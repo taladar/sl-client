@@ -29,7 +29,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::math::{Mat4, Quat, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
-use sl_avatar::{BaseMesh, Joint, MorphedMesh, SkeletalDeformations, Skeleton};
+use sl_avatar::{BaseMesh, CollisionVolume, Joint, MorphedMesh, SkeletalDeformations, Skeleton};
 
 /// Converts one decoded base-body part into a Bevy [`Mesh`] (a `TriangleList`
 /// with position, normal, and UV0 attributes plus `u32` indices).
@@ -157,16 +157,29 @@ pub struct BevySkeleton {
 impl BevySkeleton {
     /// Builds the Bevy skeleton data from a parsed [`Skeleton`].
     ///
-    /// The joint order is preserved, so index `i` here is joint `i` of the
-    /// source skeleton. Because a parent always precedes its children, each
-    /// joint's global matrix is composed from its already-computed parent.
+    /// The bone order is preserved, so index `i` here is bone `i` of the source
+    /// skeleton. Because a parent always precedes its children, each joint's
+    /// global matrix is composed from its already-computed parent.
+    ///
+    /// Each bone's [`CollisionVolume`]s are then appended as extra joints (P17.2),
+    /// parented to their owning bone at the volume's rest local transform (its
+    /// `avatar_skeleton.xml` position / rotation / **scale** — the reference
+    /// viewer's `setupBone` sets a collision volume's scale exactly like a bone's,
+    /// and that scaled world matrix is what a rigged mesh's inverse-bind matrices
+    /// cancel against). Mesh bodies and clothing rig heavily to collision volumes
+    /// (`PELVIS`, `BELLY`, `L_UPPER_ARM`, …), so they must be bindable joints;
+    /// they are appended after every bone, so all bone indices are unchanged
+    /// (base-mesh skin maps and inverse-bindpose order stay valid).
     #[must_use]
     pub fn from_skeleton(skeleton: &Skeleton) -> Self {
         let joints = skeleton.joints();
-        let mut locals = Vec::with_capacity(joints.len());
-        let mut parents = Vec::with_capacity(joints.len());
-        let mut names = Vec::with_capacity(joints.len());
-        let mut bind_globals: Vec<Mat4> = Vec::with_capacity(joints.len());
+        let capacity = joints
+            .len()
+            .saturating_add(skeleton.collision_volume_count());
+        let mut locals = Vec::with_capacity(capacity);
+        let mut parents = Vec::with_capacity(capacity);
+        let mut names = Vec::with_capacity(capacity);
+        let mut bind_globals: Vec<Mat4> = Vec::with_capacity(capacity);
         for joint in joints {
             let local = joint_transform(joint);
             let parent_global = joint
@@ -181,8 +194,30 @@ impl BevySkeleton {
             locals.push(local);
         }
 
+        // Append each bone's collision volumes as extra joints, parented to their
+        // bone (P17.2). Collected here (name → new index) so the name lookup below
+        // can register them after the bones.
+        let mut collision_volumes: Vec<(String, usize)> = Vec::new();
+        for (bone_index, joint) in joints.iter().enumerate() {
+            for volume in &joint.collision_volumes {
+                let local = collision_volume_transform(volume);
+                let parent_global = bind_globals
+                    .get(bone_index)
+                    .copied()
+                    .unwrap_or(Mat4::IDENTITY);
+                let index = locals.len();
+                bind_globals.push(parent_global.mul_mat4(&local.to_matrix()));
+                parents.push(Some(bone_index));
+                names.push(volume.name.clone());
+                locals.push(local);
+                collision_volumes.push((volume.name.clone(), index));
+            }
+        }
+
         // Rebuild the name/alias lookup with the same precedence `Skeleton` uses
-        // (aliases first, canonical names overwrite) so this type is standalone.
+        // (aliases first, canonical bone names overwrite), then the collision
+        // volumes (whose names are distinct from the bones'), so this type is
+        // standalone.
         let mut lookup = HashMap::new();
         for (index, joint) in joints.iter().enumerate() {
             for alias in &joint.aliases {
@@ -191,6 +226,9 @@ impl BevySkeleton {
         }
         for (index, joint) in joints.iter().enumerate() {
             lookup.insert(joint.name.clone(), index);
+        }
+        for (name, index) in collision_volumes {
+            lookup.insert(name, index);
         }
 
         Self {
@@ -363,6 +401,15 @@ impl BevySkeleton {
         self.lookup.get(name).copied()
     }
 
+    /// The joint canonical-name / alias → index lookup, so a caller can resolve a
+    /// rigged mesh's `joint_names` against this skeleton without holding the whole
+    /// [`BevySkeleton`] (P17.2). Same precedence as [`find`](Self::find): a
+    /// canonical name wins over an alias.
+    #[must_use]
+    pub const fn lookup(&self) -> &HashMap<String, usize> {
+        &self.lookup
+    }
+
     /// The inverse bind matrix of the joint at `index`, or `None` if out of
     /// range.
     #[must_use]
@@ -403,6 +450,19 @@ fn joint_transform(joint: &Joint) -> Transform {
     }
 }
 
+/// Builds a collision volume's local rest [`Transform`] from its Second Life
+/// fields, the same way [`joint_transform`] does for a bone (P17.2): the volume's
+/// scale is a real transform scale here (the reference viewer's `setupBone` sets
+/// it via `setScale`), so a rigged mesh's inverse-bind matrix — baked against that
+/// scaled world matrix — cancels it at rest.
+fn collision_volume_transform(volume: &CollisionVolume) -> Transform {
+    Transform {
+        translation: Vec3::from_array(volume.pos),
+        rotation: euler_deg_to_quat(volume.rot),
+        scale: Vec3::from_array(volume.scale),
+    }
+}
+
 /// Converts Second Life Euler XYZ angles (in degrees) into a Bevy [`Quat`],
 /// matching Firestorm's `mayaQ(x, y, z, LLQuaternion::XYZ)` — the rotation that
 /// applies X, then Y, then Z.
@@ -425,7 +485,7 @@ mod tests {
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams};
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
@@ -450,7 +510,12 @@ mod tests {
     fn skeleton_preserves_joints_roots_and_parents() -> Result<(), TestError> {
         let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
         let bevy = BevySkeleton::from_skeleton(&skeleton);
-        assert_eq!(bevy.len(), skeleton.len());
+        // The Bevy skeleton carries the bones plus the collision volumes appended
+        // as extra joints (P17.2).
+        assert_eq!(
+            bevy.len(),
+            skeleton.len() + skeleton.collision_volume_count()
+        );
         // `mPelvis` is the sole root; `mTorso` hangs off it, `mChest` off that.
         let pelvis = bevy.find("mPelvis").ok_or("mPelvis present")?;
         let torso = bevy.find("mTorso").ok_or("mTorso present")?;
@@ -460,6 +525,25 @@ mod tests {
         assert_eq!(bevy.parents().get(chest), Some(&Some(torso)));
         // Alias resolution matches the underlying skeleton.
         assert_eq!(bevy.find("chest"), Some(chest));
+        Ok(())
+    }
+
+    #[test]
+    fn collision_volumes_are_bindable_joints() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        // The `PELVIS` collision volume (on `mPelvis` in the fixture) resolves to a
+        // joint whose parent is `mPelvis` — so a rigged mesh binding to `PELVIS`
+        // finds a real joint entity rather than falling back (P17.2).
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis present")?;
+        let volume = bevy.find("PELVIS").ok_or("PELVIS volume present")?;
+        assert_ne!(volume, pelvis, "the volume is its own joint, not the bone");
+        assert_eq!(bevy.parents().get(volume), Some(&Some(pelvis)));
+        // Its bind pose composes off the bone (both sit on the Z axis in the
+        // fixture, so the volume's bind origin is above the ground).
+        let inverse = bevy.inverse_bindpose(volume).ok_or("volume bindpose")?;
+        let origin = inverse.inverse().transform_point3(Vec3::ZERO);
+        assert!(origin.z > 0.0, "collision-volume bind origin above ground");
         Ok(())
     }
 

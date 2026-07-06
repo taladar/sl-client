@@ -268,6 +268,19 @@ pub(crate) struct AvatarBody {
     /// pseudo-joint is not a body joint) is absent, so only body attachments
     /// resolve to a joint.
     attachment_points: HashMap<u8, BodyAttachmentPoint>,
+    /// The skeleton's joint canonical-name / alias → joint index lookup (P17.2),
+    /// so a worn rigged mesh's own `joint_names` table can be resolved against a
+    /// spawned avatar's skeleton-instance joint entities.
+    joint_lookup: HashMap<String, usize>,
+}
+
+impl AvatarBody {
+    /// The skeleton joint index a rigged mesh's joint name binds to, resolving a
+    /// canonical name or an alias like the base body does (P17.2). `None` for a
+    /// name the standard skeleton does not carry.
+    pub(crate) fn joint_index(&self, name: &str) -> Option<usize> {
+        self.joint_lookup.get(name).copied()
+    }
 }
 
 /// A resolved attachment point on the shared body (P16.2): the joint index it
@@ -357,6 +370,7 @@ pub(crate) fn setup_avatar_body(
         parts,
         joint_locals: skeleton.local_transforms().to_vec(),
         joint_parents: skeleton.parents().to_vec(),
+        joint_lookup: skeleton.lookup().clone(),
         pelvis_height: library.pelvis_height(),
         attachment_points: library
             .attachment_points()
@@ -761,6 +775,25 @@ impl AvatarState {
     ) -> Option<Entity> {
         let agent = self.by_scoped.get(&avatar_scoped)?;
         self.attachment_nodes.get(agent)?.get(&point_id).copied()
+    }
+
+    /// The rigged-body root (anchor) entity of the avatar tracked under
+    /// `avatar_scoped` (P17.2): the entity a worn rigged mesh's skinned submeshes
+    /// are parented to so they despawn with the avatar and inherit its visibility.
+    /// `None` if that avatar is not a tracked full-object avatar yet.
+    pub(crate) fn body_root(&self, avatar_scoped: ScopedObjectId) -> Option<Entity> {
+        let agent = self.by_scoped.get(&avatar_scoped)?;
+        self.objects.get(agent).map(|entities| entities.anchor)
+    }
+
+    /// The skeleton-instance joint entities (in joint order) of the avatar tracked
+    /// under `avatar_scoped` (P17.2): the entities a worn rigged mesh's
+    /// `SkinnedMesh` binds to, indexed by skeleton joint index. `None` if that
+    /// avatar has no rigged body (a sphere-only, no-`--viewer-assets` avatar, or
+    /// simply not spawned yet).
+    pub(crate) fn joint_entities(&self, avatar_scoped: ScopedObjectId) -> Option<&Vec<Entity>> {
+        let agent = self.by_scoped.get(&avatar_scoped)?;
+        self.joints.get(agent)
     }
 
     /// Reconcile the coarse-only avatar placeholders with one

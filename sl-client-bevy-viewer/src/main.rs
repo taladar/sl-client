@@ -54,7 +54,7 @@ use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
-    update_objects,
+    apply_rigged_attachments, update_objects,
 };
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
@@ -332,9 +332,20 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             (update_avatar_objects, update_coarse_avatars).chain(),
             // Parent each worn attachment to its avatar's skeleton joint (P16.1),
             // after the avatars (and their skeleton instances) have been spawned.
-            adopt_pending_attachments
-                .after(update_avatar_objects)
-                .after(update_objects),
+            // Parent each rigid attachment to its avatar's skeleton joint (P16), and
+            // bind each worn rigged mesh to its wearer's skeleton instance as a
+            // `SkinnedMesh` (P17.2). Both run after the avatars (and their skeletons)
+            // are spawned; the rigged bind also waits on the mesh decode
+            // (`apply_object_meshes` set its pending skinned build). Nested into one
+            // tuple to stay within Bevy's per-tuple system limit.
+            (
+                adopt_pending_attachments
+                    .after(update_avatar_objects)
+                    .after(update_objects),
+                apply_rigged_attachments
+                    .after(apply_object_meshes)
+                    .after(update_avatar_objects),
+            ),
             apply_avatar_names,
             // Re-shape each rigged body from its avatar's visual params — morph
             // targets (P13.3) and skeletal proportions (P13.4) — show/hide whole

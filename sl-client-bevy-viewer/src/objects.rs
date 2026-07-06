@@ -39,12 +39,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    DecodedMesh, DecodedTexture, MeshKey, Object, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat,
-    PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TextureFace,
-    TextureKey, Uuid, Vector, decode_texture_entry, pcode, tessellate, tessellate_sculpt,
-    to_bevy_mesh, to_bevy_prim_mesh,
+    DecodedMesh, DecodedTexture, MeshKey, MeshSkin, Object, PrimFaceId, PrimLod, PrimMesh,
+    PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent,
+    TextureFace, TextureKey, Uuid, Vector, decode_texture_entry, pcode, rigged_inverse_bindposes,
+    tessellate, tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh,
 };
 
 use crate::avatars::{AvatarBody, AvatarState};
@@ -177,6 +178,11 @@ enum PendingGeometry {
     /// A sculpted prim waiting on its sculpt map texture (built by
     /// [`apply_object_sculpts`]).
     Sculpt(PendingSculpt),
+    /// A worn **rigged** mesh attachment whose geometry and skin have decoded but
+    /// whose avatar skeleton instance is not yet available to bind to (P17.2).
+    /// Held until [`apply_rigged_attachments`] can resolve the avatar's joint
+    /// entities, then built as a `SkinnedMesh`.
+    RiggedMesh(PendingRiggedMesh),
 }
 
 /// A mesh object's deferred geometry build: the mesh asset key it is waiting on
@@ -184,6 +190,18 @@ enum PendingGeometry {
 /// spawned (and textured) once [`MeshManager`] decodes the mesh.
 struct PendingMesh {
     /// The mesh asset key to look the decoded geometry up by.
+    key: MeshKey,
+    /// The object's raw texture-entry bytes, decoded per-submesh at build time to
+    /// texture each face.
+    texture_entry: Vec<u8>,
+}
+
+/// A worn rigged mesh attachment's deferred skinned build (P17.2): the decoded
+/// mesh asset key and the object's texture-entry bytes, retained so its skinned
+/// submesh entities can be spawned (and textured) once the wearer avatar's
+/// skeleton instance is available to bind against.
+struct PendingRiggedMesh {
+    /// The mesh asset key to look the decoded geometry and skin up by.
     key: MeshKey,
     /// The object's raw texture-entry bytes, decoded per-submesh at build time to
     /// texture each face.
@@ -881,13 +899,19 @@ fn remove_object(state: &mut ObjectState, scoped: ScopedObjectId, commands: &mut
     };
     // Bevy despawns the parented sub-hierarchy together with the root entity.
     commands.entity(removed.entity).despawn();
+    // A rigged mesh's skinned faces hang off the *avatar body root*, not this
+    // object entity (P17.2), so Bevy's hierarchy despawn above does not take them —
+    // despawn them explicitly (a no-op for a static mesh's faces, already gone with
+    // their object entity).
+    despawn_prim_faces(&removed.face_entities, commands);
     // Drop tracked descendants; despawn any that were still waiting to be
-    // parented (Bevy did not despawn those with the root).
+    // parented (Bevy did not despawn those with the root), and their faces.
     for descendant in tracked_descendants(state, scoped) {
-        if let Some(entry) = state.objects.remove(&descendant)
-            && !entry.parented
-        {
-            commands.entity(entry.entity).try_despawn();
+        if let Some(entry) = state.objects.remove(&descendant) {
+            despawn_prim_faces(&entry.face_entities, commands);
+            if !entry.parented {
+                commands.entity(entry.entity).try_despawn();
+            }
         }
     }
 }
@@ -932,31 +956,231 @@ pub(crate) fn apply_object_meshes(
             // The fetch failed: objects pending on this key stay geometry-less.
             continue;
         };
+        // A worn rigged mesh (a mesh carrying a skin block, on an avatar) is not
+        // built as a static child here — it defers to [`apply_rigged_attachments`],
+        // which binds it to the wearer's skeleton once that avatar is spawned.
+        let is_rigged = mesh_manager.skin(key).is_some();
         for tracked in state.objects.values_mut() {
             // Take the pending build so a built object is not rebuilt; a build
             // pending on a *different* asset (another mesh, or a sculpt) is put
             // back untouched.
             match tracked.pending.take() {
                 Some(PendingGeometry::Mesh(pending)) if pending.key == key => {
-                    tracked.face_entities = build_mesh_submeshes(
-                        &mesh,
-                        &pending.texture_entry,
-                        tracked.entity,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &mut prim_textures,
-                    );
-                    debug!(
-                        "built mesh {key}: {} submesh entities",
-                        tracked.face_entities.len()
-                    );
+                    if is_rigged && tracked.attachment_point.is_some() {
+                        // Defer the skinned build to `apply_rigged_attachments`.
+                        tracked.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+                            key,
+                            texture_entry: pending.texture_entry,
+                        }));
+                    } else {
+                        tracked.face_entities = build_mesh_submeshes(
+                            &mesh,
+                            &pending.texture_entry,
+                            tracked.entity,
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &mut manager,
+                            &mut prim_textures,
+                        );
+                        debug!(
+                            "built mesh {key}: {} submesh entities",
+                            tracked.face_entities.len()
+                        );
+                    }
                 }
                 other => tracked.pending = other,
             }
         }
     }
+}
+
+/// Bind every worn rigged mesh attachment whose skeleton instance is now
+/// available (P17.2): for each object holding a [`PendingGeometry::RiggedMesh`],
+/// resolve the wearer avatar's skeleton-instance joint entities and spawn the
+/// mesh's skinned submeshes bound to them, so the mesh deforms with the avatar
+/// rather than sitting rigidly at an attachment point.
+///
+/// A rigged mesh's build is deferred here (rather than in [`apply_object_meshes`])
+/// because it needs the wearer's spawned skeleton — which can arrive before or
+/// after the mesh decodes. The pending build is retried each frame until the
+/// avatar's rigged body ([`AvatarState::joint_entities`]) is present; an avatar
+/// with no rigged body (a sphere-only, no-`--viewer-assets` run) never resolves,
+/// so the mesh simply stays unbuilt there. Each rig joint name is mapped to the
+/// avatar's matching skeleton joint entity ([`AvatarBody::joint_index`]), falling
+/// back to the pelvis for a name the skeleton lacks (the reference viewer's
+/// unknown-joint fallback). The object is marked parented so
+/// [`adopt_pending_attachments`] does not also pin it to a rigid
+/// attachment-point node.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system joining the object, avatar, and mesh state with the ECS resources the skinned build needs"
+)]
+pub(crate) fn apply_rigged_attachments(
+    mut state: ResMut<ObjectState>,
+    avatars: Res<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+    mesh_manager: Res<MeshManager>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+) {
+    // Without loaded avatar assets there are no rigged bodies to bind to.
+    let Some(body) = body else {
+        return;
+    };
+    // Snapshot the objects whose rigged build is pending, so the per-object reads
+    // below can borrow `state.objects` immutably before the final update.
+    let pending: Vec<ScopedObjectId> = state
+        .objects
+        .iter()
+        .filter_map(|(&scoped, tracked)| {
+            matches!(tracked.pending, Some(PendingGeometry::RiggedMesh(_))).then_some(scoped)
+        })
+        .collect();
+    for scoped in pending {
+        let Some(tracked) = state.objects.get(&scoped) else {
+            continue;
+        };
+        let Some(PendingGeometry::RiggedMesh(build)) = &tracked.pending else {
+            continue;
+        };
+        let key = build.key;
+        let avatar = tracked.parent;
+        // The wearer's rigged body and its skeleton-instance joints; retry next
+        // frame if the avatar (or its body) is not spawned yet.
+        let (Some(root), Some(joints)) =
+            (avatars.body_root(avatar), avatars.joint_entities(avatar))
+        else {
+            continue;
+        };
+        let Some(fallback) = joints.first().copied() else {
+            continue;
+        };
+        // The decoded geometry + skin, cloned out so the immutable `mesh_manager`
+        // borrow ends before the build borrows the other resources mutably.
+        let (Some(decoded), Some(skin)) = (
+            mesh_manager.decoded(key).map(Arc::clone),
+            mesh_manager.skin(key).map(Arc::clone),
+        ) else {
+            continue;
+        };
+        // Resolve the rig's own joint-name table against the avatar's skeleton
+        // instance (unknown names fall back to the pelvis joint).
+        // Map each rig joint name to the avatar's skeleton-instance joint entity;
+        // an unresolved name (a bone or collision volume the skeleton lacks) falls
+        // back to the pelvis, which would misplace those vertices, so it is logged.
+        let mut unresolved: Vec<&str> = Vec::new();
+        let joint_entities: Vec<Entity> = skin
+            .joint_names
+            .iter()
+            .map(|name| {
+                body.joint_index(name)
+                    .and_then(|index| joints.get(index).copied())
+                    .unwrap_or_else(|| {
+                        unresolved.push(name.as_str());
+                        fallback
+                    })
+            })
+            .collect();
+        if !unresolved.is_empty() {
+            warn!(
+                "rigged mesh {key}: {}/{} joint(s) unresolved, bound to pelvis: {:?}",
+                unresolved.len(),
+                skin.joint_names.len(),
+                unresolved
+            );
+        }
+        let texture_entry = build.texture_entry.clone();
+        let face_entities = build_rigged_submeshes(
+            &decoded,
+            &skin,
+            &joint_entities,
+            &texture_entry,
+            root,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut bindposes,
+            &mut manager,
+            &mut prim_textures,
+        );
+        if let Some(tracked) = state.objects.get_mut(&scoped) {
+            tracked.face_entities = face_entities;
+            tracked.pending = None;
+            // The skinned mesh follows the skeleton joints directly, so the object
+            // must not also be pinned to a rigid attachment-point node.
+            tracked.parented = true;
+        }
+        debug!("bound rigged mesh {key} on avatar {avatar} to its skeleton");
+    }
+}
+
+/// Spawn one skinned child entity per non-empty submesh of a decoded rigged mesh
+/// under the wearer avatar's body `root` (P17.2), each a Bevy `SkinnedMesh` bound
+/// to the shared `joint_entities` (the avatar's skeleton-instance joints, in the
+/// skin's `joint_names` order) and the mesh's own inverse bindposes, textured per
+/// submesh via the Phase-6 pipeline exactly as the static mesh path is. Returns
+/// the spawned entities so a detach (or the avatar leaving) can despawn them.
+///
+/// All submeshes share the mesh's single skin, so the inverse bindposes are built
+/// once. The skinned vertices are computed in world space from the joint entities'
+/// global transforms, so the entities are parented under the avatar body root only
+/// for lifecycle and visibility — their own `Transform` does not place them.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the skinned build needs"
+)]
+fn build_rigged_submeshes(
+    decoded: &DecodedMesh,
+    skin: &MeshSkin,
+    joint_entities: &[Entity],
+    texture_entry: &[u8],
+    root: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+) -> Vec<Entity> {
+    let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
+    // The slot every face falls back to when the object carries no texture entry.
+    let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
+    let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
+        rigged_inverse_bindposes(skin),
+    ));
+    let mut face_entities = Vec::new();
+    for (index, submesh) in decoded.submeshes.iter().enumerate() {
+        if submesh.no_geometry {
+            continue;
+        }
+        let mesh = meshes.add(to_bevy_rigged_mesh(submesh));
+        let texture_face = entry.face(index).unwrap_or(&default_face);
+        let material = face_material(texture_face, materials, manager, prim_textures);
+        // The submesh index is the Linden face index; a mesh has few faces, so the
+        // widening never saturates in practice (a clamp keeps it lint-clean).
+        let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                SkinnedMesh {
+                    inverse_bindposes: inverse_bindposes.clone(),
+                    joints: joint_entities.to_vec(),
+                },
+                Transform::default(),
+                Visibility::default(),
+                PrimFaceEntity { face_id },
+                ChildOf(root),
+            ))
+            .id();
+        face_entities.push(entity);
+    }
+    face_entities
 }
 
 /// Build the deferred geometry of every sculpted prim waiting on a sculpt map

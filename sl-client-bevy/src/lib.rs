@@ -197,7 +197,9 @@ pub use sl_bake::{
 
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::avatars::{BaseMeshSkin, BevySkeleton, to_bevy_base_mesh, to_bevy_morphed_mesh};
-pub use crate::meshes::{BevyMeshFetcher, to_bevy_mesh, to_bevy_meshes};
+pub use crate::meshes::{
+    BevyMeshFetcher, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh,
+};
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};

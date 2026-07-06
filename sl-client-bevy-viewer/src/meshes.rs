@@ -27,12 +27,13 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, MeshCacheLimits, MeshFetcher,
-    MeshKey, MeshLod, MeshStore, SlCapabilities,
+    MeshKey, MeshLod, MeshSkin, MeshStore, SlCapabilities,
 };
 
-/// The outcome of one background mesh fetch: the decoded geometry, or `None` if
-/// the mesh could not be fetched or decoded.
-type FetchResult = Option<Arc<DecodedMesh>>;
+/// The outcome of one background mesh fetch: the decoded geometry paired with the
+/// decoded rig skin (`None` when the mesh carries no skin block), or `None` for
+/// the whole fetch if the geometry could not be fetched or decoded.
+type FetchResult = Option<(Arc<DecodedMesh>, Option<Arc<MeshSkin>>)>;
 
 /// Announced (once per mesh id) when a background fetch finishes — whether it
 /// decoded or failed. The object system reads this and either builds the now-
@@ -60,6 +61,9 @@ pub(crate) struct MeshManager {
     /// Successfully decoded meshes by id, shared across all consumers so a mesh is
     /// fetched and decoded once no matter how many objects use it.
     decoded: HashMap<MeshKey, Arc<DecodedMesh>>,
+    /// The decoded rig skin of each mesh that carries one (P17.2), shared like
+    /// [`decoded`](Self::decoded); absent for a mesh with no skin block.
+    skins: HashMap<MeshKey, Arc<MeshSkin>>,
 }
 
 impl FromWorld for MeshManager {
@@ -75,6 +79,7 @@ impl FromWorld for MeshManager {
             fetcher,
             inflight: HashMap::new(),
             decoded: HashMap::new(),
+            skins: HashMap::new(),
         }
     }
 }
@@ -94,10 +99,18 @@ impl MeshManager {
             // The blocking `GetMesh` fetch runs on this IoTaskPool thread; the
             // decode is dispatched onto the store's own CPU pool, so the render
             // thread never decodes.
-            match store.get(id, MeshLod::FINEST).await {
+            let geometry = match store.get(id, MeshLod::FINEST).await {
                 Ok(entry) => entry.mesh(),
                 Err(_error) => None,
-            }
+            }?;
+            // Also decode the rig skin so a worn rigged mesh can be bound to the
+            // avatar skeleton (P17.2); a mesh with no skin block yields `None`
+            // here without failing the geometry fetch.
+            let skin = match store.get_skin(id).await {
+                Ok(entry) => entry.skin(),
+                Err(_error) => None,
+            };
+            Some((geometry, skin))
         });
         self.inflight.insert(id, task);
     }
@@ -106,6 +119,12 @@ impl MeshManager {
     /// still in flight or the fetch failed.
     pub(crate) fn decoded(&self, id: MeshKey) -> Option<&Arc<DecodedMesh>> {
         self.decoded.get(&id)
+    }
+
+    /// The decoded rig skin for `id`, once fetched, or `None` if the mesh carries
+    /// no skin block, is still in flight, or the fetch failed (P17.2).
+    pub(crate) fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
+        self.skins.get(&id)
     }
 
     /// Point the store's fetcher at the region's current mesh capability URL
@@ -183,8 +202,11 @@ pub(crate) fn poll_meshes(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
-        if let Some(mesh) = result {
+        if let Some((mesh, skin)) = result {
             let _previous = manager.decoded.insert(id, mesh);
+            if let Some(skin) = skin {
+                let _prev_skin = manager.skins.insert(id, skin);
+            }
         }
         decoded.write(MeshDecoded(id));
     }
