@@ -79,10 +79,39 @@ pub(crate) fn sl_to_bevy_object_rotation(rotation: &Rotation) -> Quat {
     sl_to_bevy_rotation().mul_quat(sl_rotation_to_quat(rotation))
 }
 
+/// A Second Life Euler rotation (XYZ angles, in **degrees**) as a Bevy [`Quat`]
+/// in Second Life's Z-up frame — the exact convention the reference viewer uses
+/// for the `avatar_lad.xml` attachment-point `rotation` attribute
+/// (`LLQuaternion::setQuat(roll, pitch, yaw)`): a roll about `X`, a pitch about
+/// `Y`, a yaw about `Z`.
+///
+/// Like [`sl_rotation_to_quat`] this does **not** apply the Second Life → Bevy
+/// basis change: it is the offset expressed in Second Life space, for use as the
+/// *local* rotation of an attachment-point node whose joint parent already
+/// carries the basis change (P16.2). The component formula is reproduced from the
+/// reference viewer verbatim so a rigid attachment seats exactly where it does
+/// there.
+#[must_use]
+pub(crate) fn sl_euler_deg_to_quat(euler_deg: [f32; 3]) -> Quat {
+    let roll = euler_deg[0].to_radians() * 0.5;
+    let pitch = euler_deg[1].to_radians() * 0.5;
+    let yaw = euler_deg[2].to_radians() * 0.5;
+    let (sx, cx) = roll.sin_cos();
+    let (sy, cy) = pitch.sin_cos();
+    let (sz, cz) = yaw.sin_cos();
+    let w = cx * cy * cz - sx * sy * sz;
+    let x = sx * cy * cz + cx * sy * sz;
+    let y = cx * sy * cz - sx * cy * sz;
+    let z = cx * cy * sz + sx * sy * cz;
+    // The trig identities keep this unit-length; `from_xyzw` needs no re-normalise.
+    Quat::from_xyzw(x, y, z, w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation, sl_to_bevy_vec,
+        sl_euler_deg_to_quat, sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation,
+        sl_to_bevy_vec,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Rotation, Vector};
@@ -165,6 +194,40 @@ mod tests {
             s: 0.0,
         };
         assert_eq!(sl_rotation_to_quat(&zero), bevy::math::Quat::IDENTITY);
+    }
+
+    /// A single-axis Second Life Euler rotation matches the corresponding glam
+    /// axis quaternion (so the attachment-point offset seats on the right axes),
+    /// and the zero rotation is the identity.
+    #[test]
+    fn euler_degrees_match_single_axis_quaternions() {
+        use bevy::math::Quat;
+        assert!(sl_euler_deg_to_quat([0.0, 0.0, 0.0]).abs_diff_eq(Quat::IDENTITY, 1.0e-6));
+        assert!(
+            sl_euler_deg_to_quat([90.0, 0.0, 0.0])
+                .abs_diff_eq(Quat::from_rotation_x(core::f32::consts::FRAC_PI_2), 1.0e-6)
+        );
+        assert!(
+            sl_euler_deg_to_quat([0.0, 90.0, 0.0])
+                .abs_diff_eq(Quat::from_rotation_y(core::f32::consts::FRAC_PI_2), 1.0e-6)
+        );
+        assert!(
+            sl_euler_deg_to_quat([0.0, 0.0, 90.0])
+                .abs_diff_eq(Quat::from_rotation_z(core::f32::consts::FRAC_PI_2), 1.0e-6)
+        );
+    }
+
+    /// A mixed Second Life Euler rotation stays unit-length (a valid `Transform`
+    /// rotation), matching the reference viewer's `roll·pitch·yaw` composition.
+    #[test]
+    fn euler_degrees_stay_unit_length() {
+        // The `avatar_lad.xml` Chest point offset ("0 90 90").
+        let quat = sl_euler_deg_to_quat([0.0, 90.0, 90.0]);
+        assert!(
+            (quat.length() - 1.0).abs() < 1.0e-5,
+            "quaternion length {} should be unit",
+            quat.length()
+        );
     }
 
     /// A root object's world rotation composes the basis change with the

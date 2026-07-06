@@ -45,7 +45,7 @@ use sl_client_bevy::{
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
-use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::textures::{TextureDecoded, TextureManager};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
@@ -180,6 +180,12 @@ pub(crate) struct AvatarState {
     /// entities a worn attachment is parented to so it follows the posed skeleton
     /// (P16.1). Absent for a sphere-only (no `--viewer-assets`) avatar.
     joints: HashMap<AgentKey, Vec<Entity>>,
+    /// The per-avatar attachment-point node entities, keyed by agent id then by
+    /// raw attachment-point id (P16.2). Each node is a child of its skeleton joint
+    /// carrying the fixed `avatar_lad.xml` offset; a worn attachment parents to the
+    /// node for its point so it seats at the stored local offset from the joint.
+    /// Absent for a sphere-only (no `--viewer-assets`) avatar.
+    attachment_nodes: HashMap<AgentKey, HashMap<u8, Entity>>,
     /// Resolved legacy names, keyed by agent id — the "simple name cache" that
     /// keeps a repeatedly-seen avatar from being re-requested.
     names: HashMap<AgentKey, String>,
@@ -256,19 +262,28 @@ pub(crate) struct AvatarBody {
     /// The pelvis rest height (Second Life Z, metres) used to plant the body
     /// vertically so its pelvis sits at the reported object position.
     pelvis_height: f32,
-    /// Each attachment point's raw numeric id mapped to the skeleton joint index
-    /// an object worn there hangs from (P16.1). Built from the `avatar_lad.xml`
-    /// `<attachment_point>` table; a HUD point (whose `mScreen` pseudo-joint is
-    /// not a body joint) is absent, so only body attachments resolve to a joint.
-    attachment_joints: HashMap<u8, usize>,
+    /// Each attachment point's raw numeric id mapped to the joint it hangs from
+    /// and its fixed local offset node (P16.1/P16.2). Built from the
+    /// `avatar_lad.xml` `<attachment_point>` table; a HUD point (whose `mScreen`
+    /// pseudo-joint is not a body joint) is absent, so only body attachments
+    /// resolve to a joint.
+    attachment_points: HashMap<u8, BodyAttachmentPoint>,
 }
 
-impl AvatarBody {
-    /// The skeleton joint index an object worn on attachment-point id `point_id`
-    /// hangs from, if the point maps to a real body joint (P16.1).
-    pub(crate) fn attachment_joint_index(&self, point_id: u8) -> Option<usize> {
-        self.attachment_joints.get(&point_id).copied()
-    }
+/// A resolved attachment point on the shared body (P16.2): the joint index it
+/// hangs from and its fixed local offset [`Transform`] from that joint (Second
+/// Life Z-up space, so it composes with a linkset child's local transform).
+///
+/// The reference viewer models each point as a node parented to its skeleton
+/// joint at this offset (`avatar_lad.xml`'s `position` / `rotation`); a worn
+/// object's own local transform is then relative to that node. The viewer spawns
+/// one such node per avatar so a rigid attachment seats where it does there.
+#[derive(Debug, Clone, Copy)]
+struct BodyAttachmentPoint {
+    /// The skeleton joint index this point hangs from.
+    joint_index: usize,
+    /// The point's fixed local offset from that joint (Second Life Z-up space).
+    offset: Transform,
 }
 
 /// One base part's shared render data.
@@ -343,7 +358,30 @@ pub(crate) fn setup_avatar_body(
         joint_locals: skeleton.local_transforms().to_vec(),
         joint_parents: skeleton.parents().to_vec(),
         pelvis_height: library.pelvis_height(),
-        attachment_joints: library.attachment_joints(),
+        attachment_points: library
+            .attachment_points()
+            .into_iter()
+            .map(|(id, info)| {
+                (
+                    id,
+                    BodyAttachmentPoint {
+                        joint_index: info.joint_index,
+                        // The `avatar_lad.xml` offset lives in the joint's Second
+                        // Life Z-up frame — the same frame a linkset child's local
+                        // transform uses — so it needs no basis change here (P16.2).
+                        offset: Transform {
+                            translation: Vec3::new(
+                                info.position[0],
+                                info.position[1],
+                                info.position[2],
+                            ),
+                            rotation: sl_euler_deg_to_quat(info.rotation_euler_deg),
+                            scale: Vec3::ONE,
+                        },
+                    },
+                )
+            })
+            .collect(),
     });
     info!("built rigged avatar body ({part_count} parts)");
 }
@@ -560,16 +598,17 @@ impl AvatarState {
     /// assets: a fresh joint-entity skeleton instance under a body-root anchor,
     /// with each base part skinned or pinned to it, plus the floating name tag.
     ///
-    /// Returns the pair of avatar entities along with the fresh joint-entity list
-    /// (in joint order), which the caller records so a worn attachment can be
-    /// parented to the right joint (P16.1).
+    /// Returns the pair of avatar entities, the fresh joint-entity list (in joint
+    /// order), and the attachment-point node entities (keyed by raw point id),
+    /// which the caller records so a worn attachment can be parented to the right
+    /// joint at its stored offset (P16.1/P16.2).
     fn spawn_body(
         &self,
         agent: AgentKey,
         object: &Object,
         body: &AvatarBody,
         commands: &mut Commands,
-    ) -> (AvatarEntities, Vec<Entity>) {
+    ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
         let root = commands
             .spawn((
                 body_root_transform(object, body.pelvis_height),
@@ -600,6 +639,21 @@ impl AvatarState {
         for (index, part) in body.parts.iter().enumerate() {
             spawn_body_part(part, index, agent, &joints, root, &body.material, commands);
         }
+        // One attachment-point node per point, parented to its joint at the fixed
+        // `avatar_lad.xml` offset (P16.2). A worn attachment then parents to the
+        // node for its point and carries only its own local transform, matching
+        // the reference viewer's joint → attachment-point → object chain.
+        let attachment_nodes: HashMap<u8, Entity> = body
+            .attachment_points
+            .iter()
+            .filter_map(|(&point_id, point)| {
+                let joint = joints.get(point.joint_index).copied()?;
+                let node = commands
+                    .spawn((point.offset, Visibility::default(), ChildOf(joint)))
+                    .id();
+                Some((point_id, node))
+            })
+            .collect();
         let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, commands);
         (
             AvatarEntities {
@@ -607,6 +661,7 @@ impl AvatarState {
                 label,
             },
             joints,
+            attachment_nodes,
         )
     }
 
@@ -652,10 +707,13 @@ impl AvatarState {
         self.request_name(agent, writer);
         let entities = match body {
             Some(body) => {
-                let (entities, joints) = self.spawn_body(agent, object, body, commands);
-                // Record the joint entities so a worn attachment can be parented to
-                // the right joint once it arrives (P16.1).
+                let (entities, joints, attachment_nodes) =
+                    self.spawn_body(agent, object, body, commands);
+                // Record the joint entities and per-point attachment nodes so a
+                // worn attachment can be parented at the right joint offset once it
+                // arrives (P16.1/P16.2).
                 self.joints.insert(agent, joints);
+                self.attachment_nodes.insert(agent, attachment_nodes);
                 entities
             }
             None => self.spawn_sphere(
@@ -683,23 +741,26 @@ impl AvatarState {
         if let Some(entities) = self.objects.remove(&agent) {
             despawn_avatar(entities, commands);
         }
-        // The body's joint entities are despawned with its anchor; drop the store
-        // so a later attachment can no longer resolve them (P16.1).
+        // The body's joint entities and attachment-point nodes are despawned with
+        // its anchor; drop the stores so a later attachment can no longer resolve
+        // them (P16.1/P16.2).
         let _dropped = self.joints.remove(&agent);
+        let _dropped_nodes = self.attachment_nodes.remove(&agent);
     }
 
-    /// The skeleton-instance joint entity a worn attachment parents to (P16.1):
-    /// the joint at `joint_index` of the rigged body of the avatar tracked under
-    /// `avatar_scoped`. `None` if that avatar is not a tracked full-object rigged
-    /// body yet, or the joint index is out of range — in which case the caller
-    /// holds the attachment pending and retries.
-    pub(crate) fn attachment_joint_entity(
+    /// The attachment-point node entity a worn attachment parents to (P16.2): the
+    /// node for raw attachment-point `point_id` on the rigged body of the avatar
+    /// tracked under `avatar_scoped`, carrying the fixed `avatar_lad.xml` offset
+    /// from its skeleton joint. `None` if that avatar is not a tracked full-object
+    /// rigged body yet, or the point has no body joint (a HUD point) — in which
+    /// case the caller holds the attachment pending and retries.
+    pub(crate) fn attachment_point_entity(
         &self,
         avatar_scoped: ScopedObjectId,
-        joint_index: usize,
+        point_id: u8,
     ) -> Option<Entity> {
         let agent = self.by_scoped.get(&avatar_scoped)?;
-        self.joints.get(agent)?.get(joint_index).copied()
+        self.attachment_nodes.get(agent)?.get(&point_id).copied()
     }
 
     /// Reconcile the coarse-only avatar placeholders with one

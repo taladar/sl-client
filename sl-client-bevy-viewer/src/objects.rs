@@ -815,20 +815,20 @@ fn adopt_pending_children(
     }
 }
 
-/// Parent every tracked attachment that is not yet parented to the skeleton joint
-/// of the avatar it is worn on (P16.1), so it follows the posed skeleton rather
-/// than sitting at a fixed world offset.
+/// Parent every tracked attachment that is not yet parented to its avatar's
+/// attachment-point node (P16.1/P16.2), so it follows the posed skeleton at the
+/// stored local offset rather than sitting at a fixed world offset.
 ///
 /// Attachments arrive in the same object stream as everything else but hang off a
 /// **pcode-47 avatar** (not a prim linkset), so [`apply_object`] holds them
 /// parentless and this system — running after the avatars (and their skeleton
-/// instances) are spawned — resolves each one's target joint from the avatar's
-/// [rigged body](AvatarBody): its raw attachment-point id maps to a skeleton
-/// joint index ([`AvatarBody::attachment_joint_index`]), which resolves to the
-/// avatar's joint entity ([`AvatarState::attachment_joint_entity`]). An
-/// attachment whose avatar / joint is not present yet (a HUD point, a sphere-only
-/// avatar, or the avatar simply not spawned yet) stays pending and is retried on
-/// a later frame.
+/// instances) are spawned — resolves each one's target from the avatar's rigged
+/// body: its raw attachment-point id maps to that avatar's attachment-point node
+/// entity ([`AvatarState::attachment_point_entity`]), a child of the skeleton
+/// joint carrying the fixed `avatar_lad.xml` offset (P16.2), onto which the
+/// object's own local transform composes. An attachment whose avatar / point node
+/// is not present yet (a HUD point, a sphere-only avatar, or the avatar simply not
+/// spawned yet) stays pending and is retried on a later frame.
 ///
 /// When no `--viewer-assets` avatar body is loaded the avatars are placeholder
 /// spheres with no skeleton, so an attachment instead falls back to the avatar's
@@ -853,10 +853,10 @@ pub(crate) fn adopt_pending_attachments(
         .collect();
     for (scoped, entity, point_id, avatar) in pending {
         let target = match body.as_deref() {
-            // Rigged body: parent to the avatar's skeleton joint (the P16.1 goal).
-            Some(body) => body
-                .attachment_joint_index(point_id)
-                .and_then(|joint_index| avatars.attachment_joint_entity(avatar, joint_index)),
+            // Rigged body: parent to the avatar's attachment-point node, which sits
+            // at the stored `avatar_lad.xml` offset from its skeleton joint, so the
+            // attachment's own local transform seats it correctly (P16.1/P16.2).
+            Some(_body) => avatars.attachment_point_entity(avatar, point_id),
             // Sphere-only avatars (no assets): fall back to the avatar's object
             // entity so the attachment at least follows its position.
             None => state.objects.get(&avatar).map(|tracked| tracked.entity),

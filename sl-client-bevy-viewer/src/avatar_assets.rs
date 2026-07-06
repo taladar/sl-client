@@ -174,6 +174,22 @@ pub(crate) struct LoadedPart {
     pub(crate) region: BodyRegion,
 }
 
+/// One attachment point resolved against the loaded skeleton (P16.2): the joint
+/// it hangs from and its fixed local offset from that joint (the `avatar_lad.xml`
+/// `position` / `rotation` attributes, kept in Second Life Z-up space). The
+/// viewer builds a per-avatar attachment-point node at this offset so a worn
+/// rigid attachment seats where the reference viewer places it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AttachmentPointInfo {
+    /// The index (in this library's skeleton) of the joint this point hangs from.
+    pub(crate) joint_index: usize,
+    /// The point's local translation from the joint, in metres (Second Life Z-up).
+    pub(crate) position: [f32; 3],
+    /// The point's local rotation from the joint, as Second Life Euler XYZ angles
+    /// in degrees.
+    pub(crate) rotation_euler_deg: [f32; 3],
+}
+
 /// A base part's resolved skeleton binding.
 #[derive(Debug)]
 pub(crate) enum LoadedBinding {
@@ -309,20 +325,28 @@ impl AvatarAssetLibrary {
         &self.masks
     }
 
-    /// The attachment-point → skeleton-joint-index map (P16.1): for each
-    /// `<attachment_point>` in `avatar_lad.xml`, its raw numeric id paired with the
-    /// index of the joint it hangs from in this library's skeleton. A point whose
-    /// joint is absent from the skeleton (e.g. a HUD point's `mScreen`
+    /// The attachment-point table resolved against this library's skeleton
+    /// (P16.1/P16.2): for each `<attachment_point>` in `avatar_lad.xml`, its raw
+    /// numeric id paired with the index of the joint it hangs from and its fixed
+    /// local offset from that joint (the `position` / `rotation` attributes). A
+    /// point whose joint is absent from the skeleton (e.g. a HUD point's `mScreen`
     /// pseudo-joint) is omitted, so a body attachment always resolves to a real
     /// skeleton joint and a HUD point simply does not.
-    pub(crate) fn attachment_joints(&self) -> HashMap<u8, usize> {
+    pub(crate) fn attachment_points(&self) -> HashMap<u8, AttachmentPointInfo> {
         self.attachment_points
             .all()
             .iter()
             .filter_map(|def| {
-                self.skeleton
-                    .find(&def.joint)
-                    .map(|joint_index| (def.id, joint_index))
+                self.skeleton.find(&def.joint).map(|joint_index| {
+                    (
+                        def.id,
+                        AttachmentPointInfo {
+                            joint_index,
+                            position: def.position,
+                            rotation_euler_deg: def.rotation,
+                        },
+                    )
+                })
             })
             .collect()
     }
