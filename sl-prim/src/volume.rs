@@ -23,14 +23,28 @@
 //! [`PrimFaceId`] the simulator textures the face from
 //! (`TextureEntry.faces[i]`).
 //!
-//! Two deliberate MVP simplifications relative to the reference viewer, both
-//! matching the road map's "fan-triangulated caps" scope:
+//! Cap triangulation follows the reference viewer's three shapes:
 //!
-//! - **Caps are always a centre fan.** The reference viewer triangulates a
-//!   hollow cap as an annulus (an area-based ear split between the outer and
-//!   inner rings) and box caps via an optimised uncut-cube path. Here every cap
-//!   is a centre-vertex fan; a hollow prim's cap therefore fills its hole. The
-//!   swept side walls (including the inner-side wall) are unaffected.
+//! - a plain **box** cap — a solid, uncut, full-path square profile on a line
+//!   path — is a bilinear vertex **grid** (`build_uncut_cube_cap`,
+//!   `LLVolumeFace::createUnCutCubeCap`), i.e. a proper two-triangle quad. A
+//!   centre-vertex fan over the same four corners triangulates the square into
+//!   four triangles meeting at the middle, so a real texture shows the fan's
+//!   diagonals as an **X / cross through the centre** (a visible artefact on
+//!   every cube face); the two-triangle grid matches the reference viewer and
+//!   removes it.
+//! - any other **solid** cap (round profiles, cut / tapered boxes) is a
+//!   centre-vertex triangle **fan** (`build_cap`, `createCap`'s fan branch);
+//!   the reference viewer fans these too, so the shading matches.
+//! - a **hollow** cap is an **annulus** (`build_hollow_cap`) — an area-based
+//!   ear split that bridges the outer and inner rings (`createCap`'s hollow
+//!   branch), so the hole stays open and every triangle winds outward. A plain
+//!   centre fan over a hollow prim's `outer ++ reversed-inner` ring would wind
+//!   its inner-ring half backwards (back-face culled → a see-through cap), so a
+//!   hollow prim needs the annulus.
+//!
+//! One deliberate MVP simplification remains relative to the reference viewer:
+//!
 //! - **Inner-side faces are a plain strip.** The reference viewer doubles a flat
 //!   hollow inner wall's column count so each inner segment carries its own flat
 //!   normal; here the inner wall is a single smoothed strip. Geometry is
@@ -39,7 +53,7 @@
 use crate::PrimLod;
 use crate::geometry::{PrimFace, PrimFaceId, PrimMesh};
 use crate::path::Path;
-use crate::profile::{Profile, ProfileFace, ProfileFaceId};
+use crate::profile::{Profile, ProfileFace, ProfileFaceId, ProfilePoint};
 use crate::shape::{PathCurve, PrimShape, ProfileCurve};
 
 /// The detail multiplier applied to derive the per-edge split count (Firestorm
@@ -77,7 +91,13 @@ pub fn tessellate(shape: &PrimShape, lod: PrimLod) -> PrimMesh {
     for (index, face) in profile.faces.iter().enumerate() {
         let face_id = PrimFaceId::new(u16_from_usize(index));
         let prim_face = if face.cap {
-            build_cap(&grid, &profile, face, face_id)
+            if profile.total_out > 0 {
+                build_hollow_cap(&grid, &profile, face, face_id)
+            } else if is_uncut_cube(shape) {
+                build_uncut_cube_cap(&grid, &profile, face, face_id)
+            } else {
+                build_cap(&grid, &profile, face, face_id)
+            }
         } else {
             build_side(&grid, &profile, &path, shape, face, face_id)
         };
@@ -335,6 +355,170 @@ fn pole_convergence(grid: &SweptGrid, num_s: usize, num_t: usize) -> (bool, bool
     )
 }
 
+/// Whether `shape` is a plain **box** — a solid, uncut, full-path square profile
+/// on a line path — the case the reference viewer caps with its optimised
+/// two-triangle grid (`createCap`'s `createUnCutCubeCap` guard) instead of a
+/// centre fan.
+fn is_uncut_cube(shape: &PrimShape) -> bool {
+    shape.profile_curve == ProfileCurve::Square
+        && shape.path_curve == PathCurve::Line
+        && !shape.is_hollow()
+        && !shape.is_profile_cut()
+        && !shape.is_path_cut()
+}
+
+/// Build a plain **box** cap as a bilinear vertex grid — a proper two-triangle
+/// quad — rather than a centre fan (Firestorm `LLVolumeFace::createUnCutCubeCap`).
+///
+/// The four square corners are read from the swept grid at the cap's path frame,
+/// their planar texture coordinates from the profile (the top face swaps its `U`
+/// axis, mirroring the reference viewer), and a `(grid_size + 1)²` vertex grid is
+/// filled by planar interpolation between three corners so a split (twisted) box
+/// keeps one quad per cell. This replaces the centre fan whose four triangles
+/// would meet at the face middle and draw an X / cross through any real texture.
+fn build_uncut_cube_cap(
+    grid: &SweptGrid,
+    profile: &Profile,
+    face: &ProfileFace,
+    face_id: PrimFaceId,
+) -> PrimFace {
+    let ring_len = profile.points.len();
+    let grid_size = ring_len.saturating_sub(1).checked_div(4).unwrap_or(0);
+    if grid_size == 0 {
+        // Not the expected 4·n+1 square ring; fall back to the fan.
+        return build_cap(grid, profile, face, face_id);
+    }
+    let top = face.face_id == ProfileFaceId::PATH_BEGIN;
+    let row = if top { grid.max_t.saturating_sub(1) } else { 0 };
+
+    // The four square corners: positions from the swept grid, planar UVs from the
+    // profile (Firestorm's `profile[i].x + 0.5`, `0.5 - profile[i].y`).
+    let mut corner_pos = [[0.0_f32; 3]; 4];
+    let mut corner_uv = [[0.0_f32; 2]; 4];
+    for (corner, slot) in corner_pos.iter_mut().zip(corner_uv.iter_mut()).enumerate() {
+        let col = grid_size.saturating_mul(corner);
+        *slot.0 = grid.position(col, row);
+        let position = profile
+            .points
+            .get(col)
+            .map_or([0.0, 0.0], |point| point.position);
+        *slot.1 = [position[0] + CAP_UV_CENTRE, CAP_UV_CENTRE - position[1]];
+    }
+
+    // One flat normal from the first three corner positions (before the UV swap).
+    let mut normal = cross(
+        subtract(corner_pos[1], corner_pos[0]),
+        subtract(corner_pos[2], corner_pos[1]),
+    );
+    if dot(normal, normal) > NORMAL_EPSILON {
+        normal = normalize(normal);
+    } else {
+        normal = if top {
+            [0.0, 0.0, 1.0]
+        } else {
+            [0.0, 0.0, -1.0]
+        };
+    }
+    if !top {
+        normal = [-normal[0], -normal[1], -normal[2]];
+    } else {
+        // The top face mirrors its U axis: swap the corner UVs 0↔3 and 1↔2.
+        corner_uv.swap(0, 3);
+        corner_uv.swap(1, 2);
+    }
+
+    // Fill the (grid_size + 1)² vertex grid by planar interpolation from corner 0
+    // along corners 1 (U) and 3 (V), in the reference viewer's `gx` outer / `gy`
+    // inner push order so the index formula below lines up.
+    let span = f32_from_usize(grid_size);
+    let side = grid_size.saturating_add(1);
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(side.saturating_mul(side));
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(side.saturating_mul(side));
+    for gx in 0..side {
+        for gy in 0..side {
+            let c01 = f32_from_usize(gx) / span;
+            let c02 = f32_from_usize(gy) / span;
+            positions.push(lerp_planar3(
+                corner_pos[0],
+                corner_pos[1],
+                corner_pos[3],
+                c01,
+                c02,
+            ));
+            uvs.push(lerp_planar2(
+                corner_uv[0],
+                corner_uv[1],
+                corner_uv[3],
+                c01,
+                c02,
+            ));
+        }
+    }
+
+    let indices = uncut_cube_indices(grid_size, top);
+    let normals = vec![normal; positions.len()];
+
+    PrimFace {
+        positions,
+        normals,
+        uvs,
+        indices,
+        face_id,
+    }
+}
+
+/// The two-triangles-per-cell index list for a box cap's `(grid_size + 1)²`
+/// vertex grid (Firestorm `createUnCutCubeCap`'s index loop). The underside emits
+/// the six indices in order; the top reverses them so its single flat normal
+/// faces up.
+fn uncut_cube_indices(grid_size: usize, top: bool) -> Vec<u32> {
+    let side = grid_size.saturating_add(1);
+    // The six cell corners relative to the cell's base vertex (`gy·side + gx`).
+    let offsets = [
+        0,
+        1,
+        side.saturating_add(1),
+        side.saturating_add(1),
+        side,
+        0,
+    ];
+    let mut indices = Vec::with_capacity(grid_size.saturating_mul(grid_size).saturating_mul(6));
+    for gx in 0..grid_size {
+        for gy in 0..grid_size {
+            let base = gy.saturating_mul(side).saturating_add(gx);
+            if top {
+                for offset in offsets.iter().rev() {
+                    indices.push(u32_from_usize(base.saturating_add(*offset)));
+                }
+            } else {
+                for offset in &offsets {
+                    indices.push(u32_from_usize(base.saturating_add(*offset)));
+                }
+            }
+        }
+    }
+    indices
+}
+
+/// Planar interpolation of a 3D position: `v0 + c01·(v1 − v0) + c02·(v2 − v0)`
+/// (Firestorm `LerpPlanarVertex`).
+fn lerp_planar3(v0: [f32; 3], v1: [f32; 3], v2: [f32; 3], c01: f32, c02: f32) -> [f32; 3] {
+    [
+        v0[0] + (v1[0] - v0[0]) * c01 + (v2[0] - v0[0]) * c02,
+        v0[1] + (v1[1] - v0[1]) * c01 + (v2[1] - v0[1]) * c02,
+        v0[2] + (v1[2] - v0[2]) * c01 + (v2[2] - v0[2]) * c02,
+    ]
+}
+
+/// Planar interpolation of a 2D texture coordinate (the UV half of
+/// [`lerp_planar3`]).
+fn lerp_planar2(v0: [f32; 2], v1: [f32; 2], v2: [f32; 2], c01: f32, c02: f32) -> [f32; 2] {
+    [
+        v0[0] + (v1[0] - v0[0]) * c01 + (v2[0] - v0[0]) * c02,
+        v0[1] + (v1[1] - v0[1]) * c01 + (v2[1] - v0[1]) * c02,
+    ]
+}
+
 /// Build one **cap** face: a triangle fan around a computed centre vertex over
 /// the profile ring at the path's begin or end frame (Firestorm
 /// `LLVolumeFace::createCap`, fan branch).
@@ -380,6 +564,128 @@ fn build_cap(
         indices,
         face_id,
     }
+}
+
+/// Build one **hollow cap** face: an annulus bridging the outer and inner
+/// profile rings at the path's begin or end frame (Firestorm
+/// `LLVolumeFace::createCap`, hollow branch).
+///
+/// Unlike the solid [`build_cap`] there is no centre vertex; the ring points are
+/// triangulated directly by walking one pointer forward from the outer-ring
+/// start and one backward from the inner-ring start, choosing at each step the
+/// non-back-facing triangle (`hollow_cap_indices`). This keeps the hole open and
+/// winds every triangle the same way, where a plain centre fan over the
+/// `outer ++ reversed-inner` ring would flip its inner-ring half. One flat
+/// normal (from the first triangle) is applied to every vertex.
+fn build_hollow_cap(
+    grid: &SweptGrid,
+    profile: &Profile,
+    face: &ProfileFace,
+    face_id: PrimFaceId,
+) -> PrimFace {
+    let ring_count = profile.points.len();
+    if ring_count < 3 {
+        return PrimFace::empty(face_id);
+    }
+    let top = face.face_id == ProfileFaceId::PATH_BEGIN;
+    let row = if top { grid.max_t.saturating_sub(1) } else { 0 };
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(ring_count);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(ring_count);
+    for (col, point) in profile.points.iter().enumerate() {
+        positions.push(grid.position(col, row));
+        uvs.push(cap_uv(point.position, top));
+    }
+
+    let indices = hollow_cap_indices(&profile.points, top);
+    let normal = cap_normal(&positions, &indices, top);
+    let normals = vec![normal; positions.len()];
+
+    PrimFace {
+        positions,
+        normals,
+        uvs,
+        indices,
+        face_id,
+    }
+}
+
+/// The annulus triangle indices bridging a hollow cap's outer and inner rings
+/// (Firestorm `createCap`'s hollow ear-split). `pt1` walks forward from the
+/// outer-ring start, `pt2` backward from the inner-ring start (the reversed
+/// inner ring places its begin at the ring end), and each step emits whichever
+/// of the two candidate triangles is not back-facing — decided from the
+/// **un-transformed** profile 2D positions, exactly as the reference viewer. The
+/// underside (`!top`) winds the opposite way so its flat normal faces down.
+fn hollow_cap_indices(ring: &[ProfilePoint], top: bool) -> Vec<u32> {
+    let num_vertices = ring.len();
+    if num_vertices < 3 {
+        return Vec::new();
+    }
+    let mut indices = Vec::with_capacity(num_vertices.saturating_sub(2).saturating_mul(3));
+    let mut pt1: usize = 0;
+    let mut pt2: usize = num_vertices.saturating_sub(1);
+    while pt2 > pt1.saturating_add(1) {
+        let p1 = ring_pos(ring, pt1);
+        let p2 = ring_pos(ring, pt2);
+        let pa = ring_pos(ring, pt1.saturating_add(1));
+        let pb = ring_pos(ring, pt2.saturating_sub(1));
+
+        // Signed areas of the candidate triangles; a negative area means the
+        // triangle is back-facing (or contains the opposite ring's next point).
+        let tri_1a2 = signed_area(p1, pa, p2) >= 0.0 && signed_area(p2, pa, pb) >= 0.0;
+        let tri_21b = signed_area(p2, p1, pb) >= 0.0 && signed_area(p1, pb, pa) >= 0.0;
+
+        let use_tri1a2 = if !tri_1a2 {
+            false
+        } else if !tri_21b {
+            true
+        } else {
+            // Both usable: keep the shorter diagonal (Firestorm's tie-break).
+            let d1 = subtract2(p1, pa);
+            let d2 = subtract2(p2, pb);
+            dot2(d1, d1) < dot2(d2, d2)
+        };
+
+        let (a, b, c) = if use_tri1a2 {
+            let tri = (pt1, pt1.saturating_add(1), pt2);
+            pt1 = pt1.saturating_add(1);
+            tri
+        } else {
+            let tri = (pt1, pt2.saturating_sub(1), pt2);
+            pt2 = pt2.saturating_sub(1);
+            tri
+        };
+        // The underside reverses the winding so its single flat normal points
+        // down (Firestorm's "flipped backfacing from top").
+        if top {
+            indices.extend_from_slice(&[u32_from_usize(a), u32_from_usize(b), u32_from_usize(c)]);
+        } else {
+            indices.extend_from_slice(&[u32_from_usize(a), u32_from_usize(c), u32_from_usize(b)]);
+        }
+    }
+    indices
+}
+
+/// The 2D profile position of ring point `index` (the origin if out of range).
+fn ring_pos(ring: &[ProfilePoint], index: usize) -> [f32; 2] {
+    ring.get(index).map_or([0.0, 0.0], |point| point.position)
+}
+
+/// Twice the signed area of the 2D triangle `a → b → c` (positive when wound
+/// counter-clockwise); the reference viewer's cap back-face test.
+fn signed_area(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+    (a[0] * b[1] - b[0] * a[1]) + (b[0] * c[1] - c[0] * b[1]) + (c[0] * a[1] - a[0] * c[1])
+}
+
+/// The 2D vector difference `a - b`.
+fn subtract2(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+/// The 2D dot product `a · b`.
+fn dot2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
 }
 
 /// The planar texture coordinate for a cap vertex at profile position `(x, y)`
@@ -622,6 +928,17 @@ fn u16_from_usize(value: usize) -> u16 {
     u16::try_from(value).unwrap_or(u16::MAX)
 }
 
+/// Convert a small grid index to `f32` for a planar interpolation coefficient;
+/// box-cap grid counts are tiny, so the conversion is exact.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "value is a tiny grid index that converts to f32 exactly"
+)]
+const fn f32_from_usize(value: usize) -> f32 {
+    value as f32
+}
+
 /// Floor a small, non-negative detail product to `u32`; a negative or
 /// non-finite value (which the parameters cannot produce) maps to `0`.
 #[expect(
@@ -793,6 +1110,146 @@ mod tests {
         assert_eq!(uncut.face_count(), 6);
         assert_eq!(cut.face_count(), 5);
         assert_mesh_integrity(&cut);
+    }
+
+    /// A hollow prim's path caps must be an annulus whose every triangle winds
+    /// the same way (`+Z` for the top, `-Z` for the bottom) — the R7 fix. A
+    /// centre fan over the `outer ++ reversed-inner` ring wound its inner half
+    /// backwards, so half the cap was back-face culled (a see-through cap).
+    #[test]
+    fn hollow_cut_cylinder_caps_wind_consistently() {
+        let mut params = default_box_params();
+        params.profile_curve = 0x00; // circle
+        params.path_curve = 0x10; // line
+        params.profile_hollow = 47500; // 0.95
+        params.profile_begin = 2000; // cut 0.04
+        params.profile_end = 25500; // .. 0.51
+        let shape = PrimShape::from_params(&params);
+        let mesh = tessellate(&shape, PrimLod::High);
+        assert_mesh_integrity(&mesh);
+
+        // Faces 0 / 3 are the path-begin (top) / path-end (bottom) caps.
+        let mut checked = 0_usize;
+        for face in &mesh.faces {
+            let want_top = match face.face_id.get() {
+                0 => true,
+                3 => false,
+                _other => continue,
+            };
+            checked = checked.saturating_add(1);
+            assert!(!face.is_empty(), "hollow cap carries geometry");
+            // A hollow cap is an annulus: no centre vertex, one triangle per
+            // ring point beyond the first two.
+            assert_eq!(
+                face.triangle_count(),
+                face.vertex_count().saturating_sub(2),
+                "hollow cap is an annulus (no centre fan)"
+            );
+            for tri in face.indices.chunks_exact(3) {
+                let vertex = |slot: usize| -> [f32; 3] {
+                    tri.get(slot)
+                        .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
+                        .copied()
+                        .unwrap_or([0.0; 3])
+                };
+                let (p0, p1, p2) = (vertex(0), vertex(1), vertex(2));
+                let normal = super::cross(super::subtract(p1, p0), super::subtract(p2, p0));
+                let z = normal.get(2).copied().unwrap_or(0.0);
+                if want_top {
+                    assert!(z >= 0.0, "top-cap triangle winds outward (+Z), got {z}");
+                } else {
+                    assert!(z <= 0.0, "bottom-cap triangle winds outward (-Z), got {z}");
+                }
+            }
+        }
+        assert_eq!(checked, 2, "both path caps were checked");
+    }
+
+    /// A plain box's path caps must be a two-triangle quad (four corner
+    /// vertices, no centre vertex), not a centre fan — the reference viewer's
+    /// `createUnCutCubeCap`. A centre fan drew an X / cross through any texture.
+    #[test]
+    fn box_caps_are_two_triangle_quads() {
+        // At Lowest detail the box takes no per-edge split, so each cap is the
+        // minimal four-corner quad — the clearest form of the fix.
+        let shape = PrimShape::from_params(&default_box_params());
+        let mesh = tessellate(&shape, PrimLod::Lowest);
+        assert_mesh_integrity(&mesh);
+
+        let mut checked = 0_usize;
+        for face in &mesh.faces {
+            let want_top = match face.face_id.get() {
+                0 => true,
+                3 => false,
+                _other => continue,
+            };
+            checked = checked.saturating_add(1);
+            // A quad: four corners, two triangles, no centre-fan vertex.
+            assert_eq!(face.vertex_count(), 4, "box cap is four corners");
+            assert_eq!(face.triangle_count(), 2, "box cap is two triangles");
+            // Every corner UV sits on the unit square's corners (planar box UVs).
+            for uv in &face.uvs {
+                assert!(
+                    (uv[0] <= 0.01 || uv[0] >= 0.99) && (uv[1] <= 0.01 || uv[1] >= 0.99),
+                    "box-cap UV {uv:?} is a unit-square corner"
+                );
+            }
+            assert_cap_winds(face, want_top);
+        }
+        assert_eq!(checked, 2, "both box caps were checked");
+    }
+
+    /// Even split (High detail) box caps stay an all-quad grid — never a centre
+    /// fan — so every triangle still winds one way and no cross appears.
+    #[test]
+    fn split_box_caps_are_a_consistent_grid() {
+        let shape = PrimShape::from_params(&default_box_params());
+        let mesh = tessellate(&shape, PrimLod::High);
+        for face in &mesh.faces {
+            let want_top = match face.face_id.get() {
+                0 => true,
+                3 => false,
+                _other => continue,
+            };
+            // A `(n+1)²`-vertex grid with `2·n²` triangles: a perfect square of
+            // vertices and twice a square of triangles, never the fan's
+            // `ring + 1` vertices / `ring` triangles.
+            let verts = face.vertex_count();
+            let side = (1..=verts)
+                .find(|n| n.saturating_mul(*n) == verts)
+                .unwrap_or(0);
+            assert_eq!(side.saturating_mul(side), verts, "cap is a square grid");
+            let cells = side.saturating_sub(1);
+            assert_eq!(
+                face.triangle_count(),
+                cells.saturating_mul(cells).saturating_mul(2),
+                "cap is two triangles per grid cell"
+            );
+            assert_cap_winds(face, want_top);
+        }
+    }
+
+    /// Assert every triangle of a path cap winds outward (`+Z` top / `-Z`
+    /// bottom).
+    fn assert_cap_winds(face: &PrimFace, want_top: bool) {
+        for tri in face.indices.chunks_exact(3) {
+            let vertex = |slot: usize| -> [f32; 3] {
+                tri.get(slot)
+                    .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
+                    .copied()
+                    .unwrap_or([0.0; 3])
+            };
+            let (p0, p1, p2) = (vertex(0), vertex(1), vertex(2));
+            let z = super::cross(super::subtract(p1, p0), super::subtract(p2, p0))
+                .get(2)
+                .copied()
+                .unwrap_or(0.0);
+            if want_top {
+                assert!(z >= 0.0, "top cap triangle winds +Z, got {z}");
+            } else {
+                assert!(z <= 0.0, "bottom cap triangle winds -Z, got {z}");
+            }
+        }
     }
 
     #[test]
