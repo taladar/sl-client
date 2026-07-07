@@ -1,0 +1,25 @@
+[package]
+name = "sl-anim"
+description = "Second Life / OpenSim Linden keyframe-motion (.anim) decoding (pure, I/O-free), mirroring sl-mesh / sl-avatar"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "animation", "keyframe", "motion"]
+categories = ["game-development", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+thiserror = { version = "2.0.18" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true
