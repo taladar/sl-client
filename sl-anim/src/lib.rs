@@ -16,9 +16,13 @@
 //!   UUIDs are the standard walks/stands/emotes, and whether each is a
 //!   downloadable `.anim` asset or a procedurally synthesised motion). Named for
 //!   its role, to avoid the `module_name_repetitions` lint (as [`decode`] is).
+//! - `sample` — playback-time mapping and per-joint keyframe interpolation, the
+//!   inherent [`Motion`] / [`JointMotion`] methods a skeleton driver samples each
+//!   frame (P18.3). Its API is those methods, so nothing is re-exported.
 
 pub mod decode;
 pub mod registry;
+mod sample;
 
 pub use decode::{
     AnimDecodeError, Constraint, ConstraintTargetType, ConstraintType, HandPose, JointMotion,

@@ -115,6 +115,19 @@ pub(crate) struct AvatarBodyPart {
     region: BodyRegion,
 }
 
+impl AvatarBodyPart {
+    /// The avatar this part belongs to (read by the animation driver, in another
+    /// module, to pose a rigid part's own `GlobalTransform`).
+    pub(crate) const fn agent(&self) -> AgentKey {
+        self.agent
+    }
+
+    /// The part's index into the shared [`AvatarBody::parts`] list.
+    pub(crate) const fn part(&self) -> usize {
+        self.part
+    }
+}
+
 /// A marker on one rigged-mesh submesh face whose `TextureEntry` slot carries a
 /// bake-on-mesh sentinel (`IMG_USE_BAKED_*`), tying it back to its wearer avatar
 /// and the baked slot it should show (P17.3). A "BoM" mesh body face is textured
@@ -265,6 +278,14 @@ pub(crate) struct AvatarState {
     /// Non-root objects whose texture entry has already been scanned for
     /// `IMG_USE_BAKED_*` sentinels, so a motion-only update never re-decodes it.
     scanned_objects: HashSet<ScopedObjectId>,
+    /// Each rigged avatar's resolved skeletal deformations, the shape
+    /// [`apply_avatar_appearance`] last applied — kept so the animation driver
+    /// (P18.3) can re-run the Second Life skeletal recurrence with the playing
+    /// motion folded in and write each joint's world matrix straight to its
+    /// `GlobalTransform` (avoiding the limb-shear a rotation overlaid onto the
+    /// baked-scale rest transform would cause). Absent for a sphere-only
+    /// (no `--viewer-assets`) avatar, or before its first appearance.
+    deformations: HashMap<AgentKey, SkeletalDeformations>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
@@ -321,6 +342,18 @@ impl AvatarBody {
     /// region material resolves (P17.3).
     pub(crate) const fn skin_material(&self) -> &Handle<StandardMaterial> {
         &self.material
+    }
+
+    /// The skeleton joint index a **rigid** base part (the eyeballs) is pinned to,
+    /// or `None` for a skinned part or an out-of-range index. The animation driver
+    /// (P18.3) uses it to write a rigid part's `GlobalTransform` from its joint's
+    /// posed world matrix, since Bevy's transform propagation ran before the driver
+    /// overwrote the joint globals.
+    pub(crate) fn rigid_joint_index(&self, part: usize) -> Option<usize> {
+        match self.parts.get(part)?.binding {
+            BodyPartBinding::Rigid(index) => Some(index),
+            BodyPartBinding::Skinned { .. } => None,
+        }
     }
 
     /// The joint position overrides a worn rigged mesh `skin` imposes on this
@@ -821,6 +854,7 @@ impl AvatarState {
         // rebuilds them from the meshes that re-bind (R1).
         let _dropped = self.joints.remove(&agent);
         let _dropped_nodes = self.attachment_nodes.remove(&agent);
+        let _dropped_deform = self.deformations.remove(&agent);
         self.clear_joint_overrides(agent);
     }
 
@@ -853,6 +887,24 @@ impl AvatarState {
     /// no-`--viewer-assets` avatar, or simply not spawned yet).
     pub(crate) fn joint_entities_of(&self, agent: AgentKey) -> Option<&Vec<Entity>> {
         self.joints.get(&agent)
+    }
+
+    /// The resolved skeletal deformations the animation driver (P18.3) folds a
+    /// playing motion into when recomputing each joint's world matrix, as last
+    /// shaped by [`apply_avatar_appearance`]. `None` for an avatar with no rigged
+    /// body, or before its first appearance.
+    pub(crate) fn deformations(&self, agent: AgentKey) -> Option<&SkeletalDeformations> {
+        self.deformations.get(&agent)
+    }
+
+    /// Every avatar with a spawned rigged-body skeleton instance (P18.3): the
+    /// driver writes each one's joint world matrices every frame — its animated
+    /// pose or its plain deformed rest — so an avatar returns to rest when its
+    /// animations stop and overlapping animations compose without a per-animation
+    /// reset (Bevy's dirty-bit propagation cannot un-freeze a joint whose global
+    /// the driver overwrote).
+    pub(crate) fn rigged_agents(&self) -> Vec<AgentKey> {
+        self.joints.keys().copied().collect()
     }
 
     /// Record the joint position overrides that worn rigged `mesh` imposes on
@@ -1902,6 +1954,7 @@ pub(crate) fn apply_avatar_appearance(
     // deformed joint transforms (both share one `ResolvedParams`).
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
+    let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
     for &agent in &state.appearance_dirty {
         if let Some(bytes) = state.appearances.get(&agent) {
             let resolved = ResolvedParams::from_appearance(library.params(), bytes);
@@ -1920,7 +1973,13 @@ pub(crate) fn apply_avatar_appearance(
                     .skeleton()
                     .deformed_local_transforms_with(&deform, &overrides),
             );
+            deformations.insert(agent, deform);
         }
+    }
+    // Record each avatar's resolved deformations so the animation driver (P18.3)
+    // can re-run the skeletal recurrence with the playing motion folded in.
+    for (agent, deform) in deformations {
+        let _prev = state.deformations.insert(agent, deform);
     }
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its
     // clothing morphs by the region's decoded bake where one is available (P14.5).

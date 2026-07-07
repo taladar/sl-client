@@ -164,6 +164,61 @@ pub struct BevySkeleton {
     lookup: HashMap<String, usize>,
 }
 
+/// A sparse per-joint animation pose (P18.3), folded into the skeletal recurrence
+/// when computing a posed avatar's joint **world** matrices: each animated joint's
+/// local rotation and/or position (Second Life Z-up), keyed by skeleton joint
+/// index. A joint absent here keeps its deformed rest rotation / position.
+///
+/// A keyframe rotation is the joint's *absolute* local rotation (the animatable
+/// `m*` joints rest at identity), so it replaces the joint's rest local rotation
+/// in the recurrence; a position (chiefly `mPelvis`) replaces the joint's local
+/// offset. Because the pose feeds the same Second Life recurrence the skeletal
+/// deformation uses — where a bone's own scale stretches only its bound geometry
+/// and never shears a child — an animated shaped avatar's limbs keep their length,
+/// unlike overlaying the rotation onto the baked-scale rest [`Transform`] (which
+/// composes as `T·R·S` and shears a non-uniformly-scaled joint).
+#[derive(Clone, Debug, Default)]
+pub struct AnimationPose {
+    /// Animated local rotations by joint index.
+    rotations: HashMap<usize, Quat>,
+    /// Animated local positions by joint index (SL Z-up, metres).
+    positions: HashMap<usize, Vec3>,
+}
+
+impl AnimationPose {
+    /// A new, empty pose (no joint animated).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the animated local rotation of joint `index`.
+    pub fn set_rotation(&mut self, index: usize, rotation: Quat) {
+        let _prev = self.rotations.insert(index, rotation);
+    }
+
+    /// Set the animated local position of joint `index` (SL Z-up, metres).
+    pub fn set_position(&mut self, index: usize, position: Vec3) {
+        let _prev = self.positions.insert(index, position);
+    }
+
+    /// Whether no joint is animated (so the pose is the plain deformed rest).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rotations.is_empty() && self.positions.is_empty()
+    }
+
+    /// The animated local rotation of joint `index`, if any.
+    fn rotation(&self, index: usize) -> Option<Quat> {
+        self.rotations.get(&index).copied()
+    }
+
+    /// The animated local position of joint `index`, if any.
+    fn position(&self, index: usize) -> Option<Vec3> {
+        self.positions.get(&index).copied()
+    }
+}
+
 impl BevySkeleton {
     /// Builds the Bevy skeleton data from a parsed [`Skeleton`].
     ///
@@ -325,8 +380,50 @@ impl BevySkeleton {
         deform: &SkeletalDeformations,
         overrides: &JointOverrides,
     ) -> Vec<Transform> {
-        // First pass: each joint's deformed world position / rotation / local
-        // scale, and the full world matrix, by the Second Life recurrence.
+        // The un-posed (rest) deformed world matrices, back-solved into the
+        // relative-to-parent local transforms Bevy's hierarchy propagates.
+        let world = self.deformed_world_matrices(deform, overrides, &AnimationPose::default());
+        let mut out = Vec::with_capacity(self.locals.len());
+        for (index, own) in world.iter().enumerate() {
+            let matrix = match self.parents.get(index).copied().flatten() {
+                Some(parent) => world
+                    .get(parent)
+                    .map_or(*own, |parent_world| parent_world.inverse().mul_mat4(own)),
+                None => *own,
+            };
+            out.push(Transform::from_matrix(matrix));
+        }
+        out
+    }
+
+    /// Every joint's deformed **world** matrix (Second Life Z-up), with an
+    /// optional per-joint animation `pose` folded in (P18.3), by the Second Life
+    /// skeletal recurrence.
+    ///
+    /// This is the matrix form the animation driver writes straight into each
+    /// joint's `GlobalTransform` (composed with the avatar-root global that
+    /// carries the SL → Bevy axis change), rather than back-solving a local
+    /// [`Transform`] as [`deformed_local_transforms_with`](Self::deformed_local_transforms_with)
+    /// does. A local `Transform` is `T·R·S`, which shears a non-uniformly-scaled
+    /// joint once an animation gives it a non-identity rotation; setting the world
+    /// matrix directly reproduces the reference viewer's matrix-palette skinning
+    /// exactly, so a shaped avatar's limbs keep their length under animation.
+    ///
+    /// The recurrence matches the reference viewer's Second Life scale semantics: a
+    /// bone's own scale stretches only its bound geometry (it is *not* inherited
+    /// into a child's world scale), while a parent's *local* scale stretches its
+    /// immediate child's position offset (the `scaleChildOffset` height / limb
+    /// mechanism). The `pose` replaces the joint's local rotation (and, for a joint
+    /// with a position track such as `mPelvis`, its local offset) before that
+    /// recurrence, so the animation composes with the deformation the same way the
+    /// reference viewer's joint states do.
+    #[must_use]
+    pub fn deformed_world_matrices(
+        &self,
+        deform: &SkeletalDeformations,
+        overrides: &JointOverrides,
+        pose: &AnimationPose,
+    ) -> Vec<Mat4> {
         let mut world_rot: Vec<Quat> = Vec::with_capacity(self.locals.len());
         let mut world_pos: Vec<Vec3> = Vec::with_capacity(self.locals.len());
         let mut local_scale: Vec<Vec3> = Vec::with_capacity(self.locals.len());
@@ -349,15 +446,31 @@ impl BevySkeleton {
                     local.scale.z + deform_scale[2],
                 )
             };
-            // A rig override replaces the joint's local position outright; else the
-            // appearance offset shifts the default rest position.
-            let position = match override_pos {
+            // The joint's local rotation: the animation pose when it animates this
+            // joint (its keyframe local rotation replaces the identity rest — the
+            // animatable `m*` joints rest at zero rotation), else the rest rotation.
+            let local_rotation = pose.rotation(index).unwrap_or(local.rotation);
+            // The joint's base local position: a rig override, else the appearance
+            // offset shifts the default rest position.
+            let base_position = match override_pos {
                 Some(pos) => pos,
                 None => Vec3::new(
                     local.translation.x + deform_offset[0],
                     local.translation.y + deform_offset[1],
                     local.translation.z + deform_offset[2],
                 ),
+            };
+            // A position track (chiefly `mPelvis`) is stored *relative* to the
+            // joint's rest position — the reference viewer's animation position is
+            // an offset, not an absolute — so it is added to the base, not replacing
+            // it (replacing would collapse the pelvis ~1 m to its parent origin).
+            let position = match pose.position(index) {
+                Some(delta) => Vec3::new(
+                    base_position.x + delta.x,
+                    base_position.y + delta.y,
+                    base_position.z + delta.z,
+                ),
+                None => base_position,
             };
             let (rotation, translation) = match self.parents.get(index).copied().flatten() {
                 Some(parent) => {
@@ -373,7 +486,7 @@ impl BevySkeleton {
                     );
                     let rotated = parent_rot.mul_vec3(scaled);
                     (
-                        parent_rot.mul_quat(local.rotation),
+                        parent_rot.mul_quat(local_rotation),
                         Vec3::new(
                             parent_pos.x + rotated.x,
                             parent_pos.y + rotated.y,
@@ -381,7 +494,7 @@ impl BevySkeleton {
                         ),
                     )
                 }
-                None => (local.rotation, position),
+                None => (local_rotation, position),
             };
             world_rot.push(rotation);
             world_pos.push(translation);
@@ -392,19 +505,7 @@ impl BevySkeleton {
                 translation,
             ));
         }
-
-        // Second pass: relative-to-parent local transforms.
-        let mut out = Vec::with_capacity(self.locals.len());
-        for (index, own) in world.iter().enumerate() {
-            let matrix = match self.parents.get(index).copied().flatten() {
-                Some(parent) => world
-                    .get(parent)
-                    .map_or(*own, |parent_world| parent_world.inverse().mul_mat4(own)),
-                None => *own,
-            };
-            out.push(Transform::from_matrix(matrix));
-        }
-        out
+        world
     }
 
     /// Insert a synthetic identity **root** joint named `name` above the

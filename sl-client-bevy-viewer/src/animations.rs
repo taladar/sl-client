@@ -23,33 +23,31 @@
 //!
 //! The fetched bytes are decoded off the render thread on Bevy's [`IoTaskPool`]
 //! and the resulting [`Motion`] is cached by UUID, shared across every avatar
-//! playing it. [`AnimationDecoded`] announces each finished resolution so the
-//! (later) skeleton-driver can react; this phase only resolves and caches —
-//! nothing is posed yet.
+//! playing it.
+//!
+//! The module also owns the P18.3 skeleton driver: [`drive_avatar_skeletons`]
+//! folds each avatar's `AvatarAnimation` set into a playback clock and resolves a
+//! per-joint [`AnimationPose`] from the playing motions, and
+//! [`pose_avatar_skeletons`] writes that pose into the skeleton-instance joints'
+//! world matrices (in `PostUpdate`, after transform propagation) — recomputing the
+//! Second Life skeletal recurrence so a shaped avatar's limbs keep their length
+//! under animation rather than shearing.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_anim::{Motion, builtin_animation};
 use sl_client_bevy::{
-    AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
-    CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent,
+    AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
+    BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid, sample_motion,
 };
 
-/// Announced (once per animation id) when a background resolve finishes — whether
-/// it decoded or failed. A later skeleton-driver (P18.3) reads this to pick up the
-/// now-cached [`Motion`]; emitted on failure too so a consumer can stop waiting.
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct AnimationDecoded(
-    #[expect(
-        dead_code,
-        reason = "the P18.3 skeleton-driver reads the id to pick up the cached motion"
-    )]
-    pub(crate) AssetKey,
-);
+use crate::avatar_assets::AvatarAssetLibrary;
+use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarState};
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -167,11 +165,7 @@ impl AnimationManager {
 
     /// The decoded motion for `id`, once resolved, or `None` if it is still in
     /// flight, has no fetchable asset, or failed. Consumed by the skeleton-driver
-    /// (P18.3).
-    #[expect(
-        dead_code,
-        reason = "the P18.3 skeleton-driver reads the cached motion to pose the avatar"
-    )]
+    /// ([`drive_avatar_skeletons`]).
     pub(crate) fn motion(&self, id: AssetKey) -> Option<&Arc<Motion>> {
         self.motions.get(&id)
     }
@@ -243,13 +237,11 @@ pub(crate) fn ingest_avatar_animations(
 }
 
 /// Poll the in-flight resolve tasks; move each completed decode into the shared
-/// cache (or record it unavailable) and announce it with [`AnimationDecoded`].
-pub(crate) fn poll_animations(
-    mut manager: ResMut<AnimationManager>,
-    mut decoded: MessageWriter<AnimationDecoded>,
-) {
+/// motion cache (the skeleton-driver [`drive_avatar_skeletons`] reads it the next
+/// frame), or record the id unavailable when the fetch / decode failed.
+pub(crate) fn poll_animations(mut manager: ResMut<AnimationManager>) {
     // Collect the finished ids first — the borrow of the task map cannot overlap
-    // the mutation of the decoded / unavailable maps.
+    // the mutation of the motions / unavailable maps.
     let mut finished: Vec<(AssetKey, Option<Motion>)> = Vec::new();
     for (&id, task) in &mut manager.inflight {
         if let Some(result) = block_on(poll_once(task)) {
@@ -271,6 +263,248 @@ pub(crate) fn poll_animations(
                 let _inserted = manager.unavailable.insert(id);
             }
         }
-        decoded.write(AnimationDecoded(id));
+    }
+}
+
+/// One animation an avatar is currently playing, tracked for playback timing.
+#[derive(Debug, Clone, Copy)]
+struct PlayState {
+    /// The simulator's per-avatar animation sequence number; a change means the
+    /// animation (re)started, so the playback clock resets.
+    sequence_id: i32,
+    /// The wall-clock time ([`Time::elapsed_secs`]) at which this animation
+    /// started, so `now - start` gives the seconds elapsed into the motion.
+    start: f32,
+}
+
+/// Per-avatar animation *playback* state (P18.3), distinct from the
+/// [`AnimationManager`]'s asset resolve/cache: which animations each avatar is
+/// playing and when each started, and the per-joint pose the driver resolved this
+/// frame for [`pose_avatar_skeletons`] to write into the skeleton's world matrices.
+#[derive(Resource, Default)]
+pub(crate) struct AnimationPlayback {
+    /// Each avatar's currently-playing animations, keyed by animation id.
+    playing: HashMap<AgentKey, HashMap<Uuid, PlayState>>,
+    /// Each posed avatar's resolved per-joint pose this frame (only avatars with a
+    /// drivable animation appear). An avatar absent here keeps its plain deformed
+    /// rest pose, produced by ordinary transform propagation.
+    poses: HashMap<AgentKey, AnimationPose>,
+}
+
+/// The winning keyframe pose for one joint this frame: the highest-priority
+/// contribution across every animation the avatar plays (a minimal priority
+/// resolution — full ease-in/out blending is P18.4).
+#[derive(Clone, Copy)]
+struct JointWinner {
+    /// The contributing animation's effective priority for this joint.
+    priority: i32,
+    /// The winning local rotation (SL Z-up), if the winner animates rotation.
+    rotation: Option<Quat>,
+    /// The winning local position (SL Z-up), if the winner animates position.
+    position: Option<Vec3>,
+}
+
+/// Resolve each rigged avatar's per-joint animation pose from the motions it is
+/// playing (P18.3), for [`pose_avatar_skeletons`] to apply.
+///
+/// Each frame it folds the latest `AvatarAnimation` updates into the playback
+/// clock (a new sequence id restarts a motion), samples every playing, decoded,
+/// unexpired motion at its elapsed time, and keeps the highest-priority
+/// contribution per joint. The resolved [`AnimationPose`]s are stored on the
+/// [`AnimationPlayback`] resource; an avatar with no drivable animation is simply
+/// omitted, so ordinary transform propagation leaves it at its deformed rest pose.
+/// Procedural built-ins (walk / stand / …) have no cached motion, so an idle
+/// avatar signalling only those keeps its rest pose.
+pub(crate) fn drive_avatar_skeletons(
+    time: Res<Time>,
+    mut events: MessageReader<SlEvent>,
+    manager: Res<AnimationManager>,
+    mut playback: ResMut<AnimationPlayback>,
+    state: Res<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+) {
+    let now = time.elapsed_secs();
+    // Reconcile the playback clock with each authoritative animation set.
+    for event in events.read() {
+        if let SlSessionEvent::AvatarAnimation {
+            avatar_id,
+            animations,
+            ..
+        } = &event.0
+        {
+            let entry = playback.playing.entry(*avatar_id).or_default();
+            let live: HashSet<Uuid> = animations
+                .iter()
+                .map(|animation| animation.anim_id)
+                .collect();
+            // Drop animations that stopped (no longer in the authoritative set).
+            entry.retain(|id, _state| live.contains(id));
+            for animation in animations {
+                // Keep an unchanged animation's start time; a fresh id or a new
+                // sequence id (re)starts the clock at `now`.
+                let restart = entry
+                    .get(&animation.anim_id)
+                    .is_none_or(|existing| existing.sequence_id != animation.sequence_id);
+                if restart {
+                    let _prev = entry.insert(
+                        animation.anim_id,
+                        PlayState {
+                            sequence_id: animation.sequence_id,
+                            start: now,
+                        },
+                    );
+                }
+            }
+            if entry.is_empty() {
+                let _removed = playback.playing.remove(avatar_id);
+            }
+        }
+    }
+    // Without the avatar asset library there are no skeleton instances to pose.
+    let Some(body) = body else {
+        playback.poses.clear();
+        return;
+    };
+    // Resolve each avatar's winning per-joint pose from its playing motions.
+    let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
+    for (&agent, anims) in &playback.playing {
+        // Only a rigged avatar (with skeleton-instance joints) can be posed.
+        if state.joint_entities_of(agent).is_none() {
+            continue;
+        }
+        let mut winners: HashMap<usize, JointWinner> = HashMap::new();
+        for (anim_id, play) in anims {
+            let elapsed = now - play.start;
+            let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
+                continue;
+            };
+            if motion.is_expired(elapsed) {
+                continue;
+            }
+            for sampled in sample_motion(motion, elapsed) {
+                let Some(index) = body.joint_index(sampled.name) else {
+                    continue;
+                };
+                let candidate = JointWinner {
+                    priority: sampled.priority,
+                    rotation: sampled.rotation,
+                    position: sampled.position,
+                };
+                // Highest priority wins the joint; an equal-or-higher contribution
+                // replaces the incumbent (a fuller blend is P18.4).
+                let keep = winners
+                    .get(&index)
+                    .is_some_and(|existing| existing.priority > candidate.priority);
+                if !keep {
+                    let _prev = winners.insert(index, candidate);
+                }
+            }
+        }
+        if winners.is_empty() {
+            continue;
+        }
+        let mut pose = AnimationPose::new();
+        for (index, winner) in winners {
+            if let Some(rotation) = winner.rotation {
+                pose.set_rotation(index, rotation);
+            }
+            if let Some(position) = winner.position {
+                pose.set_position(index, position);
+            }
+        }
+        let _prev = poses.insert(agent, pose);
+    }
+    // Edge-triggered logging (not every frame): an avatar starting / stopping being
+    // posed is the live signal that a keyframe motion decoded and drove the skeleton.
+    for &agent in poses.keys() {
+        if !playback.poses.contains_key(&agent) {
+            debug!("animation: posing avatar {agent} skeleton");
+        }
+    }
+    for &agent in playback.poses.keys() {
+        if !poses.contains_key(&agent) {
+            debug!("animation: released avatar {agent} skeleton back to rest");
+        }
+    }
+    playback.poses = poses;
+}
+
+/// Write each posed avatar's animated joint world matrices straight into the
+/// skeleton-instance joints' `GlobalTransform`s (P18.3, the reference viewer's
+/// matrix-palette skinning), so a shaped avatar's limbs keep their length under
+/// animation instead of shearing.
+///
+/// Runs in `PostUpdate` **after** transform propagation, so it overwrites the
+/// just-propagated rest globals with the animated ones for the frame's skinning /
+/// render extraction. For each posed avatar it re-runs the Second Life skeletal
+/// recurrence with the resolved [`AnimationPose`] folded in
+/// ([`BevySkeleton::deformed_world_matrices`](sl_client_bevy::BevySkeleton::deformed_world_matrices)),
+/// composes each joint's Second Life world matrix with the avatar-root global (the
+/// SL → Bevy axis change + world placement), and writes it to the joint entity. A
+/// rigid base part (the eyeballs, parented to an eye joint) is re-placed from its
+/// joint's posed global too, since propagation ran before this.
+///
+/// Every rigged avatar is written **each frame** — its animated pose when a motion
+/// is playing, or its plain deformed rest pose (an empty pose) when none is — so an
+/// avatar returns to rest when its animations stop and several overlapping
+/// animations with different runtimes compose without any per-animation reset.
+/// Bevy's dirty-bit transform propagation cannot recompute a static joint whose
+/// `GlobalTransform` the driver overwrote, so the driver owns every rigged avatar's
+/// joint globals outright.
+pub(crate) fn pose_avatar_skeletons(
+    playback: Res<AnimationPlayback>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    body: Option<Res<AvatarBody>>,
+    state: Res<AvatarState>,
+    parts: Query<(Entity, &AvatarBodyPart)>,
+    mut globals: Query<&mut GlobalTransform>,
+) {
+    let (Some(library), Some(body)) = (library, body) else {
+        return;
+    };
+    let empty = AnimationPose::default();
+    for agent in state.rigged_agents() {
+        let pose = playback.poses.get(&agent).unwrap_or(&empty);
+        let Some(root) = state.body_root_of(agent) else {
+            continue;
+        };
+        let Some(joints) = state.joint_entities_of(agent) else {
+            continue;
+        };
+        let Some(deform) = state.deformations(agent) else {
+            continue;
+        };
+        let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+        let world = library
+            .skeleton()
+            .deformed_world_matrices(deform, &overrides, pose);
+        // The avatar-root global carries the SL → Bevy axis change and the world
+        // placement; each joint's Bevy global is that composed with its Second Life
+        // world matrix. Copied out so the mutable joint writes below do not overlap
+        // the read.
+        let Ok(root_global) = globals.get(root) else {
+            continue;
+        };
+        // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
+        // `arithmetic_side_effects` lint the glam operators trip.
+        let root_matrix = root_global.to_matrix();
+        for (entity, matrix) in joints.iter().zip(world.iter()) {
+            if let Ok(mut global) = globals.get_mut(*entity) {
+                *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+            }
+        }
+        // Re-place each rigid base part (eyeballs) from its eye joint's posed
+        // global, since transform propagation used the pre-overwrite joint global.
+        for (entity, part) in &parts {
+            if part.agent() != agent {
+                continue;
+            }
+            if let Some(index) = body.rigid_joint_index(part.part())
+                && let Some(matrix) = world.get(index)
+                && let Ok(mut global) = globals.get_mut(entity)
+            {
+                *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+            }
+        }
     }
 }

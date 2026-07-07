@@ -29,17 +29,17 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
 use sl_client_bevy::{
-    ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoginFailure, LoginParams,
-    LoginRequest, MfaChallenge, SlClientPlugin, SlLoginRejected, SlMfaChallenge, StartLocation,
-    TerrainMaterialPlugin,
+    AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoginFailure,
+    LoginParams, LoginRequest, MfaChallenge, SlClientPlugin, SlLoginRejected, SlMfaChallenge,
+    StartLocation, TerrainMaterialPlugin, Uuid,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::animations::{
-    AnimationDecoded, AnimationManager, ingest_avatar_animations, poll_animations,
-    update_animation_caps,
+    AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
+    poll_animations, pose_avatar_skeletons, update_animation_caps,
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -62,7 +62,9 @@ use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
     apply_rigged_attachments, log_suspicious_objects, pick_object, update_objects,
 };
-use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
+use crate::session::{
+    PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
+};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
@@ -139,6 +141,12 @@ struct Options {
     /// system-avatar bodies. Without it, avatars stay placeholder spheres.
     #[clap(long, env = "SL_VIEWER_ASSETS")]
     viewer_assets: Option<PathBuf>,
+    /// A debug affordance: play this animation (a built-in or uploaded `.anim`
+    /// UUID) on the agent's **own** avatar once it lands, so the skeleton-animation
+    /// driver can be exercised with a single login. Needs `--viewer-assets` (a
+    /// sphere has no skeleton to pose).
+    #[clap(long, env = "SL_VIEWER_PLAY_ANIMATION")]
+    play_animation: Option<Uuid>,
 }
 
 /// Map a grid nickname to its XML-RPC login URI, or `None` if unknown.
@@ -253,7 +261,11 @@ fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
 
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
-fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutcome {
+fn run_session(
+    params: &LoginParams,
+    viewer_assets: Option<&Path>,
+    play_animation: Option<Uuid>,
+) -> LoginOutcome {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -301,10 +313,13 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<OwnBakePublish>()
     .init_resource::<WearableAssetManager>()
     .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
+    .init_resource::<AnimationPlayback>()
+    .insert_resource(PlayOnLogin {
+        animation: play_animation.map(AnimationKey::from),
+    })
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
     .add_message::<WearableAssetFetched>()
-    .add_message::<AnimationDecoded>()
     .add_systems(
         Startup,
         (setup_scene, setup_chat_overlay, setup_avatar_body),
@@ -405,17 +420,28 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
     // system limit.
     .add_systems(Update, (log_suspicious_objects, pick_object))
-    // Animations (P18.2): keep the animation store's `ViewerAsset` cap current,
-    // request a motion for every animation each nearby avatar is playing, and
-    // fold finished resolves into the shared motion cache (P18.3 drives the
-    // skeleton from it).
+    // Animations: keep the animation store's `ViewerAsset` cap current, request a
+    // motion for every animation each nearby avatar is playing, and fold finished
+    // resolves into the shared motion cache (P18.2); then drive each rigged
+    // avatar's skeleton from its playing motions, overlaying the sampled keyframe
+    // poses onto the appearance rest pose (P18.3, so after `apply_avatar_appearance`).
     .add_systems(
         Update,
         (
             update_animation_caps,
             ingest_avatar_animations,
             poll_animations,
+            drive_avatar_skeletons.after(apply_avatar_appearance),
         ),
+    )
+    // Write the posed avatars' animated joint world matrices straight into their
+    // `GlobalTransform`s (P18.3), after transform propagation has produced the rest
+    // globals this frame — so the animated pose is what skinning / render extraction
+    // reads, without the limb-shear a rotation overlaid on the baked-scale local
+    // transform would cause.
+    .add_systems(
+        PostUpdate,
+        pose_avatar_skeletons.after(TransformSystems::Propagate),
     );
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
@@ -458,7 +484,11 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             login_uri: login_uri.parse()?,
             request: request.clone(),
         };
-        let outcome = run_session(&params, options.viewer_assets.as_deref());
+        let outcome = run_session(
+            &params,
+            options.viewer_assets.as_deref(),
+            options.play_animation,
+        );
         if let Some(challenge) = outcome.challenge {
             info!(
                 "multi-factor authentication required: {}",

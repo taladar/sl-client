@@ -1323,11 +1323,50 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   `sl-anim`'s decode unit tests and reuses the P15.2 `ViewerAsset` fetch path
   already proven on OpenSim. No visible avatar motion yet: posing the skeleton
   from the cached motions is P18.3.
-- [ ] **P18.3. Drive the skeleton.** On `Event::AvatarAnimation`, for each
+- [x] **P18.3. Drive the skeleton.** On `Event::AvatarAnimation`, for each
   `PlayingAnimation` sample its `Motion` each frame and pose the target avatar's
   skeleton-instance joints (via a `sl-client-bevy` animation driver / Bevy
   clip). Attachments (Phase 16) and rigged mesh (Phase 17) follow automatically.
-  Verify a walking/waving avatar.
+  Verify a walking/waving avatar. **Done.** Pure sampling lives in a new
+  `sl-anim` `sample` module (inherent `Motion` / `JointMotion` methods,
+  Bevy-free): `Motion::playback_time` maps elapsed seconds to the time within
+  the motion honouring loop points (mirrors `LLKeyframeMotion::onUpdate`),
+  `is_expired` retires a finished one-shot, and
+  `JointMotion::sample_rotation` / `sample_position` interpolate the keyframe
+  curves (the reference viewer's `RotationCurve` / `PositionCurve` `getValue` +
+  `nlerp`, so `.anim` rotations widen to unit quaternions). `sl-client-bevy`
+  gains a `sample_motion(&Motion, elapsed) -> Vec<SampledJoint>` adapter (SL
+  Z-up `Quat` / `Vec3`, the animation mirror of `to_bevy_*`). The viewer's
+  `animations.rs` grew the driver: `drive_avatar_skeletons` (Update) folds each
+  `AvatarAnimation` set into a playback clock (a fresh `sequence_id` restarts a
+  motion) and resolves a per-joint `AnimationPose` (highest joint priority wins
+  across concurrent motions — full ease / blend is P18.4), and
+  `pose_avatar_skeletons` (PostUpdate, after transform propagation) writes each
+  rigged avatar's joint **world matrices** straight into their
+  `GlobalTransform`s. Verified live on OpenSim: the agent's own avatar plays a
+  built-in `.anim` (a new `--play-animation <uuid>` debug flag drives the own
+  avatar via `Command::PlayAnimation`, added on user request to exercise the
+  driver from a single login), fetched over `ViewerAsset` from OpenSim's
+  library asset set, decoded off-thread (dance1 = 19 joint tracks / clap = 10),
+  and the skeleton posed and returned to rest. Three fixes fell out of live
+  testing, all in the render crates: (1) the driver writes joint globals
+  **directly** rather than overlaying the keyframe rotation onto the
+  baked-scale rest `Transform` (a local `T·R·S` shears a non-uniformly-scaled
+  joint under rotation) — `BevySkeleton` gained `deformed_world_matrices(deform,
+  overrides, pose)`, the SL skeletal recurrence with the animation pose folded
+  in, and an `AnimationPose` type; (2) a position track (`mPelvis`) is a
+  **relative** offset *added* to the rest position, not an absolute one that
+  would collapse the pelvis ~1 m to its parent origin; (3) every rigged
+  avatar's globals are rewritten **each frame** (its animated pose or its plain
+  deformed rest) so an avatar un-freezes to rest when its motions stop and
+  several overlapping motions with different runtimes compose — Bevy's
+  dirty-bit propagation cannot recompute a static joint whose global the driver
+  overwrote. **Known limitation (deferred, R11):** the base body's mesh still
+  shows limb distortion under animation because it is skinned with standard
+  inverse-bindpose LBS, not Second Life's `LLSkinJoint` pivot scheme; the
+  skeleton itself is posed correctly (bone lengths stay constant — verified
+  live), so this is a P13.1 skinning-fidelity gap, invisible at rest and
+  orthogonal to the driver.
 - [ ] **P18.4. Priority blending.** Resolve concurrently-playing animations
   per-joint by priority with ease-in/out transitions (higher priority wins a
   joint, blend on start/stop). Verify layered animations (e.g. an AO stand + a
@@ -1582,6 +1621,27 @@ avatar, so they are collected here to be worked one at a time.
   the tiled faces now render "much closer to Firestorm". (A remaining colour /
   brightness difference is suspected to be lighting / tonemapping rather than
   texturing — a separate follow-up, not pursued here.)
+- [ ] **R11. Base-body mesh distorts under animation** (`sl-avatar` /
+  `sl-client-bevy`). Surfaced by P18.3: a *shaped* avatar's limbs (arms most
+  visibly) stretch / distort while an animation plays, but look correct at rest
+  and return to correct on stop. The **skeleton is posed correctly** — the joint
+  world matrices are right and the bone lengths stay constant under animation
+  (verified live from a per-frame `mShoulderLeft`→`mElbowLeft`→`mWristLeft`
+  length dump: a steady `0.289` / `0.214` throughout dance1). The distortion is
+  in the **skin**: the base body is skinned with standard inverse-bindpose
+  linear-blend skinning (P13.1 `to_bevy_base_mesh` + `base_mesh_skin`), whereas
+  the reference viewer skins the *system* avatar with the `LLSkinJoint`
+  **pivot** scheme — `LLViewerJointMesh::uploadJointMatrices` bakes each joint's
+  skin pivot (`mRootToJointSkinOffset` / `mRootToParentJointSkinOffset`) into
+  the skinning matrix (`gJointMat.translate(pivot)`) before `updateGeometry`
+  blends `jointMat[joint]` / `jointMat[joint+1]` per vertex. The two schemes
+  agree when every joint's relative rotation is identity (rest) but diverge once
+  a joint rotates, so the gap is invisible until animation. The fix is to
+  reproduce the skin-pivot skinning for the base body (compute the per-joint
+  skin offsets and fold them into the inverse bindposes, or drive skinning from
+  pivot-adjusted joint matrices). Needs careful visual iteration against a live
+  animated avatar; rigged-mesh bodies (Phase 17, ordinary skin weights) are
+  unaffected.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

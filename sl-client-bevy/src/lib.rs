@@ -196,10 +196,11 @@ pub use sl_bake::{
     composite_region, region_layers, region_plan, static_layer_files,
 };
 
+pub use crate::animations::{SampledJoint, sample_motion};
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::avatars::{
-    BaseMeshSkin, BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
-    to_bevy_morphed_mesh,
+    AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, joint_position_overrides,
+    to_bevy_base_mesh, to_bevy_morphed_mesh,
 };
 pub use crate::meshes::{
     BevyMeshFetcher, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh,
@@ -211,6 +212,7 @@ pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
 };
 
+pub mod animations;
 pub mod assets;
 pub mod avatars;
 mod caps;

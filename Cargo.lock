@@ -5669,6 +5669,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "reqwest",
+ "sl-anim",
  "sl-asset",
  "sl-avatar",
  "sl-bake",

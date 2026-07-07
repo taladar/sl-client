@@ -17,7 +17,9 @@
 //! in later phases.
 
 use bevy::prelude::*;
-use sl_client_bevy::{Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent};
+use sl_client_bevy::{
+    AnimationKey, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+};
 
 use crate::camera::FlyCamera;
 use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
@@ -39,10 +41,23 @@ const QUIT_GRACE_SECS: f32 = 3.0;
 pub(crate) struct ViewerSession {
     /// Whether the camera has been snapped to the agent's login position yet.
     camera_positioned: bool,
+    /// Whether the `--play-animation` debug animation has been triggered yet, so
+    /// it fires once on the first region handshake rather than on every one.
+    play_on_login_done: bool,
     /// The wall-clock deadline (`Time::elapsed_secs`) at which a pending quit
     /// forces an exit even without a `LoggedOut`; `None` until quit is
     /// requested.
     quit_deadline: Option<f32>,
+}
+
+/// A debug animation to play on the agent's **own** avatar once it lands (the
+/// `--play-animation <uuid>` flag), so the P18.3 skeleton driver can be exercised
+/// with a single login rather than needing a second avatar to animate. `None`
+/// (the default) plays nothing.
+#[derive(Resource, Default)]
+pub(crate) struct PlayOnLogin {
+    /// The animation to start on the agent's own avatar, or `None` to play none.
+    pub(crate) animation: Option<AnimationKey>,
 }
 
 /// Request a clean logout on the quit key (`Esc` / `Q`).
@@ -88,6 +103,7 @@ pub(crate) fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut session: ResMut<ViewerSession>,
+    play_on_login: Res<PlayOnLogin>,
     mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
     mut commands: MessageWriter<SlCommand>,
     mut exit: MessageWriter<AppExit>,
@@ -99,6 +115,17 @@ pub(crate) fn drive_session(
                 commands.write(SlCommand(Command::SetDrawDistance(Distance::new(
                     DRAW_DISTANCE_METRES,
                 ))));
+                // Kick off the `--play-animation` debug animation on the agent's
+                // own avatar, once, so its skeleton is driven (P18.3) — the sim
+                // broadcasts the agent's own `AvatarAnimation` back, which the
+                // animation manager fetches / decodes and the driver poses from.
+                if let Some(animation) = play_on_login.animation
+                    && !session.play_on_login_done
+                {
+                    info!("playing debug animation {animation} on own avatar");
+                    commands.write(SlCommand(Command::PlayAnimation(animation)));
+                    session.play_on_login_done = true;
+                }
             }
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
                 if !session.camera_positioned
