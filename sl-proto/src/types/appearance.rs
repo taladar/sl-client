@@ -487,6 +487,21 @@ impl TextureFace {
     pub const fn tex_gen(self) -> u8 {
         self.media_flags & 0x06
     }
+
+    /// Whether the face uses **planar** texture-coordinate generation
+    /// (`TEX_GEN_PLANAR`, `0x02`) rather than the default per-face mapping.
+    ///
+    /// A planar face ignores the volume's stored UVs and projects each vertex's
+    /// texture coordinate from its position (scaled by the object size) and
+    /// normal — the reference viewer's `LLFace::planarProjection`. Builders use
+    /// it so a texture keeps a fixed world scale across a prim's faces (common on
+    /// architectural prims). The other reserved modes (`spherical`,
+    /// `cylindrical`) fall back to the stored UVs, exactly as the reference
+    /// viewer only special-cases `TEX_GEN_PLANAR`.
+    #[must_use]
+    pub const fn is_planar_texgen(self) -> bool {
+        self.tex_gen() == 0x02
+    }
 }
 
 /// A decoded `TextureEntry`: one [`TextureFace`] per face. For an avatar (from
@@ -1099,9 +1114,14 @@ mod tests {
         let f = face(0, 0x01 | 0x02);
         assert!(f.media_enabled());
         assert_eq!(f.tex_gen(), 0x02);
+        assert!(f.is_planar_texgen());
         let plain = face(0, 0);
         assert!(!plain.media_enabled());
         assert_eq!(plain.tex_gen(), 0);
+        assert!(!plain.is_planar_texgen());
+        // The reserved modes (spherical 0x04, cylindrical 0x06) are not planar.
+        assert!(!face(0, 0x04).is_planar_texgen());
+        assert!(!face(0, 0x06).is_planar_texgen());
     }
 
     #[test]

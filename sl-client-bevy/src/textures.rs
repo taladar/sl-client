@@ -77,6 +77,53 @@ pub fn texture_face_uv_transform(face: &TextureFace) -> Affine2 {
     }
 }
 
+/// The **planar** texture coordinate of a vertex under `TEX_GEN_PLANAR` — a
+/// faithful port of the reference viewer's `LLFace::planarProjection`
+/// (`indra/newview/llface.cpp`).
+///
+/// A planar face does not use the volume's stored UVs; instead each vertex's
+/// texture coordinate is projected from its `position` (in the object's local
+/// Second Life space, first scaled by the object `scale`) onto the plane the
+/// face `normal` defines. The projection axis is chosen from the normal so the
+/// texture keeps a fixed world scale across the prim's faces. The returned
+/// coordinate is in Second Life's bottom-up texture space — the same space as
+/// the stored profile UVs — so the caller applies the identical downstream
+/// handling (the `1 − v` flip and the per-face [`texture_face_uv_transform`],
+/// which the reference viewer likewise applies *after* the projection).
+#[must_use]
+pub fn planar_texgen_uv(position: [f32; 3], normal: [f32; 3], scale: [f32; 3]) -> [f32; 2] {
+    // The vertex position in object-relative units (Firestorm's `vec.mul(scale)`).
+    let vec = [
+        position[0] * scale[0],
+        position[1] * scale[1],
+        position[2] * scale[2],
+    ];
+    // Pick a binormal aligned to whichever axis the face least faces, so a
+    // roughly axis-aligned face projects without degenerating.
+    let d = normal[0];
+    let binormal = if d >= 0.5 || d <= -0.5 {
+        if d < 0.0 {
+            [0.0, -1.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        }
+    } else if normal[1] > 0.0 {
+        [-1.0, 0.0, 0.0]
+    } else {
+        [1.0, 0.0, 0.0]
+    };
+    // tangent = binormal × normal.
+    let tangent = [
+        binormal[1] * normal[2] - binormal[2] * normal[1],
+        binormal[2] * normal[0] - binormal[0] * normal[2],
+        binormal[0] * normal[1] - binormal[1] * normal[0],
+    ];
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let u = 1.0 + (dot(binormal, vec) * 2.0 - 0.5);
+    let v = -(dot(tangent, vec) * 2.0 - 0.5);
+    [u, v]
+}
+
 /// A [`TextureFetcher`] over blocking `reqwest`, for
 /// a Bevy app with no async runtime. It fetches `GetTexture` codestream byte
 /// ranges; the capability URL is held in an [`ArcSwapOption`] so it can be
@@ -187,13 +234,37 @@ impl TextureFetcher for BevyTextureFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{texture_face_uv_transform, to_bevy_image};
+    use super::{planar_texgen_uv, texture_face_uv_transform, to_bevy_image};
     use bevy::math::{Affine2, Vec2};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
     use sl_proto::{DiscardLevel, TextureFace, TextureKey};
     use sl_texture::DecodedImage;
     use uuid::Uuid;
+
+    /// The planar projection of a `+Z`-facing (cap) vertex matches the reference
+    /// viewer's `planarProjection`: the position is scaled by the object size,
+    /// then `u = 1 + (x·2 − 0.5)`, `v = −(−y·2 − 0.5)`.
+    #[test]
+    fn planar_texgen_projects_a_z_face() {
+        // vec = (0.25, 0.1, 0.5) ⊙ (10, 10, 0.14) = (2.5, 1.0, 0.07).
+        // binormal = (1,0,0), tangent = (0,-1,0):
+        //   u = 1 + (2.5·2 − 0.5) = 5.5, v = −((−1.0)·2 − 0.5) = 2.5.
+        let uv = planar_texgen_uv([0.25, 0.1, 0.5], [0.0, 0.0, 1.0], [10.0, 10.0, 0.14]);
+        assert!((uv[0] - 5.5).abs() < 1.0e-5, "u was {}", uv[0]);
+        assert!((uv[1] - 2.5).abs() < 1.0e-5, "v was {}", uv[1]);
+    }
+
+    /// A strongly `+X`-facing vertex picks the `(0,1,0)` binormal branch
+    /// (`|normal.x| ≥ 0.5`), so `tangent = (0,0,-1)`.
+    #[test]
+    fn planar_texgen_projects_an_x_face() {
+        // vec = (0.5, 0.2, 0.3) ⊙ (2,2,2) = (1.0, 0.4, 0.6).
+        //   u = 1 + (0.4·2 − 0.5) = 1.3, v = −((−0.6)·2 − 0.5) = 1.7.
+        let uv = planar_texgen_uv([0.5, 0.2, 0.3], [1.0, 0.0, 0.0], [2.0, 2.0, 2.0]);
+        assert!((uv[0] - 1.3).abs() < 1.0e-5, "u was {}", uv[0]);
+        assert!((uv[1] - 1.7).abs() < 1.0e-5, "v was {}", uv[1]);
+    }
 
     /// A neutral (identity) face maps every UV to itself.
     #[test]

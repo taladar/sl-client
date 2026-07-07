@@ -46,7 +46,7 @@ use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, JointOverrides, MeshKey, MeshSkin, Object, PrimFaceId,
     PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent,
     SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
-    pcode, rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh,
+    pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh,
     to_bevy_prim_mesh, to_bevy_rigged_mesh,
 };
 
@@ -241,6 +241,8 @@ struct PendingMesh {
     /// The object's raw texture-entry bytes, decoded per-submesh at build time to
     /// texture each face.
     texture_entry: Vec<u8>,
+    /// The object's Second Life scale, needed to project planar-texgen faces.
+    scale: [f32; 3],
 }
 
 /// A worn rigged mesh attachment's deferred skinned build (P17.2): the decoded
@@ -268,6 +270,8 @@ struct PendingSculpt {
     /// The object's raw texture-entry bytes, decoded at build time to texture the
     /// sculpt's single face.
     texture_entry: Vec<u8>,
+    /// The object's Second Life scale, needed to project planar-texgen faces.
+    scale: [f32; 3],
 }
 
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
@@ -599,6 +603,7 @@ fn build_object_geometry(
                     build_mesh_submeshes(
                         &decoded,
                         &object.texture_entry,
+                        [object.scale.x, object.scale.y, object.scale.z],
                         entity,
                         commands,
                         meshes,
@@ -613,6 +618,7 @@ fn build_object_geometry(
                     Some(PendingGeometry::Mesh(PendingMesh {
                         key,
                         texture_entry: object.texture_entry.clone(),
+                        scale: [object.scale.x, object.scale.y, object.scale.z],
                     })),
                 ),
             }
@@ -630,6 +636,7 @@ fn build_object_geometry(
                         &map_image,
                         sculpt_type,
                         &object.texture_entry,
+                        [object.scale.x, object.scale.y, object.scale.z],
                         entity,
                         commands,
                         meshes,
@@ -645,6 +652,7 @@ fn build_object_geometry(
                         map,
                         sculpt_type,
                         texture_entry: object.texture_entry.clone(),
+                        scale: [object.scale.x, object.scale.y, object.scale.z],
                     })),
                 ),
             }
@@ -683,6 +691,7 @@ fn build_prim_faces(
     spawn_prim_faces(
         &prim,
         &object.texture_entry,
+        [object.scale.x, object.scale.y, object.scale.z],
         parent,
         commands,
         meshes,
@@ -713,6 +722,7 @@ fn build_sculpt_faces(
     map: &DecodedTexture,
     sculpt_type: u8,
     texture_entry: &[u8],
+    scale: [f32; 3],
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -724,6 +734,7 @@ fn build_sculpt_faces(
     spawn_prim_faces(
         &prim,
         texture_entry,
+        scale,
         parent,
         commands,
         meshes,
@@ -731,6 +742,40 @@ fn build_sculpt_faces(
         manager,
         prim_textures,
     )
+}
+
+/// Overwrite a face `mesh`'s UV0 with planar-texgen coordinates when its
+/// `texture_face` requests planar mapping (`TEX_GEN_PLANAR`).
+///
+/// A planar face ignores the volume's stored UVs; the reference viewer projects
+/// each vertex's texture coordinate from its position (in the object's local
+/// Second Life space, scaled by the object size) and normal via
+/// [`planar_texgen_uv`]. The projected coordinate gets the same `1 − v` flip
+/// [`to_bevy_prim_mesh`] / [`to_bevy_mesh`] apply to stored UVs, so a planar face
+/// samples the texture the same way up; the per-face repeats / offset / rotation
+/// still apply afterwards through the material's `uv_transform`, matching the
+/// reference viewer's order (`planarProjection` then `xform`). A no-op for a
+/// non-planar face, or when the face carries no per-vertex normals to project
+/// from.
+fn apply_planar_texgen(
+    mesh: &mut Mesh,
+    positions: &[[f32; 3]],
+    normals: &[[f32; 3]],
+    texture_face: &TextureFace,
+    scale: [f32; 3],
+) {
+    if !texture_face.is_planar_texgen() || normals.len() != positions.len() {
+        return;
+    }
+    let uvs: Vec<[f32; 2]> = positions
+        .iter()
+        .zip(normals.iter())
+        .map(|(&position, &normal)| {
+            let [u, v] = planar_texgen_uv(position, normal, scale);
+            [u, 1.0 - v]
+        })
+        .collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
 }
 
 /// Spawn one child entity per non-empty [`PrimFace`](sl_client_bevy::PrimFace) of
@@ -753,6 +798,7 @@ fn build_sculpt_faces(
 fn spawn_prim_faces(
     prim: &PrimMesh,
     texture_entry: &[u8],
+    scale: [f32; 3],
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -769,8 +815,16 @@ fn spawn_prim_faces(
         if face.is_empty() {
             continue;
         }
-        let mesh = meshes.add(to_bevy_prim_mesh(face));
         let texture_face = entry.face(face.face_id.as_usize()).unwrap_or(&default_face);
+        let mut bevy_mesh = to_bevy_prim_mesh(face);
+        apply_planar_texgen(
+            &mut bevy_mesh,
+            &face.positions,
+            &face.normals,
+            texture_face,
+            scale,
+        );
+        let mesh = meshes.add(bevy_mesh);
         let material = face_material(texture_face, materials, manager, prim_textures);
         let entity = commands
             .spawn((
@@ -807,6 +861,7 @@ fn spawn_prim_faces(
 fn build_mesh_submeshes(
     decoded: &DecodedMesh,
     texture_entry: &[u8],
+    scale: [f32; 3],
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -823,8 +878,16 @@ fn build_mesh_submeshes(
         if submesh.no_geometry {
             continue;
         }
-        let mesh = meshes.add(to_bevy_mesh(submesh));
         let texture_face = entry.face(index).unwrap_or(&default_face);
+        let mut bevy_mesh = to_bevy_mesh(submesh);
+        apply_planar_texgen(
+            &mut bevy_mesh,
+            &submesh.positions,
+            &submesh.normals,
+            texture_face,
+            scale,
+        );
+        let mesh = meshes.add(bevy_mesh);
         let material = face_material(texture_face, materials, manager, prim_textures);
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
@@ -1224,6 +1287,7 @@ pub(crate) fn apply_object_meshes(
                         tracked.face_entities = build_mesh_submeshes(
                             &mesh,
                             &pending.texture_entry,
+                            pending.scale,
                             tracked.geometry,
                             &mut commands,
                             &mut meshes,
@@ -1558,6 +1622,7 @@ pub(crate) fn apply_object_sculpts(
                         &map,
                         pending.sculpt_type,
                         &pending.texture_entry,
+                        pending.scale,
                         tracked.geometry,
                         &mut commands,
                         &mut meshes,

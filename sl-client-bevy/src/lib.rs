@@ -207,7 +207,9 @@ pub use crate::meshes::{
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
-pub use crate::textures::{BevyTextureFetcher, texture_face_uv_transform, to_bevy_image};
+pub use crate::textures::{
+    BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
+};
 
 pub mod assets;
 pub mod avatars;
