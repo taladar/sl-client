@@ -18,6 +18,7 @@ mod chat;
 mod coords;
 mod meshes;
 mod objects;
+mod screenshot;
 mod session;
 mod terrain;
 mod textures;
@@ -62,8 +63,10 @@ use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
     apply_rigged_attachments, log_suspicious_objects, pick_object, update_objects,
 };
+use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
+    repeat_debug_animation,
 };
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
@@ -147,6 +150,17 @@ struct Options {
     /// sphere has no skeleton to pose).
     #[clap(long, env = "SL_VIEWER_PLAY_ANIMATION")]
     play_animation: Option<Uuid>,
+    /// Keep re-issuing `--play-animation` on a short cadence so it is still
+    /// playing after the avatar has finished loading (a one-shot play can expire
+    /// before the body is fully baked / on screen). Handy for capture runs.
+    #[clap(long)]
+    repeat_animation: bool,
+    /// A debug affordance: when set, save a numbered PNG sequence of the window
+    /// to this directory (after a startup delay, then quit) instead of running
+    /// interactively — for inspecting an animated avatar offline. Leaves the
+    /// cursor un-grabbed so it does not hijack the desktop it runs on.
+    #[clap(long, env = "SL_VIEWER_SCREENSHOT_DIR")]
+    screenshot_dir: Option<PathBuf>,
 }
 
 /// Map a grid nickname to its XML-RPC login URI, or `None` if unknown.
@@ -265,7 +279,25 @@ fn run_session(
     params: &LoginParams,
     viewer_assets: Option<&Path>,
     play_animation: Option<Uuid>,
+    repeat_animation: bool,
+    screenshot_dir: Option<&Path>,
 ) -> LoginOutcome {
+    // In screenshot mode leave the cursor free (visible, un-grabbed) so an
+    // unattended capture run does not hijack the desktop's pointer.
+    let cursor_options = if screenshot_dir.is_some() {
+        CursorOptions {
+            grab_mode: CursorGrabMode::None,
+            visible: true,
+            ..default()
+        }
+    } else {
+        // Capture and hide the cursor so raw mouse motion drives mouse-look.
+        CursorOptions {
+            grab_mode: CursorGrabMode::Locked,
+            visible: false,
+            ..default()
+        }
+    };
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -274,13 +306,7 @@ fn run_session(
                     title: "sl-client-bevy-viewer".to_owned(),
                     ..default()
                 }),
-                // Capture and hide the cursor so raw mouse motion drives
-                // mouse-look.
-                primary_cursor_options: Some(CursorOptions {
-                    grab_mode: CursorGrabMode::Locked,
-                    visible: false,
-                    ..default()
-                }),
+                primary_cursor_options: Some(cursor_options),
                 ..default()
             })
             // The binary installs its own `tracing` subscriber (so the
@@ -316,6 +342,7 @@ fn run_session(
     .init_resource::<AnimationPlayback>()
     .insert_resource(PlayOnLogin {
         animation: play_animation.map(AnimationKey::from),
+        repeat: repeat_animation,
     })
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
@@ -432,6 +459,7 @@ fn run_session(
             ingest_avatar_animations,
             poll_animations,
             drive_avatar_skeletons.after(apply_avatar_appearance),
+            repeat_debug_animation,
         ),
     )
     // Write the posed avatars' animated joint world matrices straight into their
@@ -447,6 +475,15 @@ fn run_session(
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
     if let Some(library) = load_avatar_library(viewer_assets) {
         app.insert_resource(library);
+    }
+    // In screenshot mode, capture a numbered PNG sequence of the window after a
+    // startup delay, then quit (the R11 offline-inspection harness).
+    if let Some(dir) = screenshot_dir {
+        if let Err(error) = fs_err::create_dir_all(dir) {
+            warn!("failed to create screenshot dir {}: {error}", dir.display());
+        }
+        app.insert_resource(ScreenshotSchedule::new(dir.to_path_buf()))
+            .add_systems(Update, capture_screenshots);
     }
     let _exit = app.run();
     app.world_mut()
@@ -488,6 +525,8 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             &params,
             options.viewer_assets.as_deref(),
             options.play_animation,
+            options.repeat_animation,
+            options.screenshot_dir.as_deref(),
         );
         if let Some(challenge) = outcome.challenge {
             info!(

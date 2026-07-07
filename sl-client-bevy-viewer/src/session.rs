@@ -58,6 +58,44 @@ pub(crate) struct ViewerSession {
 pub(crate) struct PlayOnLogin {
     /// The animation to start on the agent's own avatar, or `None` to play none.
     pub(crate) animation: Option<AnimationKey>,
+    /// Whether to keep re-issuing the animation on a short cadence (the
+    /// `--repeat-animation` flag), so it is still playing once the avatar has
+    /// finished loading — useful for an unattended screenshot capture where a
+    /// one-shot play would have expired before the body is fully on screen.
+    pub(crate) repeat: bool,
+}
+
+/// Re-issue the `--play-animation` debug animation on a fixed cadence when
+/// `--repeat-animation` is set, so a short or non-looping motion keeps playing
+/// long enough for the (slower) avatar load / bake to finish. Idempotent for a
+/// looping motion (the sim just refreshes its start), and a no-op until the
+/// animation has first been kicked off on the region handshake.
+pub(crate) fn repeat_debug_animation(
+    time: Res<Time>,
+    session: Res<ViewerSession>,
+    play_on_login: Res<PlayOnLogin>,
+    mut next_at: Local<f32>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if !play_on_login.repeat || !session.play_on_login_done {
+        return;
+    }
+    let Some(animation) = play_on_login.animation else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    if now < *next_at {
+        return;
+    }
+    // Re-issue every ~2 s. A bare re-`Play` of an animation the sim already lists
+    // is a no-op (no fresh `AvatarAnimation` broadcast, so the local playback
+    // clock never restarts), so first `Stop` it to drop it from the list, then
+    // `Play` it again — the drop + re-add gives a new sequence id, which restarts
+    // the motion and re-poses the skeleton. This keeps a short / non-looping
+    // debug motion visibly moving long after a one-shot play would have expired.
+    *next_at = now + 2.0;
+    commands.write(SlCommand(Command::StopAnimation(animation)));
+    commands.write(SlCommand(Command::PlayAnimation(animation)));
 }
 
 /// Request a clean logout on the quit key (`Esc` / `Q`).
