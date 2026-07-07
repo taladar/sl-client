@@ -147,9 +147,10 @@ struct Options {
     /// A debug affordance: play this animation (a built-in or uploaded `.anim`
     /// UUID) on the agent's **own** avatar once it lands, so the skeleton-animation
     /// driver can be exercised with a single login. Needs `--viewer-assets` (a
-    /// sphere has no skeleton to pose).
-    #[clap(long, env = "SL_VIEWER_PLAY_ANIMATION")]
-    play_animation: Option<Uuid>,
+    /// sphere has no skeleton to pose). Repeat the flag (or pass a comma-separated
+    /// list) to layer several at once and exercise the P18.4 priority blending.
+    #[clap(long, env = "SL_VIEWER_PLAY_ANIMATION", value_delimiter = ',')]
+    play_animation: Vec<Uuid>,
     /// Keep re-issuing `--play-animation` on a short cadence so it is still
     /// playing after the avatar has finished loading (a one-shot play can expire
     /// before the body is fully baked / on screen). Handy for capture runs.
@@ -278,7 +279,7 @@ fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
 fn run_session(
     params: &LoginParams,
     viewer_assets: Option<&Path>,
-    play_animation: Option<Uuid>,
+    play_animation: &[Uuid],
     repeat_animation: bool,
     screenshot_dir: Option<&Path>,
 ) -> LoginOutcome {
@@ -341,7 +342,11 @@ fn run_session(
     .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
     .init_resource::<AnimationPlayback>()
     .insert_resource(PlayOnLogin {
-        animation: play_animation.map(AnimationKey::from),
+        animations: play_animation
+            .iter()
+            .copied()
+            .map(AnimationKey::from)
+            .collect(),
         repeat: repeat_animation,
     })
     .add_message::<TextureDecoded>()
@@ -528,7 +533,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
         let outcome = run_session(
             &params,
             options.viewer_assets.as_deref(),
-            options.play_animation,
+            &options.play_animation,
             options.repeat_animation,
             options.screenshot_dir.as_deref(),
         );

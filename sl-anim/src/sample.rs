@@ -63,10 +63,93 @@ impl Motion {
     /// finished one-shot (a wave, a bow) and let the joint fall back to its rest
     /// pose even before the simulator drops it from the avatar's animation list.
     /// A looping motion is never finished.
+    ///
+    /// This is the priority-blind, stop-blind check; the blending driver (P18.4)
+    /// uses the stop-aware [`is_finished`](Self::is_finished) instead, so it can
+    /// hold a motion through its ease-out tail after the simulator drops it.
     #[must_use]
     pub fn is_expired(&self, elapsed: f32) -> bool {
         !self.loops && elapsed > self.duration + self.ease_out_duration
     }
+
+    /// The motion's **pose weight** in `0..=1` at `elapsed` seconds since it
+    /// started (P18.4), given `stopped_at` — the elapsed time at which the
+    /// simulator dropped it from the avatar's animation set, or `None` while it
+    /// is still signalled.
+    ///
+    /// Mirrors the per-frame `posep->setWeight(...)` of
+    /// `LLMotionController::updateMotionsByType`: a cubic ease-in from activation
+    /// over [`ease_in_duration`](Motion::ease_in_duration), full weight while
+    /// active, and a cubic ease-out around the stop over
+    /// [`ease_out_duration`](Motion::ease_out_duration). A non-looping motion
+    /// auto-eases-out so it finishes at its [`duration`](Motion::duration) (the
+    /// reference viewer's `mSendStopTimestamp` sits an ease-out before the end),
+    /// and an explicit `stopped_at` brings that forward when it is earlier. The
+    /// residual weight the ease-out scales is the ease-in weight reached at the
+    /// stop, so stopping mid-ease-in fades from the partial weight rather than
+    /// popping to full.
+    #[must_use]
+    pub fn pose_weight(&self, elapsed: f32, stopped_at: Option<f32>) -> f32 {
+        let ease_in = self.ease_in_weight(elapsed);
+        let Some(start) = self.ease_out_start(stopped_at) else {
+            return ease_in;
+        };
+        if elapsed < start {
+            return ease_in;
+        }
+        if self.ease_out_duration <= 0.0 {
+            return 0.0;
+        }
+        // `cubic_step` clamps its argument, so a past-the-tail time yields 0.
+        let residual = self.ease_in_weight(start);
+        let fraction = (elapsed - start) / self.ease_out_duration;
+        residual * cubic_step(1.0 - fraction)
+    }
+
+    /// Whether the motion has fully eased out at `elapsed` (its pose weight has
+    /// reached 0 and will not recover), so the P18.4 driver can drop it. A
+    /// looping motion that has not been stopped is never finished.
+    #[must_use]
+    pub fn is_finished(&self, elapsed: f32, stopped_at: Option<f32>) -> bool {
+        match self.ease_out_start(stopped_at) {
+            None => false,
+            Some(start) => elapsed >= start + self.ease_out_duration,
+        }
+    }
+
+    /// The elapsed time at which the motion begins easing out, or `None` while it
+    /// still holds full weight (a looping motion the simulator has not dropped).
+    ///
+    /// A non-looping motion eases out so it ends at its duration (stop one
+    /// ease-out before the end); an explicit `stopped_at` wins when it is earlier.
+    fn ease_out_start(&self, stopped_at: Option<f32>) -> Option<f32> {
+        let natural = (!self.loops).then(|| (self.duration - self.ease_out_duration).max(0.0));
+        match (stopped_at, natural) {
+            (Some(stop), Some(nat)) => Some(stop.min(nat)),
+            (Some(stop), None) => Some(stop),
+            (None, natural) => natural,
+        }
+    }
+
+    /// The cubic ease-in weight at `elapsed` seconds (residual 0, fade weight 1):
+    /// 1 for a zero ease-in duration, else the smoothstep of `elapsed /
+    /// ease_in_duration`.
+    fn ease_in_weight(&self, elapsed: f32) -> f32 {
+        if self.ease_in_duration <= 0.0 {
+            1.0
+        } else {
+            cubic_step(elapsed / self.ease_in_duration)
+        }
+    }
+}
+
+/// The reference viewer's `cubic_step(x)` (`llmath.h`): the smoothstep
+/// `x²·(3 − 2x)` with `x` clamped to `0..=1`, used for the animation ease-in /
+/// ease-out weight ramps.
+#[must_use]
+pub(crate) fn cubic_step(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 impl JointMotion {
@@ -150,7 +233,7 @@ fn sample_curve<K: Copy, V>(
 /// Normalized quaternion interpolation `[x, y, z, w]`, matching the reference
 /// viewer's `nlerp(u, a, b)`: a plain component lerp when the quaternions face the
 /// same hemisphere, else a true spherical interpolation that takes the short arc.
-fn nlerp_quaternions(fraction: f32, a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+pub(crate) fn nlerp_quaternions(fraction: f32, a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     let [ax, ay, az, aw] = a;
     let [bx, by, bz, bw] = b;
     let dot = ax * bx + ay * by + az * bz + aw * bw;
@@ -221,7 +304,7 @@ fn normalize_quaternion(q: [f32; 4]) -> [f32; 4] {
 
 /// Component-wise vector lerp `a + fraction * (b - a)`, matching the reference
 /// viewer's `lerp(a, b, u)` for a position track.
-fn lerp_vector3(fraction: f32, a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+pub(crate) fn lerp_vector3(fraction: f32, a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     let [ax, ay, az] = a;
     let [bx, by, bz] = b;
     [
@@ -235,7 +318,7 @@ fn lerp_vector3(fraction: f32, a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use crate::decode::{JointMotion, JointPriority, Motion, PositionKey, RotationKey};
+    use crate::decode::{HandPose, JointMotion, JointPriority, Motion, PositionKey, RotationKey};
 
     /// Assert two `f32`s agree within a tight tolerance — the crate convention for
     /// float comparisons (avoids the `float_cmp` lint the exact `assert_eq` trips).
@@ -311,6 +394,84 @@ mod tests {
         assert!(one_shot.is_expired(2.5));
         let looping = timing_motion(true, 2.0, 0.0, 2.0);
         assert!(!looping.is_expired(100.0));
+    }
+
+    /// A looping motion with the given ease-in / ease-out durations for the
+    /// pose-weight tests (a long duration so the natural end never interferes).
+    fn easing_motion(loops: bool, ease_in: f32, ease_out: f32) -> Motion {
+        Motion {
+            base_priority: JointPriority::LOW,
+            duration: 30.0,
+            emote_name: String::new(),
+            loop_in_point: 0.0,
+            loop_out_point: 30.0,
+            loops,
+            ease_in_duration: ease_in,
+            ease_out_duration: ease_out,
+            hand_pose: HandPose::RELAXED,
+            joints: Vec::new(),
+            constraints: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pose_weight_eases_in_cubically() {
+        let motion = easing_motion(true, 2.0, 1.0);
+        approx(motion.pose_weight(0.0, None), 0.0);
+        // cubic_step(0.5) = 0.5.
+        approx(motion.pose_weight(1.0, None), 0.5);
+        // Fully eased in and holding while signalled.
+        approx(motion.pose_weight(2.0, None), 1.0);
+        approx(motion.pose_weight(10.0, None), 1.0);
+    }
+
+    #[test]
+    fn pose_weight_zero_ease_in_is_immediately_full() {
+        let motion = easing_motion(true, 0.0, 0.0);
+        approx(motion.pose_weight(0.0, None), 1.0);
+    }
+
+    #[test]
+    fn pose_weight_eases_out_after_stop() {
+        let motion = easing_motion(true, 0.0, 2.0);
+        // Stopped at t = 5; at the stop it still holds full weight.
+        approx(motion.pose_weight(5.0, Some(5.0)), 1.0);
+        // Halfway through the ease-out: cubic_step(1 - 0.5) = cubic_step(0.5) = 0.5.
+        approx(motion.pose_weight(6.0, Some(5.0)), 0.5);
+        // Past the tail: fully faded.
+        approx(motion.pose_weight(7.0, Some(5.0)), 0.0);
+        approx(motion.pose_weight(9.0, Some(5.0)), 0.0);
+    }
+
+    #[test]
+    fn pose_weight_stop_mid_ease_in_fades_from_partial() {
+        let motion = easing_motion(true, 2.0, 2.0);
+        // Stopped at t = 1, where the ease-in weight is cubic_step(0.5) = 0.5.
+        // At the stop the weight is that residual, then it eases out from there.
+        approx(motion.pose_weight(1.0, Some(1.0)), 0.5);
+        // Fully faded once the ease-out tail passes.
+        approx(motion.pose_weight(3.0, Some(1.0)), 0.0);
+    }
+
+    #[test]
+    fn non_looping_motion_eases_out_to_finish_at_duration() {
+        // duration 30, ease-out 2: eases out over [28, 30] even without an explicit
+        // stop, and is finished at 30.
+        let motion = easing_motion(false, 0.0, 2.0);
+        approx(motion.pose_weight(27.0, None), 1.0);
+        approx(motion.pose_weight(29.0, None), 0.5);
+        assert!(!motion.is_finished(29.0, None));
+        assert!(motion.is_finished(30.0, None));
+        // A looping motion never finishes while signalled.
+        let looping = easing_motion(true, 0.0, 2.0);
+        assert!(!looping.is_finished(1000.0, None));
+    }
+
+    #[test]
+    fn is_finished_when_ease_out_tail_passes() {
+        let motion = easing_motion(true, 0.0, 2.0);
+        assert!(!motion.is_finished(6.0, Some(5.0)));
+        assert!(motion.is_finished(7.0, Some(5.0)));
     }
 
     /// A single-track joint used by the sampling tests.

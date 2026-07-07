@@ -50,14 +50,15 @@ pub(crate) struct ViewerSession {
     quit_deadline: Option<f32>,
 }
 
-/// A debug animation to play on the agent's **own** avatar once it lands (the
-/// `--play-animation <uuid>` flag), so the P18.3 skeleton driver can be exercised
-/// with a single login rather than needing a second avatar to animate. `None`
-/// (the default) plays nothing.
+/// Debug animations to play on the agent's **own** avatar once it lands (the
+/// `--play-animation <uuid>` flag, repeatable), so the P18.3 skeleton driver and
+/// P18.4 priority blending can be exercised with a single login rather than
+/// needing a second avatar to animate. Empty (the default) plays nothing; more
+/// than one layers them so the blend of concurrent motions can be watched.
 #[derive(Resource, Default)]
 pub(crate) struct PlayOnLogin {
-    /// The animation to start on the agent's own avatar, or `None` to play none.
-    pub(crate) animation: Option<AnimationKey>,
+    /// The animations to start on the agent's own avatar (empty plays none).
+    pub(crate) animations: Vec<AnimationKey>,
     /// Whether to keep re-issuing the animation on a short cadence (the
     /// `--repeat-animation` flag), so it is still playing once the avatar has
     /// finished loading — useful for an unattended screenshot capture where a
@@ -80,9 +81,9 @@ pub(crate) fn repeat_debug_animation(
     if !play_on_login.repeat || !session.play_on_login_done {
         return;
     }
-    let Some(animation) = play_on_login.animation else {
+    if play_on_login.animations.is_empty() {
         return;
-    };
+    }
     let now = time.elapsed_secs();
     if now < *next_at {
         return;
@@ -94,8 +95,10 @@ pub(crate) fn repeat_debug_animation(
     // the motion and re-poses the skeleton. This keeps a short / non-looping
     // debug motion visibly moving long after a one-shot play would have expired.
     *next_at = now + 2.0;
-    commands.write(SlCommand(Command::StopAnimation(animation)));
-    commands.write(SlCommand(Command::PlayAnimation(animation)));
+    for &animation in &play_on_login.animations {
+        commands.write(SlCommand(Command::StopAnimation(animation)));
+        commands.write(SlCommand(Command::PlayAnimation(animation)));
+    }
 }
 
 /// Request a clean logout on the quit key (`Esc` / `Q`).
@@ -153,15 +156,15 @@ pub(crate) fn drive_session(
                 commands.write(SlCommand(Command::SetDrawDistance(Distance::new(
                     DRAW_DISTANCE_METRES,
                 ))));
-                // Kick off the `--play-animation` debug animation on the agent's
-                // own avatar, once, so its skeleton is driven (P18.3) — the sim
-                // broadcasts the agent's own `AvatarAnimation` back, which the
+                // Kick off the `--play-animation` debug animations on the agent's
+                // own avatar, once, so its skeleton is driven (P18.3 / P18.4) — the
+                // sim broadcasts the agent's own `AvatarAnimation` back, which the
                 // animation manager fetches / decodes and the driver poses from.
-                if let Some(animation) = play_on_login.animation
-                    && !session.play_on_login_done
-                {
-                    info!("playing debug animation {animation} on own avatar");
-                    commands.write(SlCommand(Command::PlayAnimation(animation)));
+                if !play_on_login.animations.is_empty() && !session.play_on_login_done {
+                    for &animation in &play_on_login.animations {
+                        info!("playing debug animation {animation} on own avatar");
+                        commands.write(SlCommand(Command::PlayAnimation(animation)));
+                    }
                     session.play_on_login_done = true;
                 }
             }
