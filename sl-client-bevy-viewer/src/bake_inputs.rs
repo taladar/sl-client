@@ -98,6 +98,22 @@ impl OwnBakeInputs {
     pub(crate) fn is_ready(&self) -> bool {
         self.stage == BakeInputStage::Ready
     }
+
+    /// Build the transmitted `AvatarAppearance.visual_params` vector from the worn
+    /// wearables' params (R12): the avatar's real shape (Shape body proportions,
+    /// skin, ...), for publishing *and* rendering the own avatar instead of a
+    /// neutral placeholder. A param no worn wearable sets falls back to its table
+    /// default, so the result is always a complete, correctly-neutral vector (the
+    /// default Ruth shape) even before every wearable is in hand — never the
+    /// all-`128` midpoint set that half-applies every asymmetric body morph.
+    #[must_use]
+    pub(crate) fn visual_params(&self, params: &VisualParams) -> Vec<u8> {
+        params.encode_appearance(|id| {
+            self.assets
+                .iter()
+                .find_map(|wearable| wearable.params.get(&id).copied())
+        })
+    }
 }
 
 /// Announced (once per asset id) when a background wearable-asset fetch finishes,

@@ -1864,6 +1864,40 @@ pub(crate) fn apply_own_local_bake(
     }
 }
 
+/// Render our own avatar from its worn shape rather than the server's echoed
+/// appearance (R12).
+///
+/// On a legacy-bake grid the `AvatarAppearance.visual_params` the sim broadcasts
+/// for our own avatar is only ever what *we* last published, so a placeholder
+/// there deforms our own body (an all-`128` set half-applies every asymmetric
+/// body morph → a bloated, spiking avatar). Resolve the real transmitted vector
+/// from the worn wearables ([`OwnBakeInputs::visual_params`] — the same bytes
+/// [`drive_bake_publish`](crate::bake_publish::drive_bake_publish) advertises) and
+/// install it as our own avatar's cached appearance whenever it differs, flagging
+/// the avatar for re-shaping. Self-healing: it re-asserts the worn shape if a
+/// later server appearance overwrites it, and picks up a re-outfit; a param no
+/// worn wearable sets falls back to its table default (the neutral Ruth shape).
+pub(crate) fn apply_own_shape_from_wearables(
+    identity: Res<SlIdentity>,
+    inputs: Res<OwnBakeInputs>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    mut state: ResMut<AvatarState>,
+) {
+    if !inputs.is_ready() {
+        return;
+    }
+    let (Some(library), Some(agent)) = (library, identity.agent_id) else {
+        return;
+    };
+    let bytes = inputs.visual_params(library.params());
+    if state.appearances.get(&agent) == Some(&bytes) {
+        return;
+    }
+    let _prev = state.appearances.insert(agent, bytes);
+    state.appearance_dirty.insert(agent);
+    debug!("resolved own avatar shape from worn wearables");
+}
+
 /// Apply each rigged avatar's appearance (P13.3 morphs + P13.4 skeletal shape):
 /// resolve an `AvatarAppearance.visual_params` vector once into its
 /// driver-propagated, sex-gated weights, then (a) rebuild every affected base

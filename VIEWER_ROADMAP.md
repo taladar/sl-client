@@ -1642,7 +1642,7 @@ avatar, so they are collected here to be worked one at a time.
   pivot-adjusted joint matrices). Needs careful visual iteration against a live
   animated avatar; rigged-mesh bodies (Phase 17, ordinary skin weights) are
   unaffected.
-- [ ] **R12. Own avatar renders bloated — publish/resolve the worn shape**
+- [x] **R12. Own avatar renders bloated — publish/resolve the worn shape**
   (`sl-client-bevy-viewer`). Diagnosed by a Firestorm vs local-OpenSim
   side-by-side: our own avatar renders with a bloated body and vertices
   spiking out of the head/hair **at rest** (no animation), while Firestorm
@@ -1660,18 +1660,35 @@ avatar, so they are collected here to be worked one at a time.
   worn-shape params and permanently corrects our render for that account; a
   never-corrected account stays bloated (confirmed: a second test avatar that
   never touched Firestorm stays bloated, a Firestorm-corrected one does not).
-  The fix is the "matching the worn shape" work `bake_publish.rs` explicitly
-  defers: resolve the own avatar's visual params from its worn **Shape**
-  wearable (already fetched for baking) and use them for **both** rendering and
-  the `AgentSetAppearance` publish, dropping the `128` placeholder — so the own
-  avatar is correct on any account/grid regardless of server state and other
-  viewers see the right shape. This is the *dominant* base-body appearance bug;
-  the animation-time skin distortion (**R11**, whose skin-pivot premise turned
-  out to be a proven sub-millimetre no-op) is a separate, smaller issue layered
-  on top, to be tackled after this. Two viewer debug affordances were added to
-  make this comparison possible: `--screenshot-dir` (an offline PNG capture
-  harness that quits after N frames) and `--repeat-animation` (keep re-issuing
-  `--play-animation` so a short motion still plays once the avatar has loaded).
+  **Fixed** — the "matching the worn shape" work `bake_publish.rs` had
+  deferred: `OwnBakeInputs::visual_params` builds the transmitted vector from
+  the worn wearables' params (a new `VisualParams::encode_appearance` +
+  `f32_to_u8` quantizer, the inverse of `map_appearance`; a param no wearable
+  sets falls back to its table default, so the vector is always the correct
+  neutral Ruth shape, never the `128` midpoint). It is used for **both** the
+  `AgentSetAppearance` publish (`drive_bake_publish`) and rendering the own
+  avatar (`apply_own_shape_from_wearables`, which overrides the server-echoed
+  appearance for our own agent and self-heals a re-outfit) — so the own avatar
+  is correct on any account/grid regardless of server state and other viewers
+  see the right shape. Verified live: a never-Firestorm'd account (Friend
+  Tester) that stayed bloated now renders the correct slender shape a few
+  seconds after login (once its wearables load). This was the *dominant*
+  base-body appearance bug; the animation-time skin distortion (**R11**, whose
+  skin-pivot premise turned out to be a proven sub-millimetre no-op) is a
+  separate, smaller issue to tackle next. Two viewer debug affordances were
+  added to make this comparison possible: `--screenshot-dir` (an offline PNG
+  capture harness that quits after N frames) and `--repeat-animation` (keep
+  re-issuing `--play-animation` so a short motion still plays once loaded).
+- [ ] **R13. Rest-visible spike under one shoulder** (`sl-client-bevy-viewer` /
+  `sl-avatar`). With the shape now correct (**R12**), a small spike of
+  geometry still pokes out under one shoulder (avatar's right) **at rest**, in
+  the T-pose with no animation and correct shape sliders — so it is not
+  shape/morph-driven. A rest-pose artifact is *not* a wrong per-vertex joint
+  weight either (those are invisible at rest, where every skin matrix is
+  identity — that is the **R11** animation class), which points at a base-mesh
+  decode / seam / stray-vertex issue in one body part rather than skinning.
+  Needs a live close-up against Firestorm on the same avatar to localise which
+  part and vertex. Surfaced by the R12 Firestorm side-by-side.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

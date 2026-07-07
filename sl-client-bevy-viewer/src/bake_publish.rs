@@ -17,9 +17,11 @@
 //! The whole thing is a one-shot, gated on the region advertising
 //! `UploadBakedTexture`: Second Life bakes centrally (P14) and does not advertise
 //! that capability, so this runs only where the legacy path is the live one
-//! (OpenSim). Publishing a real *shape* is out of scope — the appearance carries
-//! a neutral visual-parameter set (the bake textures are what P15.4 delivers);
-//! matching the worn shape is left to the deferred high-level appearance API.
+//! (OpenSim). The advertised appearance now carries the avatar's **real** visual
+//! parameters resolved from its worn wearables ([`OwnBakeInputs::visual_params`],
+//! R12) — publishing an all-`128` placeholder there deformed our own body,
+//! because the sim stores and rebroadcasts it and we render our own shape from
+//! that broadcast.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -31,6 +33,7 @@ use sl_client_bevy::{
 };
 use sl_texture::encode_j2c;
 
+use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::composite_own_region;
 use crate::bake_inputs::OwnBakeInputs;
 
@@ -107,10 +110,11 @@ fn neutral_visual_params() -> Vec<u8> {
 
 /// Advertise the uploaded bakes in an `AgentSetAppearance`: a full 45-face avatar
 /// [`TextureEntry`] whose uploaded baked slots name their new asset id (every
-/// other face nil), a neutral visual-parameter set, and one derived cache id per
-/// uploaded slot.
+/// other face nil), the avatar's real `visual_params` (resolved from its worn
+/// wearables, R12), and one derived cache id per uploaded slot.
 fn publish_appearance(
     uploaded: &HashMap<usize, TextureKey>,
+    visual_params: Vec<u8>,
     writer: &mut MessageWriter<SlCommand>,
 ) {
     if uploaded.is_empty() {
@@ -133,7 +137,7 @@ fn publish_appearance(
         serial: PUBLISH_SERIAL,
         size: AVATAR_SIZE,
         texture_entry: encode_texture_entry(&entry),
-        visual_params: neutral_visual_params(),
+        visual_params,
         wearable_cache,
     }));
     info!(
@@ -148,6 +152,7 @@ fn publish_appearance(
 pub(crate) fn drive_bake_publish(
     time: Res<Time>,
     inputs: Res<OwnBakeInputs>,
+    library: Option<Res<AvatarAssetLibrary>>,
     mut capabilities: MessageReader<SlCapabilities>,
     mut events: MessageReader<SlEvent>,
     mut publish: ResMut<OwnBakePublish>,
@@ -223,8 +228,15 @@ pub(crate) fn drive_bake_publish(
                     }
                 }
             }
-            // The queue is drained and nothing is in flight: publish the appearance.
-            publish_appearance(&publish.uploaded, &mut writer);
+            // The queue is drained and nothing is in flight: publish the
+            // appearance with the avatar's real worn shape (R12), or a neutral
+            // fallback if the character assets are absent (placeholder-sphere mode).
+            let visual_params = library
+                .as_ref()
+                .map_or_else(neutral_visual_params, |library| {
+                    inputs.visual_params(library.params())
+                });
+            publish_appearance(&publish.uploaded, visual_params, &mut writer);
             publish.stage = PublishStage::Done;
         }
         PublishStage::Done => {}

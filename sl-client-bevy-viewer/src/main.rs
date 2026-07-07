@@ -47,9 +47,9 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarState, OwnLocalBake, apply_avatar_appearance,
     apply_avatar_bake_textures, apply_avatar_names, apply_avatar_part_visibility,
-    apply_bom_face_materials, apply_own_local_bake, assign_avatar_bake_materials,
-    ingest_avatar_bakes, position_name_tags, setup_avatar_body, update_avatar_objects,
-    update_coarse_avatars,
+    apply_bom_face_materials, apply_own_local_bake, apply_own_shape_from_wearables,
+    assign_avatar_bake_materials, ingest_avatar_bakes, position_name_tags, setup_avatar_body,
+    update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -417,6 +417,10 @@ fn run_session(
             // into one tuple to stay within Bevy's per-tuple system limit.
             (
                 apply_avatar_appearance,
+                // Render our own avatar from its worn shape, not the server's echo
+                // of our own last publish (R12); after `apply_avatar_appearance`
+                // so it overrides a just-stored server appearance.
+                apply_own_shape_from_wearables.after(apply_avatar_appearance),
                 apply_avatar_part_visibility,
                 ingest_avatar_bakes,
                 assign_avatar_bake_materials,

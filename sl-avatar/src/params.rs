@@ -306,6 +306,13 @@ impl VisualParam {
         u8_to_f32(byte, self.min, self.max)
     }
 
+    /// Quantize this param's weight into its wire byte, the inverse of
+    /// [`weight_from_byte`](Self::weight_from_byte) (Firestorm's `F32_to_U8`).
+    #[must_use]
+    pub fn byte_from_weight(&self, weight: f32) -> u8 {
+        f32_to_u8(weight, self.min, self.max)
+    }
+
     /// Whether this param is packed into `AvatarAppearance.visual_params`.
     #[must_use]
     pub const fn is_transmitted(&self) -> bool {
@@ -460,6 +467,22 @@ impl VisualParams {
         }
         AppearanceValues { values, by_id }
     }
+
+    /// Build an `AvatarAppearance.visual_params` byte vector from a param-weight
+    /// lookup — the inverse of [`map_appearance`](Self::map_appearance). One byte
+    /// per transmitted param in wire order (ascending id), quantized against that
+    /// param's `[min, max]`. A param the lookup returns `None` for falls back to
+    /// its authored [`default`](VisualParam::default), so a partial source (e.g.
+    /// only the worn Shape wearable's params) still yields a complete vector that
+    /// is neutral where unset.
+    #[must_use]
+    pub fn encode_appearance(&self, weight_of: impl Fn(i32) -> Option<f32>) -> Vec<u8> {
+        self.transmitted
+            .iter()
+            .filter_map(|&index| self.params.get(index))
+            .map(|param| param.byte_from_weight(weight_of(param.id).unwrap_or(param.default)))
+            .collect()
+    }
 }
 
 /// The typed weights produced by mapping a wire appearance vector through a
@@ -519,6 +542,28 @@ fn u8_to_f32(byte: u8, lower: f32, upper: f32) -> f32 {
     let val = f32::from(byte) / 255.0 * delta + lower;
     let max_error = delta.abs() / 255.0;
     if val.abs() < max_error { 0.0 } else { val }
+}
+
+/// Quantize a weight into a wire byte, the inverse of [`u8_to_f32`] — Firestorm's
+/// `F32_to_U8` (`llquantize.h`): clamp the weight into the param range, then a
+/// linear `[lower, upper] → [0, 255]` ramp, rounded. A zero-width range (a
+/// non-slider param) encodes as `0`. Handles an inverted range (`min > max`, some
+/// driven params) the same way [`u8_to_f32`] reads it.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the ramp is clamped to 0.0..=255.0 before truncation, so it fits u8"
+)]
+fn f32_to_u8(weight: f32, lower: f32, upper: f32) -> u8 {
+    let delta = upper - lower;
+    if delta == 0.0 {
+        return 0;
+    }
+    let clamped = weight.clamp(lower.min(upper), lower.max(upper));
+    ((clamped - lower) / delta * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 /// An RGBA byte quad as linear `0.0..=1.0` components (a [`ColorRamp`] stop).
@@ -933,6 +978,31 @@ mod tests {
         // The first value records its raw byte, in wire order.
         assert_eq!(values.values().first().map(|v| v.byte), Some(Some(255)));
         assert_eq!(values.values().first().map(|v| v.id), Some(1));
+        Ok(())
+    }
+
+    #[test]
+    fn encode_appearance_round_trips() -> Result<(), TestError> {
+        let params = VisualParams::from_xml(MINI_PARAMS)?;
+        // Supply weights for two transmitted params; the rest fall back to their
+        // (zero) defaults — exactly how a partial worn-Shape source is completed.
+        let bytes = params.encode_appearance(|id| match id {
+            1 => Some(1.0),   // over [-0.3, 2.0]
+            32 => Some(0.75), // over [0, 1]
+            _ => None,
+        });
+        // One byte per transmitted param, in wire order [1, 4, 32, 111, 112].
+        assert_eq!(bytes.len(), params.transmitted_count());
+
+        // Decoding reproduces the supplied weights (within one quantization step,
+        // ~range/255) and leaves the unset params at their defaults.
+        let within = |a: f32, b: f32| (a - b).abs() < 0.01;
+        let values = params.map_appearance(&bytes);
+        assert!(values.weight(1).is_some_and(|w| within(w, 1.0)));
+        assert!(values.weight(32).is_some_and(|w| within(w, 0.75)));
+        assert_eq!(values.weight(4), Some(0.0));
+        assert_eq!(values.weight(111), Some(0.0));
+        assert_eq!(values.weight(112), Some(0.0));
         Ok(())
     }
 
