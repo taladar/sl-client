@@ -1361,12 +1361,10 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   deformed rest) so an avatar un-freezes to rest when its motions stop and
   several overlapping motions with different runtimes compose — Bevy's
   dirty-bit propagation cannot recompute a static joint whose global the driver
-  overwrote. **Known limitation (deferred, R11):** the base body's mesh still
-  shows limb distortion under animation because it is skinned with standard
-  inverse-bindpose LBS, not Second Life's `LLSkinJoint` pivot scheme; the
-  skeleton itself is posed correctly (bone lengths stay constant — verified
-  live), so this is a P13.1 skinning-fidelity gap, invisible at rest and
-  orthogonal to the driver.
+  overwrote. **The limb distortion this originally noted (R11) is now fixed** —
+  it was never the `LLSkinJoint` pivot scheme (a proven sub-millimetre no-op)
+  but the R13 base-mesh render-list bug (extended-ancestor weight shift); with
+  R13 in place the base body skins cleanly under animation (R11 verified).
 - [ ] **P18.4. Priority blending.** Resolve concurrently-playing animations
   per-joint by priority with ease-in/out transitions (higher priority wins a
   joint, blend on start/stop). Verify layered animations (e.g. an AO stand + a
@@ -1621,27 +1619,33 @@ avatar, so they are collected here to be worked one at a time.
   the tiled faces now render "much closer to Firestorm". (A remaining colour /
   brightness difference is suspected to be lighting / tonemapping rather than
   texturing — a separate follow-up, not pursued here.)
-- [ ] **R11. Base-body mesh distorts under animation** (`sl-avatar` /
-  `sl-client-bevy`). Surfaced by P18.3: a *shaped* avatar's limbs (arms most
-  visibly) stretch / distort while an animation plays, but look correct at rest
-  and return to correct on stop. The **skeleton is posed correctly** — the joint
-  world matrices are right and the bone lengths stay constant under animation
-  (verified live from a per-frame `mShoulderLeft`→`mElbowLeft`→`mWristLeft`
-  length dump: a steady `0.289` / `0.214` throughout dance1). The distortion is
-  in the **skin**: the base body is skinned with standard inverse-bindpose
-  linear-blend skinning (P13.1 `to_bevy_base_mesh` + `base_mesh_skin`), whereas
-  the reference viewer skins the *system* avatar with the `LLSkinJoint`
-  **pivot** scheme — `LLViewerJointMesh::uploadJointMatrices` bakes each joint's
-  skin pivot (`mRootToJointSkinOffset` / `mRootToParentJointSkinOffset`) into
-  the skinning matrix (`gJointMat.translate(pivot)`) before `updateGeometry`
-  blends `jointMat[joint]` / `jointMat[joint+1]` per vertex. The two schemes
-  agree when every joint's relative rotation is identity (rest) but diverge once
-  a joint rotates, so the gap is invisible until animation. The fix is to
-  reproduce the skin-pivot skinning for the base body (compute the per-joint
-  skin offsets and fold them into the inverse bindposes, or drive skinning from
-  pivot-adjusted joint matrices). Needs careful visual iteration against a live
-  animated avatar; rigged-mesh bodies (Phase 17, ordinary skin weights) are
-  unaffected.
+- [x] **R11. Base-body mesh distorts under animation** — fixed by R13
+  (`sl-avatar` / `sl-client-bevy`). Surfaced by P18.3: a *shaped* avatar's limbs
+  (arms most visibly) stretch / distort while an animation plays, but look
+  correct at rest and return to correct on stop. The **skeleton was posed
+  correctly** all along — the joint world matrices are right and the bone
+  lengths stay constant under animation (verified live from a per-frame
+  `mShoulderLeft`→`mElbowLeft`→`mWristLeft` length dump: a steady `0.289` /
+  `0.214` throughout dance1), so the distortion was in the **skin**, not the
+  pose. The original premise here (that the base body needed the reference
+  viewer's `LLSkinJoint` **pivot** scheme —
+  `LLViewerJointMesh::uploadJointMatrices` baking `mRootToJointSkinOffset` /
+  `mRootToParentJointSkinOffset` into the skinning matrix) was **disproven**:
+  R12 measured the skin pivots as a sub-millimetre no-op, and R13 found the real
+  cause — the base-mesh joint-render-data list was **including the extended
+  (Bento) ancestors** (`mSpine*`) the reference viewer skips, shifting every
+  weight index past them so whole arm chains bound to the wrong joint (invisible
+  at bind pose, but a rest-pose armpit spike and gross arm distortion the moment
+  a joint rotated). The R13 `base_ancestor` fix (skip non-base ancestors,
+  `getBaseSkeletonAncestor` / SL-287) corrected the binding, and it was
+  *expected* to also fix this animation-time distortion. **Re-checked and
+  confirmed:** no new code was needed here. Verified live on the local OpenSim
+  (own shaped avatar playing dance1 via `--play-animation`/`--repeat-animation`,
+  offline screenshot harness, both head-on and a 50° orbit): across the full
+  range of poses — elbows bent, arms spread wide sideways, arms raised — the
+  limbs skin cleanly with no stretch, ballooning, or spikes. The arm distortion
+  R11 describes is gone.
+  Rigged-mesh bodies (Phase 17, ordinary skin weights) were never affected.
 - [x] **R12. Own avatar renders bloated — publish/resolve the worn shape**
   (`sl-client-bevy-viewer`). Diagnosed by a Firestorm vs local-OpenSim
   side-by-side: our own avatar renders with a bloated body and vertices
