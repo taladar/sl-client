@@ -11,10 +11,11 @@ use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
+use bevy::math::{Affine2, Mat2, Vec2};
 use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
-use sl_proto::TextureKey;
+use sl_proto::{TextureFace, TextureKey};
 use sl_texture::{DecodedImage, FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
@@ -33,6 +34,47 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     )
+}
+
+/// The per-face texture-placement transform of a [`TextureFace`] as a Bevy
+/// [`Affine2`], ready to drop into a `StandardMaterial`'s `uv_transform` (which
+/// the PBR shader applies to `ATTRIBUTE_UV_0` before sampling).
+///
+/// This is a faithful port of the reference viewer's `xform`
+/// (`indra/newview/llface.cpp`), which maps each texture coordinate about the
+/// **centre of the face** `(0.5, 0.5)`: recentre, rotate by the face rotation,
+/// scale by the repeats (`scale_s` / `scale_t`), then offset (`offset_s` /
+/// `offset_t`) and un-recentre. Repeats above one tile the texture; a rotation
+/// spins it about the face centre; an offset slides it. The identity face
+/// (unit repeats, zero offset/rotation) yields [`Affine2::IDENTITY`].
+///
+/// The transform is expressed directly as the affine that reproduces `xform`:
+///
+/// ```text
+/// s' = (ms·cos)·s + (ms·sin)·t + (offset_s + 0.5 − 0.5·ms·(cos + sin))
+/// t' = (−mt·sin)·s + (mt·cos)·t + (offset_t + 0.5 + 0.5·mt·(sin − cos))
+/// ```
+///
+/// where `ms = scale_s`, `mt = scale_t`, and `cos` / `sin` are of
+/// [`rotation`](TextureFace::rotation).
+#[must_use]
+pub fn texture_face_uv_transform(face: &TextureFace) -> Affine2 {
+    let (sin, cos) = face.rotation.sin_cos();
+    let (ms, mt) = (face.scale_s, face.scale_t);
+    // Columns of the linear part (glam `Mat2` is column-major): the `s` column
+    // is the response to the input `s`, the `t` column to the input `t`.
+    let matrix2 = Mat2::from_cols(
+        Vec2::new(ms * cos, -mt * sin),
+        Vec2::new(ms * sin, mt * cos),
+    );
+    let translation = Vec2::new(
+        face.offset_s + 0.5 - 0.5 * ms * (cos + sin),
+        face.offset_t + 0.5 + 0.5 * mt * (sin - cos),
+    );
+    Affine2 {
+        matrix2,
+        translation,
+    }
 }
 
 /// A [`TextureFetcher`] over blocking `reqwest`, for
@@ -145,11 +187,78 @@ impl TextureFetcher for BevyTextureFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::to_bevy_image;
+    use super::{texture_face_uv_transform, to_bevy_image};
+    use bevy::math::{Affine2, Vec2};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
-    use sl_proto::DiscardLevel;
+    use sl_proto::{DiscardLevel, TextureFace, TextureKey};
     use sl_texture::DecodedImage;
+    use uuid::Uuid;
+
+    /// A neutral (identity) face maps every UV to itself.
+    #[test]
+    fn identity_face_is_the_identity_transform() {
+        let face = TextureFace::new(TextureKey::from(Uuid::nil()));
+        let transform = texture_face_uv_transform(&face);
+        assert!(transform.abs_diff_eq(Affine2::IDENTITY, 1.0e-6));
+    }
+
+    /// Doubling the repeats tiles the texture twice, centred on the face: the
+    /// centre `(0.5, 0.5)` stays put while the corners spread out.
+    #[test]
+    fn repeats_tile_about_the_face_centre() {
+        let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
+        face.scale_s = 2.0;
+        face.scale_t = 2.0;
+        let transform = texture_face_uv_transform(&face);
+        // The centre is the fixed point of a pure scale about the centre.
+        assert!(
+            transform
+                .transform_point2(Vec2::new(0.5, 0.5))
+                .abs_diff_eq(Vec2::new(0.5, 0.5), 1.0e-6)
+        );
+        // A corner maps out to twice the distance from the centre.
+        assert!(
+            transform
+                .transform_point2(Vec2::new(1.0, 1.0))
+                .abs_diff_eq(Vec2::new(1.5, 1.5), 1.0e-6)
+        );
+    }
+
+    /// A pure offset slides every UV by the same amount.
+    #[test]
+    fn offset_translates_every_uv() {
+        let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
+        face.offset_s = 0.25;
+        face.offset_t = -0.1;
+        let transform = texture_face_uv_transform(&face);
+        assert!(
+            transform
+                .transform_point2(Vec2::new(0.3, 0.7))
+                .abs_diff_eq(Vec2::new(0.55, 0.6), 1.0e-6)
+        );
+    }
+
+    /// A quarter-turn rotation spins the texture about the face centre, leaving
+    /// the centre fixed and swapping the axes at a corner.
+    #[test]
+    fn rotation_spins_about_the_face_centre() {
+        let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
+        face.rotation = core::f32::consts::FRAC_PI_2;
+        let transform = texture_face_uv_transform(&face);
+        assert!(
+            transform
+                .transform_point2(Vec2::new(0.5, 0.5))
+                .abs_diff_eq(Vec2::new(0.5, 0.5), 1.0e-6)
+        );
+        // Firestorm's `xform` at 90°: s' = t (about the centre), t' = -s.
+        // A point 0.5 above the centre (0.5, 1.0) rotates to 0.5 right (1.0, 0.5).
+        assert!(
+            transform
+                .transform_point2(Vec2::new(0.5, 1.0))
+                .abs_diff_eq(Vec2::new(1.0, 0.5), 1.0e-6)
+        );
+    }
 
     #[test]
     fn converts_rgba_to_a_bevy_image() {

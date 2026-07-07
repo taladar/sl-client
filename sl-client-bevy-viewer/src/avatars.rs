@@ -33,6 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -514,6 +515,11 @@ fn spawn_body_part(
                     inverse_bindposes: inverse_bindposes.clone(),
                     joints: part_joints,
                 },
+                // A skinned mesh's frustum bounds are computed once from its bind
+                // pose, which does not track the posed/animated vertices; without
+                // this the whole avatar is wrongly culled when the camera zooms in
+                // close (the narrow near frustum misses the stale bounds).
+                NoFrustumCulling,
                 ChildOf(root),
                 marker,
             ));
@@ -527,6 +533,10 @@ fn spawn_body_part(
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
                 initial,
+                // Match the skinned parts: never frustum-cull an avatar part, so a
+                // close camera can pass through the body the way it does in Second
+                // Life instead of the part popping out of view.
+                NoFrustumCulling,
                 ChildOf(joint),
                 marker,
             ));

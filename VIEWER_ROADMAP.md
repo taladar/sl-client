@@ -1405,22 +1405,62 @@ avatar, so they are collected here to be worked one at a time.
   is a missing eye *texture*, a fetch/material matter, not geometry — out of
   scope here.) Note: this is distinct from **R2**, the *rigid* system eyeballs
   (`avatar_eye.llm`), which are unaffected by the skinning fix and stay open.
-- [ ] **R4. Prim rendering fidelity.** Prims render too large, misplaced, and
-  flat, and the per-face `TextureEntry` surface params — texture
-  **repeat / offset / rotation** (and bump / shiny / glow / fullbright) —
-  are not applied, so textured prim faces map wrong. Apply the TE placement
-  params and fix prim scale/placement.
-- [ ] **R5. Transparent-texture handling / alpha modes.** Transparency is a
-  general gap: prim faces (`textures.rs` `face_material`) always build an
-  `AlphaMode::Opaque` material, so a texture's alpha channel and the face's own
-  colour alpha are ignored — a transparent prim renders solid. Second Life sets
-  a per-face **alpha mode** (the legacy-materials `DiffuseAlphaMode`: *None* /
-  *Alpha blending* / *Alpha masking* with a cutoff, plus *Emissive mask*); wire
-  that (and the face colour alpha) through to the Bevy `StandardMaterial`
-  `alpha_mode` for both prim faces and avatar faces. Includes finishing the
-  **eyelashes** (from R2b): the eyelash mesh needs `AlphaMode::Blend` (its own
-  material variant, à la the reference's separate eyelash render pass) so the
-  thin lashes show instead of being cut by the masked-bake 0.5 cutoff.
+- [x] **R4. Prim rendering fidelity.** Two independent fixes; the "too large /
+  misplaced / flat" perception was a real bug, distinct from the TE-placement
+  gap. Live-verified against populated aditi builds (a crosshair pick tool,
+  `pick_object` in `objects.rs`, press `P`, reports the object under the centre
+  of the screen — full id, mesh/sculpt asset, scale, world-scale, shape — so a
+  wrongly rendered object is identified by *looking* at it; plus a
+  `SL_VIEWER_LOG_OBJECTS` diagnostic that flags region-sized / sky objects).
+  - **Linkset children inherited the root's scale (the "too large / stretched"
+    cause).** Every object entity carried `object.scale`, and a linkset child
+    parents to the root entity — so Bevy composed `root_scale × child_scale`,
+    oversizing children *and* shearing them (a non-uniform parent scale on a
+    rotated child). Second Life prims each have an absolute size and never
+    inherit the root's scale. Fixed by moving the scale off the object entity
+    (now position/rotation only) onto a per-object **geometry holder** child
+    ([`geometry_transform`]) that only that object's own faces hang off, so the
+    scale reaches the geometry but never the child prims. Empty OpenSim has no
+    linksets, so it never showed there.
+  - **Per-face `TextureEntry` placement.** `scale_s` / `scale_t` (repeat),
+    offset, and rotation are applied as the material's `uv_transform`
+    (`texture_face_uv_transform` in `sl-client-bevy`, a port of the reference
+    viewer's `llface.cpp` `xform` about the face centre), covering prim, sculpt,
+    and mesh faces. Also fixed the **upside-down prim textures**: `sl-prim` UVs
+    are OpenGL bottom-up, so `to_bevy_prim_mesh` now flips V (`1 - v`) to match
+    `to_bevy_mesh` / wgpu's top-down sampling. (bump / shiny / glow / fullbright
+    stay deferred — non-goals.)
+- [x] **R5. Transparent-texture handling / alpha modes.** `face_material` no
+  longer forces `AlphaMode::Opaque`: a face whose tint colour is non-opaque
+  blends, and a face whose texture carries an alpha channel (2- or 4-component
+  codestream) is upgraded to `AlphaMode::Blend` once it decodes — so the
+  Second Life world's many transparent surfaces (invisible prims, glass, sky-
+  platform floors) stop rendering as solid region-sized walls. Covers prim,
+  sculpt, and mesh faces; finishes the **eyelashes** (from R2b), which now show
+  with proper transparency. The precise legacy-materials `DiffuseAlphaMode`
+  (mask cutoff / emissive) and avatar-face alpha stay deferred. Also: the
+  all-`f` GLTF material-override null-texture sentinel
+  (`GLTF_OVERRIDE_NULL_UUID`) is now treated as "no texture" rather than
+  endlessly re-fetched (it 503s).
+- [x] **R6. Avatar disappears when the camera zooms in close.** A Bevy skinned
+  mesh's frustum bounds are its static bind-pose AABB placed at the mesh
+  *entity's* transform, while the vertices render wherever the joint matrices
+  put them — so the bounds need not match the drawn mesh even at rest, and the
+  narrow near frustum of a close camera misses them, culling the avatar. Fixed
+  with `NoFrustumCulling` on the avatar body parts and worn rigged meshes (so a
+  close camera passes through the body as in Second Life). The near plane is
+  unrelated (it can only clip front faces, not vanish the whole avatar; and a
+  perspective near plane cannot be `0`).
+- [ ] **R7. Hollow / profile-cut prim tessellation (`sl-prim`).** A heavily
+  hollowed, profile-cut cylinder (a curved "railing" wall) renders see-through:
+  its inner wall and/or the two cut-end cap faces appear wound the wrong way, so
+  they are back-face culled and the enclosed side vanishes. The geometry itself
+  is sound (valid bounds, no degenerate / NaN triangles, the right face count),
+  and a plain solid cylinder is correct (closed top/bottom caps, normals ±Z), so
+  this is a **winding / normal-direction** bug confined to the hollow inner-wall
+  and cut-cap branches of the `sl-prim` `volume` sweep, not a missing-geometry
+  one. Needs live iteration against a reference viewer (the picked case:
+  `profile_curve` circle, `profile_hollow` ≈ 0.95, a profile cut ~0.04–0.51).
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

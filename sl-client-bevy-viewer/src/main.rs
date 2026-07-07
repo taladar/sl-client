@@ -55,7 +55,7 @@ use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
-    apply_rigged_attachments, update_objects,
+    apply_rigged_attachments, log_suspicious_objects, pick_object, update_objects,
 };
 use crate::session::{ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
@@ -391,7 +391,13 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
             enforce_quit_deadline,
             fly_camera,
         ),
-    );
+    )
+    // Opt-in diagnostic (SL_VIEWER_LOG_OBJECTS): flag region-sized / sky objects
+    // so a live session can tell an unculled large object from a wrongly decoded one.
+    // Plus the crosshair pick tool (press `P`) to identify the object under the
+    // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
+    // system limit.
+    .add_systems(Update, (log_suspicious_objects, pick_object));
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
     if let Some(library) = load_avatar_library(viewer_assets) {

@@ -16,11 +16,13 @@
 //!
 //! This is the Phase 6 slice — diffuse only. When [`objects`](crate::objects)
 //! tessellates a prim it asks [`face_material`] for each face's material: the
-//! face's decoded [`TextureFace`] gives the tint (`base_color`) and the texture
-//! id; the material is parked in [`PrimTextures`] until [`apply_prim_textures`]
-//! fills in its `base_color_texture` once the texture decodes. A face with no
-//! texture (or one that fails to fetch) keeps its flat tint. No normal /
-//! specular / PBR / glow / bump — those are deferred (see the roadmap non-goals).
+//! face's decoded [`TextureFace`] gives the tint (`base_color`), the per-face
+//! texture placement (repeat / offset / rotation, packed into the material's
+//! `uv_transform` via [`texture_face_uv_transform`]), and the texture id; the
+//! material is parked in [`PrimTextures`] until [`apply_prim_textures`] fills in
+//! its `base_color_texture` once the texture decodes. A face with no texture (or
+//! one that fails to fetch) keeps its flat tint. No normal / specular / PBR /
+//! glow / bump — those are deferred (see the roadmap non-goals).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,8 +33,22 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel,
     RemoteTextureSource, SlCapabilities, TextureFace, TextureFetcher, TextureKey, TextureStore,
-    to_bevy_image,
+    Uuid, texture_face_uv_transform, to_bevy_image,
 };
+
+/// The GLTF material-override "no texture" sentinel (all-`f`, the reference
+/// viewer's `LLGLTFMaterial::GLTF_OVERRIDE_NULL_UUID`): a face carrying it has no
+/// diffuse texture to fetch, so it is treated exactly like the nil id rather than
+/// endlessly re-requested (it is not a fetchable asset and 503s).
+const GLTF_OVERRIDE_NULL_UUID: Uuid = Uuid::from_u128(u128::MAX);
+
+/// Whether a face texture id denotes "no diffuse texture" — the nil id or the
+/// GLTF override-null sentinel — so it should neither be fetched nor treated as a
+/// textured face.
+fn is_absent_texture(id: TextureKey) -> bool {
+    let uuid = id.uuid();
+    uuid.is_nil() || uuid == GLTF_OVERRIDE_NULL_UUID
+}
 
 /// The outcome of one background texture fetch: the decoded RGBA8 image, or
 /// `None` if the texture could not be fetched or decoded.
@@ -106,7 +122,10 @@ impl TextureManager {
     /// Spawn a background fetch of `id` from `source` if it is not already decoded
     /// or in flight; the decode runs off-thread on the store's own pool.
     fn request_from(&mut self, id: TextureKey, source: RemoteTextureSource) {
-        if id.uuid().is_nil() || self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
+        if is_absent_texture(id)
+            || self.decoded.contains_key(&id)
+            || self.inflight.contains_key(&id)
+        {
             return;
         }
         let store = self.store.clone();
@@ -237,10 +256,23 @@ pub(crate) fn face_material(
     prim_textures: &mut PrimTextures,
 ) -> Handle<StandardMaterial> {
     let texture_id = face.texture_id;
-    let has_texture = !texture_id.uuid().is_nil();
+    let has_texture = !is_absent_texture(texture_id);
     let mut material = StandardMaterial {
         base_color: tint_color(face.color),
         perceptual_roughness: 0.9,
+        // The per-face `TextureEntry` placement: texture repeats (`scale_s` /
+        // `scale_t`), offset, and rotation, packed into the material's UV
+        // transform exactly as the reference viewer's `xform` maps the face's
+        // texture coordinates (about the face centre). Identity faces get the
+        // identity transform, so an un-repeated texture is unaffected.
+        uv_transform: texture_face_uv_transform(face),
+        // Transparency (R5): a face whose tint colour is non-opaque blends now; a
+        // face whose *texture* carries an alpha channel is upgraded to blending
+        // once the texture decodes (in [`apply_prim_textures`]). Without this a
+        // transparent surface — an invisible prim, a glass pane, a sky-platform
+        // floor — renders as a solid wall (the Second Life world is full of them,
+        // so the viewer otherwise fills with opaque region-sized panels).
+        alpha_mode: face_alpha_mode(face.color),
         // Single-sided (default back-face culling): Second Life renders a face
         // only from its front, so a one-sided surface (a flat mesh quad, a prim
         // cut face) is invisible from behind rather than doubled. The tessellated
@@ -280,6 +312,11 @@ pub(crate) fn apply_prim_textures(
             // Not a texture any prim face is waiting on (e.g. a terrain texture).
             continue;
         };
+        // Whether the decoded texture carries alpha, so a face showing it must
+        // blend (R5) — read before `prim_image` borrows `prim_textures` mutably.
+        let has_alpha = manager
+            .decoded(id)
+            .is_some_and(|decoded| texture_has_alpha(decoded));
         let Some(image_handle) = prim_image(&manager, &mut prim_textures, &mut images, id) else {
             // The fetch failed: the parked faces keep their flat tint.
             continue;
@@ -287,6 +324,11 @@ pub(crate) fn apply_prim_textures(
         for material_handle in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
                 material.base_color_texture = Some(image_handle.clone());
+                // Upgrade an opaque face to blending when its texture has alpha; a
+                // face already blending (a non-opaque tint) stays blending.
+                if has_alpha && material.alpha_mode == AlphaMode::Opaque {
+                    material.alpha_mode = AlphaMode::Blend;
+                }
             }
         }
     }
@@ -310,6 +352,30 @@ fn prim_image(
     Some(handle)
 }
 
+/// The alpha mode a face's tint colour alone implies: [`AlphaMode::Blend`] when
+/// the tint is non-opaque (its alpha byte below `255`), else [`AlphaMode::Opaque`].
+///
+/// This is the colour-only half of a face's transparency; the texture half — a
+/// diffuse texture with its own alpha channel — is folded in by
+/// [`apply_prim_textures`] once the texture decodes (it can only *upgrade* an
+/// opaque face to blending, never the reverse). It mirrors the reference viewer's
+/// legacy default (a face is alpha-blended when its colour or texture carries
+/// alpha), short of the per-face `DiffuseAlphaMode` mask/emissive variants, which
+/// are deferred.
+const fn face_alpha_mode(color: [u8; 4]) -> AlphaMode {
+    if color[3] < 255 {
+        AlphaMode::Blend
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
+/// Whether a decoded texture carries an alpha channel (a grey+alpha or RGBA
+/// codestream — `2` or `4` source components), so a face showing it must blend.
+const fn texture_has_alpha(decoded: &DecodedTexture) -> bool {
+    decoded.components == 2 || decoded.components == 4
+}
+
 /// Convert a face tint (RGBA bytes, `[255; 4]` = opaque white = no tint) into a
 /// Bevy sRGB [`Color`] to multiply the diffuse texture by.
 fn tint_color(color: [u8; 4]) -> Color {
@@ -319,4 +385,42 @@ fn tint_color(color: [u8; 4]) -> Color {
         f32::from(color[2]) / 255.0,
         f32::from(color[3]) / 255.0,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{face_alpha_mode, texture_has_alpha};
+    use bevy::prelude::AlphaMode;
+    use bytes::Bytes;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{DecodedTexture, DiscardLevel};
+
+    /// A decoded texture with the given source component count (pixels unused by
+    /// the alpha test, so a single RGBA8 texel stands in).
+    fn decoded(components: u16) -> DecodedTexture {
+        DecodedTexture {
+            width: 1,
+            height: 1,
+            components,
+            discard_level: DiscardLevel::FULL,
+            pixels: Bytes::from(vec![0xFF_u8; 4]),
+        }
+    }
+
+    #[test]
+    fn opaque_tint_stays_opaque_transparent_tint_blends() {
+        assert_eq!(face_alpha_mode([255; 4]), AlphaMode::Opaque);
+        // Any sub-255 alpha byte forces blending.
+        assert_eq!(face_alpha_mode([255, 255, 255, 254]), AlphaMode::Blend);
+        assert_eq!(face_alpha_mode([10, 20, 30, 0]), AlphaMode::Blend);
+    }
+
+    #[test]
+    fn only_alpha_bearing_component_counts_have_alpha() {
+        // Grey (1) and RGB (3) have no alpha; grey+alpha (2) and RGBA (4) do.
+        assert!(!texture_has_alpha(&decoded(1)));
+        assert!(texture_has_alpha(&decoded(2)));
+        assert!(!texture_has_alpha(&decoded(3)));
+        assert!(texture_has_alpha(&decoded(4)));
+    }
 }

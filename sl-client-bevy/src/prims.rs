@@ -34,7 +34,12 @@ pub fn to_bevy_prim_mesh(face: &PrimFace) -> Mesh {
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, face.normals.clone());
     }
     if !face.uvs.is_empty() {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, face.uvs.clone());
+        // Second Life prim UVs use the OpenGL bottom-up convention (V = 0 at the
+        // bottom); Bevy/wgpu samples V = 0 at the top, so the V coordinate is
+        // flipped — matching [`to_bevy_mesh`](crate::to_bevy_mesh). Without this a
+        // textured prim renders upside down (obvious on any texture bearing text).
+        let uvs: Vec<[f32; 2]> = face.uvs.iter().map(|&[u, v]| [u, 1.0 - v]).collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     }
     mesh.insert_indices(Indices::U32(face.indices.clone()));
     mesh

@@ -39,6 +39,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -118,6 +119,25 @@ pub(crate) struct SceneObject {
     pub(crate) category: ObjectCategory,
 }
 
+/// Debug identity carried on each object's root entity so the [`pick_object`]
+/// crosshair tool can report exactly what the camera is looking at — the object's
+/// full id, its mesh/sculpt asset id (the thing to fetch and decode offline when
+/// its geometry looks wrong), and its Second Life scale/position.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct ObjectDebugInfo {
+    /// The object's full (asset) id.
+    full_id: Uuid,
+    /// The mesh or sculpt-map asset id, when the object has one.
+    asset: Option<Uuid>,
+    /// The object's Second Life scale (metres per axis).
+    scale: [f32; 3],
+    /// The object's Second Life region-local position.
+    position: [f32; 3],
+    /// The object's quantized prim shape parameters, so a wrongly tessellated plain
+    /// prim can be reproduced offline exactly as the simulator described it.
+    shape: PrimShapeParams,
+}
+
 /// A marker component tagging one child entity as a single tessellated
 /// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
 /// Linden face index its material is looked up by (`TextureEntry.faces[face_id]`).
@@ -139,8 +159,14 @@ pub(crate) struct PrimFaceEntity {
 /// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
 /// entity.
 struct TrackedObject {
-    /// The entity rendering this object.
+    /// The entity rendering this object: carries its position/rotation and is the
+    /// parent linkset children and attachments hang off. It has **no scale** (see
+    /// [`object_transform`]).
     entity: Entity,
+    /// The per-object geometry holder — a child of [`entity`](Self::entity)
+    /// carrying the object's Second Life scale, onto which this object's own faces
+    /// are parented so the scale never reaches the child prims below it.
+    geometry: Entity,
     /// The object's last-seen shape fingerprint, to detect a shape change.
     shape: ShapeFingerprint,
     /// The scoped id of this object's parent (a linkset root or the avatar it is
@@ -265,30 +291,46 @@ fn classify(object: &Object) -> ObjectCategory {
     }
 }
 
-/// The Bevy `Transform` for an object.
+/// The Bevy `Transform` for an object entity — position and orientation only,
+/// **never scale**.
 ///
 /// A **root** object (no parent) gets a world transform: its region-local
 /// position and orientation carried into Bevy's Y-up world by the Second Life →
 /// Bevy [basis change](crate::coords). A **child** (linkset member / attachment)
 /// gets a *local* transform in pure Second Life space — its position and
 /// rotation are already relative to its parent, whose entity carries the single
-/// basis change for the whole subtree. In both cases the scale is applied in the
-/// object's own local frame (before the rotation), so no axis swap is needed.
+/// basis change for the whole subtree.
+///
+/// The object's scale is deliberately **not** on this entity: linkset children
+/// parent to it, and Second Life prims each have an absolute size, whereas Bevy's
+/// transform hierarchy multiplies a parent's scale into its children (and shears
+/// them when it is non-uniform and they are rotated). The scale lives on a
+/// per-object geometry holder ([`geometry_transform`]) that only this object's
+/// own faces hang off, so it reaches the geometry but never the child prims.
 fn object_transform(object: &Object, is_root: bool) -> Transform {
-    let scale = Vec3::new(object.scale.x, object.scale.y, object.scale.z);
     if is_root {
         Transform {
             translation: sl_to_bevy_vec(&object.motion.position),
             rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
-            scale,
+            scale: Vec3::ONE,
         }
     } else {
         Transform {
             translation: local_translation(&object.motion.position),
             rotation: sl_rotation_to_quat(&object.motion.rotation),
-            scale,
+            scale: Vec3::ONE,
         }
     }
+}
+
+/// The object's Second Life scale as the local [`Transform`] of its geometry
+/// holder — a child of the object entity that carries the object's faces, so the
+/// scale is applied to the geometry in the object's own local frame (after the
+/// object's rotation, before nothing else) without propagating down the linkset
+/// to child prims. See [`object_transform`] for why the scale is kept off the
+/// object entity itself.
+const fn geometry_transform(object: &Object) -> Transform {
+    Transform::from_scale(Vec3::new(object.scale.x, object.scale.y, object.scale.z))
 }
 
 /// A child's parent-relative position as a Bevy `Vec3`, kept in pure Second Life
@@ -334,6 +376,155 @@ pub(crate) fn update_objects(
             }
             _other => {}
         }
+    }
+}
+
+/// A scale component (metres) above this is unusual for ordinary content and
+/// flagged by [`log_suspicious_objects`] — a megaprim, a region-surround shell,
+/// or a wrongly sized render.
+const SUSPICIOUS_SCALE_M: f32 = 16.0;
+
+/// A region-local Z (metres) above this is "up in the sky" — a skybox or sky
+/// platform, flagged by [`log_suspicious_objects`].
+const SUSPICIOUS_HEIGHT_M: f32 = 500.0;
+
+/// Diagnostic (opt-in via the `SL_VIEWER_LOG_OBJECTS` env var): logs each object
+/// whose scale or height is out of the ordinary — big enough to read as
+/// "region-sized" or high enough to be a skybox — so a live session can tell a
+/// genuinely large/high object (which a reference viewer would draw-distance
+/// cull, not misplace) from a wrongly parsed or wrongly scaled one. Each object is
+/// logged once per full id.
+///
+/// The distinction it draws: if the flagged objects sit at plausible sky
+/// positions with sane (if large) scales, the viewer is simply not culling by
+/// distance the way a reference viewer does (empty OpenSim has none, so it never
+/// showed); if they carry impossible scales/positions, a decode is wrong.
+pub(crate) fn log_suspicious_objects(
+    mut events: MessageReader<SlEvent>,
+    mut seen: Local<std::collections::HashSet<Uuid>>,
+    mut enabled: Local<Option<bool>>,
+) {
+    // Resolve the env gate once and cache it (a `Local` persists across runs).
+    let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_LOG_OBJECTS").is_some());
+    if !on {
+        return;
+    }
+    for event in events.read() {
+        let (SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)) =
+            &event.0
+        else {
+            continue;
+        };
+        let scale = &object.scale;
+        let position = &object.motion.position;
+        let big = scale.x.abs() > SUSPICIOUS_SCALE_M
+            || scale.y.abs() > SUSPICIOUS_SCALE_M
+            || scale.z.abs() > SUSPICIOUS_SCALE_M;
+        let high = position.z > SUSPICIOUS_HEIGHT_M || position.z < -100.0;
+        let off_region =
+            !(-64.0..=320.0).contains(&position.x) || !(-64.0..=320.0).contains(&position.y);
+        if !(big || high || off_region) {
+            continue;
+        }
+        if !seen.insert(object.full_id.uuid()) {
+            continue;
+        }
+        let kind = match classify(object) {
+            ObjectCategory::Prim => "prim",
+            ObjectCategory::Mesh => "mesh",
+            ObjectCategory::Sculpt => "sculpt",
+            ObjectCategory::Avatar => "avatar",
+            ObjectCategory::Other => "other",
+        };
+        warn!(
+            "suspicious object {} pcode={} kind={kind} parent={} scale=({:.2},{:.2},{:.2}) \
+             pos=({:.1},{:.1},{:.1}) big={big} high={high} off_region={off_region}",
+            object.full_id,
+            object.pcode,
+            object.parent_id.get(),
+            scale.x,
+            scale.y,
+            scale.z,
+            position.x,
+            position.y,
+            position.z,
+        );
+    }
+}
+
+/// Crosshair pick tool (press **`P`**): casts a ray straight out of the camera
+/// and logs the object under the centre of the screen — its full id, mesh/sculpt
+/// asset id, kind, scale, and Second Life position — so a wrongly rendered object can
+/// be identified by looking at it rather than by trawling the object stream. Aim
+/// the middle of the window at the object and press the key; the `asset` id is the
+/// mesh/sculpt to fetch and decode offline when its geometry looks wrong.
+pub(crate) fn pick_object(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
+    mut ray_cast: MeshRayCast,
+    scene: Query<&SceneObject>,
+    infos: Query<&ObjectDebugInfo>,
+    globals: Query<&GlobalTransform>,
+    parents: Query<&ChildOf>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyP) {
+        return;
+    }
+    let camera = match camera.single() {
+        Ok(camera) => camera,
+        Err(error) => {
+            warn!("pick: expected exactly one 3D camera ({error})");
+            return;
+        }
+    };
+    let ray = Ray3d::new(camera.translation(), camera.forward());
+    let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default());
+    let Some((entity, hit)) = hits.first() else {
+        warn!("pick: nothing under the crosshair (aim at a surface and press P)");
+        return;
+    };
+    // The ray strikes a face/submesh child entity; walk up the linkset to the
+    // object root that carries the identity component.
+    let mut current = *entity;
+    loop {
+        if let Ok(info) = infos.get(current) {
+            let kind = scene
+                .get(current)
+                .map_or("?", |scene| match scene.category {
+                    ObjectCategory::Prim => "prim",
+                    ObjectCategory::Mesh => "mesh",
+                    ObjectCategory::Sculpt => "sculpt",
+                    ObjectCategory::Avatar => "avatar",
+                    ObjectCategory::Other => "other",
+                });
+            // The object entity's actual world scale — if it is much larger than
+            // `scale` below, the linkset root's scale is wrongly propagating to
+            // this child (Bevy composes parent scale; Second Life does not).
+            let world_scale = globals
+                .get(current)
+                .map(|global| global.to_scale_rotation_translation().0);
+            warn!(
+                "pick: {kind} full_id={} asset={:?} scale=({:.2},{:.2},{:.2}) \
+                 world_scale={:?} pos=({:.1},{:.1},{:.1}) hit_dist={:.2}m shape={:?}",
+                info.full_id,
+                info.asset,
+                info.scale[0],
+                info.scale[1],
+                info.scale[2],
+                world_scale,
+                info.position[0],
+                info.position[1],
+                info.position[2],
+                hit.distance,
+                info.shape,
+            );
+            return;
+        }
+        let Ok(child_of) = parents.get(current) else {
+            warn!("pick: hit an entity with no object identity");
+            return;
+        };
+        current = child_of.parent();
     }
 }
 
@@ -694,16 +885,38 @@ fn apply_object(
         state.objects.get(&parent).map(|root| root.entity)
     };
 
+    // The crosshair pick tool's identity for this object (full id, mesh/sculpt
+    // asset, Second Life scale/position), refreshed with each update.
+    let debug_info = ObjectDebugInfo {
+        full_id: object.full_id.uuid(),
+        asset: mesh_key(object)
+            .map(|key| key.uuid())
+            .or_else(|| sculpt_key(object).map(|(key, _type)| key.uuid())),
+        scale: [object.scale.x, object.scale.y, object.scale.z],
+        position: [
+            object.motion.position.x,
+            object.motion.position.y,
+            object.motion.position.z,
+        ],
+        shape: object.shape,
+    };
+
     if let Some(existing) = state.objects.get_mut(&scoped) {
         // A known object: re-place it and refresh its classification (a
-        // motion-only update stops here — the geometry is untouched).
+        // motion-only update stops here — the geometry is untouched). The scale
+        // rides the geometry holder, refreshed here so a live resize is applied
+        // without a re-tessellation.
         commands.entity(existing.entity).insert((
             transform,
             SceneObject {
                 scoped_id: scoped,
                 category,
             },
+            debug_info,
         ));
+        commands
+            .entity(existing.geometry)
+            .insert(geometry_transform(object));
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
             // re-tessellate. A category change is subsumed here, since the
@@ -713,7 +926,7 @@ fn apply_object(
             let (face_entities, pending) = build_object_geometry(
                 object,
                 category,
-                existing.entity,
+                existing.geometry,
                 commands,
                 meshes,
                 materials,
@@ -748,6 +961,7 @@ fn apply_object(
                 scoped_id: scoped,
                 category,
             },
+            debug_info,
             transform,
             // The per-face child meshes carry `Visibility` (required by
             // `Mesh3d`); the object entity needs it too so Bevy's visibility
@@ -762,13 +976,23 @@ fn apply_object(
         }
         None => false,
     };
+    // The geometry holder: a child of the object entity carrying only the object's
+    // scale, so the object's own faces are scaled while linkset children (which
+    // parent to the object entity, not this) are not.
+    let geometry = commands
+        .spawn((
+            geometry_transform(object),
+            Visibility::default(),
+            ChildOf(entity),
+        ))
+        .id();
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
     let (face_entities, pending) = build_object_geometry(
         object,
         category,
-        entity,
+        geometry,
         commands,
         meshes,
         materials,
@@ -780,6 +1004,7 @@ fn apply_object(
         scoped,
         TrackedObject {
             entity,
+            geometry,
             shape,
             parent,
             is_root,
@@ -999,7 +1224,7 @@ pub(crate) fn apply_object_meshes(
                         tracked.face_entities = build_mesh_submeshes(
                             &mesh,
                             &pending.texture_entry,
-                            tracked.entity,
+                            tracked.geometry,
                             &mut commands,
                             &mut meshes,
                             &mut materials,
@@ -1277,6 +1502,12 @@ fn build_rigged_submeshes(
                 inverse_bindposes: inverse_bindposes.clone(),
                 joints: joint_entities.to_vec(),
             },
+            // A skinned mesh's frustum bounds are its static bind-pose AABB placed
+            // at the mesh *entity's* transform, while the vertices actually render
+            // wherever the joint matrices put them — so the bounds need not match
+            // the drawn mesh even at rest, and a close camera can wrongly cull the
+            // whole worn body. Never frustum-cull it.
+            NoFrustumCulling,
             Transform::default(),
             Visibility::default(),
             PrimFaceEntity { face_id },
@@ -1327,7 +1558,7 @@ pub(crate) fn apply_object_sculpts(
                         &map,
                         pending.sculpt_type,
                         &pending.texture_entry,
-                        tracked.entity,
+                        tracked.geometry,
                         &mut commands,
                         &mut meshes,
                         &mut materials,
@@ -1347,7 +1578,7 @@ pub(crate) fn apply_object_sculpts(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectCategory, ShapeFingerprint, classify, object_transform};
+    use super::{ObjectCategory, ShapeFingerprint, classify, geometry_transform, object_transform};
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
@@ -1482,8 +1713,11 @@ mod tests {
                 .translation
                 .abs_diff_eq(Vec3::new(10.0, 30.0, -20.0), 1.0e-5)
         );
+        // The object entity carries no scale (it would propagate to linkset
+        // children); the scale rides the geometry holder instead.
+        assert!(transform.scale.abs_diff_eq(Vec3::ONE, 1.0e-5));
         assert!(
-            transform
+            geometry_transform(&object)
                 .scale
                 .abs_diff_eq(Vec3::new(2.0, 3.0, 4.0), 1.0e-5)
         );
