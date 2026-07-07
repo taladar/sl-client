@@ -147,14 +147,17 @@ pub(crate) struct ObjectDebugInfo {
 /// later phases that re-address an individual face (per-face material overrides,
 /// object picking).
 #[derive(Component, Debug, Clone, Copy)]
-#[expect(
-    dead_code,
-    reason = "face_id retained for later per-face addressing (material overrides, picking)"
-)]
 pub(crate) struct PrimFaceEntity {
     /// The Linden semantic face index this face is textured from.
     pub(crate) face_id: PrimFaceId,
 }
+
+/// The decoded [`TextureFace`] a face entity was built from, carried so the
+/// [`pick_object`] crosshair tool can report the exact per-face texture
+/// placement (repeats / offset / rotation / texgen / texture id) of whatever is
+/// under the crosshair — the ground truth for debugging a texture-mapping bug.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct FaceTextureDebug(pub(crate) TextureFace);
 
 /// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
 /// entity.
@@ -462,6 +465,10 @@ pub(crate) fn log_suspicious_objects(
 /// be identified by looking at it rather than by trawling the object stream. Aim
 /// the middle of the window at the object and press the key; the `asset` id is the
 /// mesh/sculpt to fetch and decode offline when its geometry looks wrong.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system querying the several components the pick report reads"
+)]
 pub(crate) fn pick_object(
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
@@ -470,6 +477,7 @@ pub(crate) fn pick_object(
     infos: Query<&ObjectDebugInfo>,
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
+    face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyP) {
         return;
@@ -487,6 +495,32 @@ pub(crate) fn pick_object(
         warn!("pick: nothing under the crosshair (aim at a surface and press P)");
         return;
     };
+    // The ray strikes a face/submesh child entity: report that exact face's
+    // texture placement (the ground truth for a texture-mapping bug) before
+    // walking up to the object identity.
+    if let Ok((face, FaceTextureDebug(tf))) = face_debug.get(*entity) {
+        warn!(
+            "pick face {}: texture={} repeats=({:.3},{:.3}) offset=({:.3},{:.3}) \
+             rot={:.3}rad media_flags=0x{:02x} texgen=0x{:02x} planar={} \
+             color=[{},{},{},{}] glow={:.3} material_id={:?}",
+            face.face_id.get(),
+            tf.texture_id,
+            tf.scale_s,
+            tf.scale_t,
+            tf.offset_s,
+            tf.offset_t,
+            tf.rotation,
+            tf.media_flags,
+            tf.tex_gen(),
+            tf.is_planar_texgen(),
+            tf.color[0],
+            tf.color[1],
+            tf.color[2],
+            tf.color[3],
+            tf.glow,
+            tf.material_id,
+        );
+    }
     // The ray strikes a face/submesh child entity; walk up the linkset to the
     // object root that carries the identity component.
     let mut current = *entity;
@@ -833,6 +867,7 @@ fn spawn_prim_faces(
                 PrimFaceEntity {
                     face_id: face.face_id,
                 },
+                FaceTextureDebug(*texture_face),
                 ChildOf(parent),
             ))
             .id();
@@ -897,6 +932,7 @@ fn build_mesh_submeshes(
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
                 PrimFaceEntity { face_id },
+                FaceTextureDebug(*texture_face),
                 ChildOf(parent),
             ))
             .id();

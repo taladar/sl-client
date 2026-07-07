@@ -1451,16 +1451,86 @@ avatar, so they are collected here to be worked one at a time.
   close camera passes through the body as in Second Life). The near plane is
   unrelated (it can only clip front faces, not vanish the whole avatar; and a
   perspective near plane cannot be `0`).
-- [ ] **R7. Hollow / profile-cut prim tessellation (`sl-prim`).** A heavily
-  hollowed, profile-cut cylinder (a curved "railing" wall) renders see-through:
-  its inner wall and/or the two cut-end cap faces appear wound the wrong way, so
-  they are back-face culled and the enclosed side vanishes. The geometry itself
-  is sound (valid bounds, no degenerate / NaN triangles, the right face count),
-  and a plain solid cylinder is correct (closed top/bottom caps, normals ±Z), so
-  this is a **winding / normal-direction** bug confined to the hollow inner-wall
-  and cut-cap branches of the `sl-prim` `volume` sweep, not a missing-geometry
-  one. Needs live iteration against a reference viewer (the picked case:
-  `profile_curve` circle, `profile_hollow` ≈ 0.95, a profile cut ~0.04–0.51).
+- [x] **R7. Hollow / profile-cut prim tessellation (`sl-prim`).** A heavily
+  hollowed, profile-cut cylinder (a curved "railing" wall) rendered see-through.
+  The original diagnosis (inner wall / cut-end caps wound wrong) was
+  **incorrect** — a winding analysis of the picked case (`profile_curve` circle,
+  `profile_hollow` 0.95, cut 0.04–0.51) showed the outer wall (+radial), inner
+  wall (−radial, faces into the hole), and both cut-end caps (`PROFILE_BEGIN` /
+  `PROFILE_END`, facing the removed arc) were all wound outward correctly. The
+  real culprit was the **path (top/bottom) caps**: `build_cap` always emitted a
+  centre-vertex triangle **fan**, but a hollow prim's cap ring is
+  `outer ++ reversed-inner`, so the inner-ring half of the fan wound backwards —
+  ~half the cap triangles (measured: 37 `+Z` / 36 `−Z` on the top) were
+  back-face culled, and you saw straight through the cap into the hollow
+  interior (the "enclosed side vanishes"). Fixed by tessellating a **hollow cap
+  as an annulus** (`build_hollow_cap` / `hollow_cap_indices` in `sl-prim`
+  `volume.rs`), a faithful port of the reference viewer's `LLVolumeFace::
+  createCap` hollow branch: an area-based ear split that walks one pointer
+  forward from the outer-ring start and one backward from the inner-ring start,
+  emitting the non-back-facing triangle at each step (top / bottom windings
+  flipped) with no centre vertex — so the hole stays open and every triangle
+  winds outward. A solid (non-hollow) cap keeps the centre fan. The
+  `sl-client-bevy` `to_bevy_prim_mesh` bridge is unchanged (geometry-only).
+  Regression test `hollow_cut_cylinder_caps_wind_consistently` asserts every
+  path-cap triangle now winds `+Z` (top) / `−Z` (bottom) and that the cap is an
+  annulus (tri count = vert count − 2, no centre fan).
+- [x] **R8. Box-cap centre-fan cross (`sl-prim`).** Every plain box (cube)
+  showed an **X / cross** through each cap face's texture. `build_cap` built
+  the square cap as a centre-vertex **fan** (four triangles meeting at the
+  middle), and a real texture reveals the fan's diagonals as a cross. The
+  reference viewer never does this for a plain box — `createCap` routes a solid,
+  uncut, full-path square-on-line prim to `createUnCutCubeCap`, a proper
+  two-triangle quad grid (a `(grid_size + 1)^2` bilinear vertex grid, one quad
+  per cell). Ported as `build_uncut_cube_cap` / `uncut_cube_indices`
+  (+ `is_uncut_cube`) in `sl-prim` `volume.rs`, dispatched for that case; other
+  solid caps (round / cut / tapered) keep the fan (the reference viewer fans
+  those too, so they already match). Tests `box_caps_are_two_triangle_quads`
+  (Lowest LOD: 4 verts / 2 tris / corner UVs) and
+  `split_box_caps_are_a_consistent_grid` (High LOD: a square vertex grid, never
+  a fan). **User-confirmed: cube cross gone.**
+- [ ] **R9. Planar texgen, unconfirmed** (`TEX_GEN_PLANAR`).
+  A flat, solid, uncut disk (a full cylinder) still looked wrong
+  versus the reference viewer even though its cap is tessellated correctly
+  (a fan with **exactly affine** UVs, which by the affine-interpolation property
+  render the texture perfectly flat whatever the triangulation — proven, not a
+  tessellation bug). The suspected cause is **texture-gen mode**: a face's
+  `media_flags & 0x06` selects the UV source, and builders commonly set
+  architectural prims to **planar** mapping (`TEX_GEN_PLANAR`, `0x02`). The
+  reference viewer then ignores the volume's stored UVs and projects each
+  vertex's texture coordinate from its position (scaled by the object size) and
+  normal (`LLFace::planarProjection`); we always used the stored UVs. A
+  candidate fix is implemented but **the live visual bug is not yet confirmed
+  fixed**: `TextureFace::is_planar_texgen` (`sl-proto`), a `planar_texgen_uv`
+  port (`sl-client-bevy`, unit-tested against hand-computed reference values),
+  and `apply_planar_texgen` in the viewer — for a planar face it overwrites the
+  built mesh's UV0 with the projection (positions × object scale, same `1 - v`
+  flip as the stored UVs), keeping the per-face repeats/offset/rotation on the
+  material's `uv_transform` afterwards (the reference viewer's
+  `planarProjection` then `xform` order). Wired through prims, sculpts, and
+  (unrigged) meshes.
+  Worn **rigged** mesh attachments are not yet covered. **Open until verified in
+  the running viewer against the reference viewer** — the fix may be incomplete
+  or the real cause may differ.
+- [x] **R10. Tiled faces need a repeating texture sampler.** The real cause of
+  the half-cylinder / disk "streaked toward the edges, coherent in the centre"
+  look (diagnosed from a live `pick` dump of the face's `TextureFace`: both
+  faces were `planar=false`, so R9 was a red herring; the tell was the
+  **repeats** — `scale_s`/`scale_t` of `(2, 1.6)` on the disk cap and `(10, 1)`
+  on the railing wall). Repeats above one push the face UVs outside `[0, 1]` to
+  tile the texture, but prim/mesh face images were uploaded with Bevy's default
+  **clamp-to-edge** sampler, which smears the edge texel across every
+  out-of-range tile instead of wrapping — heavy streaking at the rim, worse at
+  higher repeats. Second Life samples object faces with a **repeat/wrap**
+  address mode. Fixed in the viewer's `prim_image`: prim/mesh face textures now
+  upload with a repeating sampler (`address_mode_u/v/w = Repeat`, linear
+  filtering); avatar-bake and terrain paths are untouched. Also added a per-face
+  texture-placement dump to the `pick` crosshair tool (`FaceTextureDebug`:
+  repeats / offset / rotation / texgen / texture id) — the ground-truth
+  diagnostic that found this. **User-confirmed:**
+  the tiled faces now render "much closer to Firestorm". (A remaining colour /
+  brightness difference is suspected to be lighting / tonemapping rather than
+  texturing — a separate follow-up, not pursued here.)
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

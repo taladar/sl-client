@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
@@ -230,8 +231,9 @@ pub(crate) fn poll_textures(
 }
 
 /// Prim-face texturing bookkeeping: the Bevy images already uploaded for prim
-/// faces (deduped by texture id, clamp sampler) and the face materials waiting on
-/// a texture that has not decoded yet.
+/// faces (deduped by texture id, sampled with a repeating address mode so tiled
+/// faces wrap) and the face materials waiting on a texture that has not decoded
+/// yet.
 #[derive(Resource, Default)]
 pub(crate) struct PrimTextures {
     /// Uploaded diffuse images by texture id, so a texture shared by many faces
@@ -347,7 +349,22 @@ fn prim_image(
         return Some(handle.clone());
     }
     let decoded = manager.decoded(id)?;
-    let handle = images.add(to_bevy_image(decoded));
+    let mut image = to_bevy_image(decoded);
+    // Second Life object faces tile their texture (the per-face `scale_s` /
+    // `scale_t` repeats push the UVs outside `[0, 1]`), and the reference viewer
+    // samples them with a wrapping address mode. Bevy's default sampler is
+    // clamp-to-edge, which — on a face with repeats above one — smears the edge
+    // texel across every out-of-range tile instead of repeating it (a texture
+    // "coherent in the centre, streaked toward the edges"). Sample prim/mesh face
+    // textures with a repeating sampler so tiled faces render as the reference
+    // viewer does.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    let handle = images.add(image);
     let _inserted = prim_textures.images.insert(id, handle.clone());
     Some(handle)
 }
