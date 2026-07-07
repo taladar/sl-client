@@ -12,10 +12,16 @@
 //! The pieces are:
 //!
 //! - [`decode`] — the keyframe-motion binary decoder and its owned model.
+//! - [`registry`] — the fixed-UUID built-in agent-animation registry (which
+//!   UUIDs are the standard walks/stands/emotes, and whether each is a
+//!   downloadable `.anim` asset or a procedurally synthesised motion). Named for
+//!   its role, to avoid the `module_name_repetitions` lint (as [`decode`] is).
 
 pub mod decode;
+pub mod registry;
 
 pub use decode::{
     AnimDecodeError, Constraint, ConstraintTargetType, ConstraintType, HandPose, JointMotion,
     JointPriority, Motion, PositionKey, RotationKey,
 };
+pub use registry::{BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, builtin_animation};

@@ -7,6 +7,7 @@
 //! with terrain, prims, meshes, sculpts, avatars, and chat landing in later
 //! phases.
 
+mod animations;
 mod appearance;
 mod avatar_assets;
 mod avatars;
@@ -36,6 +37,10 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::animations::{
+    AnimationDecoded, AnimationManager, ingest_avatar_animations, poll_animations,
+    update_animation_caps,
+};
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
@@ -295,9 +300,11 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     .init_resource::<OwnBakeInputs>()
     .init_resource::<OwnBakePublish>()
     .init_resource::<WearableAssetManager>()
+    .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
     .add_message::<WearableAssetFetched>()
+    .add_message::<AnimationDecoded>()
     .add_systems(
         Startup,
         (setup_scene, setup_chat_overlay, setup_avatar_body),
@@ -397,7 +404,19 @@ fn run_session(params: &LoginParams, viewer_assets: Option<&Path>) -> LoginOutco
     // Plus the crosshair pick tool (press `P`) to identify the object under the
     // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
     // system limit.
-    .add_systems(Update, (log_suspicious_objects, pick_object));
+    .add_systems(Update, (log_suspicious_objects, pick_object))
+    // Animations (P18.2): keep the animation store's `ViewerAsset` cap current,
+    // request a motion for every animation each nearby avatar is playing, and
+    // fold finished resolves into the shared motion cache (P18.3 drives the
+    // skeleton from it).
+    .add_systems(
+        Update,
+        (
+            update_animation_caps,
+            ingest_avatar_animations,
+            poll_animations,
+        ),
+    );
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
     if let Some(library) = load_avatar_library(viewer_assets) {

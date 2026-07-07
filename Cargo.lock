@@ -5593,6 +5593,7 @@ version = "0.1.0"
 dependencies = [
  "pretty_assertions",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -5696,6 +5697,7 @@ dependencies = [
  "fs-err",
  "image",
  "pretty_assertions",
+ "sl-anim",
  "sl-client-bevy",
  "sl-repl",
  "sl-terrain",
