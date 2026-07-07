@@ -49,6 +49,35 @@ pub enum LayerKind {
     AlphaMask,
 }
 
+/// A garment-shape alpha mask bounding a clothing [`Layer`] to its garment
+/// extent (R14): a static grayscale mask image plus the wearable param weight and
+/// processing that turn it into a per-texel coverage alpha, exactly as the
+/// reference viewer's `LLTexLayerParamAlpha` (`avatar_lad.xml`'s `<param_alpha>`)
+/// does.
+///
+/// A clothing layer's `local_texture` covers the *whole* body-region UV, so a
+/// solid-fabric shirt or pants would otherwise paint the bare hands and feet too.
+/// The reference viewer instead multiplies each garment layer's coverage by a
+/// stack of these masks — sleeve length, shirt bottom, collar, pants length,
+/// waist, … — driven by the wearable's shape params, so the fabric is bounded to
+/// the garment (hands and feet stay skin). See [`Layer::masks`].
+#[derive(Debug, Clone)]
+pub struct ShapeMask {
+    /// The static grayscale mask image; its red channel is the raw mask value the
+    /// LUT below processes (the reference viewer's one-component alpha TGA).
+    pub image: DecodedImage,
+    /// The wearable's weight for this mask's driving param (the raw param value,
+    /// e.g. sleeve length `0.7`), applied through the `domain` ramp.
+    pub weight: f32,
+    /// The width of the input→output ramp in the mask LUT; `0` is a hard
+    /// threshold. The reference viewer's `param_alpha` `domain`.
+    pub domain: f32,
+    /// Whether this mask *multiplies* into the accumulated coverage (approximating
+    /// a `min()`), or *adds* to it (approximating a `max()`). The reference
+    /// viewer's per-`param_alpha` `multiply_blend`.
+    pub multiply_blend: bool,
+}
+
 /// One wearable layer feeding a bake region: an optional decoded texture plus
 /// the parameters that govern how it composites.
 ///
@@ -72,6 +101,10 @@ pub struct Layer {
     /// the mask is *transparent* instead of opaque (the reference viewer's
     /// per-layer `invert` flag). Ignored for other kinds.
     pub invert_mask: bool,
+    /// The garment-shape masks bounding this (clothing) layer to its garment
+    /// extent (R14). Empty for a non-garment layer (skin base, tattoo, …), which
+    /// then covers the whole region. Applied only to a [`LayerKind::Blend`] layer.
+    pub masks: Vec<ShapeMask>,
 }
 
 /// Opaque white, the identity tint (no colour change, full opacity).
@@ -88,6 +121,7 @@ impl Layer {
             tint: WHITE,
             tex_gen: TexGen::Default,
             invert_mask: false,
+            masks: Vec::new(),
         }
     }
 
@@ -101,6 +135,7 @@ impl Layer {
             tint: WHITE,
             tex_gen: TexGen::Default,
             invert_mask: false,
+            masks: Vec::new(),
         }
     }
 
@@ -114,6 +149,7 @@ impl Layer {
             tint: WHITE,
             tex_gen: TexGen::Default,
             invert_mask: false,
+            masks: Vec::new(),
         }
     }
 
@@ -128,6 +164,7 @@ impl Layer {
             tint,
             tex_gen: TexGen::Default,
             invert_mask: false,
+            masks: Vec::new(),
         }
     }
 
@@ -157,6 +194,15 @@ impl Layer {
     #[must_use]
     pub const fn inverted(mut self) -> Self {
         self.invert_mask = true;
+        self
+    }
+
+    /// Bound this (clothing) layer to its garment extent with `masks` (R14): the
+    /// stack of [`ShapeMask`]s whose combined coverage modulates the layer's
+    /// per-texel alpha, keeping a solid-fabric garment off the bare hands / feet.
+    #[must_use]
+    pub fn with_masks(mut self, masks: Vec<ShapeMask>) -> Self {
+        self.masks = masks;
         self
     }
 }
@@ -228,12 +274,39 @@ pub fn composite_region(region: BakeRegion, size: u32, layers: &[Layer]) -> Bake
     }
 }
 
+/// A [`ShapeMask`] readied for per-texel sampling: its grayscale sampler plus the
+/// LUT parameters that turn a raw mask value into a coverage alpha.
+struct MaskSampler<'pixels> {
+    /// Bilinear sampler over the mask's grayscale image.
+    sampler: LayerSampler<'pixels>,
+    /// The wearable param weight applied through the LUT.
+    weight: f32,
+    /// The LUT ramp width (`0` is a hard threshold).
+    domain: f32,
+    /// Whether this mask multiplies (min) or adds (max) into the coverage.
+    multiply_blend: bool,
+}
+
 /// Apply one `layer` to the working `canvas` (`side`×`side` linear RGBA).
 fn apply_layer(canvas: &mut [[f32; 4]], side: usize, layer: &Layer) {
     let sampler = layer.image.as_ref().and_then(LayerSampler::new);
     // Whether the source carries a real alpha channel; a solid fill (no image)
     // is treated as authoritative (its opacity is the tint alpha).
     let has_alpha = sampler.as_ref().is_none_or(|sampler| sampler.has_alpha);
+    // Ready the garment-shape masks (R14) for per-texel coverage; a mask whose
+    // image is degenerate is dropped rather than zeroing the whole layer.
+    let masks: Vec<MaskSampler<'_>> = layer
+        .masks
+        .iter()
+        .filter_map(|mask| {
+            LayerSampler::new(&mask.image).map(|sampler| MaskSampler {
+                sampler,
+                weight: mask.weight,
+                domain: mask.domain,
+                multiply_blend: mask.multiply_blend,
+            })
+        })
+        .collect();
     for y in 0..side {
         for x in 0..side {
             let index = y.saturating_mul(side).saturating_add(x);
@@ -247,8 +320,52 @@ fn apply_layer(canvas: &mut [[f32; 4]], side: usize, layer: &Layer) {
                 Some(sampler) => sampler.sample(u, v),
                 None => WHITE,
             };
-            blend_pixel(dst, layer, source, has_alpha);
+            let coverage = mask_coverage(&masks, u, v);
+            blend_pixel(dst, layer, source, has_alpha, coverage);
         }
+    }
+}
+
+/// The combined garment-shape coverage of `masks` at normalised UV `(u, v)`, in
+/// `0.0..=1.0` — `1.0` (no bounding) when there are no masks. Mirrors the
+/// reference viewer's `LLTexLayer::renderMorphMasks` accumulation: the first mask
+/// seeds the coverage (a `multiply_blend` mask multiplies against a full `1.0`
+/// buffer, an additive one starts from `0.0`), and each later mask multiplies
+/// (min) or adds (max) into it.
+fn mask_coverage(masks: &[MaskSampler<'_>], u: f32, v: f32) -> f32 {
+    let Some(first) = masks.first() else {
+        return 1.0;
+    };
+    let mut coverage = if first.multiply_blend { 1.0 } else { 0.0 };
+    for mask in masks {
+        // The mask is a one-component (grayscale) image; its red channel is the
+        // raw value the LUT processes.
+        let raw = mask.sampler.sample(u, v)[0];
+        let value = process_mask_alpha(raw, mask.weight, mask.domain);
+        if mask.multiply_blend {
+            coverage *= value;
+        } else {
+            coverage = (coverage + value).min(1.0);
+        }
+    }
+    coverage.clamp(0.0, 1.0)
+}
+
+/// Process a raw grayscale mask value (`0.0..=1.0`) into a coverage alpha through
+/// the reference viewer's `LLImageTGA::decodeAndProcess` LUT: a `domain`-wide
+/// input→output ramp offset by the param `weight` (`domain == 0` is a hard
+/// threshold at `1 - weight`).
+fn process_mask_alpha(raw: f32, weight: f32, domain: f32) -> f32 {
+    let inv_weight = (1.0 - weight).clamp(0.0, 1.0);
+    if domain > 0.0 {
+        let scale = 1.0 / domain;
+        let offset = (1.0 - domain) * inv_weight;
+        let bias = -(scale * offset);
+        (raw * scale + bias).clamp(0.0, 1.0)
+    } else if raw >= inv_weight {
+        1.0
+    } else {
+        0.0
     }
 }
 
@@ -268,7 +385,13 @@ fn pixel_uv(x: usize, y: usize, side: usize) -> (f32, f32) {
 /// destination `dst` per the layer's [`LayerKind`] and tint. `source_has_alpha`
 /// says whether the source carried a real alpha channel, which decides how an
 /// [`LayerKind::AlphaMask`] reads its mask value.
-fn blend_pixel(dst: &mut [f32; 4], layer: &Layer, source: [f32; 4], source_has_alpha: bool) {
+fn blend_pixel(
+    dst: &mut [f32; 4],
+    layer: &Layer,
+    source: [f32; 4],
+    source_has_alpha: bool,
+    coverage: f32,
+) {
     let tint = layer.tint;
     match layer.kind {
         LayerKind::Base => {
@@ -281,8 +404,10 @@ fn blend_pixel(dst: &mut [f32; 4], layer: &Layer, source: [f32; 4], source_has_a
             ];
         }
         LayerKind::Blend => {
-            // Standard (non-premultiplied) source-over composite.
-            let src_a = (source[3] * tint[3]).clamp(0.0, 1.0);
+            // Standard (non-premultiplied) source-over composite, bounded by the
+            // garment-shape mask coverage (R14) so a clothing layer paints only
+            // its garment extent, not the bare hands / feet.
+            let src_a = (source[3] * tint[3] * coverage).clamp(0.0, 1.0);
             let inv = 1.0 - src_a;
             let over = |src: f32, dst: f32| src * src_a + dst * inv;
             *dst = [
@@ -460,7 +585,9 @@ fn u8_from_unit_f32(value: f32) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BakedImage, Layer, LayerKind, TexGen, composite_region};
+    use super::{
+        BakedImage, Layer, LayerKind, ShapeMask, TexGen, composite_region, process_mask_alpha,
+    };
     use crate::region::BakeRegion;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
@@ -626,5 +753,66 @@ mod tests {
         assert_eq!(layer.tex_gen, TexGen::Default);
         let planar = layer.with_tex_gen(TexGen::Planar);
         assert_eq!(planar.tex_gen, TexGen::Planar);
+    }
+
+    #[test]
+    fn process_mask_alpha_thresholds_and_ramps() {
+        let approx = |a: f32, b: f32| (a - b).abs() < 1.0e-6;
+        // Hard threshold (domain 0): a mask value passes when `raw >= 1 - weight`.
+        assert!(approx(process_mask_alpha(1.0, 0.5, 0.0), 1.0));
+        assert!(approx(process_mask_alpha(0.0, 0.5, 0.0), 0.0));
+        assert!(approx(process_mask_alpha(0.5, 0.5, 0.0), 1.0));
+        // Smooth ramp (domain > 0): `raw / domain - (1 - domain) * (1 - weight) / domain`.
+        // weight 1 → no offset, so the value passes straight through the ramp.
+        assert!(approx(process_mask_alpha(0.5, 1.0, 0.5), 1.0));
+        assert!(approx(process_mask_alpha(0.05, 1.0, 0.1), 0.5));
+    }
+
+    /// A garment (blend) layer bounded by a shape mask paints only where the mask
+    /// is opaque; where the mask is transparent the underlying base shows through
+    /// (R14 — the sleeve / pants-length cut-out that keeps fabric off hands/feet).
+    #[test]
+    fn shape_mask_bounds_a_garment_layer() {
+        let base = Layer::base(solid_image(8, [255, 0, 0, 255], 3));
+        let garment = |mask_value: u8| {
+            Layer::blend(solid_image(8, [0, 0, 255, 255], 3)).with_masks(vec![ShapeMask {
+                image: solid_image(8, [mask_value, mask_value, mask_value, 255], 1),
+                // A hard-threshold mask at `1 - weight = 0.5`.
+                weight: 0.5,
+                domain: 0.0,
+                multiply_blend: false,
+            }])
+        };
+        // Mask fully opaque (white) → the blue garment paints over the red base.
+        let covered = composite_region(BakeRegion::UpperBody, 8, &[base.clone(), garment(255)]);
+        assert_eq!(centre_pixel(&covered), [0, 0, 255, 255]);
+        // Mask fully transparent (black) → coverage 0, so the red base shows.
+        let bare = composite_region(BakeRegion::UpperBody, 8, &[base, garment(0)]);
+        assert_eq!(centre_pixel(&bare), [255, 0, 0, 255]);
+    }
+
+    /// Two multiplicative masks intersect (min): coverage survives only where both
+    /// are opaque — the reference viewer's `param_alpha` accumulation.
+    #[test]
+    fn multiplicative_masks_intersect() {
+        let base = Layer::base(solid_image(8, [255, 0, 0, 255], 3));
+        // First mask additive (seeds coverage) white; second multiplicative black
+        // → product 0 → the garment is fully carved away, the base shows.
+        let garment = Layer::blend(solid_image(8, [0, 0, 255, 255], 3)).with_masks(vec![
+            ShapeMask {
+                image: solid_image(8, [255, 255, 255, 255], 1),
+                weight: 0.5,
+                domain: 0.0,
+                multiply_blend: false,
+            },
+            ShapeMask {
+                image: solid_image(8, [0, 0, 0, 255], 1),
+                weight: 0.5,
+                domain: 0.0,
+                multiply_blend: true,
+            },
+        ]);
+        let bake = composite_region(BakeRegion::UpperBody, 8, &[base, garment]);
+        assert_eq!(centre_pixel(&bake), [255, 0, 0, 255]);
     }
 }

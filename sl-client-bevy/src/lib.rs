@@ -192,8 +192,9 @@ pub use sl_avatar::{
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
 // bake region from ordered wearable layers, and the per-region layer plan (P15).
 pub use sl_bake::{
-    BakeRegion, BakedImage, Layer, LayerKind, LayerSource, LayerTint, PlannedLayer, TexGen,
-    composite_region, region_layers, region_plan, static_layer_files,
+    BakeRegion, BakedImage, Layer, LayerKind, LayerSource, LayerTint, PlannedLayer, ShapeMask,
+    ShapeMaskSpec, TexGen, composite_region, region_layers, region_plan, shape_mask_files,
+    static_layer_files,
 };
 
 pub use crate::animations::{SampledJoint, sample_motion};

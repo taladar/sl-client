@@ -31,10 +31,11 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion, BevyAssetFetcher, BlobFetcher,
-    CAP_VIEWER_ASSET, Command, DecodedTexture, Layer, LayerTint, SlCapabilities, SlCommand,
-    SlEvent, SlSessionEvent, TextureKey, VisualParams, Wearable, WearableAsset, WearableType,
-    avatar_texture, combine_layer_color, global_color, region_layers,
+    AppearanceValues, AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion,
+    BevyAssetFetcher, BlobFetcher, CAP_VIEWER_ASSET, Command, DecodedTexture, Layer, LayerTint,
+    ResolvedParams, SlCapabilities, SlCommand, SlEvent, SlSessionEvent, TextureKey, VisualParams,
+    Wearable, WearableAsset, WearableType, avatar_texture, combine_layer_color, global_color,
+    region_layers,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -409,6 +410,12 @@ fn assemble(
 ) {
     let assets = state.assets.clone();
     let params = library.map(AvatarAssetLibrary::params);
+    // Resolve each worn wearable's driver → driven params once (R14): a garment's
+    // shape masks are keyed on driven params (sleeve length 600, pants length
+    // 615, …) whose weight the wearable stores only as the group-0 driver
+    // (Sleeve Length 800, Pants Length 815, …), so the mask weight must come from
+    // the driver-propagated resolution, not the raw stored params.
+    let resolved = resolve_wearable_params(&assets, params);
     let mut layers = HashMap::new();
     let mut summary: Vec<String> = Vec::new();
     for region in BakeRegion::ALL {
@@ -418,6 +425,7 @@ fn assemble(
             |slot| layer_image(&assets, texture_manager, slot),
             |file| library.and_then(|lib| lib.static_texture(file).cloned()),
             |tint, wearable| layer_tint(&assets, params, tint, wearable),
+            |param_id, wearable| mask_weight(&resolved, params, param_id, wearable),
         );
         summary.push(format!("{}={}", region.name(), region_layers.len()));
         let _prev = layers.insert(region, region_layers);
@@ -475,4 +483,52 @@ fn layer_tint(
         LayerTint::Params(ids) => combine_layer_color(params, ids, weight_of),
         LayerTint::White => WHITE,
     }
+}
+
+/// Resolve each worn wearable's full param set — driver → driven propagation
+/// (R14) — keyed by wearable type, so a garment's driven shape params (sleeve /
+/// pants length, …) carry the weight derived from the wearable's stored group-0
+/// driver. Empty when the visual-param table is not loaded.
+fn resolve_wearable_params(
+    assets: &[WearableAsset],
+    params: Option<&VisualParams>,
+) -> Vec<(WearableType, ResolvedParams)> {
+    let Some(params) = params else {
+        return Vec::new();
+    };
+    // `WearableType` is not `Hash`, and there are only a handful of worn
+    // wearables, so a small assoc list (linear-searched below) suffices.
+    assets
+        .iter()
+        .map(|asset| {
+            let values = AppearanceValues::from_weights(
+                asset.params.iter().map(|(&id, &weight)| (id, weight)),
+            );
+            (
+                asset.wearable_type,
+                ResolvedParams::from_values(params, &values),
+            )
+        })
+        .collect()
+}
+
+/// The weight for a garment-shape mask's driving param (R14): the worn wearable's
+/// driver-resolved weight for `param_id` (a driven shape param), falling back to
+/// the visual-param table's default (then `0.0`). This is what carves a garment's
+/// fabric to its sleeve / bottom / collar / pants-length extent so it does not
+/// paint the bare hands and feet.
+fn mask_weight(
+    resolved: &[(WearableType, ResolvedParams)],
+    params: Option<&VisualParams>,
+    param_id: i32,
+    wearable: WearableType,
+) -> f32 {
+    if let Some((_, resolved)) = resolved.iter().find(|(kind, _)| *kind == wearable)
+        && let Some(weight) = resolved.weight(param_id)
+    {
+        return weight;
+    }
+    params
+        .and_then(|params| params.get(param_id))
+        .map_or(0.0, |param| param.default)
 }

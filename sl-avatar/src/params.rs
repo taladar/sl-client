@@ -496,6 +496,21 @@ pub struct AppearanceValues {
 }
 
 impl AppearanceValues {
+    /// Build appearance values directly from already-resolved param weights
+    /// (`id → weight`), for a source that is not a wire appearance vector — e.g.
+    /// a worn wearable asset's own stored params, from which
+    /// [`ResolvedParams::from_values`](crate::ResolvedParams::from_values) then
+    /// derives the driven garment-shape params (R14). The wire-order
+    /// [`values`](Self::values) list is left empty; only the `id → weight` lookup
+    /// [`weight`](Self::weight) queries is populated.
+    #[must_use]
+    pub fn from_weights(weights: impl IntoIterator<Item = (i32, f32)>) -> Self {
+        Self {
+            values: Vec::new(),
+            by_id: weights.into_iter().collect(),
+        }
+    }
+
     /// The resolved weights, in wire order.
     #[must_use]
     pub fn values(&self) -> &[ParamValue] {

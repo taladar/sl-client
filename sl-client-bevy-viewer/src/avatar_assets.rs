@@ -24,7 +24,7 @@ use bevy::prelude::Resource;
 use sl_client_bevy::{
     AttachmentPoints, BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, DecodedTexture,
     MorphMasks, ParamError, Skeleton, SkeletonError, VisualParams, avatar_texture,
-    static_layer_files,
+    shape_mask_files, static_layer_files,
 };
 use tracing::warn;
 
@@ -240,9 +240,11 @@ pub(crate) struct AvatarAssetLibrary {
     /// skeleton joint an attached object hangs from (P16.1).
     attachment_points: AttachmentPoints,
     /// The decoded static `character/` TGA layer textures the client-side bake
-    /// composites (the skin-grain base, eye sclera, and skin colour details), keyed
-    /// by file name. A file that could not be read / decoded is simply absent, and
-    /// its bake layer falls back (a static base to a solid skin fill).
+    /// composites (the skin-grain base, eye sclera, skin colour details, and the
+    /// garment-shape masks that bound clothing to its extent — R14), keyed by file
+    /// name. A file that could not be read / decoded is simply absent, and its bake
+    /// layer falls back (a static base to a solid skin fill; a shape mask is not
+    /// applied).
     static_textures: HashMap<&'static str, DecodedTexture>,
 }
 
@@ -392,13 +394,18 @@ impl AvatarAssetLibrary {
 }
 
 /// Load and decode the static `character/` TGA bake-layer textures the
-/// client-side compositor needs (the skin-grain base, eye sclera, and skin colour
-/// details — [`static_layer_files`]) from `dir`, keyed by file name. A file that
+/// client-side compositor needs — the skin-grain base, eye sclera, and skin colour
+/// details ([`static_layer_files`]) plus the garment-shape masks
+/// ([`shape_mask_files`], R14) — from `dir`, keyed by file name. A file that
 /// cannot be read or decoded is logged and skipped (its bake layer then falls
 /// back), never failing the whole load.
 fn load_static_layer_textures(dir: &Path) -> HashMap<&'static str, DecodedTexture> {
     let mut textures = HashMap::new();
-    for file in static_layer_files() {
+    // The diffuse static layers (skin grain, sclera, colour details) plus the
+    // garment-shape masks (sleeve / bottom / collar / pants length, … — R14),
+    // loaded and decoded the same way.
+    let files = static_layer_files().into_iter().chain(shape_mask_files());
+    for file in files {
         match fs_err::read(dir.join(file)) {
             Ok(bytes) => match decode_tga(&bytes) {
                 Ok(decoded) => {

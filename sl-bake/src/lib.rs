@@ -32,9 +32,10 @@ pub mod composite;
 pub mod plan;
 pub mod region;
 
-pub use composite::{BakedImage, Layer, LayerKind, TexGen, composite_region};
+pub use composite::{BakedImage, Layer, LayerKind, ShapeMask, TexGen, composite_region};
 pub use plan::{
-    LayerSource, LayerTint, PlannedLayer, region_layers, region_plan, static_layer_files,
+    LayerSource, LayerTint, PlannedLayer, ShapeMaskSpec, region_layers, region_plan,
+    shape_mask_files, static_layer_files,
 };
 pub use region::BakeRegion;
 
