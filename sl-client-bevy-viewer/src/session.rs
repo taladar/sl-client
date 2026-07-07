@@ -184,16 +184,47 @@ pub(crate) fn drive_session(
                     let forward = sl_to_bevy_object_rotation(&object.motion.rotation)
                         .mul_vec3(Vec3::X)
                         .normalize_or_zero();
-                    let distance = 4.0_f32;
+                    // Debug affordances for rendering diagnosis (default: the
+                    // head-on framing above). `SL_VIEWER_CAMERA_ORBIT_DEG` orbits
+                    // the camera around the avatar's vertical axis (90 = a side
+                    // view), `_ELEV_DEG` raises/lowers it (positive looks down),
+                    // `_DISTANCE` sets the metres back (a smaller value zooms in),
+                    // and `_TARGET_Z` lifts the look-at point above the pelvis (so
+                    // a close-up can be aimed at the shoulders / head). Together
+                    // they let the offline screenshot harness capture a spot the
+                    // fixed head-on pose hides — needed to localise geometry
+                    // artifacts like the shoulder spike (R13).
+                    let env_f32 = |key: &str, default: f32| {
+                        std::env::var(key)
+                            .ok()
+                            .and_then(|value| value.parse().ok())
+                            .unwrap_or(default)
+                    };
+                    let orbit = env_f32("SL_VIEWER_CAMERA_ORBIT_DEG", 0.0).to_radians();
+                    let elevation = env_f32("SL_VIEWER_CAMERA_ELEV_DEG", 0.0).to_radians();
+                    let distance = env_f32("SL_VIEWER_CAMERA_DISTANCE", 4.0);
+                    let target_up = env_f32("SL_VIEWER_CAMERA_TARGET_Z", 0.0);
+                    // Orbit the (flattened) forward around Bevy up, then tilt it by
+                    // the elevation, so the camera sits on a sphere around the
+                    // avatar aimed inward.
+                    let flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+                    let orbited = Quat::from_rotation_y(orbit).mul_vec3(flat);
+                    let dir = Vec3::new(
+                        orbited.x * elevation.cos(),
+                        elevation.sin(),
+                        orbited.z * elevation.cos(),
+                    )
+                    .normalize_or_zero();
                     let camera_pos = Vec3::new(
-                        position.x + forward.x * distance,
-                        position.y + forward.y * distance + 0.3,
-                        position.z + forward.z * distance,
+                        position.x + dir.x * distance,
+                        position.y + dir.y * distance + 0.3 + target_up,
+                        position.z + dir.z * distance,
                     );
+                    let target = Vec3::new(position.x, position.y + target_up, position.z);
                     let look = Vec3::new(
-                        position.x - camera_pos.x,
-                        position.y - camera_pos.y,
-                        position.z - camera_pos.z,
+                        target.x - camera_pos.x,
+                        target.y - camera_pos.y,
+                        target.z - camera_pos.z,
                     );
                     for (mut transform, mut camera) in &mut cameras {
                         transform.translation = camera_pos;

@@ -88,6 +88,27 @@ pub struct CollisionVolume {
     pub end: [f32; 3],
 }
 
+/// Which skeleton a joint belongs to: the original **base** avatar skeleton or the
+/// later **extended** (Bento) additions — the `support` attribute on an
+/// `avatar_skeleton.xml` `<bone>` (Firestorm's `LLJoint::SUPPORT_BASE` /
+/// `SUPPORT_EXTENDED`).
+///
+/// This distinction drives the base-mesh joint-render-data ordering: a legacy
+/// system-avatar part's per-vertex weights index a list built over the *base*
+/// skeleton only, so when rebuilding that list the reference viewer walks past any
+/// extended joint that sits between a base joint and its base ancestor
+/// (`getBaseSkeletonAncestor`, SL-287). An absent `support` attribute defaults to
+/// [`Base`](Self::Base), matching the reference loader.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum JointSupport {
+    /// A joint of the original base avatar skeleton (`support="base"`, or absent).
+    #[default]
+    Base,
+    /// An extended (Bento) joint added on top of the base skeleton
+    /// (`support="extended"`).
+    Extended,
+}
+
 /// A single skeleton joint (bone) with its rest transform and hierarchy links.
 ///
 /// Positions/rotations are the bone's rest pose *relative to its parent*; index
@@ -111,6 +132,10 @@ pub struct Joint {
     /// The joint group the viewer buckets this bone under (`Torso`, `Spine`,
     /// `Face`, …), if present.
     pub group: Option<String>,
+    /// Whether this bone is part of the base skeleton or an extended (Bento)
+    /// addition (the `support` attribute; absent defaults to
+    /// [`Base`](JointSupport::Base)).
+    pub support: JointSupport,
     /// The bone's rest translation from its parent, in metres (Z-up).
     pub pos: [f32; 3],
     /// The bone's rest rotation as Euler XYZ angles, in degrees.
@@ -295,6 +320,8 @@ struct RawBone {
     connected: bool,
     /// The joint's group, if present.
     group: Option<String>,
+    /// Whether the bone is a base-skeleton or extended (Bento) joint.
+    support: JointSupport,
     /// Rest translation from the parent.
     pos: [f32; 3],
     /// Rest rotation (Euler XYZ degrees).
@@ -321,6 +348,11 @@ fn parse_raw_bone(node: roxmltree::Node<'_, '_>) -> Result<RawBone, SkeletonErro
         .unwrap_or_default();
     let connected = node.attribute("connected") == Some("true");
     let group = node.attribute("group").map(str::to_owned);
+    // An absent `support` attribute defaults to base (Firestorm's loader).
+    let support = match node.attribute("support") {
+        Some("extended") => JointSupport::Extended,
+        _ => JointSupport::Base,
+    };
     let pos = vec3_attr(node, "bone", "pos")?;
     let rot = vec3_attr(node, "bone", "rot")?;
     let scale = vec3_attr(node, "bone", "scale")?;
@@ -342,6 +374,7 @@ fn parse_raw_bone(node: roxmltree::Node<'_, '_>) -> Result<RawBone, SkeletonErro
         aliases,
         connected,
         group,
+        support,
         pos,
         rot,
         scale,
@@ -363,6 +396,7 @@ fn flatten(raw: RawBone, parent: Option<usize>, joints: &mut Vec<Joint>) -> usiz
         children: Vec::new(),
         connected: raw.connected,
         group: raw.group,
+        support: raw.support,
         pos: raw.pos,
         rot: raw.rot,
         scale: raw.scale,

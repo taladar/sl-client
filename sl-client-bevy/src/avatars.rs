@@ -29,7 +29,9 @@ use bevy::asset::RenderAssetUsages;
 use bevy::math::{Mat4, Quat, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
-use sl_avatar::{BaseMesh, CollisionVolume, Joint, MorphedMesh, SkeletalDeformations, Skeleton};
+use sl_avatar::{
+    BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh, SkeletalDeformations, Skeleton,
+};
 use sl_mesh::MeshSkin;
 
 /// Converts one decoded base-body part into a Bevy [`Mesh`] (a `TriangleList`
@@ -159,6 +161,14 @@ pub struct BevySkeleton {
     /// Each joint's canonical name, parallel to [`locals`](Self::locals); used to
     /// look a joint's skeletal deformation up by bone name.
     names: Vec<String>,
+    /// Each joint's base-vs-extended support, parallel to [`locals`](Self::locals):
+    /// the base-mesh joint-render-data list is built over the base skeleton only,
+    /// so [`base_ancestor`](Self::base_ancestor) walks past extended (Bento) joints.
+    /// Collision volumes and the synthetic root are treated as non-walkable
+    /// ([`Base`](JointSupport::Base) for the root — it terminates the walk — and
+    /// [`Extended`](JointSupport::Extended) for collision volumes, which never
+    /// appear as a base joint's ancestor).
+    support: Vec<JointSupport>,
     /// Joint canonical-name / alias → index (a canonical name wins over an
     /// alias, matching [`Skeleton`]'s own lookup).
     lookup: HashMap<String, usize>,
@@ -244,6 +254,7 @@ impl BevySkeleton {
         let mut locals = Vec::with_capacity(capacity);
         let mut parents = Vec::with_capacity(capacity);
         let mut names = Vec::with_capacity(capacity);
+        let mut support = Vec::with_capacity(capacity);
         let mut bind_globals: Vec<Mat4> = Vec::with_capacity(capacity);
         for joint in joints {
             let local = joint_transform(joint);
@@ -256,6 +267,7 @@ impl BevySkeleton {
             bind_globals.push(parent_global.mul_mat4(&local.to_matrix()));
             parents.push(joint.parent);
             names.push(joint.name.clone());
+            support.push(joint.support);
             locals.push(local);
         }
 
@@ -274,6 +286,9 @@ impl BevySkeleton {
                 bind_globals.push(parent_global.mul_mat4(&local.to_matrix()));
                 parents.push(Some(bone_index));
                 names.push(volume.name.clone());
+                // A collision volume is never a base joint's ancestor, so its
+                // support only needs to be non-base to keep the walk honest.
+                support.push(JointSupport::Extended);
                 locals.push(local);
                 collision_volumes.push((volume.name.clone(), index));
             }
@@ -301,6 +316,7 @@ impl BevySkeleton {
             parents,
             bind_globals,
             names,
+            support,
             lookup,
         }
     }
@@ -539,6 +555,9 @@ impl BevySkeleton {
         self.parents.push(None);
         self.bind_globals.push(Mat4::IDENTITY);
         self.names.push(name.to_owned());
+        // The synthetic root mirrors the reference viewer's `mRoot`, a base joint
+        // that terminates the base-ancestor walk (it has no parent).
+        self.support.push(JointSupport::Base);
         let _prev = self.lookup.insert(name.to_owned(), new_index);
     }
 
@@ -546,6 +565,15 @@ impl BevySkeleton {
     #[must_use]
     pub fn find(&self, name: &str) -> Option<usize> {
         self.lookup.get(name).copied()
+    }
+
+    /// The canonical name of the joint at `index` (including any appended
+    /// collision-volume joints), or `None` if the index is out of range — the
+    /// inverse of [`find`](Self::find), for diagnostics that resolve a skinning
+    /// palette slot back to a joint name.
+    #[must_use]
+    pub fn joint_name(&self, index: usize) -> Option<&str> {
+        self.names.get(index).map(String::as_str)
     }
 
     /// The joint canonical-name / alias → index lookup, so a caller can resolve a
@@ -613,8 +641,8 @@ impl BevySkeleton {
             if !skin.contains(&index) {
                 continue;
             }
-            match self.parents.get(index).copied().flatten() {
-                // Previous entry already the ancestor: just append this joint.
+            match self.base_ancestor(index) {
+                // Previous entry already the base ancestor: just append this joint.
                 Some(ancestor) if render.last() == Some(&ancestor) => render.push(index),
                 // Otherwise prepend the base ancestor, then this joint.
                 Some(ancestor) => {
@@ -626,6 +654,38 @@ impl BevySkeleton {
             }
         }
         render
+    }
+
+    /// The nearest **base-skeleton** ancestor of the joint at `index`, walking up
+    /// past any extended (Bento) joint — the reference viewer's
+    /// `getBaseSkeletonAncestor` (SL-287).
+    ///
+    /// A legacy system-avatar part's per-vertex weights index a joint-render-data
+    /// list built over the base skeleton only, so extended joints inserted between
+    /// a base joint and its base ancestor (e.g. `mSpine1`..`mSpine4` between
+    /// `mTorso`/`mChest` and `mPelvis`) must be skipped when rebuilding that list —
+    /// otherwise every weight index past them is shifted and each vertex binds to
+    /// the wrong joint (invisible at the bind pose, but a rest-pose spike where the
+    /// shape deforms the skeleton, and gross distortion under animation).
+    ///
+    /// Returns the joint's parent when that parent is already a base joint (or the
+    /// topmost ancestor if the walk reaches a parentless joint first), or `None` for
+    /// a joint with no parent at all.
+    #[must_use]
+    fn base_ancestor(&self, index: usize) -> Option<usize> {
+        let mut ancestor = self.parents.get(index).copied().flatten()?;
+        loop {
+            let is_base = matches!(
+                self.support.get(ancestor).copied(),
+                Some(JointSupport::Base) | None
+            );
+            match self.parents.get(ancestor).copied().flatten() {
+                // Stop at the first base ancestor (the reference viewer's
+                // `getSupport() == SUPPORT_BASE`), or at a parentless joint.
+                Some(parent) if !is_base => ancestor = parent,
+                _ => return Some(ancestor),
+            }
+        }
     }
 }
 
@@ -890,6 +950,43 @@ mod tests {
         // face by the neck under deformation.
         let render = bevy.joint_render_data(&[chest, torso]);
         assert_eq!(render, vec![pelvis, torso, chest]);
+        Ok(())
+    }
+
+    /// A skeleton with an **extended** (Bento) joint (`mSpine1`) between two base
+    /// joints (`mPelvis` → `mSpine1` → `mTorso` → `mChest`), so the base-ancestor
+    /// walk has something to skip.
+    const EXTENDED_SKELETON: &str = r#"<?xml version="1.0"?>
+<linden_skeleton num_bones="4" num_collision_volumes="0" version="2.0">
+  <bone name="mPelvis" support="base" pivot="0 0 0" pos="0 0 1" rot="0 0 0" scale="1 1 1" end="0 0 0.1">
+    <bone name="mSpine1" support="extended" pivot="0 0 0" pos="0 0 0.1" rot="0 0 0" scale="1 1 1" end="0 0 0.1">
+      <bone name="mTorso" support="base" pivot="0 0 0" pos="0 0 0.1" rot="0 0 0" scale="1 1 1" end="0 0 0.1">
+        <bone name="mChest" support="base" pivot="0 0 0" pos="0 0 0.1" rot="0 0 0" scale="1 1 1" end="0 0 0.1"/>
+      </bone>
+    </bone>
+  </bone>
+</linden_skeleton>"#;
+
+    #[test]
+    fn joint_render_data_skips_extended_ancestors() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(EXTENDED_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis present")?;
+        let spine1 = bevy.find("mSpine1").ok_or("mSpine1 present")?;
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let chest = bevy.find("mChest").ok_or("mChest present")?;
+        // A legacy base part's weights index a render list built over the *base*
+        // skeleton only: `mTorso`'s base ancestor is `mPelvis` (skipping the
+        // extended `mSpine1`), not its direct parent. Including `mSpine1` would
+        // shift every later weight index by one and bind vertices to the wrong
+        // joint (the R13 armpit spike / R11 animation distortion). The list must
+        // therefore be `[mPelvis, mTorso, mChest]`, with `mSpine1` absent.
+        let render = bevy.joint_render_data(&[torso, chest]);
+        assert_eq!(render, vec![pelvis, torso, chest]);
+        assert!(!render.contains(&spine1), "extended joint must be skipped");
+        // The base ancestor of `mTorso` is `mPelvis`, not the extended `mSpine1`.
+        assert_eq!(bevy.base_ancestor(torso), Some(pelvis));
+        assert_eq!(bevy.base_ancestor(chest), Some(torso));
         Ok(())
     }
 

@@ -56,7 +56,8 @@ pub use params::{
 pub use resolve::ResolvedParams;
 pub use skeletal::{BoneDeform, SkeletalDeformations};
 pub use skeleton::{
-    AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, Skeleton, SkeletonError,
+    AttachmentPointDef, AttachmentPoints, CollisionVolume, Joint, JointSupport, Skeleton,
+    SkeletonError,
 };
 pub use skin::SkinningPalette;
 pub use wearable::{WearableAsset, WearableError};

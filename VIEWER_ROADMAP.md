@@ -1679,16 +1679,52 @@ avatar, so they are collected here to be worked one at a time.
   added to make this comparison possible: `--screenshot-dir` (an offline PNG
   capture harness that quits after N frames) and `--repeat-animation` (keep
   re-issuing `--play-animation` so a short motion still plays once loaded).
-- [ ] **R13. Rest-visible spike under one shoulder** (`sl-client-bevy-viewer` /
-  `sl-avatar`). With the shape now correct (**R12**), a small spike of
-  geometry still pokes out under one shoulder (avatar's right) **at rest**, in
-  the T-pose with no animation and correct shape sliders — so it is not
-  shape/morph-driven. A rest-pose artifact is *not* a wrong per-vertex joint
-  weight either (those are invisible at rest, where every skin matrix is
-  identity — that is the **R11** animation class), which points at a base-mesh
-  decode / seam / stray-vertex issue in one body part rather than skinning.
-  Needs a live close-up against Firestorm on the same avatar to localise which
-  part and vertex. Surfaced by the R12 Firestorm side-by-side.
+- [x] **R13. Rest-visible spike under one shoulder** (`sl-client-bevy` /
+  `sl-avatar`). With the shape correct (**R12**), a triangular flap of geometry
+  poked out under the avatar's **right** armpit **at rest** (the left armpit was
+  clean — the asymmetry was the tell). The premise above was **wrong on two
+  counts**: it *was* skinning, and it is *not* invisible at rest, because the
+  skeletal-deformation visual params move the joints off the bindpose the base
+  part's inverse-binds assume, so a wrongly bound vertex spikes wherever the
+  rest deformation is non-trivial (the armpit). **Root cause:** the base-mesh
+  joint-render-data list (`BevySkeleton::joint_render_data`, from **R2**)
+  prepended each skin joint's **direct parent** as its ancestor; the reference
+  viewer prepends the nearest **base-skeleton** ancestor
+  (`getBaseSkeletonAncestor`, SL-287), *skipping* the extended (Bento) joints
+  (`mSpine1`..`mSpine4`) that sit between `mTorso`/`mChest` and `mPelvis`.
+  Including `mSpine2`/`mSpine4` inserted two extra render-list slots, shifting
+  every later weight index by two — so a right-armpit vertex authored for
+  `mChest` (raw weight `10.1`) resolved to `mElbowLeft` and was dragged across
+  the body, and the whole left arm (weights `7`–`8`,
+  `mShoulderLeft`/`mElbowLeft` in the reference list) bound to
+  `mChest`/`mCollarLeft`. **Fix:** a
+  `JointSupport` enum (`Base`/`Extended`) parsed from the `support` attribute in
+  `sl-avatar`'s skeleton, carried into `BevySkeleton`, and a `base_ancestor`
+  walk that skips non-base ancestors — the render list now matches the reference
+  exactly and the skin displacements are symmetric. Confirmed live (own avatar,
+  local OpenSim) top-down: the flap is gone. Because the whole arm chain was
+  wrongly bound, this is expected to also fix — or substantially reduce —
+  **R11** (the animation-time arm distortion), which should be re-checked next.
+  New
+  debug affordances added for this class of work (kept): `SL_VIEWER_CAMERA_*`
+  (`ORBIT_DEG` / `ELEV_DEG` / `DISTANCE` / `TARGET_Z`) orbit the login-framing
+  camera so the offline screenshot harness can capture a hidden spot, and
+  `SL_VIEWER_LOG_AVATAR_GEOMETRY` logs per-part morph- and skin-displacement
+  outliers (with each vertex's render-slot → joint name) — the tool that
+  localised this. Surfaced by the R12 Firestorm side-by-side.
+- [ ] **R14. Base-body UV / clothing region mapping wrong at the extremities**
+  (`sl-client-bevy` / `sl-bake`). Against a Firestorm side-by-side the baked
+  clothing (the blue upper / red lower body layers) covers the **hands and
+  feet**, which Firestorm leaves as bare skin, and there is a visible **gap /
+  seam** in the coverage. The reference viewer masks each baked wearable layer
+  to its body region via the `avatar_lad.xml` `<layer>` / alpha `tga` bounds
+  (hands and feet are outside the upper/lower clothing regions), and composites
+  the upper/lower/head bakes onto the base body without a gap. Our bake or its
+  UV / region masking is applying the clothing layer across the whole part
+  (incl. hands/feet) and misaligning the region seam. Needs a live close-up of
+  the hands/feet and the upper/lower seam against Firestorm to localise whether
+  the fault is the layer's region mask, the base-mesh UVs, or the composite
+  bounds. Surfaced by the R13 Firestorm side-by-side.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

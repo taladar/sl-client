@@ -37,12 +37,12 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AvatarName, BakeRegion, BaseMesh, CoarseLocation, Command, DecodedTexture,
-    JointOverrides, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
-    ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture, composite_region,
-    decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image,
-    to_bevy_morphed_mesh,
+    AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
+    CoarseLocation, Command, DecodedTexture, JointOverrides, MAX_FACES, MaskTexture, MeshSkin,
+    MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture,
+    composite_region, decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh,
+    to_bevy_image, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -152,7 +152,7 @@ impl BomFace {
 }
 
 /// A marker on one skeleton-instance joint entity, tying it back to its avatar
-/// and its index in the shared [`BevySkeleton`](sl_client_bevy::BevySkeleton) so
+/// and its index in the shared [`BevySkeleton`] so
 /// the appearance system ([`apply_avatar_appearance`]) can re-set that joint's
 /// local transform from the avatar's resolved skeletal deformations (P13.4).
 #[derive(Component, Debug, Clone, Copy)]
@@ -1986,9 +1986,13 @@ pub(crate) fn apply_avatar_appearance(
     };
     // Resolve each dirty avatar's appearance once into its morph weights and the
     // deformed joint transforms (both share one `ResolvedParams`).
+    let log_geometry = std::env::var_os("SL_VIEWER_LOG_AVATAR_GEOMETRY").is_some();
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
+    // The rest deformed joint **world** matrices per avatar, kept only for the
+    // geometry diagnostic (R13) so it can reproduce the GPU skinning on the CPU.
+    let mut world_matrices: HashMap<AgentKey, Vec<Mat4>> = HashMap::new();
     for &agent in &state.appearance_dirty {
         if let Some(bytes) = state.appearances.get(&agent) {
             let resolved = ResolvedParams::from_appearance(library.params(), bytes);
@@ -2007,6 +2011,16 @@ pub(crate) fn apply_avatar_appearance(
                     .skeleton()
                     .deformed_local_transforms_with(&deform, &overrides),
             );
+            if log_geometry {
+                world_matrices.insert(
+                    agent,
+                    library.skeleton().deformed_world_matrices(
+                        &deform,
+                        &overrides,
+                        &AnimationPose::default(),
+                    ),
+                );
+            }
             deformations.insert(agent, deform);
         }
     }
@@ -2032,6 +2046,20 @@ pub(crate) fn apply_avatar_appearance(
                 Some(mask) => weights.apply_masked(&loaded.mesh, &mask),
                 None => weights.apply(&loaded.mesh),
             };
+            if log_geometry {
+                let skin = match &loaded.binding {
+                    LoadedBinding::Skinned(skin) => Some(skin),
+                    LoadedBinding::Rigid(_) => None,
+                };
+                log_geometry_outliers(
+                    part.region,
+                    &loaded.mesh,
+                    morphed.positions(),
+                    skin,
+                    world_matrices.get(&part.agent).map(Vec::as_slice),
+                    library.skeleton(),
+                );
+            }
             *mesh = Mesh3d(meshes.add(to_bevy_morphed_mesh(&loaded.mesh, &morphed)));
             morphed_parts = morphed_parts.saturating_add(1);
         }
@@ -2053,6 +2081,84 @@ pub(crate) fn apply_avatar_appearance(
         );
     }
     state.appearance_dirty.clear();
+}
+
+/// Env-gated (`SL_VIEWER_LOG_AVATAR_GEOMETRY`) diagnostic for localising a
+/// rest-pose base-body geometry artifact (R13): reproduce the GPU matrix-palette
+/// skinning on the CPU for each vertex of a skinned part and log the vertices the
+/// skinning displaces furthest from their (morphed) rest position.
+///
+/// At a true bind pose every skin matrix is identity, so this displacement is
+/// ~0; but the skeletal-deformation visual params move the joints off the
+/// bindpose the base part's inverse-binds were baked against, so a vertex bound to
+/// the *wrong* joint (the reference viewer's joint-render-data list is per-side)
+/// is dragged away and spikes even at rest. Each logged vertex carries the
+/// render-list index its weight selects and the skeleton joint that index
+/// resolves to, so the offending part / vertex / joint is named directly.
+fn log_geometry_outliers(
+    region: BodyRegion,
+    base: &BaseMesh,
+    morphed_positions: &[[f32; 3]],
+    skin: Option<&BaseMeshSkin>,
+    world_matrices: Option<&[Mat4]>,
+    skeleton: &BevySkeleton,
+) {
+    let weights = base.weights();
+    let (Some(skin), Some(world)) = (skin, world_matrices) else {
+        return;
+    };
+    // One-shot dump of the reconstructed joint-render-data list (raw weight index
+    // -> skeleton joint), the table the per-vertex weight's integer part indexes.
+    let render_list: Vec<(usize, Option<&str>)> = skin
+        .joints
+        .iter()
+        .map(|&joint| (joint, skeleton.joint_name(joint)))
+        .collect();
+    info!("geom[{region:?}] render-data list: {render_list:?}");
+    let count = weights.len().min(morphed_positions.len());
+    let mut displacements: Vec<(f32, usize, usize)> = Vec::with_capacity(count);
+    for index in 0..count {
+        let (Some(weight), Some(rest)) = (weights.get(index), morphed_positions.get(index)) else {
+            continue;
+        };
+        let rest = Vec3::new(rest[0], rest[1], rest[2]);
+        // The two adjacent render-list palette slots this vertex blends between.
+        let slot0 = weight.joint;
+        let slot1 = slot0
+            .saturating_add(1)
+            .min(skin.joints.len().saturating_sub(1));
+        let contrib = |slot: usize| -> Option<Vec3> {
+            let joint = *skin.joints.get(slot)?;
+            let inverse_bind = skin.inverse_bindposes.get(slot)?;
+            let joint_world = world.get(joint)?;
+            // palette = joint_world · inverse_bind, applied to the rest point.
+            Some(joint_world.transform_point3(inverse_bind.transform_point3(rest)))
+        };
+        let (Some(p0), Some(p1)) = (contrib(slot0), contrib(slot1)) else {
+            continue;
+        };
+        let blend = weight.blend;
+        // mix(M0,M1,t)·p == (1-t)·M0·p + t·M1·p (matrix-vector is linear).
+        let skinned = Vec3::new(
+            p0.x + (p1.x - p0.x) * blend,
+            p0.y + (p1.y - p0.y) * blend,
+            p0.z + (p1.z - p0.z) * blend,
+        );
+        // `distance` is glam's own subtraction/length, so it stays clear of the
+        // workspace `arithmetic_side_effects` lint the `Vec3` `-` operator trips.
+        displacements.push((skinned.distance(rest), index, slot0));
+    }
+    displacements.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    for &(distance, index, slot) in displacements.iter().take(10) {
+        let joint = skin.joints.get(slot).copied();
+        let name = joint.and_then(|joint| skeleton.joint_name(joint));
+        let rest = morphed_positions.get(index).copied().unwrap_or_default();
+        info!(
+            "geom[{region:?}] v{index} skin-disp {distance:.3} \
+             at rest ({:.3},{:.3},{:.3}) render-slot {slot} -> joint {joint:?} {name:?}",
+            rest[0], rest[1], rest[2]
+        );
+    }
 }
 
 /// Whether a baked-texture `slot` supplies a clothing-morph mask (P14.5) — the
