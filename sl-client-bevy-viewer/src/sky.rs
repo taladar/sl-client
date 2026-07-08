@@ -1235,7 +1235,7 @@ fn calculate_light_settings(sky: &SkySettings, light_up: f32, moon_up: bool) -> 
 /// The debug override `SL_VIEWER_SKY_DAY_POSITION` (a `0.0..=1.0` float) pins the
 /// position instead, so the offline screenshot harness can inspect any point in
 /// the day (e.g. midday) regardless of the wall clock.
-fn day_position(settings: &sl_client_bevy::EnvironmentSettings) -> f32 {
+pub(crate) fn day_position(settings: &sl_client_bevy::EnvironmentSettings) -> f32 {
     if let Ok(value) = std::env::var("SL_VIEWER_SKY_DAY_POSITION")
         && let Ok(position) = value.parse::<f32>()
     {

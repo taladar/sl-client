@@ -331,6 +331,52 @@ impl EnvironmentSettings {
         });
         blended.or_else(|| cycle.sky_frames.values().next().cloned())
     }
+
+    /// The active [`WaterSettings`] for a day-cycle `position` (the normalised
+    /// time of day, `0.0..=1.0`): the keyframe in force at `position` on the
+    /// single region-wide [`water_track`](DayCycle::water_track), resolved through
+    /// [`DayCycle::water_frames`].
+    ///
+    /// Water has no altitude tracks (unlike the sky) — one region-wide track — so
+    /// this takes only a day-cycle `position`. Like
+    /// [`active_sky_settings`](Self::active_sky_settings) it selects the *active*
+    /// keyframe without blending toward the next one; the smooth interpolation is
+    /// [`blended_water_settings`](Self::blended_water_settings). Falls back to any
+    /// defined water frame if the track is empty or names a missing frame, and to
+    /// `None` only if the cycle defines no water frame at all.
+    #[must_use]
+    pub fn active_water_settings(&self, position: f32) -> Option<&WaterSettings> {
+        let cycle = &self.day_cycle;
+        let track_frame = active_keyframe(&cycle.water_track, position)
+            .and_then(|frame| cycle.water_frames.get(&frame.name));
+        track_frame.or_else(|| cycle.water_frames.values().next())
+    }
+
+    /// The **blended** [`WaterSettings`] for a day-cycle `position` (the
+    /// normalised time of day, `0.0..=1.0`): the smooth interpolation between the
+    /// two keyframes bounding `position` on the region-wide
+    /// [`water_track`](DayCycle::water_track), the water counterpart of
+    /// [`blended_sky_settings`](Self::blended_sky_settings) (the reference
+    /// `LLSettingsWater::blend`).
+    ///
+    /// Returns an *owned* frame (the blend synthesises new values). Falls back to
+    /// any defined water frame if the track is empty or names missing frames, and
+    /// to `None` only if the cycle defines no water frame at all.
+    #[must_use]
+    pub fn blended_water_settings(&self, position: f32) -> Option<WaterSettings> {
+        let cycle = &self.day_cycle;
+        let blended =
+            bounding_keyframes(&cycle.water_track, position).and_then(|(lower, upper, factor)| {
+                let lower_water = cycle.water_frames.get(&lower.name)?;
+                // If the upper frame is missing, hold the lower one rather than
+                // falling through to an unrelated frame.
+                match cycle.water_frames.get(&upper.name) {
+                    Some(upper_water) => Some(lower_water.blend(upper_water, factor)),
+                    None => Some(lower_water.clone()),
+                }
+            });
+        blended.or_else(|| cycle.water_frames.values().next().cloned())
+    }
 }
 
 /// The day-cycle keyframe in force at normalised time `position` (`0.0..=1.0`) on
@@ -454,6 +500,15 @@ fn lerp_array2(a: [f32; 2], b: [f32; 2], factor: f32) -> [f32; 2] {
     let [ax, ay] = a;
     let [bx, by] = b;
     [lerp_f32(ax, bx, factor), lerp_f32(ay, by, factor)]
+}
+
+/// Per-axis lerp of two [`Scale`]s (e.g. the water `normal_scale`).
+fn lerp_scale(a: Scale, b: Scale, factor: f32) -> Scale {
+    Scale::new(
+        lerp_f32(a.x(), b.x(), factor),
+        lerp_f32(a.y(), b.y(), factor),
+        lerp_f32(a.z(), b.z(), factor),
+    )
 }
 
 /// Normalise a quaternion, falling back to identity for a degenerate (zero)
@@ -687,6 +742,40 @@ impl SkySettings {
 }
 
 impl WaterSettings {
+    /// Blend this water frame toward `other` by `factor` (`0.0` → `self`, `1.0` →
+    /// `other`), the reference day-cycle frame interpolation
+    /// (`LLSettingsWater::blend`).
+    ///
+    /// Numeric channels (the fresnel scalars, blur / fog / refraction scalars, the
+    /// fog colour, the normal (wavelet) scale, and the two wave directions) are
+    /// linearly interpolated; the discrete, non-blendable settings — the frame
+    /// name and the normal / transparent textures — snap to whichever frame is
+    /// nearer (`factor > 0.5` picks `other`), matching the reference's
+    /// `mix > 0.5 ? other : this` for its non-numeric settings.
+    #[must_use]
+    pub fn blend(&self, other: &Self, factor: f32) -> Self {
+        Self {
+            name: pick_at_half(&self.name, &other.name, factor),
+            blur_multiplier: lerp_f32(self.blur_multiplier, other.blur_multiplier, factor),
+            fresnel_offset: lerp_f32(self.fresnel_offset, other.fresnel_offset, factor),
+            fresnel_scale: lerp_f32(self.fresnel_scale, other.fresnel_scale, factor),
+            normal_scale: lerp_scale(self.normal_scale, other.normal_scale, factor),
+            normal_map: pick_at_half(&self.normal_map, &other.normal_map, factor),
+            scale_above: lerp_f32(self.scale_above, other.scale_above, factor),
+            scale_below: lerp_f32(self.scale_below, other.scale_below, factor),
+            transparent_texture: pick_at_half(
+                &self.transparent_texture,
+                &other.transparent_texture,
+                factor,
+            ),
+            underwater_fog_mod: lerp_f32(self.underwater_fog_mod, other.underwater_fog_mod, factor),
+            water_fog_color: lerp_color(self.water_fog_color, other.water_fog_color, factor),
+            water_fog_density: lerp_f32(self.water_fog_density, other.water_fog_density, factor),
+            wave1_direction: lerp_array2(self.wave1_direction, other.wave1_direction, factor),
+            wave2_direction: lerp_array2(self.wave2_direction, other.wave2_direction, factor),
+        }
+    }
+
     /// The reference viewer's built-in default water (`LLSettingsWater::defaults`,
     /// `indra/llinventory/llsettingswater.cpp`).
     #[must_use]
@@ -1023,6 +1112,116 @@ mod tests {
         assert!(env.blended_sky_settings(0.0, 0.5).is_some_and(|noon| {
             noon.cloud_shadow.to_bits() == reference.cloud_shadow.to_bits()
                 && noon.gamma.to_bits() == reference.gamma.to_bits()
+                && noon.name == reference.name
+        }));
+    }
+
+    #[test]
+    fn water_blend_interpolates_scalars_and_snaps_at_the_endpoints() {
+        use super::WaterSettings;
+        let mut calm = WaterSettings::legacy_default("calm");
+        let mut choppy = WaterSettings::legacy_default("choppy");
+        calm.fresnel_scale = 0.2;
+        choppy.fresnel_scale = 0.8;
+        // Halfway: the scalar is the mean.
+        let mid = calm.blend(&choppy, 0.5);
+        assert!((mid.fresnel_scale - 0.5).abs() < 1.0e-6);
+        // Endpoints reproduce each frame's scalar exactly.
+        assert_eq!(
+            calm.blend(&choppy, 0.0).fresnel_scale.to_bits(),
+            0.2_f32.to_bits()
+        );
+        assert_eq!(
+            calm.blend(&choppy, 1.0).fresnel_scale.to_bits(),
+            0.8_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn water_blend_lerps_scale_and_wave_vectors() {
+        use super::{Scale, WaterSettings};
+        let mut calm = WaterSettings::legacy_default("calm");
+        let mut choppy = WaterSettings::legacy_default("choppy");
+        calm.normal_scale = Scale::new(1.0, 1.0, 1.0);
+        choppy.normal_scale = Scale::new(3.0, 3.0, 3.0);
+        calm.wave1_direction = [0.0, 0.0];
+        choppy.wave1_direction = [1.0, -1.0];
+        let mid = calm.blend(&choppy, 0.5);
+        assert!((mid.normal_scale.x() - 2.0).abs() < 1.0e-6);
+        assert!((mid.wave1_direction[0] - 0.5).abs() < 1.0e-6);
+        assert!((mid.wave1_direction[1] + 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn water_blend_snaps_textures_and_name_at_the_halfway_point() {
+        use super::Uuid;
+        use super::WaterSettings;
+        use sl_types::key::TextureKey;
+        let mut calm = WaterSettings::legacy_default("calm");
+        let mut choppy = WaterSettings::legacy_default("choppy");
+        calm.normal_map = Some(TextureKey::from(Uuid::from_u128(1)));
+        choppy.normal_map = Some(TextureKey::from(Uuid::from_u128(2)));
+        // Below halfway holds `self`; above halfway snaps to `other`.
+        assert_eq!(calm.blend(&choppy, 0.4).name, "calm");
+        assert_eq!(calm.blend(&choppy, 0.4).normal_map, calm.normal_map);
+        assert_eq!(calm.blend(&choppy, 0.6).name, "choppy");
+        assert_eq!(calm.blend(&choppy, 0.6).normal_map, choppy.normal_map);
+    }
+
+    #[test]
+    fn blended_water_settings_interpolates_between_the_bounding_keyframes() {
+        use super::{DayCycle, DayCycleFrame, WaterSettings};
+        use std::collections::BTreeMap;
+        let mut calm = WaterSettings::legacy_default("calm");
+        let mut choppy = WaterSettings::legacy_default("choppy");
+        calm.fresnel_scale = 0.0;
+        choppy.fresnel_scale = 1.0;
+        let mut water_frames = BTreeMap::new();
+        drop(water_frames.insert("calm".to_owned(), calm));
+        drop(water_frames.insert("choppy".to_owned(), choppy));
+        let track = vec![
+            DayCycleFrame {
+                keyframe: 0.0,
+                name: "calm".to_owned(),
+            },
+            DayCycleFrame {
+                keyframe: 0.5,
+                name: "choppy".to_owned(),
+            },
+        ];
+        let mut env = EnvironmentSettings::legacy_windlight_default();
+        env.day_cycle = DayCycle {
+            name: "test".to_owned(),
+            water_track: track,
+            sky_tracks: vec![vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: "Default".to_owned(),
+            }]],
+            sky_frames: env.day_cycle.sky_frames.clone(),
+            water_frames,
+        };
+        // A quarter of the way from calm (0.0) to choppy (0.5): factor 0.5.
+        assert!(
+            env.blended_water_settings(0.25)
+                .is_some_and(|quarter| (quarter.fresnel_scale - 0.5).abs() < 1.0e-6)
+        );
+        // The active (unblended) selection at that position is still the calm frame.
+        assert!(
+            env.active_water_settings(0.25)
+                .is_some_and(|active| active.fresnel_scale.abs() < 1.0e-6)
+        );
+    }
+
+    #[test]
+    fn blended_water_settings_of_the_default_cycle_returns_its_single_frame() {
+        use super::WaterSettings;
+        // The built-in default cycle has one water keyframe, so every day position
+        // blends the same frame with itself — its values unchanged.
+        let env = EnvironmentSettings::legacy_windlight_default();
+        let reference = WaterSettings::legacy_default("Default");
+        assert!(env.blended_water_settings(0.5).is_some_and(|noon| {
+            noon.fresnel_scale.to_bits() == reference.fresnel_scale.to_bits()
+                && noon.water_fog_density.to_bits() == reference.water_fog_density.to_bits()
                 && noon.name == reference.name
         }));
     }

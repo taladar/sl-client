@@ -26,19 +26,22 @@ mod session;
 mod sky;
 mod terrain;
 mod textures;
+mod underwater_fog;
+mod water;
 
 use std::path::{Path, PathBuf};
 
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
 use sl_client_bevy::{
     AnimationKey, ChatLogConfig, ClientDirectories, CloudMaterialPlugin, InventoryCacheConfig,
     LoginFailure, LoginParams, LoginRequest, MfaChallenge, SkyMaterialPlugin, SlClientPlugin,
     SlLoginRejected, SlMfaChallenge, StarMaterialPlugin, StartLocation, SunDiscMaterialPlugin,
-    TerrainMaterialPlugin, Uuid,
+    TerrainMaterialPlugin, Uuid, WaterMaterialPlugin,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -91,6 +94,8 @@ use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
     update_texture_caps,
 };
+use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
+use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -237,7 +242,16 @@ fn setup_scene(mut commands: Commands) {
     // `drive_session` snaps it to the agent's real login position once the
     // agent's avatar object arrives.
     commands.spawn((
-        Camera3d::default(),
+        // The underwater-fog post-process (P23.1) samples the scene depth, so make
+        // the main-pass depth texture readable (`TEXTURE_BINDING`). MSAA is pinned
+        // to 4× (the default) so that depth texture is multisampled to match the
+        // fog pass's `texture_depth_2d_multisampled` binding.
+        Camera3d {
+            depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING)
+                .into(),
+            ..default()
+        },
         // A close near plane (2 cm) so the camera can push right up to fine detail
         // — an avatar's face — without the surface clipping away, and a far plane
         // well beyond a region's diagonal so distant objects do not vanish.
@@ -248,6 +262,10 @@ fn setup_scene(mut commands: Commands) {
         }),
         Transform::from_xyz(128.0, 30.0, -128.0),
         FlyCamera::default(),
+        Msaa::Sample4,
+        // The `UnderwaterFog` component both carries the per-frame fog parameters
+        // and selects this camera for the fog pass.
+        UnderwaterFog::default(),
     ));
 }
 
@@ -346,6 +364,12 @@ fn run_session(
     .add_plugins(CloudMaterialPlugin)
     // The night-time star-field material (P22.5), driven alongside the sky.
     .add_plugins(StarMaterialPlugin)
+    // The water-surface material (P23.1), driven from the region's EEP water
+    // settings by the `water` module's systems below.
+    .add_plugins(WaterMaterialPlugin)
+    // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
+    // fogs everything below the water surface (reference `getWaterFogView`).
+    .add_plugins(UnderwaterFogPlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).
@@ -358,6 +382,10 @@ fn run_session(
     .init_resource::<EnvironmentState>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
+    // The water-render bookkeeping (P23.1) is created by `setup_water` at
+    // startup, so no `init_resource` is needed here; the surface level the
+    // underwater-fog pass reads is a small resource published by `drive_water`.
+    .init_resource::<WaterLevel>()
     .init_resource::<PrimLodTargets>()
     .init_resource::<AvatarState>()
     .init_resource::<ChatOverlay>()
@@ -392,6 +420,7 @@ fn run_session(
             setup_sun_moon_discs,
             setup_clouds,
             setup_stars,
+            setup_water,
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
@@ -549,6 +578,18 @@ fn run_session(
             // decoded bloom texture.
             drive_stars.after(fly_camera),
             apply_star_textures,
+            // Water surface (P23.1): learn each region's water height, then centre
+            // the endless ocean on the camera and place a per-region plane where a
+            // neighbour's sea level differs, fold the EEP water settings into the
+            // shared material (after the fly-camera, so the ocean tracks the
+            // viewpoint), and swap in the decoded wave normal map.
+            update_water,
+            drive_water.after(fly_camera),
+            apply_water_textures,
+            // Underwater fog (P23.1): refresh the camera's fog parameters (water
+            // level, EEP fog colour/density, reconstruction matrix) each frame,
+            // after the fly-camera so the matrix matches the current viewpoint.
+            update_underwater_fog.after(fly_camera).after(drive_water),
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a

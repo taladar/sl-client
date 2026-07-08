@@ -227,6 +227,8 @@ pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMate
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
 };
+#[cfg(feature = "bevy_pbr")]
+pub use crate::water::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 
 pub mod animations;
 pub mod assets;
@@ -255,6 +257,8 @@ pub mod terrain;
 pub mod textures;
 mod upload;
 mod voice;
+#[cfg(feature = "bevy_pbr")]
+pub mod water;
 mod world;
 use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::chat_log::ChatLog;
