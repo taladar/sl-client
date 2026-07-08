@@ -1406,28 +1406,240 @@ own avatar and as the fallback whenever a baked slot is absent / default.
   over the dance's full-body pose with no shearing, and the ease-in ramps the
   pose up smoothly on start.
 
-## Phase 19 — HUD attachments
+## Phase 19 — Diagnostics HUD (FPS + pipeline status)
 
-- [ ] **P19.1. Detect HUD.** Classify an attachment whose `attachment_point()`
+The rendering-fidelity phases below drive the fetch/decode pipeline much
+harder, so the first new phase gives us the instruments to see it: an FPS /
+frame-time readout and a live texture/mesh pipeline status panel. Reuses the
+Phase 11 chat-overlay `bevy_ui` `Text` pattern (`chat.rs`).
+
+- [ ] **P19.1. FPS + frame-time overlay.** Add Bevy's
+  `FrameTimeDiagnosticsPlugin`; render a `bevy_ui` text panel (the persistent
+  absolute-positioned `Text` node pattern from `chat.rs`) showing FPS,
+  frame-ms, and entity / draw counts. Reference: `LLViewerStats` /
+  `LLFastTimerView` / `LLPerfStats`.
+- [ ] **P19.2. Pipeline status API (library).** The stores have no public
+  introspection today (only per-request `TextureProgress` / `MeshProgress`).
+  Add a public stats snapshot to `TextureStore` / `MeshStore` / `AssetStore`
+  and `sl-asset-sched`'s `PriorityGate`: counts by state (queued /
+  reading-disk / downloading / decoding / ready / failed), in-memory entries,
+  cache hits, bytes, and GC'd entries — aggregated from the existing progress
+  enums. Cross-cutting change across `sl-texture` / `sl-mesh` / `sl-asset` +
+  `sl-asset-sched`; wire it through both runtime crates. Reference:
+  `LLTextureFetch` / `LLMeshRepository` queue stats.
+- [ ] **P19.3. Pipeline status overlay.** A key-toggled HUD panel rendering
+  P19.2's texture + mesh pipeline counts (queued / decoding / ready / cached),
+  so the LOD and priority work below can be watched live.
+
+## Phase 20 — On-screen render priority
+
+Everything is fetched at max fidelity in FIFO order today (textures at
+`DiscardLevel::FULL`, meshes at `MeshLod::FINEST`), yet the schedulers already
+support per-request priority (`sl-asset-sched` `Priority` +
+`popularity_boost`, `TextureStore` / `MeshStore` `request(…, priority)` +
+`.set_priority()`). This phase computes on-screen importance and feeds it, so
+what the camera looks at loads first.
+
+- [ ] **P20.1. Screen-importance computation.** A Bevy-free helper computing
+  an object / face's approximate screen pixel area from its world bounding
+  radius, camera distance, viewport height, and vertical FOV. Port the
+  reference viewer's `LLFace::getPixelArea` / `LLPipeline::calcPixelArea` /
+  `LLVOVolume::getPixelArea`.
+- [ ] **P20.2. Drive fetch priority.** Map pixel area (plus a boost for the
+  own avatar / attachments / UI, mirroring `LLGLTexture::BOOST_*`) to a
+  `sl_asset_sched::Priority`; feed it through `TextureStore::request` /
+  `MeshStore::request` and re-prioritize each (throttled) frame via
+  `.set_priority()` as the camera moves. The existing `popularity_boost`
+  already lifts textures shared across many on-screen faces. Reference:
+  `LLViewerTexture::addTextureStats`, the mesh `LODRequest` priority.
+
+## Phase 21 — Distance / pixel-area LOD
+
+With per-object pixel area available (P20.1), fetch only the fidelity the view
+warrants: coarser textures and meshes for small / distant objects, upgrading
+as the camera approaches. The stores already expose `set_lod` for
+upgrade/downgrade and the LOD newtypes have `finer()` / `coarser()`.
+
+- [ ] **P21.1. Texture discard-level selection.** From the P20.1 pixel area
+  choose a `DiscardLevel` (fewer pixels → coarser); request at that level and
+  upgrade / downgrade via `TextureStore::set_lod` as the camera approaches /
+  recedes, respecting the read-lease. Reference:
+  `LLViewerTexture::updateVirtualSize`.
+- [ ] **P21.2. Mesh LOD selection.** Port `LLVOVolume::calcLOD`: pick a
+  `MeshLod` from pixel area / distance × `RenderVolumeLODFactor`, request that
+  block, and swap on change via `MeshStore::set_lod`, rebuilding the Bevy
+  mesh. Reference: `LLVolumeLODGroup`.
+- [ ] **P21.3. Prim LOD.** Replace the fixed `PrimLod::High` with a
+  distance / area-selected `sl-prim` LOD tier (`LLVolumeLODGroup`);
+  re-tessellate on change.
+
+## Phase 22 — Sky & atmosphere (day cycle, EEP)
+
+The scene has one static directional light today. This phase renders the SL
+sky with its atmospheric model, driven by the region's Environment (EEP)
+settings and animated through the day cycle. Its ingested settings also feed
+Phase 23 (water) and Phase 24 (shadows).
+
+- [ ] **P22.1. Environment-settings ingest.** Parse region / parcel EEP
+  settings (`LLSettingsSky` / `LLSettingsWater` / `LLSettingsDay`) with a
+  legacy WindLight fallback, wired to the viewer through a new
+  `EnvironmentUpdated` `SlEvent` (reuse the Phase 11 conformance environment
+  work; keep the parse Bevy-free). Reference: `LLEnvironment`.
+- [ ] **P22.2. Sky & atmosphere.** Render the atmospheric sky dome — port the
+  Rayleigh / Mie scattering of `LLVOSky` / `LLVOWLSky` (+ the `skyV` / `skyF`
+  deferred shaders) into a Bevy sky material; drive the sun / moon direction
+  and colours, and set the scene directional light + ambient, from the sky.
+- [ ] **P22.3. Day cycle.** Interpolate the `LLSettingsDay` keyframes over
+  region time (`getBlendedSettings`) to animate the sky and sun through the
+  day.
+
+## Phase 23 — Water surface
+
+- [ ] **P23.1. Water plane.** Render a water plane at the region water height
+  with the EEP water settings (fresnel, reflection tint, scrolling wave
+  normals) — `LLVOWater` / `LLSettingsWater` + the water shaders — as a custom
+  Bevy material fed by P22.1's environment settings.
+
+## Phase 24 — Shadows
+
+- [ ] **P24.1. Sun / moon shadow maps.** Enable Bevy cascaded shadow maps on
+  the directional light, driven by the P22.2 sky sun direction, with cascades
+  tuned to region scale. Reference: `LLPipeline::renderShadow` /
+  `RenderShadowDetail`.
+
+## Phase 25 — Local lights
+
+- [ ] **P25.1. Ingest light params.** Read a prim's light block (colour,
+  radius, falloff, intensity, and spot cone params) from its light
+  extra-params (`LLLightParams`).
+- [ ] **P25.2. Nearest-N selection + render.** Spawn Bevy `PointLight` /
+  `SpotLight` for light-flagged prims, selecting the nearest / brightest N per
+  frame within a budget (GPU / clustered-light limits). Reference:
+  `LLPipeline::setupHWLights`, `LL_NUM_LIGHT_UNITS`.
+
+## Phase 26 — Linden trees & grass
+
+Trees and grass are classified `ObjectCategory::Other` and not rendered today.
+
+- [ ] **P26.1. Species table.** Port `app_settings/trees.xml` (the `LLVOTree`
+  species table) as Bevy-free data.
+- [ ] **P26.2. Tree rendering.** Render pcode-tree objects as the reference
+  branching geometry, falling back to a distance billboard imposter
+  (`LLVOTree`), with the species diffuse texture through the texture pipeline.
+- [ ] **P26.3. Grass.** Render pcode-grass as the reference crossed-quad
+  patches (`LLVOGrass`) with the species texture.
+
+## Phase 27 — PBR & legacy materials
+
+Faces use a diffuse-only `StandardMaterial` today. This phase adds the modern
+GLTF PBR materials and the pre-PBR legacy material stack, both of which Bevy's
+`StandardMaterial` can largely express.
+
+- [ ] **P27.1. GLTF PBR materials.** Fetch `LLFetchedGLTFMaterial` assets and
+  map to Bevy `StandardMaterial` (base colour, metallic-roughness, normal,
+  emissive, occlusion, alpha mode / cutoff, double-sided), with each map
+  supplied by the texture pipeline. Reference: `LLGLTFMaterial`.
+- [ ] **P27.2. GLTF material overrides.** Apply per-face
+  `GltfMaterialOverride` deltas delivered via the override cap / ObjectUpdate
+  extended data, layered on the base material. Reference:
+  `LLGLTFMaterialList::applyOverride`.
+- [ ] **P27.3. Legacy materials (normal / specular).** Support the pre-PBR
+  `LLMaterial` (RenderMaterials): normal map + specular map +
+  environment / glossiness + alpha mode, mapped onto `StandardMaterial` normal
+  / metallic where possible. Reference: `LLMaterialMgr` / `lldrawpoolmaterials`.
+- [ ] **P27.4. Bump / shiny / glow / fullbright.** The legacy per-face bump /
+  shiny / fullbright / glow flags → Bevy emissive / normal / metallic
+  approximations.
+
+## Phase 28 — Animesh
+
+Animated-object linksets are detected (`is_animated_object`) but rendered as
+plain prims. This phase gives them their own animation-driven skeleton.
+
+- [ ] **P28.1. Control-avatar skeleton.** Give an animated-object linkset its
+  own `LLControlAvatar` skeleton, built from the linkset's rigged-mesh skin
+  joints and independent of any wearer.
+- [ ] **P28.2. Drive its animations.** Route the object's animation state
+  (`ObjectAnimation`) through the Phase 18 blend driver against that skeleton
+  so the rigged mesh deforms. Reuses the Phase 12 skeleton and Phase 18 blend.
+  Reference: `LLControlAvatar` / `LLDrawPoolAvatar`.
+
+## Phase 29 — Particles
+
+- [ ] **P29.1. Ingest particle systems.** Parse a prim's `LLPartSysData` (the
+  particle-system block on ObjectUpdate / generic data): flags, pattern,
+  burst / age params, per-particle colour / scale / velocity ranges, target.
+  Keep it Bevy-free where practical. Reference: `LLPartSysData` / `LLPartData`.
+- [ ] **P29.2. Simulate + render.** A CPU particle simulation mirroring
+  `LLViewerPartSim` / `LLViewerPartSourceScript` (emission patterns, wind,
+  acceleration, interpolation) rendered as camera-facing billboards
+  (`LLVOPartGroup`), textured via the texture pipeline.
+
+## Phase 30 — General physics foundation (`avian3d`)
+
+Flexi prims (Phase 31) and avatar body physics (Phase 33) are client-side
+simulations. Rather than hand-rolling a solver for each, stand up a shared
+physics substrate on the `avian3d` Bevy physics engine first.
+
+- [ ] **P30.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
+  world with SL gravity, a fixed timestep, and coordinate bridging to the Y-up
+  scene. Foundation reused by Phase 31 and Phase 33. New workspace dependency.
+- [ ] **P30.2. Physical objects.** Give server-flagged physical prims (the
+  `LLViewerObject` physics flag / `LLPhysicsShapeType` — prim / convex hull /
+  none) an avian rigid body + collider derived from the prim / mesh geometry.
+  The sim stays authoritative — `ObjectUpdate` transforms drive the body while
+  avian smooths between updates and powers client-only dynamics.
+
+## Phase 31 — Flexi prims
+
+- [ ] **P31.1. Ingest flexible-object data.** The `LLFlexibleObjectData` extra
+  params (softness, gravity, drag, wind, tension, force). Bevy-free.
+- [ ] **P31.2. Simulate.** Port the reference spring / chain deformation of
+  the prim path over time (`LLVolumeImplFlexible` on `LLVOVolume`), built on
+  the Phase 30 avian primitives where practical, deforming / re-tessellating
+  the flexi geometry each frame.
+
+## Phase 32 — Reflection probes
+
+- [ ] **P32.1. Reflection-probe volumes.** Detect reflection-probe volumes
+  (the prim reflection-probe flag / extra params — `LLReflectionMap`) and map
+  them to Bevy light-probe / reflection-probe components, generating an
+  environment cubemap per probe. Complements the Phase 27 PBR materials that
+  sample them. Reference: `LLReflectionMapManager` / `RenderReflectionProbe`.
+
+## Phase 33 — Avatar cloth & body physics
+
+- [ ] **P33.1. Ingest the physics wearable.** The `WT_PHYSICS` wearable params
+  — breast / belly / butt bounce driving params from `avatar_lad.xml`.
+- [ ] **P33.2. Drive them.** Port `LLPhysicsMotion` /
+  `LLPhysicsMotionController` (a spring-damper per param, driven by joint
+  acceleration, built on the Phase 30 physics foundation) as a motion in the
+  Phase 18 animation controller, folding the resulting param weights into the
+  avatar morphs each frame. Reference: `llphysicsmotion.cpp`.
+
+## Phase 34 — HUD attachments
+
+- [ ] **P34.1. Detect HUD.** Classify an attachment whose `attachment_point()`
   is a HUD slot (31–38, `HudCenter` / `HudTopLeft` / …); route it out of the
   world scene to a dedicated screen-space HUD layer, and only for the **agent's
   own** attachments.
-- [ ] **P19.2. HUD rendering.** Render HUD-attached prims/mesh on a HUD camera /
+- [ ] **P34.2. HUD rendering.** Render HUD-attached prims/mesh on a HUD camera /
   render layer anchored per the HUD attachment-point screen layout (orthographic
   / screen-relative), reusing the existing prim/mesh geometry+texture build.
   Verify a simple HUD renders fixed to the screen on aditi.
 
-## Phase 20 — Aditi (real SL) verification
+## Phase 35 — Aditi (real SL) verification
 
 OpenSim end-to-end and the clippy / fmt / `rumdl` clean sweep are **not** a
 separate phase — they happen inside every phase above as it builds, live-tests,
 and commits (per the Legend). What OpenSim can't exercise is the SL-only
 appearance stack, so this final phase is the real-SL pass:
 
-- [ ] **P20.1. Aditi (real SL).** Run against `credentials.aditi.toml` + the MFA
+- [ ] **P35.1. Aditi (real SL).** Run against `credentials.aditi.toml` + the MFA
   wrapper for the SL-only paths OpenSim can't exercise: **server-side**-baked
-  bodies (vs. OpenSim's client-side bake), BoM mesh bodies with alpha, and the
-  agent's HUDs.
+  bodies (vs. OpenSim's client-side bake), BoM mesh bodies with alpha, the
+  agent's HUDs, and the SL-heavy new phases — PBR materials / terrain, EEP
+  environment + day cycle, and animesh.
 
 ---
 
@@ -1786,15 +1998,29 @@ avatar, so they are collected here to be worked one at a time.
   are now bare skin, the shirt sleeves are bounded, the pants end at the ankles,
   and the upper/lower waist seam is clean — matching the Firestorm ground truth.
   Surfaced by the R13 Firestorm side-by-side.
+- [ ] **R15. Terrain texturing wrong on Aditi** (`sl-client-bevy` /
+  `sl-terrain`). P2.2 / P2.3's four-texture elevation splat is verified on the
+  local OpenSim, but on aditi the terrain renders as a **single flat colour**.
+  Two candidate causes to investigate: (1) the four terrain textures are
+  **starved in the fetch queue** behind other assets and never decode — which
+  the Phase 20 on-screen render-priority work may itself fix (terrain textures
+  should rank high), so re-check after Phase 20; (2) an **OpenSim ↔ aditi
+  delivery difference** — e.g. modern SL's **PBR terrain**, where a region may
+  set its four terrain "textures" to GLTF **material** assets (plus a
+  terrain-material-type flag) delivered differently than OpenSim's
+  `RegionHandshake` `TERRAIN_TEXTURE_*` fields (our splat path assumes plain
+  diffuse UUIDs); also verify the `RegionHandshake` terrain UUIDs / elevation
+  ranges even parse on SL. The PBR-terrain case depends on Phase 27 for the
+  material assets. Reference: `LLVOSurfacePatch` / `LLDrawPoolTerrain` PBR path,
+  `RenderTerrainPBREnabled`, `LLTerrainPaintMap`.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
-Advanced materials (PBR / GLTF `GltfMaterialOverride`, legacy normal / specular
-`RenderMaterials`, bump / shiny / glow / fullbright), avatar cloth / flexi /
-breast-butt physics params, facial-morph lip-sync, flexi / particles / lights /
-reflection probes, water surface, sky / atmosphere, distance-based LOD switching
-(fixed High LOD), object selection / interaction, any chat *input* or non-quit
-UI, and sound. Client-side baking *is* in scope (Phase 15) for local rendering;
-only the J2C-**encode** + re-upload of our own bake via `UploadBakedTexture` (so
-*other* viewers see us) may slip to a follow-up, since it needs an OpenJPEG
-encoder the stack does not have yet.
+Most former non-goals are now planned phases (see Phases 19–33): PBR / GLTF and
+legacy normal / specular materials + bump / shiny / glow / fullbright
+(Phase 27), water surface (23), sky / atmosphere (22), shadows (24),
+distance-based LOD switching (21), local lights (25), Linden trees / grass
+(26), animesh (28), particles (29), flexi prims (31), reflection probes (32),
+and avatar cloth / breast-butt physics (33), on a shared `avian3d` physics
+foundation (30). Still deferred: facial-morph lip-sync, object selection /
+interaction, any chat *input* or non-quit UI, and sound.
