@@ -244,6 +244,74 @@ impl EnvironmentSettings {
             },
         }
     }
+
+    /// The 0-based index into [`DayCycle::sky_tracks`] whose altitude band
+    /// contains `altitude` (metres above the region), mirroring the reference
+    /// `LLEnvironment::calculateSkyTrackForAltitude`
+    /// (`indra/newview/llenvironment.cpp`).
+    ///
+    /// The reference clamps a camera altitude against the four breakpoints
+    /// `[0, a1, a2, a3]` and returns a *track number* `1..=4`, where sky track 1
+    /// is the surface track. Here the surface track is [`DayCycle::sky_tracks`]
+    /// index 0, so the mapping is: `altitude <= a1` → 0, `<= a2` → 1, `<= a3` → 2,
+    /// otherwise 3. The result is clamped to the number of tracks the day cycle
+    /// actually carries, so a cycle with a single ground track always selects it.
+    #[must_use]
+    pub fn sky_track_for_altitude(&self, altitude: f32) -> usize {
+        let [a1, a2, a3] = self.track_altitudes;
+        let raw = if altitude <= a1 {
+            0
+        } else if altitude <= a2 {
+            1
+        } else if altitude <= a3 {
+            2
+        } else {
+            3
+        };
+        let last = self.day_cycle.sky_tracks.len().saturating_sub(1);
+        raw.min(last)
+    }
+
+    /// The active [`SkySettings`] for a camera at `altitude` and a day-cycle
+    /// `position` (the normalised time of day, `0.0..=1.0`): the keyframe in force
+    /// at `position` on the altitude-selected
+    /// [`sky_track`](Self::sky_track_for_altitude), resolved through
+    /// [`DayCycle::sky_frames`].
+    ///
+    /// This selects the *active* keyframe (the reference
+    /// `LLEnvironment::convert_time_to_position` → `get_wrapping_atbefore`)
+    /// without blending toward the next one; the smooth keyframe interpolation
+    /// over region time is a later phase. Falls back to any defined sky frame if
+    /// the selected track is empty or names a missing frame, and to `None` only
+    /// if the cycle defines no sky frame at all.
+    #[must_use]
+    pub fn active_sky_settings(&self, altitude: f32, position: f32) -> Option<&SkySettings> {
+        let cycle = &self.day_cycle;
+        let track_frame = cycle
+            .sky_tracks
+            .get(self.sky_track_for_altitude(altitude))
+            .and_then(|track| active_keyframe(track, position))
+            .and_then(|frame| cycle.sky_frames.get(&frame.name));
+        track_frame.or_else(|| cycle.sky_frames.values().next())
+    }
+}
+
+/// The day-cycle keyframe in force at normalised time `position` (`0.0..=1.0`) on
+/// `track`: the frame with the greatest keyframe time `<= position`, wrapping to
+/// the last keyframe of the cycle when `position` precedes the first (the
+/// reference `get_wrapping_atbefore`). `None` only for an empty track.
+fn active_keyframe(track: &[DayCycleFrame], position: f32) -> Option<&DayCycleFrame> {
+    let at_before = track
+        .iter()
+        .filter(|frame| frame.keyframe <= position)
+        .max_by(|a, b| a.keyframe.total_cmp(&b.keyframe));
+    // Before the first keyframe the cycle wraps: the latest keyframe (end of the
+    // previous day) is still in force.
+    at_before.or_else(|| {
+        track
+            .iter()
+            .max_by(|a, b| a.keyframe.total_cmp(&b.keyframe))
+    })
 }
 
 /// Reproduces the reference `convert_azimuth_and_altitude_to_quat`
@@ -429,6 +497,85 @@ mod tests {
             .is_some_and(|frame| cycle.water_frames.contains_key(&frame.name));
         assert!(sky_ok);
         assert!(water_ok);
+    }
+
+    #[test]
+    fn sky_track_selection_maps_altitude_bands_to_the_reference_track_numbers() {
+        let mut env = EnvironmentSettings::legacy_windlight_default();
+        env.track_altitudes = [1000.0, 2000.0, 3000.0];
+        // Four tracks so every band is distinct (the default cycle has one).
+        let frame = |name: &str| super::DayCycleFrame {
+            keyframe: 0.0,
+            name: name.to_owned(),
+        };
+        env.day_cycle.sky_tracks = vec![
+            vec![frame("ground")],
+            vec![frame("mid")],
+            vec![frame("high")],
+            vec![frame("space")],
+        ];
+        assert_eq!(env.sky_track_for_altitude(0.0), 0);
+        assert_eq!(env.sky_track_for_altitude(1000.0), 0);
+        assert_eq!(env.sky_track_for_altitude(1000.1), 1);
+        assert_eq!(env.sky_track_for_altitude(2000.0), 1);
+        assert_eq!(env.sky_track_for_altitude(2500.0), 2);
+        assert_eq!(env.sky_track_for_altitude(3000.0), 2);
+        assert_eq!(env.sky_track_for_altitude(9000.0), 3);
+    }
+
+    #[test]
+    fn sky_track_selection_clamps_to_available_tracks() {
+        // The default cycle carries only the surface track, so every altitude
+        // must resolve to it rather than an out-of-range index.
+        let env = EnvironmentSettings::legacy_windlight_default();
+        assert_eq!(env.day_cycle.sky_tracks.len(), 1);
+        assert_eq!(env.sky_track_for_altitude(0.0), 0);
+        assert_eq!(env.sky_track_for_altitude(50_000.0), 0);
+        // And the surface frame resolves to a defined sky frame at any day time.
+        assert!(env.active_sky_settings(50_000.0, 0.0).is_some());
+        assert!(env.active_sky_settings(50_000.0, 0.5).is_some());
+    }
+
+    #[test]
+    fn active_keyframe_picks_the_frame_in_force_and_wraps_before_the_first() {
+        use super::{DayCycle, active_keyframe};
+        let track = vec![
+            super::DayCycleFrame {
+                keyframe: 0.25,
+                name: "morning".to_owned(),
+            },
+            super::DayCycleFrame {
+                keyframe: 0.75,
+                name: "evening".to_owned(),
+            },
+        ];
+        // At/after a keyframe, that frame is in force.
+        assert_eq!(
+            active_keyframe(&track, 0.25).map(|f| f.name.as_str()),
+            Some("morning")
+        );
+        assert_eq!(
+            active_keyframe(&track, 0.5).map(|f| f.name.as_str()),
+            Some("morning")
+        );
+        assert_eq!(
+            active_keyframe(&track, 0.9).map(|f| f.name.as_str()),
+            Some("evening")
+        );
+        // Before the first keyframe the cycle wraps to the last frame.
+        assert_eq!(
+            active_keyframe(&track, 0.1).map(|f| f.name.as_str()),
+            Some("evening")
+        );
+        // An empty track has no active frame.
+        let empty = DayCycle {
+            name: String::new(),
+            water_track: Vec::new(),
+            sky_tracks: Vec::new(),
+            sky_frames: std::collections::BTreeMap::new(),
+            water_frames: std::collections::BTreeMap::new(),
+        };
+        assert!(active_keyframe(&empty.water_track, 0.5).is_none());
     }
 
     #[test]

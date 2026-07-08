@@ -94,6 +94,14 @@ pub(crate) const TERRAIN_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP
 /// its bakes ahead of the surrounding scene.
 pub(crate) const AVATAR_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 2);
 
+/// The fixed boost priority for the sky's referenced textures — the rainbow /
+/// halo (and, later, sun / moon / cloud / bloom) maps the atmospheric sky dome
+/// samples (`LLGLTexture::BOOST_HIGH`). In the boost band so a sky texture
+/// resolves ahead of ordinary pixel-area-ranked scene faces (the sky is drawn
+/// behind everything and, like terrain, is a custom material the on-screen face
+/// pass cannot rank), one step above the avatar boost.
+pub(crate) const SKY_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 3);
+
 /// Re-rank every queued texture and mesh fetch by on-screen pixel area (P20.2),
 /// throttled to [`REPRIORITIZE_INTERVAL_SECS`].
 ///

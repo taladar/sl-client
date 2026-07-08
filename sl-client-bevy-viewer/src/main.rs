@@ -23,6 +23,7 @@ mod objects;
 mod render_priority;
 mod screenshot;
 mod session;
+mod sky;
 mod terrain;
 mod textures;
 
@@ -35,8 +36,8 @@ use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
 use sl_client_bevy::{
     AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoginFailure,
-    LoginParams, LoginRequest, MfaChallenge, SlClientPlugin, SlLoginRejected, SlMfaChallenge,
-    StartLocation, TerrainMaterialPlugin, Uuid,
+    LoginParams, LoginRequest, MfaChallenge, SkyMaterialPlugin, SlClientPlugin, SlLoginRejected,
+    SlMfaChallenge, StartLocation, TerrainMaterialPlugin, Uuid,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -79,6 +80,7 @@ use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
     repeat_debug_animation,
 };
+use crate::sky::{apply_sky_textures, center_sky_on_camera, drive_sky, setup_sky};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
@@ -222,7 +224,9 @@ struct LoginOutcome {
     rejected: Option<LoginFailure>,
 }
 
-/// Startup system: spawn the fly-camera and a directional light.
+/// Startup system: spawn the fly-camera. The scene's directional light (the
+/// sun / moon) is spawned by [`crate::sky::setup_sky`], which also drives it from
+/// the region's environment.
 fn setup_scene(mut commands: Commands) {
     // A provisional camera pose near a region centre (256 m region, ~30 m up);
     // `drive_session` snaps it to the agent's real login position once the
@@ -239,13 +243,6 @@ fn setup_scene(mut commands: Commands) {
         }),
         Transform::from_xyz(128.0, 30.0, -128.0),
         FlyCamera::default(),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 10_000.0,
-            ..default()
-        },
-        Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
     ));
 }
 
@@ -335,6 +332,9 @@ fn run_session(
         background_inventory_fetch: false,
     })
     .add_plugins(TerrainMaterialPlugin)
+    // The atmospheric sky dome material (P22.2), driven from the region's EEP
+    // environment by the `sky` module's systems below.
+    .add_plugins(SkyMaterialPlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).
@@ -377,6 +377,7 @@ fn run_session(
         Startup,
         (
             setup_scene,
+            setup_sky,
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
@@ -507,6 +508,19 @@ fn run_session(
             // (while shown) its text from the live store snapshots.
             toggle_pipeline_overlay,
             update_pipeline_overlay.after(toggle_pipeline_overlay),
+        ),
+    )
+    // Atmospheric sky (P22.2): keep the sky dome centred on the camera, then fold
+    // the region environment + camera altitude into the sky material, the sun /
+    // moon directional light, and the ambient light, and swap each decoded sky
+    // overlay texture into the material. Run after the fly-camera so the dome
+    // tracks the current viewpoint.
+    .add_systems(
+        Update,
+        (
+            center_sky_on_camera.after(fly_camera),
+            drive_sky.after(fly_camera),
+            apply_sky_textures,
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a

@@ -56,29 +56,30 @@ pub use sl_proto::{
     CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSource, ChatSourceType,
     ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory,
     ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
-    CoarseLocation, Command, ControlFlags, ConversationKind, CreateGroupParams, DayCycle,
-    DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, Direction, DisconnectReason,
-    DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateInfo, ExperienceInfo, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState,
-    FolderType, Friend, FriendRights, GlobalCoordinates, GltfMaterialOverride, GridCoordinates,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
-    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
-    LoginRequest, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras,
-    OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams,
+    DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, Direction,
+    DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, ExperienceInfo,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
+    FolderInfo, FolderState, FolderType, Friend, FriendRights, GlobalCoordinates, Glow,
+    GltfMaterialOverride, GridCoordinates, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
+    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
+    GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
+    InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
+    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest, LureId,
+    MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError,
+    NeighborInfo, NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
+    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
+    ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
     ParcelObjectOwner, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
     ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5,
     PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
@@ -214,6 +215,8 @@ pub use crate::meshes::{
 };
 pub use crate::prims::{to_bevy_prim_mesh, to_bevy_prim_meshes};
 #[cfg(feature = "bevy_pbr")]
+pub use crate::sky::{SkyMaterial, SkyMaterialPlugin, SkyParams};
+#[cfg(feature = "bevy_pbr")]
 pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
@@ -233,6 +236,8 @@ mod materials;
 mod media;
 pub mod meshes;
 pub mod prims;
+#[cfg(feature = "bevy_pbr")]
+pub mod sky;
 #[cfg(feature = "bevy_pbr")]
 pub mod terrain;
 pub mod textures;
