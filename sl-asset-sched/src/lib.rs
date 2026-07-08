@@ -12,6 +12,8 @@
 //! - [`fetcher`] — the runtime-agnostic [`AssetFetcher`] network abstraction.
 //! - [`cpu`] — the [`run_cpu`] rayon bridge for CPU-bound decode/downsample work.
 //! - [`stats`] — the [`StoreStats`] / [`GateStats`] pipeline-status snapshots.
+//! - [`screen`] — the [`ScreenMetrics`] on-screen pixel-area computation the
+//!   viewer drives fetch priority / LOD selection by.
 //!
 //! The per-store `Requesters` set and progress enums are *not* here — they carry
 //! the store's LOD type, so each store defines its own (each calling the shared
@@ -22,10 +24,12 @@ pub mod cpu;
 pub mod fetcher;
 pub mod gate;
 pub mod priority;
+pub mod screen;
 pub mod stats;
 
 pub use cpu::run_cpu;
 pub use fetcher::{AssetFetcher, FetchChunk, FetchError};
 pub use gate::{GatePermit, PriorityGate};
 pub use priority::{POPULARITY_BOOST_SCALE, Priority, popularity_boost};
+pub use screen::ScreenMetrics;
 pub use stats::{GateStats, StoreStats};
