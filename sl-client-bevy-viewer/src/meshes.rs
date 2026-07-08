@@ -26,8 +26,8 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, MeshCacheLimits, MeshFetcher,
-    MeshKey, MeshLod, MeshSkin, MeshStore, SlCapabilities,
+    BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, GateStats, MeshCacheLimits,
+    MeshFetcher, MeshKey, MeshLod, MeshSkin, MeshStore, SlCapabilities, StoreStats,
 };
 
 /// The outcome of one background mesh fetch: the decoded geometry paired with the
@@ -131,6 +131,19 @@ impl MeshManager {
     /// (`GetMesh2`, else `GetMesh`), or clear it when absent.
     fn set_cap_url(&self, url: Option<String>) {
         self.fetcher.set_cap_url(url);
+    }
+
+    /// A point-in-time snapshot of the mesh fetch/decode pipeline (P19.2), for
+    /// the diagnostics overlay: entry counts bucketed by stage plus the
+    /// cumulative disk-cache-hit / GC counters.
+    pub(crate) fn stats(&self) -> StoreStats {
+        self.store.stats()
+    }
+
+    /// A point-in-time snapshot of the mesh store's admission gate (P19.2): its
+    /// concurrency capacity, in-flight slots, and queued waiters.
+    pub(crate) fn gate_stats(&self) -> GateStats {
+        self.store.gate_stats()
     }
 }
 

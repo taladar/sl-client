@@ -32,9 +32,9 @@ use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel,
-    RemoteTextureSource, SlCapabilities, TextureFace, TextureFetcher, TextureKey, TextureStore,
-    Uuid, texture_face_uv_transform, to_bevy_image,
+    BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel, GateStats,
+    RemoteTextureSource, SlCapabilities, StoreStats, TextureFace, TextureFetcher, TextureKey,
+    TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
 };
 
 /// The GLTF material-override "no texture" sentinel (all-`f`, the reference
@@ -155,6 +155,19 @@ impl TextureManager {
     /// URL (or clear it when absent).
     fn set_cap_url(&self, url: Option<String>) {
         self.fetcher.set_cap_url(url);
+    }
+
+    /// A point-in-time snapshot of the texture fetch/decode pipeline (P19.2),
+    /// for the diagnostics overlay: entry counts bucketed by stage plus the
+    /// cumulative disk-cache-hit / GC counters.
+    pub(crate) fn stats(&self) -> StoreStats {
+        self.store.stats()
+    }
+
+    /// A point-in-time snapshot of the texture store's admission gate (P19.2):
+    /// its concurrency capacity, in-flight slots, and queued waiters.
+    pub(crate) fn gate_stats(&self) -> GateStats {
+        self.store.gate_stats()
     }
 }
 

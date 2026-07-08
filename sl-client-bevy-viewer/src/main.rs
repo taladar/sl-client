@@ -60,7 +60,10 @@ use crate::bake_inputs::{
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
-use crate::diagnostics::{setup_diagnostics_overlay, update_diagnostics_overlay};
+use crate::diagnostics::{
+    PipelineOverlayVisible, setup_diagnostics_overlay, setup_pipeline_overlay,
+    toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
+};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
@@ -351,6 +354,7 @@ fn run_session(
     .init_resource::<WearableAssetManager>()
     .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
     .init_resource::<AnimationPlayback>()
+    .insert_resource(PipelineOverlayVisible::from_env())
     .insert_resource(PlayOnLogin {
         animations: play_animation
             .iter()
@@ -368,6 +372,7 @@ fn run_session(
             setup_scene,
             setup_chat_overlay,
             setup_diagnostics_overlay,
+            setup_pipeline_overlay,
             setup_avatar_body,
         ),
     )
@@ -476,6 +481,11 @@ fn run_session(
             log_suspicious_objects,
             pick_object,
             update_diagnostics_overlay,
+            // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
+            // resource on the toggle key, then drive the panel's visibility and
+            // (while shown) its text from the live store snapshots.
+            toggle_pipeline_overlay,
+            update_pipeline_overlay.after(toggle_pipeline_overlay),
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a
