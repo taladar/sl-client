@@ -437,5 +437,6 @@ fn decode_tga(bytes: &[u8]) -> Result<DecodedTexture, image::ImageError> {
         components,
         discard_level: sl_client_bevy::DiscardLevel::FULL,
         pixels: bytes::Bytes::from(rgba.into_raw()),
+        aux: None,
     })
 }

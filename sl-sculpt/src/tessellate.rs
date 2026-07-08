@@ -483,6 +483,7 @@ mod tests {
             components: 3,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from(pixels),
+            aux: None,
         }
     }
 
@@ -601,6 +602,7 @@ mod tests {
             components: 3,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::new(),
+            aux: None,
         };
         let mesh = tessellate(&empty, 3);
         assert_face_integrity(&mesh);
@@ -617,6 +619,7 @@ mod tests {
             components: 3,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from_static(&[10, 20, 30, 255]),
+            aux: None,
         };
         let mesh = tessellate(&short, 2);
         assert_face_integrity(&mesh);

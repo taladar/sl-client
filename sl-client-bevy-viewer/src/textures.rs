@@ -449,10 +449,11 @@ const fn face_alpha_mode(color: [u8; 4]) -> AlphaMode {
     }
 }
 
-/// Whether a decoded texture carries an alpha channel (a grey+alpha or RGBA
-/// codestream — `2` or `4` source components), so a face showing it must blend.
+/// Whether a decoded texture carries an alpha channel (a grey+alpha, RGBA, or
+/// Second Life 5-component bake codestream — `2` or `4`+ source components), so a
+/// face showing it must blend.
 const fn texture_has_alpha(decoded: &DecodedTexture) -> bool {
-    decoded.components == 2 || decoded.components == 4
+    decoded.components == 2 || decoded.components >= 4
 }
 
 /// Convert a face tint (RGBA bytes, `[255; 4]` = opaque white = no tint) into a
@@ -483,6 +484,7 @@ mod tests {
             components,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from(vec![0xFF_u8; 4]),
+            aux: None,
         }
     }
 

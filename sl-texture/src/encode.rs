@@ -132,6 +132,7 @@ mod tests {
             components: 4,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from(pixels),
+            aux: None,
         }
     }
 
@@ -207,6 +208,7 @@ mod tests {
             components: 4,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::new(),
+            aux: None,
         };
         // Errors either way: `Empty` with the encoder linked, `Disabled` without.
         let rejected = encode_j2c(&image).is_err();

@@ -286,6 +286,14 @@ pub(crate) struct AvatarState {
     /// baked-scale rest transform would cause). Absent for a sphere-only
     /// (no `--viewer-assets`) avatar, or before its first appearance.
     deformations: HashMap<AgentKey, SkeletalDeformations>,
+    /// The extra vertical plant height each avatar gains from its worn shoes'
+    /// heel / platform height (R17), in Second Life Z-up metres: the reference
+    /// viewer's `computeBodySize` folds the shoe's downward foot-bone offset into
+    /// `mPelvisToFoot`, raising the avatar so its shod feet rest on the ground.
+    /// Added to the fixed pelvis rest height when planting the body root
+    /// ([`body_root_transform`]). Absent (treated as `0`) until an appearance
+    /// resolves the shoe params, or for a sphere-only avatar.
+    pelvis_lift: HashMap<AgentKey, f32>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
@@ -488,16 +496,46 @@ pub(crate) fn setup_avatar_body(
 /// and orientation carried into Bevy's Y-up world by the Second Life → Bevy
 /// basis change, lowered by the pelvis rest height so the pelvis sits at the
 /// reported object position (Second Life reports an avatar near its pelvis).
-fn body_root_transform(object: &Object, pelvis_height: f32) -> Transform {
+///
+/// `shoe_lift` (R17) is the extra height the worn shoes' heel / platform add to
+/// the pelvis-to-foot distance: subtracting it too raises the whole body so its
+/// shod feet still rest on the ground rather than sinking in.
+fn body_root_transform(object: &Object, pelvis_height: f32, shoe_lift: f32) -> Transform {
     let translation = sl_to_bevy_vec(&object.motion.position);
     Transform {
         // Per-component subtract to avoid the `arithmetic_side_effects` lint on
         // the glam `Vec3` operator.
-        translation: Vec3::new(translation.x, translation.y - pelvis_height, translation.z),
+        translation: Vec3::new(
+            translation.x,
+            translation.y - pelvis_height - shoe_lift,
+            translation.z,
+        ),
         rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
         scale: Vec3::ONE,
     }
 }
+
+/// The extra vertical plant height (R17), in Second Life Z-up metres, a set of
+/// resolved skeletal deformations gives an avatar from its worn shoes: the
+/// reference viewer's `computeBodySize` folds the shoe params' downward foot-bone
+/// offset into `mPelvisToFoot` (the `Shoe_Heels` id 197 / `Shoe_Platform` id 502
+/// `param_skeleton`s offset `mFootLeft` / `mFootRight` by a negative Z, scaled by
+/// the ankle), raising the avatar so its shod feet rest on the ground.
+///
+/// Taken from the left foot (the sides are symmetric); a shoe only ever raises the
+/// avatar, so a non-negative result is used and any spurious lowering is ignored.
+fn shoe_lift(deform: &SkeletalDeformations) -> f32 {
+    let foot_offset_z = deform.offset(FOOT_JOINT)[2];
+    let ankle_scale_z = 1.0 + deform.scale(ANKLE_JOINT)[2];
+    (-foot_offset_z * ankle_scale_z).max(0.0)
+}
+
+/// The skeleton bone the shoe heel / platform params offset downward (R17).
+const FOOT_JOINT: &str = "mFootLeft";
+
+/// The skeleton bone whose scale the shoe foot offset is measured through (R17),
+/// matching the reference viewer's `mPelvisToFoot` `- foot.z * ankle_scale.z`.
+const ANKLE_JOINT: &str = "mAnkleLeft";
 
 /// Spawn one base part's render entity into a skeleton instance: a `SkinnedMesh`
 /// under the body root for a skinned part, or a plain mesh parented to a single
@@ -716,9 +754,10 @@ impl AvatarState {
         body: &AvatarBody,
         commands: &mut Commands,
     ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
+        let shoe_lift = self.pelvis_lift.get(&agent).copied().unwrap_or(0.0);
         let root = commands
             .spawn((
-                body_root_transform(object, body.pelvis_height),
+                body_root_transform(object, body.pelvis_height, shoe_lift),
                 Visibility::default(),
                 AvatarAnchor,
             ))
@@ -805,7 +844,10 @@ impl AvatarState {
             // Move the existing anchor: a body root gets the full position +
             // orientation transform, a sphere just its translation.
             let transform = match body {
-                Some(body) => body_root_transform(object, body.pelvis_height),
+                Some(body) => {
+                    let shoe_lift = self.pelvis_lift.get(&agent).copied().unwrap_or(0.0);
+                    body_root_transform(object, body.pelvis_height, shoe_lift)
+                }
                 None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
             };
             commands.entity(existing.anchor).insert(transform);
@@ -1917,6 +1959,10 @@ pub(crate) fn apply_own_shape_from_wearables(
     clippy::too_many_arguments,
     reason = "a Bevy system folding appearances and bakes into the morphed body meshes"
 )]
+#[expect(
+    clippy::type_complexity,
+    reason = "a Bevy query whose disjointness filters spell out the exact anchor archetype"
+)]
 pub(crate) fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
@@ -1927,6 +1973,17 @@ pub(crate) fn apply_avatar_appearance(
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
     mut parts: Query<(&AvatarBodyPart, &mut Mesh3d)>,
     mut joints: Query<(&AvatarJoint, &mut Transform)>,
+    // The rigged body roots, re-planted when their shoe lift changes (R17);
+    // disjoint from `joints` (never an `AvatarJoint`) and from the sphere anchors.
+    mut anchors: Query<
+        &mut Transform,
+        (
+            With<AvatarAnchor>,
+            Without<AvatarSphere>,
+            Without<AvatarJoint>,
+            Without<AvatarBodyPart>,
+        ),
+    >,
 ) {
     // A decoded baked texture of a masked body region (head / upper / lower)
     // supplies the clothing-morph mask, so re-shape any avatar wearing it: its
@@ -2027,8 +2084,20 @@ pub(crate) fn apply_avatar_appearance(
         }
     }
     // Record each avatar's resolved deformations so the animation driver (P18.3)
-    // can re-run the skeletal recurrence with the playing motion folded in.
+    // can re-run the skeletal recurrence with the playing motion folded in, and
+    // fold the worn shoes' heel / platform height into the body's plant height
+    // (R17): the shoe raises the pelvis-to-foot distance, so an already-spawned
+    // (possibly stationary) body is re-planted straight away rather than waiting
+    // for its next position update.
     for (agent, deform) in deformations {
+        let lift = shoe_lift(&deform);
+        let previous = state.pelvis_lift.insert(agent, lift).unwrap_or(0.0);
+        if (lift - previous).abs() > f32::EPSILON
+            && let Some(entities) = state.objects.get(&agent)
+            && let Ok(mut transform) = anchors.get_mut(entities.anchor)
+        {
+            transform.translation.y -= lift - previous;
+        }
         let _prev = state.deformations.insert(agent, deform);
     }
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its
@@ -2482,7 +2551,8 @@ mod tests {
             y: 20.0,
             z: 30.0,
         });
-        let transform = body_root_transform(&object, pelvis_height);
+        // No worn shoes, so no extra plant height (R17).
+        let transform = body_root_transform(&object, pelvis_height, 0.0);
         // Second Life (10, 20, 30) → Bevy (10, 30, -20), then lowered in Y by the
         // pelvis height.
         assert_eq!(
@@ -2495,6 +2565,36 @@ mod tests {
                 .rotation
                 .abs_diff_eq(sl_to_bevy_rotation(), 1.0e-6)
         );
+    }
+
+    /// A worn shoe raises the avatar (R17): a `Shoe_Heels`-style `param_skeleton`
+    /// offsetting `mFootLeft` / `mFootRight` downward at full weight yields a
+    /// positive plant lift equal to that downward offset, while no shoe yields
+    /// none.
+    #[test]
+    fn shoe_offset_lifts_the_body() -> Result<(), Box<dyn core::error::Error>> {
+        use sl_client_bevy::{SkeletalDeformations, VisualParams};
+        // A transmitted shoe-heel param (id 0) offsetting the foot bones down by
+        // 0.08 m at full weight, mirroring `avatar_lad.xml`'s `Shoe_Heels`.
+        let lad = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="0" group="0" name="Shoe_Heels" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mFootLeft" scale="0 0 0" offset="0 0 -0.08"/>
+        <bone name="mFootRight" scale="0 0 0" offset="0 0 -0.08"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+</linden_avatar>"#;
+        let params = VisualParams::from_xml(lad)?;
+        // Full heel → planted 0.08 m higher.
+        let full = SkeletalDeformations::from_appearance(&params, &[255]);
+        assert!((super::shoe_lift(&full) - 0.08).abs() < 1.0e-4);
+        // No heel → no lift.
+        let none = SkeletalDeformations::from_appearance(&params, &[0]);
+        assert!(super::shoe_lift(&none).abs() < 1.0e-6);
+        Ok(())
     }
 
     /// Each body region keys its visibility off its own baked slot — the head

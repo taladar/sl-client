@@ -711,6 +711,7 @@ mod tests {
             components: 4,
             discard_level: sl_proto::DiscardLevel::FULL,
             pixels: Bytes::from(pixels),
+            aux: None,
         }
     }
 

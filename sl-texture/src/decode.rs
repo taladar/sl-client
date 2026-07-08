@@ -20,13 +20,25 @@ pub struct DecodedImage {
     pub width: u32,
     /// Decoded image height in pixels (at [`Self::discard_level`]).
     pub height: u32,
-    /// The source codestream's component count (1 = grey, 3 = RGB, 4 = RGBA),
-    /// retained as metadata; [`Self::pixels`] is always expanded to RGBA8.
+    /// The source codestream's component count (1 = grey, 3 = RGB, 4 = RGBA,
+    /// 5 = a Second Life server "Sunshine" avatar bake, `R G B alpha mask`),
+    /// retained as metadata; [`Self::pixels`] is always expanded to RGBA8 from
+    /// the first four source channels, and a 5th channel is kept in
+    /// [`Self::aux`].
     pub components: u16,
     /// The level of detail these pixels represent.
     pub discard_level: DiscardLevel,
     /// Tightly packed 8-bit RGBA pixels, `width * height * 4` bytes, row-major.
+    /// For a Second Life 5-component bake this is `R G B alpha` — the first four
+    /// channels, alpha included (matching the reference viewer's
+    /// `decodeChannels(.., 0, 4)`).
     pub pixels: Bytes,
+    /// The auxiliary 5th channel of a Second Life server avatar bake — the
+    /// clothing/bump "mask" (`M` of the `RGBHM` layout) the reference viewer
+    /// decodes separately (`decodeChannels(.., 4, 4)`) as the morph/material
+    /// mask — one byte per pixel, `width * height` bytes, row-major. `None` for
+    /// any source with four or fewer components.
+    pub aux: Option<Bytes>,
 }
 
 impl DecodedImage {
@@ -91,11 +103,9 @@ pub fn decode_j2c(
         .map_err(|error| DecodeError::Codec(error.to_string()))?;
     let components = u16::try_from(image.num_components()).unwrap_or(0);
     // A Second Life server ("Sunshine") avatar bake is a 5-component J2C
-    // (`R, G, B, bump, clothing`), which `jpeg2k`'s `get_pixels` rejects (it only
-    // maps 1–4 components). Take the diffuse RGB from the first three channels and
-    // drop the bump/clothing aux channels (opaque alpha), matching the reference
-    // viewer, which decodes a baked texture with `decodeChannels(.., 0, 4)` and
-    // uses just the colour for the opaque body.
+    // (`R G B alpha mask`), which `jpeg2k`'s `get_pixels` rejects (it only maps
+    // 1–4 components), so it is read channel by channel instead — keeping the
+    // composited alpha and the aux mask (see `decode_multicomponent`).
     if image.num_components() > 4 {
         return decode_multicomponent(&image, discard_level);
     }
@@ -115,19 +125,24 @@ pub fn decode_j2c(
         components,
         discard_level,
         pixels: Bytes::from(pixels),
+        aux: None,
     })
 }
 
-/// Decodes a J2C with more than four components — a Second Life server avatar bake
-/// (`R, G, B, bump, clothing`) — into opaque RGBA, taking the diffuse RGB from the
-/// first three components and dropping the bump/clothing aux channels.
+/// Decodes a J2C with more than four components — a Second Life server "Sunshine"
+/// avatar bake, whose 5 channels are `R G B alpha mask` (the reference viewer's
+/// `RGBHM`: colour, heightfield/alpha, clothing mask) — into RGBA8 plus the
+/// separate aux mask channel.
 ///
 /// `jpeg2k`'s [`get_pixels`](jpeg2k::Image::get_pixels) only maps 1–4 components,
-/// so a 5-component bake is read here from its individual components instead. A
-/// component whose sample resolution differs from the image (a subsampled aux
-/// channel) is ignored — only the first three (full-resolution) colour channels
-/// are used. Reports [`components`](DecodedImage::components) as 3 so the alpha is
-/// treated as absent (a wholly opaque bake).
+/// so a 5-component bake is read here from its individual components instead. The
+/// first four full-resolution channels become the RGBA8 [`pixels`](DecodedImage::pixels)
+/// — keeping the composited alpha (channel 3), which is what makes a hair bake
+/// soft or a bald/mesh-hair bake transparent (R16) — matching the reference
+/// viewer's `decodeChannels(.., 0, 4)`. The 5th channel (the clothing/bump mask)
+/// is kept in [`aux`](DecodedImage::aux), mirroring the reference viewer's second
+/// `decodeChannels(.., 4, 4)` pass; a channel whose sample resolution differs from
+/// the image (a subsampled aux) is dropped rather than misaligned.
 #[cfg(feature = "decode")]
 fn decode_multicomponent(
     image: &jpeg2k::Image,
@@ -142,12 +157,14 @@ fn decode_multicomponent(
         return Err(DecodeError::Empty);
     }
     let comps = image.components();
-    // The first three components as full 8-bit channels; a monochrome source (only
-    // one component) replicates its single channel across RGB.
+    // Each source component as full 8-bit samples; a component absent or at a
+    // different resolution than the image yields an empty vec (handled per use).
     let channel = |index: usize| -> Vec<u8> {
         comps
             .get(index)
-            .map_or_else(Vec::new, |comp| comp.data_u8().collect())
+            .map(|comp| comp.data_u8().collect::<Vec<u8>>())
+            .filter(|samples| samples.len() >= pixel_count)
+            .unwrap_or_default()
     };
     let red = channel(0);
     if red.len() < pixel_count {
@@ -155,20 +172,29 @@ fn decode_multicomponent(
     }
     let green = channel(1);
     let blue = channel(2);
+    // The composited alpha (channel 3); a source lacking it stays fully opaque.
+    let alpha = channel(3);
     let mut pixels = Vec::with_capacity(pixel_count.saturating_mul(4));
     for index in 0..pixel_count {
         let r = red.get(index).copied().unwrap_or(0);
         pixels.push(r);
         pixels.push(green.get(index).copied().unwrap_or(r));
         pixels.push(blue.get(index).copied().unwrap_or(r));
-        pixels.push(OPAQUE_ALPHA);
+        pixels.push(alpha.get(index).copied().unwrap_or(OPAQUE_ALPHA));
     }
+    // The clothing/bump mask (channel 4), kept for later material use; dropped if
+    // the source has no full-resolution 5th channel.
+    let aux = {
+        let mask = channel(4);
+        (mask.len() >= pixel_count).then(|| Bytes::from(mask))
+    };
     Ok(DecodedImage {
         width,
         height,
-        components: 3,
+        components: u16::try_from(comps.len()).unwrap_or(0),
         discard_level,
         pixels: Bytes::from(pixels),
+        aux,
     })
 }
 
@@ -285,11 +311,17 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
     let mut width = image.width;
     let mut height = image.height;
     let mut pixels = image.pixels.to_vec();
+    // Downsample the aux mask channel (R16) in lockstep so a lowered LOD keeps it.
+    let mut aux = image.aux.as_ref().map(|mask| mask.to_vec());
     for _step in 0..steps {
         if width <= 1 || height <= 1 {
             break;
         }
-        let (halved, next_width, next_height) = halve_rgba8(&pixels, width, height);
+        let (halved, next_width, next_height) =
+            halve_channels(&pixels, width, height, RGBA_CHANNELS);
+        if let Some(mask) = &aux {
+            aux = Some(halve_channels(mask, width, height, 1).0);
+        }
         pixels = halved;
         width = next_width;
         height = next_height;
@@ -300,6 +332,7 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         components: image.components,
         discard_level: target,
         pixels: Bytes::from(pixels),
+        aux: aux.map(Bytes::from),
     }
 }
 
@@ -312,28 +345,36 @@ fn sample(pixels: &[u8], base: usize, channel: usize) -> u16 {
         .map_or(0, u16::from)
 }
 
-/// Halves an RGBA8 image once with a 2×2 box filter, returning the new pixels and
-/// dimensions. Each output channel is the average of the four covered input
-/// samples. Assumes `pixels` holds `width * height * 4` bytes.
+/// Halves an RGBA8 image once with a 2×2 box filter — a [`halve_channels`] at the
+/// canonical [`RGBA_CHANNELS`] stride.
+#[cfg(test)]
 fn halve_rgba8(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+    halve_channels(pixels, width, height, RGBA_CHANNELS)
+}
+
+/// Halves an interleaved `channels`-per-pixel image once with a 2×2 box filter,
+/// returning the new pixels and dimensions. Each output channel is the average of
+/// the four covered input samples. Assumes `pixels` holds `width * height *
+/// channels` bytes (RGBA8 body pixels, or a single-channel aux mask).
+fn halve_channels(pixels: &[u8], width: u32, height: u32, channels: usize) -> (Vec<u8>, u32, u32) {
     let out_width = (width >> 1_u32).max(1);
     let out_height = (height >> 1_u32).max(1);
     let width_usize = usize::try_from(width).unwrap_or(0);
-    let stride = width_usize.saturating_mul(RGBA_CHANNELS);
+    let stride = width_usize.saturating_mul(channels);
     let out_w = usize::try_from(out_width).unwrap_or(0);
     let out_h = usize::try_from(out_height).unwrap_or(0);
-    let mut out = Vec::with_capacity(out_w.saturating_mul(out_h).saturating_mul(RGBA_CHANNELS));
+    let mut out = Vec::with_capacity(out_w.saturating_mul(out_h).saturating_mul(channels));
 
     for out_y in 0..out_h {
         let top = out_y.saturating_mul(2).saturating_mul(stride);
         let bottom = top.saturating_add(stride);
         for out_x in 0..out_w {
-            let left = out_x.saturating_mul(2).saturating_mul(RGBA_CHANNELS);
+            let left = out_x.saturating_mul(2).saturating_mul(channels);
             let base00 = top.saturating_add(left);
-            let base01 = base00.saturating_add(RGBA_CHANNELS);
+            let base01 = base00.saturating_add(channels);
             let base10 = bottom.saturating_add(left);
-            let base11 = base10.saturating_add(RGBA_CHANNELS);
-            for channel in 0..RGBA_CHANNELS {
+            let base11 = base10.saturating_add(channels);
+            for channel in 0..channels {
                 let sum = sample(pixels, base00, channel)
                     .saturating_add(sample(pixels, base01, channel))
                     .saturating_add(sample(pixels, base10, channel))
@@ -367,6 +408,7 @@ mod tests {
             components: 4,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from(pixels),
+            aux: None,
         }
     }
 

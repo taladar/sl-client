@@ -339,6 +339,7 @@ mod tests {
             components: 4,
             discard_level: DiscardLevel::FULL,
             pixels: Bytes::from(vec![0x7F_u8; 2 * 2 * 4]),
+            aux: None,
         };
         let image = to_bevy_image(&decoded);
         assert_eq!(image.width(), 2);

@@ -2096,31 +2096,52 @@ avatar, so they are collected here to be worked one at a time.
   ranges even parse on SL. The PBR-terrain case depends on Phase 27 for the
   material assets. Reference: `LLVOSurfacePatch` / `LLDrawPoolTerrain` PBR path,
   `RenderTerrainPBREnabled`, `LLTerrainPaintMap`.
-- [ ] **R16. Linden system hair shows on mesh-hair avatars**
-  (`sl-client-bevy` / `sl-avatar`). Surfaced during the P20.2 aditi session:
-  the default Linden **system hair** base-mesh part (`avatar_hair.llm`, the
-  helmet-shaped scalp mesh) keeps rendering even on avatars that wear a
-  **rigged mesh hair** attachment (or no hair at all), where the reference
-  viewer hides it — so the default hair helmet pokes through the worn hair.
-  This is the hair analogue of the P13.5 conditional part visibility already
-  done for the skirt / mesh body: a worn mesh hair (or the appearance's
-  baked-hair / bald signal) should suppress the system hair part. Investigate
-  whether the trigger is a worn mesh-hair attachment, an `IMG_USE_BAKED_HAIR` /
-  bald-bake signal, or the hair bake's own alpha not being applied (so it reads
-  as a solid helmet rather than soft hair). Reference:
-  `LLVOAvatar::updateMeshVisibility`, the baked-hair `IMG_USE_BAKED_*` hide,
-  `avatar_lad.xml` hair `<mesh>`.
-- [ ] **R17. Shoe height / heel offset not applied to avatar placement**
-  (`sl-client-bevy` / `sl-avatar`). Surfaced during the P20.2 aditi session:
-  the worn **shoe** wearable's height adjustment — the heel / platform offset
-  that raises the avatar so its feet rest on the ground (the `Shoe_Heel_Height`
-  / `Shoe_Platform_Height` visual params and the resulting foot-to-ground /
-  hover correction) — is not taken into account, so a shoe-wearing avatar sinks
-  into or floats above the ground. Our body is currently planted by the fixed
-  pelvis rest height (P13.2); the shoe's heel/platform must extend the
-  pelvis-to-foot distance so the placement follows. Reference: Firestorm
-  `LLVOAvatar` `mPelvisToFoot` / `mBodySize` computation and the shoe
-  wearable's height params.
+- [x] **R16. Linden system hair shows on mesh-hair avatars**
+  (`sl-texture`). Surfaced during the P20.2 aditi session: the default Linden
+  **system hair** base-mesh part (`avatar_hair.llm`, the helmet-shaped scalp
+  mesh) kept rendering as a solid **dome** even on avatars that wear a **rigged
+  mesh hair** attachment (or are bald), where the reference viewer hides it.
+  **Root cause** (the third candidate — the hair bake's own alpha not being
+  applied): a Second Life server "Sunshine" bake is a **5-component** J2C, whose
+  channels are `R G B alpha mask` (the reference's `RGBHM`: colour,
+  heightfield/**alpha**, clothing mask — `llviewertexlayer.cpp`). Our
+  `decode_multicomponent` took only RGB and reported `components: 3`, so **every
+  modern-SL bake was classified fully opaque** and the composited alpha (which
+  makes a hair bake soft and a bald/mesh-hair bake transparent) was thrown
+  away — the scalp mesh then read as a solid helmet and the P14.3
+  transparent-region hide never fired. **Fix:** `decode_multicomponent` now
+  keeps the first four
+  channels — RGB **plus the composited alpha (channel 3)** — as the RGBA8 pixels
+  (matching the reference viewer's `decodeChannels(.., 0, 4)`), so the existing
+  P14.3 pipeline classifies a bald/mesh-hair hair bake `Transparent` (region
+  hidden) or `Masked` (soft hair) with no rendering-code change. The 5th channel
+  (the clothing/bump mask) is preserved in a new `DecodedImage::aux` field,
+  mirroring the reference's separate `decodeChannels(.., 4, 4)` pass, for later
+  material use; `downsample` carries it in lockstep. Confirmed live on aditi
+  (own + nearby avatars): the hair dome is gone. Reference:
+  `LLViewerTexLayerSetBuffer::readBackAndUpload` (`baked_image_components = 5`),
+  `LLImageJ2C::decodeChannels`, `LLVOAvatar::updateMeshVisibility`.
+- [x] **R17. Shoe height / heel offset not applied to avatar placement**
+  (`sl-client-bevy-viewer`). Surfaced during the P20.2 aditi session: the worn
+  **shoe** wearable's height adjustment — the heel / platform offset that raises
+  the avatar so its feet rest on the ground — was not taken into account, so a
+  shoe-wearing avatar sank into or floated above the ground. The body was
+  planted only by the fixed pelvis rest height (P13.2), ignoring the shoe. The
+  shoe height is **already a skeletal deformation** we resolve: the `Shoe_Heels`
+  (id 197, driven by the transmitted `Heel Height` id 198) and `Shoe_Platform`
+  (id 502) `param_skeleton`s offset `mFootLeft` / `mFootRight` downward in Z, so
+  the reference viewer's `computeBodySize` folds that offset into
+  `mPelvisToFoot` (`- foot.z * ankle_scale.z`) and stands the avatar taller.
+  **Fix:** a per-agent `pelvis_lift`, computed from the resolved deformations as
+  `-offset(mFootLeft).z * (1 + scale(mAnkleLeft).z)` (clamped ≥ 0 — a shoe only
+  ever raises), is added to the pelvis rest height when planting the body root;
+  `apply_avatar_appearance` re-plants an already-spawned, possibly-stationary
+  body the moment its shoe lift changes (a disjoint anchor query) rather than
+  waiting for its next position update. Unit-tested
+  (`shoe_offset_lifts_the_body`); not visually confirmed against a shod avatar
+  this session (the default own avatar wears no shoes and no second avatar was
+  in view). Reference: `LLAvatarAppearance::computeBodySize` `mPelvisToFoot`,
+  `avatar_lad.xml` `Shoe_Heels` / `Shoe_Platform` `param_skeleton`.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

@@ -231,6 +231,9 @@ impl BakedImage {
             components: RGBA_CHANNELS_U16,
             discard_level: DiscardLevel::FULL,
             pixels: bytes::Bytes::copy_from_slice(&self.pixels),
+            // A client-side composited bake carries its coverage in the RGBA
+            // alpha channel, not a separate Second Life 5-component aux mask.
+            aux: None,
         }
     }
 }
@@ -608,6 +611,7 @@ mod tests {
             components,
             discard_level: sl_proto::DiscardLevel::FULL,
             pixels: Bytes::from(pixels),
+            aux: None,
         }
     }
 
