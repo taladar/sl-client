@@ -73,6 +73,13 @@ pub(crate) struct MeshManager {
     /// The decoded rig skin of each mesh that carries one (P17.2), shared like
     /// [`decoded`](Self::decoded); absent for a mesh with no skin block.
     skins: HashMap<MeshKey, Arc<MeshSkin>>,
+    /// Requests made before the region's mesh capability was known, held here (at
+    /// their base priority) instead of failed. A fetch issued before the seed caps
+    /// arrive would fail permanently ("mesh capability not available"); these are
+    /// drained and issued for real by [`retry_pending`](Self::retry_pending) once
+    /// the cap is set. (Object updates normally arrive after the caps, so this is a
+    /// latent-race guard rather than a routinely-hit path.)
+    pending: HashMap<MeshKey, Priority>,
 }
 
 impl FromWorld for MeshManager {
@@ -90,6 +97,7 @@ impl FromWorld for MeshManager {
             requests: HashMap::new(),
             decoded: HashMap::new(),
             skins: HashMap::new(),
+            pending: HashMap::new(),
         }
     }
 }
@@ -115,6 +123,15 @@ impl MeshManager {
         if id.uuid().is_nil() || self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
             return;
         }
+        // The fetch needs the region's mesh capability. If it is not set yet (a
+        // rare race — object updates usually arrive after the seed caps), hold the
+        // request rather than spawn a fetch that would fail for good;
+        // `retry_pending` issues it once the cap is up.
+        if !self.fetcher.has_cap_url() {
+            let _previous = self.pending.insert(id, priority);
+            return;
+        }
+        self.pending.remove(&id);
         let request = self.store.request(id, MeshLod::FINEST, priority);
         let task_request = request.clone();
         let store = self.store.clone();
@@ -171,6 +188,21 @@ impl MeshManager {
         self.fetcher.set_cap_url(url);
     }
 
+    /// Issue any requests that were made before the mesh capability was known (see
+    /// [`pending`](Self::pending)), now that it is. A no-op while the cap is unset
+    /// or nothing is pending. Call this whenever the cap is (re)set.
+    pub(crate) fn retry_pending(&mut self) {
+        if self.pending.is_empty() || !self.fetcher.has_cap_url() {
+            return;
+        }
+        // Drain first, then re-issue: `request` removes each id from `pending` and
+        // spawns its fetch now the cap resolves.
+        let pending: Vec<(MeshKey, Priority)> = self.pending.drain().collect();
+        for (id, priority) in pending {
+            self.request(id, priority);
+        }
+    }
+
     /// A point-in-time snapshot of the mesh fetch/decode pipeline (P19.2), for
     /// the diagnostics overlay: entry counts bucketed by stage plus the
     /// cumulative disk-cache-hit / GC counters.
@@ -225,7 +257,7 @@ fn mesh_cache_dir() -> Option<PathBuf> {
 /// capability map is (re)discovered, preferring `GetMesh2` over `GetMesh`.
 pub(crate) fn update_mesh_caps(
     mut capabilities: MessageReader<SlCapabilities>,
-    manager: Res<MeshManager>,
+    mut manager: ResMut<MeshManager>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
         let url = map
@@ -234,6 +266,8 @@ pub(crate) fn update_mesh_caps(
             .cloned();
         manager.set_cap_url(url);
     }
+    // Issue any requests parked while the mesh cap was still unknown.
+    manager.retry_pending();
 }
 
 /// Poll the in-flight fetch tasks; move each completed decode into the shared

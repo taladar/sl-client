@@ -123,6 +123,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::estate_info::EstateInfoCase),
         Box::new(crate::cases::estate_access::EstateAccess),
         Box::new(crate::cases::map_blocks_items::MapBlocksItems),
+        Box::new(crate::cases::terrain_composition::TerrainComposition),
         Box::new(crate::cases::teleport_local_phases::TeleportLocalPhases),
         Box::new(crate::cases::teleport_failed::TeleportFailed),
         Box::new(crate::cases::teleport_cross_region::TeleportCrossRegion),

@@ -65,6 +65,22 @@ pub struct RegionIdentity {
     pub terrain: RegionTerrainComposition,
 }
 
+/// The four default ground ("detail") texture ids a region falls back to when its
+/// `RegionHandshake` leaves a `TerrainDetail` slot **nil** — ordered lowest to
+/// highest ground: dirt, grass, mountain, rock. These are the standard Linden
+/// terrain textures (`indra_constants.h` `TERRAIN_DIRT/GRASS/MOUNTAIN/ROCK_DETAIL`),
+/// which the reference viewer seeds its `LLVLComposition` with and, crucially,
+/// *keeps* when the handshake carries a nil id (`LLVLComposition::setDetailAssetID`
+/// early-returns on a null id). Modern Second Life mainland regions commonly send
+/// nil detail ids, so a client that does not apply this fallback shades the ground
+/// flat. Both grids serve these ids as ordinary J2C textures.
+pub const DEFAULT_TERRAIN_DETAIL_TEXTURES: [Uuid; 4] = [
+    Uuid::from_u128(0x0bc5_8228_74a0_7e83_89bc_5c23_464b_cec5),
+    Uuid::from_u128(0x6333_8ede_0037_c4fd_855b_015d_7711_2fc8),
+    Uuid::from_u128(0x303c_d381_8560_7579_23f1_f0a8_8079_9740),
+    Uuid::from_u128(0x53a2_f406_4895_1d13_d541_d2e3_b86b_c19c),
+];
+
 /// A region's terrain texture-compositing parameters, parsed from the
 /// `RegionHandshake` `RegionInfo` block: the four ground ("detail") texture ids
 /// and, for each of the region's four corners, the elevation at which the
@@ -92,6 +108,31 @@ pub struct RegionTerrainComposition {
     /// textures, in the same `00, 01, 10, 11` corner order as
     /// [`Self::start_heights`].
     pub height_ranges: [f32; 4],
+}
+
+impl RegionTerrainComposition {
+    /// The four ground/detail texture ids to actually shade with: the region's
+    /// own [`Self::detail_textures`], but with each **nil** slot replaced by the
+    /// corresponding [`DEFAULT_TERRAIN_DETAIL_TEXTURES`] fallback.
+    ///
+    /// Modern Second Life mainland regions frequently deliver nil `TerrainDetail`
+    /// ids in the `RegionHandshake`; the reference viewer keeps the default Linden
+    /// terrain textures for those slots (see [`DEFAULT_TERRAIN_DETAIL_TEXTURES`]),
+    /// so a client that splats the raw ids shades the ground flat. Use this in
+    /// place of the raw field when requesting the textures to render.
+    #[must_use]
+    pub fn detail_textures_or_default(&self) -> [Uuid; 4] {
+        let mut textures = self.detail_textures;
+        for (texture, default) in textures
+            .iter_mut()
+            .zip(DEFAULT_TERRAIN_DETAIL_TEXTURES.iter())
+        {
+            if texture.is_nil() {
+                *texture = *default;
+            }
+        }
+        textures
+    }
 }
 
 /// A region's agent and object capacity plus estate/terrain/chat/combat settings,
@@ -470,8 +511,42 @@ pub struct RegionCombatSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::SimStatId;
+    use super::{DEFAULT_TERRAIN_DETAIL_TEXTURES, RegionTerrainComposition, SimStatId};
     use pretty_assertions::{assert_eq, assert_ne};
+    use uuid::Uuid;
+
+    /// A nil detail slot falls back to the matching default Linden terrain
+    /// texture, while a non-nil slot is left untouched.
+    #[test]
+    fn nil_detail_textures_fall_back_to_defaults() {
+        let custom = Uuid::from_u128(0xABCD);
+        let terrain = RegionTerrainComposition {
+            // Slots 0 and 2 carry a real id; slots 1 and 3 are nil.
+            detail_textures: [custom, Uuid::nil(), custom, Uuid::nil()],
+            start_heights: [10.0; 4],
+            height_ranges: [60.0; 4],
+        };
+        let effective = terrain.detail_textures_or_default();
+        assert_eq!(effective[0], custom);
+        assert_eq!(effective[1], DEFAULT_TERRAIN_DETAIL_TEXTURES[1]);
+        assert_eq!(effective[2], custom);
+        assert_eq!(effective[3], DEFAULT_TERRAIN_DETAIL_TEXTURES[3]);
+    }
+
+    /// An all-nil handshake (the modern Second Life mainland case) yields exactly
+    /// the four default terrain textures.
+    #[test]
+    fn all_nil_detail_textures_yield_all_defaults() {
+        let terrain = RegionTerrainComposition {
+            detail_textures: [Uuid::nil(); 4],
+            start_heights: [0.0; 4],
+            height_ranges: [1.0; 4],
+        };
+        assert_eq!(
+            terrain.detail_textures_or_default(),
+            DEFAULT_TERRAIN_DETAIL_TEXTURES
+        );
+    }
 
     /// Every known stat id round-trips through its raw value.
     #[test]

@@ -139,6 +139,12 @@ pub(crate) struct WearableAssetManager {
     inflight: HashMap<AssetKey, Task<Option<Vec<u8>>>>,
     /// Successfully downloaded asset bytes by id.
     fetched: HashMap<AssetKey, Vec<u8>>,
+    /// Requests (id → asset class) made before the region's `ViewerAsset`
+    /// capability was known, held here instead of failed, and issued for real by
+    /// [`retry_pending`](Self::retry_pending) once the cap is set. Wearable fetches
+    /// normally follow the handshake's wearables reply — after the caps — so this
+    /// is a latent-race guard rather than a routinely-hit path.
+    pending: HashMap<AssetKey, AssetType>,
 }
 
 impl FromWorld for WearableAssetManager {
@@ -150,6 +156,7 @@ impl FromWorld for WearableAssetManager {
             fetcher,
             inflight: HashMap::new(),
             fetched: HashMap::new(),
+            pending: HashMap::new(),
         }
     }
 }
@@ -160,6 +167,14 @@ impl WearableAssetManager {
         if id.uuid().is_nil() || self.fetched.contains_key(&id) || self.inflight.contains_key(&id) {
             return;
         }
+        // The fetch needs the region's `ViewerAsset` capability. If it is not set
+        // yet, hold the request rather than spawn a fetch that would fail for good;
+        // `retry_pending` issues it once the cap is up.
+        if !self.fetcher.has_cap_url() {
+            let _previous = self.pending.insert(id, asset_type);
+            return;
+        }
+        self.pending.remove(&id);
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
             match store.get(id, asset_type).await {
@@ -173,6 +188,19 @@ impl WearableAssetManager {
     /// Point the store's fetcher at the region's current `ViewerAsset` URL.
     fn set_cap_url(&self, url: Option<String>) {
         self.fetcher.set_cap_url(url);
+    }
+
+    /// Issue any requests parked before the `ViewerAsset` capability was known (see
+    /// [`pending`](Self::pending)), now that it is. A no-op while the cap is unset
+    /// or nothing is pending. Call this whenever the cap is (re)set.
+    fn retry_pending(&mut self) {
+        if self.pending.is_empty() || !self.fetcher.has_cap_url() {
+            return;
+        }
+        let pending: Vec<(AssetKey, AssetType)> = self.pending.drain().collect();
+        for (id, asset_type) in pending {
+            self.request(id, asset_type);
+        }
     }
 }
 
@@ -220,11 +248,13 @@ const fn wearable_asset_type(wearable_type: WearableType) -> AssetType {
 /// region's capability map is (re)discovered.
 pub(crate) fn update_asset_caps(
     mut capabilities: MessageReader<SlCapabilities>,
-    manager: Res<WearableAssetManager>,
+    mut manager: ResMut<WearableAssetManager>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
     }
+    // Issue any wearable-asset requests parked while the cap was still unknown.
+    manager.retry_pending();
 }
 
 /// Drive the request half: once the region handshake completes, ask the sim for

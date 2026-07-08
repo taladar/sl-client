@@ -2113,21 +2113,42 @@ avatar, so they are collected here to be worked one at a time.
   are now bare skin, the shirt sleeves are bounded, the pants end at the ankles,
   and the upper/lower waist seam is clean — matching the Firestorm ground truth.
   Surfaced by the R13 Firestorm side-by-side.
-- [ ] **R15. Terrain texturing wrong on Aditi** (`sl-client-bevy` /
-  `sl-terrain`). P2.2 / P2.3's four-texture elevation splat is verified on the
-  local OpenSim, but on aditi the terrain renders as a **single flat colour**.
-  Two candidate causes to investigate: (1) the four terrain textures are
-  **starved in the fetch queue** behind other assets and never decode — which
-  the Phase 20 on-screen render-priority work may itself fix (terrain textures
-  should rank high), so re-check after Phase 20; (2) an **OpenSim ↔ aditi
-  delivery difference** — e.g. modern SL's **PBR terrain**, where a region may
-  set its four terrain "textures" to GLTF **material** assets (plus a
-  terrain-material-type flag) delivered differently than OpenSim's
-  `RegionHandshake` `TERRAIN_TEXTURE_*` fields (our splat path assumes plain
-  diffuse UUIDs); also verify the `RegionHandshake` terrain UUIDs / elevation
-  ranges even parse on SL. The PBR-terrain case depends on Phase 27 for the
-  material assets. Reference: `LLVOSurfacePatch` / `LLDrawPoolTerrain` PBR path,
-  `RenderTerrainPBREnabled`, `LLTerrainPaintMap`.
+- [x] **R15. Terrain texturing wrong on Aditi** (`sl-proto` / `sl-client-bevy`).
+  Root cause found (new `terrain-composition` conformance case, live on both
+  grids): a modern Second Life mainland region leaves its four
+  `TerrainDetail` ids **nil** in the `RegionHandshake` and drives the ground
+  appearance another way, so the splat had nothing to fetch and rendered
+  flat. This is *not* a parse bug — the case confirmed the `RegionInfo`
+  fields that sit after the terrain block (`RegionID` / `ProductName` /
+  `ProductSKU`) and the elevation bands all parse correctly while the ids
+  are nil (aditi region "Mauve": `product_name = "Mainland / Full Region"`,
+  `start_height 20` / `range 60`, all four detail ids nil). The reference
+  viewer keeps rendering here because `LLVLComposition::setDetailAssetID`
+  early-returns on a nil id, leaving the four
+  **default Linden terrain textures** (dirt / grass / mountain / rock) its
+  composition was seeded with. Fix: a new
+  `RegionTerrainComposition::detail_textures_or_default()` substitutes those
+  defaults (`DEFAULT_TERRAIN_DETAIL_TEXTURES`, in `sl-proto`) for nil slots,
+  and the viewer requests the effective ids — the case shows all four
+  defaults fetch and decode over `GetTexture` on aditi
+  (`terrain_mode = "default-substituted"`, complete). A **second** bug
+  (found by a live viewer run against aditi) stacked on top: the terrain
+  composition is learned during the `RegionHandshake`, *before* the seed
+  capabilities arrive, so the boosted `GetTexture` fetch failed permanently
+  ("capability not available") and the ground stayed flat even with the
+  defaults. Fix: the texture / mesh / wearable / animation managers now
+  **hold** a request whose capability is not set yet and re-issue it once
+  the cap arrives (`retry_pending*`), rather than fail it — a general
+  latent-race guard (terrain is the only consumer that requests before caps,
+  so it was the only one that reliably triggered it). Verified end to end by
+  a windowed run: the aditi mainland ground renders the default dirt / grass
+  / mountain / rock splat, matching Firestorm. Still deferred to
+  **Phase 27**: a region that sends *non-nil* GLTF **material** ids (PBR
+  terrain) — those do not decode as J2C, so the case marks that partial.
+  Candidate cause (1), fetch-queue starvation, was already addressed by the
+  Phase 20 `BOOST_TERRAIN` priority. Reference:
+  `LLVLComposition::setDetailAssetID` / `getDefaultTextures`,
+  `indra_constants.h` `TERRAIN_*_DETAIL`.
 - [x] **R16. Linden system hair shows on mesh-hair avatars**
   (`sl-texture`). Surfaced during the P20.2 aditi session: the default Linden
   **system hair** base-mesh part (`avatar_hair.llm`, the helmet-shaped scalp

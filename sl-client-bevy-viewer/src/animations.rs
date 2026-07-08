@@ -79,6 +79,11 @@ pub(crate) struct AnimationManager {
     /// Ids with no fetchable/decodable asset — a procedural built-in, or a fetch
     /// that failed — so [`request`](Self::request) does not retry them forever.
     unavailable: HashSet<AssetKey>,
+    /// Ids requested before the region's `ViewerAsset` capability was known (and
+    /// with no local `.anim` to read instead), held here so the fetch is not run —
+    /// and the id not marked permanently [`unavailable`](Self::unavailable) — until
+    /// the cap arrives. Drained by [`retry_pending`](Self::retry_pending).
+    pending: HashSet<AssetKey>,
 }
 
 impl AnimationManager {
@@ -96,6 +101,7 @@ impl AnimationManager {
             inflight: HashMap::new(),
             motions: HashMap::new(),
             unavailable: HashSet::new(),
+            pending: HashSet::new(),
         }
     }
 
@@ -125,13 +131,24 @@ impl AnimationManager {
             let _inserted = self.unavailable.insert(id);
             return;
         }
-        let label = builtin_animation(id.uuid()).map_or("uploaded", |builtin| builtin.name);
-        debug!("resolving animation {} (`{label}`)", id.uuid());
-        let store = self.store.clone();
         let local = self
             .viewer_assets
             .as_ref()
             .map(|dir| dir.join(format!("{}.anim", id.uuid())));
+        // A downloadable `.anim` comes over the `ViewerAsset` cap unless a local
+        // built-in file can satisfy it. If neither is available yet (the cap is not
+        // set), hold the request rather than run a fetch that would fail and mark
+        // the animation permanently unavailable; `retry_pending` re-issues it once
+        // the cap arrives.
+        let local_exists = local.as_ref().is_some_and(|path| path.exists());
+        if !local_exists && !self.fetcher.has_cap_url() {
+            let _inserted = self.pending.insert(id);
+            return;
+        }
+        self.pending.remove(&id);
+        let label = builtin_animation(id.uuid()).map_or("uploaded", |builtin| builtin.name);
+        debug!("resolving animation {} (`{label}`)", id.uuid());
+        let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
             // A pre-provisioned built-in `.anim` on disk wins; otherwise fetch the
             // asset over `ViewerAsset`. Both the blocking file read and HTTP fetch
@@ -175,6 +192,19 @@ impl AnimationManager {
     fn set_cap_url(&self, url: Option<String>) {
         self.fetcher.set_cap_url(url);
     }
+
+    /// Re-issue any animation resolves parked before the `ViewerAsset` capability
+    /// was known (see [`pending`](Self::pending)), now that it is. A no-op while the
+    /// cap is unset or nothing is pending. Call this whenever the cap is (re)set.
+    pub(crate) fn retry_pending(&mut self) {
+        if self.pending.is_empty() || !self.fetcher.has_cap_url() {
+            return;
+        }
+        let pending: Vec<AssetKey> = self.pending.drain().collect();
+        for id in pending {
+            self.request(id);
+        }
+    }
 }
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
@@ -213,11 +243,13 @@ fn animation_cache_dir() -> Option<PathBuf> {
 /// capability map is (re)discovered.
 pub(crate) fn update_animation_caps(
     mut capabilities: MessageReader<SlCapabilities>,
-    manager: Res<AnimationManager>,
+    mut manager: ResMut<AnimationManager>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
     }
+    // Re-issue any animation resolves parked while the cap was still unknown.
+    manager.retry_pending();
 }
 
 /// Ingest each `AvatarAnimation` update and request every signalled animation's

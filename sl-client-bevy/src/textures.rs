@@ -155,6 +155,16 @@ impl BevyTextureFetcher {
         self.cap_url.store(url.map(std::sync::Arc::new));
     }
 
+    /// Whether a `GetTexture` capability URL is currently set, i.e. a default
+    /// (by-UUID) texture fetch can succeed. A consumer that issues a boosted
+    /// request during the region handshake — before the seed capabilities have
+    /// arrived — uses this to defer the request until the cap is present rather
+    /// than failing it permanently.
+    #[must_use]
+    pub fn has_default_cap(&self) -> bool {
+        self.cap_url.load().is_some()
+    }
+
     /// The URL a fetch of `id` from `source` targets: for a default texture the
     /// `GetTexture` capability queried by UUID, for a server bake the appearance-
     /// service URL supplied with the source (`FTT_SERVER_BAKE`).

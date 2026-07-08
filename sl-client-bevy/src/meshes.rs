@@ -201,6 +201,14 @@ impl BevyMeshFetcher {
         self.cap_url.store(url.map(std::sync::Arc::new));
     }
 
+    /// Whether the mesh capability URL is currently set, i.e. a fetch can succeed.
+    /// A consumer that might request a mesh before the seed caps have arrived uses
+    /// this to defer the request rather than fail it permanently.
+    #[must_use]
+    pub fn has_cap_url(&self) -> bool {
+        self.cap_url.load().is_some()
+    }
+
     /// Performs the blocking range request, returning the chunk.
     fn fetch_blocking(
         &self,

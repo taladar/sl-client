@@ -366,11 +366,12 @@ fn learn_composition(
             [metres_to_f32(global_x), metres_to_f32(global_y)],
         ));
         if !entry.requested {
-            for (slot, texture) in entry
-                .detail_keys
-                .iter_mut()
-                .zip(identity.terrain.detail_textures.iter())
-            {
+            // A modern Second Life mainland region often leaves its `TerrainDetail`
+            // ids nil; substitute the default Linden terrain textures for those
+            // slots (as the reference viewer's `LLVLComposition` keeps its
+            // defaults) so the ground is shaded rather than left flat (R15).
+            let detail_textures = identity.terrain.detail_textures_or_default();
+            for (slot, texture) in entry.detail_keys.iter_mut().zip(detail_textures.iter()) {
                 if texture.is_nil() {
                     continue;
                 }
@@ -379,7 +380,11 @@ fn learn_composition(
                 // Terrain textures are boosted (P20.2 / `BOOST_TERRAIN`): they are
                 // few, always under the camera, and not ranked by the on-screen
                 // face pass (terrain is a custom material, not a prim face), so a
-                // fixed boost keeps the ground from being starved behind prims.
+                // fixed boost keeps the ground from being starved behind prims. The
+                // composition is learned during the region handshake — before the
+                // seed caps arrive — so the store holds this request until the
+                // `GetTexture` cap is up rather than failing it (see
+                // `TextureManager::request_from`).
                 manager.request_boosted(key, crate::render_priority::TERRAIN_BOOST_PRIORITY);
             }
             entry.requested = true;

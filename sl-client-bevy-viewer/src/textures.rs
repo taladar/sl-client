@@ -126,6 +126,27 @@ pub(crate) struct TextureManager {
     /// blocks (or is mistaken for) the first fetch and at most one LOD change
     /// runs per texture at a time.
     lod_inflight: HashMap<TextureKey, Task<FetchResult>>,
+    /// Default-source (`GetTexture`, by-UUID) requests made before the region's
+    /// `GetTexture` capability was known, held here instead of failed. The terrain
+    /// detail textures are requested the moment the composition is learned — during
+    /// the region handshake, before the seed capabilities arrive — so a fetch
+    /// issued then would fail for good ("GetTexture capability not available") and
+    /// the ground would stay flat (R15). These are drained and issued for real by
+    /// [`retry_pending_default`](Self::retry_pending_default) once the cap is set.
+    pending_default: HashMap<TextureKey, PendingDefaultRequest>,
+}
+
+/// A default-source texture request deferred until the `GetTexture` capability is
+/// available (see [`TextureManager::pending_default`]).
+#[derive(Clone, Copy)]
+struct PendingDefaultRequest {
+    /// The request-time (base) priority the fetch will be admitted at.
+    priority: Priority,
+    /// The discard level (resolution) to fetch first.
+    initial_lod: DiscardLevel,
+    /// Whether the texture is pixel-area LOD managed (an ordinary face) rather than
+    /// fetched at full resolution (a boosted consumer such as terrain).
+    managed: bool,
 }
 
 impl FromWorld for TextureManager {
@@ -144,6 +165,7 @@ impl FromWorld for TextureManager {
             decoded: HashMap::new(),
             managed: HashMap::new(),
             lod_inflight: HashMap::new(),
+            pending_default: HashMap::new(),
         }
     }
 }
@@ -254,6 +276,24 @@ impl TextureManager {
         if self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
             return;
         }
+        // A default (by-UUID `GetTexture`) fetch needs the region's `GetTexture`
+        // capability. If it is not set yet — the terrain detail textures are
+        // requested during the region handshake, before the seed caps arrive —
+        // hold the request rather than spawn a fetch that would fail for good;
+        // `retry_pending_default` issues it once the cap is up (R15). A server-bake
+        // source carries its own URL and needs no such deferral.
+        if matches!(source, RemoteTextureSource::Default) && !self.fetcher.has_default_cap() {
+            self.pending_default.insert(
+                id,
+                PendingDefaultRequest {
+                    priority,
+                    initial_lod,
+                    managed,
+                },
+            );
+            return;
+        }
+        self.pending_default.remove(&id);
         let request = self.store.request(id, initial_lod, priority, source);
         let task_request = request.clone();
         let task = IoTaskPool::get().spawn(async move {
@@ -396,6 +436,29 @@ impl TextureManager {
         self.fetcher.set_cap_url(url);
     }
 
+    /// Issue any default-source requests that were made before the `GetTexture`
+    /// capability was known (see [`pending_default`](Self::pending_default)), now
+    /// that it is. A no-op while the cap is still unset (nothing to fetch against)
+    /// or when nothing is pending. Call this whenever the cap is (re)set.
+    pub(crate) fn retry_pending_default(&mut self) {
+        if self.pending_default.is_empty() || !self.fetcher.has_default_cap() {
+            return;
+        }
+        // Drain first, then re-issue: `request_from` removes each id from
+        // `pending_default` and spawns its fetch now the cap resolves.
+        let pending: Vec<(TextureKey, PendingDefaultRequest)> =
+            self.pending_default.drain().collect();
+        for (id, request) in pending {
+            self.request_from(
+                id,
+                RemoteTextureSource::Default,
+                request.priority,
+                request.initial_lod,
+                request.managed,
+            );
+        }
+    }
+
     /// A point-in-time snapshot of the texture fetch/decode pipeline (P19.2),
     /// for the diagnostics overlay: entry counts bucketed by stage plus the
     /// cumulative disk-cache-hit / GC counters.
@@ -448,14 +511,17 @@ fn texture_cache_dir() -> Option<PathBuf> {
 }
 
 /// Refresh the store fetcher's `GetTexture` capability URL each time the region's
-/// capability map is (re)discovered.
+/// capability map is (re)discovered, then issue any default-source requests that
+/// were parked while the cap was still unknown (the terrain detail textures,
+/// requested during the handshake before the seed caps arrived — R15).
 pub(crate) fn update_texture_caps(
     mut capabilities: MessageReader<SlCapabilities>,
-    manager: Res<TextureManager>,
+    mut manager: ResMut<TextureManager>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_GET_TEXTURE).cloned());
     }
+    manager.retry_pending_default();
 }
 
 /// Poll the in-flight fetch tasks; move each completed decode into the shared
