@@ -18,7 +18,11 @@
 //! - [`drive_render_priority`] recomputes it for every visible face and mesh a
 //!   few times a second and calls [`TextureManager::set_priority`] /
 //!   [`MeshManager::set_priority`], which re-rank the still-queued requests
-//!   in place (a texture the camera turns toward rises, one it turns away sinks).
+//!   in place (a texture the camera turns toward rises, one it turns away sinks);
+//! - the same pass also drives texture level-of-detail (P21.1): it calls
+//!   [`TextureManager::set_lod_for_area`] with each face texture's on-screen
+//!   pixel area, so a small / distant face is fetched (and kept) at a coarser
+//!   discard level and upgraded as the camera approaches.
 //!
 //! Assets the pixel-area pass does not cover — terrain detail textures and avatar
 //! textures / bakes — are requested at a fixed [boost](AVATAR_BOOST_PRIORITY)
@@ -47,7 +51,18 @@ const REPRIORITIZE_INTERVAL_SECS: f32 = 0.25;
 /// the closest, largest prim face rather than merely tying with it on a region
 /// dense with max-pixel-area content — mirroring how the reference viewer's
 /// `BOOST_*` levels force a texture ahead of ordinary pixel-area-ranked content.
-const PIXEL_AREA_CAP: u32 = 2048 * 2048;
+pub(crate) const PIXEL_AREA_CAP: u32 = 2048 * 2048;
+
+/// Whether `priority` sits in the boost band strictly above the pixel-area range
+/// (terrain / avatar / worn-attachment textures). A boosted texture is fetched
+/// at full resolution and excluded from pixel-area LOD management (P21.1): its
+/// skinned / joint-parented entity transform does not reflect its on-screen
+/// size, so the face pass cannot rank it, and it is deliberately loaded at full
+/// fidelity regardless of apparent size (the reference viewer's `BOOST_*`
+/// textures likewise skip discard reduction).
+pub(crate) const fn is_boost_priority(priority: Priority) -> bool {
+    priority.get() > PIXEL_AREA_CAP
+}
 
 /// The fixed boost priority for a region's four terrain detail textures
 /// (`LLGLTexture::BOOST_TERRAIN`): one step into the boost band, so the ground is
@@ -87,7 +102,7 @@ pub(crate) fn drive_render_priority(
     windows: Query<&Window>,
     faces: Query<(&GlobalTransform, &FaceTextureDebug)>,
     objects: Query<(&GlobalTransform, &ObjectDebugInfo)>,
-    textures: Res<TextureManager>,
+    mut textures: ResMut<TextureManager>,
     meshes: Res<MeshManager>,
 ) {
     *since_last += time.delta_secs();
@@ -115,6 +130,10 @@ pub(crate) fn drive_render_priority(
     }
     for (id, area) in texture_area {
         textures.set_priority(id, Priority::from_pixel_area(area));
+        // Pixel-area LOD (P21.1): pick the discard level the on-screen size of
+        // the face warrants and upgrade / downgrade the store entry toward it.
+        // A no-op for a boosted (full-resolution) or not-yet-decoded texture.
+        textures.set_lod_for_area(id, area);
     }
 
     // A mesh object's geometry is still fetching before its face entities exist,

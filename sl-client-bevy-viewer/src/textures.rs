@@ -55,6 +55,29 @@ fn is_absent_texture(id: TextureKey) -> bool {
 /// `None` if the texture could not be fetched or decoded.
 type FetchResult = Option<Arc<DecodedTexture>>;
 
+/// The discard level a pixel-area-managed texture (P21.1) is first requested at,
+/// before its on-screen size is known: a coarse-but-quick placeholder (¼ linear
+/// resolution, 1/16 the data) that loads fast, which the render-priority driver
+/// then refines up or down once the first decode reveals the texture's native
+/// size. This mirrors the reference viewer's progressive (coarse-first) texture
+/// load — a distant texture stays coarse and is never upgraded, so only the
+/// fidelity the view warrants is fetched.
+const INITIAL_MANAGED_DISCARD: DiscardLevel = DiscardLevel::from_clamped(2);
+
+/// The per-texture level-of-detail state of a pixel-area-managed texture (P21.1).
+/// Its presence in [`TextureManager::managed`] marks the texture as LOD-managed
+/// (an ordinary prim / mesh / sculpt diffuse face); boosted textures (terrain,
+/// avatar bakes, worn attachments) are absent and stay at full resolution.
+struct ManagedLod {
+    /// The texture's full (discard-0) pixel dimensions, learned from the first
+    /// decode; `None` until then (so no LOD can be selected yet).
+    native: Option<(u32, u32)>,
+    /// The discard level of the currently decoded image, `None` until the first
+    /// decode. The render-priority driver compares its target against this to
+    /// decide whether to upgrade, downgrade, or leave the texture unchanged.
+    current: Option<DiscardLevel>,
+}
+
 /// Announced (once per texture id) when a background fetch finishes — whether it
 /// decoded or failed. Every consumer that parked work on that texture reads this
 /// and either applies the now-cached image or drops back to its fallback.
@@ -90,6 +113,19 @@ pub(crate) struct TextureManager {
     /// Successfully decoded images by texture id, shared across all consumers so
     /// a texture is fetched and decoded once no matter how many faces use it.
     decoded: HashMap<TextureKey, Arc<DecodedTexture>>,
+    /// Per-texture level-of-detail state for pixel-area-managed textures (P21.1),
+    /// keyed by texture id. Presence marks a texture as LOD-managed; the
+    /// render-priority driver upgrades / downgrades it toward the discard level
+    /// its on-screen size warrants. The texture's initial [`TextureRequest`]
+    /// handle is retained in [`requests`](Self::requests) (rather than dropped on
+    /// resolve) for exactly these, so its store entry stays live for
+    /// [`TextureStore::set_lod`].
+    managed: HashMap<TextureKey, ManagedLod>,
+    /// In-flight level-of-detail changes (P21.1), one per texture, kept separate
+    /// from the initial [`inflight`](Self::inflight) fetch so a re-decode never
+    /// blocks (or is mistaken for) the first fetch and at most one LOD change
+    /// runs per texture at a time.
+    lod_inflight: HashMap<TextureKey, Task<FetchResult>>,
 }
 
 impl FromWorld for TextureManager {
@@ -106,6 +142,8 @@ impl FromWorld for TextureManager {
             inflight: HashMap::new(),
             requests: HashMap::new(),
             decoded: HashMap::new(),
+            managed: HashMap::new(),
+            lod_inflight: HashMap::new(),
         }
     }
 }
@@ -129,7 +167,47 @@ impl TextureManager {
     ///
     /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
     pub(crate) fn request_boosted(&mut self, id: TextureKey, priority: Priority) {
-        self.request_from(id, RemoteTextureSource::Default, priority);
+        // Boosted textures (terrain, avatar layers, sculpt maps that drive
+        // geometry) are fetched at full resolution and are *not* pixel-area LOD
+        // managed (P21.1).
+        self.request_from(
+            id,
+            RemoteTextureSource::Default,
+            priority,
+            DiscardLevel::FULL,
+            false,
+        );
+    }
+
+    /// Ensure an ordinary scene face's diffuse texture `id` is being fetched at
+    /// request-time priority `priority`.
+    ///
+    /// An unboosted face is **pixel-area LOD managed** (P21.1): it is first
+    /// requested at a coarse [placeholder level](INITIAL_MANAGED_DISCARD) and the
+    /// render-priority driver then upgrades / downgrades it via
+    /// [`set_lod_for_area`](Self::set_lod_for_area) to the discard level its
+    /// on-screen size warrants, so a small / distant face fetches only a coarse
+    /// image. A boosted face (an avatar's baked-on-mesh face, a worn attachment —
+    /// whose skinned transform the face pass cannot rank) is instead fetched at
+    /// full resolution, exactly like [`request_boosted`](Self::request_boosted).
+    pub(crate) fn request_face(&mut self, id: TextureKey, priority: Priority) {
+        if crate::render_priority::is_boost_priority(priority) {
+            self.request_from(
+                id,
+                RemoteTextureSource::Default,
+                priority,
+                DiscardLevel::FULL,
+                false,
+            );
+        } else {
+            self.request_from(
+                id,
+                RemoteTextureSource::Default,
+                priority,
+                INITIAL_MANAGED_DISCARD,
+                true,
+            );
+        }
     }
 
     /// Ensure a server-side ("Sunshine") avatar bake `id` is being fetched from the
@@ -143,6 +221,8 @@ impl TextureManager {
             id,
             RemoteTextureSource::ServerBake { url },
             crate::render_priority::AVATAR_BOOST_PRIORITY,
+            DiscardLevel::FULL,
+            false,
         );
     }
 
@@ -151,14 +231,30 @@ impl TextureManager {
     /// pool. The fetch is admitted through the store's priority gate — the request
     /// handle is retained so [`set_priority`](Self::set_priority) can re-rank it
     /// while it waits (P20.2).
-    fn request_from(&mut self, id: TextureKey, source: RemoteTextureSource, priority: Priority) {
-        if is_absent_texture(id)
-            || self.decoded.contains_key(&id)
-            || self.inflight.contains_key(&id)
-        {
+    fn request_from(
+        &mut self,
+        id: TextureKey,
+        source: RemoteTextureSource,
+        priority: Priority,
+        initial_lod: DiscardLevel,
+        managed: bool,
+    ) {
+        if is_absent_texture(id) {
             return;
         }
-        let request = self.store.request(id, DiscardLevel::FULL, priority, source);
+        // A boosted (full-resolution) consumer — an avatar body part, an
+        // attachment, a HUD attachment, or a terrain detail texture — must never
+        // leave this texture below full resolution. If an ordinary prim face had
+        // already registered the *same* texture id for pixel-area LOD (a builder
+        // reusing, say, a terrain texture on a prim), stop managing it and upgrade
+        // it back to full resolution.
+        if !managed && self.managed.remove(&id).is_some() {
+            self.upgrade_to_full(id);
+        }
+        if self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
+            return;
+        }
+        let request = self.store.request(id, initial_lod, priority, source);
         let task_request = request.clone();
         let task = IoTaskPool::get().spawn(async move {
             // The blocking fetch runs on this IoTaskPool thread once the request is
@@ -174,7 +270,105 @@ impl TextureManager {
             }
         });
         let _previous = self.requests.insert(id, (request, priority));
+        if managed {
+            // Register for pixel-area LOD management (P21.1); the retained
+            // request handle keeps its store entry live for later `set_lod`.
+            let _existing = self.managed.entry(id).or_insert(ManagedLod {
+                native: None,
+                current: None,
+            });
+        }
         self.inflight.insert(id, task);
+    }
+
+    /// Upgrade or downgrade a pixel-area-managed texture (P21.1) toward the
+    /// discard level its on-screen `pixel_area` warrants, via
+    /// [`TextureStore::set_lod`]. Called by the render-priority driver each
+    /// throttled frame with the largest area any visible face using the texture
+    /// covers.
+    ///
+    /// A no-op unless the texture is LOD-managed, has decoded at least once (so
+    /// its native size — and hence the level a given area maps to — is known),
+    /// the chosen level differs from the current one, and no LOD change for it is
+    /// already running. The store's `set_lod` fetches + decodes on an upgrade and
+    /// downsamples in place on a downgrade (waiting for any GPU read-lease to
+    /// release before it frees the finer buffer). The completed image is folded
+    /// in by [`poll_textures`], which re-uploads it in place.
+    pub(crate) fn set_lod_for_area(&mut self, id: TextureKey, pixel_area: f32) {
+        let Some(state) = self.managed.get(&id) else {
+            return;
+        };
+        let (Some((width, height)), Some(current)) = (state.native, state.current) else {
+            // Not decoded yet — the native size the level depends on is unknown.
+            return;
+        };
+        let desired = DiscardLevel::for_pixel_area(pixel_area, width, height);
+        if desired == current || self.lod_inflight.contains_key(&id) {
+            return;
+        }
+        let Some((request, _base)) = self.requests.get(&id) else {
+            // The retained handle is what keeps the entry live; without it we
+            // cannot drive a LOD change.
+            return;
+        };
+        let entry = request.entry();
+        let store = self.store.clone();
+        debug!(
+            "texture {id} pixel-area LOD: discard {} -> {} (area {pixel_area:.0} px, native {width}x{height})",
+            current.get(),
+            desired.get(),
+        );
+        let task = IoTaskPool::get().spawn(async move {
+            if let Err(error) = store.set_lod(&entry, desired).await {
+                warn!(
+                    "texture {id} LOD change to discard {} failed: {error}",
+                    desired.get()
+                );
+            }
+            entry.image()
+        });
+        let _previous = self.lod_inflight.insert(id, task);
+    }
+
+    /// Upgrade a (now un-managed) texture back to full resolution and keep it
+    /// there — used when a boosted consumer claims a texture a prim face had been
+    /// pixel-area LOD managing (see [`request_from`](Self::request_from)). A
+    /// no-op if the texture is already at full resolution or its retained request
+    /// handle is gone.
+    fn upgrade_to_full(&mut self, id: TextureKey) {
+        let Some((request, _base)) = self.requests.get(&id) else {
+            return;
+        };
+        let entry = request.entry();
+        if entry.current_discard() == Some(DiscardLevel::FULL) {
+            return;
+        }
+        let store = self.store.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            if let Err(error) = store.set_lod(&entry, DiscardLevel::FULL).await {
+                warn!("texture {id} upgrade to full resolution failed: {error}");
+            }
+            entry.image()
+        });
+        // Supersedes any coarser LOD change still queued for this texture.
+        let _previous = self.lod_inflight.insert(id, task);
+    }
+
+    /// Record a freshly decoded image as the current one for `id`: update the
+    /// shared decoded cache and, for a pixel-area-managed texture, its learned
+    /// native (discard-0) size and current level (P21.1). The native size is the
+    /// decoded size scaled back up by the discard level (each level halves both
+    /// dimensions).
+    fn record_decoded(&mut self, id: TextureKey, image: Arc<DecodedTexture>) {
+        if let Some(state) = self.managed.get_mut(&id) {
+            let scale = u32::from(image.discard_level.get());
+            state.native = Some((
+                image.width.checked_shl(scale).unwrap_or(image.width),
+                image.height.checked_shl(scale).unwrap_or(image.height),
+            ));
+            state.current = Some(image.discard_level);
+        }
+        let _previous = self.decoded.insert(id, image);
     }
 
     /// Re-rank an in-flight texture request from the on-screen pixel area the
@@ -281,13 +475,34 @@ pub(crate) fn poll_textures(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
-        // Drop the schedulable request handle now the fetch is done — the decoded
-        // pixels live in `decoded`, independent of the store entry (P20.2).
-        let _request = manager.requests.remove(&id);
+        // Drop the schedulable request handle now the initial fetch is done — the
+        // decoded pixels live in `decoded`, independent of the store entry (P20.2)
+        // — *unless* the texture is pixel-area LOD managed (P21.1), where the
+        // retained handle keeps its store entry live for later `set_lod`.
+        if !manager.managed.contains_key(&id) {
+            let _request = manager.requests.remove(&id);
+        }
         if let Some(image) = result {
-            let _previous = manager.decoded.insert(id, image);
+            manager.record_decoded(id, image);
         }
         decoded.write(TextureDecoded(id));
+    }
+
+    // Fold in completed level-of-detail changes (P21.1): the store entry now
+    // holds the finer / coarser image, so refresh the shared decoded cache and
+    // re-announce the texture so `apply_prim_textures` re-uploads it in place.
+    let mut lod_finished: Vec<(TextureKey, FetchResult)> = Vec::new();
+    for (&id, task) in &mut manager.lod_inflight {
+        if let Some(result) = block_on(poll_once(task)) {
+            lod_finished.push((id, result));
+        }
+    }
+    for (id, result) in lod_finished {
+        let _removed = manager.lod_inflight.remove(&id);
+        if let Some(image) = result {
+            manager.record_decoded(id, image);
+            decoded.write(TextureDecoded(id));
+        }
     }
 }
 
@@ -355,7 +570,7 @@ pub(crate) fn face_material(
             .entry(texture_id)
             .or_default()
             .push(handle.clone());
-        manager.request_boosted(texture_id, priority);
+        manager.request_face(texture_id, priority);
     }
     handle
 }
@@ -372,6 +587,17 @@ pub(crate) fn apply_prim_textures(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
+        // Level-of-detail re-decode (P21.1): a texture already uploaded to the GPU
+        // whose store entry the driver upgraded / downgraded. Refresh the Bevy
+        // image *behind its existing handle*, so every material sampling it shows
+        // the new resolution without any material re-patching.
+        if let Some(handle) = prim_textures.images.get(&id).cloned() {
+            if let Some(image) = manager.decoded(id) {
+                let refreshed = build_prim_image(image);
+                let _replaced = images.insert(&handle, refreshed);
+            }
+            continue;
+        }
         let Some(parked) = prim_textures.pending.remove(&id) else {
             // Not a texture any prim face is waiting on (e.g. a terrain texture).
             continue;
@@ -411,24 +637,32 @@ fn prim_image(
         return Some(handle.clone());
     }
     let decoded = manager.decoded(id)?;
+    let handle = images.add(build_prim_image(decoded));
+    let _inserted = prim_textures.images.insert(id, handle.clone());
+    Some(handle)
+}
+
+/// Build the Bevy [`Image`] for a prim/mesh/sculpt face's decoded diffuse
+/// texture, with the repeating address mode Second Life object faces need.
+///
+/// Second Life object faces tile their texture (the per-face `scale_s` /
+/// `scale_t` repeats push the UVs outside `[0, 1]`), and the reference viewer
+/// samples them with a wrapping address mode. Bevy's default sampler is
+/// clamp-to-edge, which — on a face with repeats above one — smears the edge
+/// texel across every out-of-range tile instead of repeating it (a texture
+/// "coherent in the centre, streaked toward the edges"). Sample prim/mesh face
+/// textures with a repeating sampler so tiled faces render as the reference
+/// viewer does. Shared by the first upload and a level-of-detail re-upload
+/// (P21.1).
+fn build_prim_image(decoded: &Arc<DecodedTexture>) -> Image {
     let mut image = to_bevy_image(decoded);
-    // Second Life object faces tile their texture (the per-face `scale_s` /
-    // `scale_t` repeats push the UVs outside `[0, 1]`), and the reference viewer
-    // samples them with a wrapping address mode. Bevy's default sampler is
-    // clamp-to-edge, which — on a face with repeats above one — smears the edge
-    // texel across every out-of-range tile instead of repeating it (a texture
-    // "coherent in the centre, streaked toward the edges"). Sample prim/mesh face
-    // textures with a repeating sampler so tiled faces render as the reference
-    // viewer does.
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
         address_mode_w: ImageAddressMode::Repeat,
         ..ImageSamplerDescriptor::linear()
     });
-    let handle = images.add(image);
-    let _inserted = prim_textures.images.insert(id, handle.clone());
-    Some(handle)
+    image
 }
 
 /// The alpha mode a face's tint colour alone implies: [`AlphaMode::Blend`] when

@@ -204,6 +204,38 @@ impl DiscardLevel {
         let max = header.max_discard_level();
         if self.0 > max { Self(max) } else { self }
     }
+
+    /// Selects the discard level whose decoded resolution matches a desired
+    /// on-screen `pixel_area`, given the texture's full (discard-0) pixel
+    /// dimensions.
+    ///
+    /// Ports the reference viewer's
+    /// `discard = floor(log4(full_texels / virtual_size))`
+    /// (`LLViewerLODTexture::processTextureStats`): each discard step quarters
+    /// the texel count, so the base-4 logarithm of the ratio of full texels to
+    /// the on-screen pixel area is the number of resolution levels to discard.
+    /// Fewer on-screen pixels ⇒ a coarser (larger) level; an object covering at
+    /// least the full texel count selects [`DiscardLevel::FULL`]. Clamps into
+    /// `[FULL, MAX]`; a non-positive or non-finite area (an off-screen /
+    /// behind-camera object) selects [`DiscardLevel::MAX`].
+    #[must_use]
+    pub fn for_pixel_area(pixel_area: f32, full_width: u32, full_height: u32) -> Self {
+        let texels = f64::from(full_width) * f64::from(full_height);
+        let area = f64::from(pixel_area);
+        if !area.is_finite() || area <= 0.0 || texels <= 0.0 {
+            return Self::MAX;
+        }
+        // floor(log4(full_texels / on-screen area)) by repeated division by
+        // four — each discard level quarters the texel count. Avoids a float
+        // `log` (and its lossy back-cast to the integer level).
+        let mut ratio = texels / area;
+        let mut level = 0_u8;
+        while ratio >= 4.0 && level < MAX_DISCARD_LEVEL {
+            ratio /= 4.0;
+            level = level.saturating_add(1);
+        }
+        Self(level)
+    }
 }
 
 /// Reads a big-endian `u16` at `offset` in `data`, or `None` if out of bounds.
@@ -429,6 +461,50 @@ mod tests {
         assert!(!DiscardLevel::MAX.is_at_least_as_fine_as(DiscardLevel::FULL));
         let two = DiscardLevel::from_clamped(2);
         assert!(two.is_at_least_as_fine_as(two));
+    }
+
+    #[test]
+    fn discard_level_for_pixel_area_matches_log4_of_the_texel_ratio() {
+        // A 1024x1024 texture (1_048_576 texels). Each discard level quarters
+        // the texel count, so the level is floor(log4(texels / on-screen area)).
+        let full = |area: f32| DiscardLevel::for_pixel_area(area, 1024, 1024).get();
+        // Covering the full texel count (or more) wants full resolution.
+        assert_eq!(full(1024.0 * 1024.0), 0);
+        assert_eq!(full(4_000_000.0), 0);
+        // A quarter of the texels (512x512 on screen) is one level coarser.
+        assert_eq!(full(512.0 * 512.0), 1);
+        // 256x256 on screen ⇒ discard 2 (1024 → 512 → 256).
+        assert_eq!(full(256.0 * 256.0), 2);
+        // A vanishingly small area saturates at the coarsest level.
+        assert_eq!(full(1.0), DiscardLevel::MAX.get());
+        // A non-positive / non-finite area (off-screen, behind the camera) is
+        // the coarsest level.
+        assert_eq!(
+            DiscardLevel::for_pixel_area(0.0, 1024, 1024),
+            DiscardLevel::MAX
+        );
+        assert_eq!(
+            DiscardLevel::for_pixel_area(-5.0, 1024, 1024),
+            DiscardLevel::MAX
+        );
+        assert_eq!(
+            DiscardLevel::for_pixel_area(f32::NAN, 1024, 1024),
+            DiscardLevel::MAX
+        );
+        // A degenerate (zero-dimension) texture cannot be ranked ⇒ coarsest.
+        assert_eq!(DiscardLevel::for_pixel_area(100.0, 0, 0), DiscardLevel::MAX);
+    }
+
+    #[test]
+    fn discard_level_for_pixel_area_uses_the_native_dimensions() {
+        // The same on-screen area picks a coarser level for a larger native
+        // texture: 128x128 on screen (16_384 px) wants native/16_384 texels.
+        let area = 128.0 * 128.0;
+        // 2048x2048 native ⇒ 4_194_304 / 16_384 = 256 ⇒ log4 = 4.
+        assert_eq!(DiscardLevel::for_pixel_area(area, 2048, 2048).get(), 4);
+        // 512x512 native ⇒ 262_144 / 16_384 = 16 ⇒ log4 = 2. Both resolve to a
+        // 128x128 decoded image, the on-screen size.
+        assert_eq!(DiscardLevel::for_pixel_area(area, 512, 512).get(), 2);
     }
 
     #[test]
