@@ -67,8 +67,9 @@ use crate::diagnostics::{
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
-    ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
-    apply_rigged_attachments, log_suspicious_objects, pick_object, update_objects,
+    ObjectState, PrimLodTargets, adopt_pending_attachments, apply_object_meshes,
+    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, log_suspicious_objects,
+    pick_object, update_objects,
 };
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
@@ -343,6 +344,7 @@ fn run_session(
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
+    .init_resource::<PrimLodTargets>()
     .init_resource::<AvatarState>()
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
@@ -484,8 +486,11 @@ fn run_session(
             pick_object,
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
-            // looks at loads first. Throttled internally.
+            // looks at loads first. Throttled internally. It also picks each plain
+            // prim's tessellation level of detail (P21.3); `apply_prim_lod` then
+            // re-tessellates any prim whose level changed, so it runs after.
             drive_render_priority,
+            apply_prim_lod.after(drive_render_priority),
             update_diagnostics_overlay,
             // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
             // resource on the toggle key, then drive the panel's visibility and

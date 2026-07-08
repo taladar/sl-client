@@ -23,12 +23,17 @@
 //!   [`TextureManager::set_lod_for_area`] with each face texture's on-screen
 //!   pixel area, so a small / distant face is fetched (and kept) at a coarser
 //!   discard level and upgraded as the camera approaches;
-//! - and mesh level-of-detail (P21.2): it computes each mesh object's
+//! - mesh level-of-detail (P21.2): it computes each mesh object's
 //!   [`MeshLod`] from its bounding radius and camera distance
 //!   ([`MeshLod::for_distance`], the reference viewer's `LLVOVolume::calcLOD`)
 //!   and calls [`MeshManager::set_lod_for_area`], so a small / distant mesh is
 //!   fetched (and kept) at a coarser geometry block and upgraded as the camera
-//!   approaches.
+//!   approaches;
+//! - and prim level-of-detail (P21.3): it computes each plain prim's
+//!   [`PrimLod`] the same way ([`PrimLod::for_distance`], the same
+//!   `LLVolumeLODGroup` tier selection) and records it in [`PrimLodTargets`], so
+//!   `apply_prim_lod` re-tessellates a small / distant prim at a coarser detail
+//!   and refines it as the camera approaches.
 //!
 //! Assets the pixel-area pass does not cover — terrain detail textures and avatar
 //! textures / bakes — are requested at a fixed [boost](AVATAR_BOOST_PRIORITY)
@@ -39,10 +44,14 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use sl_client_bevy::{DEFAULT_LOD_FACTOR, MeshKey, MeshLod, Priority, ScreenMetrics, TextureKey};
+use sl_client_bevy::{
+    DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey,
+};
 
 use crate::meshes::MeshManager;
-use crate::objects::{FaceTextureDebug, ObjectDebugInfo};
+use crate::objects::{
+    FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject,
+};
 use crate::textures::TextureManager;
 
 /// How often (seconds) the render-priority pass re-ranks the queued fetches. The
@@ -107,9 +116,10 @@ pub(crate) fn drive_render_priority(
     camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
     windows: Query<&Window>,
     faces: Query<(&GlobalTransform, &FaceTextureDebug)>,
-    objects: Query<(&GlobalTransform, &ObjectDebugInfo)>,
+    objects: Query<(&GlobalTransform, &ObjectDebugInfo, &SceneObject)>,
     mut textures: ResMut<TextureManager>,
     mut meshes: ResMut<MeshManager>,
+    mut prim_targets: ResMut<PrimLodTargets>,
 ) {
     *since_last += time.delta_secs();
     if *since_last < REPRIORITIZE_INTERVAL_SECS {
@@ -147,15 +157,26 @@ pub(crate) fn drive_render_priority(
     // aggregation; the store not fetching that id ignores it.
     let mut mesh_area: HashMap<MeshKey, f32> = HashMap::new();
     let mut mesh_lod: HashMap<MeshKey, MeshLod> = HashMap::new();
-    for (transform, info) in &objects {
-        let Some(asset) = info.render_asset() else {
-            continue;
-        };
+    // Fresh prim LOD targets for this pass (P21.3); `apply_prim_lod` drains them.
+    prim_targets.0.clear();
+    for (transform, info, scene) in &objects {
         // The object's full scale-vector length: its half is the bounding-sphere
         // radius for pixel area, while `LLVOVolume::calcLOD` ranks LOD against the
-        // full length (`getScale().length()`), so the two uses differ (P21.2).
+        // full length (`getScale().length()`), so the two uses differ (P21.2/P21.3).
         let scale_length = Vec3::from_array(info.scale()).length();
         let distance = camera_position.distance(transform.translation());
+        let Some(asset) = info.render_asset() else {
+            // A plain prim (no mesh / sculpt asset) is client-tessellation LOD
+            // managed (P21.3): pick the tier its on-screen size warrants and hand
+            // it to `apply_prim_lod`, which re-tessellates the prim on a change.
+            // Each prim tessellates its own shape, so — unlike a shared mesh asset
+            // — there is no cross-instance aggregation.
+            if scene.category == ObjectCategory::Prim {
+                let desired = PrimLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+                prim_targets.0.insert(scene.scoped_id, desired);
+            }
+            continue;
+        };
         let area = metrics.pixel_area(0.5 * scale_length, distance);
         let mesh_key = MeshKey::from(asset);
         let area_slot = mesh_area.entry(mesh_key).or_insert(0.0);

@@ -103,16 +103,12 @@ impl ShapeFingerprint {
 }
 
 /// A marker component tagging an entity as an in-world object, carrying its
-/// scoped id and render classification for the later rendering phases to query.
+/// scoped id and render classification for the rendering phases to query — the
+/// [`pick_object`] crosshair tool (both fields) and the [`drive_render_priority`]
+/// prim LOD pass (P21.3, keyed off the classification and scoped id).
 ///
-/// P5.1 only spawns the marker; the fields are read by the rendering phases
-/// (P5.2 prims / P7 mesh / P9 sculpt / P10 avatars) that attach geometry keyed
-/// off the classification.
+/// [`drive_render_priority`]: crate::render_priority::drive_render_priority
 #[derive(Component, Debug, Clone, Copy)]
-#[expect(
-    dead_code,
-    reason = "read by the later rendering phases that attach geometry to these entities"
-)]
 pub(crate) struct SceneObject {
     /// The object's scoped (circuit + region-local) id.
     pub(crate) scoped_id: ScopedObjectId,
@@ -221,6 +217,15 @@ struct TrackedObject {
     /// mesh, or a mesh still pending its first decode. Retained so a LOD swap can
     /// despawn the old submeshes and rebuild from the new block.
     mesh_rebuild: Option<PendingMesh>,
+    /// For a **plain prim**, the inputs needed to re-tessellate its face entities
+    /// when the pixel-area LOD driver picks a different [`PrimLod`] for its
+    /// on-screen size (P21.3). `None` for a sculpt, mesh, or non-rendered
+    /// category (none of which is client-tessellation LOD managed).
+    prim_rebuild: Option<PendingPrim>,
+    /// A plain prim's currently tessellated [`PrimLod`] (P21.3), compared against
+    /// the driver's desired level to decide whether to re-tessellate. Meaningless
+    /// (and left at [`PrimLod::FINEST`]) for a non-prim.
+    prim_lod: PrimLod,
     /// Whether this object is an **animated object** (animesh) — its
     /// `ExtendedMesh` param carries the `ANIMATED_MESH_ENABLED` flag. Set on the
     /// linkset root; a worn animesh drives its own control-avatar skeleton, so its
@@ -326,6 +331,36 @@ struct PendingSculpt {
     priority: Priority,
 }
 
+/// A plain prim's deferred re-tessellation inputs (P21.3): the shape, texture
+/// entry, scale, and fetch priority retained so the pixel-area LOD driver can
+/// re-tessellate the prim at a different [`PrimLod`] as its on-screen size
+/// changes, without needing the live [`Object`] (which the driver does not hold).
+///
+/// Only a **plain prim** carries this — a sculpt tessellates from its decoded
+/// map (no [`PrimLod`] input) and a mesh from fetched geometry blocks, so neither
+/// is client-tessellation LOD managed.
+struct PendingPrim {
+    /// The object's quantized prim shape, re-hydrated to a float
+    /// [`PrimShapeFloat`] and re-tessellated at the new level on a LOD swap.
+    shape: PrimShapeParams,
+    /// The object's raw texture-entry bytes, decoded per-face at build time to
+    /// texture each re-tessellated face.
+    texture_entry: Vec<u8>,
+    /// The object's Second Life scale, needed to project planar-texgen faces.
+    scale: [f32; 3],
+    /// The request-time (base) fetch priority for this object's face textures — a
+    /// boost for a worn attachment, else idle (P20.2).
+    priority: Priority,
+}
+
+/// The [`PrimLod`] a pixel-area-managed plain prim is first tessellated at
+/// (P21.3), before the render-priority driver has a camera to size it against —
+/// a coarse placeholder the driver upgrades toward the level the prim's on-screen
+/// size warrants (mirroring the mesh path's [placeholder block][crate::meshes]).
+/// Client tessellation is cheap, but starting coarse keeps a dense region's
+/// initial geometry small and only refines the prims the camera looks at.
+const INITIAL_MANAGED_PRIM_LOD: PrimLod = PrimLod::Low;
+
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
 /// object currently in the scene, keyed by scoped id.
 #[derive(Resource, Default)]
@@ -333,6 +368,17 @@ pub(crate) struct ObjectState {
     /// Every tracked object, keyed by its scoped id.
     objects: HashMap<ScopedObjectId, TrackedObject>,
 }
+
+/// The [`PrimLod`] the render-priority driver (P21.3) wants each plain prim
+/// re-tessellated at, keyed by scoped id. The driver ([`drive_render_priority`])
+/// computes a prim's level from its on-screen size each throttled pass and writes
+/// it here; [`apply_prim_lod`] drains the map and re-tessellates any prim whose
+/// desired level differs from its current one. Kept separate from [`ObjectState`]
+/// because the driver holds no `Commands` / asset resources to rebuild geometry.
+///
+/// [`drive_render_priority`]: crate::render_priority::drive_render_priority
+#[derive(Resource, Default)]
+pub(crate) struct PrimLodTargets(pub(crate) HashMap<ScopedObjectId, PrimLod>);
 
 /// Classify an object from its `pcode` and sculpt/mesh extra parameters.
 fn classify(object: &Object) -> ObjectCategory {
@@ -534,6 +580,7 @@ pub(crate) fn pick_object(
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
     textures: Res<TextureManager>,
     mesh_manager: Res<MeshManager>,
+    state: Res<ObjectState>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyP) {
         return;
@@ -642,6 +689,16 @@ pub(crate) fn pick_object(
             {
                 warn!("pick mesh {asset}: lod={lod:?} managed={managed}");
             }
+            // The live prim level of detail (P21.3): for a plain prim, its current
+            // tessellation level should move toward `High` as the camera
+            // approaches. Aim at a prim face and press the pick key while walking
+            // in to confirm it refines.
+            if let Ok(obj) = scene.get(current)
+                && obj.category == ObjectCategory::Prim
+                && let Some(tracked) = state.objects.get(&obj.scoped_id)
+            {
+                warn!("pick prim {}: lod={:?}", info.full_id, tracked.prim_lod);
+            }
             return;
         }
         let Ok(child_of) = parents.get(current) else {
@@ -696,7 +753,7 @@ fn build_object_geometry(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
-) -> (Vec<Entity>, Option<PendingGeometry>) {
+) -> (Vec<Entity>, Option<PendingGeometry>, Option<PendingPrim>) {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
     let priority = worn_base_priority(object);
@@ -711,12 +768,22 @@ fn build_object_geometry(
                 manager,
                 prim_textures,
                 priority,
+                INITIAL_MANAGED_PRIM_LOD,
             ),
             None,
+            // Retain the re-tessellation inputs so the pixel-area LOD driver can
+            // rebuild this prim at a different level as its on-screen size
+            // changes (P21.3).
+            Some(PendingPrim {
+                shape: object.shape,
+                texture_entry: object.texture_entry.clone(),
+                scale: [object.scale.x, object.scale.y, object.scale.z],
+                priority,
+            }),
         ),
         ObjectCategory::Mesh => {
             let Some(key) = mesh_key(object) else {
-                return (Vec::new(), None);
+                return (Vec::new(), None, None);
             };
             mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -737,6 +804,7 @@ fn build_object_geometry(
                         priority,
                     ),
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -746,12 +814,13 @@ fn build_object_geometry(
                         scale: [object.scale.x, object.scale.y, object.scale.z],
                         priority,
                     })),
+                    None,
                 ),
             }
         }
         ObjectCategory::Sculpt => {
             let Some((map, sculpt_type)) = sculpt_key(object) else {
-                return (Vec::new(), None);
+                return (Vec::new(), None, None);
             };
             manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -772,6 +841,7 @@ fn build_object_geometry(
                         priority,
                     ),
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -782,19 +852,24 @@ fn build_object_geometry(
                         scale: [object.scale.x, object.scale.y, object.scale.z],
                         priority,
                     })),
+                    None,
                 ),
             }
         }
-        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None),
+        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None),
     }
 }
 
-/// Tessellate a plain prim at a fixed high level of detail and spawn one child
+/// Tessellate a plain prim at level of detail `lod` and spawn one child
 /// entity per non-empty [`PrimFace`](sl_client_bevy::PrimFace) under `parent`,
 /// each carrying its geometry mesh, its per-face diffuse material (from the
 /// object's decoded [`TextureEntry`](sl_client_bevy::TextureEntry)), and a
 /// [`PrimFaceEntity`] tag naming its Linden face index. Returns the spawned face
-/// entities so a later shape change can despawn and rebuild them.
+/// entities so a later shape change or LOD swap can despawn and rebuild them.
+///
+/// `lod` is the pixel-area-selected tessellation level (P21.3): a new prim starts
+/// at [`INITIAL_MANAGED_PRIM_LOD`] and [`apply_prim_lod`] re-tessellates it toward
+/// the level its on-screen size warrants.
 ///
 /// Each face's material is built from its `TextureEntry` slot (tint + texture
 /// id) by [`face_material`], which requests the texture through `manager` and
@@ -807,7 +882,7 @@ fn build_object_geometry(
 /// single Second Life → Bevy basis change for the whole prim.
 #[expect(
     clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority"
+    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority and LOD"
 )]
 fn build_prim_faces(
     object: &Object,
@@ -818,9 +893,10 @@ fn build_prim_faces(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    lod: PrimLod,
 ) -> Vec<Entity> {
     let shape = PrimShapeFloat::from_params(&object.shape);
-    let prim = tessellate(&shape, PrimLod::High);
+    let prim = tessellate(&shape, lod);
     spawn_prim_faces(
         &prim,
         &object.texture_entry,
@@ -1126,7 +1202,7 @@ fn apply_object(
             // fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, pending) = build_object_geometry(
+            let (face_entities, pending, prim_rebuild) = build_object_geometry(
                 object,
                 category,
                 existing.geometry,
@@ -1140,9 +1216,13 @@ fn apply_object(
             existing.face_entities = face_entities;
             existing.pending = pending;
             // The geometry was re-requested from scratch; any prior LOD-rebuild
-            // inputs are stale (the mesh key or scale may have changed) and are
-            // re-established when the new build decodes (P21.2).
+            // inputs are stale (the mesh key, scale, or category may have changed)
+            // and are re-established from the new build: a mesh's on its next
+            // decode (P21.2), a plain prim's immediately here (P21.3). A prim that
+            // became a mesh/sculpt drops its prim rebuild (`prim_rebuild` is None).
             existing.mesh_rebuild = None;
+            existing.prim_rebuild = prim_rebuild;
+            existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -1196,7 +1276,7 @@ fn apply_object(
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let (face_entities, pending) = build_object_geometry(
+    let (face_entities, pending, prim_rebuild) = build_object_geometry(
         object,
         category,
         geometry,
@@ -1220,6 +1300,10 @@ fn apply_object(
             face_entities,
             pending,
             mesh_rebuild: None,
+            // A plain prim is first tessellated at the coarse placeholder level
+            // (P21.3); a non-prim keeps `prim_rebuild` None and stays at FINEST.
+            prim_rebuild,
+            prim_lod: INITIAL_MANAGED_PRIM_LOD,
             animated: is_animated_object(object),
         },
     );
@@ -1486,6 +1570,66 @@ pub(crate) fn apply_object_meshes(
                 );
             }
         }
+    }
+}
+
+/// Re-tessellate every plain prim whose pixel-area-selected [`PrimLod`] just
+/// changed (P21.3): drain the [`PrimLodTargets`] the render-priority driver
+/// filled this pass and, for each prim whose desired level differs from its
+/// current one, despawn its old face entities and rebuild them from a fresh
+/// tessellation at the new level.
+///
+/// The mirror of the mesh LOD swap in [`apply_object_meshes`], but with no async
+/// fetch: prim geometry is tessellated on the CPU here and now. A target for a
+/// non-prim, an untracked (removed) object, or a prim already at the desired
+/// level is a no-op — `prim_rebuild` is `Some` only for a plain prim.
+pub(crate) fn apply_prim_lod(
+    mut targets: ResMut<PrimLodTargets>,
+    mut state: ResMut<ObjectState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+) {
+    for (scoped, desired) in targets.0.drain() {
+        let Some(tracked) = state.objects.get_mut(&scoped) else {
+            continue;
+        };
+        // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
+        // avatar has none and is left untouched.
+        let Some(rebuild) = tracked.prim_rebuild.as_ref() else {
+            continue;
+        };
+        if tracked.prim_lod == desired {
+            continue;
+        }
+        // Clone the rebuild inputs out so the immutable borrow of `tracked` ends
+        // before the mutable rebuild of its face entities below.
+        let shape = PrimShapeFloat::from_params(&rebuild.shape);
+        let texture_entry = rebuild.texture_entry.clone();
+        let scale = rebuild.scale;
+        let priority = rebuild.priority;
+        let geometry = tracked.geometry;
+        let prim = tessellate(&shape, desired);
+        despawn_prim_faces(&tracked.face_entities, &mut commands);
+        tracked.face_entities = spawn_prim_faces(
+            &prim,
+            &texture_entry,
+            scale,
+            geometry,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut manager,
+            &mut prim_textures,
+            priority,
+        );
+        tracked.prim_lod = desired;
+        debug!(
+            "re-tessellated prim {scoped} at {desired:?}: {} faces",
+            tracked.face_entities.len()
+        );
     }
 }
 

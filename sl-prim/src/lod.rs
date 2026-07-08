@@ -129,6 +129,43 @@ impl PrimLod {
     pub const fn is_at_least_as_fine_as(self, other: Self) -> bool {
         self.index() >= other.index()
     }
+
+    /// The finer (more detailed) of two levels.
+    #[must_use]
+    pub const fn finer_of(self, other: Self) -> Self {
+        if self.index() >= other.index() {
+            self
+        } else {
+            other
+        }
+    }
+
+    /// Selects the level of detail a prim of world bounding `radius` (metres) at
+    /// camera `distance` (metres) should tessellate at, porting the reference
+    /// viewer's `LLVOVolume::calcLOD` / `LLVolumeLODGroup::getDetailFromTan`.
+    ///
+    /// The reference viewer picks a volume's LOD tier *before* it matters whether
+    /// that volume's geometry is client-tessellated (a prim) or asset-backed (a
+    /// mesh) — the same `LLVolumeLODGroup` angular-size computation drives both.
+    /// That computation is already ported in [`sl_proto::MeshLod::for_distance`],
+    /// so this maps its resulting tier onto the matching [`PrimLod`] by index:
+    /// both enums are declared coarsest-first with identical `0..=3` indices, so
+    /// the tier maps one-to-one.
+    ///
+    /// `lod_factor` is the viewer's `RenderVolumeLODFactor` (default
+    /// [`sl_proto::DEFAULT_LOD_FACTOR`]); `radius` is the prim's full scale-vector
+    /// length (`getScale().length()`, the box diagonal), the same quantity
+    /// [`sl_proto::MeshLod::for_distance`] expects (**not** the half-diagonal
+    /// bounding-sphere radius used for pixel area). A degenerate input (a
+    /// non-finite or non-positive radius, distance, or LOD factor) yields the
+    /// finest level, matching the reference's close-object bias.
+    #[must_use]
+    pub fn for_distance(radius: f32, distance: f32, lod_factor: f32) -> Self {
+        let tier = sl_proto::MeshLod::for_distance(radius, distance, lod_factor);
+        // Both enums index 0 (coarsest) ..= 3 (finest), so the tier always maps;
+        // the finest level is the natural fallback for the unreachable arm.
+        Self::from_index(tier.index()).unwrap_or(Self::FINEST)
+    }
 }
 
 /// Rounds a small, non-negative side count (`MIN_DETAIL_FACES * detail`, at most
@@ -204,5 +241,59 @@ mod tests {
         assert!(PrimLod::High.is_at_least_as_fine_as(PrimLod::Lowest));
         assert!(PrimLod::Medium.is_at_least_as_fine_as(PrimLod::Medium));
         assert!(!PrimLod::Low.is_at_least_as_fine_as(PrimLod::High));
+        assert_eq!(PrimLod::Low.finer_of(PrimLod::High), PrimLod::High);
+        assert_eq!(PrimLod::Medium.finer_of(PrimLod::Lowest), PrimLod::Medium);
+    }
+
+    #[test]
+    fn for_distance_degenerate_inputs_are_finest() {
+        // At or behind the camera, zero size, or a non-positive / non-finite LOD
+        // factor: tessellate at the finest level (the reference's close-object
+        // bias, inherited from `MeshLod::for_distance`).
+        assert_eq!(PrimLod::for_distance(1.0, 0.0, 1.0), PrimLod::FINEST);
+        assert_eq!(PrimLod::for_distance(0.0, 10.0, 1.0), PrimLod::FINEST);
+        assert_eq!(PrimLod::for_distance(1.0, 10.0, 0.0), PrimLod::FINEST);
+        assert_eq!(PrimLod::for_distance(f32::NAN, 10.0, 1.0), PrimLod::FINEST);
+        assert_eq!(
+            PrimLod::for_distance(1.0, f32::INFINITY, 1.0),
+            PrimLod::FINEST
+        );
+    }
+
+    #[test]
+    fn for_distance_is_monotone_in_distance() {
+        // A fixed prim gets no finer as it recedes, and the range spans finest to
+        // coarsest over the sampled distances.
+        let radius = 4.0;
+        let mut previous = PrimLod::FINEST;
+        let mut saw_finest = false;
+        let mut saw_coarsest = false;
+        for step in 1..=200_u8 {
+            let distance = f32::from(step);
+            let lod = PrimLod::for_distance(radius, distance, 1.0);
+            assert!(
+                lod <= previous,
+                "LOD rose from {previous:?} to {lod:?} as distance grew to {distance}"
+            );
+            saw_finest |= lod == PrimLod::FINEST;
+            saw_coarsest |= lod == PrimLod::COARSEST;
+            previous = lod;
+        }
+        assert!(saw_finest, "never selected the finest level up close");
+        assert!(saw_coarsest, "never selected the coarsest level far away");
+    }
+
+    #[test]
+    fn for_distance_matches_the_mesh_lod_tier() {
+        // The prim tier is the mesh tier by index (same `LLVolumeLODGroup`
+        // computation): confirm parity across a spread of sizes and distances.
+        for &radius in &[0.5_f32, 2.0, 5.0, 12.0] {
+            for step in 1..=60_u8 {
+                let distance = f32::from(step);
+                let tier = sl_proto::MeshLod::for_distance(radius, distance, 1.0);
+                let prim = PrimLod::for_distance(radius, distance, 1.0);
+                assert_eq!(prim.index(), tier.index());
+            }
+        }
     }
 }
