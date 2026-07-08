@@ -37,8 +37,8 @@ use clap::Parser as _;
 use sl_client_bevy::{
     AnimationKey, ChatLogConfig, ClientDirectories, CloudMaterialPlugin, InventoryCacheConfig,
     LoginFailure, LoginParams, LoginRequest, MfaChallenge, SkyMaterialPlugin, SlClientPlugin,
-    SlLoginRejected, SlMfaChallenge, StartLocation, SunDiscMaterialPlugin, TerrainMaterialPlugin,
-    Uuid,
+    SlLoginRejected, SlMfaChallenge, StarMaterialPlugin, StartLocation, SunDiscMaterialPlugin,
+    TerrainMaterialPlugin, Uuid,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -82,8 +82,9 @@ use crate::session::{
     repeat_debug_animation,
 };
 use crate::sky::{
-    apply_cloud_textures, apply_disc_textures, apply_sky_textures, center_sky_on_camera,
-    drive_clouds, drive_sky, drive_sun_moon_discs, setup_clouds, setup_sky, setup_sun_moon_discs,
+    apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
+    center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
+    setup_sky, setup_stars, setup_sun_moon_discs,
 };
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
@@ -343,6 +344,8 @@ fn run_session(
     .add_plugins(SunDiscMaterialPlugin)
     // The scrolling cloud-layer material (P22.4), driven alongside the sky.
     .add_plugins(CloudMaterialPlugin)
+    // The night-time star-field material (P22.5), driven alongside the sky.
+    .add_plugins(StarMaterialPlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).
@@ -388,6 +391,7 @@ fn run_session(
             setup_sky,
             setup_sun_moon_discs,
             setup_clouds,
+            setup_stars,
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
@@ -540,6 +544,11 @@ fn run_session(
             // material, accumulate the scroll, and swap in the decoded cloud noise.
             drive_clouds.after(fly_camera),
             apply_cloud_textures,
+            // Star field (P22.5): centre / rotate the field on the camera, fade it
+            // in with the active sky frame's `star_brightness`, and swap in the
+            // decoded bloom texture.
+            drive_stars.after(fly_camera),
+            apply_star_textures,
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a

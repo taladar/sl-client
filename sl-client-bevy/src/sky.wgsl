@@ -76,6 +76,13 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    // Skybox depth: force the dome to the reverse-Z far clip plane (ndc z = 0) so
+    // it renders as an infinitely distant backdrop — real scene geometry at ANY
+    // altitude (a 2000 m skybox, a tall build) occludes it, and the dome never
+    // hides objects beyond its own radius. Bevy's mesh pipeline uses a
+    // `GreaterEqual` depth test, so `0 >= 0` still draws the dome over the cleared
+    // (far) background while `0 >= any nearer geometry` fails.
+    out.clip_position.z = 0.0;
     out.local_position = vertex.position;
     return out;
 }

@@ -28,6 +28,17 @@
 //!   for the active sky frame, and fetches its sun / moon textures **boosted**;
 //! - [`apply_disc_textures`] swaps each decoded disc texture into its material.
 //!
+//! It also renders the **star field** (P22.5), a sphere of small camera-facing
+//! quads that fade in at night with the sky frame's `star_brightness` (the
+//! reference `LLDrawPoolWLSky::renderStarsDeferred` / `LLVOWLSky::drawStars`):
+//!
+//! - [`setup_stars`] builds the 1000-star quad mesh and spawns it with a
+//!   [`StarMaterial`] (initially hidden) and registers [`StarState`];
+//! - [`drive_stars`] centres and slowly rotates the field on the camera, folds
+//!   `star_brightness` and the twinkle time into the material, shows / hides the
+//!   field for the active sky frame, and fetches its bloom texture **boosted**;
+//! - [`apply_star_textures`] swaps the decoded bloom texture into the material.
+//!
 //! The day-cycle keyframe interpolation over region time (animating the frame
 //! chosen here) is a later phase; P22.2 renders the statically selected frame.
 
@@ -36,11 +47,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams,
-    SkySettings, SunDiscMaterial, SunDiscParams, TextureKey, Uuid, to_bevy_image,
+    SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams, TextureKey, Uuid,
+    to_bevy_image,
 };
 
 use crate::camera::FlyCamera;
@@ -49,10 +62,10 @@ use crate::environment::EnvironmentState;
 use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::textures::{TextureDecoded, TextureManager};
 
-/// The radius of the sky dome, in metres. Large enough that the whole region sits
-/// well inside it (so scene geometry always depth-tests in front of the sky) yet
-/// comfortably within the camera's far plane (4096 m) so the dome is never
-/// clipped away.
+/// The radius of the sky dome, in metres. The dome's *depth* is forced to the far
+/// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
+/// altitude), so this radius only needs to enclose the camera and stay comfortably
+/// within the camera's far plane (4096 m) so the sphere is never frustum-culled.
 const SKY_DOME_RADIUS: f32 = 3000.0;
 
 /// The scene directional light's illuminance (lux). Held constant; the sky's
@@ -79,10 +92,12 @@ const IMG_HALO: Uuid = Uuid::from_u128(0x1214_9143_f599_91a7_77ac_b52a_3c0f_59cd
 const LIGHT_UP_LIMIT: f32 = f32::EPSILON * 8.0;
 
 /// The distance, in metres, at which the sun / moon disc billboards are placed
-/// from the camera. Comfortably inside [`SKY_DOME_RADIUS`] so the discs depth-test
-/// in front of the (opaque) sky dome, and inside the camera's far plane. The disc
-/// angular size is independent of this distance (the half-extent scales with it),
-/// so it only fixes where the billboard sits relative to the dome.
+/// from the camera. Unlike the sky / cloud / star domes (whose depth is forced to
+/// the far clip plane), the discs keep their real world-space depth, so at 2000 m
+/// they depth-test in front of the far-plane sky backdrop and the star field (a
+/// disc occludes the stars behind it) while still sitting inside the camera's far
+/// plane. The disc angular size is independent of this distance (the half-extent
+/// scales with it), so it only fixes where the billboard sits relative to the dome.
 const DISC_DISTANCE: f32 = 2000.0;
 
 /// The reference `HEAVENLY_BODY_FACTOR` (`llvosky.h`): the disc half-extent is
@@ -108,16 +123,61 @@ const DEFAULT_MOON_ID: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4
 /// `llsettingssky.cpp`), sampled when the sky frame names none of its own.
 const DEFAULT_CLOUD_ID: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
 
-/// The radius of the cloud dome, in metres. Just inside [`SKY_DOME_RADIUS`] so the
-/// alpha-blended cloud layer depth-tests in front of the opaque sky dome without
-/// z-fighting it, while staying a far background layer (so near scene geometry
-/// still occludes it).
+/// The radius of the cloud dome, in metres. Like the sky and star domes, the cloud
+/// layer's *depth* is forced to the far clip plane by `clouds.wgsl` (a skybox
+/// backdrop), so this radius only sets the directional layout; it is kept just
+/// inside [`SKY_DOME_RADIUS`] and well within the camera's far plane.
 const CLOUD_DOME_RADIUS: f32 = 2950.0;
 
 /// The reference cloud-scroll accumulation divisor (`LLEnvironment::
 /// updateCloudScroll`): the scroll delta grows by `dt * cloud_scroll_rate / 100`
 /// each frame.
 const CLOUD_SCROLL_DIVISOR: f32 = 100.0;
+
+/// The reference viewer's built-in bloom / star texture (`IMG_BLOOM1`,
+/// `llsettingssky.cpp`), sampled by the star field when the sky frame names none
+/// of its own.
+const IMG_BLOOM1: Uuid = Uuid::from_u128(0x3c59_f7fe_9dc8_47f9_8aaf_a9dd_1fbc_3bef);
+
+/// The number of stars in the field (the reference `LLVOWLSky::getStarsNumVerts`).
+const STAR_COUNT: usize = 1000;
+
+/// The radius of the star sphere, in metres, at which the star quads sit for
+/// screen projection. Their *depth* is forced to the far clip plane by `stars.wgsl`
+/// (a skybox backdrop, occluded by real geometry at any altitude), so this radius
+/// only sets the directional layout and — with [`REFERENCE_DOME_RADIUS`] — the
+/// per-star screen size; it is kept well inside the camera's 4096 m far plane so
+/// the sphere is not frustum-culled.
+const STAR_DOME_RADIUS: f32 = 2900.0;
+
+/// The reference sky-dome radius (`LLSettingsSky::DOME_RADIUS`), at which the
+/// reference sizes the star quads (`sc = 16 + frand * 20`). Our field sits at the
+/// much smaller [`STAR_DOME_RADIUS`] for screen projection, so the per-star size is
+/// scaled by `STAR_DOME_RADIUS / REFERENCE_DOME_RADIUS` to keep the same *angular*
+/// size the reference draws — otherwise the stars look ~5× too large.
+const REFERENCE_DOME_RADIUS: f32 = 15000.0;
+
+/// The reference star-brightness → `custom_alpha` divisor
+/// (`renderStarsDeferred`: `getStarBrightness() / 500`).
+const STAR_BRIGHTNESS_DIVISOR: f32 = 500.0;
+
+/// Below this `custom_alpha` the reference skips the star pass entirely
+/// (`renderStarsDeferred`); the viewer hides the field instead.
+const STAR_ALPHA_THRESHOLD: f32 = 0.001;
+
+/// The reference slow star-field rotation rate, about the up axis
+/// (`renderStarsDeferred`: `rotatef(gFrameTimeSeconds * 0.01, …)`). `glRotatef`
+/// takes *degrees*, so this is degrees per second — a very slow drift (a full turn
+/// takes ~10 hours); it is converted to radians at use.
+const STAR_ROTATION_RATE_DEG: f32 = 0.01;
+
+/// The reference twinkle-time scale (`renderStarsDeferred`: `sStarTime =
+/// getElapsedSeconds() * 0.5`).
+const STAR_TIME_SCALE: f32 = 0.5;
+
+/// The seed for the deterministic star-placement PRNG, so the star field is
+/// identical across runs (the reference seeds from the global `ll_frand`).
+const STAR_RNG_SEED: u64 = 0x5142_4152_5354_4152;
 
 /// Marks the sky-dome entity so [`center_sky_on_camera`] can follow the camera.
 #[derive(Component)]
@@ -182,6 +242,21 @@ pub(crate) struct CloudState {
     /// `cloud_scroll_rate` and folded into `cloud_pos_density1` so the layer
     /// drifts. Persists across sky-frame changes, like the reference.
     scroll: Vec2,
+}
+
+/// Marks the star-field entity so [`drive_stars`] can centre / rotate it.
+#[derive(Component)]
+pub(crate) struct StarField;
+
+/// The viewer's star-field state: the star material and the bloom texture
+/// currently requested for it.
+#[derive(Resource)]
+pub(crate) struct StarState {
+    /// The single star-field material, updated each frame by [`drive_stars`].
+    material: Handle<StarMaterial>,
+    /// The texture id currently requested for the bloom / star texture (the active
+    /// sky frame's, or the built-in [`IMG_BLOOM1`]).
+    star_key: Option<TextureKey>,
 }
 
 /// Startup: spawn the sky dome (with its material) and the scene's directional
@@ -696,6 +771,244 @@ pub(crate) fn apply_cloud_textures(
             material.cloud_noise = handle.clone();
             material.cloud_noise_next = handle;
         }
+    }
+}
+
+/// Startup: build the star-quad mesh, spawn the star field (with its material,
+/// initially hidden until an environment selects a sky frame), and register
+/// [`StarState`].
+pub(crate) fn setup_stars(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StarMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let placeholder = images.add(placeholder_image());
+    let material = materials.add(StarMaterial {
+        params: StarParams {
+            custom_alpha: 0.0,
+            time: 0.0,
+            reserved: Vec2::ZERO,
+        },
+        diffuse: placeholder,
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(build_star_mesh())),
+        MeshMaterial3d(material.clone()),
+        Transform::default(),
+        Visibility::Hidden,
+        // The star field never casts shadows (like the sky / cloud domes).
+        NotShadowCaster,
+        StarField,
+    ));
+    commands.insert_resource(StarState {
+        material,
+        star_key: None,
+    });
+}
+
+/// Centre and slowly rotate the star field on the camera, fold the active sky
+/// frame's `star_brightness` and the twinkle time into the material, show / hide
+/// the field, and (re)request the sky's bloom texture boosted.
+pub(crate) fn drive_stars(
+    time: Res<Time>,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    environment: Res<EnvironmentState>,
+    mut state: ResMut<StarState>,
+    mut materials: ResMut<Assets<StarMaterial>>,
+    mut textures: ResMut<TextureManager>,
+    mut field: Query<(&mut Transform, &mut Visibility), With<StarField>>,
+) {
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let camera_pos = camera.translation();
+    let position = day_position(&environment.settings);
+    let Some(sky) = environment
+        .settings
+        .active_sky_settings(camera_pos.y, position)
+    else {
+        return;
+    };
+
+    // The reference `custom_alpha` = `star_brightness / 500` (clamped); below the
+    // `0.001` threshold the reference skips the pass, so hide the field.
+    let custom_alpha = (sky.star_brightness / STAR_BRIGHTNESS_DIVISOR).min(1.0);
+    let visible = custom_alpha >= STAR_ALPHA_THRESHOLD;
+    let elapsed = time.elapsed_secs();
+
+    if let Ok((mut transform, mut vis)) = field.single_mut() {
+        // Keep the field centred on the camera and rotate it slowly about the up
+        // axis (the reference `rotatef(gFrameTimeSeconds * 0.01, …)`, in degrees).
+        *transform = Transform {
+            translation: camera_pos,
+            rotation: Quat::from_rotation_y((elapsed * STAR_ROTATION_RATE_DEG).to_radians()),
+            scale: Vec3::ONE,
+        };
+        *vis = visible_if(visible);
+    }
+
+    if let Some(mut material) = materials.get_mut(&state.material) {
+        material.params.custom_alpha = custom_alpha;
+        material.params.time = elapsed * STAR_TIME_SCALE;
+    }
+
+    // Fetch the sky's bloom texture boosted (the sky frame's own, or the reference
+    // built-in) so it resolves ahead of ordinary faces.
+    let star_key = sky
+        .bloom_texture
+        .unwrap_or_else(|| TextureKey::from(IMG_BLOOM1));
+    textures.request_boosted(star_key, SKY_BOOST_PRIORITY);
+    state.star_key = Some(star_key);
+}
+
+/// Swap the decoded bloom texture into the star material when its id resolves.
+pub(crate) fn apply_star_textures(
+    mut decoded: MessageReader<TextureDecoded>,
+    state: Res<StarState>,
+    manager: Res<TextureManager>,
+    mut materials: ResMut<Assets<StarMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    for &TextureDecoded(id) in decoded.read() {
+        if state.star_key != Some(id) {
+            continue;
+        }
+        let Some(decoded) = manager.decoded(id) else {
+            // The fetch/decode failed; the field keeps its (transparent) placeholder.
+            continue;
+        };
+        let handle = images.add(to_bevy_image(decoded));
+        if let Some(mut material) = materials.get_mut(&state.material) {
+            material.diffuse = handle;
+        }
+    }
+}
+
+/// Build the star-field mesh: [`STAR_COUNT`] small camera-facing quads scattered
+/// over the upper hemisphere of a sphere of radius [`STAR_DOME_RADIUS`], each with
+/// a per-star near-white colour (the reference `LLVOWLSky::initStars` /
+/// `updateStarGeometry`). Deterministic (fixed-seed PRNG) so the field is stable
+/// across runs.
+fn build_star_mesh() -> Mesh {
+    let mut rng = StarRng::new(STAR_RNG_SEED);
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(STAR_COUNT.saturating_mul(4));
+    let mut indices: Vec<u32> = Vec::with_capacity(STAR_COUNT.saturating_mul(6));
+
+    for i in 0..STAR_COUNT {
+        // A random direction on the upper hemisphere (Bevy Y up): the reference
+        // `initStars` picks `x,y ∈ [-0.5, 0.5)`, `z ∈ [0, 0.5)` (Second Life up),
+        // which maps to Bevy `x,z ∈ [-0.5, 0.5)`, `y ∈ [0, 0.5)`.
+        let x = rng.frand() - 0.5;
+        let z = rng.frand() - 0.5;
+        let y = rng.frand() * 0.5;
+        let dir = Vec3::new(x, y, z).normalize_or(Vec3::Y);
+        let centre = scale3(dir, STAR_DOME_RADIUS);
+
+        // Quad basis (the reference `at % up` / `at % left`): a stable pair
+        // orthogonal to the view direction. Seed with a different axis near the
+        // zenith so the cross products stay well-conditioned.
+        let seed = if dir.y.abs() > 0.99 { Vec3::X } else { Vec3::Y };
+        let left = dir.cross(seed).normalize_or(Vec3::X);
+        let up = dir.cross(left).normalize_or(Vec3::Z);
+        // Per-star size (the reference `sc = 16 + frand * 20`, at its 15000 m dome),
+        // scaled down to our nearer dome so the *angular* size matches the reference.
+        let sc = (16.0 + rng.frand() * 20.0) * (STAR_DOME_RADIUS / REFERENCE_DOME_RADIUS);
+        let left = scale3(left, sc);
+        let up = scale3(up, sc);
+
+        // The four quad corners (the reference winds `star`, `star+up`,
+        // `star+left+up`, `star+left`).
+        let c0 = centre;
+        let c1 = add3(centre, up);
+        let c2 = add3(add3(centre, left), up);
+        let c3 = add3(centre, left);
+        positions.push(c0.to_array());
+        positions.push(c1.to_array());
+        positions.push(c2.to_array());
+        positions.push(c3.to_array());
+
+        // Matching corner UVs (the reference `(1,0) (1,1) (0,1) (0,0)`).
+        uvs.push([1.0, 0.0]);
+        uvs.push([1.0, 1.0]);
+        uvs.push([0.0, 1.0]);
+        uvs.push([0.0, 0.0]);
+
+        // Per-star colour: a near-white with a little red / blue variance (the
+        // reference `0.75 + frand * 0.25` on red and blue, green `1.0`).
+        let red = 0.75 + rng.frand() * 0.25;
+        let blue = 0.75 + rng.frand() * 0.25;
+        let color = [red, 1.0, blue, 1.0];
+        colors.push(color);
+        colors.push(color);
+        colors.push(color);
+        colors.push(color);
+
+        // Two triangles per quad. The base index is `i * 4`, computed without a
+        // panicking multiply so the workspace lints stay happy.
+        let base = u32::try_from(i.saturating_mul(4)).unwrap_or(u32::MAX);
+        indices.push(base);
+        indices.push(base.saturating_add(1));
+        indices.push(base.saturating_add(2));
+        indices.push(base);
+        indices.push(base.saturating_add(2));
+        indices.push(base.saturating_add(3));
+    }
+
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+    .with_inserted_indices(Indices::U32(indices))
+}
+
+/// Component-wise `a + b`, avoiding the glam `+` operator (which trips the
+/// workspace `arithmetic_side_effects` lint).
+fn add3(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(a.x + b.x, a.y + b.y, a.z + b.z)
+}
+
+/// Component-wise `a * s`, avoiding the glam `*` operator (as [`add3`]).
+fn scale3(a: Vec3, s: f32) -> Vec3 {
+    Vec3::new(a.x * s, a.y * s, a.z * s)
+}
+
+/// A tiny deterministic PRNG (SplitMix64) standing in for the reference viewer's
+/// `ll_frand`, so the star field is reproducible across runs without pulling in an
+/// RNG dependency.
+struct StarRng(u64);
+
+impl StarRng {
+    /// Seed the generator.
+    const fn new(seed: u64) -> Self {
+        Self(seed)
+    }
+
+    /// The next 64-bit SplitMix64 output.
+    const fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// A pseudo-random `f32` in `[0, 1)` (the reference `ll_frand`), from the top
+    /// 24 mantissa-worth of bits.
+    fn frand(&mut self) -> f32 {
+        let bits = self.next_u64() >> 40;
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::as_conversions,
+            reason = "24-bit value, exactly representable as f32; scaled to [0, 1)"
+        )]
+        let value = bits as f32 / 16_777_216.0_f32;
+        value
     }
 }
 

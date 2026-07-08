@@ -89,6 +89,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    // Skybox depth: force the cloud dome to the reverse-Z far clip plane (ndc z =
+    // 0) so it renders as an infinitely distant backdrop, occluded by real scene
+    // geometry at any altitude (as `sky.wgsl` does for the sky dome). The layer is
+    // alpha-blended and does not write depth, so it composites over the sky.
+    out.clip_position.z = 0.0;
     out.local_position = vertex.position;
     return out;
 }
