@@ -17,6 +17,7 @@ mod camera;
 mod chat;
 mod coords;
 mod diagnostics;
+mod environment;
 mod meshes;
 mod objects;
 mod render_priority;
@@ -65,6 +66,7 @@ use crate::diagnostics::{
     PipelineOverlayVisible, setup_diagnostics_overlay, setup_pipeline_overlay,
     toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
 };
+use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, PrimLodTargets, adopt_pending_attachments, apply_object_meshes,
@@ -342,6 +344,7 @@ fn run_session(
     ))
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
+    .init_resource::<EnvironmentState>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
     .init_resource::<PrimLodTargets>()
@@ -385,6 +388,11 @@ fn run_session(
         (
             capture_login_outcome,
             drive_session,
+            // Request the region environment (EEP) on handshake, then fold the
+            // grid's reply into `EnvironmentState` (P22.1); the sky / water /
+            // shadow phases render from it. Nested into one tuple to stay within
+            // Bevy's per-tuple system limit.
+            (request_environment, ingest_environment),
             // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
             drive_server_bake,
             // Keep the texture store's `GetTexture` cap current, then poll
@@ -469,8 +477,10 @@ fn run_session(
             position_name_tags,
             // Append newly received local chat to the on-screen overlay.
             update_chat_overlay,
-            handle_quit_input,
-            enforce_quit_deadline,
+            // Quit handling: request a clean logout on the quit key, then force the
+            // exit once the grace period lapses. Nested into one tuple to stay
+            // within Bevy's per-tuple system limit.
+            (handle_quit_input, enforce_quit_deadline),
             fly_camera,
         ),
     )
