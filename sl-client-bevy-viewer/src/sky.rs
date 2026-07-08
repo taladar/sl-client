@@ -18,6 +18,16 @@
 //!   sky's rainbow / halo textures **boosted** through the shared texture manager;
 //! - [`apply_sky_textures`] swaps each decoded sky texture into the material.
 //!
+//! On top of the dome it renders the **sun and moon discs** (P22.3), textured
+//! billboards at the computed sun / moon directions (the reference
+//! `LLDrawPoolWLSky::renderHeavenlyBodies` / `sunDiscV/F.glsl` + `moonV/F.glsl`):
+//!
+//! - [`setup_sun_moon_discs`] spawns the two billboard entities (a shared unit
+//!   quad + a [`SunDiscMaterial`] each) and registers [`DiscState`];
+//! - [`drive_sun_moon_discs`] aims, scales, colours, and shows / hides each disc
+//!   for the active sky frame, and fetches its sun / moon textures **boosted**;
+//! - [`apply_disc_textures`] swaps each decoded disc texture into its material.
+//!
 //! The day-cycle keyframe interpolation over region time (animating the frame
 //! chosen here) is a later phase; P22.2 renders the statically selected frame.
 
@@ -28,8 +38,8 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams, SkySettings, TextureKey, Uuid,
-    to_bevy_image,
+    Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams, SkySettings, SunDiscMaterial,
+    SunDiscParams, TextureKey, Uuid, to_bevy_image,
 };
 
 use crate::camera::FlyCamera;
@@ -67,6 +77,32 @@ const IMG_HALO: Uuid = Uuid::from_u128(0x1214_9143_f599_91a7_77ac_b52a_3c0f_59cd
 /// light's up component, so the altitude attenuation term stays finite.
 const LIGHT_UP_LIMIT: f32 = f32::EPSILON * 8.0;
 
+/// The distance, in metres, at which the sun / moon disc billboards are placed
+/// from the camera. Comfortably inside [`SKY_DOME_RADIUS`] so the discs depth-test
+/// in front of the (opaque) sky dome, and inside the camera's far plane. The disc
+/// angular size is independent of this distance (the half-extent scales with it),
+/// so it only fixes where the billboard sits relative to the dome.
+const DISC_DISTANCE: f32 = 2000.0;
+
+/// The reference `HEAVENLY_BODY_FACTOR` (`llvosky.h`): the disc half-extent is
+/// `sun_scale * distance * HEAVENLY_BODY_FACTOR * disk_radius`, so a unit-scale
+/// disc subtends `HEAVENLY_BODY_FACTOR * disk_radius` radians (half-angle).
+const HEAVENLY_BODY_FACTOR: f32 = 0.1;
+
+/// The reference sun-disc radius (`SUN_DISK_RADIUS`, `llvosky.cpp`).
+const SUN_DISK_RADIUS: f32 = 0.5;
+
+/// The reference moon-disc radius (`MOON_DISK_RADIUS = SUN_DISK_RADIUS * 0.9`).
+const MOON_DISK_RADIUS: f32 = 0.45;
+
+/// The reference viewer's built-in sun-disc texture (`DEFAULT_SUN_ID`,
+/// `llsettingssky.cpp`), used when the sky frame names none of its own.
+const DEFAULT_SUN_ID: Uuid = Uuid::from_u128(0x32bf_bcea_24b1_fb9d_1ef9_48a2_8a63_730f);
+
+/// The reference viewer's built-in moon-disc texture (`DEFAULT_MOON_ID`,
+/// `llsettingssky.cpp`).
+const DEFAULT_MOON_ID: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4a1_c428);
+
 /// Marks the sky-dome entity so [`center_sky_on_camera`] can follow the camera.
 #[derive(Component)]
 pub(crate) struct SkyDome;
@@ -87,6 +123,29 @@ pub(crate) struct SkyState {
     rainbow_key: Option<TextureKey>,
     /// The texture id currently requested for the halo overlay.
     halo_key: Option<TextureKey>,
+}
+
+/// Marks the sun-disc billboard entity so [`drive_sun_moon_discs`] can aim it.
+#[derive(Component)]
+pub(crate) struct SunDisc;
+
+/// Marks the moon-disc billboard entity so [`drive_sun_moon_discs`] can aim it.
+#[derive(Component)]
+pub(crate) struct MoonDisc;
+
+/// The viewer's sun / moon disc state: the two disc materials and the disc
+/// textures currently requested for them.
+#[derive(Resource)]
+pub(crate) struct DiscState {
+    /// The sun-disc material, updated each frame by [`drive_sun_moon_discs`].
+    sun_material: Handle<SunDiscMaterial>,
+    /// The moon-disc material.
+    moon_material: Handle<SunDiscMaterial>,
+    /// The texture id currently requested for the sun disc (the active sky
+    /// frame's, or the built-in [`DEFAULT_SUN_ID`]).
+    sun_key: Option<TextureKey>,
+    /// The texture id currently requested for the moon disc.
+    moon_key: Option<TextureKey>,
 }
 
 /// Startup: spawn the sky dome (with its material) and the scene's directional
@@ -291,6 +350,223 @@ pub(crate) fn apply_sky_textures(
         if is_halo {
             material.halo = handle;
         }
+    }
+}
+
+/// Startup: spawn the sun / moon disc billboards (a shared unit quad + a
+/// [`SunDiscMaterial`] each, initially hidden) and register [`DiscState`].
+pub(crate) fn setup_sun_moon_discs(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<SunDiscMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let placeholder = images.add(placeholder_image());
+    // A shared 1×1 quad (centred, +Z normal); the billboards scale it to the disc
+    // size and orient it toward the camera each frame.
+    let quad = meshes.add(Rectangle::new(1.0, 1.0));
+
+    let sun_material = materials.add(SunDiscMaterial {
+        params: SunDiscParams {
+            brightness: 1.0,
+            blend_factor: 0.0,
+            moon_mode: 0.0,
+            up_component: 0.0,
+        },
+        diffuse: placeholder.clone(),
+        alt_diffuse: placeholder.clone(),
+    });
+    let moon_material = materials.add(SunDiscMaterial {
+        params: SunDiscParams {
+            brightness: 1.0,
+            blend_factor: 0.0,
+            moon_mode: 1.0,
+            up_component: 0.0,
+        },
+        diffuse: placeholder.clone(),
+        alt_diffuse: placeholder.clone(),
+    });
+
+    commands.spawn((
+        Mesh3d(quad.clone()),
+        MeshMaterial3d(sun_material.clone()),
+        Transform::default(),
+        Visibility::Hidden,
+        NotShadowCaster,
+        SunDisc,
+    ));
+    commands.spawn((
+        Mesh3d(quad),
+        MeshMaterial3d(moon_material.clone()),
+        Transform::default(),
+        Visibility::Hidden,
+        NotShadowCaster,
+        MoonDisc,
+    ));
+
+    commands.insert_resource(DiscState {
+        sun_material,
+        moon_material,
+        sun_key: None,
+        moon_key: None,
+    });
+}
+
+/// Aim, scale, colour, and show / hide the sun and moon discs for the active sky
+/// frame, and (re)request their sun / moon textures boosted.
+#[expect(
+    clippy::type_complexity,
+    reason = "two Bevy queries whose disjointness filters keep the sun / moon discs distinct"
+)]
+pub(crate) fn drive_sun_moon_discs(
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    environment: Res<EnvironmentState>,
+    mut state: ResMut<DiscState>,
+    mut materials: ResMut<Assets<SunDiscMaterial>>,
+    mut textures: ResMut<TextureManager>,
+    mut sun: Query<(&mut Transform, &mut Visibility), (With<SunDisc>, Without<MoonDisc>)>,
+    mut moon: Query<(&mut Transform, &mut Visibility), (With<MoonDisc>, Without<SunDisc>)>,
+) {
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let camera_pos = camera.translation();
+    let position = day_position(&environment.settings);
+    let Some(sky) = environment
+        .settings
+        .active_sky_settings(camera_pos.y, position)
+    else {
+        return;
+    };
+
+    // Sun / moon directions in Bevy space (as in `drive_sky`).
+    let sun_dir = sl_to_bevy_object_rotation(&sky.sun_rotation)
+        .mul_vec3(Vec3::X)
+        .normalize();
+    let moon_dir = sl_to_bevy_object_rotation(&sky.moon_rotation)
+        .mul_vec3(Vec3::X)
+        .normalize();
+    let sun_up = sun_dir.y >= 0.0;
+    let moon_up = moon_dir.y >= 0.0;
+
+    // Aim each disc when its body is up, and show only the bodies above the
+    // horizon (`getIsSunUp` / `getIsMoonUp`).
+    if let Ok((mut transform, mut vis)) = sun.single_mut() {
+        if sun_up {
+            *transform = disc_transform(camera_pos, sun_dir, sky.sun_scale, SUN_DISK_RADIUS);
+        }
+        *vis = visible_if(sun_up);
+    }
+    if let Ok((mut transform, mut vis)) = moon.single_mut() {
+        if moon_up {
+            *transform = disc_transform(camera_pos, moon_dir, sky.moon_scale, MOON_DISK_RADIUS);
+        }
+        *vis = visible_if(moon_up);
+    }
+
+    // The sun disc is untinted (the reference `sunDiscF` ignores its bound diffuse
+    // colour); the moon disc is scaled by the sky's moon brightness and faded near
+    // the horizon by its up component (`moonF`).
+    if let Some(mut material) = materials.get_mut(&state.sun_material) {
+        material.params.up_component = sun_dir.y;
+    }
+    if let Some(mut material) = materials.get_mut(&state.moon_material) {
+        material.params.brightness = sky.moon_brightness;
+        material.params.up_component = moon_dir.y;
+    }
+
+    // Fetch the disc textures boosted (the sky frame's own, or the reference
+    // built-ins) so they resolve ahead of ordinary faces.
+    let sun_key = sky
+        .sun_texture
+        .unwrap_or_else(|| TextureKey::from(DEFAULT_SUN_ID));
+    let moon_key = sky
+        .moon_texture
+        .unwrap_or_else(|| TextureKey::from(DEFAULT_MOON_ID));
+    textures.request_boosted(sun_key, SKY_BOOST_PRIORITY);
+    textures.request_boosted(moon_key, SKY_BOOST_PRIORITY);
+    state.sun_key = Some(sun_key);
+    state.moon_key = Some(moon_key);
+}
+
+/// Swap a decoded disc texture into the sun / moon material when its id resolves.
+pub(crate) fn apply_disc_textures(
+    mut decoded: MessageReader<TextureDecoded>,
+    state: Res<DiscState>,
+    manager: Res<TextureManager>,
+    mut materials: ResMut<Assets<SunDiscMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    for &TextureDecoded(id) in decoded.read() {
+        let is_sun = state.sun_key == Some(id);
+        let is_moon = state.moon_key == Some(id);
+        if !is_sun && !is_moon {
+            continue;
+        }
+        let Some(decoded) = manager.decoded(id) else {
+            // The fetch/decode failed; the disc keeps its (transparent) placeholder.
+            continue;
+        };
+        let handle = images.add(to_bevy_image(decoded));
+        let target = if is_sun {
+            &state.sun_material
+        } else {
+            &state.moon_material
+        };
+        if let Some(mut material) = materials.get_mut(target) {
+            // Both texture slots share the id until the day cycle (P22.6) drives a
+            // separate next-frame texture and the blend factor between them.
+            material.diffuse = handle.clone();
+            material.alt_diffuse = handle;
+        }
+    }
+}
+
+/// Build the billboard transform for a heavenly-body disc: a camera-facing quad
+/// at [`DISC_DISTANCE`] along `dir`, oriented and sized like the reference
+/// `LLVOSky::updateHeavenlyBodyGeometry` (with its near-horizon enlargement).
+fn disc_transform(camera_pos: Vec3, dir: Vec3, scale: f32, disk_radius: f32) -> Transform {
+    // Component-wise so the workspace `arithmetic_side_effects` lint (which fires on
+    // the glam vector operators) stays happy: `camera_pos + dir * DISC_DISTANCE`.
+    let translation = Vec3::new(
+        camera_pos.x + dir.x * DISC_DISTANCE,
+        camera_pos.y + dir.y * DISC_DISTANCE,
+        camera_pos.z + dir.z * DISC_DISTANCE,
+    );
+
+    // Billboard basis: `right = dir × up`, `up = right × dir` (the reference's
+    // `hb_right` / `hb_up`, with Second Life up = Bevy `y`), and the quad's `+z`
+    // normal facing back toward the camera (`-dir`). Seed with `z` near the zenith
+    // so the cross products stay well-conditioned.
+    let seed = if dir.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+    let right = dir.cross(seed).normalize();
+    let up = right.cross(dir).normalize();
+    let rotation = Quat::from_mat3(&Mat3::from_cols(
+        right,
+        up,
+        Vec3::new(-dir.x, -dir.y, -dir.z),
+    ));
+
+    // Near-horizon enlargement (`enlargm_factor = 1 - dir.z`), then the reference
+    // half-extent `scale * distance * factor * disk_radius`.
+    let enlarge = 1.0 - dir.y;
+    let horiz = 1.0 + enlarge * 0.3;
+    let vert = 1.0 + enlarge * 0.2;
+    let half = scale * DISC_DISTANCE * HEAVENLY_BODY_FACTOR * disk_radius;
+
+    Transform {
+        translation,
+        rotation,
+        scale: Vec3::new(2.0 * horiz * half, 2.0 * vert * half, 1.0),
+    }
+}
+
+/// [`Visibility::Visible`] when `up`, else [`Visibility::Hidden`].
+const fn visible_if(up: bool) -> Visibility {
+    if up {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
     }
 }
 

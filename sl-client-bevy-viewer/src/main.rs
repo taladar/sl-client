@@ -37,7 +37,7 @@ use clap::Parser as _;
 use sl_client_bevy::{
     AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig, LoginFailure,
     LoginParams, LoginRequest, MfaChallenge, SkyMaterialPlugin, SlClientPlugin, SlLoginRejected,
-    SlMfaChallenge, StartLocation, TerrainMaterialPlugin, Uuid,
+    SlMfaChallenge, StartLocation, SunDiscMaterialPlugin, TerrainMaterialPlugin, Uuid,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -80,7 +80,10 @@ use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
     repeat_debug_animation,
 };
-use crate::sky::{apply_sky_textures, center_sky_on_camera, drive_sky, setup_sky};
+use crate::sky::{
+    apply_disc_textures, apply_sky_textures, center_sky_on_camera, drive_sky, drive_sun_moon_discs,
+    setup_sky, setup_sun_moon_discs,
+};
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
@@ -335,6 +338,8 @@ fn run_session(
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
     .add_plugins(SkyMaterialPlugin)
+    // The sun / moon disc billboard material (P22.3), driven alongside the sky.
+    .add_plugins(SunDiscMaterialPlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).
@@ -378,6 +383,7 @@ fn run_session(
         (
             setup_scene,
             setup_sky,
+            setup_sun_moon_discs,
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
@@ -521,6 +527,11 @@ fn run_session(
             center_sky_on_camera.after(fly_camera),
             drive_sky.after(fly_camera),
             apply_sky_textures,
+            // Sun / moon discs (P22.3): aim and colour the billboards from the same
+            // active sky frame (after the fly-camera, so they track the viewpoint),
+            // then swap each decoded disc texture into its material.
+            drive_sun_moon_discs.after(fly_camera),
+            apply_disc_textures,
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a
