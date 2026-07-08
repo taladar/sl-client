@@ -16,6 +16,7 @@ mod bake_publish;
 mod camera;
 mod chat;
 mod coords;
+mod diagnostics;
 mod meshes;
 mod objects;
 mod screenshot;
@@ -25,6 +26,7 @@ mod textures;
 
 use std::path::{Path, PathBuf};
 
+use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions};
@@ -58,6 +60,7 @@ use crate::bake_inputs::{
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
+use crate::diagnostics::{setup_diagnostics_overlay, update_diagnostics_overlay};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
@@ -324,6 +327,13 @@ fn run_session(
         background_inventory_fetch: false,
     })
     .add_plugins(TerrainMaterialPlugin)
+    // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
+    // overlay (the rendering-fidelity phases lean hard on the fetch/decode
+    // pipeline, so make the frame budget visible).
+    .add_plugins((
+        FrameTimeDiagnosticsPlugin::default(),
+        EntityCountDiagnosticsPlugin::default(),
+    ))
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
     .init_resource::<TerrainState>()
@@ -354,7 +364,12 @@ fn run_session(
     .add_message::<WearableAssetFetched>()
     .add_systems(
         Startup,
-        (setup_scene, setup_chat_overlay, setup_avatar_body),
+        (
+            setup_scene,
+            setup_chat_overlay,
+            setup_diagnostics_overlay,
+            setup_avatar_body,
+        ),
     )
     .add_systems(
         Update,
@@ -455,7 +470,14 @@ fn run_session(
     // Plus the crosshair pick tool (press `P`) to identify the object under the
     // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
     // system limit.
-    .add_systems(Update, (log_suspicious_objects, pick_object))
+    .add_systems(
+        Update,
+        (
+            log_suspicious_objects,
+            pick_object,
+            update_diagnostics_overlay,
+        ),
+    )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a
     // motion for every animation each nearby avatar is playing, and fold finished
     // resolves into the shared motion cache (P18.2); then drive each rigged
