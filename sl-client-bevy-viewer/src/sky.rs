@@ -34,12 +34,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams, SkySettings, SunDiscMaterial,
-    SunDiscParams, TextureKey, Uuid, to_bevy_image,
+    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams,
+    SkySettings, SunDiscMaterial, SunDiscParams, TextureKey, Uuid, to_bevy_image,
 };
 
 use crate::camera::FlyCamera;
@@ -103,6 +104,21 @@ const DEFAULT_SUN_ID: Uuid = Uuid::from_u128(0x32bf_bcea_24b1_fb9d_1ef9_48a2_8a6
 /// `llsettingssky.cpp`).
 const DEFAULT_MOON_ID: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4a1_c428);
 
+/// The reference viewer's built-in cloud-noise texture (`DEFAULT_CLOUD_ID`,
+/// `llsettingssky.cpp`), sampled when the sky frame names none of its own.
+const DEFAULT_CLOUD_ID: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
+
+/// The radius of the cloud dome, in metres. Just inside [`SKY_DOME_RADIUS`] so the
+/// alpha-blended cloud layer depth-tests in front of the opaque sky dome without
+/// z-fighting it, while staying a far background layer (so near scene geometry
+/// still occludes it).
+const CLOUD_DOME_RADIUS: f32 = 2950.0;
+
+/// The reference cloud-scroll accumulation divisor (`LLEnvironment::
+/// updateCloudScroll`): the scroll delta grows by `dt * cloud_scroll_rate / 100`
+/// each frame.
+const CLOUD_SCROLL_DIVISOR: f32 = 100.0;
+
 /// Marks the sky-dome entity so [`center_sky_on_camera`] can follow the camera.
 #[derive(Component)]
 pub(crate) struct SkyDome;
@@ -146,6 +162,26 @@ pub(crate) struct DiscState {
     sun_key: Option<TextureKey>,
     /// The texture id currently requested for the moon disc.
     moon_key: Option<TextureKey>,
+}
+
+/// Marks the cloud-dome entity so [`center_sky_on_camera`] can follow the camera.
+#[derive(Component)]
+pub(crate) struct CloudDome;
+
+/// The viewer's cloud-layer state: the cloud material, the requested cloud-noise
+/// texture, and the accumulated scroll offset.
+#[derive(Resource)]
+pub(crate) struct CloudState {
+    /// The single cloud-dome material, updated each frame by [`drive_clouds`].
+    material: Handle<CloudMaterial>,
+    /// The texture id currently requested for the cloud noise (the active sky
+    /// frame's, or the built-in [`DEFAULT_CLOUD_ID`]).
+    cloud_key: Option<TextureKey>,
+    /// The accumulated cloud-scroll offset (the reference
+    /// `LLEnvironment::mCloudScrollDelta`), grown each frame from the sky frame's
+    /// `cloud_scroll_rate` and folded into `cloud_pos_density1` so the layer
+    /// drifts. Persists across sky-frame changes, like the reference.
+    scroll: Vec2,
 }
 
 /// Startup: spawn the sky dome (with its material) and the scene's directional
@@ -192,19 +228,24 @@ pub(crate) fn setup_sky(
     });
 }
 
-/// Keep the sky dome centred on the camera each frame, so the atmosphere always
-/// surrounds the viewpoint (the reference renders the dome camera-relative).
+/// Keep the sky and cloud domes centred on the camera each frame, so the
+/// atmosphere always surrounds the viewpoint (the reference renders the domes
+/// camera-relative).
+#[expect(
+    clippy::type_complexity,
+    reason = "a Bevy query filter selecting both dome markers so they follow the camera together"
+)]
 pub(crate) fn center_sky_on_camera(
     camera: Query<&GlobalTransform, With<FlyCamera>>,
-    mut dome: Query<&mut Transform, With<SkyDome>>,
+    mut domes: Query<&mut Transform, Or<(With<SkyDome>, With<CloudDome>)>>,
 ) {
     let Ok(camera) = camera.single() else {
         return;
     };
-    let Ok(mut transform) = dome.single_mut() else {
-        return;
-    };
-    transform.translation = camera.translation();
+    let translation = camera.translation();
+    for mut transform in &mut domes {
+        transform.translation = translation;
+    }
 }
 
 /// Fold the current environment + camera altitude into the sky material, the
@@ -522,6 +563,142 @@ pub(crate) fn apply_disc_textures(
     }
 }
 
+/// Startup: spawn the cloud dome (with its material, initially hidden until an
+/// environment selects a sky frame) and register [`CloudState`].
+pub(crate) fn setup_clouds(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CloudMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let placeholder = images.add(placeholder_image());
+    let material = materials.add(CloudMaterial {
+        params: default_cloud_params(),
+        cloud_noise: placeholder.clone(),
+        cloud_noise_next: placeholder,
+    });
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(CLOUD_DOME_RADIUS))),
+        MeshMaterial3d(material.clone()),
+        Transform::default(),
+        // The cloud layer never casts shadows (like the sky dome).
+        NotShadowCaster,
+        CloudDome,
+    ));
+    commands.insert_resource(CloudState {
+        material,
+        cloud_key: None,
+        scroll: Vec2::ZERO,
+    });
+}
+
+/// Fold the current environment + camera altitude into the cloud material,
+/// accumulate the cloud scroll, and (re)request the sky's cloud-noise texture
+/// boosted.
+pub(crate) fn drive_clouds(
+    time: Res<Time>,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    environment: Res<EnvironmentState>,
+    mut state: ResMut<CloudState>,
+    mut materials: ResMut<Assets<CloudMaterial>>,
+    mut textures: ResMut<TextureManager>,
+) {
+    let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
+    let position = day_position(&environment.settings);
+    let Some(sky) = environment.settings.active_sky_settings(altitude, position) else {
+        return;
+    };
+
+    // Sun / moon directions in Bevy space, and which body is up (as in `drive_sky`).
+    let sun_dir = sl_to_bevy_object_rotation(&sky.sun_rotation)
+        .mul_vec3(Vec3::X)
+        .normalize();
+    let moon_dir = sl_to_bevy_object_rotation(&sky.moon_rotation)
+        .mul_vec3(Vec3::X)
+        .normalize();
+    let sun_up = sun_dir.y >= 0.0;
+    let moon_up = moon_dir.y >= 0.0;
+
+    // The active light direction and glow factor (as in `drive_sky`).
+    let light_dir = if sun_up {
+        sun_dir
+    } else if moon_up {
+        moon_dir
+    } else {
+        Vec3::NEG_Y
+    };
+    let sun_up_factor = if sun_up { 1.0 } else { 0.0 };
+    let glow_factor = if sun_up {
+        1.0
+    } else if moon_up {
+        sky.moon_brightness * 0.25
+    } else {
+        0.0
+    };
+    let lightnorm = Vec3::new(light_dir.x, light_dir.y.max(-0.1), light_dir.z);
+
+    // Accumulate the cloud scroll (`LLEnvironment::updateCloudScroll`): grow the
+    // delta by `dt * rate / 100`, or reset it to zero when the rate is zero.
+    let [rate_x, rate_y] = sky.cloud_scroll_rate;
+    if rate_x == 0.0 && rate_y == 0.0 {
+        state.scroll = Vec2::ZERO;
+    } else {
+        let dt = time.delta_secs();
+        state.scroll.x += dt * rate_x / CLOUD_SCROLL_DIVISOR;
+        state.scroll.y += dt * rate_y / CLOUD_SCROLL_DIVISOR;
+    }
+
+    if let Some(mut material) = materials.get_mut(&state.material) {
+        material.params = cloud_params(sky, lightnorm, sun_up_factor, glow_factor, state.scroll);
+    }
+
+    // Fetch the sky's cloud-noise texture boosted (the sky frame's own, or the
+    // reference built-in) so it resolves ahead of ordinary faces.
+    let cloud_key = sky
+        .cloud_texture
+        .unwrap_or_else(|| TextureKey::from(DEFAULT_CLOUD_ID));
+    textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
+    state.cloud_key = Some(cloud_key);
+}
+
+/// Swap a decoded cloud-noise texture into the cloud material when its id resolves.
+pub(crate) fn apply_cloud_textures(
+    mut decoded: MessageReader<TextureDecoded>,
+    state: Res<CloudState>,
+    manager: Res<TextureManager>,
+    mut materials: ResMut<Assets<CloudMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    for &TextureDecoded(id) in decoded.read() {
+        if state.cloud_key != Some(id) {
+            continue;
+        }
+        let Some(decoded) = manager.decoded(id) else {
+            // The fetch/decode failed; the layer keeps its (transparent) placeholder.
+            continue;
+        };
+        // The cloud shader tiles the noise: `cloud_scale` magnifies the UVs and the
+        // `cloud_pos_density` / scroll offsets push them well outside `[0, 1]`, so the
+        // texture must wrap. Bevy's default sampler is clamp-to-edge (which would smear
+        // the black edge texel across the whole layer — the reference samples with
+        // `GL_REPEAT`), so give the cloud image a repeating sampler.
+        let mut image = to_bevy_image(decoded);
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            address_mode_w: ImageAddressMode::Repeat,
+            ..ImageSamplerDescriptor::linear()
+        });
+        let handle = images.add(image);
+        if let Some(mut material) = materials.get_mut(&state.material) {
+            // Both noise slots share the id until the day cycle (P22.6) drives a
+            // separate next-frame texture and the blend factor between them.
+            material.cloud_noise = handle.clone();
+            material.cloud_noise_next = handle;
+        }
+    }
+}
+
 /// Build the billboard transform for a heavenly-body disc: a camera-facing quad
 /// at [`DISC_DISTANCE`] along `dir`, oriented and sized like the reference
 /// `LLVOSky::updateHeavenlyBodyGeometry` (with its near-horizon enlargement).
@@ -607,6 +784,56 @@ const fn sky_params(
 fn default_sky_params() -> SkyParams {
     let sky = SkySettings::legacy_windlight_default("Default");
     sky_params(&sky, Vec3::Y, 1.0, 1.0)
+}
+
+/// Build the cloud-shader uniform block from a sky frame plus the per-frame light
+/// direction, day/night factor, glow factor, and accumulated scroll offset. The
+/// scroll is folded into `cloud_pos_density1` the way the reference
+/// `LLSettingsVOSky::applySpecial` does (the x offset negated).
+fn cloud_params(
+    sky: &SkySettings,
+    lightnorm: Vec3,
+    sun_up_factor: f32,
+    glow_factor: f32,
+    scroll: Vec2,
+) -> CloudParams {
+    let sunlight = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
+    let pd1 = sky.cloud_pos_density1;
+    let pd2 = sky.cloud_pos_density2;
+    CloudParams {
+        lightnorm,
+        sun_up_factor,
+        sunlight_color: sunlight,
+        haze_horizon: sky.haze_horizon,
+        // The reference shares the sunlight colour for moonlight.
+        moonlight_color: sunlight,
+        haze_density: sky.haze_density,
+        ambient_color: Vec3::from_array(color_rgb(sky.ambient)),
+        cloud_shadow: sky.cloud_shadow,
+        blue_horizon: Vec3::from_array(color_rgb(sky.blue_horizon)),
+        density_multiplier: sky.density_multiplier,
+        blue_density: Vec3::from_array(color_rgb(sky.blue_density)),
+        max_y: sky.max_y,
+        glow: glow_vec(sky.glow),
+        sun_moon_glow_factor: glow_factor,
+        cloud_color: Vec3::from_array(color_rgb(sky.cloud_color)),
+        cloud_scale: sky.cloud_scale,
+        cloud_pos_density1: Vec3::new(
+            pd1.position_x() - scroll.x,
+            pd1.position_y() + scroll.y,
+            pd1.density(),
+        ),
+        cloud_variance: sky.cloud_variance,
+        cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
+        blend_factor: 0.0,
+    }
+}
+
+/// The cloud uniforms for the built-in legacy default sky, used to seed the
+/// material before an environment is selected.
+fn default_cloud_params() -> CloudParams {
+    let sky = SkySettings::legacy_windlight_default("Default");
+    cloud_params(&sky, Vec3::Y, 1.0, 1.0, Vec2::ZERO)
 }
 
 /// The scene lighting derived from a sky frame — the reference

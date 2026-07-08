@@ -210,6 +210,8 @@ pub use crate::avatars::{
     AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, joint_position_overrides,
     to_bevy_base_mesh, to_bevy_morphed_mesh,
 };
+#[cfg(feature = "bevy_pbr")]
+pub use crate::clouds::{CloudMaterial, CloudMaterialPlugin, CloudParams};
 pub use crate::meshes::{
     BevyMeshFetcher, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh,
 };
@@ -229,6 +231,8 @@ pub mod assets;
 pub mod avatars;
 mod caps;
 mod chat_log;
+#[cfg(feature = "bevy_pbr")]
+pub mod clouds;
 mod experiences;
 mod fetch;
 mod http;
