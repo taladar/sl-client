@@ -19,6 +19,7 @@ mod coords;
 mod diagnostics;
 mod meshes;
 mod objects;
+mod render_priority;
 mod screenshot;
 mod session;
 mod terrain;
@@ -69,6 +70,7 @@ use crate::objects::{
     ObjectState, adopt_pending_attachments, apply_object_meshes, apply_object_sculpts,
     apply_rigged_attachments, log_suspicious_objects, pick_object, update_objects,
 };
+use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
@@ -480,6 +482,10 @@ fn run_session(
         (
             log_suspicious_objects,
             pick_object,
+            // On-screen render priority (P20.2): re-rank the queued texture / mesh
+            // fetches by the pixel area each object covers, so what the camera
+            // looks at loads first. Throttled internally.
+            drive_render_priority,
             update_diagnostics_overlay,
             // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
             // resource on the toggle key, then drive the panel's visibility and

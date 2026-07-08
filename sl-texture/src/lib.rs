@@ -30,5 +30,5 @@ pub use fetcher::{
     TextureFetchType, TextureFetcher,
 };
 pub use schedule::{Priority, TextureProgress, TextureRequest};
-pub use sl_asset_sched::{GateStats, StoreStats};
+pub use sl_asset_sched::{FULL_RESOLUTION_PIXEL_AREA, GateStats, ScreenMetrics, StoreStats};
 pub use store::{TextureError, TextureStore};

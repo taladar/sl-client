@@ -33,8 +33,8 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel, GateStats,
-    RemoteTextureSource, SlCapabilities, StoreStats, TextureFace, TextureFetcher, TextureKey,
-    TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
+    Priority, RemoteTextureSource, SlCapabilities, StoreStats, TextureFace, TextureFetcher,
+    TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
 };
 
 /// The GLTF material-override "no texture" sentinel (all-`f`, the reference
@@ -65,8 +65,8 @@ pub(crate) struct TextureDecoded(pub(crate) TextureKey);
 /// [`TextureStore`] plus the in-flight background
 /// fetch tasks and the decoded images already in hand.
 ///
-/// A consumer calls [`request`](Self::request) to ensure a texture is being
-/// fetched, then — once a [`TextureDecoded`] names it — reads
+/// A consumer calls [`request_boosted`](Self::request_boosted) to ensure a
+/// texture is being fetched, then — once a [`TextureDecoded`] names it — reads
 /// [`decoded`](Self::decoded) for the RGBA8 image to upload.
 #[derive(Resource)]
 pub(crate) struct TextureManager {
@@ -79,6 +79,14 @@ pub(crate) struct TextureManager {
     /// The background fetch task per texture id, polled to completion by
     /// [`poll_textures`]; presence means "already being fetched".
     inflight: HashMap<TextureKey, Task<FetchResult>>,
+    /// The re-prioritizable request handle per in-flight texture id (P20.2),
+    /// paired with the request-time (base) priority it was issued at, so the
+    /// render-priority driver can raise a texture the camera looks at (via
+    /// [`set_priority`](Self::set_priority)) while it is still queued behind the
+    /// store's admission gate — but never *demote* a boosted request (terrain, an
+    /// avatar bake) below its base. Cleared alongside [`inflight`](Self::inflight)
+    /// once the fetch resolves.
+    requests: HashMap<TextureKey, (TextureRequest, Priority)>,
     /// Successfully decoded images by texture id, shared across all consumers so
     /// a texture is fetched and decoded once no matter how many faces use it.
     decoded: HashMap<TextureKey, Arc<DecodedTexture>>,
@@ -96,45 +104,68 @@ impl FromWorld for TextureManager {
             store,
             fetcher,
             inflight: HashMap::new(),
+            requests: HashMap::new(),
             decoded: HashMap::new(),
         }
     }
 }
 
 impl TextureManager {
-    /// Ensure `id` is being fetched from the default `GetTexture` service (a plain
-    /// prim/terrain texture). A nil id (no texture) is ignored.
+    /// Ensure `id` is being fetched from the default `GetTexture` service at
+    /// request-time (base) priority `priority`. A nil id (no texture) is ignored.
+    ///
+    /// An ordinary prim face passes [`Priority::IDLE`] and the render-priority
+    /// driver ([`drive_render_priority`]) raises the texture each throttled frame
+    /// from the on-screen pixel area of the faces using it (P20.2), so it starts
+    /// idle and rises to what the camera warrants. A texture the driver does not
+    /// (or cannot) rank from a scene object's pixel area — a terrain detail
+    /// texture, an avatar texture, a worn attachment's face texture — passes a
+    /// fixed boost instead (mirroring `LLGLTexture::BOOST_TERRAIN` /
+    /// `BOOST_AVATAR`), which the driver never demotes below, so it is not starved
+    /// behind nearer prims.
     ///
     /// Idempotent — many faces requesting the same texture trigger a single
     /// fetch, on top of the store's own single-flight dedupe.
-    pub(crate) fn request(&mut self, id: TextureKey) {
-        self.request_from(id, RemoteTextureSource::Default);
+    ///
+    /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
+    pub(crate) fn request_boosted(&mut self, id: TextureKey, priority: Priority) {
+        self.request_from(id, RemoteTextureSource::Default, priority);
     }
 
     /// Ensure a server-side ("Sunshine") avatar bake `id` is being fetched from the
     /// appearance service at `url` (`FTT_SERVER_BAKE`) — a baked id is not fetchable
     /// by UUID from the `GetTexture` CDN. The decoded bake is stored in the same
     /// [`TextureStore`] keyed by `id`, so every consumer reads it exactly like any
-    /// other texture (P17.3 / P14).
+    /// other texture (P17.3 / P14). Boosted like any avatar texture (P20.2) so the
+    /// bake loads promptly rather than queued behind nearer prims.
     pub(crate) fn request_server_bake(&mut self, id: TextureKey, url: String) {
-        self.request_from(id, RemoteTextureSource::ServerBake { url });
+        self.request_from(
+            id,
+            RemoteTextureSource::ServerBake { url },
+            crate::render_priority::AVATAR_BOOST_PRIORITY,
+        );
     }
 
-    /// Spawn a background fetch of `id` from `source` if it is not already decoded
-    /// or in flight; the decode runs off-thread on the store's own pool.
-    fn request_from(&mut self, id: TextureKey, source: RemoteTextureSource) {
+    /// Spawn a background fetch of `id` from `source` at `priority` if it is not
+    /// already decoded or in flight; the decode runs off-thread on the store's own
+    /// pool. The fetch is admitted through the store's priority gate — the request
+    /// handle is retained so [`set_priority`](Self::set_priority) can re-rank it
+    /// while it waits (P20.2).
+    fn request_from(&mut self, id: TextureKey, source: RemoteTextureSource, priority: Priority) {
         if is_absent_texture(id)
             || self.decoded.contains_key(&id)
             || self.inflight.contains_key(&id)
         {
             return;
         }
-        let store = self.store.clone();
+        let request = self.store.request(id, DiscardLevel::FULL, priority, source);
+        let task_request = request.clone();
         let task = IoTaskPool::get().spawn(async move {
-            // The blocking fetch runs on this IoTaskPool thread; the decode is
+            // The blocking fetch runs on this IoTaskPool thread once the request is
+            // admitted through the gate (in priority order); the decode is
             // dispatched onto the store's own CPU pool, so the render thread never
             // decodes.
-            match store.get(id, DiscardLevel::FULL, source).await {
+            match task_request.resolved().await {
                 Ok(entry) => entry.image(),
                 Err(error) => {
                     warn!("texture {id} fetch/decode failed: {error}");
@@ -142,7 +173,21 @@ impl TextureManager {
                 }
             }
         });
+        let _previous = self.requests.insert(id, (request, priority));
         self.inflight.insert(id, task);
+    }
+
+    /// Re-rank an in-flight texture request from the on-screen pixel area the
+    /// driver computed (P20.2), clamped to never fall below the request-time base
+    /// priority — so the per-frame face pass can raise an unboosted prim texture
+    /// the camera turns toward, but cannot demote a boosted terrain / avatar
+    /// request that the face pass does not (and should not) rank. A no-op for a
+    /// texture already decoded, never requested, or whose fetch already finished
+    /// (its handle is dropped once it resolves).
+    pub(crate) fn set_priority(&self, id: TextureKey, priority: Priority) {
+        if let Some((request, base)) = self.requests.get(&id) {
+            request.set_priority(Priority::combine(priority, *base));
+        }
     }
 
     /// The decoded image for `id`, once it has been fetched, or `None` if it is
@@ -236,6 +281,9 @@ pub(crate) fn poll_textures(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
+        // Drop the schedulable request handle now the fetch is done — the decoded
+        // pixels live in `decoded`, independent of the store entry (P20.2).
+        let _request = manager.requests.remove(&id);
         if let Some(image) = result {
             let _previous = manager.decoded.insert(id, image);
         }
@@ -269,6 +317,7 @@ pub(crate) fn face_material(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    priority: Priority,
 ) -> Handle<StandardMaterial> {
     let texture_id = face.texture_id;
     let has_texture = !is_absent_texture(texture_id);
@@ -306,7 +355,7 @@ pub(crate) fn face_material(
             .entry(texture_id)
             .or_default()
             .push(handle.clone());
-        manager.request(texture_id);
+        manager.request_boosted(texture_id, priority);
     }
     handle
 }

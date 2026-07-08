@@ -30,6 +30,8 @@ pub mod stats;
 pub use cpu::run_cpu;
 pub use fetcher::{AssetFetcher, FetchChunk, FetchError};
 pub use gate::{GatePermit, PriorityGate};
-pub use priority::{POPULARITY_BOOST_SCALE, Priority, popularity_boost};
+pub use priority::{
+    FULL_RESOLUTION_PIXEL_AREA, POPULARITY_BOOST_SCALE, Priority, popularity_boost,
+};
 pub use screen::ScreenMetrics;
 pub use stats::{GateStats, StoreStats};

@@ -131,9 +131,10 @@ pub use sl_proto::DiscardLevel;
 // `sl-asset-sched` types across the texture / mesh / asset stores, so they are
 // re-exported once here (from `sl_texture`) rather than three times.
 pub use sl_texture::{
-    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, GateStats,
-    NotRemotelyFetchable, Priority, RemoteTextureSource, StoreStats, TextureError,
-    TextureFetchType, TextureFetcher, TextureProgress, TextureRequest, TextureStore,
+    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FULL_RESOLUTION_PIXEL_AREA,
+    FetchChunk, GateStats, NotRemotelyFetchable, Priority, RemoteTextureSource, ScreenMetrics,
+    StoreStats, TextureError, TextureFetchType, TextureFetcher, TextureProgress, TextureRequest,
+    TextureStore,
 };
 // The decoding, LOD-aware mesh store (the mesh counterpart of the texture
 // store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /

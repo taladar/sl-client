@@ -1289,7 +1289,9 @@ pub(crate) fn ingest_avatar_bakes(
                         let url = format!("{service}texture/{}/{name}/{id}", appearance.avatar_id);
                         manager.request_server_bake(id, url);
                     }
-                    None => manager.request(id),
+                    None => {
+                        manager.request_boosted(id, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                    }
                 }
             }
             debug!(

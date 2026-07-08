@@ -1493,13 +1493,48 @@ what the camera looks at loads first.
   Guards a zero/degenerate FOV → 0 and a zero distance → the `pi/2` half-angle
   (matching `atan(+inf)`) instead of dividing by zero. Unit-tested; re-exported
   at the crate root.
-- [ ] **P20.2. Drive fetch priority.** Map pixel area (plus a boost for the
-  own avatar / attachments / UI, mirroring `LLGLTexture::BOOST_*`) to a
+- [x] **P20.2. Drive fetch priority.** Map pixel area (plus a boost for
+  the own avatar / attachments / UI, mirroring `LLGLTexture::BOOST_*`) to a
   `sl_asset_sched::Priority`; feed it through `TextureStore::request` /
   `MeshStore::request` and re-prioritize each (throttled) frame via
   `.set_priority()` as the camera moves. The existing `popularity_boost`
   already lifts textures shared across many on-screen faces. Reference:
   `LLViewerTexture::addTextureStats`, the mesh `LODRequest` priority.
+  **Done:** a new `Priority::from_pixel_area` in `sl-asset-sched` maps a P20.1
+  pixel area to a scheduling priority exactly as the reference viewer's texture
+  decode priority *is* its `mMaxVirtualSize` (clamped/rounded into the `u32`
+  range, saturating at the full-resolution `2048 * 2048` area — the
+  reference's `BOOST_HIGH` full-res force — exposed as
+  `FULL_RESOLUTION_PIXEL_AREA`). The two viewer managers (`TextureManager` /
+  `MeshManager`) now fetch through `store.request(…, priority).resolved()`
+  instead of the ungated `store.get`, so every fetch is admitted through the
+  store's 16-slot priority gate in on-screen order; each keeps its
+  re-prioritizable request handle and gains a `set_priority`. A new
+  `render_priority` module's `drive_render_priority` system recomputes, a few
+  times a second (throttled 0.25 s), the pixel area every visible prim /
+  sculpt / mesh face covers — keeping the *max* per texture (the reference's
+  per-texture `mMaxVirtualSize`) — and the pixel area of each mesh object's
+  still-fetching geometry, then feeds those back through `set_priority`, so
+  what the camera looks at rises in the queue and what it turns away sinks
+  (the driver's per-frame value is clamped — in *both* the texture and mesh
+  managers — to never *demote* a request below its request-time base, so a boost
+  is never undone by the face pass). Assets the face pass cannot rank from a
+  scene object's pixel area are instead requested at a fixed boost: terrain
+  detail textures (`BOOST_TERRAIN`), avatar textures / server bakes /
+  client-bake layers, and — crucially — a **worn attachment's** face textures
+  *and* mesh geometry (`BOOST_AVATAR`). An attachment is a skinned / joint-
+  parented entity whose transform does not reflect its on-screen size, so the
+  pixel-area pass ranks it too low; the boost (threaded through the geometry
+  build from `worn_base_priority`, and unconditional for a rigged mesh) is what
+  loads it with the avatar. Every boost sits in a band *strictly above* the
+  pixel-area range (which saturates at the full-resolution `2048 * 2048`), so a
+  boosted asset always outranks even the closest, largest prim rather than
+  merely tying with it on a dense region. Verified live: OpenSim (terrain,
+  prims, sculpt, textured avatar all load through the gated path) and aditi (a
+  ~25k-entity region drove the gate genuinely under load — 270+ textures and
+  440+ meshes queued, hundreds waiting — draining in on-screen order, with the
+  center avatar's server bakes *and its worn mesh attachments* — jeans, top,
+  hair — resolving ahead of the surrounding build).
 
 ## Phase 21 — Distance / pixel-area LOD
 
@@ -2061,6 +2096,31 @@ avatar, so they are collected here to be worked one at a time.
   ranges even parse on SL. The PBR-terrain case depends on Phase 27 for the
   material assets. Reference: `LLVOSurfacePatch` / `LLDrawPoolTerrain` PBR path,
   `RenderTerrainPBREnabled`, `LLTerrainPaintMap`.
+- [ ] **R16. Linden system hair shows on mesh-hair avatars**
+  (`sl-client-bevy` / `sl-avatar`). Surfaced during the P20.2 aditi session:
+  the default Linden **system hair** base-mesh part (`avatar_hair.llm`, the
+  helmet-shaped scalp mesh) keeps rendering even on avatars that wear a
+  **rigged mesh hair** attachment (or no hair at all), where the reference
+  viewer hides it — so the default hair helmet pokes through the worn hair.
+  This is the hair analogue of the P13.5 conditional part visibility already
+  done for the skirt / mesh body: a worn mesh hair (or the appearance's
+  baked-hair / bald signal) should suppress the system hair part. Investigate
+  whether the trigger is a worn mesh-hair attachment, an `IMG_USE_BAKED_HAIR` /
+  bald-bake signal, or the hair bake's own alpha not being applied (so it reads
+  as a solid helmet rather than soft hair). Reference:
+  `LLVOAvatar::updateMeshVisibility`, the baked-hair `IMG_USE_BAKED_*` hide,
+  `avatar_lad.xml` hair `<mesh>`.
+- [ ] **R17. Shoe height / heel offset not applied to avatar placement**
+  (`sl-client-bevy` / `sl-avatar`). Surfaced during the P20.2 aditi session:
+  the worn **shoe** wearable's height adjustment — the heel / platform offset
+  that raises the avatar so its feet rest on the ground (the `Shoe_Heel_Height`
+  / `Shoe_Platform_Height` visual params and the resulting foot-to-ground /
+  hover correction) — is not taken into account, so a shoe-wearing avatar sinks
+  into or floats above the ground. Our body is currently planted by the fixed
+  pelvis rest height (P13.2); the shoe's heel/platform must extend the
+  pelvis-to-foot distance so the placement follows. Reference: Firestorm
+  `LLVOAvatar` `mPelvisToFoot` / `mBodySize` computation and the shoe
+  wearable's height params.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

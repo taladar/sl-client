@@ -27,7 +27,8 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, GateStats, MeshCacheLimits,
-    MeshFetcher, MeshKey, MeshLod, MeshSkin, MeshStore, SlCapabilities, StoreStats,
+    MeshFetcher, MeshKey, MeshLod, MeshRequest, MeshSkin, MeshStore, Priority, SlCapabilities,
+    StoreStats,
 };
 
 /// The outcome of one background mesh fetch: the decoded geometry paired with the
@@ -58,6 +59,14 @@ pub(crate) struct MeshManager {
     /// The background fetch task per mesh id, polled to completion by
     /// [`poll_meshes`]; presence means "already being fetched".
     inflight: HashMap<MeshKey, Task<FetchResult>>,
+    /// The re-prioritizable request handle per in-flight mesh id (P20.2), paired
+    /// with the request-time (base) priority it was issued at, so the
+    /// render-priority driver can raise a mesh the camera looks at (via
+    /// [`set_priority`](Self::set_priority)) while it is still queued behind the
+    /// store's admission gate — but never *demote* a boosted request (a worn
+    /// avatar attachment) below its base. Cleared alongside
+    /// [`inflight`](Self::inflight) once the fetch resolves.
+    requests: HashMap<MeshKey, (MeshRequest, Priority)>,
     /// Successfully decoded meshes by id, shared across all consumers so a mesh is
     /// fetched and decoded once no matter how many objects use it.
     decoded: HashMap<MeshKey, Arc<DecodedMesh>>,
@@ -78,6 +87,7 @@ impl FromWorld for MeshManager {
             store,
             fetcher,
             inflight: HashMap::new(),
+            requests: HashMap::new(),
             decoded: HashMap::new(),
             skins: HashMap::new(),
         }
@@ -85,21 +95,35 @@ impl FromWorld for MeshManager {
 }
 
 impl MeshManager {
-    /// Ensure `id` is being fetched: spawn a background fetch task if the mesh is
-    /// not already decoded or in flight. A nil id (no mesh) is ignored.
+    /// Ensure `id` is being fetched at request-time (base) priority `priority`:
+    /// spawn a background fetch task if the mesh is not already decoded or in
+    /// flight. A nil id (no mesh) is ignored.
+    ///
+    /// An ordinary scene mesh is requested at [`Priority::IDLE`] and the
+    /// render-priority driver ([`drive_render_priority`]) raises it each throttled
+    /// frame from the owning object's on-screen pixel area (P20.2), so a mesh the
+    /// camera looks at loads ahead of a distant one; a worn avatar attachment is
+    /// requested at a boost (its skinned entity transform does not reflect its
+    /// on-screen size, so the pixel-area pass cannot rank it — the base priority,
+    /// which the driver never demotes below, is what keeps it ahead).
     ///
     /// Idempotent — many objects sharing the same mesh trigger a single fetch, on
     /// top of the store's own single-flight dedupe.
-    pub(crate) fn request(&mut self, id: MeshKey) {
+    ///
+    /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
+    pub(crate) fn request(&mut self, id: MeshKey, priority: Priority) {
         if id.uuid().is_nil() || self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
             return;
         }
+        let request = self.store.request(id, MeshLod::FINEST, priority);
+        let task_request = request.clone();
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
-            // The blocking `GetMesh` fetch runs on this IoTaskPool thread; the
-            // decode is dispatched onto the store's own CPU pool, so the render
-            // thread never decodes.
-            let geometry = match store.get(id, MeshLod::FINEST).await {
+            // The blocking `GetMesh` fetch runs on this IoTaskPool thread once the
+            // request is admitted through the gate (in priority order); the decode
+            // is dispatched onto the store's own CPU pool, so the render thread
+            // never decodes.
+            let geometry = match task_request.resolved().await {
                 Ok(entry) => entry.mesh(),
                 Err(_error) => None,
             }?;
@@ -112,7 +136,21 @@ impl MeshManager {
             };
             Some((geometry, skin))
         });
+        let _previous = self.requests.insert(id, (request, priority));
         self.inflight.insert(id, task);
+    }
+
+    /// Re-rank an in-flight mesh request from the on-screen pixel area the driver
+    /// computed (P20.2), clamped to never fall below the request-time base
+    /// priority — so the per-frame object pass can raise a mesh the camera turns
+    /// toward, but cannot demote a boosted worn attachment (whose skinned entity
+    /// transform the pixel-area pass ranks too low). A no-op for a mesh already
+    /// decoded, never requested, or whose fetch already finished (its handle is
+    /// dropped once it resolves).
+    pub(crate) fn set_priority(&self, id: MeshKey, priority: Priority) {
+        if let Some((request, base)) = self.requests.get(&id) {
+            request.set_priority(Priority::combine(priority, *base));
+        }
     }
 
     /// The decoded geometry for `id`, once it has been fetched, or `None` if it is
@@ -215,6 +253,9 @@ pub(crate) fn poll_meshes(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
+        // Drop the schedulable request handle now the fetch is done — the decoded
+        // geometry lives in `decoded`, independent of the store entry (P20.2).
+        let _request = manager.requests.remove(&id);
         if let Some((mesh, skin)) = result {
             let _previous = manager.decoded.insert(id, mesh);
             if let Some(skin) = skin {

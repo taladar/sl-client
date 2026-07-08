@@ -376,7 +376,11 @@ fn learn_composition(
                 }
                 let key = TextureKey::from(*texture);
                 *slot = Some(key);
-                manager.request(key);
+                // Terrain textures are boosted (P20.2 / `BOOST_TERRAIN`): they are
+                // few, always under the camera, and not ranked by the on-screen
+                // face pass (terrain is a custom material, not a prim face), so a
+                // fixed boost keeps the ground from being starved behind prims.
+                manager.request_boosted(key, crate::render_priority::TERRAIN_BOOST_PRIORITY);
             }
             entry.requested = true;
         }

@@ -44,15 +44,16 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, JointOverrides, MeshKey, MeshSkin, Object, PrimFaceId,
-    PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, ScopedObjectId, SculptOrMeshKey, SlEvent,
-    SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
-    pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh,
-    to_bevy_prim_mesh, to_bevy_rigged_mesh,
+    PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey,
+    SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture,
+    decode_texture_entry, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
+    tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh,
 };
 
 use crate::avatars::{AvatarBody, AvatarState, BomFace};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::meshes::{MeshDecoded, MeshManager};
+use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
@@ -138,6 +139,22 @@ pub(crate) struct ObjectDebugInfo {
     shape: PrimShapeParams,
 }
 
+impl ObjectDebugInfo {
+    /// The object's mesh or sculpt-map asset id, or `None` for a plain prim. Used
+    /// by the P20.2 render-priority driver to rank a mesh object's still-fetching
+    /// geometry (or a sculpt's map) from the object's on-screen size before its
+    /// face entities exist.
+    pub(crate) const fn render_asset(&self) -> Option<Uuid> {
+        self.asset
+    }
+
+    /// The object's Second Life scale (metres per axis), whose half-diagonal is
+    /// its bounding radius for the P20.2 pixel-area computation.
+    pub(crate) const fn scale(&self) -> [f32; 3] {
+        self.scale
+    }
+}
+
 /// A marker component tagging one child entity as a single tessellated
 /// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
 /// Linden face index its material is looked up by (`TextureEntry.faces[face_id]`).
@@ -219,6 +236,25 @@ fn is_animated_object(object: &Object) -> bool {
         .is_some_and(|mesh| mesh.flags & ANIMATED_MESH_ENABLED_FLAG != 0)
 }
 
+/// The request-time (base) fetch priority for an object's textures and mesh
+/// geometry (P20.2): a worn avatar attachment is boosted so it loads with the
+/// avatar rather than queued behind the surrounding scene — its skinned / joint-
+/// parented entity transform does not reflect its on-screen size, so the
+/// pixel-area render-priority pass cannot rank it, and the base priority (which
+/// the driver never demotes below) is what keeps it ahead. Ordinary scene objects
+/// start [idle](Priority::IDLE) and are ranked purely by on-screen pixel area.
+///
+/// Keyed on the object carrying an attachment point (a worn attachment root); a
+/// linkset child of a multi-prim attachment is not itself flagged, so this is the
+/// common single-object attachment case.
+const fn worn_base_priority(object: &Object) -> Priority {
+    if object.attachment_point_id().is_some() {
+        AVATAR_BOOST_PRIORITY
+    } else {
+        Priority::IDLE
+    }
+}
+
 /// A deferred geometry build waiting on an asset fetch — a mesh object on its
 /// `LLMesh` asset, or a sculpted prim on its sculpt map texture — retained so the
 /// object's face entities can be spawned (and textured) once the asset decodes.
@@ -246,6 +282,9 @@ struct PendingMesh {
     texture_entry: Vec<u8>,
     /// The object's Second Life scale, needed to project planar-texgen faces.
     scale: [f32; 3],
+    /// The request-time (base) fetch priority for this object's face textures — a
+    /// boost for a worn attachment, else idle (P20.2).
+    priority: Priority,
 }
 
 /// A worn rigged mesh attachment's deferred skinned build (P17.2): the decoded
@@ -275,6 +314,9 @@ struct PendingSculpt {
     texture_entry: Vec<u8>,
     /// The object's Second Life scale, needed to project planar-texgen faces.
     scale: [f32; 3],
+    /// The request-time (base) fetch priority for this object's face textures — a
+    /// boost for a worn attachment, else idle (P20.2).
+    priority: Priority,
 }
 
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
@@ -611,6 +653,9 @@ fn build_object_geometry(
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
 ) -> (Vec<Entity>, Option<PendingGeometry>) {
+    // A worn attachment's textures / mesh are boosted so they load with the
+    // avatar rather than queued behind the surrounding scene (P20.2).
+    let priority = worn_base_priority(object);
     match category {
         ObjectCategory::Prim => (
             build_prim_faces(
@@ -621,6 +666,7 @@ fn build_object_geometry(
                 materials,
                 manager,
                 prim_textures,
+                priority,
             ),
             None,
         ),
@@ -628,7 +674,7 @@ fn build_object_geometry(
             let Some(key) = mesh_key(object) else {
                 return (Vec::new(), None);
             };
-            mesh_manager.request(key);
+            mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `mesh_manager` ends before the submesh build borrows the other
             // resources.
@@ -644,6 +690,7 @@ fn build_object_geometry(
                         materials,
                         manager,
                         prim_textures,
+                        priority,
                     ),
                     None,
                 ),
@@ -653,6 +700,7 @@ fn build_object_geometry(
                         key,
                         texture_entry: object.texture_entry.clone(),
                         scale: [object.scale.x, object.scale.y, object.scale.z],
+                        priority,
                     })),
                 ),
             }
@@ -661,7 +709,7 @@ fn build_object_geometry(
             let Some((map, sculpt_type)) = sculpt_key(object) else {
                 return (Vec::new(), None);
             };
-            manager.request(map);
+            manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `manager` ends before the face build borrows it mutably.
             match manager.decoded(map).map(Arc::clone) {
@@ -677,6 +725,7 @@ fn build_object_geometry(
                         materials,
                         manager,
                         prim_textures,
+                        priority,
                     ),
                     None,
                 ),
@@ -687,6 +736,7 @@ fn build_object_geometry(
                         sculpt_type,
                         texture_entry: object.texture_entry.clone(),
                         scale: [object.scale.x, object.scale.y, object.scale.z],
+                        priority,
                     })),
                 ),
             }
@@ -711,6 +761,10 @@ fn build_object_geometry(
 /// The face geometry stays in the prim's local Second Life space; the object
 /// entity's `Transform` carries the object's scale / rotation / position and the
 /// single Second Life → Bevy basis change for the whole prim.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority"
+)]
 fn build_prim_faces(
     object: &Object,
     parent: Entity,
@@ -719,6 +773,7 @@ fn build_prim_faces(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    priority: Priority,
 ) -> Vec<Entity> {
     let shape = PrimShapeFloat::from_params(&object.shape);
     let prim = tessellate(&shape, PrimLod::High);
@@ -732,6 +787,7 @@ fn build_prim_faces(
         materials,
         manager,
         prim_textures,
+        priority,
     )
 }
 
@@ -763,6 +819,7 @@ fn build_sculpt_faces(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    priority: Priority,
 ) -> Vec<Entity> {
     let prim = tessellate_sculpt(map, sculpt_type);
     spawn_prim_faces(
@@ -775,6 +832,7 @@ fn build_sculpt_faces(
         materials,
         manager,
         prim_textures,
+        priority,
     )
 }
 
@@ -839,6 +897,7 @@ fn spawn_prim_faces(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    priority: Priority,
 ) -> Vec<Entity> {
     let entry = decode_texture_entry(texture_entry, prim.faces.len());
     // The slot every face falls back to when the object carries no texture entry:
@@ -859,7 +918,7 @@ fn spawn_prim_faces(
             scale,
         );
         let mesh = meshes.add(bevy_mesh);
-        let material = face_material(texture_face, materials, manager, prim_textures);
+        let material = face_material(texture_face, materials, manager, prim_textures, priority);
         let entity = commands
             .spawn((
                 Mesh3d(mesh),
@@ -903,6 +962,7 @@ fn build_mesh_submeshes(
     materials: &mut Assets<StandardMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    priority: Priority,
 ) -> Vec<Entity> {
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry:
@@ -923,7 +983,7 @@ fn build_mesh_submeshes(
             scale,
         );
         let mesh = meshes.add(bevy_mesh);
-        let material = face_material(texture_face, materials, manager, prim_textures);
+        let material = face_material(texture_face, materials, manager, prim_textures, priority);
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
         let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
@@ -1330,6 +1390,7 @@ pub(crate) fn apply_object_meshes(
                             &mut materials,
                             &mut manager,
                             &mut prim_textures,
+                            pending.priority,
                         );
                         debug!(
                             "built mesh {key}: {} submesh entities",
@@ -1590,7 +1651,16 @@ fn build_rigged_submeshes(
         });
         let material = match bom {
             Some(_) => skin_placeholder.clone(),
-            None => face_material(texture_face, materials, manager, prim_textures),
+            // A rigged mesh is always a worn attachment, so its face textures are
+            // boosted (P20.2) — its skinned entity transform does not reflect its
+            // on-screen size, so the pixel-area pass cannot rank it.
+            None => face_material(
+                texture_face,
+                materials,
+                manager,
+                prim_textures,
+                AVATAR_BOOST_PRIORITY,
+            ),
         };
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
@@ -1665,6 +1735,7 @@ pub(crate) fn apply_object_sculpts(
                         &mut materials,
                         &mut manager,
                         &mut prim_textures,
+                        pending.priority,
                     );
                     debug!(
                         "built sculpt {id}: {} face entities",
