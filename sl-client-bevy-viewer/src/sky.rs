@@ -39,8 +39,12 @@
 //!   field for the active sky frame, and fetches its bloom texture **boosted**;
 //! - [`apply_star_textures`] swaps the decoded bloom texture into the material.
 //!
-//! The day-cycle keyframe interpolation over region time (animating the frame
-//! chosen here) is a later phase; P22.2 renders the statically selected frame.
+//! Every frame the sky, discs, clouds, and stars pull the **blended**
+//! [`SkySettings`] for the current region time
+//! (`EnvironmentSettings::blended_sky_settings`) — the smooth interpolation
+//! between the two day-cycle keyframes bounding the moment (P22.6), so the
+//! atmosphere and the sun / moon animate continuously through the day rather
+//! than snapping between keyframes.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -273,8 +277,10 @@ pub(crate) fn setup_sky(
     // current day position; `drive_sky` refines it every frame.
     let sky = environment
         .settings
-        .active_sky_settings(0.0, day_position(&environment.settings));
-    let params = sky.map_or_else(default_sky_params, |sky| sky_params(sky, Vec3::Y, 1.0, 1.0));
+        .blended_sky_settings(0.0, day_position(&environment.settings));
+    let params = sky.map_or_else(default_sky_params, |sky| {
+        sky_params(&sky, Vec3::Y, 1.0, 1.0)
+    });
     let material = materials.add(SkyMaterial {
         params,
         rainbow: placeholder.clone(),
@@ -337,7 +343,10 @@ pub(crate) fn drive_sky(
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment.settings);
-    let Some(sky) = environment.settings.active_sky_settings(altitude, position) else {
+    let Some(sky) = environment
+        .settings
+        .blended_sky_settings(altitude, position)
+    else {
         return;
     };
 
@@ -378,11 +387,11 @@ pub(crate) fn drive_sky(
     let lightnorm = Vec3::new(light_dir.x, light_dir.y.max(-0.1), light_dir.z);
 
     if let Some(mut material) = materials.get_mut(&state.material) {
-        material.params = sky_params(sky, lightnorm, sun_up_factor, glow_factor);
+        material.params = sky_params(&sky, lightnorm, sun_up_factor, glow_factor);
     }
 
     // Scene lighting from the sky (`calculateLightSettings`).
-    let lighting = calculate_light_settings(sky, light_dir.y, moon_up);
+    let lighting = calculate_light_settings(&sky, light_dir.y, moon_up);
     let diffuse = if sun_up {
         lighting.sun_diffuse
     } else if moon_up {
@@ -550,7 +559,7 @@ pub(crate) fn drive_sun_moon_discs(
     let position = day_position(&environment.settings);
     let Some(sky) = environment
         .settings
-        .active_sky_settings(camera_pos.y, position)
+        .blended_sky_settings(camera_pos.y, position)
     else {
         return;
     };
@@ -680,7 +689,10 @@ pub(crate) fn drive_clouds(
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment.settings);
-    let Some(sky) = environment.settings.active_sky_settings(altitude, position) else {
+    let Some(sky) = environment
+        .settings
+        .blended_sky_settings(altitude, position)
+    else {
         return;
     };
 
@@ -724,7 +736,7 @@ pub(crate) fn drive_clouds(
     }
 
     if let Some(mut material) = materials.get_mut(&state.material) {
-        material.params = cloud_params(sky, lightnorm, sun_up_factor, glow_factor, state.scroll);
+        material.params = cloud_params(&sky, lightnorm, sun_up_factor, glow_factor, state.scroll);
     }
 
     // Fetch the sky's cloud-noise texture boosted (the sky frame's own, or the
@@ -826,7 +838,7 @@ pub(crate) fn drive_stars(
     let position = day_position(&environment.settings);
     let Some(sky) = environment
         .settings
-        .active_sky_settings(camera_pos.y, position)
+        .blended_sky_settings(camera_pos.y, position)
     else {
         return;
     };
