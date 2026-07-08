@@ -141,8 +141,9 @@ pub use sl_texture::{
 // `sl_proto`); the mesh `CacheLimits` is aliased so it does not collide with the
 // texture one.
 pub use sl_mesh::{
-    CacheLimits as MeshCacheLimits, DecodedMesh, MeshEntry, MeshError, MeshFetcher, MeshLod,
-    MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin, MeshStore, Submesh,
+    CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshEntry, MeshError,
+    MeshFetcher, MeshLod, MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin,
+    MeshStore, Submesh,
 };
 
 // The generic-asset store (the opaque-blob counterpart of the texture/mesh

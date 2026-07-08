@@ -214,6 +214,13 @@ struct TrackedObject {
     /// asset or a sculpt's map texture), the pending build request; `None` once
     /// the geometry is built or for an object whose geometry needs no fetch.
     pending: Option<PendingGeometry>,
+    /// For a **built static** (non-rigged, pixel-area LOD managed) mesh object, the
+    /// inputs needed to rebuild its submesh entities when the mesh store swaps its
+    /// geometry to a different level of detail (P21.2): the mesh key, texture
+    /// entry, scale, and fetch priority. `None` for a prim, sculpt, worn rigged
+    /// mesh, or a mesh still pending its first decode. Retained so a LOD swap can
+    /// despawn the old submeshes and rebuild from the new block.
+    mesh_rebuild: Option<PendingMesh>,
     /// Whether this object is an **animated object** (animesh) — its
     /// `ExtendedMesh` param carries the `ANIMATED_MESH_ENABLED` flag. Set on the
     /// linkset root; a worn animesh drives its own control-avatar skeleton, so its
@@ -507,6 +514,11 @@ pub(crate) fn log_suspicious_objects(
 /// be identified by looking at it rather than by trawling the object stream. Aim
 /// the middle of the window at the object and press the key; the `asset` id is the
 /// mesh/sculpt to fetch and decode offline when its geometry looks wrong.
+///
+/// It also logs the live level of detail under the crosshair: the diffuse
+/// texture's current discard level (P21.1) and, for a mesh, its decoded geometry
+/// LOD (P21.2). Aim at a face and press the key while walking toward it to confirm
+/// the discard level falls (finer) and the mesh LOD rises as it should.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system querying the several components the pick report reads"
@@ -520,6 +532,8 @@ pub(crate) fn pick_object(
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    textures: Res<TextureManager>,
+    mesh_manager: Res<MeshManager>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyP) {
         return;
@@ -562,6 +576,26 @@ pub(crate) fn pick_object(
             tf.glow,
             tf.material_id,
         );
+        // The live level-of-detail of the face's diffuse texture (P21.1): its
+        // current discard level should *fall* (toward 0 = full resolution) as the
+        // camera moves toward the face. Aim and press the pick key while walking in
+        // to confirm the texture actually refines.
+        match textures.lod_debug(tf.texture_id) {
+            Some(lod) => warn!(
+                "pick texture {}: discard={} current={}x{} native={:?} header_native={:?} managed={}",
+                tf.texture_id,
+                lod.discard.get(),
+                lod.width,
+                lod.height,
+                lod.native,
+                lod.header_native,
+                lod.managed,
+            ),
+            None => warn!(
+                "pick texture {}: not decoded yet (still fetching or no texture)",
+                tf.texture_id,
+            ),
+        }
     }
     // The ray strikes a face/submesh child entity; walk up the linkset to the
     // object root that carries the identity component.
@@ -598,6 +632,16 @@ pub(crate) fn pick_object(
                 hit.distance,
                 info.shape,
             );
+            // The live mesh level of detail (P21.2): for a mesh object, its decoded
+            // geometry block should move toward `High` as the camera approaches. A
+            // boosted (worn attachment) mesh stays at the finest level and is not
+            // LOD managed.
+            if matches!(scene.get(current), Ok(obj) if obj.category == ObjectCategory::Mesh)
+                && let Some(asset) = info.asset
+                && let Some((lod, managed)) = mesh_manager.lod_debug(MeshKey::from(asset))
+            {
+                warn!("pick mesh {asset}: lod={lod:?} managed={managed}");
+            }
             return;
         }
         let Ok(child_of) = parents.get(current) else {
@@ -1095,6 +1139,10 @@ fn apply_object(
             );
             existing.face_entities = face_entities;
             existing.pending = pending;
+            // The geometry was re-requested from scratch; any prior LOD-rebuild
+            // inputs are stale (the mesh key or scale may have changed) and are
+            // re-established when the new build decodes (P21.2).
+            existing.mesh_rebuild = None;
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -1171,6 +1219,7 @@ fn apply_object(
             attachment_point,
             face_entities,
             pending,
+            mesh_rebuild: None,
             animated: is_animated_object(object),
         },
     );
@@ -1368,37 +1417,73 @@ pub(crate) fn apply_object_meshes(
         // which binds it to the wearer's skeleton once that avatar is spawned.
         let is_rigged = mesh_manager.skin(key).is_some();
         for tracked in state.objects.values_mut() {
-            // Take the pending build so a built object is not rebuilt; a build
-            // pending on a *different* asset (another mesh, or a sculpt) is put
-            // back untouched.
-            match tracked.pending.take() {
-                Some(PendingGeometry::Mesh(pending)) if pending.key == key => {
-                    if is_rigged && tracked.attachment_point.is_some() {
-                        // Defer the skinned build to `apply_rigged_attachments`.
-                        tracked.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
-                            key,
-                            texture_entry: pending.texture_entry,
-                        }));
-                    } else {
-                        tracked.face_entities = build_mesh_submeshes(
-                            &mesh,
-                            &pending.texture_entry,
-                            pending.scale,
-                            tracked.geometry,
-                            &mut commands,
-                            &mut meshes,
-                            &mut materials,
-                            &mut manager,
-                            &mut prim_textures,
-                            pending.priority,
-                        );
-                        debug!(
-                            "built mesh {key}: {} submesh entities",
-                            tracked.face_entities.len()
-                        );
-                    }
+            // First build: an object pending on this mesh key. A build pending on a
+            // *different* asset (another mesh, or a sculpt) is left untouched.
+            if matches!(&tracked.pending, Some(PendingGeometry::Mesh(pending)) if pending.key == key)
+            {
+                let Some(PendingGeometry::Mesh(pending)) = tracked.pending.take() else {
+                    continue;
+                };
+                if is_rigged && tracked.attachment_point.is_some() {
+                    // Defer the skinned build to `apply_rigged_attachments`.
+                    tracked.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+                        key,
+                        texture_entry: pending.texture_entry,
+                    }));
+                } else {
+                    tracked.face_entities = build_mesh_submeshes(
+                        &mesh,
+                        &pending.texture_entry,
+                        pending.scale,
+                        tracked.geometry,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &mut prim_textures,
+                        pending.priority,
+                    );
+                    debug!(
+                        "built mesh {key}: {} submesh entities",
+                        tracked.face_entities.len()
+                    );
+                    // Remember how to rebuild on a later LOD swap (P21.2); a rigged
+                    // mesh (handled above) is boosted and never LOD managed.
+                    tracked.mesh_rebuild = Some(pending);
                 }
-                other => tracked.pending = other,
+                continue;
+            }
+            // LOD swap (P21.2): this object already built this static mesh, and the
+            // store just swapped its geometry to a different level of detail.
+            // Despawn the old submesh entities and rebuild from the new block.
+            if !is_rigged
+                && tracked.pending.is_none()
+                && matches!(&tracked.mesh_rebuild, Some(rebuild) if rebuild.key == key)
+            {
+                let Some(rebuild) = tracked.mesh_rebuild.as_ref() else {
+                    continue;
+                };
+                let texture_entry = rebuild.texture_entry.clone();
+                let scale = rebuild.scale;
+                let priority = rebuild.priority;
+                let geometry = tracked.geometry;
+                despawn_prim_faces(&tracked.face_entities, &mut commands);
+                tracked.face_entities = build_mesh_submeshes(
+                    &mesh,
+                    &texture_entry,
+                    scale,
+                    geometry,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut manager,
+                    &mut prim_textures,
+                    priority,
+                );
+                debug!(
+                    "rebuilt mesh {key} at new LOD: {} submesh entities",
+                    tracked.face_entities.len()
+                );
             }
         }
     }

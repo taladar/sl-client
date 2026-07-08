@@ -34,7 +34,7 @@ pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;
 pub use j2c::{DiscardLevel, MAX_DISCARD_LEVEL};
-pub use mesh_lod::{MESH_LOD_COUNT, MeshLod};
+pub use mesh_lod::{DEFAULT_LOD_FACTOR, MESH_LOD_COUNT, MeshLod};
 pub use object_update::{
     TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
     encode_terse_texture_entry,

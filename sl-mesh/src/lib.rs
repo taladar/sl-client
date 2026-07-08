@@ -32,4 +32,4 @@ pub use progress::{MeshProgress, MeshRequest, Priority};
 pub use sl_asset_sched::{GateStats, StoreStats};
 pub use store::{MeshError, MeshStore};
 
-pub use sl_proto::{MeshKey, MeshLod};
+pub use sl_proto::{DEFAULT_LOD_FACTOR, MeshKey, MeshLod};

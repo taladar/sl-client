@@ -22,7 +22,13 @@
 //! - the same pass also drives texture level-of-detail (P21.1): it calls
 //!   [`TextureManager::set_lod_for_area`] with each face texture's on-screen
 //!   pixel area, so a small / distant face is fetched (and kept) at a coarser
-//!   discard level and upgraded as the camera approaches.
+//!   discard level and upgraded as the camera approaches;
+//! - and mesh level-of-detail (P21.2): it computes each mesh object's
+//!   [`MeshLod`] from its bounding radius and camera distance
+//!   ([`MeshLod::for_distance`], the reference viewer's `LLVOVolume::calcLOD`)
+//!   and calls [`MeshManager::set_lod_for_area`], so a small / distant mesh is
+//!   fetched (and kept) at a coarser geometry block and upgraded as the camera
+//!   approaches.
 //!
 //! Assets the pixel-area pass does not cover — terrain detail textures and avatar
 //! textures / bakes — are requested at a fixed [boost](AVATAR_BOOST_PRIORITY)
@@ -33,7 +39,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use sl_client_bevy::{MeshKey, Priority, ScreenMetrics, TextureKey};
+use sl_client_bevy::{DEFAULT_LOD_FACTOR, MeshKey, MeshLod, Priority, ScreenMetrics, TextureKey};
 
 use crate::meshes::MeshManager;
 use crate::objects::{FaceTextureDebug, ObjectDebugInfo};
@@ -103,7 +109,7 @@ pub(crate) fn drive_render_priority(
     faces: Query<(&GlobalTransform, &FaceTextureDebug)>,
     objects: Query<(&GlobalTransform, &ObjectDebugInfo)>,
     mut textures: ResMut<TextureManager>,
-    meshes: Res<MeshManager>,
+    mut meshes: ResMut<MeshManager>,
 ) {
     *since_last += time.delta_secs();
     if *since_last < REPRIORITIZE_INTERVAL_SECS {
@@ -120,14 +126,49 @@ pub(crate) fn drive_render_priority(
     let metrics = ScreenMetrics::new(window.height(), perspective.fov);
     let camera_position = camera_transform.translation();
 
-    // The largest pixel area any face reached for each texture, and each mesh's
-    // pixel area — the reference viewer's per-texture `mMaxVirtualSize`.
+    // The largest pixel area any face reached for each texture — the reference
+    // viewer's per-texture `mMaxVirtualSize`.
     let mut texture_area: HashMap<TextureKey, f32> = HashMap::new();
     for (transform, FaceTextureDebug(face)) in &faces {
         let area = face_pixel_area(&metrics, transform, camera_position);
         let slot = texture_area.entry(face.texture_id).or_insert(0.0);
         *slot = slot.max(area);
     }
+
+    // A mesh object's geometry is still fetching before its face entities exist,
+    // so it is ranked from the object's own debug identity (its asset id + Second
+    // Life scale) rather than a face. A mesh asset shared by several object
+    // instances at different apparent sizes is aggregated the same way a texture
+    // is: the largest pixel area (for priority) and the *finest* level any on-
+    // screen instance warrants (for LOD) — so a shared mesh is not thrashed
+    // between levels by whichever instance was visited last, and renders at the
+    // fidelity its closest / largest use needs (P21.2). A sculpt's map is a
+    // texture keyed by the same asset id, so its area is folded into the texture
+    // aggregation; the store not fetching that id ignores it.
+    let mut mesh_area: HashMap<MeshKey, f32> = HashMap::new();
+    let mut mesh_lod: HashMap<MeshKey, MeshLod> = HashMap::new();
+    for (transform, info) in &objects {
+        let Some(asset) = info.render_asset() else {
+            continue;
+        };
+        // The object's full scale-vector length: its half is the bounding-sphere
+        // radius for pixel area, while `LLVOVolume::calcLOD` ranks LOD against the
+        // full length (`getScale().length()`), so the two uses differ (P21.2).
+        let scale_length = Vec3::from_array(info.scale()).length();
+        let distance = camera_position.distance(transform.translation());
+        let area = metrics.pixel_area(0.5 * scale_length, distance);
+        let mesh_key = MeshKey::from(asset);
+        let area_slot = mesh_area.entry(mesh_key).or_insert(0.0);
+        *area_slot = area_slot.max(area);
+        let desired = MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+        let lod_slot = mesh_lod.entry(mesh_key).or_insert(MeshLod::COARSEST);
+        *lod_slot = lod_slot.finer_of(desired);
+        // Offer the same area to the texture store, aggregated by the maximum, for
+        // a sculpt map (or a mesh-asset id also used as a texture).
+        let texture_slot = texture_area.entry(TextureKey::from(asset)).or_insert(0.0);
+        *texture_slot = texture_slot.max(area);
+    }
+
     for (id, area) in texture_area {
         textures.set_priority(id, Priority::from_pixel_area(area));
         // Pixel-area LOD (P21.1): pick the discard level the on-screen size of
@@ -135,20 +176,14 @@ pub(crate) fn drive_render_priority(
         // A no-op for a boosted (full-resolution) or not-yet-decoded texture.
         textures.set_lod_for_area(id, area);
     }
-
-    // A mesh object's geometry is still fetching before its face entities exist,
-    // so it is ranked from the object's own debug identity (its asset id + Second
-    // Life scale) rather than a face. A sculpt's map is a texture keyed by the
-    // same asset id, so the priority is offered to both stores; the one that is
-    // not fetching that id ignores it.
-    for (transform, info) in &objects {
-        let Some(asset) = info.render_asset() else {
-            continue;
-        };
-        let area = object_pixel_area(&metrics, transform, info.scale(), camera_position);
-        let priority = Priority::from_pixel_area(area);
-        meshes.set_priority(MeshKey::from(asset), priority);
-        textures.set_priority(TextureKey::from(asset), priority);
+    for (mesh_key, area) in mesh_area {
+        meshes.set_priority(mesh_key, Priority::from_pixel_area(area));
+    }
+    for (mesh_key, desired) in mesh_lod {
+        // Mesh LOD (P21.2): upgrade / downgrade the managed mesh toward the finest
+        // level any on-screen instance warrants. A no-op for a boosted (finest,
+        // unmanaged) or not-yet-decoded mesh.
+        meshes.set_lod_for_area(mesh_key, desired);
     }
 }
 
@@ -164,19 +199,5 @@ fn face_pixel_area(
     let (scale, _rotation, translation) = transform.to_scale_rotation_translation();
     let radius = 0.5 * scale.length();
     let distance = camera_position.distance(translation);
-    metrics.pixel_area(radius, distance)
-}
-
-/// The pixel area an object covers, from its Second Life `scale` (the bounding-box
-/// dimensions, whose half-diagonal is the bounding radius) and the camera distance
-/// to the object's world position.
-fn object_pixel_area(
-    metrics: &ScreenMetrics,
-    transform: &GlobalTransform,
-    scale: [f32; 3],
-    camera_position: Vec3,
-) -> f32 {
-    let radius = 0.5 * Vec3::from_array(scale).length();
-    let distance = camera_position.distance(transform.translation());
     metrics.pixel_area(radius, distance)
 }

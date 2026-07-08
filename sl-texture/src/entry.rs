@@ -217,6 +217,17 @@ impl TextureEntry {
         self.image.load().as_ref().map(|image| image.discard_level)
     }
 
+    /// The texture's true native (full-resolution) pixel dimensions, read from the
+    /// parsed JPEG-2000 codestream header (`Xsiz`/`Ysiz`) rather than inferred from
+    /// a decoded image's size and discard level. `None` until enough of the
+    /// codestream is present to parse the header. This is the authoritative source
+    /// for a pixel-area LOD decision — a partial or non-power-of-two decode makes
+    /// the `decoded_size << discard_level` back-calculation unreliable.
+    #[must_use]
+    pub fn native_dimensions(&self) -> Option<(u32, u32)> {
+        self.header().map(|header| (header.width, header.height))
+    }
+
     /// Leases the current pixels for reading (e.g. a GPU upload): holds the usage
     /// lock so a concurrent downgrade waits, and pins the pixel buffer via an
     /// `Arc`. Returns `None` if the texture has not been decoded yet.

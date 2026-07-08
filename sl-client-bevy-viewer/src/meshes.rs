@@ -14,10 +14,14 @@
 //! message the [`objects`](crate::objects) system reacts to (building one child
 //! entity per submesh and texturing it via the Phase 6 texture pipeline).
 //!
-//! This is the Phase 7 slice — mesh geometry at the finest level of detail. The
-//! low-level `Command::FetchMesh` / `MeshReceived` path is deliberately *not*
-//! used, mirroring the Phase 6 texture work that moved off the equivalent raw
-//! texture path.
+//! Built in the Phase 7 slice (mesh geometry) and extended with pixel-area
+//! level-of-detail selection in P21.2: an ordinary scene mesh is fetched at a
+//! coarse placeholder block and upgraded / downgraded toward the level its
+//! on-screen size warrants (a worn attachment is boosted to the finest level and
+//! left there, mirroring the boosted-texture rule of P21.1). The low-level
+//! `Command::FetchMesh` / `MeshReceived` path is deliberately *not* used,
+//! mirroring the Phase 6 texture work that moved off the equivalent raw texture
+//! path.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -35,6 +39,32 @@ use sl_client_bevy::{
 /// decoded rig skin (`None` when the mesh carries no skin block), or `None` for
 /// the whole fetch if the geometry could not be fetched or decoded.
 type FetchResult = Option<(Arc<DecodedMesh>, Option<Arc<MeshSkin>>)>;
+
+/// The outcome of one background mesh level-of-detail change (P21.2): the newly
+/// decoded geometry block, or `None` if the swap could not be fetched or decoded
+/// (the mesh then keeps the level it already had). Only the geometry changes on a
+/// LOD swap — the rig skin is level-independent, so it is not re-decoded.
+type LodResult = Option<Arc<DecodedMesh>>;
+
+/// The mesh level of detail a pixel-area-managed mesh (P21.2) is first requested
+/// at, before its on-screen size is known: a coarse-but-quick placeholder block
+/// that loads fast, which the render-priority driver then upgrades / downgrades to
+/// the level the object's apparent size warrants. This mirrors the coarse-first
+/// texture placeholder (P21.1) — a small / distant mesh stays coarse and only the
+/// fidelity the view warrants is fetched.
+const INITIAL_MANAGED_LOD: MeshLod = MeshLod::Low;
+
+/// The per-mesh level-of-detail state of a pixel-area-managed mesh (P21.2). Its
+/// presence in [`MeshManager::managed`] marks the mesh as LOD-managed (an ordinary
+/// scene mesh object); boosted meshes (worn attachments, whose skinned transform
+/// the pixel-area pass cannot rank) are absent and stay at the finest level.
+struct ManagedMeshLod {
+    /// The level of the currently decoded geometry. The render-priority driver
+    /// compares its target against this to decide whether to upgrade, downgrade,
+    /// or leave the mesh unchanged; it is updated from the actually decoded block
+    /// once each fetch / LOD change completes.
+    current: MeshLod,
+}
 
 /// Announced (once per mesh id) when a background fetch finishes — whether it
 /// decoded or failed. The object system reads this and either builds the now-
@@ -67,6 +97,18 @@ pub(crate) struct MeshManager {
     /// avatar attachment) below its base. Cleared alongside
     /// [`inflight`](Self::inflight) once the fetch resolves.
     requests: HashMap<MeshKey, (MeshRequest, Priority)>,
+    /// Per-mesh level-of-detail state for pixel-area-managed meshes (P21.2), keyed
+    /// by mesh id. Presence marks a mesh as LOD-managed; the render-priority driver
+    /// upgrades / downgrades it toward the level the owning object's on-screen size
+    /// warrants. The mesh's initial [`MeshRequest`] handle is retained in
+    /// [`requests`](Self::requests) (rather than dropped on resolve) for exactly
+    /// these, so its store entry stays live for [`MeshStore::set_lod`].
+    managed: HashMap<MeshKey, ManagedMeshLod>,
+    /// In-flight level-of-detail changes (P21.2), one per mesh, kept separate from
+    /// the initial [`inflight`](Self::inflight) fetch so a re-decode never blocks
+    /// (or is mistaken for) the first fetch and at most one LOD change runs per
+    /// mesh at a time.
+    lod_inflight: HashMap<MeshKey, Task<LodResult>>,
     /// Successfully decoded meshes by id, shared across all consumers so a mesh is
     /// fetched and decoded once no matter how many objects use it.
     decoded: HashMap<MeshKey, Arc<DecodedMesh>>,
@@ -95,6 +137,8 @@ impl FromWorld for MeshManager {
             fetcher,
             inflight: HashMap::new(),
             requests: HashMap::new(),
+            managed: HashMap::new(),
+            lod_inflight: HashMap::new(),
             decoded: HashMap::new(),
             skins: HashMap::new(),
             pending: HashMap::new(),
@@ -115,6 +159,15 @@ impl MeshManager {
     /// on-screen size, so the pixel-area pass cannot rank it — the base priority,
     /// which the driver never demotes below, is what keeps it ahead).
     ///
+    /// An ordinary (unboosted) scene mesh is also **pixel-area LOD managed**
+    /// (P21.2): it is first fetched at a coarse [placeholder level](INITIAL_MANAGED_LOD)
+    /// and the render-priority driver then upgrades / downgrades it via
+    /// [`set_lod_for_area`](Self::set_lod_for_area) to the level the owning object's
+    /// on-screen size warrants, so a small / distant mesh fetches only a coarse
+    /// block. A boosted mesh (a worn attachment, whose skinned transform the
+    /// pixel-area pass cannot rank) is instead fetched at [`MeshLod::FINEST`] and
+    /// left there — mirroring the boosted-texture rule (P21.1).
+    ///
     /// Idempotent — many objects sharing the same mesh trigger a single fetch, on
     /// top of the store's own single-flight dedupe.
     ///
@@ -132,7 +185,16 @@ impl MeshManager {
             return;
         }
         self.pending.remove(&id);
-        let request = self.store.request(id, MeshLod::FINEST, priority);
+        // A boosted mesh (a worn attachment) loads at full detail and is not LOD
+        // managed; an ordinary scene mesh starts at a coarse placeholder block the
+        // driver then refines (P21.2).
+        let managed = !crate::render_priority::is_boost_priority(priority);
+        let target = if managed {
+            INITIAL_MANAGED_LOD
+        } else {
+            MeshLod::FINEST
+        };
+        let request = self.store.request(id, target, priority);
         let task_request = request.clone();
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
@@ -154,7 +216,54 @@ impl MeshManager {
             Some((geometry, skin))
         });
         let _previous = self.requests.insert(id, (request, priority));
+        if managed {
+            // Register for pixel-area LOD management (P21.2); the retained request
+            // handle keeps its store entry live for later `set_lod`.
+            let _existing = self
+                .managed
+                .entry(id)
+                .or_insert(ManagedMeshLod { current: target });
+        }
         self.inflight.insert(id, task);
+    }
+
+    /// Upgrade or downgrade a pixel-area-managed mesh (P21.2) toward `desired` —
+    /// the level of detail the owning object's on-screen size warrants
+    /// ([`MeshLod::for_distance`]) — via [`MeshStore::set_lod`]. Called by the
+    /// render-priority driver each throttled frame.
+    ///
+    /// A no-op unless the mesh is LOD-managed, the chosen level differs from the
+    /// current one, no LOD change for it is already running, and its retained
+    /// request handle is still live. The store's `set_lod` fetches + decodes the
+    /// target geometry block (waiting for any GPU read-lease to release before it
+    /// frees the old one). The completed block is folded in by [`poll_meshes`],
+    /// which re-announces the mesh so the object system rebuilds its submesh
+    /// entities from the new geometry.
+    pub(crate) fn set_lod_for_area(&mut self, id: MeshKey, desired: MeshLod) {
+        let Some(state) = self.managed.get(&id) else {
+            return;
+        };
+        if desired == state.current || self.lod_inflight.contains_key(&id) {
+            return;
+        }
+        let Some((request, _base)) = self.requests.get(&id) else {
+            // The retained handle is what keeps the entry live; without it we
+            // cannot drive a LOD change.
+            return;
+        };
+        let entry = request.entry();
+        let store = self.store.clone();
+        debug!(
+            "mesh {id} pixel-area LOD: {:?} -> {desired:?}",
+            state.current
+        );
+        let task = IoTaskPool::get().spawn(async move {
+            if let Err(error) = store.set_lod(&entry, desired).await {
+                warn!("mesh {id} LOD change to {desired:?} failed: {error}");
+            }
+            entry.mesh()
+        });
+        let _previous = self.lod_inflight.insert(id, task);
     }
 
     /// Re-rank an in-flight mesh request from the on-screen pixel area the driver
@@ -180,6 +289,15 @@ impl MeshManager {
     /// no skin block, is still in flight, or the fetch failed (P17.2).
     pub(crate) fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
         self.skins.get(&id)
+    }
+
+    /// The currently decoded level of detail of `id`, and whether it is pixel-area
+    /// LOD managed (an ordinary scene mesh) rather than boosted to the finest level
+    /// (a worn attachment) — for the crosshair pick tool's LOD diagnostics (P21.2).
+    /// `None` if the mesh has not decoded yet.
+    pub(crate) fn lod_debug(&self, id: MeshKey) -> Option<(MeshLod, bool)> {
+        let mesh = self.decoded.get(&id)?;
+        Some((mesh.lod, self.managed.contains_key(&id)))
     }
 
     /// Point the store's fetcher at the region's current mesh capability URL
@@ -288,14 +406,44 @@ pub(crate) fn poll_meshes(
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
         // Drop the schedulable request handle now the fetch is done — the decoded
-        // geometry lives in `decoded`, independent of the store entry (P20.2).
-        let _request = manager.requests.remove(&id);
+        // geometry lives in `decoded`, independent of the store entry (P20.2) —
+        // *unless* the mesh is pixel-area LOD managed (P21.2), where the retained
+        // handle keeps its store entry live for later `set_lod`.
+        if !manager.managed.contains_key(&id) {
+            let _request = manager.requests.remove(&id);
+        }
         if let Some((mesh, skin)) = result {
+            // Record the level actually decoded (the store may have fallen back to
+            // a coarser available block than requested), so the driver ranks
+            // further changes against the real current level (P21.2).
+            if let Some(state) = manager.managed.get_mut(&id) {
+                state.current = mesh.lod;
+            }
             let _previous = manager.decoded.insert(id, mesh);
             if let Some(skin) = skin {
                 let _prev_skin = manager.skins.insert(id, skin);
             }
         }
         decoded.write(MeshDecoded(id));
+    }
+
+    // Fold in completed level-of-detail changes (P21.2): the store entry now holds
+    // the finer / coarser geometry block, so refresh the shared decoded cache and
+    // re-announce the mesh so `apply_object_meshes` rebuilds its submesh entities.
+    let mut lod_finished: Vec<(MeshKey, LodResult)> = Vec::new();
+    for (&id, task) in &mut manager.lod_inflight {
+        if let Some(result) = block_on(poll_once(task)) {
+            lod_finished.push((id, result));
+        }
+    }
+    for (id, result) in lod_finished {
+        let _removed = manager.lod_inflight.remove(&id);
+        if let Some(mesh) = result {
+            if let Some(state) = manager.managed.get_mut(&id) {
+                state.current = mesh.lod;
+            }
+            let _previous = manager.decoded.insert(id, mesh);
+            decoded.write(MeshDecoded(id));
+        }
     }
 }

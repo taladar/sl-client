@@ -78,6 +78,30 @@ struct ManagedLod {
     current: Option<DiscardLevel>,
 }
 
+/// A snapshot of a texture's level-of-detail state for the crosshair pick tool
+/// (P21.1 diagnostics), returned by [`TextureManager::lod_debug`].
+pub(crate) struct TextureLodDebug {
+    /// The discard level of the currently decoded / uploaded image (`0` = full
+    /// resolution). This is what should fall as the camera approaches.
+    pub(crate) discard: DiscardLevel,
+    /// The width of the currently decoded image, in texels.
+    pub(crate) width: u32,
+    /// The height of the currently decoded image, in texels.
+    pub(crate) height: u32,
+    /// The learned native (discard-0) size, if the texture is LOD-managed and has
+    /// decoded at least once; `None` for an unmanaged (boosted) texture. This is
+    /// the manager's `decoded_size << discard_level` back-calculation.
+    pub(crate) native: Option<(u32, u32)>,
+    /// The texture's *true* native size from the parsed J2C codestream header, the
+    /// authoritative full-resolution dimensions. If this exceeds
+    /// [`native`](Self::native), the back-calculation under-counted (a partial /
+    /// non-power-of-two decode) and the texture is wrongly capped coarse.
+    pub(crate) header_native: Option<(u32, u32)>,
+    /// Whether the texture is pixel-area LOD managed (an ordinary face) rather
+    /// than fetched at full resolution (a boosted avatar / terrain texture).
+    pub(crate) managed: bool,
+}
+
 /// Announced (once per texture id) when a background fetch finishes — whether it
 /// decoded or failed. Every consumer that parked work on that texture reads this
 /// and either applies the now-cached image or drops back to its fallback.
@@ -396,16 +420,28 @@ impl TextureManager {
 
     /// Record a freshly decoded image as the current one for `id`: update the
     /// shared decoded cache and, for a pixel-area-managed texture, its learned
-    /// native (discard-0) size and current level (P21.1). The native size is the
-    /// decoded size scaled back up by the discard level (each level halves both
-    /// dimensions).
+    /// native (discard-0) size and current level (P21.1).
+    ///
+    /// The native size is read from the store entry's parsed J2C header — the
+    /// authoritative full-resolution dimensions — falling back to the
+    /// decoded-size-scaled-up-by-discard-level back-calculation only when the
+    /// header is not yet available. The back-calculation is unreliable if a decode
+    /// was partial (a truncated resolution-progressive codestream decodes to a
+    /// smaller image than its discard level implies), which would cap the texture
+    /// coarse; the header dimensions never lie.
     fn record_decoded(&mut self, id: TextureKey, image: Arc<DecodedTexture>) {
+        let header_native = self
+            .requests
+            .get(&id)
+            .and_then(|(request, _base)| request.entry().native_dimensions());
         if let Some(state) = self.managed.get_mut(&id) {
-            let scale = u32::from(image.discard_level.get());
-            state.native = Some((
-                image.width.checked_shl(scale).unwrap_or(image.width),
-                image.height.checked_shl(scale).unwrap_or(image.height),
-            ));
+            state.native = Some(header_native.unwrap_or_else(|| {
+                let scale = u32::from(image.discard_level.get());
+                (
+                    image.width.checked_shl(scale).unwrap_or(image.width),
+                    image.height.checked_shl(scale).unwrap_or(image.height),
+                )
+            }));
             state.current = Some(image.discard_level);
         }
         let _previous = self.decoded.insert(id, image);
@@ -428,6 +464,30 @@ impl TextureManager {
     /// still in flight or the fetch failed.
     pub(crate) fn decoded(&self, id: TextureKey) -> Option<&Arc<DecodedTexture>> {
         self.decoded.get(&id)
+    }
+
+    /// A snapshot of a texture's level-of-detail state for the crosshair pick tool
+    /// (P21.1 diagnostics): the currently decoded discard level and pixel
+    /// dimensions, its learned native (discard-0) size (only for a LOD-managed
+    /// texture), and whether it is pixel-area LOD managed at all. `None` if the
+    /// texture has not decoded yet. Aim at a face and press the pick key while
+    /// walking toward it to watch the discard level fall (finer) as it should.
+    pub(crate) fn lod_debug(&self, id: TextureKey) -> Option<TextureLodDebug> {
+        let image = self.decoded.get(&id)?;
+        // The true native size lives on the store entry's parsed J2C header; the
+        // retained request handle (kept for managed textures) is the way to it.
+        let header_native = self
+            .requests
+            .get(&id)
+            .and_then(|(request, _base)| request.entry().native_dimensions());
+        Some(TextureLodDebug {
+            discard: image.discard_level,
+            width: image.width,
+            height: image.height,
+            native: self.managed.get(&id).and_then(|state| state.native),
+            header_native,
+            managed: self.managed.contains_key(&id),
+        })
     }
 
     /// Point the store's fetcher at the region's current `GetTexture` capability
@@ -584,6 +644,15 @@ pub(crate) struct PrimTextures {
     /// Face materials parked on a texture id, patched with the diffuse image (or
     /// released to their flat tint) once the fetch resolves.
     pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    /// Every material that samples each texture, tracked so a level-of-detail
+    /// re-upload (P21.1) can mark them changed. A Bevy material's bind group caches
+    /// the texture's GPU view and is **not** rebuilt when the [`Image`] behind its
+    /// handle is replaced with a different-size one (nothing in `bevy_pbr` watches
+    /// `AssetEvent<Image>` for materials), so the new resolution never appears until
+    /// the material asset itself is touched. Stored as weak [`AssetId`]s so a
+    /// despawned face's material is not kept alive; ids that no longer resolve are
+    /// pruned when the texture is refreshed.
+    materials: HashMap<TextureKey, Vec<AssetId<StandardMaterial>>>,
 }
 
 /// Build the diffuse [`StandardMaterial`] for one prim face: `base_color` is the
@@ -628,15 +697,24 @@ pub(crate) fn face_material(
         material.base_color_texture = Some(image.clone());
     }
     let handle = materials.add(material);
-    // A textured face whose image is not uploaded yet: park the material and ask
-    // the pipeline for the texture (idempotent across faces).
-    if has_texture && !prim_textures.images.contains_key(&texture_id) {
+    if has_texture {
+        // Track this material so a later level-of-detail re-upload can mark it
+        // changed and rebuild its bind group (P21.1) — see `PrimTextures::materials`.
         prim_textures
-            .pending
+            .materials
             .entry(texture_id)
             .or_default()
-            .push(handle.clone());
-        manager.request_face(texture_id, priority);
+            .push(handle.id());
+        // A textured face whose image is not uploaded yet: park the material and
+        // ask the pipeline for the texture (idempotent across faces).
+        if !prim_textures.images.contains_key(&texture_id) {
+            prim_textures
+                .pending
+                .entry(texture_id)
+                .or_default()
+                .push(handle.clone());
+            manager.request_face(texture_id, priority);
+        }
     }
     handle
 }
@@ -655,12 +733,18 @@ pub(crate) fn apply_prim_textures(
     for &TextureDecoded(id) in decoded.read() {
         // Level-of-detail re-decode (P21.1): a texture already uploaded to the GPU
         // whose store entry the driver upgraded / downgraded. Refresh the Bevy
-        // image *behind its existing handle*, so every material sampling it shows
-        // the new resolution without any material re-patching.
+        // image *behind its existing handle*, then mark every material sampling it
+        // changed so Bevy rebuilds their bind groups — a material's bind group
+        // caches the texture's GPU view and is not rebuilt on an image change
+        // alone, so without this the new resolution would decode but never appear.
         if let Some(handle) = prim_textures.images.get(&id).cloned() {
             if let Some(image) = manager.decoded(id) {
                 let refreshed = build_prim_image(image);
                 let _replaced = images.insert(&handle, refreshed);
+                if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
+                    // Touch each live material (prune any whose face was despawned).
+                    material_ids.retain(|&material_id| materials.get_mut(material_id).is_some());
+                }
             }
             continue;
         }

@@ -369,7 +369,15 @@ impl TextureStore {
             }
             // No header yet ⇒ probe with `FIRST_PACKET_SIZE` first to read it.
             let need = entry.header().map_or(j2c::FIRST_PACKET_SIZE, |header| {
-                if full {
+                // A full-resolution (discard 0) decode must fetch the *whole*
+                // codestream, not the `1/8`-rate estimate. Second Life textures are
+                // resolution-progressive, so a short prefix decodes cleanly to a
+                // lower resolution — OpenJPEG returns success, so the decode-error
+                // fallback never fires and the "full-res" image is silently stuck
+                // at a reduced size that can never sharpen. The estimate is only a
+                // valid prefix boundary for a coarser LOD, whose target resolution
+                // a prefix genuinely reaches.
+                if full || target.is_full() {
                     header.full_data_size_bound()
                 } else {
                     target.data_size(&header)
