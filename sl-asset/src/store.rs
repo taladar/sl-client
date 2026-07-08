@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
-use sl_asset_sched::{Priority, PriorityGate};
+use sl_asset_sched::{Priority, PriorityGate, StoreStats};
 use sl_proto::{AssetKey, AssetType};
 
 use crate::disk::{AssetDiskCache, CacheLimits, now_unix};
@@ -53,6 +53,10 @@ struct StoreInner {
     gate: PriorityGate,
     /// Monotonic source of unique gate request ids.
     request_counter: AtomicU64,
+    /// Cumulative disk-cache hits (assets served from disk).
+    cache_hits: AtomicU64,
+    /// Cumulative entries garbage-collected by [`sweep`](AssetStore::sweep).
+    collected: AtomicU64,
 }
 
 /// A cloneable handle to a generic-asset fetch/cache store.
@@ -90,6 +94,8 @@ impl AssetStore {
             disk,
             gate: PriorityGate::new(DEFAULT_INFLIGHT),
             request_counter: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
+            collected: AtomicU64::new(0),
         })))
     }
 
@@ -105,7 +111,50 @@ impl AssetStore {
 
     /// Drops dead weak references from the map. Cheap; call periodically.
     pub fn sweep(&self) {
+        let before = self.0.map.len();
         self.0.map.retain(|_ref, weak| weak.strong_count() > 0);
+        let removed = before.saturating_sub(self.0.map.len());
+        self.0
+            .collected
+            .fetch_add(as_u64(removed), Ordering::Relaxed);
+    }
+
+    /// A point-in-time snapshot of the store's fetch pipeline: its live entries
+    /// bucketed by progress, the in-memory byte footprint, and the cumulative
+    /// cache-hit and garbage-collected counters. A generic asset has no decode
+    /// step and no cancellation, so those buckets stay zero.
+    #[must_use]
+    pub fn stats(&self) -> StoreStats {
+        let mut stats = StoreStats::default();
+        for reference in &self.0.map {
+            let Some(entry) = reference.value().upgrade() else {
+                continue;
+            };
+            stats.in_memory = stats.in_memory.saturating_add(1);
+            let bucket = match entry.progress() {
+                AssetProgress::Queued => &mut stats.queued,
+                AssetProgress::ReadingDisk => &mut stats.reading_disk,
+                AssetProgress::Downloading { .. } => &mut stats.downloading,
+                AssetProgress::Ready(_len) => &mut stats.ready,
+                AssetProgress::Failed => &mut stats.failed,
+            };
+            *bucket = bucket.saturating_add(1);
+            let bytes = entry
+                .data
+                .load()
+                .as_ref()
+                .map_or(0, |data| as_u64(data.len()));
+            stats.bytes = stats.bytes.saturating_add(bytes);
+        }
+        stats.cache_hits = self.0.cache_hits.load(Ordering::Relaxed);
+        stats.collected = self.0.collected.load(Ordering::Relaxed);
+        stats
+    }
+
+    /// A snapshot of the store's admission gate (capacity / in-flight / waiting).
+    #[must_use]
+    pub fn gate_stats(&self) -> sl_asset_sched::GateStats {
+        self.0.gate.stats()
     }
 
     /// Fetches `id`'s asset of class `asset_type`, returning the shared entry
@@ -172,6 +221,7 @@ impl AssetStore {
         if let Some(disk) = self.0.disk.as_ref() {
             entry.set_progress(AssetProgress::ReadingDisk);
             if let Some(bytes) = disk.read(asset_ref.id.uuid()) {
+                self.0.cache_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(bytes);
             }
         }
@@ -208,5 +258,77 @@ impl AssetStore {
                 fresh
             }
         }
+    }
+}
+
+/// A `usize` widened to `u64` for a stats counter, saturating on the (only
+/// theoretically possible, on a >64-bit target) overflow.
+fn as_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AssetStore;
+    use crate::disk::CacheLimits;
+    use crate::fetcher::{AssetRef, BlobFetcher};
+    use bytes::Bytes;
+    use pretty_assertions::assert_eq;
+    use sl_asset_sched::{FetchChunk, FetchError};
+    use sl_proto::{AssetKey, AssetType, Uuid};
+    use std::sync::Arc;
+
+    /// A fetcher that returns a fixed byte blob for any asset (a `200` whole
+    /// response), for exercising the store without a network.
+    #[derive(Debug)]
+    struct BlobbyFetcher {
+        /// The bytes returned for any fetch.
+        blob: Bytes,
+    }
+
+    #[async_trait::async_trait]
+    impl sl_asset_sched::AssetFetcher<AssetRef> for BlobbyFetcher {
+        async fn fetch_range(
+            &self,
+            _id: AssetRef,
+            _start: usize,
+            _end: usize,
+        ) -> Result<FetchChunk, FetchError> {
+            Ok(FetchChunk {
+                bytes: self.blob.clone(),
+                whole: true,
+            })
+        }
+    }
+
+    /// A store over a fetcher serving `blob`, with no disk cache.
+    fn store_with(blob: Bytes) -> AssetStore {
+        let fetcher: Arc<dyn BlobFetcher> = Arc::new(BlobbyFetcher { blob });
+        AssetStore::new(fetcher, None, CacheLimits::default())
+            .unwrap_or_else(|_error| unreachable!("no disk cache cannot fail"))
+    }
+
+    #[test]
+    fn stats_bucket_a_ready_asset_and_count_collection() {
+        let store = store_with(Bytes::from_static(b"an-opaque-asset"));
+        let id = AssetKey::from(Uuid::from_u128(1));
+        pollster::block_on(async {
+            let entry = store
+                .get(id, AssetType::Notecard)
+                .await
+                .unwrap_or_else(|_error| unreachable!("whole fetch succeeds"));
+            // One ready entry, held in memory, with its bytes accounted for.
+            let ready = store.stats();
+            assert_eq!(ready.in_memory, 1);
+            assert_eq!(ready.ready, 1);
+            assert_eq!(ready.bytes, 15);
+            assert_eq!(ready.collected, 0);
+            // Dropping the entry and sweeping collects it and counts one GC.
+            drop(entry);
+            store.sweep();
+            let swept = store.stats();
+            assert_eq!(swept.in_memory, 0);
+            assert_eq!(swept.collected, 1);
+        });
     }
 }

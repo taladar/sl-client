@@ -30,4 +30,5 @@ pub use fetcher::{
     TextureFetchType, TextureFetcher,
 };
 pub use schedule::{Priority, TextureProgress, TextureRequest};
+pub use sl_asset_sched::{GateStats, StoreStats};
 pub use store::{TextureError, TextureStore};

@@ -12,6 +12,7 @@ use keyed_priority_queue::KeyedPriorityQueue;
 use parking_lot::Mutex;
 
 use crate::priority::Priority;
+use crate::stats::GateStats;
 
 /// The mutable state of a [`PriorityGate`]: the free-slot count and the
 /// priority-ordered set of waiting request ids.
@@ -110,6 +111,22 @@ impl PriorityGate {
         let _notified = self.wake.notify(usize::MAX);
     }
 
+    /// A point-in-time snapshot of the gate's capacity, in-flight, and waiting
+    /// figures.
+    #[must_use]
+    pub fn stats(&self) -> GateStats {
+        let capacity = self.capacity.load(Ordering::Relaxed);
+        let state = self.state.lock();
+        let slots = state.slots;
+        let waiting = state.waiters.len();
+        drop(state);
+        GateStats {
+            capacity,
+            in_flight: capacity.saturating_sub(slots),
+            waiting,
+        }
+    }
+
     /// Releases one permit, waking waiters to admit the next one.
     fn release(&self) {
         {
@@ -163,6 +180,7 @@ impl Drop for WaiterCleanup<'_> {
 mod tests {
     use super::PriorityGate;
     use crate::priority::Priority;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn gate_admits_up_to_capacity_then_serialises() {
@@ -173,6 +191,25 @@ mod tests {
             drop(first);
             let second = gate.acquire(2, Priority::new(1)).await;
             drop(second);
+        });
+    }
+
+    #[test]
+    fn stats_report_capacity_in_flight_and_waiting() {
+        pollster::block_on(async {
+            let gate = PriorityGate::new(1);
+            // Empty gate: nothing in flight, nobody waiting.
+            let idle = gate.stats();
+            assert_eq!(idle.capacity, 1);
+            assert_eq!(idle.in_flight, 0);
+            assert_eq!(idle.waiting, 0);
+            // Holding the only permit shows one slot in flight.
+            let held = gate.acquire(1, Priority::new(1)).await;
+            let busy = gate.stats();
+            assert_eq!(busy.in_flight, 1);
+            assert_eq!(busy.waiting, 0);
+            drop(held);
+            assert_eq!(gate.stats().in_flight, 0);
         });
     }
 }

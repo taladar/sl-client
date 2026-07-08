@@ -28,6 +28,7 @@ pub use disk::{AssetDiskCache, CacheLimits};
 pub use entry::AssetEntry;
 pub use fetcher::{AssetFetcher, AssetRef, BlobFetcher, FetchChunk, FetchError};
 pub use progress::{AssetProgress, Priority};
+pub use sl_asset_sched::{GateStats, StoreStats};
 pub use store::{AssetError, AssetStore};
 
 pub use sl_proto::{AssetKey, AssetType};

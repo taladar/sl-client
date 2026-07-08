@@ -14,7 +14,7 @@ use std::sync::{Arc, Weak};
 use bytes::Bytes;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
-use sl_asset_sched::{PriorityGate, run_cpu};
+use sl_asset_sched::{PriorityGate, StoreStats, run_cpu};
 use sl_proto::{MeshKey, MeshLod};
 
 use crate::decode::{self, MeshDecodeError, MeshHeader, MeshPhysics, parse_header};
@@ -75,6 +75,10 @@ struct StoreInner {
     gate: PriorityGate,
     /// Monotonic source of unique request ids.
     request_counter: AtomicU64,
+    /// Cumulative disk-cache hits (assets served from disk).
+    cache_hits: AtomicU64,
+    /// Cumulative entries garbage-collected by [`sweep`](MeshStore::sweep).
+    collected: AtomicU64,
 }
 
 /// A cloneable handle to a mesh fetch/decode/cache store.
@@ -113,6 +117,8 @@ impl MeshStore {
             decode_permits: async_lock::Semaphore::new(num_cpus::get().max(1)),
             gate: PriorityGate::new(DEFAULT_INFLIGHT),
             request_counter: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
+            collected: AtomicU64::new(0),
         })))
     }
 
@@ -129,7 +135,51 @@ impl MeshStore {
 
     /// Drops dead weak references from the map. Cheap; call periodically.
     pub fn sweep(&self) {
+        let before = self.0.map.len();
         self.0.map.retain(|_id, weak| weak.strong_count() > 0);
+        let removed = before.saturating_sub(self.0.map.len());
+        self.0
+            .collected
+            .fetch_add(as_u64(removed), Ordering::Relaxed);
+    }
+
+    /// A point-in-time snapshot of the store's fetch/decode pipeline: its live
+    /// entries bucketed by progress, the in-memory byte footprint, and the
+    /// cumulative cache-hit and garbage-collected counters.
+    #[must_use]
+    pub fn stats(&self) -> StoreStats {
+        let mut stats = StoreStats::default();
+        for reference in &self.0.map {
+            let Some(entry) = reference.value().upgrade() else {
+                continue;
+            };
+            stats.in_memory = stats.in_memory.saturating_add(1);
+            let bucket = match entry.progress() {
+                MeshProgress::Queued => &mut stats.queued,
+                MeshProgress::ReadingDisk { .. } => &mut stats.reading_disk,
+                MeshProgress::Downloading { .. } => &mut stats.downloading,
+                MeshProgress::Decoding => &mut stats.decoding,
+                MeshProgress::Ready(_lod) => &mut stats.ready,
+                MeshProgress::Failed => &mut stats.failed,
+                MeshProgress::Cancelled => &mut stats.cancelled,
+            };
+            *bucket = bucket.saturating_add(1);
+            let asset = entry
+                .asset
+                .load()
+                .as_ref()
+                .map_or(0, |asset| as_u64(asset.data.len()));
+            stats.bytes = stats.bytes.saturating_add(asset);
+        }
+        stats.cache_hits = self.0.cache_hits.load(Ordering::Relaxed);
+        stats.collected = self.0.collected.load(Ordering::Relaxed);
+        stats
+    }
+
+    /// A snapshot of the store's admission gate (capacity / in-flight / waiting).
+    #[must_use]
+    pub fn gate_stats(&self) -> sl_asset_sched::GateStats {
+        self.0.gate.stats()
     }
 
     /// Registers a non-blocking, observable, cancellable, re-prioritizable
@@ -158,17 +208,8 @@ impl MeshStore {
         target: MeshLod,
     ) -> Result<(), MeshError> {
         let target = finest(target, entry.finest_want());
-        match self.ensure(entry, target, true).await {
-            Ok(()) => {
-                let level = entry.current_lod().unwrap_or(target);
-                entry.set_progress(MeshProgress::Ready(level));
-                Ok(())
-            }
-            Err(error) => {
-                entry.set_progress(MeshProgress::Failed);
-                Err(error)
-            }
-        }
+        let outcome = self.ensure(entry, target, true).await;
+        publish(entry, target, outcome)
     }
 
     /// Ensures `id` is decoded to at least `target` level and returns its shared
@@ -182,9 +223,11 @@ impl MeshStore {
         if let Some(current) = entry.current_lod()
             && current.is_at_least_as_fine_as(target)
         {
+            entry.set_progress(MeshProgress::Ready(current));
             return Ok(entry);
         }
-        self.ensure(&entry, target, true).await?;
+        let outcome = self.ensure(&entry, target, true).await;
+        publish(&entry, target, outcome)?;
         Ok(entry)
     }
 
@@ -197,7 +240,8 @@ impl MeshStore {
     ///
     /// Returns [`MeshError`] if the fetch or decode fails.
     pub async fn set_lod(&self, entry: &Arc<MeshEntry>, target: MeshLod) -> Result<(), MeshError> {
-        self.ensure(entry, target, false).await
+        let outcome = self.ensure(entry, target, false).await;
+        publish(entry, target, outcome)
     }
 
     /// Ensures `id`'s skin block is decoded and returns its entry. A mesh with no
@@ -336,6 +380,7 @@ impl MeshStore {
             return Ok(());
         }
         if let Some(asset) = self.read_disk(entry.id) {
+            self.0.cache_hits.fetch_add(1, Ordering::Relaxed);
             entry.set_progress(MeshProgress::ReadingDisk {
                 read: asset.data.len(),
                 total: asset.data.len(),
@@ -505,6 +550,32 @@ impl MeshStore {
     }
 }
 
+/// Publishes the terminal progress for a level-load `outcome`: [`Ready`] at the
+/// level actually in hand (falling back to `target`) on success, [`Failed`] on
+/// error. Shared by [`drive`](MeshStore::drive), [`get`](MeshStore::get), and
+/// [`set_lod`](MeshStore::set_lod) so every completion path leaves the entry's
+/// observable progress truthful (not stuck at `Downloading` / `Decoding`).
+///
+/// [`Ready`]: MeshProgress::Ready
+/// [`Failed`]: MeshProgress::Failed
+fn publish(
+    entry: &Arc<MeshEntry>,
+    target: MeshLod,
+    outcome: Result<(), MeshError>,
+) -> Result<(), MeshError> {
+    match outcome {
+        Ok(()) => {
+            let level = entry.current_lod().unwrap_or(target);
+            entry.set_progress(MeshProgress::Ready(level));
+            Ok(())
+        }
+        Err(error) => {
+            entry.set_progress(MeshProgress::Failed);
+            Err(error)
+        }
+    }
+}
+
 /// The finer (higher-detail) of an explicit target and an optional cached
 /// finest-wanted level. Used to coalesce concurrent mixed-LOD requests to a
 /// single decode at the finest level any live requester wants.
@@ -513,6 +584,12 @@ const fn finest(target: MeshLod, want: Option<MeshLod>) -> MeshLod {
         Some(want) => target.finer_of(want),
         None => target,
     }
+}
+
+/// A `usize` widened to `u64` for a stats counter, saturating on the (only
+/// theoretically possible, on a >64-bit target) overflow.
+fn as_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 /// The absolute byte range of `block` given `entry`'s parsed header size.
@@ -786,6 +863,48 @@ mod tests {
         );
         let _removed = fs_err::remove_dir_all(&dir);
         Ok(())
+    }
+
+    #[test]
+    fn get_publishes_ready_progress() -> Result<(), TestError> {
+        use crate::progress::MeshProgress;
+        let asset = Bytes::from(synth_mesh()?);
+        let (store, _calls) = store_with(asset)?;
+        let id = MeshKey::from(Uuid::from_u128(7));
+        pollster::block_on(async {
+            let entry = store.get(id, MeshLod::High).await?;
+            // `get` must leave the entry's observable progress truthful (Ready),
+            // not stuck at the mid-flight Downloading / Decoding it passed through.
+            assert_eq!(entry.progress(), MeshProgress::Ready(MeshLod::High));
+            Ok::<(), TestError>(())
+        })
+    }
+
+    #[test]
+    fn stats_bucket_a_ready_mesh_and_count_collection() -> Result<(), TestError> {
+        use crate::progress::Priority;
+        let asset = Bytes::from(synth_mesh()?);
+        let (store, _calls) = store_with(asset)?;
+        let id = MeshKey::from(Uuid::from_u128(6));
+        pollster::block_on(async {
+            let request = store.request(id, MeshLod::High, Priority::new(1));
+            let entry = request.resolved().await?;
+            // One ready entry, held in memory, with a non-zero asset footprint.
+            // (The request/drive path publishes the terminal Ready progress.)
+            let ready = store.stats();
+            assert_eq!(ready.in_memory, 1);
+            assert_eq!(ready.ready, 1);
+            assert!(ready.bytes > 0);
+            assert_eq!(ready.collected, 0);
+            // Dropping the entry and the request and sweeping collects it.
+            drop(entry);
+            drop(request);
+            store.sweep();
+            let swept = store.stats();
+            assert_eq!(swept.in_memory, 0);
+            assert_eq!(swept.collected, 1);
+            Ok::<(), TestError>(())
+        })
     }
 
     #[test]

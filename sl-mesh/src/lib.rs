@@ -29,6 +29,7 @@ pub use disk::{CacheLimits, MeshDiskCache};
 pub use entry::{MeshEntry, MeshReadLease};
 pub use fetcher::{AssetFetcher, FetchChunk, FetchError, MeshFetcher};
 pub use progress::{MeshProgress, MeshRequest, Priority};
+pub use sl_asset_sched::{GateStats, StoreStats};
 pub use store::{MeshError, MeshStore};
 
 pub use sl_proto::{MeshKey, MeshLod};

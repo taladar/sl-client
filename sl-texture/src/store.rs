@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 use bytes::Bytes;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
-use sl_asset_sched::{PriorityGate, run_cpu};
+use sl_asset_sched::{PriorityGate, StoreStats, run_cpu};
 use sl_proto::{DiscardLevel, TextureKey, j2c};
 
 use crate::decode::{DecodeError, DecodedImage, decode_j2c, downsample};
@@ -53,6 +53,10 @@ struct StoreInner {
     gate: PriorityGate,
     /// Monotonic source of unique request ids.
     request_counter: AtomicU64,
+    /// Cumulative disk-cache hits (codestreams served from disk).
+    cache_hits: AtomicU64,
+    /// Cumulative entries garbage-collected by [`sweep`](TextureStore::sweep).
+    collected: AtomicU64,
 }
 
 /// A cloneable handle to a texture fetch/decode/cache store.
@@ -91,6 +95,8 @@ impl TextureStore {
             decode_permits: async_lock::Semaphore::new(num_cpus::get().max(1)),
             gate: PriorityGate::new(DEFAULT_INFLIGHT),
             request_counter: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
+            collected: AtomicU64::new(0),
         })))
     }
 
@@ -107,7 +113,51 @@ impl TextureStore {
 
     /// Drops dead weak references from the map. Cheap; call periodically.
     pub fn sweep(&self) {
+        let before = self.0.map.len();
         self.0.map.retain(|_id, weak| weak.strong_count() > 0);
+        let removed = before.saturating_sub(self.0.map.len());
+        self.0
+            .collected
+            .fetch_add(as_u64(removed), Ordering::Relaxed);
+    }
+
+    /// A point-in-time snapshot of the store's fetch/decode pipeline: its live
+    /// entries bucketed by progress, the in-memory byte footprint, and the
+    /// cumulative cache-hit and garbage-collected counters.
+    #[must_use]
+    pub fn stats(&self) -> StoreStats {
+        let mut stats = StoreStats::default();
+        for reference in &self.0.map {
+            let Some(entry) = reference.value().upgrade() else {
+                continue;
+            };
+            stats.in_memory = stats.in_memory.saturating_add(1);
+            let bucket = match entry.progress() {
+                TextureProgress::Queued => &mut stats.queued,
+                TextureProgress::ReadingDisk { .. } => &mut stats.reading_disk,
+                TextureProgress::Downloading { .. } => &mut stats.downloading,
+                TextureProgress::Decoding => &mut stats.decoding,
+                TextureProgress::Ready(_level) => &mut stats.ready,
+                TextureProgress::Failed => &mut stats.failed,
+                TextureProgress::Cancelled => &mut stats.cancelled,
+            };
+            *bucket = bucket.saturating_add(1);
+            let codestream = as_u64(entry.codestream.load().covered());
+            let pixels = entry.image().map_or(0, |image| as_u64(image.pixels.len()));
+            stats.bytes = stats
+                .bytes
+                .saturating_add(codestream)
+                .saturating_add(pixels);
+        }
+        stats.cache_hits = self.0.cache_hits.load(Ordering::Relaxed);
+        stats.collected = self.0.collected.load(Ordering::Relaxed);
+        stats
+    }
+
+    /// A snapshot of the store's admission gate (capacity / in-flight / waiting).
+    #[must_use]
+    pub fn gate_stats(&self) -> sl_asset_sched::GateStats {
+        self.0.gate.stats()
     }
 
     /// Registers a non-blocking, observable, cancellable, re-prioritizable
@@ -147,17 +197,8 @@ impl TextureStore {
         target: DiscardLevel,
     ) -> Result<(), TextureError> {
         let target = finest(target, entry.finest_want());
-        match self.upgrade(entry, target).await {
-            Ok(()) => {
-                let level = entry.current_discard().unwrap_or(target);
-                entry.set_progress(TextureProgress::Ready(level));
-                Ok(())
-            }
-            Err(error) => {
-                entry.set_progress(TextureProgress::Failed);
-                Err(error)
-            }
-        }
+        let outcome = self.upgrade(entry, target).await;
+        publish(entry, target, outcome)
     }
 
     /// Ensures `id` is decoded to at least `target` resolution and returns its
@@ -177,9 +218,11 @@ impl TextureStore {
         if let Some(image) = entry.image()
             && image.discard_level.is_at_least_as_fine_as(target)
         {
+            entry.set_progress(TextureProgress::Ready(image.discard_level));
             return Ok(entry);
         }
-        self.upgrade(&entry, target).await?;
+        let outcome = self.upgrade(&entry, target).await;
+        publish(&entry, target, outcome)?;
         Ok(entry)
     }
 
@@ -199,9 +242,15 @@ impl TextureStore {
         match entry.current_discard() {
             Some(current) if target.get() > current.get() => {
                 self.downgrade(entry, target).await;
+                if let Some(level) = entry.current_discard() {
+                    entry.set_progress(TextureProgress::Ready(level));
+                }
                 Ok(())
             }
-            _other => self.upgrade(entry, target).await,
+            _other => {
+                let outcome = self.upgrade(entry, target).await;
+                publish(entry, target, outcome)
+            }
         }
     }
 
@@ -362,6 +411,7 @@ impl TextureStore {
                 read: bytes.len(),
                 total: need,
             });
+            self.0.cache_hits.fetch_add(1, Ordering::Relaxed);
             store_codestream(entry, bytes, false);
             return Ok(true);
         }
@@ -429,6 +479,32 @@ impl TextureStore {
     }
 }
 
+/// Publishes the terminal progress for an upgrade `outcome`: [`Ready`] at the
+/// level actually in hand (falling back to `target`) on success, [`Failed`] on
+/// error. Shared by [`drive`](TextureStore::drive), [`get`](TextureStore::get),
+/// and [`set_lod`](TextureStore::set_lod) so every completion path leaves the
+/// entry's observable progress truthful (not stuck at `Decoding`).
+///
+/// [`Ready`]: TextureProgress::Ready
+/// [`Failed`]: TextureProgress::Failed
+fn publish(
+    entry: &Arc<TextureEntry>,
+    target: DiscardLevel,
+    outcome: Result<(), TextureError>,
+) -> Result<(), TextureError> {
+    match outcome {
+        Ok(()) => {
+            let level = entry.current_discard().unwrap_or(target);
+            entry.set_progress(TextureProgress::Ready(level));
+            Ok(())
+        }
+        Err(error) => {
+            entry.set_progress(TextureProgress::Failed);
+            Err(error)
+        }
+    }
+}
+
 /// The finer (smaller discard) of an explicit target and an optional cached
 /// finest-wanted level. Used to coalesce concurrent mixed-LOD requests to a
 /// single decode at the finest level any live requester wants.
@@ -445,6 +521,12 @@ fn store_codestream(entry: &Arc<TextureEntry>, bytes: Bytes, complete: bool) {
         .codestream
         .store(Arc::new(Codestream { bytes, complete }));
     let _header = entry.header();
+}
+
+/// A `usize` widened to `u64` for a stats counter, saturating on the (only
+/// theoretically possible, on a >64-bit target) overflow.
+fn as_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 /// The current time in whole unix seconds, for LRU stamping (0 on error).
@@ -611,6 +693,60 @@ mod tests {
         assert_eq!(finest(coarse, None), coarse);
         drop(coarse_request);
         drop(fine_request);
+    }
+
+    #[test]
+    fn get_publishes_failed_progress_on_decode_error() {
+        use crate::schedule::{Priority, TextureProgress};
+        // 700 zero bytes are not a valid J2C image, so the decode fails: `get`
+        // must publish the terminal Failed, not leave progress stuck at Decoding.
+        let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(7));
+        // A held request keeps the shared entry alive so its progress is readable
+        // after the failing `get` (which otherwise drops its only strong ref).
+        let held = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(1),
+            RemoteTextureSource::Default,
+        );
+        pollster::block_on(async {
+            let _outcome = store
+                .get(id, DiscardLevel::FULL, RemoteTextureSource::Default)
+                .await;
+        });
+        assert_eq!(held.progress(), TextureProgress::Failed);
+    }
+
+    #[test]
+    fn stats_bucket_live_entries_and_count_collection() {
+        use crate::schedule::Priority;
+        let (store, _calls) = store_with(Bytes::from(vec![0_u8; 700]));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(6));
+        let request = store.request(
+            id,
+            DiscardLevel::FULL,
+            Priority::new(1),
+            RemoteTextureSource::Default,
+        );
+        // One queued entry, held in memory, nothing collected yet.
+        let queued = store.stats();
+        assert_eq!(queued.in_memory, 1);
+        assert_eq!(queued.queued, 1);
+        assert_eq!(queued.collected, 0);
+        // Driving fails to decode zeros, so the entry lands in the Failed bucket.
+        pollster::block_on(async {
+            let _outcome = request.resolved().await;
+        });
+        let failed = store.stats();
+        assert_eq!(failed.failed, 1);
+        assert_eq!(failed.ready, 0);
+        // Dropping the last requester and sweeping collects it and counts one GC.
+        drop(request);
+        store.sweep();
+        let swept = store.stats();
+        assert_eq!(swept.in_memory, 0);
+        assert_eq!(swept.collected, 1);
     }
 
     #[test]

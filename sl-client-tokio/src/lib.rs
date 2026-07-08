@@ -102,10 +102,13 @@ pub use sl_proto::{
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
 // flat because `TextureEntry` would collide with `sl_proto`'s prim-face type.
+// `StoreStats` / `GateStats` (the pipeline-status snapshots) are the same shared
+// `sl-asset-sched` types across the texture / mesh / asset stores, so they are
+// re-exported once here (from `sl_texture`) rather than three times.
 pub use sl_texture::{
-    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, NotRemotelyFetchable,
-    Priority, RemoteTextureSource, TextureError, TextureFetchType, TextureFetcher, TextureProgress,
-    TextureRequest, TextureStore,
+    AssetFetcher, CacheLimits, DecodedImage as DecodedTexture, FetchChunk, GateStats,
+    NotRemotelyFetchable, Priority, RemoteTextureSource, StoreStats, TextureError,
+    TextureFetchType, TextureFetcher, TextureProgress, TextureRequest, TextureStore,
 };
 // The decoding, LOD-aware mesh store (the mesh counterpart of the texture
 // store). `Priority` and `MeshKey` are already re-exported (from `sl_texture` /
