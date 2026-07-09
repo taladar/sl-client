@@ -130,6 +130,16 @@ pub use sl_asset::{
     CacheLimits as AssetCacheLimits, FetchError as AssetFetchError,
 };
 
+// The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material
+// counterpart of `sl_mesh` / `sl_texture`: a client fetches a material asset
+// over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
+// it into a renderer-agnostic `GltfMaterial` (P27.1). Kept at parity with the
+// Bevy runtime.
+pub use sl_material::{
+    GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
+    MaterialError as GltfMaterialError, parse_gltf_material_document, parse_material_asset,
+};
+
 pub use crate::assets::ReqwestAssetFetcher;
 pub use crate::meshes::ReqwestMeshFetcher;
 pub use crate::textures::ReqwestTextureFetcher;

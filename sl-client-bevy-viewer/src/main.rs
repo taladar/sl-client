@@ -19,6 +19,7 @@ mod coords;
 mod diagnostics;
 mod environment;
 mod lights;
+mod materials;
 mod meshes;
 mod objects;
 mod render_priority;
@@ -75,6 +76,10 @@ use crate::diagnostics::{
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::lights::{LocalLights, drive_local_lights};
+use crate::materials::{
+    MaterialManager, apply_pbr_textures, poll_materials, register_pbr_materials,
+    update_material_caps,
+};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
@@ -400,6 +405,7 @@ fn run_session(
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
+    .insert_resource(MaterialManager::new())
     .init_resource::<AvatarBakeMaterials>()
     .init_resource::<OwnLocalBake>()
     .init_resource::<ServerBakeState>()
@@ -473,7 +479,20 @@ fn run_session(
             // of any sculpted prim whose sculpt map just decoded.
             apply_object_meshes,
             apply_object_sculpts,
-            apply_prim_textures,
+            // Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
+            // render-material pipeline (P27.1): keep the material store's
+            // `ViewerAsset` cap current, register each newly-spawned face's
+            // material, fold finished material fetches into the face materials, and
+            // drop each decoded texture map into its slot. Nested into one tuple to
+            // stay within Bevy's per-tuple system limit; runs after the
+            // face-spawning systems so a face's PBR material is seen.
+            (
+                apply_prim_textures,
+                update_material_caps,
+                register_pbr_materials,
+                poll_materials,
+                apply_pbr_textures,
+            ),
             // Avatar placeholder spheres: full-object avatars first, then the
             // coarse-only ones (which dedupe against the full-object set); then
             // fold resolved names in and float each name tag over its sphere.

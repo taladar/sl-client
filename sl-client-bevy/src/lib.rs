@@ -157,6 +157,16 @@ pub use sl_asset::{
     CacheLimits as AssetCacheLimits,
 };
 
+// The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material
+// counterpart of `sl_mesh` / `sl_texture`: the viewer fetches a material asset
+// over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
+// it into a `GltfMaterial` it maps onto a Bevy `StandardMaterial`, sourcing each
+// referenced texture from the shared `TextureStore` (P27.1).
+pub use sl_material::{
+    GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
+    MaterialError as GltfMaterialError, parse_gltf_material_document, parse_material_asset,
+};
+
 // The pure prim-tessellation geometry (no store/fetcher — a prim is tessellated
 // on the CPU from its shape parameters, not fetched). Re-exported so the viewer
 // can dequantize a `PrimShapeParams` into a float shape, tessellate it at a

@@ -1,0 +1,30 @@
+[package]
+name = "sl-material"
+description = "GLTF 2.0 (PBR) render-material asset decoder for Second Life / OpenSim clients (LLGLTFMaterial / AT_MATERIAL)"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "material", "gltf", "pbr"]
+categories = ["game-development", "rendering", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145" }
+sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
+sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+thiserror = { version = "2.0.18" }
+uuid = { version = "1.18.1" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

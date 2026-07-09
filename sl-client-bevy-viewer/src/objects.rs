@@ -56,6 +56,7 @@ use sl_client_bevy::{
 use crate::avatars::{AvatarBody, AvatarState, BomFace};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::lights::{ObjectLight, light_from_object};
+use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
@@ -881,6 +882,28 @@ fn sculpt_key(object: &Object) -> Option<(TextureKey, u8)> {
     }
 }
 
+/// Attach (or clear) the object's per-face GLTF render-material references on its
+/// geometry-holder entity — the parent of its face entities — so
+/// [`register_pbr_materials`](crate::materials::register_pbr_materials) can look a
+/// face's PBR material up by index (P27.1). Refreshed on every update, and the
+/// component removed when the object carries no PBR material, so a material
+/// cleared in-world stops being applied.
+fn apply_render_materials(geometry: Entity, object: &Object, commands: &mut Commands) {
+    let faces: Vec<(u8, Uuid)> = object
+        .extra
+        .render_material
+        .iter()
+        .map(|reference| (reference.face, reference.material_id))
+        .collect();
+    if faces.is_empty() {
+        commands.entity(geometry).remove::<ObjectRenderMaterials>();
+    } else {
+        commands
+            .entity(geometry)
+            .insert(ObjectRenderMaterials { faces });
+    }
+}
+
 /// Build an object's renderable geometry for its category, returning the spawned
 /// child entities and — for a mesh or sculpt whose asset has not decoded yet — the
 /// pending build to finish once the asset arrives.
@@ -1561,6 +1584,7 @@ fn apply_object(
         commands
             .entity(existing.geometry)
             .insert(holder_transform(object, category));
+        apply_render_materials(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
@@ -1645,6 +1669,7 @@ fn apply_object(
             ChildOf(entity),
         ))
         .id();
+    apply_render_materials(geometry, object, commands);
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.

@@ -5673,6 +5673,7 @@ dependencies = [
  "sl-asset",
  "sl-avatar",
  "sl-bake",
+ "sl-material",
  "sl-mesh",
  "sl-prim",
  "sl-proto",
@@ -5722,6 +5723,7 @@ dependencies = [
  "pretty_assertions",
  "reqwest",
  "sl-asset",
+ "sl-material",
  "sl-mesh",
  "sl-proto",
  "sl-texture",
@@ -5783,6 +5785,19 @@ dependencies = [
  "sl-types",
  "thiserror 2.0.18",
  "time",
+ "uuid",
+]
+
+[[package]]
+name = "sl-material"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sl-llsd",
+ "sl-types",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
