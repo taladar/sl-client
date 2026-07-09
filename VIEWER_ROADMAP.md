@@ -3035,9 +3035,18 @@ avatar, so they are collected here to be worked one at a time.
     (confirmed live: the universal face resolves to a real bake). A correctness
     fix — it does not on its own resolve the arm's other defects (R22d–R22f).
   - [ ] **R22d. Mesh-body arm renders semi-transparent** — the background
-    bleeds through the arm. An alpha-*mode* issue on the skin / BoM faces
-    (rendered alpha-blended rather than opaque), not a placeholder-vs-bake
-    problem. **Open.**
+    bleeds through the arm. A **reference-faithful face-alpha** change landed
+    (`textures.rs`/`objects.rs`/`legacy_materials.rs`): a face is no longer
+    auto-blended just because its texture carries alpha (the reference only
+    blends off the TE tint / `LLMaterial`) — a `TextureAlpha` policy on
+    `face_material` renders a rigged face opaque and an ordinary face
+    alpha-*masked*, and `legacy_alpha_override` now honours all four
+    `DiffuseAlphaMode`s authoritatively. **NOT confirmed to fix the arm**: the
+    user still saw background bleeding through afterwards, and per-face data
+    shows ~half the arm faces are tint-alpha-0 hidden **onion shells**, so the
+    remaining bleed/seams look like the mesh body's multi-shell structure (and
+    R22e/R22f), not the blend path. Needs a Firestorm forearm side-by-side and
+    fresh diagnosis. **Open.**
   - [ ] **R22e. Green gap / seam line across the mesh-body forearm.** A
     pre-existing mesh seam (confirmed to predate the R22c work). **Open.**
   - [ ] **R22f. Hand redder than the arm on a mesh body.** The hand shows the

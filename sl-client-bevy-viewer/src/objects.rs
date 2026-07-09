@@ -60,7 +60,7 @@ use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
-use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
+use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
@@ -1293,7 +1293,14 @@ fn build_tree_faces(
     let mesh = meshes.add(to_bevy_tree_mesh(&tree));
     // The tree's single diffuse comes from the species table, not a `TextureEntry`.
     let texture_face = TextureFace::new(species.texture_id);
-    let material = face_material(&texture_face, materials, manager, prim_textures, priority);
+    let material = face_material(
+        &texture_face,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        TextureAlpha::Mask,
+    );
     // Foliage is alpha-**masked** (cutout), not opaque or blended: the reference
     // viewer renders trees in the alpha-mask pool so the leaf-card texture's alpha
     // clips each leaf to its shape (transparent around the edges) rather than
@@ -1356,7 +1363,14 @@ fn build_grass_faces(
     let mesh = meshes.add(to_bevy_grass_mesh(&clump));
     // The clump's single diffuse comes from the species table, not a `TextureEntry`.
     let texture_face = TextureFace::new(species.texture_id);
-    let material = face_material(&texture_face, materials, manager, prim_textures, priority);
+    let material = face_material(
+        &texture_face,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        TextureAlpha::Mask,
+    );
     // Grass is alpha-**blended** (the reference's `PASS_GRASS` / `POOL_ALPHA`), so
     // the soft blade-card edges fade rather than clip. Set here so it is not
     // overridden by the tint-based opaque default.
@@ -1459,7 +1473,14 @@ fn spawn_prim_faces(
             scale,
         );
         let mesh = meshes.add(bevy_mesh);
-        let material = face_material(texture_face, materials, manager, prim_textures, priority);
+        let material = face_material(
+            texture_face,
+            materials,
+            manager,
+            prim_textures,
+            priority,
+            TextureAlpha::Mask,
+        );
         let entity = commands
             .spawn((
                 Mesh3d(mesh),
@@ -1524,7 +1545,14 @@ fn build_mesh_submeshes(
             scale,
         );
         let mesh = meshes.add(bevy_mesh);
-        let material = face_material(texture_face, materials, manager, prim_textures, priority);
+        let material = face_material(
+            texture_face,
+            materials,
+            manager,
+            prim_textures,
+            priority,
+            TextureAlpha::Mask,
+        );
         // The submesh index is the Linden face index; a mesh has few faces, so the
         // widening never saturates in practice (a clamp keeps it lint-clean).
         let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
@@ -2413,6 +2441,11 @@ fn build_rigged_submeshes(
                 manager,
                 prim_textures,
                 AVATAR_BOOST_PRIORITY,
+                // A rigged avatar / mesh-body face stays opaque when its texture
+                // carries alpha — the reference never auto-masks or auto-blends a
+                // rigged face off its texture alpha, so solid skin is not rendered
+                // see-through (R22d).
+                TextureAlpha::Opaque,
             ),
         };
         // The submesh index is the Linden face index; a mesh has few faces, so the

@@ -58,9 +58,9 @@ const MATERIAL_TEXTURE_PRIORITY: Priority = TERRAIN_BOOST_PRIORITY;
 /// OpenSim also enforces. Requests are chunked to this size.
 const MAX_MATERIALS_PER_REQUEST: usize = 50;
 
-/// The diffuse alpha mode with no per-face alpha at all (`DIFFUSE_ALPHA_MODE_NONE`):
-/// force the face opaque.
-const DIFFUSE_ALPHA_MODE_NONE: u8 = 0;
+/// The diffuse alpha-blend mode (`DIFFUSE_ALPHA_MODE_BLEND`): the z-sorted
+/// transparent path.
+const DIFFUSE_ALPHA_MODE_BLEND: u8 = 1;
 /// The diffuse alpha-mask mode (`DIFFUSE_ALPHA_MODE_MASK`): alpha-test at the
 /// material's cutoff.
 const DIFFUSE_ALPHA_MODE_MASK: u8 = 2;
@@ -164,17 +164,20 @@ fn reflectance_from_environment(environment_intensity: u8) -> f32 {
     f32::from(environment_intensity) / 255.0
 }
 
-/// The [`AlphaMode`] a legacy diffuse alpha mode forces, or `None` to leave the
-/// face's existing (diffuse-derived) alpha mode untouched. Only the unambiguous
-/// modes override: `NONE` forces opaque and `MASK` forces an alpha test at the
-/// material cutoff; `BLEND` / `EMISSIVE` keep whatever the diffuse pipeline chose
-/// from the texture's own alpha, so a legacy material never forces an otherwise
-/// opaque face into the (z-sorted) transparent path.
-fn legacy_alpha_override(diffuse_alpha_mode: u8, alpha_mask_cutoff: u8) -> Option<AlphaMode> {
+/// The [`AlphaMode`] a face's `LLMaterial` diffuse alpha mode forces — the
+/// authoritative per-face alpha property (the "alpha mode" control in the reference
+/// viewer's build/texture tab: none / alpha-blend / alpha-mask / emissive). All
+/// four modes are honoured: `NONE` and `EMISSIVE` force opaque (emissive glow is a
+/// separate channel), `MASK` an alpha test at the material cutoff, and `BLEND` the
+/// z-sorted transparent path. This must cover every mode because the diffuse-pipeline
+/// default no longer blends off the texture's alpha (R22d) — so a `BLEND` face has to
+/// be forced back into the transparent path here rather than inheriting it.
+fn legacy_alpha_override(diffuse_alpha_mode: u8, alpha_mask_cutoff: u8) -> AlphaMode {
     match diffuse_alpha_mode {
-        DIFFUSE_ALPHA_MODE_NONE => Some(AlphaMode::Opaque),
-        DIFFUSE_ALPHA_MODE_MASK => Some(AlphaMode::Mask(f32::from(alpha_mask_cutoff) / 255.0)),
-        _other => None,
+        DIFFUSE_ALPHA_MODE_MASK => AlphaMode::Mask(f32::from(alpha_mask_cutoff) / 255.0),
+        DIFFUSE_ALPHA_MODE_BLEND => AlphaMode::Blend,
+        // `NONE`, `EMISSIVE`, and any unknown value render opaque.
+        _other => AlphaMode::Opaque,
     }
 }
 
@@ -300,11 +303,8 @@ fn apply_legacy_to_face(
     if let Some(mut standard) = materials.get_mut(handle) {
         standard.reflectance = reflectance_from_environment(material.environment_intensity);
         standard.perceptual_roughness = roughness_from_glossiness(material.specular_exponent);
-        if let Some(mode) =
-            legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff)
-        {
-            standard.alpha_mode = mode;
-        }
+        standard.alpha_mode =
+            legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
         // A material that carries no normal map clears any it had previously.
         if material.normal_map.uuid().is_nil() {
             standard.normal_map_texture = None;
@@ -373,18 +373,19 @@ mod tests {
     }
 
     #[test]
-    fn only_unambiguous_alpha_modes_override() {
-        // NONE forces opaque; MASK forces a cutoff test; BLEND / EMISSIVE leave
-        // the diffuse-derived mode untouched.
-        assert!(matches!(
-            legacy_alpha_override(DIFFUSE_ALPHA_MODE_NONE, 0),
-            Some(AlphaMode::Opaque)
-        ));
+    fn every_alpha_mode_is_authoritative() {
+        // The face's alpha-mode property is honoured for all four modes: NONE (0)
+        // and EMISSIVE (3) render opaque, MASK (2) alpha-tests at the cutoff, and
+        // BLEND (1) takes the transparent path.
+        assert!(matches!(legacy_alpha_override(0, 0), AlphaMode::Opaque));
         assert!(matches!(
             legacy_alpha_override(DIFFUSE_ALPHA_MODE_MASK, 128),
-            Some(AlphaMode::Mask(cutoff)) if (cutoff - 128.0 / 255.0).abs() < 1e-6
+            AlphaMode::Mask(cutoff) if (cutoff - 128.0 / 255.0).abs() < 1e-6
         ));
-        assert!(legacy_alpha_override(1, 0).is_none());
-        assert!(legacy_alpha_override(3, 0).is_none());
+        assert!(matches!(
+            legacy_alpha_override(DIFFUSE_ALPHA_MODE_BLEND, 0),
+            AlphaMode::Blend
+        ));
+        assert!(matches!(legacy_alpha_override(3, 0), AlphaMode::Opaque));
     }
 }

@@ -643,7 +643,7 @@ pub(crate) struct PrimTextures {
     images: HashMap<TextureKey, Handle<Image>>,
     /// Face materials parked on a texture id, patched with the diffuse image (or
     /// released to their flat tint) once the fetch resolves.
-    pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    pending: HashMap<TextureKey, Vec<(Handle<StandardMaterial>, TextureAlpha)>>,
     /// Every material that samples each texture, tracked so a level-of-detail
     /// re-upload (P21.1) can mark them changed. A Bevy material's bind group caches
     /// the texture's GPU view and is **not** rebuilt when the [`Image`] behind its
@@ -655,11 +655,50 @@ pub(crate) struct PrimTextures {
     materials: HashMap<TextureKey, Vec<AssetId<StandardMaterial>>>,
 }
 
+/// How a face treats a diffuse texture that carries its **own** alpha channel,
+/// matching the reference viewer's per-face alpha handling.
+///
+/// The reference does **not** blend a face merely because its texture has an alpha
+/// channel: a face's blend (`PASS_ALPHA`) membership is driven by the TE *tint*
+/// alpha (`< 1`) and its `LLMaterial` diffuse alpha mode, while the texture's own
+/// alpha only qualifies the face for alpha-*masking* via `LLFace::canRenderAsMask`
+/// — and rigged faces are never auto-masked (`llface.cpp`: "never auto alpha-mask
+/// rigged faces"). So a texture-alpha face defaults to:
+/// - [`Mask`](Self::Mask): an ordinary prim / static-mesh / tree / grass face
+///   alpha-masks (opaque pass + alpha test), so a wholly transparent texel is cut
+///   (an invisible prim stays invisible) while a solid texel stays solid.
+/// - [`Opaque`](Self::Opaque): a rigged avatar / mesh-body face stays opaque (the
+///   reference never auto-masks or auto-blends a rigged face off its texture
+///   alpha), so solid skin is not rendered see-through.
+///
+/// This is only the *default* for a face with no explicit alpha mode: a non-opaque
+/// TE tint already forces blending when the material is built
+/// ([`face_alpha_mode`]), and a face's `LLMaterial` diffuse alpha mode (fetched
+/// later over `RenderMaterials`) overrides it authoritatively
+/// ([`legacy_alpha_override`](crate::legacy_materials)).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TextureAlpha {
+    /// Alpha-mask a texture-alpha face (ordinary faces).
+    Mask,
+    /// Keep a texture-alpha face opaque (rigged avatar / mesh-body faces).
+    Opaque,
+}
+
+/// The alpha-test cutoff a [`TextureAlpha::Mask`] face discards below — a texel
+/// whose alpha is under this fraction is cut. Half, matching the bake-mask cutoff
+/// and the reference viewer's default auto-mask.
+const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
+
 /// Build the diffuse [`StandardMaterial`] for one prim face: `base_color` is the
 /// face tint (opaque white = untinted), and `base_color_texture` is filled in
 /// immediately when the face's texture is already uploaded, otherwise the
 /// material is parked in `prim_textures` and its texture requested through
 /// `manager` (which dedupes) so [`apply_prim_textures`] can fill it in later.
+///
+/// `texture_alpha` selects how a diffuse texture's own alpha channel is treated
+/// (the reference-faithful default before any `LLMaterial` alpha mode arrives):
+/// [`Mask`](TextureAlpha::Mask) for an ordinary face, [`Opaque`](TextureAlpha::Opaque)
+/// for a rigged one.
 ///
 /// A face with no texture (nil id) keeps just its flat tint.
 pub(crate) fn face_material(
@@ -668,6 +707,7 @@ pub(crate) fn face_material(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    texture_alpha: TextureAlpha,
 ) -> Handle<StandardMaterial> {
     let texture_id = face.texture_id;
     let has_texture = !is_absent_texture(texture_id);
@@ -680,12 +720,14 @@ pub(crate) fn face_material(
         // texture coordinates (about the face centre). Identity faces get the
         // identity transform, so an un-repeated texture is unaffected.
         uv_transform: texture_face_uv_transform(face),
-        // Transparency (R5): a face whose tint colour is non-opaque blends now; a
-        // face whose *texture* carries an alpha channel is upgraded to blending
-        // once the texture decodes (in [`apply_prim_textures`]). Without this a
-        // transparent surface — an invisible prim, a glass pane, a sky-platform
-        // floor — renders as a solid wall (the Second Life world is full of them,
-        // so the viewer otherwise fills with opaque region-sized panels).
+        // Transparency: a face whose tint colour is non-opaque blends now (the TE
+        // color alpha, the reference's `blinn_phong_transparent`). A face whose
+        // *texture* carries an alpha channel is NOT blended — the reference viewer
+        // never blends off the texture alpha alone (R22d); it is instead resolved
+        // per `texture_alpha` once the texture decodes (in [`apply_prim_textures`]):
+        // an ordinary face alpha-masks (an invisible prim stays invisible), a rigged
+        // face stays opaque. A face's `LLMaterial` diffuse alpha mode overrides both
+        // later ([`legacy_alpha_override`](crate::legacy_materials)).
         alpha_mode: face_alpha_mode(face.color),
         // Single-sided (default back-face culling): Second Life renders a face
         // only from its front, so a one-sided surface (a flat mesh quad, a prim
@@ -716,7 +758,7 @@ pub(crate) fn face_material(
                 .pending
                 .entry(texture_id)
                 .or_default()
-                .push(handle.clone());
+                .push((handle.clone(), texture_alpha));
             manager.request_face(texture_id, priority);
         }
     }
@@ -765,13 +807,22 @@ pub(crate) fn apply_prim_textures(
             // The fetch failed: the parked faces keep their flat tint.
             continue;
         };
-        for material_handle in parked {
+        for (material_handle, texture_alpha) in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
                 material.base_color_texture = Some(image_handle.clone());
-                // Upgrade an opaque face to blending when its texture has alpha; a
-                // face already blending (a non-opaque tint) stays blending.
+                // Resolve a texture-alpha face's mode (R22d, reference-faithful): a
+                // face is NOT blended just because its texture carries alpha — only
+                // its tint / `LLMaterial` does. An ordinary face alpha-*masks* (so an
+                // invisible prim stays cut but solid texels stay solid); a rigged
+                // face stays opaque. A face already blending (a non-opaque tint) is
+                // left blending; a face whose `LLMaterial` later sets a mode wins.
                 if has_alpha && material.alpha_mode == AlphaMode::Opaque {
-                    material.alpha_mode = AlphaMode::Blend;
+                    match texture_alpha {
+                        TextureAlpha::Mask => {
+                            material.alpha_mode = AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF);
+                        }
+                        TextureAlpha::Opaque => {}
+                    }
                 }
             }
         }
