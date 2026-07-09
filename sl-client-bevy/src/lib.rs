@@ -1533,14 +1533,31 @@ fn advance_running(
                 session.request_group_names(ids, now).ok();
             }
             Command::RequestEnvironment { parcel_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
-                    });
+                if let Some(caps) = caps.as_ref() {
+                    if let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned() {
+                        let events_tx = caps.events_tx.clone();
+                        let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
+                        tracing::info!(
+                            target: "sl_client_bevy::environment",
+                            "requesting EEP environment from {CAP_EXT_ENVIRONMENT} cap"
+                        );
+                        std::thread::spawn(move || {
+                            run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
+                        });
+                    } else {
+                        tracing::warn!(
+                            target: "sl_client_bevy::environment",
+                            "RequestEnvironment: the {CAP_EXT_ENVIRONMENT} capability is not \
+                             advertised by this region; the sky / cloud / water stack will run \
+                             on the legacy WindLight defaults ({} caps available)",
+                            caps.map.len()
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        target: "sl_client_bevy::environment",
+                        "RequestEnvironment: no CAPS available yet; environment not requested"
+                    );
                 }
             }
             Command::RequestMoneyBalance => {

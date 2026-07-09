@@ -127,11 +127,31 @@ const DEFAULT_MOON_ID: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4
 /// `llsettingssky.cpp`), sampled when the sky frame names none of its own.
 const DEFAULT_CLOUD_ID: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
 
-/// The radius of the cloud dome, in metres. Like the sky and star domes, the cloud
-/// layer's *depth* is forced to the far clip plane by `clouds.wgsl` (a skybox
-/// backdrop), so this radius only sets the directional layout; it is kept just
-/// inside [`SKY_DOME_RADIUS`] and well within the camera's far plane.
-const CLOUD_DOME_RADIUS: f32 = 2950.0;
+/// The radius of the cloud dome, in metres — the reference `LLSettingsSky::
+/// DOME_RADIUS`. The cloud layer's *depth* is forced to the far clip plane by
+/// `clouds.wgsl` (a skybox backdrop), so this large radius does not need to fit
+/// inside the camera far plane; it sets the directional layout and the lighting
+/// ray length (`rel_pos_len`) to match the reference.
+const CLOUD_DOME_RADIUS: f32 = 15000.0;
+
+/// The fraction of [`CLOUD_DOME_RADIUS`] the camera sits *above* the dome centre —
+/// the reference `LLSettingsSky::DOME_OFFSET` (`getCamHeight = dome_offset ×
+/// dome_radius`). The reference renders the dome with the camera this high inside
+/// it, so the shallow `[0, π/8]` zenith cap ([`calc_cloud_phi`]) wraps down to fill
+/// the whole visible sky rather than a small overhead circle. The viewer bakes
+/// this offset into the dome vertices so the camera-centred dome entity places the
+/// cap the same way.
+const CLOUD_DOME_OFFSET: f32 = 0.96;
+
+/// The number of stacks (rings from the zenith to the dome edge) in the cloud
+/// dome, mirroring the reference `LLVOWLSky` sky-dome tessellation
+/// (`getNumStacks`, `WLSkyDetail`). The stacks are distributed by
+/// [`calc_cloud_phi`] over the reference's `[0, π/8]` zenith cap.
+const CLOUD_DOME_STACKS: usize = 32;
+
+/// The number of slices (segments around the dome) in the cloud dome, matching the
+/// reference `getNumSlices` = `2 × getNumStacks`.
+const CLOUD_DOME_SLICES: usize = 64;
 
 /// The reference cloud-scroll accumulation divisor (`LLEnvironment::
 /// updateCloudScroll`): the scroll delta grows by `dt * cloud_scroll_rate / 100`
@@ -246,6 +266,9 @@ pub(crate) struct CloudState {
     /// `cloud_scroll_rate` and folded into `cloud_pos_density1` so the layer
     /// drifts. Persists across sky-frame changes, like the reference.
     scroll: Vec2,
+    /// The next time (`Time::elapsed_secs`) the opt-in cloud-param debug log
+    /// (`SL_VIEWER_LOG_CLOUDS`) may fire, throttling it to a readable cadence.
+    next_log_at: f32,
 }
 
 /// Marks the star-field entity so [`drive_stars`] can centre / rotate it.
@@ -662,7 +685,7 @@ pub(crate) fn setup_clouds(
         cloud_noise_next: placeholder,
     });
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(CLOUD_DOME_RADIUS))),
+        Mesh3d(meshes.add(build_cloud_dome_mesh())),
         MeshMaterial3d(material.clone()),
         Transform::default(),
         // The cloud layer never casts shadows (like the sky dome).
@@ -673,6 +696,7 @@ pub(crate) fn setup_clouds(
         material,
         cloud_key: None,
         scroll: Vec2::ZERO,
+        next_log_at: 0.0,
     });
 }
 
@@ -746,6 +770,38 @@ pub(crate) fn drive_clouds(
         .unwrap_or_else(|| TextureKey::from(DEFAULT_CLOUD_ID));
     textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
     state.cloud_key = Some(cloud_key);
+
+    // Opt-in cloud-param diagnostic (`SL_VIEWER_LOG_CLOUDS`): dump the EEP cloud
+    // settings + the resolved cloud-noise texture id so a live aditi session can be
+    // compared against Firestorm (R18 — the cloud distribution mismatch). Throttled
+    // to ~2 s; purely a log, no rendering effect.
+    if time.elapsed_secs() >= state.next_log_at && std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+        state.next_log_at = time.elapsed_secs() + 2.0;
+        let pd1 = sky.cloud_pos_density1;
+        let pd2 = sky.cloud_pos_density2;
+        info!(
+            "cloud params: texture={:?} region_specified={} scale={:.4} \
+             pos_density1=({:.4},{:.4},{:.4}) pos_density2=({:.4},{:.4},{:.4}) \
+             variance={:.4} scroll_rate=[{:.4},{:.4}] shadow={:.4} \
+             color=({:.3},{:.3},{:.3})",
+            cloud_key,
+            sky.cloud_texture.is_some(),
+            sky.cloud_scale,
+            pd1.position_x(),
+            pd1.position_y(),
+            pd1.density(),
+            pd2.position_x(),
+            pd2.position_y(),
+            pd2.density(),
+            sky.cloud_variance,
+            sky.cloud_scroll_rate[0],
+            sky.cloud_scroll_rate[1],
+            sky.cloud_shadow,
+            sky.cloud_color.red(),
+            sky.cloud_color.green(),
+            sky.cloud_color.blue(),
+        );
+    }
 }
 
 /// Swap a decoded cloud-noise texture into the cloud material when its id resolves.
@@ -762,8 +818,17 @@ pub(crate) fn apply_cloud_textures(
         }
         let Some(decoded) = manager.decoded(id) else {
             // The fetch/decode failed; the layer keeps its (transparent) placeholder.
+            if std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+                warn!("cloud texture {id:?} fetch/decode FAILED (using placeholder)");
+            }
             continue;
         };
+        if std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+            info!(
+                "cloud texture {id:?} decoded ({}x{}, {} components)",
+                decoded.width, decoded.height, decoded.components
+            );
+        }
         // The cloud shader tiles the noise: `cloud_scale` magnifies the UVs and the
         // `cloud_pos_density` / scroll offsets push them well outside `[0, 1]`, so the
         // texture must wrap. Bevy's default sampler is clamp-to-edge (which would smear
@@ -895,6 +960,111 @@ pub(crate) fn apply_star_textures(
             material.diffuse = handle;
         }
     }
+}
+
+/// The reference `LLVOWLSky::calcPhi` stack-angle distribution: maps a normalised
+/// stack parameter `t` (`0` at the zenith, `1` at the dome edge) to a polar angle
+/// `φ ∈ [0, π/8]` measured from the zenith, biased toward the edge. This is why the
+/// cloud dome is a shallow **overhead cap** (its edge sits ~22.5° from straight up),
+/// so clouds concentrate overhead and never reach the horizon — the key to
+/// avoiding the near-horizon smear (R18) the per-fragment full-sphere projection
+/// produced.
+fn calc_cloud_phi(t: f32) -> f32 {
+    let mut x = t * t; // t²
+    x = x * x; // t⁴
+    x = 1.0 - x; // 1 − t⁴
+    x = x * x; // (1 − t⁴)²
+    x = 1.0 - x; // 1 − (1 − t⁴)²
+    core::f32::consts::FRAC_PI_8 * x
+}
+
+/// Build the cloud-dome mesh: a faithful port of the reference `LLVOWLSky` sky-dome
+/// tessellation used for clouds (`buildStripsBuffer`). A grid of
+/// [`CLOUD_DOME_STACKS`]×[`CLOUD_DOME_SLICES`] vertices over the zenith cap
+/// ([`calc_cloud_phi`]), each carrying the reference **baked** planar cloud
+/// texcoord `((-z0 + 1) / 2, (-x0 + 1) / 2)` of its unit dome direction (Bevy Y-up:
+/// `x0`/`z0` horizontal, `y0 = cos φ` up). `clouds.wgsl` samples the cloud texture
+/// through this interpolated UV, so the projection matches the reference instead of
+/// being derived per fragment across a full sphere.
+fn build_cloud_dome_mesh() -> Mesh {
+    let stride = CLOUD_DOME_SLICES.saturating_add(1);
+    let vert_count = CLOUD_DOME_STACKS.saturating_add(1).saturating_mul(stride);
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vert_count);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vert_count);
+    let mut indices: Vec<u32> = Vec::new();
+
+    // The camera sits this high inside the dome (`getCamHeight`); baking it into
+    // the vertices (lowering the dome by `cam_height`) means the camera-centred
+    // dome entity sees the `[0, π/8]` cap wrapped down over the whole sky, and the
+    // vertex position is already camera-relative for the shader's lighting `rel_pos`.
+    let cam_height = CLOUD_DOME_RADIUS * CLOUD_DOME_OFFSET;
+
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::as_conversions,
+        reason = "small stack/slice counts, exactly representable as f32"
+    )]
+    let stacks_f = CLOUD_DOME_STACKS as f32;
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::as_conversions,
+        reason = "small stack/slice counts, exactly representable as f32"
+    )]
+    let slices_f = CLOUD_DOME_SLICES as f32;
+
+    for i in 0..=CLOUD_DOME_STACKS {
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::as_conversions,
+            reason = "small stack index, exactly representable as f32"
+        )]
+        let t = i as f32 / stacks_f;
+        let phi = calc_cloud_phi(t);
+        let (sin_phi, cos_phi) = (phi.sin(), phi.cos());
+        for j in 0..=CLOUD_DOME_SLICES {
+            #[expect(
+                clippy::cast_precision_loss,
+                clippy::as_conversions,
+                reason = "small slice index, exactly representable as f32"
+            )]
+            let theta = std::f32::consts::TAU * (j as f32 / slices_f);
+            let (sin_theta, cos_theta) = (theta.sin(), theta.cos());
+            // Unit dome direction (Bevy Y-up: y0 is up, x0/z0 horizontal).
+            let x0 = sin_phi * cos_theta;
+            let y0 = cos_phi;
+            let z0 = sin_phi * sin_theta;
+            positions.push([
+                x0 * CLOUD_DOME_RADIUS,
+                y0 * CLOUD_DOME_RADIUS - cam_height,
+                z0 * CLOUD_DOME_RADIUS,
+            ]);
+            // The reference baked planar texcoord (`buildStripsBuffer`):
+            // `((-z0 + 1) / 2, (-x0 + 1) / 2)`, expressed as midpoints.
+            uvs.push([f32::midpoint(-z0, 1.0), f32::midpoint(-x0, 1.0)]);
+        }
+    }
+
+    for i in 0..CLOUD_DOME_STACKS {
+        let row = i.saturating_mul(stride);
+        let next_row = row.saturating_add(stride);
+        for j in 0..CLOUD_DOME_SLICES {
+            let a = u32::try_from(row.saturating_add(j)).unwrap_or(u32::MAX);
+            let b = a.saturating_add(1);
+            let c = u32::try_from(next_row.saturating_add(j)).unwrap_or(u32::MAX);
+            let d = c.saturating_add(1);
+            // Two triangles per grid cell; cloud material disables back-face
+            // culling, so winding is immaterial.
+            indices.extend_from_slice(&[a, c, b, b, c, d]);
+        }
+    }
+
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
 }
 
 /// Build the star-field mesh: [`STAR_COUNT`] small camera-facing quads scattered

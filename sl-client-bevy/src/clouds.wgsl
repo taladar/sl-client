@@ -70,14 +70,24 @@ struct CloudParams {
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
+    // The dome's baked planar cloud texcoord, generated on the CPU exactly as the
+    // reference `LLVOWLSky::buildStripsBuffer` does (`((-z0 + 1) / 2, (-x0 + 1) /
+    // 2)` of the unit dome direction). Interpolated across the (zenith-biased) dome
+    // triangles, this is the faithful cloud projection — unlike deriving it per
+    // fragment from the view direction over a full sphere, which smears the texture
+    // into a vertical plume near the horizon (the reference dome is an overhead cap,
+    // so it never reaches that degenerate region).
+    @location(1) uv: vec2<f32>,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     // The dome vertex position in the entity's local space. The dome entity is
     // kept centred on the camera each frame, so this is the camera-relative offset
-    // the cloud model is evaluated along (the reference's `rel_pos`).
+    // the cloud lighting model is evaluated along (the reference's `rel_pos`).
     @location(0) local_position: vec3<f32>,
+    // The baked cloud texcoord, interpolated across the dome.
+    @location(1) uv: vec2<f32>,
 };
 
 @vertex
@@ -95,6 +105,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // alpha-blended and does not write depth, so it composites over the sky.
     out.clip_position.z = 0.0;
     out.local_position = vertex.position;
+    out.uv = vertex.uv;
     return out;
 }
 
@@ -112,11 +123,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // --- cloudsV.glsl: texcoords from the dome's planar UV. ---
-    // The reference dome's planar UV is ((-z + 1) / 2, (-x + 1) / 2) of the unit
-    // view direction (Y-up), so the cloud texture is projected top-down.
-    let dir = normalize(in.local_position);
-    var base_uv = vec2<f32>((-dir.z + 1.0) / 2.0, (-dir.x + 1.0) / 2.0);
+    // --- cloudsV.glsl: texcoords from the dome's baked planar UV. ---
+    // The reference bakes ((-z0 + 1) / 2, (-x0 + 1) / 2) of the unit dome direction
+    // per vertex (`LLVOWLSky::buildStripsBuffer`) and interpolates it across the
+    // dome; the CPU-built dome carries exactly that in its UV attribute.
+    let base_uv = in.uv;
 
     // SL-13084: the custom cloud textures are flipped horizontally.
     var uv0 = vec2<f32>(-base_uv.x, base_uv.y);

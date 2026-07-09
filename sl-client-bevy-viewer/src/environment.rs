@@ -29,6 +29,13 @@ pub(crate) enum EnvironmentSource {
     Parcel,
 }
 
+/// How many times to (re)request the region environment before giving up and
+/// rendering with the legacy WindLight defaults.
+const MAX_ENV_ATTEMPTS: u32 = 12;
+
+/// Seconds between environment-request retries while a request is outstanding.
+const ENV_RETRY_INTERVAL: f32 = 3.0;
+
 /// The viewer's current environment: the sky / water / day-cycle settings the
 /// later rendering phases draw from, plus where they came from.
 #[derive(Resource)]
@@ -38,6 +45,14 @@ pub(crate) struct EnvironmentState {
     pub(crate) settings: EnvironmentSettings,
     /// The provenance of [`Self::settings`].
     pub(crate) source: EnvironmentSource,
+    /// Whether a region-environment request is still outstanding — the retry loop
+    /// keeps re-requesting until the reply is ingested or [`MAX_ENV_ATTEMPTS`] is
+    /// reached.
+    req_pending: bool,
+    /// How many `RequestEnvironment` attempts have been made in the current cycle.
+    req_attempts: u32,
+    /// The earliest time (`Time::elapsed_secs`) the next retry may fire.
+    req_next_retry_at: f32,
 }
 
 impl Default for EnvironmentState {
@@ -45,24 +60,62 @@ impl Default for EnvironmentState {
         Self {
             settings: EnvironmentSettings::legacy_windlight_default(),
             source: EnvironmentSource::Default,
+            req_pending: false,
+            req_attempts: 0,
+            req_next_retry_at: 0.0,
         }
     }
 }
 
-/// Request the region environment once each region handshake completes, so the
-/// grid's EEP settings replace the built-in default. Parcels can override the
-/// region environment, but the viewer asks for the whole-region settings here
-/// (`parcel_id: None`); a parcel-scoped request lands with the parcel work.
+/// Request the region environment after each region handshake, retrying until the
+/// grid's EEP reply is ingested (or [`MAX_ENV_ATTEMPTS`] is reached). A single
+/// one-shot request is fragile: on a slower / remote grid the `ExtEnvironment`
+/// capability may not be seeded yet when the handshake completes, so the runtime
+/// silently drops the request and the sky / cloud / water stack is left on the
+/// legacy WindLight defaults forever (observed on aditi). Retrying until
+/// [`ingest_environment`] clears the pending flag closes that race — the same
+/// cap-not-ready-yet class of bug the terrain fetch hit. Parcels can override the
+/// region environment; the viewer asks for the whole-region settings here
+/// (`parcel_id: None`).
 pub(crate) fn request_environment(
+    time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     mut commands: MessageWriter<SlCommand>,
+    mut state: ResMut<EnvironmentState>,
 ) {
+    // A handshake (initial login or a border crossing) starts a fresh request
+    // cycle for the new region's environment.
     for event in events.read() {
         if matches!(event.0, SlSessionEvent::RegionHandshakeComplete) {
             info!("region handshake complete; requesting environment (EEP) settings");
-            commands.write(SlCommand(Command::RequestEnvironment { parcel_id: None }));
+            state.req_pending = true;
+            state.req_attempts = 0;
+            state.req_next_retry_at = 0.0;
         }
     }
+
+    if !state.req_pending {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < state.req_next_retry_at {
+        return;
+    }
+    if state.req_attempts >= MAX_ENV_ATTEMPTS {
+        warn!(
+            "environment (EEP) not received after {MAX_ENV_ATTEMPTS} attempts; \
+             rendering with the legacy WindLight defaults"
+        );
+        state.req_pending = false;
+        return;
+    }
+    state.req_attempts = state.req_attempts.saturating_add(1);
+    state.req_next_retry_at = now + ENV_RETRY_INTERVAL;
+    debug!(
+        "requesting environment (EEP) settings (attempt {}/{MAX_ENV_ATTEMPTS})",
+        state.req_attempts
+    );
+    commands.write(SlCommand(Command::RequestEnvironment { parcel_id: None }));
 }
 
 /// Fold an incoming [`SlSessionEvent::Environment`] into [`EnvironmentState`],
@@ -88,6 +141,8 @@ pub(crate) fn ingest_environment(
             );
             state.settings = (**settings).clone();
             state.source = source;
+            // The reply landed — stop the request/retry loop for this region.
+            state.req_pending = false;
         }
     }
 }

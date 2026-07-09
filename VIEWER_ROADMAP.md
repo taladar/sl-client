@@ -2555,18 +2555,59 @@ avatar, so they are collected here to be worked one at a time.
   this session (the default own avatar wears no shoes and no second avatar was
   in view). Reference: `LLAvatarAppearance::computeBodySize` `mPelvisToFoot`,
   `avatar_lad.xml` `Shoe_Heels` / `Shoe_Platform` `param_skeleton`.
-- [ ] **R18. Cloud layer renders vertical / broken** (`sl-client-bevy` /
-  `sl-client-bevy-viewer`, P22.4). Noticed while verifying P23.1 water: the
-  scrolling cloud layer (`clouds.wgsl` on the camera-centred dome) appears
-  oriented **vertically** rather than as a roughly horizontal overhead sheet,
-  and looks **even more broken on aditi** than on the local OpenSim grid — so it
-  is likely a per-fragment texcoord / dome-projection bug in `clouds.wgsl`
-  (the reference derives the cloud planar UV and the altitude projection to the
-  cloud layer per *vertex* in `cloudsV.glsl`; the port evaluates it per fragment
-  from the dome direction, and the vertical appearance suggests that projection
-  is wrong), possibly interacting with the sky settings the two grids send
-  differently. Investigate the `cloudsV.glsl` planar-UV / `rel_pos` altitude
-  projection against the per-fragment port, and re-check on both grids.
+- [ ] **R18. Cloud layer — horizon plume fixed, one-quadrant clustering still
+  broken** (`sl-client-bevy` / `sl-client-bevy-viewer`, P22.4). Noticed while
+  verifying P23.1 water. Two distinct defects, one fixed, one **still open**:
+  - **(fixed) Vertical horizon plume.** The old port evaluated the cloud UV
+    *per fragment* from the view direction over a **full sphere**; near the
+    horizon that projection is degenerate (`base_uv ∝ (1−cos elev)`, quadratic),
+    smearing the texture into a vertical plume. **Fix:** render clouds on a
+    CPU replica of the reference `LLVOWLSky` dome — the `calcPhi` zenith cap
+    (φ∈[0,π/8]) with the reference **baked** planar texcoords
+    (`buildStripsBuffer`, `((-z0+1)/2,(-x0+1)/2)`), and the camera-height offset
+    (`DOME_OFFSET × DOME_RADIUS` = `0.96×15000`) baked into the vertices so the
+    shallow cap wraps down to fill the sky (the reference puts the camera high
+    inside the dome). `clouds.wgsl` now samples the interpolated vertex UV.
+  - **(still open) Clouds cluster into ~one quadrant** with the other three
+    near empty — on BOTH grids, not faithful (Firestorm spreads them evenly,
+    reaching the horizon). Verified every checkable element of the port matches
+    `class1/deferred/cloudsV` (the φ∈[0,π/8] dome, `calcPhi`, baked UV,
+    `cloud_scale=0.4199`, the `0.96×15000` offset, the repeat sampler,
+    `drawDome`→`mStripsVerts`) — there is only one cloud shader (no `class2`/
+    `class3` variant; `LLVOClouds` gone), so the code path is right. Yet the
+    dome projection maps the whole visible sky onto a tiny ~0.14-radius disc of
+    the cloud texture (≈0.66 tile), so only 1–2 features show →
+    one-sided. This mismatch with Firestorm's even clouds is **unexplained by
+    source archaeology** and needs a same-grid Firestorm pixel comparison /
+    runtime debugging. NOTE: a **separate confound was ruled out** — the EEP
+    environment was not ingested on aditi at all (see R19), so aditi ran on
+    WindLight defaults; with R19 fixed aditi now loads its real EEP and still
+    shows the one-quadrant clustering, confirming a projection defect, not a
+    settings problem. Candidate next step: the altitude-plane projection (sample
+    the cloud texture where the view ray meets the cloud-altitude plane), which
+    tiles evenly to the horizon — a deviation from the literal baked-UV formula
+    but matches Firestorm's result. The `SL_VIEWER_LOG_CLOUDS` env var logs the
+    live cloud EEP params + resolved texture id for comparison.
+- [x] **R19. EEP environment never ingested on aditi (one-shot, no retry)**
+  (`sl-client-bevy-viewer` / `sl-client-bevy`, P22.1). **Fixed.**
+  Surfaced while debugging R18: on aditi the entire sky / sun / moon / cloud /
+  star / water stack silently ran on the **legacy WindLight defaults**
+  (`SkySettings::legacy_windlight_default`), never the region's real EEP. Root
+  cause was a cap-not-ready-yet **race** (the same class as the terrain fetch):
+  `request_environment` fired a **single** `RequestEnvironment` on
+  `RegionHandshakeComplete`, and the runtime **silently drops it** if the
+  `ExtEnvironment` capability is not in the caps map yet — which on a slower /
+  remote grid it usually is not at handshake time. Local OpenSim seeds caps fast
+  enough that the one-shot always won, so this went unseen until aditi. **Fix:**
+  `request_environment` now retries every 3 s (up to 12 attempts) until
+  `ingest_environment` folds the reply in and clears a pending flag (or it gives
+  up to the defaults); a `RegionHandshakeComplete` (login or border crossing)
+  starts a fresh cycle. The runtime also warns when `RequestEnvironment`
+  finds no `ExtEnvironment` cap. Verified: aditi now logs `environment ingested
+  (Region)` and the cloud params flip to `region_specified=true` with the
+  region's real values. This retroactively means **any P22/P23 behaviour
+  "verified on OpenSim only" was running on defaults on aditi** and should be
+  re-checked there now that the real EEP loads.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
