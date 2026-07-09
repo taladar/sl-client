@@ -16,8 +16,13 @@
 //! space (sRGB base colour / emissive, linear normal / metallic-roughness) and
 //! drops it into the material's matching slot.
 //!
-//! Per-face GLTF material **overrides** (delivered over the material cap) are a
-//! later phase (P27.2) layered on top of this base material.
+//! Per-face GLTF material **overrides** (P27.2) — the sparse deltas the simulator
+//! pushes in a GLTF material-override `GenericStreamingMessage` — are layered on
+//! top of this base material by [`apply_material_overrides`]. Each registered face
+//! is tracked by its scoped-object + face-index key so an override addressed to it
+//! can be found and the face recomposed ([`recompose_face`]): the decoded base
+//! material with the override folded on, re-applied to the face's
+//! [`StandardMaterial`].
 //!
 //! Mirrors the structure of [`AnimationManager`](crate::animations) /
 //! [`WearableAssetManager`](crate::bake_inputs) for the fetch/decode/cache half.
@@ -36,12 +41,18 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
     CAP_VIEWER_ASSET, DecodedTexture, GltfAlphaMode, GltfMaterial, GltfTexture,
-    GltfTextureTransform, Priority, SlCapabilities, TextureKey, Uuid, parse_material_asset,
+    GltfTextureTransform, MaterialOverride, Priority, ScopedObjectId, SlCapabilities, SlEvent,
+    SlSessionEvent, TextureKey, Uuid, parse_material_asset, parse_material_override,
 };
 
 use crate::objects::PrimFaceEntity;
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::TextureManager;
+
+/// A face-material identity: the scoped object id and its Linden face index — the
+/// key both a registered face material and an incoming per-face GLTF override
+/// (P27.2) are addressed by.
+type FaceKey = (ScopedObjectId, u8);
 
 /// The fetch priority PBR material texture maps are requested at: a modest boost
 /// (like a terrain detail texture), so a material's maps load at full resolution
@@ -67,8 +78,12 @@ fn is_fetchable_texture(id: TextureKey) -> bool {
 /// object's **geometry holder** entity (the parent of its face entities) so
 /// [`register_pbr_materials`] can look up a face's material id by its face index.
 /// Present only on objects that carry at least one PBR material.
-#[derive(Component, Debug, Clone, Default)]
+#[derive(Component, Debug, Clone)]
 pub(crate) struct ObjectRenderMaterials {
+    /// The scoped id of the object owning these faces — the key a per-face GLTF
+    /// override (P27.2) is addressed by, so a registered face can be found again
+    /// when its override arrives.
+    pub(crate) scoped_id: ScopedObjectId,
     /// `(face index, material asset id)` pairs, straight from the object's
     /// `render_material` extra-params block.
     pub(crate) faces: Vec<(u8, Uuid)>,
@@ -89,10 +104,42 @@ enum PbrSlot {
 }
 
 impl PbrSlot {
+    /// The four slots, in the order [`GltfMaterial`] carries their textures.
+    const ALL: [Self; 4] = [
+        Self::BaseColor,
+        Self::MetallicRoughness,
+        Self::Normal,
+        Self::Emissive,
+    ];
+
     /// Whether this slot's texture is sRGB-encoded (base colour / emissive) as
     /// opposed to linear (normal / metallic-roughness).
     const fn is_srgb(self) -> bool {
         matches!(self, Self::BaseColor | Self::Emissive)
+    }
+
+    /// This slot's texture reference on a decoded [`GltfMaterial`].
+    const fn texture(self, material: &GltfMaterial) -> Option<GltfTexture> {
+        match self {
+            Self::BaseColor => material.base_color_texture,
+            Self::MetallicRoughness => material.metallic_roughness_texture,
+            Self::Normal => material.normal_texture,
+            Self::Emissive => material.emissive_texture,
+        }
+    }
+
+    /// Clear this slot's texture on a face [`StandardMaterial`] (the
+    /// metallic-roughness slot also drives occlusion, so both are cleared).
+    fn clear(self, standard: &mut StandardMaterial) {
+        match self {
+            Self::BaseColor => standard.base_color_texture = None,
+            Self::MetallicRoughness => {
+                standard.metallic_roughness_texture = None;
+                standard.occlusion_texture = None;
+            }
+            Self::Normal => standard.normal_map_texture = None,
+            Self::Emissive => standard.emissive_texture = None,
+        }
     }
 }
 
@@ -105,10 +152,24 @@ struct PbrTexturePatch {
     slot: PbrSlot,
 }
 
+/// A registered PBR face material: which base material asset feeds it, the
+/// material handle to patch, and the face's own (texture-entry) UV placement to
+/// recompose each material's `KHR_texture_transform` onto.
+struct FaceSlot {
+    /// The base GLTF material asset id this face renders (before any override).
+    material_id: AssetKey,
+    /// The face's [`StandardMaterial`] handle, re-patched on each recomposition.
+    handle: Handle<StandardMaterial>,
+    /// The face's diffuse (texture-entry) `uv_transform`, captured at registration
+    /// before any material composition, so recomposition never double-applies the
+    /// base-colour `KHR_texture_transform`.
+    base_uv: Affine2,
+}
+
 /// The PBR material fetch/decode/apply pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability for `AT_MATERIAL` assets, the in-flight fetch tasks,
-/// the decoded materials, and the bookkeeping tying face materials to the assets
-/// and texture maps they wait on.
+/// the decoded materials, and the bookkeeping tying face materials to the assets,
+/// per-face overrides, and texture maps they wait on.
 #[derive(Resource)]
 pub(crate) struct MaterialManager {
     /// The generic-asset store doing the `ViewerAsset` fetch, dedupe, off-thread
@@ -123,8 +184,12 @@ pub(crate) struct MaterialManager {
     /// Successfully decoded materials by id, shared across every face using the
     /// material so it is fetched and decoded once.
     decoded: HashMap<AssetKey, GltfMaterial>,
-    /// Face materials parked on a material id, patched once its asset decodes.
-    pending: HashMap<AssetKey, Vec<Handle<StandardMaterial>>>,
+    /// Each registered PBR face by its scoped-object + face-index key, recomposed
+    /// whenever its base material decodes or its override changes.
+    face_slots: HashMap<FaceKey, FaceSlot>,
+    /// Per-face GLTF material overrides (P27.2), layered on the base material at
+    /// recomposition; absent for a face with no override.
+    overrides: HashMap<FaceKey, MaterialOverride>,
     /// Material ids whose fetch / decode failed, so they are not retried forever
     /// (the parked faces keep their diffuse material).
     unavailable: HashSet<AssetKey>,
@@ -150,7 +215,8 @@ impl MaterialManager {
             fetcher,
             inflight: HashMap::new(),
             decoded: HashMap::new(),
-            pending: HashMap::new(),
+            face_slots: HashMap::new(),
+            overrides: HashMap::new(),
             unavailable: HashSet::new(),
             pending_cap: HashSet::new(),
             images: HashMap::new(),
@@ -158,13 +224,27 @@ impl MaterialManager {
         }
     }
 
-    /// Park face material `handle` on GLTF material `id` and ensure the asset is
-    /// being fetched. Idempotent across the many faces that share a material.
-    fn register(&mut self, id: AssetKey, handle: Handle<StandardMaterial>) {
-        if id.uuid().is_nil() || self.unavailable.contains(&id) {
+    /// Register a PBR face material (its base material id, handle, and the face's
+    /// diffuse UV placement) and ensure the base asset is being fetched. Replaces
+    /// any prior registration for the same face (an object re-tessellation).
+    fn register(
+        &mut self,
+        key: FaceKey,
+        id: AssetKey,
+        handle: Handle<StandardMaterial>,
+        base_uv: Affine2,
+    ) {
+        if id.uuid().is_nil() {
             return;
         }
-        self.pending.entry(id).or_default().push(handle);
+        let _prev = self.face_slots.insert(
+            key,
+            FaceSlot {
+                material_id: id,
+                handle,
+                base_uv,
+            },
+        );
         self.request(id);
     }
 
@@ -314,10 +394,14 @@ pub(crate) fn update_material_caps(
 
 /// Join each newly-spawned face entity to its object's [`ObjectRenderMaterials`]
 /// holder (its geometry-holder parent), and, when the face's index carries a PBR
-/// material, hand the face's material handle to the [`MaterialManager`] to fetch
-/// and apply (P27.1). A face with no PBR material keeps its diffuse material.
+/// material, register the face with the [`MaterialManager`] (keyed by its scoped
+/// object id + face index) and recompose it — the base material (P27.1) plus any
+/// override already received for the face (P27.2). A face with no PBR material
+/// keeps its diffuse material.
 pub(crate) fn register_pbr_materials(
     mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     new_faces: Query<
         (&MeshMaterial3d<StandardMaterial>, &PrimFaceEntity, &ChildOf),
         Added<PrimFaceEntity>,
@@ -329,20 +413,33 @@ pub(crate) fn register_pbr_materials(
             continue;
         };
         let face_index = face.face_id.as_usize();
-        let Some(&(_face, material_id)) = holder
+        let Some(&(face_id, material_id)) = holder
             .faces
             .iter()
             .find(|(index, _id)| usize::from(*index) == face_index)
         else {
             continue;
         };
-        manager.register(AssetKey::from(material_id), material.0.clone());
+        // The face's diffuse UV placement, captured before any material
+        // composition so recomposition never double-applies a `KHR_texture_transform`.
+        let base_uv = materials
+            .get(&material.0)
+            .map_or(Affine2::IDENTITY, |standard| standard.uv_transform);
+        let key = (holder.scoped_id, face_id);
+        manager.register(
+            key,
+            AssetKey::from(material_id),
+            material.0.clone(),
+            base_uv,
+        );
+        recompose_face(&mut manager, &mut textures, &mut materials, key);
     }
 }
 
 /// Poll the in-flight material fetches; fold each result into the decoded cache
-/// (or mark it unavailable), then patch every face parked on a now-decoded
-/// material: set its PBR scalars and request its texture maps.
+/// (or mark it unavailable), then recompose every registered face whose base
+/// material just decoded — applying its base scalars, any override, and its
+/// texture maps.
 pub(crate) fn poll_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
@@ -356,37 +453,113 @@ pub(crate) fn poll_materials(
             finished.push((id, result));
         }
     }
+    let mut newly_decoded: Vec<AssetKey> = Vec::new();
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
         match result {
             Some(material) => {
                 let _prev = manager.decoded.insert(id, material);
+                newly_decoded.push(id);
             }
             None => {
                 let _inserted = manager.unavailable.insert(id);
-                let _dropped = manager.pending.remove(&id);
             }
         }
     }
 
-    // Patch every parked face whose material has decoded. `GltfMaterial` is `Copy`,
-    // so it can be lifted out before the parked handles borrow the manager again.
-    let ready: Vec<AssetKey> = manager
-        .pending
-        .keys()
-        .filter(|id| manager.decoded.contains_key(id))
-        .copied()
-        .collect();
-    for id in ready {
-        let Some(material) = manager.decoded.get(&id).copied() else {
-            continue;
-        };
-        let handles = manager.pending.remove(&id).unwrap_or_default();
-        for handle in handles {
-            apply_material_scalars(&mut materials, &handle, &material);
-            request_material_textures(&mut manager, &mut textures, &handle, &material);
+    // Recompose every face whose base material just became available.
+    for id in newly_decoded {
+        let keys: Vec<FaceKey> = manager
+            .face_slots
+            .iter()
+            .filter(|(_key, slot)| slot.material_id == id)
+            .map(|(key, _slot)| *key)
+            .collect();
+        for key in keys {
+            recompose_face(&mut manager, &mut textures, &mut materials, key);
         }
     }
+}
+
+/// Apply per-face GLTF material overrides (P27.2) pushed by the simulator in a
+/// GLTF material-override `GenericStreamingMessage`. Each affected face's override
+/// document is decoded and stored (or cleared, when it reverts to base), and the
+/// face recomposed so the delta layers onto its base material. Faces of the same
+/// object omitted from the message have their override cleared, mirroring the
+/// reference (`LLGLTFMaterialList::applyOverrideMessage`).
+pub(crate) fn apply_material_overrides(
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut events: MessageReader<SlEvent>,
+) {
+    for SlEvent(event) in events.read() {
+        let SlSessionEvent::GltfMaterialOverride {
+            local_id,
+            faces,
+            overrides,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        let scoped = *local_id;
+        debug!(
+            "GLTF material override for object {scoped} on {} face(s)",
+            faces.len()
+        );
+        let mut present: HashSet<u8> = HashSet::new();
+        for (face, raw) in faces.iter().zip(overrides.iter()) {
+            present.insert(*face);
+            let key = (scoped, *face);
+            let decoded = parse_material_override(raw).unwrap_or_default();
+            if decoded.is_empty() {
+                let _removed = manager.overrides.remove(&key);
+            } else {
+                let _prev = manager.overrides.insert(key, decoded);
+            }
+            recompose_face(&mut manager, &mut textures, &mut materials, key);
+        }
+        // Clear overrides on this object's faces the message no longer lists (a
+        // revert to base for a face whose override was dropped).
+        let stale: Vec<FaceKey> = manager
+            .overrides
+            .keys()
+            .filter(|(object, face)| *object == scoped && !present.contains(face))
+            .copied()
+            .collect();
+        for key in stale {
+            let _removed = manager.overrides.remove(&key);
+            recompose_face(&mut manager, &mut textures, &mut materials, key);
+        }
+    }
+}
+
+/// Recompose one registered face's [`StandardMaterial`]: layer its override (if
+/// any) onto its decoded base material, write the effective scalars / UV
+/// placement, and (re)request its texture maps. A no-op until the base material
+/// has decoded (the face is recomposed again when it does).
+fn recompose_face(
+    manager: &mut MaterialManager,
+    textures: &mut TextureManager,
+    materials: &mut Assets<StandardMaterial>,
+    key: FaceKey,
+) {
+    let Some(slot) = manager.face_slots.get(&key) else {
+        return;
+    };
+    let material_id = slot.material_id;
+    let handle = slot.handle.clone();
+    let base_uv = slot.base_uv;
+    let Some(base) = manager.decoded.get(&material_id).copied() else {
+        return;
+    };
+    let mut effective = base;
+    if let Some(over) = manager.overrides.get(&key) {
+        over.apply_to(&mut effective);
+    }
+    apply_material_scalars(materials, &handle, &effective, base_uv);
+    request_material_textures(manager, textures, materials, &handle, &base, &effective);
 }
 
 /// Write a decoded [`GltfMaterial`]'s scalar / factor fields onto a face's
@@ -397,6 +570,7 @@ fn apply_material_scalars(
     materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
     material: &GltfMaterial,
+    base_uv: Affine2,
 ) {
     let Some(mut standard) = materials.get_mut(handle) else {
         return;
@@ -419,51 +593,70 @@ fn apply_material_scalars(
         GltfAlphaMode::Blend => AlphaMode::Blend,
     };
     // Compose the base-colour texture's `KHR_texture_transform` onto the face's
-    // existing (texture-entry) UV placement. Bevy carries a single `uv_transform`
-    // for all maps, so the base-colour transform stands in for every slot (a
-    // documented approximation of the reference's per-slot transforms). `Mul::mul`
-    // (a method, not the `*` operator) keeps clear of the workspace
+    // diffuse (texture-entry) UV placement `base_uv`. Recomposing from the captured
+    // `base_uv` (rather than the live `uv_transform`) keeps a re-application (a
+    // later override) from stacking the transform. Bevy carries a single
+    // `uv_transform` for all maps, so the base-colour transform stands in for every
+    // slot (a documented approximation of the reference's per-slot transforms).
+    // `Mul::mul` (a method, not the `*` operator) keeps clear of the workspace
     // `arithmetic_side_effects` lint the glam operators trip.
-    if let Some(texture) = material.base_color_texture {
-        standard.uv_transform = standard
-            .uv_transform
-            .mul(gltf_uv_transform(&texture.transform));
-    }
+    standard.uv_transform = match material.base_color_texture {
+        Some(texture) => base_uv.mul(gltf_uv_transform(&texture.transform)),
+        None => base_uv,
+    };
 }
 
-/// Request each of a decoded material's texture maps through the shared texture
-/// pipeline and park the corresponding slot patch on it, so [`apply_pbr_textures`]
-/// fills the slot once the map decodes.
+/// Reconcile a face's PBR texture slots to `effective` (the base material with any
+/// override applied), given its `base` material: request each slot the effective
+/// material names, and clear a slot the override *removed* (present on `base` but
+/// not `effective`) so a cleared texture reverts. A slot absent on both `base` and
+/// `effective` is left as the face's diffuse texture (the P27.1 behaviour).
 fn request_material_textures(
     manager: &mut MaterialManager,
     textures: &mut TextureManager,
+    materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
-    material: &GltfMaterial,
+    base: &GltfMaterial,
+    effective: &GltfMaterial,
 ) {
-    for (slot, texture) in [
-        (PbrSlot::BaseColor, material.base_color_texture),
-        (
-            PbrSlot::MetallicRoughness,
-            material.metallic_roughness_texture,
-        ),
-        (PbrSlot::Normal, material.normal_texture),
-        (PbrSlot::Emissive, material.emissive_texture),
-    ] {
-        let Some(GltfTexture { id, .. }) = texture else {
-            continue;
-        };
-        if !is_fetchable_texture(id) {
-            continue;
+    for slot in PbrSlot::ALL {
+        match slot.texture(effective) {
+            Some(GltfTexture { id, .. }) if is_fetchable_texture(id) => {
+                textures.request_boosted(id, MATERIAL_TEXTURE_PRIORITY);
+                manager
+                    .texture_pending
+                    .entry(id)
+                    .or_default()
+                    .push(PbrTexturePatch {
+                        material: handle.clone(),
+                        slot,
+                    });
+            }
+            // The effective material clears (or never had) this slot's texture.
+            // Clear the face slot only when the *base* carried one — i.e. an
+            // override removed it — leaving an untouched diffuse texture in place.
+            _ => {
+                if slot.texture(base).is_some() {
+                    drop_texture_patches(manager, handle, slot);
+                    if let Some(mut standard) = materials.get_mut(handle) {
+                        slot.clear(&mut standard);
+                    }
+                }
+            }
         }
-        textures.request_boosted(id, MATERIAL_TEXTURE_PRIORITY);
-        manager
-            .texture_pending
-            .entry(id)
-            .or_default()
-            .push(PbrTexturePatch {
-                material: handle.clone(),
-                slot,
-            });
+    }
+}
+
+/// Drop any parked (not-yet-applied) texture patches targeting `handle`'s `slot`,
+/// so an override that clears a slot is not later re-filled by a stale patch left
+/// from an earlier composition of the same face.
+fn drop_texture_patches(
+    manager: &mut MaterialManager,
+    handle: &Handle<StandardMaterial>,
+    slot: PbrSlot,
+) {
+    for patches in manager.texture_pending.values_mut() {
+        patches.retain(|patch| !(patch.material == *handle && patch.slot == slot));
     }
 }
 

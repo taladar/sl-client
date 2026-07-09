@@ -68,4 +68,10 @@ pub enum LlsdError {
     /// [`parse_llsd_binary`](crate::parse_llsd_binary).
     #[error("binary LLSD date is not a representable timestamp")]
     InvalidBinaryDate,
+    /// A notation-LLSD stream ended unexpectedly or carried a byte that does not
+    /// start (nor continue) a valid notation value. Raised by
+    /// [`parse_llsd_notation`](crate::parse_llsd_notation) so a malformed textual
+    /// payload fails cleanly instead of yielding a bogus tree.
+    #[error("notation LLSD input was malformed")]
+    MalformedNotation,
 }

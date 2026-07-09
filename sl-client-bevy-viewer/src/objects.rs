@@ -888,7 +888,12 @@ fn sculpt_key(object: &Object) -> Option<(TextureKey, u8)> {
 /// face's PBR material up by index (P27.1). Refreshed on every update, and the
 /// component removed when the object carries no PBR material, so a material
 /// cleared in-world stops being applied.
-fn apply_render_materials(geometry: Entity, object: &Object, commands: &mut Commands) {
+fn apply_render_materials(
+    geometry: Entity,
+    scoped: ScopedObjectId,
+    object: &Object,
+    commands: &mut Commands,
+) {
     let faces: Vec<(u8, Uuid)> = object
         .extra
         .render_material
@@ -898,9 +903,10 @@ fn apply_render_materials(geometry: Entity, object: &Object, commands: &mut Comm
     if faces.is_empty() {
         commands.entity(geometry).remove::<ObjectRenderMaterials>();
     } else {
-        commands
-            .entity(geometry)
-            .insert(ObjectRenderMaterials { faces });
+        commands.entity(geometry).insert(ObjectRenderMaterials {
+            scoped_id: scoped,
+            faces,
+        });
     }
 }
 
@@ -1584,7 +1590,7 @@ fn apply_object(
         commands
             .entity(existing.geometry)
             .insert(holder_transform(object, category));
-        apply_render_materials(existing.geometry, object, commands);
+        apply_render_materials(existing.geometry, scoped, object, commands);
         apply_light(existing.entity, light, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
@@ -1669,7 +1675,7 @@ fn apply_object(
             ChildOf(entity),
         ))
         .id();
-    apply_render_materials(geometry, object, commands);
+    apply_render_materials(geometry, scoped, object, commands);
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.

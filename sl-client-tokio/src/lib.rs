@@ -133,11 +133,14 @@ pub use sl_asset::{
 // The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material
 // counterpart of `sl_mesh` / `sl_texture`: a client fetches a material asset
 // over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
-// it into a renderer-agnostic `GltfMaterial` (P27.1). Kept at parity with the
-// Bevy runtime.
+// it into a renderer-agnostic `GltfMaterial` (P27.1), plus the per-face
+// `MaterialOverride` delta (P27.2) layered on the base material. Kept at parity
+// with the Bevy runtime.
 pub use sl_material::{
     GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
-    MaterialError as GltfMaterialError, parse_gltf_material_document, parse_material_asset,
+    MaterialError as GltfMaterialError, MaterialOverride, TextureOverride,
+    TextureTransformOverride, parse_gltf_material_document, parse_material_asset,
+    parse_material_override,
 };
 
 pub use crate::assets::ReqwestAssetFetcher;

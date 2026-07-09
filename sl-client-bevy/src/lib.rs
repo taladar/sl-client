@@ -161,10 +161,14 @@ pub use sl_asset::{
 // counterpart of `sl_mesh` / `sl_texture`: the viewer fetches a material asset
 // over the `ViewerAsset` capability (the generic `AssetStore` above) and decodes
 // it into a `GltfMaterial` it maps onto a Bevy `StandardMaterial`, sourcing each
-// referenced texture from the shared `TextureStore` (P27.1).
+// referenced texture from the shared `TextureStore` (P27.1). `MaterialOverride`
+// (P27.2) is the per-face delta the viewer layers on the base material, decoded
+// from a GLTF material-override `GenericStreamingMessage`.
 pub use sl_material::{
     GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
-    MaterialError as GltfMaterialError, parse_gltf_material_document, parse_material_asset,
+    MaterialError as GltfMaterialError, MaterialOverride, TextureOverride,
+    TextureTransformOverride, parse_gltf_material_document, parse_material_asset,
+    parse_material_override,
 };
 
 // The pure prim-tessellation geometry (no store/fetcher — a prim is tessellated

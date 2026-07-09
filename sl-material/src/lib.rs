@@ -27,10 +27,14 @@
 
 pub mod decode;
 pub mod error;
+pub mod overrides;
 pub mod types;
 
 pub use decode::{parse_gltf_material_document, parse_material_asset};
 pub use error::MaterialError;
+pub use overrides::{
+    MaterialOverride, TextureOverride, TextureTransformOverride, parse_material_override,
+};
 pub use types::{GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform};
 
 #[cfg(test)]

@@ -77,8 +77,8 @@ use crate::diagnostics::{
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::lights::{LocalLights, drive_local_lights};
 use crate::materials::{
-    MaterialManager, apply_pbr_textures, poll_materials, register_pbr_materials,
-    update_material_caps,
+    MaterialManager, apply_material_overrides, apply_pbr_textures, poll_materials,
+    register_pbr_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
@@ -491,6 +491,7 @@ fn run_session(
                 update_material_caps,
                 register_pbr_materials,
                 poll_materials,
+                apply_material_overrides,
                 apply_pbr_textures,
             ),
             // Avatar placeholder spheres: full-object avatars first, then the
