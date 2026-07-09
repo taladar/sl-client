@@ -2008,10 +2008,39 @@ Phase 23 (water) and Phase 24 (shadows).
   decode. Verified live on OpenSim against a provisioned orange point-light prim
   (`emitted=[0.8,0.398,0.0]`, i.e. linear `[1,0.5,0]` scaled by intensity `0.8`,
   radius 10 m, falloff 1). P25.2 will read `ObjectLight` to spawn Bevy lights.
-- [ ] **P25.2. Nearest-N selection + render.** Spawn Bevy `PointLight` /
+- [x] **P25.2. Nearest-N selection + render.** Spawn Bevy `PointLight` /
   `SpotLight` for light-flagged prims, selecting the nearest / brightest N per
   frame within a budget (GPU / clustered-light limits). Reference:
-  `LLPipeline::setupHWLights`, `LL_NUM_LIGHT_UNITS`.
+  `LLPipeline::setupHWLights`, `LL_NUM_LIGHT_UNITS`. Done: `drive_local_lights`
+  reads each frame's `ObjectLight` components (P25.1), ranks them by emitted
+  luminance attenuated by camera distance (nearest / brightest first, mirroring
+  `setupHWLights` keeping only the closest lights), and spawns the top
+  `MAX_LOCAL_LIGHTS` (32) as Bevy lights — a `PointLight` for a plain light, a
+  `SpotLight` (cone from the projector's half-FOV, inner cone from its focus)
+  for a projector. Each Bevy light is a child of the light-flagged object
+  entity with an identity local transform, so it rides the prim's transform
+  and — for a
+  spotlight — its forward (`-Z`) already equals Second Life's spot direction
+  (`at_axis(0,0,-1) * render_rotation`) once the parent's coordinate conversion
+  is applied, needing no extra rotation. The SL colour carries the light hue and
+  the wire-alpha intensity rides Bevy's photometric lumens
+  (`LOCAL_LIGHT_LUMENS = 1_000_000`, Bevy's `VERY_LARGE_CINEMA_LIGHT`), so
+  radiance stays proportional to the emitted colour; the radius maps to the Bevy
+  light `range`. Each Bevy light child is **kept alive and updated in place**
+  across frames (tracked in a `LocalLights` object→child map, which also caches
+  the last-applied light so an unchanged prim does no per-frame ECS mutation); a
+  prim only gains a child on entering the budget and loses it on dropping out.
+  Re-spawning (or even re-inserting the light component on) the child every
+  frame churns the retained render world and makes the light *flicker* on lit
+  surfaces — the reconcile-in-place-on-change path is what fixes that (verified
+  live). A
+  change in the rendered count logs once at `debug`. SL `falloff` has no Bevy
+  analogue (Bevy's
+  point light uses a fixed smooth range attenuation) and the projected light
+  *texture* (`SpotLightTexture` / `PointLightTexture`) is not yet wired through
+  the texture pipeline — both are follow-ups. Verified live on OpenSim: the
+  provisioned orange point-light prim is selected (`rendering 1 of 1 candidate`)
+  and rendered without regressing the scene.
 
 ## Phase 26 — Linden trees & grass
 
@@ -2629,6 +2658,21 @@ avatar, so they are collected here to be worked one at a time.
   region's real values. This retroactively means **any P22/P23 behaviour
   "verified on OpenSim only" was running on defaults on aditi** and should be
   re-checked there now that the real EEP loads.
+- [ ] **R20. Directional shadows oscillate along one axis (still open)**
+  (`sl-client-bevy-viewer` / `sl-client-bevy`, P24.1). Noticed while verifying
+  P25.2 local lights: with a **static camera and a stationary light prim**, the
+  sun/moon cascaded shadows on the ground jitter back and forth a small amount
+  along a single axis, frame to frame. This is **not** the local light (P25.2
+  point/spot lights cast no shadows here) and **not** camera-driven cascade
+  crawl (the camera was still) — it is the P24.1 directional cascaded-shadow-map
+  projection recomputing with tiny per-frame differences (a classic CSM
+  texel-snap / stabilisation artifact, likely the cascade world-space bounds not
+  being snapped to shadow-map texel increments, or the sun direction drifting
+  microscopically from the day-cycle interpolation each frame). Candidate fix:
+  round each cascade's projection origin to whole shadow-map texels (texel
+  snapping) so a sub-texel change in the fit no longer shifts the whole map, and
+  confirm the sun direction is stable when the day cycle is paused. Independent
+  of Phase 25.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

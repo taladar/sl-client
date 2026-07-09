@@ -74,6 +74,7 @@ use crate::diagnostics::{
     toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
+use crate::lights::{LocalLights, drive_local_lights};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, PrimLodTargets, adopt_pending_attachments, apply_object_meshes,
@@ -393,6 +394,7 @@ fn run_session(
     // underwater-fog pass reads is a small resource published by `drive_water`.
     .init_resource::<WaterLevel>()
     .init_resource::<PrimLodTargets>()
+    .init_resource::<LocalLights>()
     .init_resource::<AvatarState>()
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
@@ -557,6 +559,10 @@ fn run_session(
             // (while shown) its text from the live store snapshots.
             toggle_pipeline_overlay,
             update_pipeline_overlay.after(toggle_pipeline_overlay),
+            // Local lights (P25.2): render the nearest / brightest light-flagged
+            // prims as Bevy point / spot lights, after the fly-camera so the
+            // distance-based budget selection uses the current viewpoint.
+            drive_local_lights.after(fly_camera),
         ),
     )
     // Atmospheric sky (P22.2): keep the sky dome centred on the camera, then fold

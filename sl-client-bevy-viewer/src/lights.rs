@@ -1,25 +1,87 @@
 //! Local lights (Phase 25): fold a prim's `LLLightParams` light block into the
-//! scene mirror.
+//! scene mirror and render it as a Bevy light.
 //!
-//! This is the P25.1 slice — *ingest only*. Each in-world prim may carry a light
-//! extra-param ([`LightData`]) marking it as a light
-//! source, and — when it is a spotlight (projector) — a companion light-image
-//! extra-param ([`LightImage`](sl_client_bevy::LightImage)) holding the projected
-//! texture and its cone parameters. [`light_from_object`] decodes those two
-//! blocks into an [`ObjectLight`] component, which [`apply_object`] attaches to
-//! (or clears from) each object entity as its updates arrive. P25.2 will read
-//! this component to spawn the nearest / brightest N Bevy `PointLight` /
-//! `SpotLight`s.
+//! **Ingest (P25.1).** Each in-world prim may carry a light extra-param
+//! ([`LightData`]) marking it as a light source, and — when it is a spotlight
+//! (projector) — a companion light-image extra-param
+//! ([`LightImage`](sl_client_bevy::LightImage)) holding the projected texture and
+//! its cone parameters. [`light_from_object`] decodes those two blocks into an
+//! [`ObjectLight`] component, which [`apply_object`] attaches to (or clears from)
+//! each object entity as its updates arrive.
+//!
+//! **Render (P25.2).** [`drive_local_lights`] reads those [`ObjectLight`]
+//! components each frame and spawns a Bevy [`PointLight`] (or [`SpotLight`] for a
+//! projector) as a child of the light-flagged object entity, so the Bevy light
+//! rides the prim's transform. Only the nearest / brightest [`MAX_LOCAL_LIGHTS`]
+//! prims win the budget each frame, mirroring the way
+//! `LLPipeline::setupHWLights` keeps only the closest `LL_NUM_LIGHT_UNITS` — the
+//! rest are dropped so the clustered-forward renderer is not overwhelmed. The
+//! Bevy light is parented with an identity local transform, so its forward
+//! (`-Z`) already equals the Second Life spot direction (the prim's local `-Z`,
+//! `at_axis(0,0,-1) * render_rotation`) once the parent's coordinate conversion
+//! is applied.
 //!
 //! [`apply_object`]: crate::objects
 //!
 //! Reference (read-only): Firestorm `LLVOVolume::getLight*` /
-//! `isLightSpotlight` (`indra/newview/llvovolume.cpp`) and
+//! `isLightSpotlight` (`indra/newview/llvovolume.cpp`),
+//! `LLPipeline::setupHWLights` (`indra/newview/pipeline.cpp`), and
 //! `LLLightParams` / `LLLightImageParams`
 //! (`indra/llprimitive/llprimitive.{h,cpp}`).
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use sl_client_bevy::{LightData, Object, TextureKey};
+
+use crate::camera::FlyCamera;
+
+/// The maximum number of local prim lights rendered at once (P25.2). Second
+/// Life's legacy fixed-function path capped hardware lights at
+/// `LL_NUM_LIGHT_UNITS` (8); its deferred renderer raises the nearby-light limit
+/// (`RenderLocalLightCount`) far higher. Bevy's clustered-forward renderer bounds
+/// the per-cluster light count, so we spend a middling scene-wide budget on the
+/// nearest / brightest prims each frame.
+const MAX_LOCAL_LIGHTS: usize = 32;
+
+/// The luminous power (lumens) of a full-intensity (`intensity == 1.0`) local
+/// light. Second Life light intensity is `0.0..=1.0`; this scales it into Bevy's
+/// photometric lumens. Set to Bevy's own `VERY_LARGE_CINEMA_LIGHT` default so a
+/// full-strength prim light reads brightly at the scene's default exposure
+/// without washing out the sunlit `SCENE_LIGHT_ILLUMINANCE` (10,000 lux).
+const LOCAL_LIGHT_LUMENS: f32 = 1_000_000.0;
+
+/// The smallest spotlight cone half-angle (radians) handed to a Bevy
+/// [`SpotLight`]: Bevy requires a positive outer angle, so a near-zero projector
+/// FOV is clamped up to this.
+const MIN_SPOT_ANGLE: f32 = 0.05;
+/// The largest spotlight cone half-angle (radians) handed to a Bevy
+/// [`SpotLight`]: Bevy requires the outer angle strictly below `π/2`, so a wide
+/// projector FOV is clamped down to just under it.
+const MAX_SPOT_ANGLE: f32 = core::f32::consts::FRAC_PI_2 - 0.01;
+
+/// Marks a Bevy light entity spawned by [`drive_local_lights`] as the render of a
+/// prim's [`ObjectLight`]. Parented to the light-flagged object entity so it is
+/// never confused with the object geometry.
+#[derive(Component)]
+pub(crate) struct LocalLightChild;
+
+/// The persistent mapping from a light-flagged object entity to the Bevy light
+/// child [`drive_local_lights`] spawned for it (P25.2).
+///
+/// The light entities are **kept alive across frames** and updated in place — a
+/// prim only gains a light child when it enters the render budget and loses it
+/// when it drops out. Despawning / re-spawning the Bevy light every frame instead
+/// churns the render world and makes the light flicker, so the selection is
+/// reconciled against this map rather than rebuilt from scratch.
+#[derive(Resource, Default)]
+pub(crate) struct LocalLights {
+    /// Light-flagged object entity → its spawned Bevy light child entity and the
+    /// last [`ObjectLight`] applied to it. The stored light lets the reconcile
+    /// skip a prim whose light is unchanged, so a stable scene does no per-frame
+    /// component churn at all.
+    assigned: HashMap<Entity, (Entity, ObjectLight)>,
+}
 
 /// The projector parameters of a **spotlight** — a light that carries a
 /// light-image ([`LightImage`](sl_client_bevy::LightImage)) extra-param and so
@@ -128,9 +190,181 @@ pub(crate) fn light_from_object(object: &Object) -> Option<ObjectLight> {
     })
 }
 
+/// The Rec. 709 relative luminance of a linear RGB colour — used to rank lights
+/// by how bright they read, so a dim tinted light does not outbid a strong one.
+fn luminance(color: [f32; 3]) -> f32 {
+    0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+}
+
+/// Build the [`PointLight`] for a plain (non-projector) local light.
+fn point_light(light: &ObjectLight) -> PointLight {
+    PointLight {
+        color: light_color(light),
+        // The colour carries the hue; the intensity (the wire alpha) rides the
+        // photometric power, so radiance stays proportional to the emitted colour.
+        intensity: LOCAL_LIGHT_LUMENS * light.intensity,
+        range: light.radius,
+        radius: 0.0,
+        ..default()
+    }
+}
+
+/// Build the [`SpotLight`] for a projector local light, its cone taken from the
+/// projector's field of view.
+fn spot_light(projection: LightProjection, light: &ObjectLight) -> SpotLight {
+    // The projector field of view is the *full* cone angle (`LLLightImageParams`
+    // defaults it to `F_PI * 0.5`); Bevy's outer angle is the half-angle from the
+    // cone axis.
+    let outer = (projection.fov * 0.5).clamp(MIN_SPOT_ANGLE, MAX_SPOT_ANGLE);
+    // The projector focus sharpens the cone edge: a higher focus pulls the
+    // fully-lit inner cone out toward the outer edge (a harder falloff).
+    let inner = outer * projection.focus.clamp(0.0, 1.0);
+    SpotLight {
+        color: light_color(light),
+        intensity: LOCAL_LIGHT_LUMENS * light.intensity,
+        range: light.radius,
+        radius: 0.0,
+        inner_angle: inner,
+        outer_angle: outer,
+        ..default()
+    }
+}
+
+/// The Bevy [`Color`] for a local light: its linear RGB hue (the intensity rides
+/// the photometric power, not the colour).
+const fn light_color(light: &ObjectLight) -> Color {
+    Color::linear_rgb(
+        light.linear_color[0],
+        light.linear_color[1],
+        light.linear_color[2],
+    )
+}
+
+/// Spawn a fresh Bevy light child for a light-flagged prim entering the render
+/// budget (P25.2), returning its entity.
+///
+/// A plain point light becomes a [`PointLight`]; a projector (spotlight) becomes
+/// a [`SpotLight`]. Both are parented to the object entity with an identity local
+/// transform, so the light sits at the prim's origin and a spotlight's forward
+/// already points down the prim's Second Life local `-Z` (see the module docs).
+fn spawn_local_light(commands: &mut Commands, object: Entity, light: &ObjectLight) -> Entity {
+    let mut child = commands.spawn((Transform::IDENTITY, LocalLightChild, ChildOf(object)));
+    match light.projection {
+        Some(projection) => child.insert(spot_light(projection, light)),
+        None => child.insert(point_light(light)),
+    };
+    child.id()
+}
+
+/// Refresh an existing light child's parameters in place (P25.2), so a prim whose
+/// light was retuned — or toggled between point and spot — stays current without
+/// a despawn / re-spawn. Removes the counterpart light component so a point↔spot
+/// switch never leaves both on one entity.
+fn update_local_light(commands: &mut Commands, child: Entity, light: &ObjectLight) {
+    let mut entity = commands.entity(child);
+    match light.projection {
+        Some(projection) => {
+            entity.insert(spot_light(projection, light));
+            entity.remove::<PointLight>();
+        }
+        None => {
+            entity.insert(point_light(light));
+            entity.remove::<SpotLight>();
+        }
+    }
+}
+
+/// Render the nearest / brightest light-flagged prims as Bevy lights (P25.2).
+///
+/// Ranks every light-flagged prim by its emitted luminance attenuated by camera
+/// distance — the nearest / brightest win the fixed [`MAX_LOCAL_LIGHTS`] budget,
+/// mirroring `LLPipeline::setupHWLights`. A prim with a black or zero-radius light
+/// contributes nothing and is skipped so it does not waste a slot. The winners'
+/// Bevy light children are **kept alive and updated in place** across frames (see
+/// [`LocalLights`]); a prim only gains a child on entering the budget and loses it
+/// on dropping out — re-spawning every frame flickers the render world.
+pub(crate) fn drive_local_lights(
+    mut commands: Commands,
+    mut assigned: ResMut<LocalLights>,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    lights: Query<(Entity, &ObjectLight, &GlobalTransform)>,
+    // The count rendered last frame, so a change (a light coming into / out of
+    // the budget) logs once instead of every frame.
+    mut last_rendered: Local<usize>,
+) {
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let eye = camera.translation();
+
+    let mut ranked: Vec<(Entity, f32)> = lights
+        .iter()
+        .filter_map(|(entity, light, transform)| {
+            let brightness = luminance(light.effective_linear_color());
+            if brightness <= f32::EPSILON || light.radius <= f32::EPSILON {
+                return None;
+            }
+            // Clamp the denominator so a light the camera sits inside does not
+            // score infinite; nearer / brighter still ranks higher.
+            let distance2 = eye.distance_squared(transform.translation()).max(1.0);
+            Some((entity, brightness / distance2))
+        })
+        .collect();
+    // Highest score first, then keep only the budget.
+    let candidates = ranked.len();
+    ranked.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+    ranked.truncate(MAX_LOCAL_LIGHTS);
+
+    if ranked.len() != *last_rendered {
+        debug!(
+            "local lights: rendering {} of {candidates} candidate prim light(s) \
+             (budget {MAX_LOCAL_LIGHTS})",
+            ranked.len(),
+        );
+        *last_rendered = ranked.len();
+    }
+
+    // Retire the light children of prims that fell out of the budget (or whose
+    // object despawned — Bevy's hierarchy already took the child, so `try_despawn`
+    // is a safe no-op there). Retaining leaves only entries for the selected,
+    // still-alive objects, so the refresh loop below never inserts into a dead
+    // entity.
+    let selected: std::collections::HashSet<Entity> = ranked.iter().map(|&(e, _)| e).collect();
+    assigned.assigned.retain(|object, (child, _)| {
+        if selected.contains(object) {
+            true
+        } else {
+            commands.entity(*child).try_despawn();
+            false
+        }
+    });
+
+    // Insert a child for each newly selected prim; refresh the rest only when the
+    // light actually changed, so a stable scene does no per-frame ECS churn.
+    for (entity, _score) in ranked {
+        // The entity came straight from `lights.iter()` this frame, so the lookup
+        // cannot miss; skip defensively rather than unwrap.
+        let Ok((_, light, _)) = lights.get(entity) else {
+            continue;
+        };
+        match assigned.assigned.get_mut(&entity) {
+            Some((child, applied)) => {
+                if *applied != *light {
+                    update_local_light(&mut commands, *child, light);
+                    *applied = *light;
+                }
+            }
+            None => {
+                let child = spawn_local_light(&mut commands, entity, light);
+                assigned.assigned.insert(entity, (child, *light));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ObjectLight, light_from_object};
+    use super::{ObjectLight, light_from_object, luminance};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{LightData, LightImage, Object, TextureKey, Uuid, Vector};
 
@@ -298,5 +532,19 @@ mod tests {
             projection: None,
         };
         assert!(close3(light.effective_linear_color(), [1.0, 1.0, 1.0]));
+    }
+
+    /// White is brighter than any single primary, and green outweighs red /
+    /// blue — so the P25.2 budget ranks a strong light above a dim tinted one.
+    #[test]
+    fn luminance_ranks_by_perceived_brightness() {
+        let white = luminance([1.0, 1.0, 1.0]);
+        let green = luminance([0.0, 1.0, 0.0]);
+        let red = luminance([1.0, 0.0, 0.0]);
+        let blue = luminance([0.0, 0.0, 1.0]);
+        assert!(close(white, 1.0));
+        assert!(green > red);
+        assert!(red > blue);
+        assert!(close(luminance([0.0, 0.0, 0.0]), 0.0));
     }
 }
