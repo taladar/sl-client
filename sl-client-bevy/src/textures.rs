@@ -59,8 +59,32 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
 /// [`rotation`](TextureFace::rotation).
 #[must_use]
 pub fn texture_face_uv_transform(face: &TextureFace) -> Affine2 {
-    let (sin, cos) = face.rotation.sin_cos();
-    let (ms, mt) = (face.scale_s, face.scale_t);
+    texture_uv_transform(
+        face.rotation,
+        face.offset_s,
+        face.offset_t,
+        face.scale_s,
+        face.scale_t,
+    )
+}
+
+/// The per-face texture-placement transform for a raw (rotation, offset, repeats)
+/// tuple, as a Bevy [`Affine2`] — the parameterised core of
+/// [`texture_face_uv_transform`], factored out so callers that do not have a
+/// [`TextureFace`] (e.g. the texture-animation driver folding an
+/// animation-derived placement over the face's static one) can build the same
+/// affine. See [`texture_face_uv_transform`] for the derivation; the identity
+/// placement (unit repeats, zero offset/rotation) yields [`Affine2::IDENTITY`].
+#[must_use]
+pub fn texture_uv_transform(
+    rotation: f32,
+    offset_s: f32,
+    offset_t: f32,
+    scale_s: f32,
+    scale_t: f32,
+) -> Affine2 {
+    let (sin, cos) = rotation.sin_cos();
+    let (ms, mt) = (scale_s, scale_t);
     // Columns of the linear part (glam `Mat2` is column-major): the `s` column
     // is the response to the input `s`, the `t` column to the input `t`.
     let matrix2 = Mat2::from_cols(
@@ -68,8 +92,8 @@ pub fn texture_face_uv_transform(face: &TextureFace) -> Affine2 {
         Vec2::new(ms * sin, mt * cos),
     );
     let translation = Vec2::new(
-        face.offset_s + 0.5 - 0.5 * ms * (cos + sin),
-        face.offset_t + 0.5 + 0.5 * mt * (sin - cos),
+        offset_s + 0.5 - 0.5 * ms * (cos + sin),
+        offset_t + 0.5 + 0.5 * mt * (sin - cos),
     );
     Affine2 {
         matrix2,

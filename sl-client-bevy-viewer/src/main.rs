@@ -106,6 +106,7 @@ use crate::sky::{
     setup_sky, setup_stars, setup_sun_moon_discs,
 };
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
+use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
     update_texture_caps,
@@ -614,6 +615,11 @@ fn run_session(
             // prims as Bevy point / spot lights, after the fly-camera so the
             // distance-based budget selection uses the current viewpoint.
             drive_local_lights.after(fly_camera),
+            // Animated textures (P28.2): advance every prim's `llSetTextureAnim`
+            // and fold the current frame's UV / flipbook placement into its faces,
+            // then reset a face to its static placement when the animation stops.
+            drive_texture_animations,
+            restore_stopped_animations,
         ),
     )
     // Atmospheric sky (P22.2): keep the sky dome centred on the camera, then fold

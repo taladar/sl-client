@@ -260,7 +260,8 @@ pub use crate::sun_disc::{SunDiscMaterial, SunDiscMaterialPlugin, SunDiscParams}
 #[cfg(feature = "bevy_pbr")]
 pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
 pub use crate::textures::{
-    BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
+    BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, texture_uv_transform,
+    to_bevy_image,
 };
 pub use crate::tree::to_bevy_tree_mesh;
 #[cfg(feature = "bevy_pbr")]
