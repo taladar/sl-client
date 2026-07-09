@@ -98,7 +98,7 @@ use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
-    repeat_debug_animation,
+    repeat_debug_animation, report_camera_interest,
 };
 use crate::sky::{
     apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
@@ -733,6 +733,7 @@ fn run_session(
             poll_animations,
             drive_avatar_skeletons.after(apply_avatar_appearance),
             repeat_debug_animation,
+            report_camera_interest,
         ),
     )
     // Write the posed avatars' animated joint world matrices straight into their

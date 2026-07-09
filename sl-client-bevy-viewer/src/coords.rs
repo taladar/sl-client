@@ -28,6 +28,21 @@ pub(crate) fn sl_to_bevy_vec(vector: &Vector) -> Vec3 {
     Vec3::new(vector.x, vector.z, -vector.y)
 }
 
+/// Convert a Bevy [`Vec3`] (Y-up) back into a Second Life position [`Vector`]
+/// (Z-up metres) — the inverse of [`sl_to_bevy_vec`].
+///
+/// Inverting `(x, y, z) -> (x, z, -y)` gives `(bx, by, bz) -> (bx, -bz, by)`.
+/// Used at the camera boundary to report the fly-camera's viewpoint back to the
+/// simulator (region-local metres) so its interest list follows the camera.
+#[must_use]
+pub(crate) fn bevy_to_sl_vec(vector: Vec3) -> Vector {
+    Vector {
+        x: vector.x,
+        y: -vector.z,
+        z: vector.y,
+    }
+}
+
 /// The rotation half of the Second Life → Bevy boundary: the quaternion form of
 /// the `(x, y, z) -> (x, z, -y)` axis map, a `-90°` turn about the shared `X`
 /// axis.
@@ -140,6 +155,33 @@ mod tests {
             z: 0.0,
         });
         assert_eq!(east, bevy::math::Vec3::new(1.0, 0.0, 0.0));
+    }
+
+    /// [`bevy_to_sl_vec`] is the exact inverse of [`sl_to_bevy_vec`], so a
+    /// viewpoint reported back to the simulator round-trips to the same metres.
+    #[test]
+    fn bevy_to_sl_is_the_inverse() {
+        use super::bevy_to_sl_vec;
+        for vector in [
+            Vector {
+                x: 12.0,
+                y: -3.5,
+                z: 40.0,
+            },
+            Vector {
+                x: -7.0,
+                y: 200.0,
+                z: 0.25,
+            },
+        ] {
+            let round = bevy_to_sl_vec(sl_to_bevy_vec(&vector));
+            let mapped = bevy::math::Vec3::new(round.x, round.y, round.z);
+            let original = bevy::math::Vec3::new(vector.x, vector.y, vector.z);
+            assert!(
+                mapped.abs_diff_eq(original, 1.0e-6),
+                "round-trip {mapped:?} should match {original:?}"
+            );
+        }
     }
 
     /// The rotation quaternion reproduces the position axis map on any vector,

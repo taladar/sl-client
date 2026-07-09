@@ -3022,7 +3022,9 @@ avatar, so they are collected here to be worked one at a time.
     written but **does not resolve the spheres in live testing** — cause not
     yet found (possibly not reaching the sim, or a deeper interest /
     cross-region case). Not reproducible headless (every avatar resolves to a
-    full body in local runs). **Open** (candidate fix uncommitted).
+    full body in local runs). **Open** — the candidate fix is committed (a step
+    in the right direction: reporting the fly-camera the sim's interest list
+    needs), but it does not yet visibly resolve the spheres.
   - [x] **R22c. Mesh-body "universal" BoM slots render as flat placeholder
     skin** (`avatars.rs`). **Fixed.** A modern mesh body maps its arms / legs
     to the universal baked slots (`leftarm` / `leftleg` / `aux*`), which the

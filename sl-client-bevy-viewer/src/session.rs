@@ -18,11 +18,11 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AnimationKey, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
 };
 
 use crate::camera::{CameraStart, FlyCamera};
-use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::coords::{bevy_to_sl_vec, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
 /// The draw distance requested once the region handshake completes, in metres.
 ///
@@ -99,6 +99,58 @@ pub(crate) fn repeat_debug_animation(
         commands.write(SlCommand(Command::StopAnimation(animation)));
         commands.write(SlCommand(Command::PlayAnimation(animation)));
     }
+}
+
+/// How often, in seconds, the fly-camera's viewpoint is reported to the simulator
+/// as the agent's interest camera (R22). The simulator streams full object /
+/// avatar updates within the interest radius of this viewpoint, so a few times a
+/// second is ample — `set_camera` sends an `AgentUpdate` on each call, and the
+/// session re-advertises the viewpoint on every keep-alive between them.
+const CAMERA_INTEREST_INTERVAL_SECS: f32 = 0.5;
+
+/// Report the fly-camera's world viewpoint to the simulator as the agent's
+/// interest camera, throttled to [`CAMERA_INTEREST_INTERVAL_SECS`] (R22).
+///
+/// The simulator builds the agent's interest list — which objects and avatars it
+/// streams as full updates — around this viewpoint. Left at its
+/// [`Camera::region_center`] default it never follows the fly-camera, so a distant
+/// avatar the sim only ever announced as a coarse minimap dot stays a placeholder
+/// sphere no matter how close the camera flies to it (and, conversely, a full
+/// avatar is never culled back to a dot as the camera leaves). Feeding the
+/// fly-camera in makes the interest list track the viewpoint, so avatars resolve
+/// on approach and coarsen again on retreat, matching the reference viewer.
+///
+/// Reporting the camera does **not** move the agent — the `AgentUpdate` camera
+/// fields are the viewpoint only; the agent moves solely via its control flags.
+pub(crate) fn report_camera_interest(
+    time: Res<Time>,
+    mut since_last: Local<f32>,
+    session: Res<ViewerSession>,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    // Only once the agent is in-world (its avatar object has arrived, so a circuit
+    // exists to carry the `AgentUpdate`); before then there is nothing to stream to.
+    if !session.camera_positioned {
+        return;
+    }
+    *since_last += time.delta_secs();
+    if *since_last < CAMERA_INTEREST_INTERVAL_SECS {
+        return;
+    }
+    *since_last = 0.0;
+    let Ok(transform) = camera.single() else {
+        return;
+    };
+    let eye = transform.translation();
+    // A point one metre ahead along the camera's forward (Bevy `-Z`) gives the
+    // look axis `Camera::looking_at` needs; the distance is irrelevant to it.
+    // Per-component `f32` maths keeps clear of the workspace
+    // `arithmetic_side_effects` lint, which `Vec3`'s `+` operator trips.
+    let forward = transform.forward();
+    let target = Vec3::new(eye.x + forward.x, eye.y + forward.y, eye.z + forward.z);
+    let camera = Camera::looking_at(bevy_to_sl_vec(eye), bevy_to_sl_vec(target));
+    commands.write(SlCommand(Command::SetCamera(camera)));
 }
 
 /// Request a clean logout on the quit key (`Esc` / `Q`).
