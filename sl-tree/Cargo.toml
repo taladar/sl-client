@@ -1,0 +1,26 @@
+[package]
+name = "sl-tree"
+description = "Linden tree & grass species tables and geometry for Second Life / OpenSim clients (LLVOTree / LLVOGrass)"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "tree", "grass", "geometry"]
+categories = ["game-development", "rendering", "rendering::data-formats"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+uuid = { version = "1.18.1" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

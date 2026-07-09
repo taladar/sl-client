@@ -22,6 +22,7 @@ members = [
     "sl-survey",
     "sl-terrain",
     "sl-texture",
+    "sl-tree",
     "sl-wire",
 ]
 resolver = "3"

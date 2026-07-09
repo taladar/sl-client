@@ -5959,6 +5959,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-tree"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sl-types",
+ "uuid",
+]
+
+[[package]]
 name = "sl-types"
 version = "0.6.2"
 dependencies = [
