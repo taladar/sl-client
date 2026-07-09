@@ -29,6 +29,7 @@ mod screenshot;
 mod session;
 mod sky;
 mod terrain;
+mod texture_anim;
 mod textures;
 mod underwater_fog;
 mod water;

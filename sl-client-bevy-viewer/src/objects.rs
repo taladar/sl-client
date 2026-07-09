@@ -59,6 +59,7 @@ use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
+use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
 
 /// The broad render classification of an in-world object, decided from its
@@ -703,6 +704,7 @@ pub(crate) fn pick_object(
     scene: Query<&SceneObject>,
     infos: Query<&ObjectDebugInfo>,
     lights: Query<&ObjectLight>,
+    tex_anims: Query<&ObjectTextureAnimation>,
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
@@ -728,8 +730,12 @@ pub(crate) fn pick_object(
     };
     // The ray strikes a face/submesh child entity: report that exact face's
     // texture placement (the ground truth for a texture-mapping bug) before
-    // walking up to the object identity.
+    // walking up to the object identity. The face index is retained so the
+    // object's texture animation (P28.1), reported below, can say whether it
+    // targets this particular face.
+    let mut picked_face: Option<PrimFaceId> = None;
     if let Ok((face, FaceTextureDebug(tf))) = face_debug.get(*entity) {
+        picked_face = Some(face.face_id);
         warn!(
             "pick face {}: texture={} repeats=({:.3},{:.3}) offset=({:.3},{:.3}) \
              rot={:.3}rad media_flags=0x{:02x} texgen=0x{:02x} planar={} \
@@ -854,6 +860,30 @@ pub(crate) fn pick_object(
                     light.projection,
                 );
             }
+            // The ingested texture animation (P28.1): a prim running
+            // `llSetTextureAnim` reports its decoded mode / frame-grid / timing —
+            // the ground truth for the P28.2 UV / flipbook driver — plus whether
+            // it targets the face under the crosshair (`face == -1` = all faces).
+            if let Ok(obj) = scene.get(current)
+                && let Some(tracked) = state.objects.get(&obj.scoped_id)
+                && let Ok(tex_anim) = tex_anims.get(tracked.geometry)
+            {
+                let anim = tex_anim.anim;
+                let targets_face = picked_face.map(|face| tex_anim.applies_to_face(face.get()));
+                warn!(
+                    "pick texture-anim {}: mode=0x{:02x} face={} grid={}x{} \
+                     start={:.3} length={:.3} rate={:.3} targets_picked_face={:?}",
+                    info.full_id,
+                    anim.mode,
+                    anim.face,
+                    anim.size_x,
+                    anim.size_y,
+                    anim.start,
+                    anim.length,
+                    anim.rate,
+                    targets_face,
+                );
+            }
             return;
         }
         let Ok(child_of) = parents.get(current) else {
@@ -907,6 +937,33 @@ fn apply_render_materials(
             scoped_id: scoped,
             faces,
         });
+    }
+}
+
+/// Carry (or clear) the object's decoded texture animation on its geometry-holder
+/// entity — the parent of its face entities — so the P28.2 driver can advance it
+/// each frame (P28.1). Refreshed on every update: the [`ObjectTextureAnimation`]
+/// holder is inserted while the object reports a **running** animation (the
+/// [`ON`](sl_client_bevy::texture_anim_mode::ON) bit set) and removed otherwise,
+/// so an animation stopped in-world reverts the faces to their static placement.
+fn apply_texture_animation(geometry: Entity, object: &Object, commands: &mut Commands) {
+    match running_texture_animation(object.texture_animation) {
+        Some(anim) => {
+            debug!(
+                "object {} texture animation: mode=0x{:02x} face={} grid={}x{}",
+                object.scoped_id(),
+                anim.mode,
+                anim.face,
+                anim.size_x,
+                anim.size_y,
+            );
+            commands
+                .entity(geometry)
+                .insert(ObjectTextureAnimation { anim });
+        }
+        None => {
+            commands.entity(geometry).remove::<ObjectTextureAnimation>();
+        }
     }
 }
 
@@ -1591,6 +1648,7 @@ fn apply_object(
             .entity(existing.geometry)
             .insert(holder_transform(object, category));
         apply_render_materials(existing.geometry, scoped, object, commands);
+        apply_texture_animation(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
@@ -1676,6 +1734,7 @@ fn apply_object(
         ))
         .id();
     apply_render_materials(geometry, scoped, object, commands);
+    apply_texture_animation(geometry, object, commands);
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
