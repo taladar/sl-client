@@ -2235,95 +2235,159 @@ GLTF PBR materials and the pre-PBR legacy material stack, both of which Bevy's
   asset / bake cases aditi-partial — works on aditi) with the scene rendering
   intact. OpenSim's Default Region carries no legacy-material faces, so no
   on-screen confirmation there (the pipeline runs clean).
-- [ ] **P27.4. Bump / shiny / glow / fullbright.** The legacy per-face bump /
-  shiny / fullbright / glow flags → Bevy emissive / normal / metallic
-  approximations.
+- [x] **P27.4. Bump / shiny / glow / fullbright.** The legacy per-face
+  bump / shiny / fullbright / glow flags → Bevy emissive / normal / metallic
+  approximations. Reference: `lldrawpoolbump` / `LLFace::getGeometryVolume` /
+  the `SHININESS_TO_ALPHA` shiny packing. **Done:** a new `bump.rs` module maps
+  the four legacy surface effects a `TextureEntry` face carries (in its
+  `bump_shiny_fullbright` byte plus the separate `glow` scalar — the pre-PBR
+  per-face controls, distinct from the P27.1 GLTF and P27.3 `LLMaterial`
+  materials). The scalar three fold onto each face's `StandardMaterial` as it is
+  built, by `apply_surface_flags` called from `face_material`, so they cover
+  prims, sculpts, meshes, and rigged attachments uniformly: **fullbright** →
+  `unlit` (exact); **glow** (0..1) → an additive `emissive` tinted by the face
+  colour (the viewer has no bloom pass, so a glowing face simply reads brighter,
+  and the glow is uniform rather than texture-following — a documented
+  approximation); **shiny** (none / low / medium / high) → an *analytic-light*
+  highlight, not a cube-map reflection, since the viewer has no reflection
+  probe (a metallic surface would read black) — `reflectance` is raised and
+  `perceptual_roughness` lowered with the level (driven by the reference's
+  `SHININESS_TO_ALPHA = [0, .25, .5, .75]` environment-intensity table), leaving
+  metallic at zero so the sun/moon directional light throws a progressively
+  sharper, brighter specular. **Bump** needs the decoded diffuse, so it runs as
+  a small fetch/generate pipeline like the P27.3 normal path: a `BumpManager`
+  resource, `register_bump_faces` (parks each newly-spawned bumped face on its
+  diffuse texture id, skipping a face with no diffuse, a legacy `LLMaterial` id
+  — P27.3 supplies its normal — or a PBR GLTF material, which supersedes the
+  legacy flags as in the reference), and `apply_bump_normals` (once the diffuse
+  decodes, generates a tangent-space **normal map** from its luminance as a
+  height field — Sobel central differences, wrapping to match the repeating face
+  sampler — and drops it into `normal_map_texture`). The normal's **source**
+  matches the reference: the brightness / darkness codes derive it from the
+  face's own diffuse (darkness inverts the height field), while the 15 standard
+  emboss codes (≥ 3 — woodgrain, bark, bricks, …) fetch their fixed Linden bump
+  texture (the reference viewer's `std_bump.ini` UUID table) through the shared
+  texture manager and derive the normal from that. Runs after the legacy
+  material path so a real `LLMaterial` normal wins. Scalar mappings + normal
+  encoding + the standard-code lookup unit-tested. **Live-confirmed on aditi**
+  (like P27.2 / P27.3): the landing region drove real bump content — dozens of
+  faces across many textures generated normal maps cleanly (6 / 8 / 16 / 116 …
+  faces per texture), including the real standard emboss textures (woodgrain,
+  gravel, siding fetched by UUID), with the scene rendering intact.
+  OpenSim's Default Region carries no bump/shiny faces, so no on-screen
+  confirmation there (the pipeline runs clean).
 
-## Phase 28 — Animesh
+## Phase 28 — Animated textures
+
+Prims animate their textures (`llSetTextureAnim`): UV scroll / rotate / scale,
+or a sprite-sheet flipbook stepping through a grid of frames. The wire block is
+already decoded — `sl-proto`'s `decode_texture_anim` → `TextureAnimation` (mode
+flags, `face`, the `size_x` × `size_y` frame grid, `start`, `length`, `rate`) —
+but nothing in the viewer consumes it, so every animated texture currently sits
+static. This phase is the viewer-side driver. Reference: `LLViewerTextureAnim` /
+`LLVOVolume::animateTextures`.
+
+- [ ] **P28.1. Ingest per-object texture animation.** Carry the decoded
+  `TextureAnimation` from each object's `texture_anim` update onto the object
+  (a component beside the geometry holder, like the P27 material holders),
+  resolving the target-face bitmask (`face == -1` = all faces). The decode
+  itself already lives in `sl-proto`; net-new is holding the state on the object
+  and clearing it when the animation stops (`ON` bit clear).
+- [ ] **P28.2. Drive the animation.** Each frame advance every animated
+  object and update its affected faces: the `ROTATE` / `SCALE` / scroll modes
+  compose an extra UV transform onto the face's texture-entry placement
+  (`StandardMaterial::uv_transform`), while the flipbook mode selects the
+  current cell of the `size_x` × `size_y` sprite grid (a per-cell offset +
+  scale),
+  honouring the `LOOP` / `REVERSE` / `PING_PONG` / `SMOOTH` mode flags and the
+  `start` / `length` / `rate` timing. Mirrors the reference viewer's
+  `LLVOVolume::animateTextures` folding a per-face texture matrix each frame.
+
+## Phase 29 — Animesh
 
 Animated-object linksets are detected (`is_animated_object`) but rendered as
 plain prims. This phase gives them their own animation-driven skeleton.
 
-- [ ] **P28.1. Control-avatar skeleton.** Give an animated-object linkset its
+- [ ] **P29.1. Control-avatar skeleton.** Give an animated-object linkset its
   own `LLControlAvatar` skeleton, built from the linkset's rigged-mesh skin
   joints and independent of any wearer.
-- [ ] **P28.2. Drive its animations.** Route the object's animation state
+- [ ] **P29.2. Drive its animations.** Route the object's animation state
   (`ObjectAnimation`) through the Phase 18 blend driver against that skeleton
   so the rigged mesh deforms. Reuses the Phase 12 skeleton and Phase 18 blend.
   Reference: `LLControlAvatar` / `LLDrawPoolAvatar`.
 
-## Phase 29 — Particles
+## Phase 30 — Particles
 
-- [ ] **P29.1. Ingest particle systems.** Parse a prim's `LLPartSysData` (the
+- [ ] **P30.1. Ingest particle systems.** Parse a prim's `LLPartSysData` (the
   particle-system block on ObjectUpdate / generic data): flags, pattern,
   burst / age params, per-particle colour / scale / velocity ranges, target.
   Keep it Bevy-free where practical. Reference: `LLPartSysData` / `LLPartData`.
-- [ ] **P29.2. Simulate + render.** A CPU particle simulation mirroring
+- [ ] **P30.2. Simulate + render.** A CPU particle simulation mirroring
   `LLViewerPartSim` / `LLViewerPartSourceScript` (emission patterns, wind,
   acceleration, interpolation) rendered as camera-facing billboards
   (`LLVOPartGroup`), textured via the texture pipeline.
 
-## Phase 30 — General physics foundation (`avian3d`)
+## Phase 31 — General physics foundation (`avian3d`)
 
-Flexi prims (Phase 31) and avatar body physics (Phase 33) are client-side
+Flexi prims (Phase 32) and avatar body physics (Phase 34) are client-side
 simulations. Rather than hand-rolling a solver for each, stand up a shared
 physics substrate on the `avian3d` Bevy physics engine first.
 
-- [ ] **P30.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
+- [ ] **P31.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
   world with SL gravity, a fixed timestep, and coordinate bridging to the Y-up
-  scene. Foundation reused by Phase 31 and Phase 33. New workspace dependency.
-- [ ] **P30.2. Physical objects.** Give server-flagged physical prims (the
+  scene. Foundation reused by Phase 32 and Phase 34. New workspace dependency.
+- [ ] **P31.2. Physical objects.** Give server-flagged physical prims (the
   `LLViewerObject` physics flag / `LLPhysicsShapeType` — prim / convex hull /
   none) an avian rigid body + collider derived from the prim / mesh geometry.
   The sim stays authoritative — `ObjectUpdate` transforms drive the body while
   avian smooths between updates and powers client-only dynamics.
 
-## Phase 31 — Flexi prims
+## Phase 32 — Flexi prims
 
-- [ ] **P31.1. Ingest flexible-object data.** The `LLFlexibleObjectData` extra
+- [ ] **P32.1. Ingest flexible-object data.** The `LLFlexibleObjectData` extra
   params (softness, gravity, drag, wind, tension, force). Bevy-free.
-- [ ] **P31.2. Simulate.** Port the reference spring / chain deformation of
+- [ ] **P32.2. Simulate.** Port the reference spring / chain deformation of
   the prim path over time (`LLVolumeImplFlexible` on `LLVOVolume`), built on
-  the Phase 30 avian primitives where practical, deforming / re-tessellating
+  the Phase 31 avian primitives where practical, deforming / re-tessellating
   the flexi geometry each frame.
 
-## Phase 32 — Reflection probes
+## Phase 33 — Reflection probes
 
-- [ ] **P32.1. Reflection-probe volumes.** Detect reflection-probe volumes
+- [ ] **P33.1. Reflection-probe volumes.** Detect reflection-probe volumes
   (the prim reflection-probe flag / extra params — `LLReflectionMap`) and map
   them to Bevy light-probe / reflection-probe components, generating an
   environment cubemap per probe. Complements the Phase 27 PBR materials that
   sample them. Reference: `LLReflectionMapManager` / `RenderReflectionProbe`.
 
-## Phase 33 — Avatar cloth & body physics
+## Phase 34 — Avatar cloth & body physics
 
-- [ ] **P33.1. Ingest the physics wearable.** The `WT_PHYSICS` wearable params
+- [ ] **P34.1. Ingest the physics wearable.** The `WT_PHYSICS` wearable params
   — breast / belly / butt bounce driving params from `avatar_lad.xml`.
-- [ ] **P33.2. Drive them.** Port `LLPhysicsMotion` /
+- [ ] **P34.2. Drive them.** Port `LLPhysicsMotion` /
   `LLPhysicsMotionController` (a spring-damper per param, driven by joint
-  acceleration, built on the Phase 30 physics foundation) as a motion in the
+  acceleration, built on the Phase 31 physics foundation) as a motion in the
   Phase 18 animation controller, folding the resulting param weights into the
   avatar morphs each frame. Reference: `llphysicsmotion.cpp`.
 
-## Phase 34 — HUD attachments
+## Phase 35 — HUD attachments
 
-- [ ] **P34.1. Detect HUD.** Classify an attachment whose `attachment_point()`
+- [ ] **P35.1. Detect HUD.** Classify an attachment whose `attachment_point()`
   is a HUD slot (31–38, `HudCenter` / `HudTopLeft` / …); route it out of the
   world scene to a dedicated screen-space HUD layer, and only for the **agent's
   own** attachments.
-- [ ] **P34.2. HUD rendering.** Render HUD-attached prims/mesh on a HUD camera /
+- [ ] **P35.2. HUD rendering.** Render HUD-attached prims/mesh on a HUD camera /
   render layer anchored per the HUD attachment-point screen layout (orthographic
   / screen-relative), reusing the existing prim/mesh geometry+texture build.
   Verify a simple HUD renders fixed to the screen on aditi.
 
-## Phase 35 — Aditi (real SL) verification
+## Phase 36 — Aditi (real SL) verification
 
 OpenSim end-to-end and the clippy / fmt / `rumdl` clean sweep are **not** a
 separate phase — they happen inside every phase above as it builds, live-tests,
 and commits (per the Legend). What OpenSim can't exercise is the SL-only
 appearance stack, so this final phase is the real-SL pass:
 
-- [ ] **P35.1. Aditi (real SL).** Run against `credentials.aditi.toml` + the MFA
+- [ ] **P36.1. Aditi (real SL).** Run against `credentials.aditi.toml` + the MFA
   wrapper for the SL-only paths OpenSim can't exercise: **server-side**-baked
   bodies (vs. OpenSim's client-side bake), BoM mesh bodies with alpha, the
   agent's HUDs, and the SL-heavy new phases — PBR materials / terrain, EEP
@@ -2859,14 +2923,33 @@ avatar, so they are collected here to be worked one at a time.
   flat colour), or a missing reflection/refraction so it falls back to a
   constant. Needs a focused look at `water.rs` / the EEP water ingestion; out of
   scope for the grass work, logged here so it is not lost.
+- [ ] **R22. Avatars stay low-detail / blue spheres and never resolve
+  on approach** (`sl-client-bevy-viewer`, P10 placeholders / P13 base avatar /
+  P21 pixel-area LOD). Two related failures seen against live avatars: (a) an
+  avatar's **textures load only at a coarse level and never sharpen** as the
+  camera moves in — the baked skin / worn-mesh textures stay blurry, and the
+  distance / pixel-area LOD driver (P21.1) never raises their discard level the
+  way it does for prim/terrain faces; and (b) some avatars **remain the P10 blue
+  placeholder sphere** and never turn into a real avatar even at close range,
+  instead of being replaced once the full-object avatar + appearance resolve.
+  Candidates to check: avatar face textures are fetched at a fixed
+  `AVATAR_BOOST_PRIORITY` but are **not** registered with the pixel-area LOD
+  manager (P21.1) — a skinned mesh's entity transform does not reflect its
+  on-screen size, so the pixel-area pass cannot rank it and it never asks for a
+  finer LOD; the baked-texture materials may hold their first (coarse) decode
+  without a later full-resolution re-fetch; and the coarse-avatar → full-object
+  handoff (`update_coarse_avatars` deduping against `update_avatar_objects`) may
+  fail to swap the sphere if the full object arrives late or the agent id never
+  correlates. Needs focused work on the avatar texture-LOD path and the
+  placeholder-replacement handoff; logged here so it is not lost.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
-Most former non-goals are now planned phases (see Phases 19–33): PBR / GLTF and
+Most former non-goals are now planned phases (see Phases 19–34): PBR / GLTF and
 legacy normal / specular materials + bump / shiny / glow / fullbright
-(Phase 27), water surface (23), sky / atmosphere (22), shadows (24),
-distance-based LOD switching (21), local lights (25), Linden trees / grass
-(26), animesh (28), particles (29), flexi prims (31), reflection probes (32),
-and avatar cloth / breast-butt physics (33), on a shared `avian3d` physics
-foundation (30). Still deferred: facial-morph lip-sync, object selection /
-interaction, any chat *input* or non-quit UI, and sound.
+(Phase 27), animated textures (28), water surface (23), sky / atmosphere (22),
+shadows (24), distance-based LOD switching (21), local lights (25), Linden
+trees / grass (26), animesh (29), particles (30), flexi prims (32), reflection
+probes (33), and avatar cloth / breast-butt physics (34), on a shared `avian3d`
+physics foundation (31). Still deferred: facial-morph lip-sync, object
+selection / interaction, any chat *input* or non-quit UI, and sound.

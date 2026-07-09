@@ -13,6 +13,7 @@ mod avatar_assets;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
+mod bump;
 mod camera;
 mod chat;
 mod coords;
@@ -69,6 +70,7 @@ use crate::bake_inputs::{
     drive_wearable_requests, poll_wearable_assets, update_asset_caps,
 };
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
+use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
 use crate::camera::{FlyCamera, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::diagnostics::{
@@ -412,6 +414,7 @@ fn run_session(
     .init_resource::<PrimTextures>()
     .insert_resource(MaterialManager::new())
     .init_resource::<LegacyMaterialManager>()
+    .init_resource::<BumpManager>()
     .init_resource::<AvatarBakeMaterials>()
     .init_resource::<OwnLocalBake>()
     .init_resource::<ServerBakeState>()
@@ -508,6 +511,14 @@ fn run_session(
                 receive_legacy_materials,
                 apply_legacy_materials,
                 apply_legacy_normal_maps,
+                // The legacy per-face bump / shiny / glow / fullbright flags
+                // (P27.4): register each newly-spawned bumped face and, once its
+                // diffuse texture decodes, generate and assign its normal map
+                // (fullbright / glow / shiny are folded in at material-build time
+                // by `face_material`). Runs after the legacy material path so a
+                // face's real `LLMaterial` normal map takes precedence over bump.
+                register_bump_faces,
+                apply_bump_normals,
             ),
             // Avatar placeholder spheres: full-object avatars first, then the
             // coarse-only ones (which dedupe against the full-object set); then

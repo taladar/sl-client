@@ -696,6 +696,10 @@ pub(crate) fn face_material(
     if has_texture && let Some(image) = prim_textures.images.get(&texture_id) {
         material.base_color_texture = Some(image.clone());
     }
+    // Legacy per-face surface flags (P27.4): fullbright / glow / shiny fold onto
+    // this material as it is built (bump needs the decoded diffuse and is applied
+    // later by the `bump` pipeline). A face with none of these flags is untouched.
+    crate::bump::apply_surface_flags(&mut material, face);
     let handle = materials.add(material);
     if has_texture {
         // Track this material so a later level-of-detail re-upload can mark it
