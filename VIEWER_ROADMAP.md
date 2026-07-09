@@ -2986,25 +2986,63 @@ avatar, so they are collected here to be worked one at a time.
   absolute fixed camera pose + auto-rotate for unattended screenshot captures of
   a specific viewpoint, such as a region edge — the reproduction path this fix
   needed).
-- [ ] **R22. Avatars stay low-detail / blue spheres and never resolve
-  on approach** (`sl-client-bevy-viewer`, P10 placeholders / P13 base avatar /
-  P21 pixel-area LOD). Two related failures seen against live avatars: (a) an
-  avatar's **textures load only at a coarse level and never sharpen** as the
-  camera moves in — the baked skin / worn-mesh textures stay blurry, and the
-  distance / pixel-area LOD driver (P21.1) never raises their discard level the
-  way it does for prim/terrain faces; and (b) some avatars **remain the P10 blue
-  placeholder sphere** and never turn into a real avatar even at close range,
-  instead of being replaced once the full-object avatar + appearance resolve.
-  Candidates to check: avatar face textures are fetched at a fixed
-  `AVATAR_BOOST_PRIORITY` but are **not** registered with the pixel-area LOD
-  manager (P21.1) — a skinned mesh's entity transform does not reflect its
-  on-screen size, so the pixel-area pass cannot rank it and it never asks for a
-  finer LOD; the baked-texture materials may hold their first (coarse) decode
-  without a later full-resolution re-fetch; and the coarse-avatar → full-object
-  handoff (`update_coarse_avatars` deduping against `update_avatar_objects`) may
-  fail to swap the sphere if the full object arrives late or the agent id never
-  correlates. Needs focused work on the avatar texture-LOD path and the
-  placeholder-replacement handoff; logged here so it is not lost.
+- **R22. Avatars stay low-detail / blue spheres / mesh-body render defects**
+  (`sl-client-bevy-viewer`, P10 placeholders / P13 base avatar / P17 mesh
+  attachments / P21 pixel-area LOD). Umbrella item, split into the distinct
+  issues found while investigating it. The **original premise was
+  disproven**: it read as "avatar baked skin / worn-mesh textures load coarse
+  and never sharpen," but a live decode census showed 236/237 boosted avatar
+  textures decode at full resolution and bound rigged meshes are never in the
+  pixel-area-managed set — so a well-loaded avatar's textures and geometry are
+  already full / finest. The "coarse avatar" symptom was really the far-avatar
+  routing bug (R22a). The distinct issues:
+  - [x] **R22a. Far / late avatar frozen in a static T-pose with coarse
+    textures** (`objects.rs` / `meshes.rs`). **Fixed.** A worn rigged mesh
+    whose `attachment_point` had not arrived by the time its mesh decoded was
+    misrouted to the *static* (un-skinned) build path — leaving it in bind
+    pose (T-pose) — and, via `worn_base_priority` returning `IDLE`, onto the
+    pixel-area-*managed* LOD path for both geometry and textures, where a
+    skinned mesh is never re-ranked, so it froze at the coarse level its rez
+    distance warranted (worse the farther it rezzed, never recovering on
+    approach). The rigged bind (`apply_rigged_attachments`) already resolves
+    the wearer by parent chain, not `attachment_point`, so the routing gate
+    was the sole cause. Now *any* rigged mesh routes to the skinned + boosted
+    path regardless of `attachment_point`; a new
+    `MeshManager::upgrade_to_finest` lifts a mesh discovered rigged off the
+    managed / coarse-block path; its textures are boosted by the existing
+    rigged build. A truly non-worn rigged mesh (animesh) defers to Phase 29.
+    Verified live: an animated rigged-mesh avatar renders posed, not T-posed.
+  - [ ] **R22b. Coarse "blue sphere" avatars never resolve on approach (nor
+    revert to a dot when far).** The viewer never reported the fly-camera to
+    the sim, so the interest list stayed centred on the stationary agent: a
+    minimap-only avatar was never upgraded to a full object however close the
+    camera flew, and a full avatar was never culled back to a dot. A
+    `report_camera_interest` system feeding the fly-camera into
+    `Command::SetCamera` (all the session plumbing already existed) was
+    written but **does not resolve the spheres in live testing** — cause not
+    yet found (possibly not reaching the sim, or a deeper interest /
+    cross-region case). Not reproducible headless (every avatar resolves to a
+    full body in local runs). **Open** (candidate fix uncommitted).
+  - [~] **R22c. Mesh-body "universal" BoM slots render as flat placeholder
+    skin** (`avatars.rs`). A modern mesh body maps its arms / legs to the
+    universal baked slots (`leftarm` / `leftleg` / `aux*`), which the viewer
+    did not fetch — so those bake-on-mesh faces fell through to the flat skin
+    placeholder, a tone seam against the UPPER-slot torso. A fix to fetch the
+    universal bakes (new slot → service-name entries, `UNIVERSAL_BAKE_SLOTS`)
+    and drape them on the universal-slot BoM faces is written and confirmed
+    live (the universal face resolves to a real bake), but it **surfaced
+    further arm defects (R22d–R22f) and is not yet confirmed a net
+    improvement**. **In progress, uncommitted.**
+  - [ ] **R22d. Mesh-body arm renders semi-transparent** — the background
+    bleeds through the arm. An alpha-*mode* issue on the skin / BoM faces
+    (rendered alpha-blended rather than opaque), not a placeholder-vs-bake
+    problem. **Open.**
+  - [ ] **R22e. Green gap / seam line across the mesh-body forearm.** A
+    pre-existing mesh seam (confirmed to predate the R22c work). **Open.**
+  - [ ] **R22f. Hand redder than the arm on a mesh body.** The hand shows the
+    reddish `BODY_COLOR` skin placeholder (or a differently-toned slot) while
+    the arm resolved to the real, less-red bake — a mismatch surfaced (or
+    introduced) by R22c resolving the arm but not the hand. **Open.**
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

@@ -266,6 +266,37 @@ impl MeshManager {
         let _previous = self.lod_inflight.insert(id, task);
     }
 
+    /// Stop pixel-area LOD managing `id` and upgrade its geometry to
+    /// [`MeshLod::FINEST`] — used when a mesh is discovered to be **rigged** (a
+    /// worn avatar attachment, or an animesh) *after* it was already requested as
+    /// an ordinary managed scene mesh, because its worn status was not yet known
+    /// when the fetch began. A far / late-rezzing avatar's attachment can decode
+    /// before its wearer link resolves, so its mesh is requested at
+    /// [`Priority::IDLE`] and starts on the managed, coarse-block path; a rigged
+    /// mesh's skinned transform cannot be ranked by the pixel-area pass, so — like
+    /// any boosted worn attachment — it must render at the finest block and never
+    /// be LOD reduced. A no-op if the mesh is not (or no longer) managed, which
+    /// includes the common case where its worn status was known up front and it
+    /// was already fetched boosted at finest.
+    pub(crate) fn upgrade_to_finest(&mut self, id: MeshKey) {
+        if self.managed.remove(&id).is_none() {
+            return;
+        }
+        let Some((request, _base)) = self.requests.get(&id) else {
+            return;
+        };
+        let entry = request.entry();
+        let store = self.store.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            if let Err(error) = store.set_lod(&entry, MeshLod::FINEST).await {
+                warn!("mesh {id} upgrade to finest failed: {error}");
+            }
+            entry.mesh()
+        });
+        // Supersedes any coarser LOD change still queued for this mesh.
+        let _previous = self.lod_inflight.insert(id, task);
+    }
+
     /// Re-rank an in-flight mesh request from the on-screen pixel area the driver
     /// computed (P20.2), clamped to never fall below the request-time base
     /// priority — so the per-frame object pass can raise a mesh the camera turns

@@ -1955,16 +1955,17 @@ pub(crate) fn apply_object_meshes(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
-    mesh_manager: Res<MeshManager>,
+    mut mesh_manager: ResMut<MeshManager>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
         let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
             // The fetch failed: objects pending on this key stay geometry-less.
             continue;
         };
-        // A worn rigged mesh (a mesh carrying a skin block, on an avatar) is not
-        // built as a static child here — it defers to [`apply_rigged_attachments`],
-        // which binds it to the wearer's skeleton once that avatar is spawned.
+        // A rigged mesh (a mesh carrying a skin block) is worn by an avatar — or is
+        // an animesh (Phase 29) — and is never built as a static child: it must be
+        // skinned to a skeleton. It defers to [`apply_rigged_attachments`], which
+        // finds its wearer by walking the parent chain to an avatar root.
         let is_rigged = mesh_manager.skin(key).is_some();
         for tracked in state.objects.values_mut() {
             // First build: an object pending on this mesh key. A build pending on a
@@ -1974,8 +1975,20 @@ pub(crate) fn apply_object_meshes(
                 let Some(PendingGeometry::Mesh(pending)) = tracked.pending.take() else {
                     continue;
                 };
-                if is_rigged && tracked.attachment_point.is_some() {
-                    // Defer the skinned build to `apply_rigged_attachments`.
+                if is_rigged {
+                    // Defer the skinned build to `apply_rigged_attachments`. This is
+                    // gated on the mesh being rigged, NOT on `attachment_point`: an
+                    // attachment's point can arrive in a later update than the mesh
+                    // decode, and that race used to strand a far / late-rezzing
+                    // avatar's body in a static, un-skinned T-pose with coarse,
+                    // pixel-area-managed textures that never recovered on approach
+                    // (R22). The rigged bind resolves the wearer by parent chain, so
+                    // it does not need the point. A rigged mesh's skinned transform
+                    // also cannot be ranked by the pixel-area pass, so its geometry
+                    // must render at the finest block and never be LOD reduced —
+                    // upgrade it now in case its worn status was unknown when the
+                    // fetch began and it started on the managed, coarse-block path.
+                    mesh_manager.upgrade_to_finest(key);
                     tracked.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
                         key,
                         texture_entry: pending.texture_entry,
