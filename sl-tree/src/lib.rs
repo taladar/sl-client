@@ -10,8 +10,8 @@
 //! parameters of the procedurally generated geometry.
 //!
 //! Like its sibling geometry crates this crate is deliberately **Bevy-free and
-//! I/O-free**: it never fetches or decodes; it holds the species data (and, in
-//! later phases, the geometry generation) while the Bevy conversion stays in
+//! I/O-free**: it never fetches or decodes; it holds the species data and the
+//! procedural geometry generation while the Bevy conversion stays in
 //! `sl-client-bevy`.
 //!
 //! Currently implemented:
@@ -19,7 +19,16 @@
 //! - [`species`] — the `LLVOTree` species table ([`TreeSpecies`] /
 //!   [`TREE_SPECIES`]) ported from `trees.xml`, with a [`tree_species`] lookup
 //!   by species byte.
+//! - [`geometry`] — procedural `LLVOTree` branch / leaf geometry
+//!   ([`tree_geometry`] / [`billboard_geometry`]) generated from a
+//!   [`TreeSpecies`], plus the [`TreeLod`] trunk levels of detail.
 
+pub mod geometry;
+mod noise;
 pub mod species;
 
+pub use geometry::{
+    RADIUS_SCALE_FACTOR, TREE_LOD_LEVELS, TreeLod, TreeMesh, YAW_DEGREES, billboard_geometry,
+    tree_geometry,
+};
 pub use species::{MAX_TREE_SPECIES, TREE_SPECIES, TreeSpecies, tree_species};

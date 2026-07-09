@@ -5678,6 +5678,7 @@ dependencies = [
  "sl-proto",
  "sl-sculpt",
  "sl-texture",
+ "sl-tree",
  "sl-wire",
  "thiserror 2.0.18",
  "time",

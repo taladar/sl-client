@@ -47,6 +47,7 @@ sl-prim = { version = "0.1.0", path = "../sl-prim" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-sculpt = { version = "0.1.0", path = "../sl-sculpt" }
 sl-texture = { version = "0.1.0", path = "../sl-texture" }
+sl-tree = { version = "0.1.0", path = "../sl-tree" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.49", features = ["local-offset"] }

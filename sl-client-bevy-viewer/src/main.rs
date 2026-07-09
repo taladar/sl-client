@@ -77,9 +77,9 @@ use crate::environment::{EnvironmentState, ingest_environment, request_environme
 use crate::lights::{LocalLights, drive_local_lights};
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
-    ObjectState, PrimLodTargets, adopt_pending_attachments, apply_object_meshes,
-    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, log_suspicious_objects,
-    pick_object, update_objects,
+    ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
+    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
+    log_suspicious_objects, pick_object, update_objects,
 };
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
@@ -394,6 +394,7 @@ fn run_session(
     // underwater-fog pass reads is a small resource published by `drive_water`.
     .init_resource::<WaterLevel>()
     .init_resource::<PrimLodTargets>()
+    .init_resource::<TreeLodTargets>()
     .init_resource::<LocalLights>()
     .init_resource::<AvatarState>()
     .init_resource::<ChatOverlay>()
@@ -553,6 +554,9 @@ fn run_session(
             // re-tessellates any prim whose level changed, so it runs after.
             drive_render_priority,
             apply_prim_lod.after(drive_render_priority),
+            // Tree level of detail (P26.2): regenerate any tree whose branching /
+            // billboard tier the driver changed, after it has picked the tiers.
+            apply_tree_lod.after(drive_render_priority),
             update_diagnostics_overlay,
             // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
             // resource on the toggle key, then drive the panel's visibility and

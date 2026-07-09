@@ -183,6 +183,19 @@ pub use sl_prim::{
 pub use sl_sculpt::tessellate::tessellate as tessellate_sculpt;
 pub use sl_sculpt::{SculptParams, SculptStitch};
 
+// The pure Linden-tree geometry (the `LLVOTree` counterpart of `sl_prim` /
+// `sl_sculpt`; likewise no store/fetcher — a tree's branch / leaf geometry is
+// generated on the CPU from its species-table entry, selected by the object's
+// `state` byte). Re-exported so the viewer can look up a `TreeSpecies`, generate
+// its `TreeMesh` at a `TreeLod` (or a distance `billboard_geometry` imposter),
+// and feed it through [`to_bevy_tree_mesh`]. `RADIUS_SCALE_FACTOR` / `YAW_DEGREES`
+// are the outer-scale placement constants the viewer applies at the transform.
+pub use sl_tree::{
+    RADIUS_SCALE_FACTOR as TREE_RADIUS_SCALE_FACTOR, TreeLod, TreeMesh, TreeSpecies,
+    YAW_DEGREES as TREE_YAW_DEGREES, billboard_geometry as tree_billboard_geometry, tree_geometry,
+    tree_species,
+};
+
 // The pure system-avatar decoders (skeleton / base body / visual params), the
 // avatar counterpart of `sl_mesh` / `sl_texture`. Re-exported so the viewer can
 // parse the standard Linden `character/` assets and drive them through
@@ -227,6 +240,7 @@ pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMate
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, to_bevy_image,
 };
+pub use crate::tree::to_bevy_tree_mesh;
 #[cfg(feature = "bevy_pbr")]
 pub use crate::water::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 
@@ -255,6 +269,7 @@ pub mod sun_disc;
 #[cfg(feature = "bevy_pbr")]
 pub mod terrain;
 pub mod textures;
+pub mod tree;
 mod upload;
 mod voice;
 #[cfg(feature = "bevy_pbr")]

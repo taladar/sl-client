@@ -45,9 +45,10 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, JointOverrides, MeshKey, MeshSkin, Object, PrimFaceId,
     PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey,
-    SlEvent, SlSessionEvent, TextureFace, TextureKey, Uuid, Vector, avatar_texture,
-    decode_texture_entry, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
-    tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh,
+    SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace, TextureKey,
+    TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, pcode, planar_texgen_uv,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh,
+    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
 };
 
 use crate::avatars::{AvatarBody, AvatarState, BomFace};
@@ -70,8 +71,11 @@ pub(crate) enum ObjectCategory {
     Sculpt,
     /// A mesh object (its shape comes from a mesh asset) — Phase 7.
     Mesh,
-    /// Anything else (tree, grass, particle-system object, …); not rendered by
-    /// the current phases.
+    /// A Linden tree (`PCODE_TREE` / `PCODE_NEW_TREE`) — its branch / leaf
+    /// geometry is generated procedurally from its species (P26.2).
+    Tree,
+    /// Anything else (grass, particle-system object, …); not rendered by the
+    /// current phases.
     Other,
 }
 
@@ -227,6 +231,14 @@ struct TrackedObject {
     /// the driver's desired level to decide whether to re-tessellate. Meaningless
     /// (and left at [`PrimLod::FINEST`]) for a non-prim.
     prim_lod: PrimLod,
+    /// For a **tree**, the inputs needed to regenerate its geometry when the
+    /// pixel-area LOD driver picks a different [`TreeTier`] for its on-screen size
+    /// (P26.2). `None` for a non-tree.
+    tree_rebuild: Option<PendingTree>,
+    /// A tree's currently generated [`TreeTier`] (P26.2), compared against the
+    /// driver's desired tier to decide whether to regenerate. Meaningless (and left
+    /// at [`INITIAL_TREE_TIER`]) for a non-tree.
+    tree_tier: TreeTier,
     /// Whether this object is an **animated object** (animesh) — its
     /// `ExtendedMesh` param carries the `ANIMATED_MESH_ENABLED` flag. Set on the
     /// linkset root; a worn animesh drives its own control-avatar skeleton, so its
@@ -362,6 +374,44 @@ struct PendingPrim {
 /// initial geometry small and only refines the prims the camera looks at.
 const INITIAL_MANAGED_PRIM_LOD: PrimLod = PrimLod::Low;
 
+/// The rendered level of detail of a Linden tree (P26.2): one of the four
+/// [`TreeLod`] branching-geometry tiers, or the far [`TreeTier::Billboard`]
+/// imposter that stands in for the whole tree once it is small on screen. Selected
+/// by the render-priority driver from the tree's on-screen size, mirroring the
+/// reference viewer's `LLVOTree::mTrunkLOD` selection plus its billboard fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TreeTier {
+    /// Procedural branch / leaf geometry at the given trunk level of detail.
+    Lod(TreeLod),
+    /// The distant crossed-quad billboard imposter (`tree_billboard_geometry`).
+    Billboard,
+}
+
+/// The tree tier a new tree is first built at (P26.2), before the render-priority
+/// driver has a camera to size it against — a mid branching level the driver
+/// refines toward the tier the tree's on-screen size warrants, like a plain prim's
+/// [`INITIAL_MANAGED_PRIM_LOD`].
+const INITIAL_TREE_TIER: TreeTier = TreeTier::Lod(TreeLod::High);
+
+/// The alpha-test cutoff for tree foliage (P26.2): a leaf-card / trunk texel with
+/// alpha below this is discarded, clipping each leaf to its shape. Matches the
+/// reference viewer's alpha-mask tree rendering (a mid cutoff for crisp cutout
+/// edges without eroding the leaf).
+const TREE_ALPHA_CUTOFF: f32 = 0.5;
+
+/// A tree's deferred rebuild inputs (P26.2): its species byte and fetch priority,
+/// retained so the pixel-area LOD driver can regenerate its geometry at a
+/// different [`TreeTier`] as its on-screen size changes, without the live
+/// [`Object`] (which the driver does not hold). The species diffuse texture and
+/// geometry parameters are looked up from the species table at rebuild time.
+struct PendingTree {
+    /// The tree species byte (the object `state`), indexing the `LLVOTree`
+    /// species table for the diffuse texture and geometry parameters.
+    species: u8,
+    /// The request-time (base) fetch priority for the species diffuse texture.
+    priority: Priority,
+}
+
 /// Viewer-side object bookkeeping: the entity and metadata for every in-world
 /// object currently in the scene, keyed by scoped id.
 #[derive(Resource, Default)]
@@ -381,6 +431,16 @@ pub(crate) struct ObjectState {
 #[derive(Resource, Default)]
 pub(crate) struct PrimLodTargets(pub(crate) HashMap<ScopedObjectId, PrimLod>);
 
+/// The [`TreeTier`] the render-priority driver (P26.2) wants each tree rendered
+/// at, keyed by scoped id — the tree counterpart of [`PrimLodTargets`]. The driver
+/// ([`drive_render_priority`]) computes a tree's tier from its on-screen size each
+/// throttled pass and writes it here; [`apply_tree_lod`] drains the map and
+/// regenerates any tree whose desired tier differs from its current one.
+///
+/// [`drive_render_priority`]: crate::render_priority::drive_render_priority
+#[derive(Resource, Default)]
+pub(crate) struct TreeLodTargets(pub(crate) HashMap<ScopedObjectId, TreeTier>);
+
 /// Classify an object from its `pcode` and sculpt/mesh extra parameters.
 fn classify(object: &Object) -> ObjectCategory {
     match object.pcode {
@@ -390,6 +450,7 @@ fn classify(object: &Object) -> ObjectCategory {
             Some(SculptOrMeshKey::Sculpt(_)) => ObjectCategory::Sculpt,
             None => ObjectCategory::Prim,
         },
+        pcode::TREE | pcode::NEW_TREE => ObjectCategory::Tree,
         _other => ObjectCategory::Other,
     }
 }
@@ -434,6 +495,32 @@ fn object_transform(object: &Object, is_root: bool) -> Transform {
 /// object entity itself.
 const fn geometry_transform(object: &Object) -> Transform {
     Transform::from_scale(Vec3::new(object.scale.x, object.scale.y, object.scale.z))
+}
+
+/// The geometry-holder transform for an object of `category` (P26.2). Ordinary
+/// objects use the anisotropic per-axis [`geometry_transform`] scale; a **tree**
+/// instead reproduces the reference viewer's tree placement, which its generated
+/// geometry (in unit-outer-scale Second Life space) needs applied here:
+///
+/// - a **uniform** scale of `scale.length() * 0.05` (`LLVOTree`'s
+///   `radius = getScale().magVec() * 0.05`) — a tree's size tracks the *magnitude*
+///   of its scale vector, not its per-axis components;
+/// - a fixed 90° yaw about Second Life Z (`LLQuaternion(90°, (0,0,1))`), applied
+///   here (in the object's local frame) before the object's own rotation on the
+///   object entity;
+/// - a small `-0.1 m` Z nudge that plants the trunk base slightly underground
+///   (the reference's `pos.z - 0.1` translation).
+fn holder_transform(object: &Object, category: ObjectCategory) -> Transform {
+    if category != ObjectCategory::Tree {
+        return geometry_transform(object);
+    }
+    let scale_length = Vec3::new(object.scale.x, object.scale.y, object.scale.z).length()
+        * TREE_RADIUS_SCALE_FACTOR;
+    Transform {
+        translation: Vec3::new(0.0, 0.0, -0.1),
+        rotation: Quat::from_rotation_z(TREE_YAW_DEGREES.to_radians()),
+        scale: Vec3::splat(scale_length),
+    }
 }
 
 /// A child's parent-relative position as a Bevy `Vec3`, kept in pure Second Life
@@ -537,6 +624,7 @@ pub(crate) fn log_suspicious_objects(
             ObjectCategory::Mesh => "mesh",
             ObjectCategory::Sculpt => "sculpt",
             ObjectCategory::Avatar => "avatar",
+            ObjectCategory::Tree => "tree",
             ObjectCategory::Other => "other",
         };
         warn!(
@@ -658,6 +746,7 @@ pub(crate) fn pick_object(
                     ObjectCategory::Mesh => "mesh",
                     ObjectCategory::Sculpt => "sculpt",
                     ObjectCategory::Avatar => "avatar",
+                    ObjectCategory::Tree => "tree",
                     ObjectCategory::Other => "other",
                 });
             // The object entity's actual world scale — if it is much larger than
@@ -765,7 +854,13 @@ fn sculpt_key(object: &Object) -> Option<(TextureKey, u8)> {
 /// texture through `manager` (the shared texture store) and, if the map is already
 /// decoded, stitches and spawns its face now; otherwise it returns a
 /// [`PendingGeometry::Sculpt`] so [`apply_object_sculpts`] can build it on decode.
-/// Every other category renders nothing here.
+/// A **tree** generates its branch / leaf geometry immediately from its species
+/// (P26.2) and returns a [`PendingTree`] so [`apply_tree_lod`] can regenerate it
+/// at a different [`TreeTier`]. Every other category renders nothing here.
+///
+/// The last two returns are the plain-prim re-tessellation inputs
+/// ([`PendingPrim`], P21.3) and the tree regeneration inputs ([`PendingTree`],
+/// P26.2); at most one is ever `Some`.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
@@ -780,7 +875,12 @@ fn build_object_geometry(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
-) -> (Vec<Entity>, Option<PendingGeometry>, Option<PendingPrim>) {
+) -> (
+    Vec<Entity>,
+    Option<PendingGeometry>,
+    Option<PendingPrim>,
+    Option<PendingTree>,
+) {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
     let priority = worn_base_priority(object);
@@ -807,10 +907,11 @@ fn build_object_geometry(
                 scale: [object.scale.x, object.scale.y, object.scale.z],
                 priority,
             }),
+            None,
         ),
         ObjectCategory::Mesh => {
             let Some(key) = mesh_key(object) else {
-                return (Vec::new(), None, None);
+                return (Vec::new(), None, None, None);
             };
             mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -832,6 +933,7 @@ fn build_object_geometry(
                     ),
                     None,
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -842,12 +944,13 @@ fn build_object_geometry(
                         priority,
                     })),
                     None,
+                    None,
                 ),
             }
         }
         ObjectCategory::Sculpt => {
             let Some((map, sculpt_type)) = sculpt_key(object) else {
-                return (Vec::new(), None, None);
+                return (Vec::new(), None, None, None);
             };
             manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -869,6 +972,7 @@ fn build_object_geometry(
                     ),
                     None,
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -880,10 +984,32 @@ fn build_object_geometry(
                         priority,
                     })),
                     None,
+                    None,
                 ),
             }
         }
-        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None),
+        ObjectCategory::Tree => (
+            build_tree_faces(
+                object.state,
+                INITIAL_TREE_TIER,
+                entity,
+                commands,
+                meshes,
+                materials,
+                manager,
+                prim_textures,
+                priority,
+            ),
+            None,
+            None,
+            // Retain the regeneration inputs so the pixel-area LOD driver can
+            // rebuild this tree at a different tier as its size changes (P26.2).
+            Some(PendingTree {
+                species: object.state,
+                priority,
+            }),
+        ),
+        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None, None),
     }
 }
 
@@ -981,6 +1107,69 @@ fn build_sculpt_faces(
         prim_textures,
         priority,
     )
+}
+
+/// Generate a Linden tree's branch / leaf geometry for `species_byte` at
+/// [`TreeTier`] `tier` and spawn its single face entity under `parent`, textured
+/// with the species diffuse through the Phase 6 pipeline (P26.2).
+///
+/// The species byte is the object's `state`; an out-of-range value clamps to
+/// species `0`, matching the reference viewer. The geometry (a branch/leaf mesh
+/// at the tier's trunk level of detail, or the crossed-quad billboard imposter)
+/// is generated by `sl_tree` in unit-outer-scale Second Life space and sized by
+/// the tree's [`holder_transform`]. Its diffuse texture is the species'
+/// `texture_id` (its trunk region textures the cylinders, its leaf-card region the
+/// leaves), fetched and applied exactly as a prim face's — a synthetic white
+/// [`TextureFace`] carrying the species texture drives [`face_material`], so a
+/// tree's leaf alpha upgrades it to blending on decode like any other face.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn build_tree_faces(
+    species_byte: u8,
+    tier: TreeTier,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+) -> Vec<Entity> {
+    // Clamp an unknown species to 0, as the reference viewer does (species 0 is
+    // always defined, so the fallback resolves).
+    let Some(species) = tree_species(species_byte).or_else(|| tree_species(0)) else {
+        return Vec::new();
+    };
+    let tree = match tier {
+        TreeTier::Lod(lod) => tree_geometry(species, lod),
+        TreeTier::Billboard => tree_billboard_geometry(species),
+    };
+    let mesh = meshes.add(to_bevy_tree_mesh(&tree));
+    // The tree's single diffuse comes from the species table, not a `TextureEntry`.
+    let texture_face = TextureFace::new(species.texture_id);
+    let material = face_material(&texture_face, materials, manager, prim_textures, priority);
+    // Foliage is alpha-**masked** (cutout), not opaque or blended: the reference
+    // viewer renders trees in the alpha-mask pool so the leaf-card texture's alpha
+    // clips each leaf to its shape (transparent around the edges) rather than
+    // showing a solid quad. A fixed cutoff clips the trunk (opaque) cleanly too.
+    // Set here so it is not overridden by the tint-based opaque/blend default.
+    if let Some(mut tree_material) = materials.get_mut(&material) {
+        tree_material.alpha_mode = AlphaMode::Mask(TREE_ALPHA_CUTOFF);
+    }
+    let entity = commands
+        .spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            PrimFaceEntity {
+                face_id: PrimFaceId::new(0),
+            },
+            FaceTextureDebug(texture_face),
+            ChildOf(parent),
+        ))
+        .id();
+    vec![entity]
 }
 
 /// Overwrite a face `mesh`'s UV0 with planar-texgen coordinates when its
@@ -1252,7 +1441,7 @@ fn apply_object(
         ));
         commands
             .entity(existing.geometry)
-            .insert(geometry_transform(object));
+            .insert(holder_transform(object, category));
         apply_light(existing.entity, light, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
@@ -1260,7 +1449,7 @@ fn apply_object(
             // fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, pending, prim_rebuild) = build_object_geometry(
+            let (face_entities, pending, prim_rebuild, tree_rebuild) = build_object_geometry(
                 object,
                 category,
                 existing.geometry,
@@ -1276,11 +1465,14 @@ fn apply_object(
             // The geometry was re-requested from scratch; any prior LOD-rebuild
             // inputs are stale (the mesh key, scale, or category may have changed)
             // and are re-established from the new build: a mesh's on its next
-            // decode (P21.2), a plain prim's immediately here (P21.3). A prim that
-            // became a mesh/sculpt drops its prim rebuild (`prim_rebuild` is None).
+            // decode (P21.2), a plain prim's immediately here (P21.3), a tree's here
+            // (P26.2). An object that changed category drops the rebuild inputs it no
+            // longer has (`prim_rebuild` / `tree_rebuild` is `None`).
             existing.mesh_rebuild = None;
             existing.prim_rebuild = prim_rebuild;
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
+            existing.tree_rebuild = tree_rebuild;
+            existing.tree_tier = INITIAL_TREE_TIER;
             existing.shape = shape;
         }
         // Reconcile parenting: an object relinked to a root becomes a child of
@@ -1329,7 +1521,7 @@ fn apply_object(
     // parent to the object entity, not this) are not.
     let geometry = commands
         .spawn((
-            geometry_transform(object),
+            holder_transform(object, category),
             Visibility::default(),
             ChildOf(entity),
         ))
@@ -1337,7 +1529,7 @@ fn apply_object(
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let (face_entities, pending, prim_rebuild) = build_object_geometry(
+    let (face_entities, pending, prim_rebuild, tree_rebuild) = build_object_geometry(
         object,
         category,
         geometry,
@@ -1365,6 +1557,10 @@ fn apply_object(
             // (P21.3); a non-prim keeps `prim_rebuild` None and stays at FINEST.
             prim_rebuild,
             prim_lod: INITIAL_MANAGED_PRIM_LOD,
+            // A tree is first generated at the placeholder tier (P26.2); a non-tree
+            // keeps `tree_rebuild` None.
+            tree_rebuild,
+            tree_tier: INITIAL_TREE_TIER,
             animated: is_animated_object(object),
         },
     );
@@ -1691,6 +1887,51 @@ pub(crate) fn apply_prim_lod(
             "re-tessellated prim {scoped} at {desired:?}: {} faces",
             tracked.face_entities.len()
         );
+    }
+}
+
+/// Regenerate each tree the render-priority driver picked a new [`TreeTier`] for
+/// (P26.2) — the tree counterpart of [`apply_prim_lod`]. Drains
+/// [`TreeLodTargets`] and, for any tree whose desired tier differs from its
+/// current one, despawns its face and regenerates the branch / leaf geometry (or
+/// the billboard imposter) at the new tier.
+pub(crate) fn apply_tree_lod(
+    mut targets: ResMut<TreeLodTargets>,
+    mut state: ResMut<ObjectState>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut manager: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+) {
+    for (scoped, desired) in targets.0.drain() {
+        let Some(tracked) = state.objects.get_mut(&scoped) else {
+            continue;
+        };
+        // Only a tree carries regeneration inputs; anything else is left untouched.
+        let Some(rebuild) = tracked.tree_rebuild.as_ref() else {
+            continue;
+        };
+        if tracked.tree_tier == desired {
+            continue;
+        }
+        let species = rebuild.species;
+        let priority = rebuild.priority;
+        let geometry = tracked.geometry;
+        despawn_prim_faces(&tracked.face_entities, &mut commands);
+        tracked.face_entities = build_tree_faces(
+            species,
+            desired,
+            geometry,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut manager,
+            &mut prim_textures,
+            priority,
+        );
+        tracked.tree_tier = desired;
+        debug!("regenerated tree {scoped} at {desired:?}");
     }
 }
 
@@ -2155,11 +2396,16 @@ mod tests {
         assert_eq!(classify(&mesh), ObjectCategory::Mesh);
     }
 
-    /// A tree object is neither prim nor avatar — it classifies as
-    /// [`ObjectCategory::Other`].
+    /// A tree object (`PCODE_TREE` / `PCODE_NEW_TREE`) classifies as
+    /// [`ObjectCategory::Tree`] and is rendered as procedural branch geometry
+    /// (P26.2).
     #[test]
-    fn tree_classifies_as_other() {
-        assert_eq!(classify(&bare_object(pcode::TREE)), ObjectCategory::Other);
+    fn tree_classifies_as_tree() {
+        assert_eq!(classify(&bare_object(pcode::TREE)), ObjectCategory::Tree);
+        assert_eq!(
+            classify(&bare_object(pcode::NEW_TREE)),
+            ObjectCategory::Tree
+        );
     }
 
     /// A root object's world transform carries its region-local position into

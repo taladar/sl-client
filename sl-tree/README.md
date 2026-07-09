@@ -23,6 +23,11 @@ Currently implemented:
   a [`tree_species`] lookup by species byte. Each entry carries the species
   diffuse [`TextureKey`](sl_types::key::TextureKey) plus the `LLVOTree`
   geometry parameters.
+- [`geometry`] — the procedural `LLVOTree` branch / leaf geometry generation
+  ([`tree_geometry`] / [`billboard_geometry`]) ported from
+  `LLVOTree::updateGeometry` / `genBranchPipeline`, producing a Bevy-free
+  [`TreeMesh`] at one of four [`TreeLod`] trunk levels or as a distance
+  billboard imposter.
 
-The geometry generation (tree branch pipeline, grass crossed quads) and the
-grass species table land in later phases.
+The grass geometry (crossed quads) and the grass species table land in later
+phases.

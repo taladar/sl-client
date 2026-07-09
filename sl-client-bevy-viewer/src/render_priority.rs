@@ -45,12 +45,13 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use sl_client_bevy::{
-    DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey,
+    DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey, TreeLod,
 };
 
 use crate::meshes::MeshManager;
 use crate::objects::{
-    FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject,
+    FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject, TreeLodTargets,
+    TreeTier,
 };
 use crate::textures::TextureManager;
 
@@ -128,6 +129,7 @@ pub(crate) fn drive_render_priority(
     mut textures: ResMut<TextureManager>,
     mut meshes: ResMut<MeshManager>,
     mut prim_targets: ResMut<PrimLodTargets>,
+    mut tree_targets: ResMut<TreeLodTargets>,
 ) {
     *since_last += time.delta_secs();
     if *since_last < REPRIORITIZE_INTERVAL_SECS {
@@ -165,8 +167,10 @@ pub(crate) fn drive_render_priority(
     // aggregation; the store not fetching that id ignores it.
     let mut mesh_area: HashMap<MeshKey, f32> = HashMap::new();
     let mut mesh_lod: HashMap<MeshKey, MeshLod> = HashMap::new();
-    // Fresh prim LOD targets for this pass (P21.3); `apply_prim_lod` drains them.
+    // Fresh prim / tree LOD targets for this pass (P21.3 / P26.2); `apply_prim_lod`
+    // / `apply_tree_lod` drain them.
     prim_targets.0.clear();
+    tree_targets.0.clear();
     for (transform, info, scene) in &objects {
         // The object's full scale-vector length: its half is the bounding-sphere
         // radius for pixel area, while `LLVOVolume::calcLOD` ranks LOD against the
@@ -182,6 +186,13 @@ pub(crate) fn drive_render_priority(
             if scene.category == ObjectCategory::Prim {
                 let desired = PrimLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
                 prim_targets.0.insert(scene.scoped_id, desired);
+            } else if scene.category == ObjectCategory::Tree {
+                // A tree is procedurally generated (like a prim, no asset): pick the
+                // branching tier its on-screen size warrants, or the billboard
+                // imposter once it is tiny on screen (P26.2).
+                let area = metrics.pixel_area(0.5 * scale_length, distance);
+                let desired = tree_tier_for_size(scale_length, distance, area);
+                tree_targets.0.insert(scene.scoped_id, desired);
             }
             continue;
         };
@@ -214,6 +225,27 @@ pub(crate) fn drive_render_priority(
         // unmanaged) or not-yet-decoded mesh.
         meshes.set_lod_for_area(mesh_key, desired);
     }
+}
+
+/// Pixel area below which a tree drops to the [`TreeTier::Billboard`] imposter —
+/// once it covers only a small patch of screen, the crossed-quad billboard stands
+/// in for the branch geometry (P26.2). Roughly a 24×24-pixel footprint.
+const TREE_BILLBOARD_MAX_PIXEL_AREA: f32 = 576.0;
+
+/// Select a tree's [`TreeTier`] from its on-screen size (P26.2): the crossed-quad
+/// [`TreeTier::Billboard`] imposter once its pixel `area` is tiny, else the
+/// branching [`TreeLod`] its distance warrants (the reference viewer's
+/// `LLVOTree::mTrunkLOD` selection, reusing the shared `LLVOVolume::calcLOD` tier).
+fn tree_tier_for_size(scale_length: f32, distance: f32, area: f32) -> TreeTier {
+    if area < TREE_BILLBOARD_MAX_PIXEL_AREA {
+        return TreeTier::Billboard;
+    }
+    // `MeshLod` indexes 0 (coarsest) ..= 3 (finest); `TreeLod` indexes 0 (finest,
+    // `Highest`) ..= 3 (coarsest, `Low`), so the mesh tier maps by mirroring.
+    let tier = MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+    TreeTier::Lod(TreeLod::from_index(
+        3usize.saturating_sub(usize::from(tier.index())),
+    ))
 }
 
 /// The pixel area a face's object covers: its world bounding radius is half the
