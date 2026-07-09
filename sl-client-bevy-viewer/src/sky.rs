@@ -103,6 +103,42 @@ fn shadow_cascades() -> CascadeShadowConfig {
     .build()
 }
 
+/// The directional shadow map's resolution (`DirectionalLightShadowMap.size`, set
+/// to 4096 in `main`). The shadow-direction snap step is derived from it so a
+/// direction step never moves a shadow by more than ~one texel on any cascade.
+const SHADOW_MAP_SIZE: f32 = 4096.0;
+
+/// Snap a shadow-caster light direction to a stable angular grid (R20).
+///
+/// Bevy's cascaded shadow maps already texel-snap the cascade origin, but that
+/// only stabilises the shadow while the light *direction* is fixed. The real-time
+/// day cycle rotates the sun a hair every frame, rotating the light-space texel
+/// grid and making the ground shadows shimmer / oscillate. Rounding the direction
+/// components to a grid and re-normalising holds the direction **bit-identical**
+/// across the frames whose true direction falls in the same cell, so the shadow
+/// sits perfectly still, and a step to the next cell changes the unit direction by
+/// at most the grid step — which, for a receiver at distance `R`, moves its shadow
+/// by at most `R · step`. Choosing the step as `1 / shadow_map_size` keeps that
+/// bounded to ~one shadow-map texel on every cascade (a cascade's texel is its
+/// diameter / size, and the receiver distance scales with the diameter), so each
+/// step is imperceptible while the continuous shimmer is gone.
+///
+/// Component-rounding + re-normalise is used rather than snapping spherical angles
+/// so it stays well-behaved when the sun passes near the zenith (where an azimuth
+/// is ill-defined).
+fn snap_shadow_direction(direction: Vec3) -> Vec3 {
+    let step = 1.0 / SHADOW_MAP_SIZE;
+    let snapped = Vec3::new(
+        (direction.x / step).round() * step,
+        (direction.y / step).round() * step,
+        (direction.z / step).round() * step,
+    );
+    // Re-normalise so it stays a unit direction; fall back to the input if the
+    // rounding collapsed it to zero (only possible for a near-zero input, which a
+    // light direction never is).
+    snapped.try_normalize().unwrap_or(direction)
+}
+
 /// The reference viewer's built-in rainbow texture (`IMG_RAINBOW`,
 /// `llsettingssky.cpp`), sampled by the sky's rainbow overlay when the sky frame
 /// names none of its own.
@@ -450,9 +486,19 @@ pub(crate) fn drive_sky(
     };
     if let Ok((mut transform, mut light)) = sun.single_mut() {
         // The light travels *toward* its forward axis, i.e. away from the body, so
-        // its forward is the negated light direction. Pick a safe up when the body
-        // is near the zenith (forward near-parallel to +Y).
-        let forward = Vec3::new(-light_dir.x, -light_dir.y, -light_dir.z);
+        // its forward is the negated light direction. Snap the *shadow-caster*
+        // direction to a texel-equivalent angular grid first (R20): the real-time
+        // day cycle rotates the sun a hair every frame, which rotates the cascaded
+        // shadow map's light-space texel grid and makes the ground shadows shimmer
+        // / oscillate — Bevy already texel-snaps the cascade origin, but a
+        // per-frame-rotating light defeats it. Snapping holds the direction
+        // bit-stable between steps, so the shadow sits still, and each step moves
+        // it by at most ~one shadow-map texel (imperceptible). The visible sun
+        // disc, sky, and light colour keep the un-snapped direction, so only the
+        // shadow projection is affected. Pick a safe up when the body is near the
+        // zenith (forward near-parallel to +Y).
+        let shadow_dir = snap_shadow_direction(light_dir);
+        let forward = Vec3::new(-shadow_dir.x, -shadow_dir.y, -shadow_dir.z);
         let up = if forward.dot(Vec3::Y).abs() > 0.99 {
             Vec3::Z
         } else {
@@ -1484,4 +1530,62 @@ fn placeholder_image() -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SHADOW_MAP_SIZE, snap_shadow_direction};
+    use bevy::math::Vec3;
+    use pretty_assertions::assert_eq;
+
+    /// The snapped direction stays a unit vector (a valid light orientation).
+    #[test]
+    fn snapped_direction_is_unit_length() {
+        for dir in [
+            Vec3::new(0.1736, 0.9848, 0.0),
+            Vec3::new(-0.452, 0.892, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.577, 0.577, 0.577),
+        ] {
+            let snapped = snap_shadow_direction(dir.normalize());
+            assert!(
+                (snapped.length() - 1.0).abs() < 1.0e-5,
+                "snapped {snapped:?} should be unit length"
+            );
+        }
+    }
+
+    /// Two directions closer than the snap step round to the **same** snapped
+    /// direction, so the shadow-caster orientation is bit-stable across the frames
+    /// whose true direction drifts within one cell (the R20 shimmer fix).
+    #[test]
+    fn nearby_directions_snap_together() {
+        let step = 1.0 / SHADOW_MAP_SIZE;
+        let base = Vec3::new(-0.452, 0.892, 0.0).normalize();
+        // A drift a tenth of a step should never cross a cell boundary from the
+        // cell centre, so it snaps identically.
+        let centre = Vec3::new(
+            (base.x / step).round() * step,
+            (base.y / step).round() * step,
+            (base.z / step).round() * step,
+        )
+        .normalize();
+        let nudged = (centre + Vec3::splat(0.1 * step)).normalize();
+        assert_eq!(snap_shadow_direction(centre), snap_shadow_direction(nudged));
+    }
+
+    /// The snapped direction never departs the input by more than about one grid
+    /// step per component, so the shadow moves at most ~one texel per step.
+    #[test]
+    fn snap_stays_close_to_input() {
+        let step = 1.0 / SHADOW_MAP_SIZE;
+        let dir = Vec3::new(0.2, 0.95, -0.24).normalize();
+        let snapped = snap_shadow_direction(dir);
+        // Bounded by the rounding (half a step per component) plus the small
+        // re-normalisation drift.
+        assert!(
+            (snapped - dir).length() < 2.0 * step,
+            "snapped {snapped:?} drifted too far from {dir:?}"
+        );
+    }
 }

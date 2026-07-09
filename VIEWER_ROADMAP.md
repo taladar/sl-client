@@ -2658,21 +2658,30 @@ avatar, so they are collected here to be worked one at a time.
   region's real values. This retroactively means **any P22/P23 behaviour
   "verified on OpenSim only" was running on defaults on aditi** and should be
   re-checked there now that the real EEP loads.
-- [ ] **R20. Directional shadows oscillate along one axis (still open)**
-  (`sl-client-bevy-viewer` / `sl-client-bevy`, P24.1). Noticed while verifying
-  P25.2 local lights: with a **static camera and a stationary light prim**, the
-  sun/moon cascaded shadows on the ground jitter back and forth a small amount
-  along a single axis, frame to frame. This is **not** the local light (P25.2
-  point/spot lights cast no shadows here) and **not** camera-driven cascade
-  crawl (the camera was still) — it is the P24.1 directional cascaded-shadow-map
-  projection recomputing with tiny per-frame differences (a classic CSM
-  texel-snap / stabilisation artifact, likely the cascade world-space bounds not
-  being snapped to shadow-map texel increments, or the sun direction drifting
-  microscopically from the day-cycle interpolation each frame). Candidate fix:
-  round each cascade's projection origin to whole shadow-map texels (texel
-  snapping) so a sub-texel change in the fit no longer shifts the whole map, and
-  confirm the sun direction is stable when the day cycle is paused. Independent
-  of Phase 25.
+- [x] **R20. Directional shadows oscillate along one axis**
+  (`sl-client-bevy-viewer`, P24.1). **Fixed.** Noticed while verifying P25.2
+  local lights: with a static camera and a stationary light prim, the sun/moon
+  cascaded shadows on the ground jittered back and forth a small amount along a
+  single axis, frame to frame. **Root cause** (confirmed by logging the
+  per-frame light direction — 3196 unique values across 3221 frames): the day
+  cycle runs off the real-time clock (`day_position` reads `SystemTime::now()`),
+  so the sun rotates a hair **every frame**. Bevy's cascaded shadow maps already
+  texel-snap the cascade origin
+  (`bevy_light::build_directional_light_cascades` floors `near_plane_center` to
+  texel multiples), but that snap is done in **light space** — a per-frame
+  rotating light rotates the snap grid itself, so a fixed receiver lands on a
+  different texel each frame and the shadow shimmers / oscillates (the
+  back-and-forth is the `floor()` flip-flopping at a texel boundary). **Fix:**
+  `snap_shadow_direction` (sky.rs) quantises the **shadow-caster** direction to
+  a texel-equivalent angular grid (round the unit-vector components to
+  `1 / shadow_map_size` and re-normalise) before orienting the `SceneSun`
+  `DirectionalLight`. The direction is then bit-identical across the frames
+  whose true direction stays in one cell (verified: it now holds for ~10–36
+  frames even at fast dawn, far longer midday), so Bevy's texel snapping keeps
+  the shadow perfectly still; each step moves any cascade's shadow by ≤ ~1 texel
+  (imperceptible). Only the shadow projection is snapped — the visible sun disc,
+  sky, and light colour keep the continuous direction. Verified live on OpenSim.
+  Independent of Phase 25.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
