@@ -2954,20 +2954,38 @@ avatar, so they are collected here to be worked one at a time.
   (imperceptible). Only the shadow projection is snapped — the visible sun disc,
   sky, and light colour keep the continuous direction. Verified live on OpenSim.
   Independent of Phase 25.
-- [ ] **R21. Large flat dark-blue plane across the scene (water / water fog?)**
-  (`sl-client-bevy-viewer`, likely P23 water). Noticed while verifying P26.3
+- [x] **R21. Large flat dark-blue plane across the scene (water / water fog?)**
+  (`sl-client-bevy-viewer`, P23.1). **Fixed.** Noticed while verifying P26.3
   grass on the local OpenSim: a near-horizontal, near-uniform **dark blue**
-  plane cuts across the scene at the shoreline (visible in the grass side-view
-  screenshots), much darker and flatter than a plausible water surface — it
-  reads as a solid slab rather than a lit, rippled, semi-transparent surface.
-  Almost certainly the region **water surface** (P23.1 `WaterMaterial`) and/or
-  its underwater **fog**: candidates to check are the water material's base
-  colour / fog density / opacity being driven too dark from the EEP water
-  settings, the water plane sitting at the wrong height (so it clips the terrain
-  oddly at the shore), the surface receiving no sky/sun contribution (unlit →
-  flat colour), or a missing reflection/refraction so it falls back to a
-  constant. Needs a focused look at `water.rs` / the EEP water ingestion; out of
-  scope for the grass work, logged here so it is not lost.
+  plane cuts across the scene at the shoreline, much darker and flatter than a
+  plausible water surface — it reads as a solid slab rather than a lit, rippled,
+  semi-transparent surface. **Root cause** (localised by an A/B capture — the
+  slab vanishes with the underwater fog forced off, so it is the fog, not the
+  `WaterMaterial` surface): the underwater-fog post-process
+  (`underwater_fog.wgsl`) fogged **every** fragment below the water height,
+  including the region's underwater **seafloor / terrain seen from *above*
+  water**, painting it into a flat dark slab that shows through the
+  semi-transparent water surface. The
+  reference fogs the deferred *opaque* geometry **before** the transparent water
+  surface is composited, so from above the surface shader alone gives the look;
+  our fullscreen pass runs after everything, so it over-fogged. The contrast was
+  starkest over the **void past a region edge with no neighbour** (endless-ocean
+  surface, no seafloor → unfogged/light) against the adjacent region water
+  (fogged seafloor → dark). **Fix:** gate the fog to an **underwater** effect —
+  when the eye is **above** the water surface the shader returns the scene
+  untouched (the `water.wgsl` surface provides the from-above deep-water tint +
+  fresnel); only a **submerged** eye fogs the scene below, with the reference's
+  per-fragment waterline clip preserved. Verified live on OpenSim (own captures
+  above water + user confirmation both above and below the surface): the dark
+  slab is gone, region water and void ocean now read the same, and submerged fog
+  is unchanged. An earlier candidate (a `SURFACE_SKIP` band excluding only the
+  water-surface *plane*) was tried and discarded — it left the fogged seafloor
+  slab. Two debug affordances landed with this: a
+  `SL_VIEWER_DISABLE_UNDERWATER_FOG` env A/B knob, and the `--camera-position` /
+  `--camera-look-at` / `--camera-spin` / `--camera-spin-axis` CLI options (an
+  absolute fixed camera pose + auto-rotate for unattended screenshot captures of
+  a specific viewpoint, such as a region edge — the reproduction path this fix
+  needed).
 - [ ] **R22. Avatars stay low-detail / blue spheres and never resolve
   on approach** (`sl-client-bevy-viewer`, P10 placeholders / P13 base avatar /
   P21 pixel-area LOD). Two related failures seen against live avatars: (a) an

@@ -72,7 +72,7 @@ use crate::bake_inputs::{
 };
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
-use crate::camera::{FlyCamera, fly_camera};
+use crate::camera::{CameraSpin, CameraStart, FlyCamera, SpinAxis, fly_camera};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::diagnostics::{
     PipelineOverlayVisible, setup_diagnostics_overlay, setup_pipeline_overlay,
@@ -202,6 +202,47 @@ struct Options {
     /// cursor un-grabbed so it does not hijack the desktop it runs on.
     #[clap(long, env = "SL_VIEWER_SCREENSHOT_DIR")]
     screenshot_dir: Option<PathBuf>,
+    /// A debug affordance: place the fly-camera at an absolute Second Life
+    /// region-local position `x,y,z` (Z-up metres, e.g. `240,128,25` near an
+    /// east edge) instead of snapping it to the agent on login. Lets an
+    /// unattended screenshot capture frame a fixed viewpoint — such as a region
+    /// edge, to inspect the water surface / underwater fog (R21). Pairs with
+    /// `--camera-look-at` and `--camera-spin`.
+    #[clap(long, value_parser = parse_sl_vec3, allow_hyphen_values = true)]
+    camera_position: Option<Vec3>,
+    /// Aim the fixed camera (`--camera-position`) at this Second Life
+    /// region-local point `x,y,z` (Z-up metres). Ignored without
+    /// `--camera-position`; without it the camera keeps its default forward aim.
+    #[clap(long, value_parser = parse_sl_vec3, allow_hyphen_values = true)]
+    camera_look_at: Option<Vec3>,
+    /// A debug affordance: auto-rotate the camera at this many degrees per second
+    /// about the axis chosen by `--camera-spin-axis` — a slow survey pan for a
+    /// screenshot sequence. Works with the login-snapped camera too.
+    #[clap(long, allow_hyphen_values = true)]
+    camera_spin: Option<f32>,
+    /// Which camera axis `--camera-spin` rotates about (default `yaw`, a
+    /// left/right pan).
+    #[clap(long, value_enum, default_value_t = SpinAxis::Yaw)]
+    camera_spin_axis: SpinAxis,
+}
+
+/// Parse a `--camera-position` / `--camera-look-at` argument: three
+/// comma-separated Second Life region-local coordinates (`x,y,z`, Z-up metres)
+/// into a Bevy Y-up [`Vec3`], applying the same `(x, y, z) -> (x, z, -y)` axis
+/// map as [`crate::coords::sl_to_bevy_vec`] so the operator can think in Second
+/// Life region coordinates.
+fn parse_sl_vec3(value: &str) -> Result<Vec3, String> {
+    let parts: Vec<&str> = value.split(',').collect();
+    let [x, y, z] = parts.as_slice() else {
+        return Err(format!(
+            "expected three comma-separated numbers `x,y,z`, got {value:?}"
+        ));
+    };
+    let x = x.trim().parse::<f32>().map_err(|error| error.to_string())?;
+    let y = y.trim().parse::<f32>().map_err(|error| error.to_string())?;
+    let z = z.trim().parse::<f32>().map_err(|error| error.to_string())?;
+    // Second Life Z-up region-local -> Bevy Y-up: (x, y, z) -> (x, z, -y).
+    Ok(Vec3::new(x, z, -y))
 }
 
 /// Map a grid nickname to its XML-RPC login URI, or `None` if unknown.
@@ -254,10 +295,21 @@ struct LoginOutcome {
 /// Startup system: spawn the fly-camera. The scene's directional light (the
 /// sun / moon) is spawned by [`crate::sky::setup_sky`], which also drives it from
 /// the region's environment.
-fn setup_scene(mut commands: Commands) {
+fn setup_scene(mut commands: Commands, camera_start: Res<CameraStart>) {
     // A provisional camera pose near a region centre (256 m region, ~30 m up);
     // `drive_session` snaps it to the agent's real login position once the
-    // agent's avatar object arrives.
+    // agent's avatar object arrives — unless `--camera-position` fixed an
+    // absolute pose, in which case place it there and aim it (and `drive_session`
+    // leaves it alone).
+    let mut camera = FlyCamera::default();
+    let translation = if let Some(position) = camera_start.position {
+        if let Some(look) = camera_start.look {
+            camera.aim_along(look);
+        }
+        position
+    } else {
+        Vec3::new(128.0, 30.0, -128.0)
+    };
     commands.spawn((
         // The underwater-fog post-process (P23.1) samples the scene depth, so make
         // the main-pass depth texture readable (`TEXTURE_BINDING`). MSAA is pinned
@@ -277,8 +329,8 @@ fn setup_scene(mut commands: Commands) {
             far: 4096.0,
             ..default()
         }),
-        Transform::from_xyz(128.0, 30.0, -128.0),
-        FlyCamera::default(),
+        Transform::from_translation(translation),
+        camera,
         Msaa::Sample4,
         // The `UnderwaterFog` component both carries the per-frame fog parameters
         // and selects this camera for the fog pass.
@@ -330,6 +382,8 @@ fn run_session(
     play_animation: &[Uuid],
     repeat_animation: bool,
     screenshot_dir: Option<&Path>,
+    camera_start: CameraStart,
+    camera_spin: CameraSpin,
 ) -> LoginOutcome {
     // In screenshot mode leave the cursor free (visible, un-grabbed) so an
     // unattended capture run does not hijack the desktop's pointer.
@@ -399,6 +453,11 @@ fn run_session(
     // world unit to shadow an avatar crisply across a whole region.
     .insert_resource(DirectionalLightShadowMap { size: 4096 })
     .init_resource::<ViewerSession>()
+    // The debug camera override (`--camera-position` / `--camera-look-at` /
+    // `--camera-spin`): `setup_scene` reads the start pose, `fly_camera` reads
+    // the spin, and `drive_session` skips its login-snap when a pose is fixed.
+    .insert_resource(camera_start)
+    .insert_resource(camera_spin)
     .init_resource::<LoginOutcome>()
     .init_resource::<EnvironmentState>()
     .init_resource::<TerrainState>()
@@ -735,12 +794,31 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             login_uri: login_uri.parse()?,
             request: request.clone(),
         };
+        let camera_start = CameraStart {
+            position: options.camera_position,
+            // Aim the fixed camera at the look-at point (the direction from the
+            // camera to the target); ignored without a fixed position.
+            look: match (options.camera_position, options.camera_look_at) {
+                (Some(position), Some(target)) => Some(Vec3::new(
+                    target.x - position.x,
+                    target.y - position.y,
+                    target.z - position.z,
+                )),
+                _other => None,
+            },
+        };
+        let camera_spin = CameraSpin {
+            rate: options.camera_spin.unwrap_or(0.0).to_radians(),
+            axis: options.camera_spin_axis,
+        };
         let outcome = run_session(
             &params,
             options.viewer_assets.as_deref(),
             &options.play_animation,
             options.repeat_animation,
             options.screenshot_dir.as_deref(),
+            camera_start,
+            camera_spin,
         );
         if let Some(challenge) = outcome.challenge {
             info!(

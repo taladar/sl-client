@@ -4,13 +4,17 @@
 // underwater geometry (terrain, objects, avatars, the water underside) uniformly
 // — not just one material.
 //
-// The scene colour and the depth buffer are the inputs; per pixel the depth is
-// reconstructed into a world position, and the reference's per-fragment water-plane
-// clip is applied: a fragment above the water surface passes through untouched, so
-// a camera straddling the surface splits cleanly along the waterline (and an
-// underwater fragment seen from above water — the sea floor through the surface —
-// still fogs). Everything else runs the reference's `getWaterFogViewNoClip`
-// transmittance / in-scatter, re-derived for a horizontal plane (Bevy +Y up).
+// The scene colour and the depth buffer are the inputs. The fog is treated as an
+// *underwater* effect (R21): when the eye is above the water surface the whole
+// scene passes through untouched (the water-surface shader `water.wgsl` provides
+// the from-above look), because fogging the underwater seafloor from above painted
+// the sea into a flat dark slab the reference does not show — most visibly over the
+// void past a region edge with no neighbour. When the eye is submerged, each pixel's
+// depth is reconstructed into a world position and the reference's per-fragment
+// water-plane clip is applied (a fragment above the surface passes through, so the
+// waterline splits cleanly); everything below runs the reference's
+// `getWaterFogViewNoClip` transmittance / in-scatter, re-derived for a horizontal
+// plane (Bevy +Y up).
 
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
@@ -40,6 +44,17 @@ struct UnderwaterFog {
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scene = textureSample(screen_texture, screen_sampler, in.uv);
 
+    // The underwater fog is an *underwater* effect: only fog the scene when the eye
+    // itself is submerged. When the eye is above water, the water-surface shader
+    // (water.wgsl) already gives the from-above appearance (deep-water tint +
+    // fresnel reflection), and fogging here would darken the sea / the underwater
+    // seafloor into a flat dark slab Firestorm does not show — starkest over the
+    // void past a region edge with no neighbour (R21). An eye above the surface
+    // therefore leaves the whole scene untouched; a submerged eye fogs it below.
+    if (fog.camera_pos.y > fog.water_height) {
+        return scene;
+    }
+
     // Read the (multisampled) depth for this pixel. Reverse-Z: the far plane / empty
     // sky is depth 0.0, which has no geometry to fog.
     let coord = vec2<i32>(in.position.xy);
@@ -55,7 +70,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let world_pos = world_h.xyz / world_h.w;
 
     // getWaterFogView per-fragment clip: a fragment above the water surface is not
-    // fogged (so the waterline split and half-submerged objects work).
+    // fogged, so a submerged camera looking up past the waterline (e.g. at the shore
+    // or a half-submerged object) splits cleanly along the surface.
     if (world_pos.y > fog.water_height) {
         return scene;
     }

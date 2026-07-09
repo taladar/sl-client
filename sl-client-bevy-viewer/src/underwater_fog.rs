@@ -10,6 +10,16 @@
 //! pass over the composited image plus the depth buffer — fogging terrain, objects,
 //! avatars, and the water underside uniformly, exactly where they are underwater.
 //!
+//! Scope (R21): the pass fogs only when the **eye is submerged**. The reference
+//! fogs the deferred *opaque* geometry before the transparent water surface is
+//! composited, so the surface is never fogged by this pass; here the surface is
+//! already in the colour buffer, and fogging the underwater seafloor as seen from
+//! *above* water painted the sea into a flat dark slab (starkest over the void past
+//! a region edge with no neighbour). Above the surface the water-surface shader
+//! (`water.wgsl`) already gives the from-above look, so the fog shader passes the
+//! scene through untouched when the eye is above water and only fogs when submerged.
+//! `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces it off entirely (a debug A/B knob).
+//!
 //! Bevy 0.19 replaced the render graph with a **system-based** renderer, so this is
 //! not a render-graph `ViewNode`: the pass is a system in the [`Core3d`] schedule
 //! (in [`Core3dSystems::PostProcess`], before tonemapping), modelled on
@@ -131,6 +141,12 @@ pub(crate) fn update_underwater_fog(
     level: Res<WaterLevel>,
     mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<FlyCamera>>,
 ) {
+    // A debug affordance: `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the fog off
+    // (zero density is a shader no-op) so a capture can A/B the underwater-fog pass
+    // against the plain water-surface shading (used to localise the R21 dark slab).
+    let disabled = std::env::var("SL_VIEWER_DISABLE_UNDERWATER_FOG")
+        .ok()
+        .is_some_and(|value| value != "0" && !value.is_empty());
     for (global, projection, mut fog) in &mut cameras {
         let camera_pos = global.translation();
         let position = day_position(&environment.settings);
@@ -188,6 +204,8 @@ pub(crate) fn update_underwater_fog(
             }
             None => (Vec3::ZERO, 0.0),
         };
+        // Debug override: a zero density makes the fog shader a pass-through.
+        let fog_density = if disabled { 0.0 } else { fog_density };
 
         *fog = UnderwaterFog {
             world_from_clip,

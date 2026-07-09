@@ -21,7 +21,7 @@ use sl_client_bevy::{
     AnimationKey, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::{CameraStart, FlyCamera};
 use crate::coords::{sl_to_bevy_object_rotation, sl_to_bevy_vec};
 
 /// The draw distance requested once the region handshake completes, in metres.
@@ -140,11 +140,19 @@ pub(crate) fn enforce_quit_deadline(
 /// Fold the session event stream into viewer actions: draw distance on
 /// handshake, camera placement on the agent's first appearance, and a clean
 /// exit on logout/disconnect.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS resources and queries; \
+              placing / snapping the camera needs the event stream, identity, session \
+              bookkeeping, play-on-login and camera-override config, the camera query, \
+              and the command / exit writers together"
+)]
 pub(crate) fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut session: ResMut<ViewerSession>,
     play_on_login: Res<PlayOnLogin>,
+    camera_start: Res<CameraStart>,
     mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
     mut commands: MessageWriter<SlCommand>,
     mut exit: MessageWriter<AppExit>,
@@ -169,7 +177,8 @@ pub(crate) fn drive_session(
                 }
             }
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                if !session.camera_positioned
+                if camera_start.position.is_none()
+                    && !session.camera_positioned
                     && identity
                         .agent_id
                         .is_some_and(|agent| agent.uuid() == object.full_id.uuid())

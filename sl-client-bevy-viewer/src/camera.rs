@@ -30,6 +30,47 @@ const MOUSE_SENSITIVITY: f32 = 0.003;
 /// pole.
 const MAX_PITCH: f32 = 1.54;
 
+/// Which of the camera's own axes an [auto-rotation](CameraSpin) spins about.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum SpinAxis {
+    /// About the vertical (Bevy `+Y`) axis — pans left/right (the natural survey
+    /// spin; rotates freely).
+    #[default]
+    Yaw,
+    /// About the camera's local right axis — tilts up/down (clamped to the same
+    /// `±MAX_PITCH` the mouse-look uses, so it sweeps rather than loops).
+    Pitch,
+    /// About the camera's local forward axis — rolls the horizon (rotates freely).
+    Roll,
+}
+
+/// A debug affordance: auto-rotate the camera at a fixed rate about one of its
+/// axes, for unattended screenshot sequences that pan across a scene (e.g. to
+/// inspect the water / underwater-fog artifacts of R21 around a region edge).
+/// Inserted from the `--camera-spin` / `--camera-spin-axis` options; a zero
+/// [`rate`](Self::rate) disables it.
+#[derive(Resource, Default)]
+pub(crate) struct CameraSpin {
+    /// Radians per second to auto-rotate; `0.0` disables the spin.
+    pub(crate) rate: f32,
+    /// Which of the camera's axes the spin rotates about.
+    pub(crate) axis: SpinAxis,
+}
+
+/// A debug affordance: place the fly-camera at an absolute pose on startup
+/// instead of snapping it to the agent on login, so an unattended screenshot
+/// capture can frame a specific viewpoint. Inserted from the `--camera-position`
+/// / `--camera-look-at` options; a `None` [`position`](Self::position) keeps the
+/// default login-snap behaviour.
+#[derive(Resource, Default)]
+pub(crate) struct CameraStart {
+    /// The absolute Bevy-space camera position, or `None` to snap to the agent.
+    pub(crate) position: Option<Vec3>,
+    /// The Bevy-space look direction (un-normalised is fine), or `None` to keep
+    /// the default forward aim.
+    pub(crate) look: Option<Vec3>,
+}
+
 /// The debug fly-camera: a marker plus its accumulated look angles.
 #[derive(Component)]
 pub(crate) struct FlyCamera {
@@ -38,6 +79,9 @@ pub(crate) struct FlyCamera {
     /// Pitch about the camera's local right axis, in radians, clamped to
     /// `±MAX_PITCH`.
     pitch: f32,
+    /// Roll about the camera's local forward axis, in radians. Only the
+    /// [`CameraSpin`] roll mode moves it; mouse-look leaves it at `0`.
+    roll: f32,
 }
 
 impl Default for FlyCamera {
@@ -46,6 +90,7 @@ impl Default for FlyCamera {
         Self {
             yaw: 0.0,
             pitch: 0.0,
+            roll: 0.0,
         }
     }
 }
@@ -74,6 +119,7 @@ pub(crate) fn fly_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
+    spin: Res<CameraSpin>,
     mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
 ) {
     let delta = mouse.delta;
@@ -83,7 +129,20 @@ pub(crate) fn fly_camera(
         // (moving the mouse up looks up).
         camera.yaw -= delta.x * MOUSE_SENSITIVITY;
         camera.pitch = (camera.pitch - delta.y * MOUSE_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, 0.0);
+        // Optional auto-rotation (a survey pan for unattended captures): advance
+        // the chosen axis by the spin rate. Yaw and roll loop freely; pitch keeps
+        // the mouse-look clamp, so a pitch spin sweeps between the poles.
+        if spin.rate != 0.0 {
+            let step = spin.rate * dt;
+            match spin.axis {
+                SpinAxis::Yaw => camera.yaw += step,
+                SpinAxis::Pitch => {
+                    camera.pitch = (camera.pitch + step).clamp(-MAX_PITCH, MAX_PITCH);
+                }
+                SpinAxis::Roll => camera.roll += step,
+            }
+        }
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, camera.yaw, camera.pitch, camera.roll);
 
         // Assemble a movement direction from the pressed keys, in the camera's
         // now-current basis, accumulated per-component so the arithmetic stays
