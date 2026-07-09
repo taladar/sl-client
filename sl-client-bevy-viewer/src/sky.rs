@@ -50,7 +50,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::light::NotShadowCaster;
+use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -81,6 +81,27 @@ const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 /// Maps the sky's ambient colour luminance to the Bevy ambient-light brightness
 /// (lux). The reference default ambient (`0.25` grey) lands at a soft fill.
 const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
+
+/// Cascaded-shadow-map coverage for the scene sun / moon (P24.1). Tuned to a
+/// Second Life region's scale (256 m): the last cascade reaches to a region's
+/// diagonal (~362 m) so an avatar's shadow, nearby prims, and terrain relief all
+/// receive the sun, while the first (near) cascade is kept tight so avatar-close
+/// detail gets most of the shadow-map resolution. The reference
+/// `LLPipeline::renderShadow` uses four split sun cascades likewise.
+fn shadow_cascades() -> CascadeShadowConfig {
+    CascadeShadowConfigBuilder {
+        num_cascades: 4,
+        // The camera can push right up to an avatar's face (2 cm near plane), so
+        // start the near cascade close.
+        minimum_distance: 0.1,
+        // A region diagonal — beyond this, distant relief goes unshadowed.
+        maximum_distance: 384.0,
+        // Keep the near cascade tight so avatar-close geometry is crisp.
+        first_cascade_far_bound: 24.0,
+        overlap_proportion: 0.2,
+    }
+    .build()
+}
 
 /// The reference viewer's built-in rainbow texture (`IMG_RAINBOW`,
 /// `llsettingssky.cpp`), sampled by the sky's rainbow overlay when the sky frame
@@ -320,8 +341,13 @@ pub(crate) fn setup_sky(
     commands.spawn((
         DirectionalLight {
             illuminance: SCENE_LIGHT_ILLUMINANCE,
+            // P24.1: cast cascaded shadow maps from the sun / moon.
+            shadow_maps_enabled: true,
             ..default()
         },
+        // Cascades tuned to region scale so shadows cover an avatar plus nearby
+        // prims and terrain (`drive_sky` keeps the direction on the active body).
+        shadow_cascades(),
         Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
         SceneSun,
     ));

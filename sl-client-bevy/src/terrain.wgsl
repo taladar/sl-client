@@ -4,13 +4,18 @@
 // plus ambient light so the ground reads with relief.
 //
 // This is deliberately not a full PBR material: it binds only the four detail
-// textures and hard-codes a sun direction matching the viewer's directional
-// light, avoiding the view/light bind groups so it stays robust across Bevy
-// point releases. Advanced terrain materials (PBR / normal / specular) are a
-// deferred non-goal of the minimum-viable viewer.
+// textures and a single directional (sun / moon) term. It does, however, read
+// the shared view + light bind group (group 0) so it tracks the scene's real
+// sun/moon direction (the day cycle) and — for P24 — samples the directional
+// light's cascaded shadow maps so the ground receives shadows cast by avatars,
+// prims, and terrain relief. Advanced terrain materials (PBR / normal /
+// specular) remain a deferred non-goal of the minimum-viable viewer.
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings as view_bindings,
+    mesh_view_types,
+    shadows,
     view_transformations::position_world_to_clip,
 }
 
@@ -36,6 +41,7 @@ struct VertexOutput {
     @location(0) world_normal: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) weights: vec4<f32>,
+    @location(3) world_position: vec4<f32>,
 };
 
 @vertex
@@ -47,6 +53,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0),
     );
     out.clip_position = position_world_to_clip(world_position.xyz);
+    out.world_position = world_position;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         vertex.normal,
         vertex.instance_index,
@@ -70,11 +77,39 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let c3 = textureSample(detail3_texture, detail3_sampler, in.uv);
     let base = c0 * weights.x + c1 * weights.y + c2 * weights.z + c3 * weights.w;
 
-    // Direction toward the sun, matching the viewer's directional light
-    // (which looks along (-0.4, -1.0, -0.3)).
-    let sun_dir = normalize(vec3<f32>(0.4, 1.0, 0.3));
     let normal = normalize(in.world_normal);
+
+    // Direction toward the active sun / moon, taken from the scene's first
+    // directional light so the ground tracks the day cycle. Fall back to a fixed
+    // overhead-ish direction if (unexpectedly) no directional light is present.
+    var sun_dir = normalize(vec3<f32>(0.4, 1.0, 0.3));
+    var shadow = 1.0;
+    if (view_bindings::lights.n_directional_lights > 0u) {
+        let light = &view_bindings::lights.directional_lights[0];
+        sun_dir = (*light).direction_to_light;
+
+        // P24: sample the directional light's cascaded shadow maps so the ground
+        // receives shadows. `view_z` is the fragment's depth in view space (what
+        // selects the cascade); `clip_position.xy` is the fragment coordinate.
+        if (((*light).flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u) {
+            let view_z = dot(vec4<f32>(
+                view_bindings::view.view_from_world[0].z,
+                view_bindings::view.view_from_world[1].z,
+                view_bindings::view.view_from_world[2].z,
+                view_bindings::view.view_from_world[3].z,
+            ), in.world_position);
+            shadow = shadows::fetch_directional_shadow(
+                0u,
+                in.world_position,
+                normal,
+                view_z,
+                in.clip_position.xy,
+            );
+        }
+    }
+
+    // A flat ambient fill plus the shadowed direct (sun / moon) term.
     let diffuse = max(dot(normal, sun_dir), 0.0);
-    let light = 0.35 + 0.65 * diffuse;
+    let light = 0.35 + 0.65 * diffuse * shadow;
     return vec4<f32>(base.rgb * light, 1.0);
 }

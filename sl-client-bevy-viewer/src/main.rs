@@ -32,6 +32,7 @@ mod water;
 use std::path::{Path, PathBuf};
 
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
+use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
@@ -377,6 +378,10 @@ fn run_session(
         FrameTimeDiagnosticsPlugin::default(),
         EntityCountDiagnosticsPlugin::default(),
     ))
+    // P24.1: a larger sun/moon shadow map than the 2048 default, so the four
+    // region-scale cascades (see `sky::shadow_cascades`) keep enough texels per
+    // world unit to shadow an avatar crisply across a whole region.
+    .insert_resource(DirectionalLightShadowMap { size: 4096 })
     .init_resource::<ViewerSession>()
     .init_resource::<LoginOutcome>()
     .init_resource::<EnvironmentState>()
