@@ -257,6 +257,12 @@ pub(crate) struct AvatarState {
     /// the system body. Keyed by baked slot ([`BODY_BAKE_SLOTS`]); a slot with no
     /// real bake is simply absent.
     baked_textures: HashMap<AgentKey, HashMap<usize, TextureKey>>,
+    /// The base-body region slots each avatar has baked **invisible**
+    /// (`IMG_INVISIBLE`) via a worn system alpha layer, from its latest appearance
+    /// (R22). These regions are hidden outright ([`apply_avatar_part_visibility`]),
+    /// matching the reference viewer's `isTextureVisible`, so the system body does
+    /// not render and z-fight a non-BOM mesh body worn over it.
+    invisible_regions: HashMap<AgentKey, HashSet<usize>>,
     /// The Current Outfit Folder version whose bakes were last fetched per avatar
     /// (P14.4), so a later `AvatarAppearance` with a strictly-older `cof_version`
     /// (an out-of-order / duplicate resend) is skipped and cannot clobber a newer
@@ -1134,10 +1140,9 @@ impl AvatarState {
     }
 }
 
-/// The base-body baked-texture slots the viewer fetches and drapes over the
-/// system body (P14): the six region bakes — head, upper body, lower body, eyes,
-/// hair, and skirt. The "universal" baked slots (`*_ARM` / `*_LEG` / `AUX*`) are
-/// not used by the base mesh, so they are not fetched.
+/// The base-body baked-texture slots draped over the **system** body (P14): the
+/// six region bakes — head, upper body, lower body, eyes, hair, and skirt — each
+/// with a matching base-mesh region part.
 const BODY_BAKE_SLOTS: [usize; 6] = [
     avatar_texture::HEAD_BAKED,
     avatar_texture::UPPER_BAKED,
@@ -1145,6 +1150,19 @@ const BODY_BAKE_SLOTS: [usize; 6] = [
     avatar_texture::EYES_BAKED,
     avatar_texture::HAIR_BAKED,
     avatar_texture::SKIRT_BAKED,
+];
+
+/// The **universal** baked-texture slots a modern mesh body samples via
+/// bake-on-mesh for its arms / legs / detached parts (R22). The system base mesh
+/// has no matching region — these bakes are fetched only so a worn mesh body's BoM
+/// faces on those slots ([`apply_bom_face_materials`]) can show the real baked skin
+/// instead of the flat skin placeholder; they are never draped on a system part.
+const UNIVERSAL_BAKE_SLOTS: [usize; 5] = [
+    avatar_texture::LEFT_ARM_BAKED,
+    avatar_texture::LEFT_LEG_BAKED,
+    avatar_texture::AUX1_BAKED,
+    avatar_texture::AUX2_BAKED,
+    avatar_texture::AUX3_BAKED,
 ];
 
 /// The appearance-service URL path name for a baked slot — the reference viewer's
@@ -1159,18 +1177,44 @@ const fn bake_service_slot_name(slot: usize) -> Option<&'static str> {
         avatar_texture::EYES_BAKED => Some("eyes"),
         avatar_texture::HAIR_BAKED => Some("hair"),
         avatar_texture::SKIRT_BAKED => Some("skirt"),
+        // The "universal" bakes a modern mesh body samples via bake-on-mesh for its
+        // arms / legs / detached parts (R22), fetched from the appearance service by
+        // the same `<slot>` URL names the reference viewer uses (`llavatarappearance
+        // defines.cpp` `BakedEntry`).
+        avatar_texture::LEFT_ARM_BAKED => Some("leftarm"),
+        avatar_texture::LEFT_LEG_BAKED => Some("leftleg"),
+        avatar_texture::AUX1_BAKED => Some("aux1"),
+        avatar_texture::AUX2_BAKED => Some("aux2"),
+        avatar_texture::AUX3_BAKED => Some("aux3"),
         _other => None,
     }
 }
 
-/// The visible baked texture id in each base-body region slot of an avatar's
-/// texture entry — every [`BODY_BAKE_SLOTS`] slot whose id names a real,
-/// renderable bake ([`is_bake_visible`](avatar_texture::is_bake_visible)), keyed
-/// by baked slot. A slot that is empty, defaulted, or invisible is omitted, so a
-/// region with no published bake has nothing to fetch.
+/// The base-body region slots whose baked texture is the `IMG_INVISIBLE` sentinel
+/// (R22) — a worn system alpha layer carved the region away. The reference viewer's
+/// `isTextureVisible` treats these as not visible and hides the region; only the
+/// system-body [`BODY_BAKE_SLOTS`] are checked (a universal slot has no base part).
+fn invisible_body_slots(texture_entry: &TextureEntry) -> HashSet<usize> {
+    BODY_BAKE_SLOTS
+        .into_iter()
+        .filter(|&slot| {
+            texture_entry
+                .texture_id(slot)
+                .is_some_and(|id| id.uuid() == avatar_texture::IMG_INVISIBLE)
+        })
+        .collect()
+}
+
+/// The visible baked texture id in each baked slot of an avatar's texture entry —
+/// every [`BODY_BAKE_SLOTS`] (system-body region) and [`UNIVERSAL_BAKE_SLOTS`]
+/// (mesh-body bake-on-mesh) slot whose id names a real, renderable bake
+/// ([`is_bake_visible`](avatar_texture::is_bake_visible)), keyed by baked slot. A
+/// slot that is empty, defaulted, or invisible is omitted, so a region with no
+/// published bake has nothing to fetch. The universal slots have no system-body
+/// part, so they are draped only onto a worn mesh body's BoM faces (R22).
 fn visible_body_bakes(texture_entry: &TextureEntry) -> HashMap<usize, TextureKey> {
     let mut bakes = HashMap::new();
-    for slot in BODY_BAKE_SLOTS {
+    for slot in BODY_BAKE_SLOTS.into_iter().chain(UNIVERSAL_BAKE_SLOTS) {
         if let Some(id) = texture_entry.texture_id(slot)
             && avatar_texture::is_bake_visible(id)
         {
@@ -1318,6 +1362,16 @@ pub(crate) fn ingest_avatar_bakes(
                 continue;
             }
             let bakes = visible_body_bakes(&appearance.texture_entry);
+            // The base regions this avatar has baked **invisible** (`IMG_INVISIBLE`)
+            // — a worn system alpha layer that carves the system body away so a
+            // (non-BOM) mesh body shows through cleanly. The reference viewer's
+            // `isTextureVisible` returns false for these, hiding the region; we do
+            // the same in `apply_avatar_part_visibility` (R22). Without it the
+            // untextured system body renders and z-fights the mesh body (blotches).
+            state.invisible_regions.insert(
+                appearance.avatar_id,
+                invisible_body_slots(&appearance.texture_entry),
+            );
             for (&slot, &id) in &bakes {
                 // On a central-baking grid a baked id is fetched from the appearance
                 // service (`<svc>texture/<avatar>/<slot>/<uuid>`), not by UUID from
@@ -2304,7 +2358,14 @@ pub(crate) fn apply_avatar_part_visibility(
             .get(&part.agent)
             .and_then(|bakes| bakes.get(&slot))
             .is_some_and(|&id| bake_mats.region_transparent(id));
+        // A region baked `IMG_INVISIBLE` by a worn system alpha layer is hidden
+        // outright (R22), matching the reference viewer's `isTextureVisible`.
+        let invisible = state
+            .invisible_regions
+            .get(&part.agent)
+            .is_some_and(|slots| slots.contains(&slot));
         let region_hidden = alpha_hidden
+            || invisible
             || hidden
                 .get(&part.agent)
                 .is_some_and(|slots| slots.contains(&slot));
@@ -2350,10 +2411,20 @@ pub(crate) fn apply_avatar_part_visibility(
 /// it only re-points a face whose material actually differs. A face whose region
 /// has no bake yet keeps the opaque skin placeholder it was spawned with (the
 /// shared body skin material), so a BoM body stays visibly present — never an
-/// invisible shell (the P17.2 finding) — while its bake loads. A face on a
-/// "universal" baked slot the base body does not track (no matching region part)
-/// keeps that placeholder too.
+/// invisible shell (the P17.2 finding) — while its bake loads.
+///
+/// A face on a **universal** baked slot (`leftarm` / `leftleg` / `aux*`) has no
+/// system-body region part, so its material is not among `parts`; it is resolved
+/// (and created on demand) straight from the avatar's fetched universal bake
+/// ([`UNIVERSAL_BAKE_SLOTS`]) so a mesh body's arm / leg shows the real baked skin
+/// rather than the flat placeholder (R22). Only when the avatar publishes no bake
+/// for that slot does the face keep the placeholder.
 pub(crate) fn apply_bom_face_materials(
+    state: Res<AvatarState>,
+    mut bake_mats: ResMut<AvatarBakeMaterials>,
+    manager: Res<TextureManager>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     parts: Query<(&AvatarBodyPart, &MeshMaterial3d<StandardMaterial>), Without<BomFace>>,
     mut faces: Query<(&BomFace, &mut MeshMaterial3d<StandardMaterial>), Without<AvatarBodyPart>>,
 ) {
@@ -2363,20 +2434,37 @@ pub(crate) fn apply_bom_face_materials(
     // The material each avatar body region currently wears, keyed by (agent, baked
     // slot) — whatever the server / client bake assignment resolved it to (a real
     // bake material, or the shared skin placeholder for a region with no bake).
-    let mut region_material: HashMap<(AgentKey, usize), Handle<StandardMaterial>> = HashMap::new();
+    let mut part_materials: HashMap<(AgentKey, usize), Handle<StandardMaterial>> = HashMap::new();
     for (part, material) in &parts {
         let _prev =
-            region_material.insert((part.agent, part.region.baked_slot()), material.0.clone());
+            part_materials.insert((part.agent, part.region.baked_slot()), material.0.clone());
     }
     let mut retargeted = 0_usize;
     for (face, mut material) in &mut faces {
-        let Some(desired) = region_material.get(&(face.agent, face.slot)) else {
-            // A universal baked slot (or an avatar with no body parts): keep the
-            // placeholder the face was spawned with.
+        let desired = if let Some(handle) = part_materials.get(&(face.agent, face.slot)) {
+            handle.clone()
+        } else if let Some(&id) = state
+            .baked_textures
+            .get(&face.agent)
+            .and_then(|bakes| bakes.get(&face.slot))
+        {
+            // A universal baked slot: no base-mesh part carries its material, so
+            // build one straight from the avatar's fetched universal bake (R22). The
+            // region material is filled when the bake decodes, like any other.
+            bake_mats.region_material(
+                face.agent,
+                face.slot,
+                id,
+                &manager,
+                &mut images,
+                &mut materials,
+            )
+        } else {
+            // No bake for this slot: keep the placeholder the face was spawned with.
             continue;
         };
-        if material.0 != *desired {
-            *material = MeshMaterial3d(desired.clone());
+        if material.0 != desired {
+            *material = MeshMaterial3d(desired);
             retargeted = retargeted.saturating_add(1);
         }
     }
@@ -2436,8 +2524,8 @@ pub(crate) fn position_name_tags(
 mod tests {
     use super::{
         AvatarState, BakeAlpha, PROVISIONAL_ID_CHARS, body_root_transform, classify_bake_alpha,
-        coarse_translation, provisional_label, should_refetch_bakes, used_baked_slots,
-        visible_body_bakes,
+        coarse_translation, invisible_body_slots, provisional_label, should_refetch_bakes,
+        used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
@@ -2735,6 +2823,33 @@ mod tests {
         assert!(!bakes.contains_key(&avatar_texture::LOWER_BAKED));
         assert!(!bakes.contains_key(&avatar_texture::EYES_BAKED));
         assert_eq!(bakes.len(), 2, "only the two real bakes are picked up");
+    }
+
+    /// A region whose baked slot is the `IMG_INVISIBLE` sentinel (a worn system
+    /// alpha layer) is reported as invisible so the system body is hidden (R22);
+    /// a real bake, the null id, and a non-body (universal) slot are not.
+    #[test]
+    fn invisible_body_slots_flags_only_the_invisible_regions() {
+        let faces = (0..avatar_texture::COUNT)
+            .map(|slot| {
+                let id = if slot == avatar_texture::LOWER_BAKED {
+                    TextureKey::from(avatar_texture::IMG_INVISIBLE)
+                } else if slot == avatar_texture::HEAD_BAKED {
+                    TextureKey::from(Uuid::from_u128(0xabc))
+                } else if slot == avatar_texture::LEFT_ARM_BAKED {
+                    // A universal slot baked invisible must NOT flag a base region.
+                    TextureKey::from(avatar_texture::IMG_INVISIBLE)
+                } else {
+                    TextureKey::from(Uuid::nil())
+                };
+                TextureFace::new(id)
+            })
+            .collect();
+        let invisible = invisible_body_slots(&TextureEntry { faces });
+        assert!(invisible.contains(&avatar_texture::LOWER_BAKED));
+        assert!(!invisible.contains(&avatar_texture::HEAD_BAKED));
+        assert!(!invisible.contains(&avatar_texture::LEFT_ARM_BAKED));
+        assert_eq!(invisible.len(), 1);
     }
 
     /// A baked texture's composited alpha (P14.3) is classified from its source

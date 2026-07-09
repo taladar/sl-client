@@ -3023,16 +3023,15 @@ avatar, so they are collected here to be worked one at a time.
     yet found (possibly not reaching the sim, or a deeper interest /
     cross-region case). Not reproducible headless (every avatar resolves to a
     full body in local runs). **Open** (candidate fix uncommitted).
-  - [~] **R22c. Mesh-body "universal" BoM slots render as flat placeholder
-    skin** (`avatars.rs`). A modern mesh body maps its arms / legs to the
-    universal baked slots (`leftarm` / `leftleg` / `aux*`), which the viewer
-    did not fetch — so those bake-on-mesh faces fell through to the flat skin
-    placeholder, a tone seam against the UPPER-slot torso. A fix to fetch the
-    universal bakes (new slot → service-name entries, `UNIVERSAL_BAKE_SLOTS`)
-    and drape them on the universal-slot BoM faces is written and confirmed
-    live (the universal face resolves to a real bake), but it **surfaced
-    further arm defects (R22d–R22f) and is not yet confirmed a net
-    improvement**. **In progress, uncommitted.**
+  - [x] **R22c. Mesh-body "universal" BoM slots render as flat placeholder
+    skin** (`avatars.rs`). **Fixed.** A modern mesh body maps its arms / legs
+    to the universal baked slots (`leftarm` / `leftleg` / `aux*`), which the
+    viewer did not fetch — so those bake-on-mesh faces fell through to the flat
+    skin placeholder, a tone seam against the UPPER-slot torso. Now the viewer
+    fetches the universal bakes (new slot → service-name entries,
+    `UNIVERSAL_BAKE_SLOTS`) and drapes them on the universal-slot BoM faces
+    (confirmed live: the universal face resolves to a real bake). A correctness
+    fix — it does not on its own resolve the arm's other defects (R22d–R22f).
   - [ ] **R22d. Mesh-body arm renders semi-transparent** — the background
     bleeds through the arm. An alpha-*mode* issue on the skin / BoM faces
     (rendered alpha-blended rather than opaque), not a placeholder-vs-bake
@@ -3043,6 +3042,19 @@ avatar, so they are collected here to be worked one at a time.
     reddish `BODY_COLOR` skin placeholder (or a differently-toned slot) while
     the arm resolved to the real, less-red bake — a mismatch surfaced (or
     introduced) by R22c resolving the arm but not the hand. **Open.**
+  - [x] **R22g. Other avatars' system body z-fights through their mesh body**
+    (`avatars.rs`). **Fixed** (user-confirmed against a Firestorm side-by-side).
+    A non-BOM mesh-body wearer hides the system body with a worn system **alpha
+    layer**, which bakes the head / upper / lower regions to the `IMG_INVISIBLE`
+    sentinel. We only hid the system body via the BOM (`IMG_USE_BAKED`) or a
+    fully-transparent-classified real bake, and `is_bake_visible` *filtered*
+    `IMG_INVISIBLE` out — so those regions had no hide signal and the untextured
+    system body rendered and z-fought the mesh body (blotchy pale patches; live
+    case: the avatar "Aciasblades", whose head/upper/lower slots are all
+    `IMG_INVISIBLE`, rendered clean in Firestorm but blotchy for us). Now
+    `invisible_body_slots` records the `IMG_INVISIBLE` base regions per avatar
+    and `apply_avatar_part_visibility` hides them, matching the reference
+    viewer's `isTextureVisible`. No-op for BOM / normal-bake avatars.
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
