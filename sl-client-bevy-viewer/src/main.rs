@@ -18,6 +18,7 @@ mod chat;
 mod coords;
 mod diagnostics;
 mod environment;
+mod legacy_materials;
 mod lights;
 mod materials;
 mod meshes;
@@ -75,6 +76,10 @@ use crate::diagnostics::{
     toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
+use crate::legacy_materials::{
+    LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
+    drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
+};
 use crate::lights::{LocalLights, drive_local_lights};
 use crate::materials::{
     MaterialManager, apply_material_overrides, apply_pbr_textures, poll_materials,
@@ -406,6 +411,7 @@ fn run_session(
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
     .insert_resource(MaterialManager::new())
+    .init_resource::<LegacyMaterialManager>()
     .init_resource::<AvatarBakeMaterials>()
     .init_resource::<OwnLocalBake>()
     .init_resource::<ServerBakeState>()
@@ -493,6 +499,15 @@ fn run_session(
                 poll_materials,
                 apply_material_overrides,
                 apply_pbr_textures,
+                // The legacy (normal/specular) render-material pipeline (P27.3):
+                // register each face carrying a `TextureEntry` material id, batch
+                // the `RenderMaterials` cap requests, fold in the replies, and
+                // apply the materials + their normal maps to the faces.
+                register_legacy_materials,
+                drive_legacy_material_requests,
+                receive_legacy_materials,
+                apply_legacy_materials,
+                apply_legacy_normal_maps,
             ),
             // Avatar placeholder spheres: full-object avatars first, then the
             // coarse-only ones (which dedupe against the full-object set); then
