@@ -18,6 +18,7 @@ mod chat;
 mod coords;
 mod diagnostics;
 mod environment;
+mod lights;
 mod meshes;
 mod objects;
 mod render_priority;

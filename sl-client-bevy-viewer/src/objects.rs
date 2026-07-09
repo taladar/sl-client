@@ -52,6 +52,7 @@ use sl_client_bevy::{
 
 use crate::avatars::{AvatarBody, AvatarState, BomFace};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::lights::{ObjectLight, light_from_object};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureDecoded, TextureManager, face_material};
@@ -575,6 +576,7 @@ pub(crate) fn pick_object(
     mut ray_cast: MeshRayCast,
     scene: Query<&SceneObject>,
     infos: Query<&ObjectDebugInfo>,
+    lights: Query<&ObjectLight>,
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
@@ -698,6 +700,31 @@ pub(crate) fn pick_object(
                 && let Some(tracked) = state.objects.get(&obj.scoped_id)
             {
                 warn!("pick prim {}: lod={:?}", info.full_id, tracked.prim_lod);
+            }
+            // The ingested light block (P25.1): a light-source prim reports its
+            // decoded colour / intensity / radius / falloff and, for a spotlight,
+            // its projector texture + cone params — the ground truth for the
+            // P25.2 render pass.
+            if let Ok(light) = lights.get(current) {
+                let emitted = light.effective_linear_color();
+                warn!(
+                    "pick light {}: spotlight={} linear_color=[{:.3},{:.3},{:.3}] \
+                     intensity={:.3} emitted=[{:.3},{:.3},{:.3}] radius={:.2}m \
+                     falloff={:.2} cutoff={:.1}deg projection={:?}",
+                    info.full_id,
+                    light.is_spotlight(),
+                    light.linear_color[0],
+                    light.linear_color[1],
+                    light.linear_color[2],
+                    light.intensity,
+                    emitted[0],
+                    emitted[1],
+                    emitted[2],
+                    light.radius,
+                    light.falloff,
+                    light.cutoff,
+                    light.projection,
+                );
             }
             return;
         }
@@ -1129,6 +1156,30 @@ fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
     }
 }
 
+/// Reconcile an object entity's [`ObjectLight`] component (P25.1) with its current
+/// light block: insert / refresh it when the object is a light source, remove it
+/// when the light was cleared in-world. Called on both the spawn and update paths
+/// so a light toggled on or off between updates is tracked.
+fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Commands) {
+    match light {
+        Some(light) => {
+            debug!(
+                "object light: spotlight={} emitted={:?} radius={:.2}m falloff={:.2} \
+                 cutoff={:.1}deg",
+                light.is_spotlight(),
+                light.effective_linear_color(),
+                light.radius,
+                light.falloff,
+                light.cutoff,
+            );
+            commands.entity(entity).insert(light);
+        }
+        None => {
+            commands.entity(entity).remove::<ObjectLight>();
+        }
+    }
+}
+
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
 #[expect(
@@ -1166,6 +1217,12 @@ fn apply_object(
 
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
+    // The object's light block (P25.1): present only if the prim is a light
+    // source. Refreshed on every update so a light toggled off / retuned in-world
+    // is reflected — [`apply_light`] inserts the component when present and
+    // removes it when absent.
+    let light = light_from_object(object);
+
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
         asset: mesh_key(object)
@@ -1196,6 +1253,7 @@ fn apply_object(
         commands
             .entity(existing.geometry)
             .insert(geometry_transform(object));
+        apply_light(existing.entity, light, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
             // re-tessellate. A category change is subsumed here, since the
@@ -1263,6 +1321,9 @@ fn apply_object(
         }
         None => false,
     };
+    // A light-source prim carries its decoded light block (P25.1); a plain prim
+    // gets nothing.
+    apply_light(entity, light, commands);
     // The geometry holder: a child of the object entity carrying only the object's
     // scale, so the object's own faces are scaled while linkset children (which
     // parent to the object entity, not this) are not.
