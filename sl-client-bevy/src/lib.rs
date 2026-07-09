@@ -196,6 +196,13 @@ pub use sl_tree::{
     tree_species,
 };
 
+// The pure Linden-grass geometry (the `LLVOGrass` counterpart of the tree path
+// above; likewise no store/fetcher — a grass clump's blade geometry is generated
+// on the CPU from its species-table entry, selected by the object's `state` byte,
+// and the object scale). Re-exported so the viewer can look up a `GrassSpecies`,
+// generate its `GrassMesh`, and feed it through [`to_bevy_grass_mesh`].
+pub use sl_tree::{GRASS_MAX_BLADES, GrassMesh, GrassSpecies, grass_geometry, grass_species};
+
 // The pure system-avatar decoders (skeleton / base body / visual params), the
 // avatar counterpart of `sl_mesh` / `sl_texture`. Re-exported so the viewer can
 // parse the standard Linden `character/` assets and drive them through
@@ -225,6 +232,7 @@ pub use crate::avatars::{
 };
 #[cfg(feature = "bevy_pbr")]
 pub use crate::clouds::{CloudMaterial, CloudMaterialPlugin, CloudParams};
+pub use crate::grass::to_bevy_grass_mesh;
 pub use crate::meshes::{
     BevyMeshFetcher, rigged_inverse_bindposes, to_bevy_mesh, to_bevy_meshes, to_bevy_rigged_mesh,
 };
@@ -253,6 +261,7 @@ mod chat_log;
 pub mod clouds;
 mod experiences;
 mod fetch;
+pub mod grass;
 mod http;
 mod inventory;
 mod inventory_cache;

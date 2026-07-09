@@ -17,13 +17,17 @@
 //! Currently implemented:
 //!
 //! - [`species`] — the `LLVOTree` species table ([`TreeSpecies`] /
-//!   [`TREE_SPECIES`]) ported from `trees.xml`, with a [`tree_species`] lookup
-//!   by species byte.
+//!   [`TREE_SPECIES`]) ported from `trees.xml` and the `LLVOGrass` species table
+//!   ([`GrassSpecies`] / [`GRASS_SPECIES`]) ported from `grass.xml`, with
+//!   [`tree_species`] / [`grass_species`] lookups by species byte.
 //! - [`geometry`] — procedural `LLVOTree` branch / leaf geometry
 //!   ([`tree_geometry`] / [`billboard_geometry`]) generated from a
 //!   [`TreeSpecies`], plus the [`TreeLod`] trunk levels of detail.
+//! - [`grass`] — procedural `LLVOGrass` crossed-quad blade geometry
+//!   ([`grass_geometry`]) generated from a [`GrassSpecies`] and the object scale.
 
 pub mod geometry;
+pub mod grass;
 mod noise;
 pub mod species;
 
@@ -31,4 +35,8 @@ pub use geometry::{
     RADIUS_SCALE_FACTOR, TREE_LOD_LEVELS, TreeLod, TreeMesh, YAW_DEGREES, billboard_geometry,
     tree_geometry,
 };
-pub use species::{MAX_TREE_SPECIES, TREE_SPECIES, TreeSpecies, tree_species};
+pub use grass::{GRASS_MAX_BLADES, GrassMesh, grass_geometry};
+pub use species::{
+    GRASS_SPECIES, GrassSpecies, MAX_GRASS_SPECIES, MAX_TREE_SPECIES, TREE_SPECIES, TreeSpecies,
+    grass_species, tree_species,
+};

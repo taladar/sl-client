@@ -43,12 +43,14 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, DecodedMesh, DecodedTexture, JointOverrides, MeshKey, MeshSkin, Object, PrimFaceId,
-    PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey,
-    SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace, TextureKey,
-    TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, pcode, planar_texgen_uv,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_mesh, to_bevy_prim_mesh,
-    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
+    AgentKey, DecodedMesh, DecodedTexture, GRASS_MAX_BLADES, JointOverrides, MeshKey, MeshSkin,
+    Object, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority,
+    ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
+    TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
+    decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_grass_mesh, to_bevy_mesh,
+    to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry,
+    tree_geometry, tree_species,
 };
 
 use crate::avatars::{AvatarBody, AvatarState, BomFace};
@@ -74,8 +76,11 @@ pub(crate) enum ObjectCategory {
     /// A Linden tree (`PCODE_TREE` / `PCODE_NEW_TREE`) — its branch / leaf
     /// geometry is generated procedurally from its species (P26.2).
     Tree,
-    /// Anything else (grass, particle-system object, …); not rendered by the
-    /// current phases.
+    /// A Linden grass clump (`PCODE_GRASS`) — its crossed-quad blade geometry is
+    /// generated procedurally from its species and scale (P26.3).
+    Grass,
+    /// Anything else (particle-system object, …); not rendered by the current
+    /// phases.
     Other,
 }
 
@@ -91,6 +96,12 @@ struct ShapeFingerprint {
     shape: PrimShapeParams,
     /// The sculpt/mesh key and type byte, when the object is a sculpt or mesh.
     sculpt: Option<(SculptOrMeshKey, u8)>,
+    /// For a **grass** clump only: the object's X/Y scale (in millimetres) that
+    /// sets the blade-centre spread. `None` for every other category, so a resize
+    /// rebuilds only a grass patch — whose blade geometry is generated with the
+    /// scale baked in (P26.3) — and never a prim / mesh / sculpt / tree (whose
+    /// scale rides the geometry holder, so a resize needs no rebuild).
+    grass_spread: Option<(i32, i32)>,
 }
 
 impl ShapeFingerprint {
@@ -103,6 +114,19 @@ impl ShapeFingerprint {
                 .extra
                 .sculpt
                 .map(|sculpt| (sculpt.texture, sculpt.sculpt_type)),
+            grass_spread: (object.pcode == pcode::GRASS).then(|| {
+                // Quantise to millimetres so the fingerprint stays `Eq`; grass is
+                // rebuilt when its clump-defining scale changes by ≥ 1 mm.
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "object scale in mm is far inside i32 range"
+                )]
+                (
+                    (object.scale.x * 1000.0).round() as i32,
+                    (object.scale.y * 1000.0).round() as i32,
+                )
+            }),
         }
     }
 }
@@ -451,6 +475,7 @@ fn classify(object: &Object) -> ObjectCategory {
             None => ObjectCategory::Prim,
         },
         pcode::TREE | pcode::NEW_TREE => ObjectCategory::Tree,
+        pcode::GRASS => ObjectCategory::Grass,
         _other => ObjectCategory::Other,
     }
 }
@@ -511,15 +536,26 @@ const fn geometry_transform(object: &Object) -> Transform {
 /// - a small `-0.1 m` Z nudge that plants the trunk base slightly underground
 ///   (the reference's `pos.z - 0.1` translation).
 fn holder_transform(object: &Object, category: ObjectCategory) -> Transform {
-    if category != ObjectCategory::Tree {
-        return geometry_transform(object);
-    }
-    let scale_length = Vec3::new(object.scale.x, object.scale.y, object.scale.z).length()
-        * TREE_RADIUS_SCALE_FACTOR;
-    Transform {
-        translation: Vec3::new(0.0, 0.0, -0.1),
-        rotation: Quat::from_rotation_z(TREE_YAW_DEGREES.to_radians()),
-        scale: Vec3::splat(scale_length),
+    match category {
+        ObjectCategory::Tree => {
+            let scale_length = Vec3::new(object.scale.x, object.scale.y, object.scale.z).length()
+                * TREE_RADIUS_SCALE_FACTOR;
+            Transform {
+                translation: Vec3::new(0.0, 0.0, -0.1),
+                rotation: Quat::from_rotation_z(TREE_YAW_DEGREES.to_radians()),
+                scale: Vec3::splat(scale_length),
+            }
+        }
+        // A grass clump's blade geometry is generated in absolute metres with the
+        // object scale already folded into the blade-centre spread (P26.3), so —
+        // unlike every other category — the holder applies **no** scale (an
+        // identity transform), lest the clump be scaled twice.
+        ObjectCategory::Grass => Transform::IDENTITY,
+        ObjectCategory::Prim
+        | ObjectCategory::Sculpt
+        | ObjectCategory::Mesh
+        | ObjectCategory::Avatar
+        | ObjectCategory::Other => geometry_transform(object),
     }
 }
 
@@ -625,6 +661,7 @@ pub(crate) fn log_suspicious_objects(
             ObjectCategory::Sculpt => "sculpt",
             ObjectCategory::Avatar => "avatar",
             ObjectCategory::Tree => "tree",
+            ObjectCategory::Grass => "grass",
             ObjectCategory::Other => "other",
         };
         warn!(
@@ -747,6 +784,7 @@ pub(crate) fn pick_object(
                     ObjectCategory::Sculpt => "sculpt",
                     ObjectCategory::Avatar => "avatar",
                     ObjectCategory::Tree => "tree",
+                    ObjectCategory::Grass => "grass",
                     ObjectCategory::Other => "other",
                 });
             // The object entity's actual world scale — if it is much larger than
@@ -1009,6 +1047,26 @@ fn build_object_geometry(
                 priority,
             }),
         ),
+        ObjectCategory::Grass => (
+            build_grass_faces(
+                object.state,
+                [object.scale.x, object.scale.y],
+                entity,
+                commands,
+                meshes,
+                materials,
+                manager,
+                prim_textures,
+                priority,
+            ),
+            // A grass clump is generated immediately from its species and scale
+            // (like a tree) and never needs a deferred asset build or an LOD
+            // rebuild; a scale change rebuilds it through the shape fingerprint
+            // ([`ShapeFingerprint::grass_spread`]).
+            None,
+            None,
+            None,
+        ),
         ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None, None),
     }
 }
@@ -1157,6 +1215,67 @@ fn build_tree_faces(
     // Set here so it is not overridden by the tint-based opaque/blend default.
     if let Some(mut tree_material) = materials.get_mut(&material) {
         tree_material.alpha_mode = AlphaMode::Mask(TREE_ALPHA_CUTOFF);
+    }
+    let entity = commands
+        .spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            PrimFaceEntity {
+                face_id: PrimFaceId::new(0),
+            },
+            FaceTextureDebug(texture_face),
+            ChildOf(parent),
+        ))
+        .id();
+    vec![entity]
+}
+
+/// Generate a grass clump's crossed-quad blade geometry for the species in
+/// `species_byte`, spread over the object's X/Y `scale`, and spawn its single face
+/// entity under `parent`, textured with the species diffuse through the Phase 6
+/// pipeline (P26.3) — the grass counterpart of [`build_tree_faces`].
+///
+/// The species byte is the object's `state`; an out-of-range value clamps to
+/// species `0`, matching the reference viewer's substitution. The geometry (a fan
+/// of up to [`GRASS_MAX_BLADES`] leaning blade cards) is generated by `sl_tree` in
+/// absolute-metre Second Life space with the object scale folded into the blade
+/// spread, so it is placed by an identity [`holder_transform`] (no further scale).
+/// Its diffuse texture is the species' `texture_id`, fetched and applied exactly as
+/// a prim face's — a synthetic white [`TextureFace`] drives [`face_material`].
+///
+/// Grass renders in the reference viewer's **alpha-blend** pool (`PASS_GRASS` /
+/// `POOL_ALPHA`), so the material is forced to [`AlphaMode::Blend`] here (rather
+/// than the cutout mask used for trees) to reproduce the soft-edged blades.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn build_grass_faces(
+    species_byte: u8,
+    scale: [f32; 2],
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+) -> Vec<Entity> {
+    // Clamp an unknown species to 0, as the reference viewer does (species 0 is
+    // always defined, so the fallback resolves).
+    let Some(species) = grass_species(species_byte).or_else(|| grass_species(0)) else {
+        return Vec::new();
+    };
+    let clump = grass_geometry(species, scale[0], scale[1], GRASS_MAX_BLADES);
+    let mesh = meshes.add(to_bevy_grass_mesh(&clump));
+    // The clump's single diffuse comes from the species table, not a `TextureEntry`.
+    let texture_face = TextureFace::new(species.texture_id);
+    let material = face_material(&texture_face, materials, manager, prim_textures, priority);
+    // Grass is alpha-**blended** (the reference's `PASS_GRASS` / `POOL_ALPHA`), so
+    // the soft blade-card edges fade rather than clip. Set here so it is not
+    // overridden by the tint-based opaque default.
+    if let Some(mut grass_material) = materials.get_mut(&material) {
+        grass_material.alpha_mode = AlphaMode::Blend;
     }
     let entity = commands
         .spawn((
@@ -2281,7 +2400,10 @@ pub(crate) fn apply_object_sculpts(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectCategory, ShapeFingerprint, classify, geometry_transform, object_transform};
+    use super::{
+        ObjectCategory, ShapeFingerprint, classify, geometry_transform, holder_transform,
+        object_transform,
+    };
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
@@ -2405,6 +2527,37 @@ mod tests {
         assert_eq!(
             classify(&bare_object(pcode::NEW_TREE)),
             ObjectCategory::Tree
+        );
+    }
+
+    /// A grass object (`PCODE_GRASS`) classifies as [`ObjectCategory::Grass`] and
+    /// is rendered as a procedural crossed-quad blade clump (P26.3).
+    #[test]
+    fn grass_classifies_as_grass() {
+        assert_eq!(classify(&bare_object(pcode::GRASS)), ObjectCategory::Grass);
+    }
+
+    /// A grass clump's geometry is generated in absolute metres with the object
+    /// scale folded into the blade spread, so — unlike a tree — its geometry holder
+    /// applies no scale (an identity transform). Its shape fingerprint carries the
+    /// clump-defining X/Y scale so a resize rebuilds the clump.
+    #[test]
+    fn grass_holder_is_identity_and_fingerprint_tracks_scale() {
+        let object = bare_object(pcode::GRASS);
+        let holder = holder_transform(&object, ObjectCategory::Grass);
+        assert!(holder.scale.abs_diff_eq(Vec3::ONE, 1.0e-5));
+        assert!(holder.translation.abs_diff_eq(Vec3::ZERO, 1.0e-5));
+        // The fingerprint records the X/Y scale (bare_object is scale 2,3,4 → mm).
+        let fingerprint = ShapeFingerprint::of(&object);
+        assert_eq!(fingerprint.grass_spread, Some((2000, 3000)));
+        // A resize changes the fingerprint, so the known-object path rebuilds it.
+        let mut resized = object;
+        resized.scale.x = 5.0;
+        assert_ne!(ShapeFingerprint::of(&resized), fingerprint);
+        // A non-grass object carries no grass spread (a resize never rebuilds it).
+        assert_eq!(
+            ShapeFingerprint::of(&bare_object(pcode::PRIMITIVE)).grass_spread,
+            None
         );
     }
 

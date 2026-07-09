@@ -592,9 +592,108 @@ pub fn tree_species(species: u8) -> Option<&'static TreeSpecies> {
     TREE_SPECIES.get(usize::from(species))
 }
 
+/// One `LLVOGrass` species: the diffuse texture plus the reference dimensions of
+/// a single grass blade card.
+///
+/// Ported verbatim from `app_settings/grass.xml` / Firestorm's
+/// `LLVOGrass::GrassSpeciesData`. A grass object (`PCODE_GRASS`) carries a
+/// one-byte species selector in its `state` field that indexes [`GRASS_SPECIES`];
+/// unlike a tree, a grass clump has no branching geometry — its visible form is a
+/// fixed fan of textured crossed-quad blades (see [`crate::grass`]) whose card
+/// size comes from `blade_size_x` / `blade_size_y`.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `GrassSpecies` reads clearly"
+)]
+pub struct GrassSpecies {
+    /// The species index (`species_id`), matching this entry's position in
+    /// [`GRASS_SPECIES`].
+    pub species_id: u8,
+    /// Human-readable species name (`name`), e.g. `"Grass 0"`.
+    pub name: &'static str,
+    /// Diffuse texture applied to every blade card (`texture_id` /
+    /// `mTextureID`).
+    pub texture_id: TextureKey,
+    /// Blade card width scale (`blade_size_x` / `mBladeSizeX`).
+    pub blade_size_x: f32,
+    /// Blade card height scale (`blade_size_y` / `mBladeSizeY`).
+    pub blade_size_y: f32,
+}
+
+/// Number of defined grass species (`species_id` `0..MAX_GRASS_SPECIES`).
+pub const MAX_GRASS_SPECIES: u8 = 6;
+
+/// The `LLVOGrass` species table, ported from `app_settings/grass.xml`.
+///
+/// Indexed by species byte: `GRASS_SPECIES[n].species_id == n`. Prefer
+/// [`grass_species`] for a bounds-checked lookup from an on-wire species value.
+pub static GRASS_SPECIES: [GrassSpecies; 6] = [
+    GrassSpecies {
+        species_id: 0,
+        name: "Grass 0",
+        texture_id: tex(uuid!("6c4727b8-ac79-ba44-3b81-f9aa887b47eb")),
+        blade_size_x: 1.35,
+        blade_size_y: 1.35,
+    },
+    GrassSpecies {
+        species_id: 1,
+        name: "Grass 1",
+        texture_id: tex(uuid!("79504bf5-c3ec-0763-6563-d843de66d0a1")),
+        blade_size_x: 1.0,
+        blade_size_y: 0.66,
+    },
+    GrassSpecies {
+        species_id: 2,
+        name: "Grass 2",
+        texture_id: tex(uuid!("6c4727b8-ac79-ba44-3b81-f9aa887b47eb")),
+        blade_size_x: 1.8,
+        blade_size_y: 1.8,
+    },
+    GrassSpecies {
+        species_id: 3,
+        name: "Grass 3",
+        texture_id: tex(uuid!("99bd60a2-3250-efc9-2e39-2fbcadefbecc")),
+        blade_size_x: 1.0,
+        blade_size_y: 1.0,
+    },
+    GrassSpecies {
+        species_id: 4,
+        name: "Grass 4",
+        texture_id: tex(uuid!("7a2b3a4a-53c2-53ac-5716-aac7d743c020")),
+        blade_size_x: 2.25,
+        blade_size_y: 2.25,
+    },
+    GrassSpecies {
+        species_id: 5,
+        name: "undergrowth_1",
+        texture_id: tex(uuid!("8f458549-173b-23ff-d4ff-bfaa5ea2371b")),
+        blade_size_x: 2.0,
+        blade_size_y: 2.0,
+    },
+];
+
+/// Look up a grass species by its on-wire species byte.
+///
+/// Returns `None` for a species value outside the defined range
+/// (`0..MAX_GRASS_SPECIES`). Firestorm substitutes the first defined species for
+/// an unknown one; callers that must always render something can fall back to
+/// species `0`.
+#[must_use]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `grass_species` reads clearly"
+)]
+pub fn grass_species(species: u8) -> Option<&'static GrassSpecies> {
+    GRASS_SPECIES.get(usize::from(species))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MAX_TREE_SPECIES, TREE_SPECIES, tree_species};
+    use super::{
+        GRASS_SPECIES, MAX_GRASS_SPECIES, MAX_TREE_SPECIES, TREE_SPECIES, grass_species,
+        tree_species,
+    };
     use pretty_assertions::assert_eq;
     use uuid::uuid;
 
@@ -637,5 +736,37 @@ mod tests {
         // `trunk_depth="3.0"` for Cypress 2 (species 8); both parse as ints.
         assert_eq!(tree_species(15).map(|s| s.trunk_depth), Some(0));
         assert_eq!(tree_species(8).map(|s| s.trunk_depth), Some(3));
+    }
+
+    #[test]
+    fn grass_table_is_indexed_by_species_id() {
+        for (index, species) in GRASS_SPECIES.iter().enumerate() {
+            assert_eq!(usize::from(species.species_id), index);
+        }
+    }
+
+    #[test]
+    fn grass_covers_all_defined_species() {
+        assert_eq!(GRASS_SPECIES.len(), usize::from(MAX_GRASS_SPECIES));
+        assert_eq!(MAX_GRASS_SPECIES, 6);
+    }
+
+    #[test]
+    fn grass_lookup_in_range_and_out_of_range() {
+        assert_eq!(grass_species(0).map(|s| s.name), Some("Grass 0"));
+        assert_eq!(grass_species(5).map(|s| s.name), Some("undergrowth_1"));
+        assert!(grass_species(6).is_none());
+        assert!(grass_species(255).is_none());
+    }
+
+    #[test]
+    fn grass_known_species_texture_and_blade_size() {
+        assert_eq!(
+            grass_species(0).map(|s| s.texture_id.uuid()),
+            Some(uuid!("6c4727b8-ac79-ba44-3b81-f9aa887b47eb")),
+        );
+        // Species 1 is the one asymmetric blade (grass.xml `blade_size_y="0.66"`).
+        assert_eq!(grass_species(1).map(|s| s.blade_size_x), Some(1.0));
+        assert_eq!(grass_species(1).map(|s| s.blade_size_y), Some(0.66));
     }
 }
