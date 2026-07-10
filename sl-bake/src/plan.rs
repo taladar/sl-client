@@ -525,6 +525,55 @@ const HAIR_LAYERS: &[PlannedLayer] = &[
     ),
 ];
 
+/// A "universal" bake's layers: a single universal-tattoo layer for that slot,
+/// blended over nothing (the bake is transparent where the tattoo does not cover,
+/// which is correct — a mesh body samples it only for the tattoo). Following the
+/// reference viewer's `BakedEntry`s for `BAKED_LEFT_ARM`/`LEFT_LEG`/`AUX1-3`, each
+/// of which lists exactly one `WT_UNIVERSAL` layer. No worn universal wearable ⇒
+/// no layer ⇒ the region is skipped (never an all-transparent published bake).
+///
+/// The tattoo is tinted by its `avatar_lad.xml` `tattoo_<slot>_{red,green,blue}`
+/// colour params (leftarm `1214-1216`, leftleg `1217-1219`, aux1 `1220-1222`, aux2
+/// `1223-1225`, aux3 `1226-1228`), as the other universal-tattoo layers are.
+const LEFT_ARM: &[PlannedLayer] = &[PlannedLayer::textured(
+    tex::LEFT_ARM_TATTOO,
+    Universal,
+    Blend,
+    LayerTint::Params(&[1214, 1215, 1216]),
+)];
+
+/// The universal left-leg bake's layers (see [`LEFT_ARM`]).
+const LEFT_LEG: &[PlannedLayer] = &[PlannedLayer::textured(
+    tex::LEFT_LEG_TATTOO,
+    Universal,
+    Blend,
+    LayerTint::Params(&[1217, 1218, 1219]),
+)];
+
+/// The universal aux1 bake's layers (see [`LEFT_ARM`]).
+const AUX1: &[PlannedLayer] = &[PlannedLayer::textured(
+    tex::AUX1_TATTOO,
+    Universal,
+    Blend,
+    LayerTint::Params(&[1220, 1221, 1222]),
+)];
+
+/// The universal aux2 bake's layers (see [`LEFT_ARM`]).
+const AUX2: &[PlannedLayer] = &[PlannedLayer::textured(
+    tex::AUX2_TATTOO,
+    Universal,
+    Blend,
+    LayerTint::Params(&[1223, 1224, 1225]),
+)];
+
+/// The universal aux3 bake's layers (see [`LEFT_ARM`]).
+const AUX3: &[PlannedLayer] = &[PlannedLayer::textured(
+    tex::AUX3_TATTOO,
+    Universal,
+    Blend,
+    LayerTint::Params(&[1226, 1227, 1228]),
+)];
+
 /// The ordered planned layers for a bake region, in composite order (bottom to
 /// top). These describe *which* worn-wearable textures feed the region and how;
 /// [`region_layers`] resolves them into concrete [`Layer`]s.
@@ -541,6 +590,11 @@ pub const fn region_plan(region: BakeRegion) -> &'static [PlannedLayer] {
         BakeRegion::Eyes => EYES,
         BakeRegion::Skirt => SKIRT_LAYERS,
         BakeRegion::Hair => HAIR_LAYERS,
+        BakeRegion::LeftArm => LEFT_ARM,
+        BakeRegion::LeftLeg => LEFT_LEG,
+        BakeRegion::Aux1 => AUX1,
+        BakeRegion::Aux2 => AUX2,
+        BakeRegion::Aux3 => AUX3,
     }
 }
 
@@ -748,6 +802,43 @@ mod tests {
                     assert!(files.contains(&file), "missing static file {file}");
                 }
             }
+        }
+    }
+
+    /// Each "universal" region composites a single universal-tattoo layer from a
+    /// worn `WT_UNIVERSAL` wearable's matching slot (R22 parity), and nothing when
+    /// none is worn — so an unworn universal bake is never published.
+    #[test]
+    fn universal_regions_composite_their_tattoo_slot() {
+        let cases = [
+            (BakeRegion::LeftArm, tex::LEFT_ARM_TATTOO),
+            (BakeRegion::LeftLeg, tex::LEFT_LEG_TATTOO),
+            (BakeRegion::Aux1, tex::AUX1_TATTOO),
+            (BakeRegion::Aux2, tex::AUX2_TATTOO),
+            (BakeRegion::Aux3, tex::AUX3_TATTOO),
+        ];
+        for (region, slot) in cases {
+            assert_eq!(region_plan(region).len(), 1, "{} plan", region.name());
+            // A worn universal wearable supplying the slot → one composited layer.
+            let worn = region_layers(
+                region,
+                |wearable| wearable == WearableType::Universal,
+                |s| (s == slot).then(|| image([1, 2, 3, 255])),
+                |_file| None,
+                |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
+                |_id, _wearable| 0.0,
+            );
+            assert_eq!(worn.len(), 1, "{} worn", region.name());
+            // Nothing worn → no layers → the region is skipped (no empty bake).
+            let bare = region_layers(
+                region,
+                |_wearable| false,
+                |_slot| None,
+                |_file| None,
+                |_tint, _wearable| [1.0, 1.0, 1.0, 1.0],
+                |_id, _wearable| 0.0,
+            );
+            assert!(bare.is_empty(), "{} bare", region.name());
         }
     }
 

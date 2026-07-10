@@ -242,14 +242,28 @@ pub mod avatar_texture {
     pub const HAIR_TATTOO: usize = 33;
     /// `TEX_EYES_TATTOO`: the universal wearable's eyes layer.
     pub const EYES_TATTOO: usize = 34;
+    /// `TEX_LEFT_ARM_TATTOO`: the universal wearable's left-arm layer (feeds the
+    /// [`LEFT_ARM_BAKED`] "universal" bake).
+    pub const LEFT_ARM_TATTOO: usize = 35;
+    /// `TEX_LEFT_LEG_TATTOO`: the universal wearable's left-leg layer (feeds
+    /// [`LEFT_LEG_BAKED`]).
+    pub const LEFT_LEG_TATTOO: usize = 36;
+    /// `TEX_AUX1_TATTOO`: the universal wearable's aux1 layer (feeds [`AUX1_BAKED`]).
+    pub const AUX1_TATTOO: usize = 37;
+    /// `TEX_AUX2_TATTOO`: the universal wearable's aux2 layer (feeds [`AUX2_BAKED`]).
+    pub const AUX2_TATTOO: usize = 38;
+    /// `TEX_AUX3_TATTOO`: the universal wearable's aux3 layer (feeds [`AUX3_BAKED`]).
+    pub const AUX3_TATTOO: usize = 39;
 
     use super::WearableType;
 
-    /// The per-wearable layer texture slots used by the six base-body bakes, each
-    /// with its `local_texture` name and the wearable type that supplies it. The
-    /// client-side baker walks a bake region's layers (see `sl-bake`) and reads
-    /// each slot's texture from the matching worn wearable asset.
-    pub const LAYER_TEXTURES: [(usize, &str, WearableType); 29] = [
+    /// The per-wearable layer texture slots used by the eleven avatar bakes (the
+    /// six base-body regions plus the five "universal" left-arm / left-leg / aux
+    /// bakes), each with its `local_texture` name and the wearable type that
+    /// supplies it. The client-side baker walks a bake region's layers (see
+    /// `sl-bake`) and reads each slot's texture from the matching worn wearable
+    /// asset.
+    pub const LAYER_TEXTURES: [(usize, &str, WearableType); 34] = [
         (HEAD_BODYPAINT, "head_bodypaint", WearableType::Skin),
         (UPPER_BODYPAINT, "upper_bodypaint", WearableType::Skin),
         (LOWER_BODYPAINT, "lower_bodypaint", WearableType::Skin),
@@ -299,6 +313,11 @@ pub mod avatar_texture {
         (SKIRT_TATTOO, "skirt_tattoo", WearableType::Universal),
         (HAIR_TATTOO, "hair_tattoo", WearableType::Universal),
         (EYES_TATTOO, "eyes_tattoo", WearableType::Universal),
+        (LEFT_ARM_TATTOO, "leftarm_tattoo", WearableType::Universal),
+        (LEFT_LEG_TATTOO, "leftleg_tattoo", WearableType::Universal),
+        (AUX1_TATTOO, "aux1_tattoo", WearableType::Universal),
+        (AUX2_TATTOO, "aux2_tattoo", WearableType::Universal),
+        (AUX3_TATTOO, "aux3_tattoo", WearableType::Universal),
     ];
 
     /// The wearable type that supplies the layer texture at `slot`, or `None` for

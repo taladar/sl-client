@@ -1,12 +1,12 @@
-//! The six base-body avatar bake regions and their [`sl_proto`] baked-slot
-//! mapping.
+//! The eleven avatar bake regions and their [`sl_proto`] baked-slot mapping.
 
 use sl_proto::avatar_texture;
 
-/// One of the six base-body avatar bake regions the client composites. These are
-/// the standard (non-"universal") bakes, matching the reference viewer's
-/// `EBakedTextureIndex` order (`BAKED_HEAD` … `BAKED_HAIR`); each maps to a
-/// baked texture slot in an avatar `TextureEntry` (see [`avatar_texture`]).
+/// One of the avatar bake regions the client composites: the six base-body
+/// (non-"universal") bakes plus the five "universal" bakes (left-arm / left-leg /
+/// aux1–3) a modern mesh body samples via bake-on-mesh. Each maps to a baked
+/// texture slot in an avatar `TextureEntry` (see [`avatar_texture`]), in the
+/// reference viewer's `EBakedTextureIndex` order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[expect(
     clippy::module_name_repetitions,
@@ -25,17 +25,35 @@ pub enum BakeRegion {
     Skirt,
     /// The hair bake (`BAKED_HAIR`), slot [`avatar_texture::HAIR_BAKED`].
     Hair,
+    /// The universal left-arm bake (`BAKED_LEFT_ARM`), slot
+    /// [`avatar_texture::LEFT_ARM_BAKED`].
+    LeftArm,
+    /// The universal left-leg bake (`BAKED_LEFT_LEG`), slot
+    /// [`avatar_texture::LEFT_LEG_BAKED`].
+    LeftLeg,
+    /// The universal aux1 bake (`BAKED_AUX1`), slot [`avatar_texture::AUX1_BAKED`].
+    Aux1,
+    /// The universal aux2 bake (`BAKED_AUX2`), slot [`avatar_texture::AUX2_BAKED`].
+    Aux2,
+    /// The universal aux3 bake (`BAKED_AUX3`), slot [`avatar_texture::AUX3_BAKED`].
+    Aux3,
 }
 
 impl BakeRegion {
-    /// Every base-body bake region, in `EBakedTextureIndex` order.
-    pub const ALL: [Self; 6] = [
+    /// Every avatar bake region, in `EBakedTextureIndex` order (the six base-body
+    /// bakes then the five universal ones).
+    pub const ALL: [Self; 11] = [
         Self::Head,
         Self::UpperBody,
         Self::LowerBody,
         Self::Eyes,
         Self::Skirt,
         Self::Hair,
+        Self::LeftArm,
+        Self::LeftLeg,
+        Self::Aux1,
+        Self::Aux2,
+        Self::Aux3,
     ];
 
     /// The avatar-`TextureEntry` baked-slot index this region composites into
@@ -50,12 +68,16 @@ impl BakeRegion {
             Self::Eyes => avatar_texture::EYES_BAKED,
             Self::Skirt => avatar_texture::SKIRT_BAKED,
             Self::Hair => avatar_texture::HAIR_BAKED,
+            Self::LeftArm => avatar_texture::LEFT_ARM_BAKED,
+            Self::LeftLeg => avatar_texture::LEFT_LEG_BAKED,
+            Self::Aux1 => avatar_texture::AUX1_BAKED,
+            Self::Aux2 => avatar_texture::AUX2_BAKED,
+            Self::Aux3 => avatar_texture::AUX3_BAKED,
         }
     }
 
     /// The region for an avatar-`TextureEntry` baked-slot index, or `None` for a
-    /// non-base-body slot (the "universal" left-arm / left-leg / aux bakes, or
-    /// any non-baked slot). The inverse of [`BakeRegion::slot`].
+    /// non-baked slot. The inverse of [`BakeRegion::slot`].
     #[must_use]
     pub const fn from_slot(slot: usize) -> Option<Self> {
         Some(match slot {
@@ -65,6 +87,11 @@ impl BakeRegion {
             avatar_texture::EYES_BAKED => Self::Eyes,
             avatar_texture::SKIRT_BAKED => Self::Skirt,
             avatar_texture::HAIR_BAKED => Self::Hair,
+            avatar_texture::LEFT_ARM_BAKED => Self::LeftArm,
+            avatar_texture::LEFT_LEG_BAKED => Self::LeftLeg,
+            avatar_texture::AUX1_BAKED => Self::Aux1,
+            avatar_texture::AUX2_BAKED => Self::Aux2,
+            avatar_texture::AUX3_BAKED => Self::Aux3,
             _ => return None,
         })
     }
@@ -80,6 +107,11 @@ impl BakeRegion {
             Self::Eyes => "eyes",
             Self::Skirt => "skirt",
             Self::Hair => "hair",
+            Self::LeftArm => "leftarm",
+            Self::LeftLeg => "leftleg",
+            Self::Aux1 => "aux1",
+            Self::Aux2 => "aux2",
+            Self::Aux3 => "aux3",
         }
     }
 }
@@ -97,13 +129,26 @@ mod tests {
     }
 
     #[test]
-    fn non_base_body_slots_have_no_region() {
-        // A "universal" bake slot and an ordinary (non-baked) slot.
+    fn universal_bake_slots_round_trip() {
+        // The universal (left-arm / left-leg / aux) bakes are now regions too.
         assert_eq!(
             BakeRegion::from_slot(sl_proto::avatar_texture::LEFT_ARM_BAKED),
+            Some(BakeRegion::LeftArm)
+        );
+        assert_eq!(
+            BakeRegion::from_slot(sl_proto::avatar_texture::AUX3_BAKED),
+            Some(BakeRegion::Aux3)
+        );
+    }
+
+    #[test]
+    fn non_baked_slots_have_no_region() {
+        // An ordinary (non-baked) slot has no bake region.
+        assert_eq!(BakeRegion::from_slot(0), None);
+        assert_eq!(
+            BakeRegion::from_slot(sl_proto::avatar_texture::LEFT_ARM_TATTOO),
             None
         );
-        assert_eq!(BakeRegion::from_slot(0), None);
     }
 
     #[test]
