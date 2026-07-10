@@ -3102,6 +3102,19 @@ avatar, so they are collected here to be worked one at a time.
   (the reference positions the avatar so the *soles* meet the ground, not the
   pelvis-derived root), or the base-mesh / collision-volume foot offset not
   applied. Cosmetic but consistently visible. **Open.**
+- [ ] **R24. Neighbour-region avatars get no coarse dot — child-circuit
+  `CoarseLocationUpdate` is dropped.** `Session::dispatch_child` folds a
+  neighbour region's object stream in (via `try_dispatch_object`) but has no arm
+  for its `CoarseLocationUpdate`, so that message falls through to the
+  unhandled-message diagnostic. Only the *root* region's coarse (minimap) list
+  ever reaches the viewer, so an avatar present only in a neighbour region is
+  never even placed as a coarse "blue sphere", let alone resolved to a body.
+  Surfaced while investigating R22b — but *separate* from it: the two spheres
+  seen there were root-region avatars the sim declined to stream (the agent was
+  too far), not neighbour-region ones. Fix: handle `CoarseLocationUpdate` on the
+  child circuits too, tagging each coarse location with its source region so the
+  viewer can map it into world space (the coarse X/Y are region-local, so a
+  neighbour's dots need that region's handle/offset to place). **Open.**
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 
