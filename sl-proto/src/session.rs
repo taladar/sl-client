@@ -170,6 +170,19 @@ pub const CAP_UPDATE_SETTINGS_AGENT_INVENTORY: &str = "UpdateSettingsAgentInvent
 /// [`Session::handle_caps_event`].
 pub const CAP_OBJECT_MEDIA: &str = "ObjectMedia";
 
+/// The seed capability that advertises animesh support (`ObjectAnimation`).
+///
+/// Despite the name, this capability is **never fetched or POSTed** — an animated
+/// object's animation state arrives as the UDP `ObjectAnimation` message
+/// ([`Event::ObjectAnimation`](crate::Event::ObjectAnimation)), not over HTTP.
+/// Listing it in the seed-capabilities request is how a viewer tells the simulator
+/// it can render animesh; a simulator withholds the `ObjectAnimation` UDP stream
+/// from a viewer that did not request the capability, so an animated object stays
+/// frozen at its rest pose (the reference viewer lists it in
+/// `LLViewerRegionImpl::buildCapabilityNames`). Kept in
+/// [`REQUESTED_CAPABILITIES`] purely to opt in to that stream.
+pub const CAP_OBJECT_ANIMATION: &str = "ObjectAnimation";
+
 /// The HTTP capability for navigating the media on a single prim face to a new
 /// URL (`ObjectMediaNavigate`): a POST of a `{ object_id, current_url,
 /// texture_index }` map. Driven by the runtimes' `NavigateObjectMedia` command;
@@ -475,6 +488,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_OBJECT_ANIMATION,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_RENDER_MATERIALS,
@@ -988,6 +1002,21 @@ pub struct Session {
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,
+    /// Whether the initial-login `CompleteAgentMovement` has been **deferred** until
+    /// the region's capabilities are fetched. `true` from login until
+    /// [`Session::notify_capabilities_ready`] releases it; `false` otherwise (once
+    /// sent, or when it was not deferred — a teleport handover sends it immediately).
+    ///
+    /// The simulator gates object streaming — including an animesh's one-shot
+    /// `ObjectAnimation` — on `CompleteAgentMovement`, and only streams
+    /// `ObjectAnimation` to a viewer that advertised the `ObjectAnimation`
+    /// capability. Sending `CompleteAgentMovement` only after the seed-caps request
+    /// (which advertises it) is processed ensures the sim knows we support animesh
+    /// before it streams the scene. The driver releases it after its caps fetch
+    /// settles — on success *and* failure (a failed fetch proceeds into a degraded,
+    /// capless session, the pre-existing behaviour), the fetch itself bounded by the
+    /// driver's HTTP timeout — so no session-side timer is needed.
+    pending_complete_movement: bool,
     /// The agent-appearance (server-side "Sunshine" bake) service base URL, from
     /// the `agent_appearance_service` login field. Server-baked avatar textures are
     /// fetched from here (`<url>texture/<avatar>/<slot>/<uuid>`), not by UUID from

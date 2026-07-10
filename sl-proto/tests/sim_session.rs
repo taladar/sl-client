@@ -218,6 +218,9 @@ mod test {
     fn setup(now: Instant) -> Result<(Session, SimSession), TestError> {
         let mut client = new_client()?;
         client.handle_login_response(success()?, now)?;
+        // The client defers `CompleteAgentMovement` until its driver reports the
+        // region's capabilities are ready; release it so the sim sees the arrival.
+        client.notify_capabilities_ready(now)?;
         let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         pump(&mut client, &mut sim, now)?;
         Ok((client, sim))

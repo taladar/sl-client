@@ -329,6 +329,10 @@ mod test {
         let mut session = new_session()?;
         assert!(session.login_http_request().is_some());
         session.handle_login_response(success()?, now)?;
+        // `CompleteAgentMovement` is deferred until the driver reports the region's
+        // capabilities are ready (so the simulator knows we support animesh before
+        // it streams the scene); a test driver releases it explicitly.
+        session.notify_capabilities_ready(now)?;
 
         let sent = drain(&mut session)?;
         assert!(matches!(sent.first(), Some(AnyMessage::UseCircuitCode(_))));

@@ -195,6 +195,7 @@ impl Session {
             online: BTreeSet::new(),
             chat_sessions: BTreeMap::new(),
             seed_capability: None,
+            pending_complete_movement: false,
             agent_appearance_service: None,
             login_account: None,
             xfer_downloads: BTreeMap::new(),
@@ -1224,8 +1225,19 @@ impl Session {
                     now,
                 );
                 circuit.send_use_circuit_code(now)?;
-                circuit.send_complete_agent_movement(now)?;
                 self.circuit = Some(circuit);
+                // Defer `CompleteAgentMovement` until the region's capabilities have
+                // been fetched (the seed-caps request advertises our animesh support
+                // via the `ObjectAnimation` capability). The simulator gates object
+                // streaming — including each animesh's one-shot `ObjectAnimation` —
+                // on `CompleteAgentMovement`, so sending it before the sim knows we
+                // support animesh makes it stream (and never re-send) the scene
+                // without animations. The driver calls
+                // [`notify_capabilities_ready`](Self::notify_capabilities_ready) once
+                // caps are in; a timeout fallback in `run_timeout` sends it anyway so
+                // login proceeds (degraded) if caps genuinely fail. The fetch is
+                // bounded by the driver's HTTP timeout, so no session timer is needed.
+                self.pending_complete_movement = true;
                 // A fresh session: discard any objects and terrain from a
                 // previous login.
                 self.objects.clear();
@@ -1305,6 +1317,60 @@ impl Session {
                     self.events.push_back(Event::FriendList(friends));
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Signal that the region's capabilities have been fetched (or the fetch has
+    /// failed), releasing the initial-login `CompleteAgentMovement` that was
+    /// deferred until the seed-caps request advertised our animesh support.
+    ///
+    /// A driver must call this once, after its seed-caps fetch settles, on both the
+    /// success and failure paths — on failure the message is still sent so login
+    /// proceeds without caps rather than hanging. Idempotent and a no-op when
+    /// `CompleteAgentMovement` was not deferred (already sent, or a teleport
+    /// handover that sends it immediately), so it is safe to call unconditionally.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Wire`] if `CompleteAgentMovement` fails to encode.
+    pub fn notify_capabilities_ready(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_deferred_complete_movement(now)
+    }
+
+    /// Whether the initial-login `CompleteAgentMovement` is still deferred waiting on
+    /// the region's capabilities — i.e. login has not yet been released by
+    /// [`notify_capabilities_ready`](Self::notify_capabilities_ready). A driver uses
+    /// this to distinguish an initial-login cap-fetch failure (fail the login, via
+    /// [`fail_no_capabilities`](Self::fail_no_capabilities)) from a later region
+    /// change's cap failure (the session is already established, so ignore it).
+    #[must_use]
+    pub const fn is_awaiting_initial_capabilities(&self) -> bool {
+        self.pending_complete_movement
+    }
+
+    /// Abort login because the region served no capabilities: close the session with
+    /// a [`DisconnectReason::LoginFailed`] carrying `message`. The deferred
+    /// `CompleteAgentMovement` is never sent, so the agent never fully arrives. A
+    /// driver calls this when its initial cap fetch fails while
+    /// [`is_awaiting_initial_capabilities`](Self::is_awaiting_initial_capabilities).
+    pub fn fail_no_capabilities(&mut self, message: String) {
+        self.pending_complete_movement = false;
+        self.close(DisconnectReason::LoginFailed {
+            reason: "no_capabilities".to_owned(),
+            message,
+        });
+    }
+
+    /// Send the deferred initial-login `CompleteAgentMovement` if one is pending,
+    /// then clear the pending state. A no-op when nothing is deferred, so it is safe
+    /// to call unconditionally / more than once.
+    fn send_deferred_complete_movement(&mut self, now: Instant) -> Result<(), Error> {
+        if !core::mem::take(&mut self.pending_complete_movement) {
+            return Ok(());
+        }
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_complete_agent_movement(now)?;
         }
         Ok(())
     }
@@ -1487,6 +1553,36 @@ impl Session {
             AnyMessage::CoarseLocationUpdate(update) => {
                 let event = self.coarse_location_event(from, update);
                 self.events.push_back(event);
+            }
+            // A neighbour region streams its avatars' and animated objects'
+            // animation state on this child circuit, just like the object stream —
+            // without handling them here a neighbour-region avatar or animesh stays
+            // frozen at its rest / T-pose even though its geometry renders (its
+            // `ObjectUpdate` is dispatched by `try_dispatch_object` above). Mirror
+            // the root-circuit handlers so it animates.
+            AnyMessage::AvatarAnimation(animation) => {
+                self.events.push_back(Event::AvatarAnimation {
+                    avatar_id: AgentKey::from(animation.sender.id),
+                    animations: avatar_animations(animation),
+                    physical_events: animation
+                        .physical_avatar_event_list
+                        .iter()
+                        .map(|block| block.type_data.clone())
+                        .collect(),
+                });
+            }
+            AnyMessage::ObjectAnimation(animation) => {
+                self.events.push_back(Event::ObjectAnimation {
+                    object_id: ObjectKey::from(animation.sender.id),
+                    animations: animation
+                        .animation_list
+                        .iter()
+                        .map(|block| ObjectPlayingAnimation {
+                            anim_id: AnimationKey::from(block.anim_id),
+                            sequence_id: block.anim_sequence_id,
+                        })
+                        .collect(),
+                });
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
