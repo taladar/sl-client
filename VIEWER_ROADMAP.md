@@ -3012,19 +3012,24 @@ avatar, so they are collected here to be worked one at a time.
     managed / coarse-block path; its textures are boosted by the existing
     rigged build. A truly non-worn rigged mesh (animesh) defers to Phase 29.
     Verified live: an animated rigged-mesh avatar renders posed, not T-posed.
-  - [ ] **R22b. Coarse "blue sphere" avatars never resolve on approach (nor
-    revert to a dot when far).** The viewer never reported the fly-camera to
-    the sim, so the interest list stayed centred on the stationary agent: a
-    minimap-only avatar was never upgraded to a full object however close the
-    camera flew, and a full avatar was never culled back to a dot. A
-    `report_camera_interest` system feeding the fly-camera into
-    `Command::SetCamera` (all the session plumbing already existed) was
-    written but **does not resolve the spheres in live testing** — cause not
-    yet found (possibly not reaching the sim, or a deeper interest /
-    cross-region case). Not reproducible headless (every avatar resolves to a
-    full body in local runs). **Open** — the candidate fix is committed (a step
-    in the right direction: reporting the fly-camera the sim's interest list
-    needs), but it does not yet visibly resolve the spheres.
+  - [x] **R22b. Coarse "blue sphere" avatars never resolve on approach.**
+    **Not a bug — closed.** Root cause found live on aditi: the parcel we were
+    testing on had the About-Land option *"Avatars on this parcel can see and
+    chat with avatars on other parcels"* **unchecked**, so the region
+    deliberately withholds other-parcel avatars' object data — they appear on
+    radar/minimap only (our coarse sphere) and never stream a full object. This
+    is a Second Life privacy feature, not a client fault; Firestorm shows the
+    same spheres on such a parcel. It matched the telemetry exactly: every
+    unresolved sphere had `ever_full_object=false` for the whole session and
+    only the avatar co-located with us (same parcel) rendered, and camming the
+    fly-camera to within ~6 m of a sphere never streamed it (camera position is
+    irrelevant when the sim withholds the data by policy). The investigation
+    still yielded three genuine Firestorm-parity omissions that were fixed and
+    kept (they do not affect this parcel-privacy case): reporting the interest
+    camera in fixed-camera mode, advertising `AgentHeightWidth`/`AgentFOV`, and
+    advertising an `AgentThrottle`. Diagnostics behind
+    `SL_VIEWER_LOG_AVATAR_INTEREST` (coarse census + per-avatar distance name
+    tags) remain for any future interest-list work.
   - [x] **R22c. Mesh-body "universal" BoM slots render as flat placeholder
     skin** (`avatars.rs`). **Fixed.** A modern mesh body maps its arms / legs
     to the universal baked slots (`leftarm` / `leftleg` / `aux*`), which the
