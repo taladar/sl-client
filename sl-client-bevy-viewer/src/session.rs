@@ -20,6 +20,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    Throttle,
 };
 
 use crate::camera::{CameraStart, FlyCamera};
@@ -288,10 +289,20 @@ pub(crate) fn drive_session(
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::RegionHandshakeComplete => {
-                info!("region handshake complete; requesting draw distance");
+                info!("region handshake complete; requesting draw distance + throttle");
                 commands.write(SlCommand(Command::SetDrawDistance(Distance::new(
                     DRAW_DISTANCE_METRES,
                 ))));
+                // Advertise a generous bandwidth throttle (R22b). Without an
+                // `AgentThrottle` the simulator streams objects at conservative
+                // defaults, so it spends the tiny budget on the highest-priority
+                // (nearest) objects and never reaches lower-priority ones — a
+                // same-region avatar 150 m off stays a coarse "blue sphere" for the
+                // whole session however close the camera flies, because interest-list
+                // sends are bandwidth-priority-ordered. The reference viewer always
+                // advertises its throttle; the 1000 kbps preset matches its generous
+                // end and is ample to stream the full scene.
+                commands.write(SlCommand(Command::SetThrottle(Throttle::preset_1000())));
                 // Kick off the `--play-animation` debug animations on the agent's
                 // own avatar, once, so its skeleton is driven (P18.3 / P18.4) — the
                 // sim broadcasts the agent's own `AvatarAnimation` back, which the
