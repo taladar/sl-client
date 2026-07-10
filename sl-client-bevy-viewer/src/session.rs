@@ -17,6 +17,7 @@
 //! in later phases.
 
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
 };
@@ -170,6 +171,62 @@ pub(crate) fn report_camera_interest(
     }
     let camera = Camera::looking_at(center, bevy_to_sl_vec(target));
     commands.write(SlCommand(Command::SetCamera(camera)));
+}
+
+/// The vertical field of view (radians) advertised to the simulator if the
+/// camera's projection can't be read — the Bevy perspective default the viewer
+/// camera is built with.
+const DEFAULT_VERTICAL_FOV: f32 = core::f32::consts::FRAC_PI_4;
+
+/// Report the viewer's viewport size (`AgentHeightWidth`) and vertical field of
+/// view (`AgentFOV`) to the simulator, resent whenever either changes (R22b).
+///
+/// The simulator builds the agent's interest list from a **view frustum** — the
+/// camera position and look axis (sent in `AgentUpdate`, see
+/// [`report_camera_interest`]) *plus* the field of view and viewport aspect it can
+/// only learn from these two messages. The reference viewer sends both on login and
+/// on every window reshape. Without them the sim falls back to a default frustum, so
+/// the camera-interest report alone never pulls a distant avatar into the interest
+/// list — it stays a coarse "blue sphere" however close the camera flies, and edge-of-
+/// range objects cull by the wrong direction. Advertising the real viewport + FOV is
+/// what makes the directional, camera-driven interest list behave like the reference
+/// viewer's.
+///
+/// Gated on [`ViewerSession::agent_in_world`] (a live circuit must exist) and sent
+/// only on change, so it is idle once the window settles.
+pub(crate) fn report_agent_viewport(
+    session: Res<ViewerSession>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<&Projection, With<FlyCamera>>,
+    mut last: Local<Option<(u16, u16, u32)>>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if !session.agent_in_world {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let width = u16::try_from(window.resolution.physical_width()).unwrap_or(u16::MAX);
+    let height = u16::try_from(window.resolution.physical_height()).unwrap_or(u16::MAX);
+    let fov = match cameras.single() {
+        Ok(Projection::Perspective(perspective)) => perspective.fov,
+        _ => DEFAULT_VERTICAL_FOV,
+    };
+    // Resend only when the viewport or FOV actually changes (the FOV compared by its
+    // bit pattern, since `f32` is not `Eq`); otherwise this is a per-frame no-op.
+    let key = (width, height, fov.to_bits());
+    if *last == Some(key) {
+        return;
+    }
+    *last = Some(key);
+    if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
+        info!("R22b report viewport {width}x{height} vertical_fov={fov} rad");
+    }
+    commands.write(SlCommand(Command::SetAgentSize { height, width }));
+    commands.write(SlCommand(Command::SetAgentFov {
+        vertical_angle: fov,
+    }));
 }
 
 /// Request a clean logout on the quit key (`Esc` / `Q`).
