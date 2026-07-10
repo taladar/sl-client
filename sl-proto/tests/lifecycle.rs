@@ -6043,6 +6043,7 @@ mod test {
                     locations,
                     you,
                     prey,
+                    region_handle: _,
                 } => Some((locations, you, prey)),
                 _ => None,
             })

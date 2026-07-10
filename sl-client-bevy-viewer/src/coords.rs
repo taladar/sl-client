@@ -18,6 +18,18 @@
 use bevy::math::{Quat, Vec3};
 use sl_client_bevy::{Rotation, Vector};
 
+/// Convert a global metre coordinate (a region's south-west corner, up to a few
+/// million metres) to `f32` exactly, via a 16-bit high/low split — there is no
+/// lossless `From<u32>` for `f32`, but the split keeps every metre value under
+/// the `f32` mantissa's exact-integer range. Shared by terrain and coarse-avatar
+/// placement to offset a neighbour region from the scene origin.
+#[must_use]
+pub(crate) fn metres_to_f32(metres: u32) -> f32 {
+    let high = u16::try_from(metres.checked_shr(16).unwrap_or(0)).unwrap_or(u16::MAX);
+    let low = u16::try_from(metres & 0xFFFF).unwrap_or(u16::MAX);
+    f32::from(high) * 65_536.0 + f32::from(low)
+}
+
 /// Convert a Second Life position [`Vector`] (Z-up metres) into a Bevy
 /// [`Vec3`] (Y-up).
 ///

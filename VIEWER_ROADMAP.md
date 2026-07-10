@@ -3107,19 +3107,24 @@ avatar, so they are collected here to be worked one at a time.
   (the reference positions the avatar so the *soles* meet the ground, not the
   pelvis-derived root), or the base-mesh / collision-volume foot offset not
   applied. Cosmetic but consistently visible. **Open.**
-- [ ] **R24. Neighbour-region avatars get no coarse dot — child-circuit
-  `CoarseLocationUpdate` is dropped.** `Session::dispatch_child` folds a
-  neighbour region's object stream in (via `try_dispatch_object`) but has no arm
-  for its `CoarseLocationUpdate`, so that message falls through to the
-  unhandled-message diagnostic. Only the *root* region's coarse (minimap) list
-  ever reaches the viewer, so an avatar present only in a neighbour region is
-  never even placed as a coarse "blue sphere", let alone resolved to a body.
-  Surfaced while investigating R22b — but *separate* from it: the two spheres
-  seen there were root-region avatars the sim declined to stream (the agent was
-  too far), not neighbour-region ones. Fix: handle `CoarseLocationUpdate` on the
-  child circuits too, tagging each coarse location with its source region so the
-  viewer can map it into world space (the coarse X/Y are region-local, so a
-  neighbour's dots need that region's handle/offset to place). **Open.**
+- [x] **R24. Neighbour-region avatars get no coarse dot — child-circuit
+  `CoarseLocationUpdate` was dropped.** **Fixed.** `Session::dispatch_child`
+  folded a neighbour region's object stream in (via `try_dispatch_object`) but
+  had no arm for its `CoarseLocationUpdate`, so that message fell through to the
+  unhandled-message diagnostic — only the *root* region's coarse (minimap) list
+  reached the viewer, so an avatar present only in a neighbour region was never
+  even placed as a coarse "blue sphere". Now both the root and child dispatch
+  build the event via a shared `coarse_location_event` helper that tags it with
+  the source circuit's `region_handle` (a new field on
+  `Event::CoarseLocationUpdate`), and the viewer offsets a neighbour region's
+  dots by `region − origin` metres (the same convention terrain uses, via the
+  now-shared `metres_to_f32`) so they land on the right neighbour terrain rather
+  than overlapping the home region. The viewer reconciles coarse dots **per
+  region** (tracking each dot's source region), so a neighbour's update never
+  despawns another region's dots; and `DisableSimulator` emits an empty
+  `CoarseLocationUpdate` for the retiring region so its dots are dropped rather
+  than left stale. Surfaced while investigating R22b but *separate* from it
+  (that was a parcel-privacy case, root-region avatars).
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

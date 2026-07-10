@@ -1464,8 +1464,29 @@ impl Session {
                 self.children.remove(&from);
                 self.child_seeds.remove(&from);
                 if let Some(circuit_id) = circuit_id {
+                    // Drop this neighbour region's coarse (minimap) avatar dots:
+                    // an empty `CoarseLocationUpdate` for the region reconciles its
+                    // coarse set to nothing, so a consumer does not leave stale
+                    // dots behind once the region is gone (R24). Emitted before
+                    // `forget_sim_objects`, which clears the region-handle cache.
+                    if let Some(region_handle) = self.regions.get(&circuit_id).copied() {
+                        self.events.push_back(Event::CoarseLocationUpdate {
+                            locations: Vec::new(),
+                            you: None,
+                            prey: None,
+                            region_handle,
+                        });
+                    }
                     self.forget_sim_objects(circuit_id);
                 }
+            }
+            // A neighbour region's coarse (minimap) avatar positions, tagged with
+            // this child circuit's region so a consumer can place the dots into
+            // world space — otherwise a neighbour-region avatar is never even shown
+            // as a coarse dot (R24).
+            AnyMessage::CoarseLocationUpdate(update) => {
+                let event = self.coarse_location_event(from, update);
+                self.events.push_back(event);
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -1476,6 +1497,41 @@ impl Session {
             }
         }
         Ok(())
+    }
+
+    /// Builds the client-facing [`Event::CoarseLocationUpdate`] from a
+    /// `CoarseLocationUpdate` received on the circuit `from`, tagged with that
+    /// circuit's source region. The same message arrives on the root circuit and
+    /// on each child (neighbour) circuit; its `x`/`y` are region-local, so the
+    /// region handle lets a consumer place a neighbour region's dots into world
+    /// space (R24). The region resolves to [`RegionHandle(0)`] if the circuit is
+    /// not (yet) associated with a region.
+    fn coarse_location_event(
+        &self,
+        from: SocketAddr,
+        update: &sl_wire::messages::CoarseLocationUpdate,
+    ) -> Event {
+        let locations = update
+            .agent_data
+            .iter()
+            .zip(update.location.iter())
+            .map(|(agent, location)| CoarseLocation {
+                agent_id: AgentKey::from(agent.agent_id),
+                x: location.x,
+                y: location.y,
+                z: u16::from(location.z).saturating_mul(4),
+            })
+            .collect();
+        let region_handle = self
+            .circuit_id_for(from)
+            .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+            .unwrap_or(RegionHandle(0));
+        Event::CoarseLocationUpdate {
+            locations,
+            you: index_into(update.index.you),
+            prey: index_into(update.index.prey),
+            region_handle,
+        }
     }
 
     /// Handles the object/scene-graph messages (full / compressed / cached /
@@ -3140,22 +3196,8 @@ impl Session {
             // agent-data blocks are parallel arrays; `you`/`prey` index into them
             // (a negative index means "none").
             AnyMessage::CoarseLocationUpdate(update) => {
-                let locations = update
-                    .agent_data
-                    .iter()
-                    .zip(update.location.iter())
-                    .map(|(agent, location)| CoarseLocation {
-                        agent_id: AgentKey::from(agent.agent_id),
-                        x: location.x,
-                        y: location.y,
-                        z: u16::from(location.z).saturating_mul(4),
-                    })
-                    .collect();
-                self.events.push_back(Event::CoarseLocationUpdate {
-                    locations,
-                    you: index_into(update.index.you),
-                    prey: index_into(update.index.prey),
-                });
+                let event = self.coarse_location_event(from, update);
+                self.events.push_back(event);
             }
             // Periodic region performance telemetry (~1 Hz). `RegionX`/`RegionY`
             // carry the region's map-tile indices (grid coordinates); the

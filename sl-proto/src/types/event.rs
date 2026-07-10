@@ -1455,6 +1455,12 @@ pub enum Event {
         /// The index of the tracked ("prey") agent in `locations`, if any (set
         /// after a [`Command::TrackAgent`](crate::Command::TrackAgent)).
         prey: Option<usize>,
+        /// The region these coarse positions belong to — the source circuit's
+        /// region. A `CoarseLocationUpdate` arrives on the root circuit *and* on
+        /// each child (neighbour) circuit, and its `x`/`y` are relative to *that*
+        /// region's south-west corner, so a consumer needs the region handle to
+        /// place a neighbour region's dots into world space (R24).
+        region_handle: RegionHandle,
     },
     /// Transient HUD effects from nearby avatars (`ViewerEffect`): look-at /
     /// point-at gaze hints, the editing/touch beam, and the other effects a

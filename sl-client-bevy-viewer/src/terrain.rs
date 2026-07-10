@@ -52,7 +52,7 @@ use sl_client_bevy::{
 use sl_terrain::TerrainComposition;
 
 use crate::camera::FlyCamera;
-use crate::coords::{sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::textures::{TextureDecoded, TextureManager};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
@@ -683,16 +683,6 @@ fn grid_normal(heights: &[f32], width: u32, x: u32, y: u32) -> [f32; 3] {
 /// region) to `f32`; there is no `From<u32>` for `f32`, and the value is exact.
 fn patch_coord_f32(value: u32) -> f32 {
     f32::from(u16::try_from(value).unwrap_or(u16::MAX))
-}
-
-/// Convert a global metre coordinate (a region's south-west corner, up to a few
-/// million metres) to `f32` exactly, via a 16-bit high/low split — there is no
-/// lossless `From<u32>` for `f32`, but the split keeps every metre value under
-/// the `f32` mantissa's exact-integer range.
-fn metres_to_f32(metres: u32) -> f32 {
-    let high = u16::try_from(metres.checked_shr(16).unwrap_or(0)).unwrap_or(u16::MAX);
-    let low = u16::try_from(metres & 0xFFFF).unwrap_or(u16::MAX);
-    f32::from(high) * 65_536.0 + f32::from(low)
 }
 
 #[cfg(test)]

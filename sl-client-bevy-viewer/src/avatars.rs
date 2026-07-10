@@ -42,7 +42,7 @@ use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
     CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES, MaskTexture,
-    MeshSkin, MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId,
+    MeshSkin, MorphWeights, Object, PartMorphMask, RegionHandle, ResolvedParams, ScopedObjectId,
     SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
     Uuid, avatar_texture, composite_region, decode_texture_entry, joint_position_overrides, pcode,
     to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
@@ -50,7 +50,9 @@ use sl_client_bevy::{
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
-use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::coords::{
+    metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
+};
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
@@ -355,6 +357,12 @@ pub(crate) struct AvatarState {
     /// Avatars known only from coarse (minimap) locations — not (currently) a full
     /// object — keyed by agent id; their sphere sits at the 1 m coarse position.
     coarse: HashMap<AgentKey, AvatarEntities>,
+    /// The source region of each coarse-only avatar (R24). `CoarseLocationUpdate`
+    /// arrives per-region (root *and* each neighbour child circuit), so a coarse
+    /// dot is reconciled only against its own region's update — a neighbour's
+    /// update must not despawn the root region's dots. Also lets a region's dots be
+    /// dropped when that region is disabled (an empty update for the region).
+    coarse_region: HashMap<AgentKey, RegionHandle>,
     /// A reverse map from an object's scoped id to its agent id, so an
     /// `ObjectRemoved` can find the avatar to despawn.
     by_scoped: HashMap<ScopedObjectId, AgentKey>,
@@ -794,10 +802,10 @@ fn placeholder_material() -> StandardMaterial {
 /// Bevy's Y-up world by the Second Life → Bevy [axis map](crate::coords). It sits
 /// in the root region's frame like the objects in [`objects`](crate::objects) —
 /// no multi-region origin offset yet.
-fn coarse_translation(location: &CoarseLocation) -> Vec3 {
+fn coarse_translation(location: &CoarseLocation, offset_east: f32, offset_north: f32) -> Vec3 {
     let position = sl_client_bevy::Vector {
-        x: f32::from(location.x),
-        y: f32::from(location.y),
+        x: offset_east + f32::from(location.x),
+        y: offset_north + f32::from(location.y),
         z: f32::from(location.z),
     };
     sl_to_bevy_vec(&position)
@@ -997,6 +1005,7 @@ impl AvatarState {
         if let Some(entities) = self.coarse.remove(&agent) {
             despawn_avatar(entities, commands);
         }
+        self.coarse_region.remove(&agent);
         if let Some(existing) = self.objects.get(&agent) {
             // Move the existing anchor: a body root gets the full position +
             // orientation transform, a sphere just its translation.
@@ -1167,12 +1176,29 @@ impl AvatarState {
         self.avatar_root_of(scoped)
     }
 
-    /// Reconcile the coarse-only avatar placeholders with one
+    /// Reconcile the coarse-only avatar placeholders with one region's
     /// `CoarseLocationUpdate`: spawn/move a sphere for every coarse avatar that is
     /// not already a full object (and is not the agent's own `you` entry), and
-    /// despawn any coarse placeholder whose avatar has dropped out of the list.
+    /// despawn any coarse placeholder **from this region** that has dropped out of
+    /// its list.
+    ///
+    /// `region` is the region these locations belong to and `origin` the scene
+    /// origin (the agent's own region); a neighbour region's coarse `x`/`y` are
+    /// relative to *its* south-west corner, so its dots are offset by
+    /// `region − origin` (mirroring the terrain placement) to land on the right
+    /// neighbour terrain (R24). The reconcile is scoped to `region`, so a
+    /// neighbour's update never despawns another region's dots — and an empty
+    /// update for a region (emitted when it is disabled) drops exactly its dots.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "reconciling one region's coarse dots needs the region + scene \
+                  origin (to offset), the update's locations + you index, and the \
+                  Commands / mesh / material / command-writer sinks to spawn spheres"
+    )]
     fn apply_coarse(
         &mut self,
+        region: RegionHandle,
+        origin: Option<RegionHandle>,
         locations: &[CoarseLocation],
         you: Option<usize>,
         commands: &mut Commands,
@@ -1180,6 +1206,12 @@ impl AvatarState {
         materials: &mut Assets<StandardMaterial>,
         writer: &mut MessageWriter<SlCommand>,
     ) {
+        // The neighbour region's south-west corner relative to the scene origin, in
+        // Second Life east/north metres (0 for the root region itself).
+        let (region_x, region_y) = region.global_coordinates();
+        let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
+        let offset_east = metres_to_f32(region_x) - metres_to_f32(origin_x);
+        let offset_north = metres_to_f32(region_y) - metres_to_f32(origin_y);
         let mut present: HashSet<AgentKey> = HashSet::new();
         for (index, location) in locations.iter().enumerate() {
             // The agent's own coarse dot is left to the (precise) object path.
@@ -1196,7 +1228,7 @@ impl AvatarState {
                 self.coarse_pos
                     .insert(agent, (location.x, location.y, location.z));
             }
-            let translation = coarse_translation(location);
+            let translation = coarse_translation(location, offset_east, offset_north);
             if let Some(existing) = self.coarse.get(&agent) {
                 commands
                     .entity(existing.anchor)
@@ -1206,15 +1238,24 @@ impl AvatarState {
                 let entities = self.spawn_sphere(agent, translation, commands, meshes, materials);
                 self.coarse.insert(agent, entities);
             }
+            self.coarse_region.insert(agent, region);
         }
-        // Despawn coarse placeholders for avatars no longer in the coarse list.
-        self.coarse.retain(|agent, entities| {
-            let keep = present.contains(agent);
-            if !keep {
-                despawn_avatar(*entities, commands);
+        // Despawn coarse placeholders from THIS region that dropped out of its
+        // list; leave other regions' dots untouched.
+        let stale: Vec<AgentKey> = self
+            .coarse
+            .keys()
+            .copied()
+            .filter(|agent| {
+                self.coarse_region.get(agent) == Some(&region) && !present.contains(agent)
+            })
+            .collect();
+        for agent in stale {
+            if let Some(entities) = self.coarse.remove(&agent) {
+                despawn_avatar(entities, commands);
             }
-            keep
-        });
+            self.coarse_region.remove(&agent);
+        }
     }
 
     /// Record a resolved legacy name and refresh the tag text of any avatar
@@ -1463,15 +1504,25 @@ pub(crate) fn update_avatar_objects(
 /// is current within the frame.
 pub(crate) fn update_coarse_avatars(
     mut events: MessageReader<SlEvent>,
+    identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut writer: MessageWriter<SlCommand>,
 ) {
+    let origin = identity.region_handle;
     for event in events.read() {
-        if let SlSessionEvent::CoarseLocationUpdate { locations, you, .. } = &event.0 {
+        if let SlSessionEvent::CoarseLocationUpdate {
+            locations,
+            you,
+            region_handle,
+            ..
+        } = &event.0
+        {
             state.apply_coarse(
+                *region_handle,
+                origin,
                 locations,
                 *you,
                 &mut commands,
@@ -3035,7 +3086,8 @@ mod tests {
     }
 
     /// A coarse location maps its whole-metre region-relative position through the
-    /// Second Life → Bevy axis map (Second Life `(x, y, z)` → Bevy `(x, z, -y)`).
+    /// Second Life → Bevy axis map (Second Life `(x, y, z)` → Bevy `(x, z, -y)`),
+    /// with no region offset for a same-region (root) dot.
     #[test]
     fn coarse_translation_maps_through_axis_swap() {
         let location = CoarseLocation {
@@ -3044,7 +3096,28 @@ mod tests {
             y: 20,
             z: 24,
         };
-        assert_eq!(coarse_translation(&location), Vec3::new(10.0, 24.0, -20.0));
+        assert_eq!(
+            coarse_translation(&location, 0.0, 0.0),
+            Vec3::new(10.0, 24.0, -20.0)
+        );
+    }
+
+    /// A neighbour region's coarse dot is offset by the region's east/north metres
+    /// from the scene origin before the axis swap, so it lands on that neighbour's
+    /// terrain (R24): a dot one region (256 m) east and 256 m north maps its local
+    /// `(10, 20)` to Bevy `(266, 24, -276)`.
+    #[test]
+    fn coarse_translation_offsets_a_neighbour_region() {
+        let location = CoarseLocation {
+            agent_id: AgentKey::from(Uuid::from_u128(1)),
+            x: 10,
+            y: 20,
+            z: 24,
+        };
+        assert_eq!(
+            coarse_translation(&location, 256.0, 256.0),
+            Vec3::new(266.0, 24.0, -276.0)
+        );
     }
 
     /// The provisional tag is the agent id's leading hex fragment, so two distinct
