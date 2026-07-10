@@ -60,11 +60,12 @@ use crate::animations::{
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarBakeMaterials, AvatarState, OwnLocalBake, apply_avatar_appearance,
-    apply_avatar_bake_textures, apply_avatar_names, apply_avatar_part_visibility,
-    apply_bom_face_materials, apply_own_local_bake, apply_own_shape_from_wearables,
-    assign_avatar_bake_materials, ingest_avatar_bakes, position_name_tags, setup_avatar_body,
-    update_avatar_objects, update_coarse_avatars,
+    AvatarBakeMaterials, AvatarState, OwnLocalBake, annotate_avatar_distances,
+    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
+    apply_avatar_part_visibility, apply_bom_face_materials, apply_own_local_bake,
+    apply_own_shape_from_wearables, assign_avatar_bake_materials, ingest_avatar_bakes,
+    log_avatar_interest_census, position_name_tags, setup_avatar_body, update_avatar_objects,
+    update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -584,7 +585,14 @@ fn run_session(
             // Avatar placeholder spheres: full-object avatars first, then the
             // coarse-only ones (which dedupe against the full-object set); then
             // fold resolved names in and float each name tag over its sphere.
-            (update_avatar_objects, update_coarse_avatars).chain(),
+            (
+                (update_avatar_objects, update_coarse_avatars).chain(),
+                // R22b diagnostic census of unresolved coarse "blue sphere" avatars,
+                // plus per-tag distance annotation (both gated by
+                // `SL_VIEWER_LOG_AVATAR_INTEREST`; a no-op otherwise).
+                log_avatar_interest_census,
+                annotate_avatar_distances,
+            ),
             // Parent each worn attachment to its avatar's skeleton joint (P16.1),
             // after the avatars (and their skeleton instances) have been spawned.
             // Parent each rigid attachment to its avatar's skeleton joint (P16), and

@@ -206,6 +206,18 @@ pub(crate) fn log_avatar_faces_enabled() -> bool {
     std::env::var("SL_VIEWER_LOG_AVATAR_FACES").as_deref() == Ok("1")
 }
 
+/// Whether the R22b "blue sphere" interest diagnostic is enabled
+/// (`SL_VIEWER_LOG_AVATAR_INTEREST=1`): logs each full avatar object the session
+/// surfaces (agent, region handle, position) and, on a 5 s cadence, a census of the
+/// coarse-only sphere avatars that have not resolved — each flagged with whether a
+/// full object was *ever* received for it and its coarse `z` (a `z` at the 1020 m
+/// ceiling is the "off this region" sentinel). This tells apart the two R22b
+/// failure modes: the simulator never streaming a distant/neighbour avatar's full
+/// object, versus the viewer receiving it but failing to render it. Off by default.
+pub(crate) fn log_avatar_interest() -> bool {
+    std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1")
+}
+
 /// Whether the bake-on-mesh diagnostic flat-skin mode is enabled
 /// (`SL_VIEWER_DEBUG_AVATAR_FLAT=1`): renders every BoM face with a flat neutral
 /// material instead of its baked texture, so a texture / UV-seam artifact (which
@@ -433,6 +445,19 @@ pub(crate) struct AvatarState {
     /// ([`body_root_transform`]). Absent (treated as `0`) until an appearance
     /// resolves the shoe params, or for a sphere-only avatar.
     pelvis_lift: HashMap<AgentKey, f32>,
+    /// R22b diagnostic: every agent the session has *ever* surfaced a full avatar
+    /// object (`pcode` 47) for, so the [`log_avatar_interest`]-gated census can
+    /// tell a "the simulator never streamed this avatar" case (agent absent here)
+    /// from a "we received it but failed to render it" case (agent present here yet
+    /// still a coarse sphere). Never pruned — it is a cumulative diagnostic marker.
+    ever_full_object: HashSet<AgentKey>,
+    /// R22b diagnostic: the last coarse (minimap) position `(x, y, z)` seen per
+    /// coarse-only agent — `x`/`y` region-local metres (0..255), `z` already in
+    /// metres (0..1020, the `u8 × 4` coarse scale). A `z` at the 1020 ceiling is the
+    /// simulator's "height unknown / off this region" sentinel, so the census can
+    /// flag a sphere that is really a neighbour-region avatar. Populated only when
+    /// [`log_avatar_interest`] is set.
+    coarse_pos: HashMap<AgentKey, (u8, u8, u16)>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
@@ -1167,6 +1192,10 @@ impl AvatarState {
                 continue;
             }
             present.insert(agent);
+            if log_avatar_interest() {
+                self.coarse_pos
+                    .insert(agent, (location.x, location.y, location.z));
+            }
             let translation = coarse_translation(location);
             if let Some(existing) = self.coarse.get(&agent) {
                 commands
@@ -1393,6 +1422,21 @@ pub(crate) fn update_avatar_objects(
                 // the avatars themselves.
                 state.track_object(object);
                 if object.pcode == pcode::AVATAR {
+                    // R22b diagnostic: record that the simulator streamed a full
+                    // object for this agent, and log its arrival, so a live census
+                    // can tell "never streamed" apart from "streamed but unrendered".
+                    let agent = AgentKey::from(object.full_id.uuid());
+                    if log_avatar_interest() {
+                        let first = state.ever_full_object.insert(agent);
+                        info!(
+                            "R22b full avatar object {}agent={agent} region={:?} pos={:?}",
+                            if first { "(first) " } else { "" },
+                            object.region_handle,
+                            object.motion.position,
+                        );
+                    } else {
+                        state.ever_full_object.insert(agent);
+                    }
                     state.apply_object(
                         object,
                         body,
@@ -1435,6 +1479,101 @@ pub(crate) fn update_coarse_avatars(
                 &mut materials,
                 &mut writer,
             );
+        }
+    }
+}
+
+/// R22b diagnostic: on a 5 s cadence (when `SL_VIEWER_LOG_AVATAR_INTEREST=1`), log a
+/// census of the coarse-only "blue sphere" avatars that have not resolved to a full
+/// object — each flagged with whether the simulator *ever* streamed a full object for
+/// it and its coarse `z` (a `z` at the 1020 m ceiling is the "off this region"
+/// sentinel). Read against the per-arrival `R22b full avatar object` lines, this
+/// pinpoints whether an unresolved sphere is a "never streamed" (interest-list /
+/// cross-region) case or a "streamed but unrendered" (viewer) case. A no-op unless the
+/// env flag is set.
+pub(crate) fn log_avatar_interest_census(
+    time: Res<Time>,
+    state: Res<AvatarState>,
+    mut next_at: Local<f32>,
+) {
+    if !log_avatar_interest() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < *next_at {
+        return;
+    }
+    *next_at = now + 5.0;
+    info!(
+        "R22b census: {} full-object avatars, {} coarse-only spheres",
+        state.objects.len(),
+        state.coarse.len()
+    );
+    for agent in state.coarse.keys() {
+        let name = state
+            .names
+            .get(agent)
+            .map_or("<unresolved>", String::as_str);
+        let ever_object = state.ever_full_object.contains(agent);
+        let pos = state.coarse_pos.get(agent);
+        info!(
+            "  sphere agent={agent} name={name:?} ever_full_object={ever_object} coarse_pos={pos:?}"
+        );
+    }
+}
+
+/// R22b diagnostic: when `SL_VIEWER_LOG_AVATAR_INTEREST=1`, append each avatar's
+/// distance from the agent's own avatar to its floating name tag (e.g.
+/// `"Kamaeri (152m)"`), refreshed twice a second. Lets a live run read off exactly
+/// where a full-body avatar gives way to a coarse "blue sphere" — i.e. the radius the
+/// simulator streams full avatar objects within, and whether flying the camera moves
+/// that boundary. A no-op unless the flag is set (`apply_avatar_names` restores the
+/// plain tag on the next name refresh once it is off).
+pub(crate) fn annotate_avatar_distances(
+    time: Res<Time>,
+    mut next_at: Local<f32>,
+    state: Res<AvatarState>,
+    identity: Res<SlIdentity>,
+    anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
+    mut texts: Query<&mut Text, With<NameTag>>,
+) {
+    if !log_avatar_interest() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < *next_at {
+        return;
+    }
+    *next_at = now + 0.5;
+    let Some(own_agent) = identity.agent_id else {
+        return;
+    };
+    let Some(own_pos) = state
+        .objects
+        .get(&own_agent)
+        .and_then(|own| anchors.get(own.anchor).ok())
+        .map(GlobalTransform::translation)
+    else {
+        return;
+    };
+    for (agent, entities) in state.objects.iter().chain(state.coarse.iter()) {
+        if *agent == own_agent {
+            continue;
+        }
+        let Ok(pos) = anchors
+            .get(entities.anchor)
+            .map(GlobalTransform::translation)
+        else {
+            continue;
+        };
+        let distance = own_pos.distance(pos);
+        let name = state
+            .names
+            .get(agent)
+            .cloned()
+            .unwrap_or_else(|| provisional_label(*agent));
+        if let Ok(mut text) = texts.get_mut(entities.label) {
+            *text = Text::new(format!("{name} ({distance:.0}m)"));
         }
     }
 }
