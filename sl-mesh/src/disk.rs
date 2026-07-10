@@ -70,6 +70,15 @@ pub struct AssetBytes {
 }
 
 impl AssetBytes {
+    /// The contiguous asset bytes (header + fetched blocks from offset 0) —
+    /// suitable to hand to [`decode_lod`](crate::decode::decode_lod). Exposed so an
+    /// offline tool / test can decode a mesh straight from the disk cache
+    /// ([`MeshDiskCache::read`]).
+    #[must_use]
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     /// An asset with only the header region fetched (no blocks yet).
     pub(crate) const fn header_only(data: Bytes, header_size: usize) -> Self {
         Self {

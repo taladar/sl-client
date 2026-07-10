@@ -37,6 +37,8 @@ url = { version = "2.5.8" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
+sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
 
 [lints]
 workspace = true

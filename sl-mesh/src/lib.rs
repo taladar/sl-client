@@ -18,6 +18,7 @@ pub mod disk;
 pub mod entry;
 pub mod fetcher;
 pub mod progress;
+pub mod seams;
 pub mod store;
 
 pub use decode::{
@@ -25,10 +26,11 @@ pub use decode::{
     Submesh, VertexWeights, decode_lod, decode_physics_convex, decode_physics_mesh, decode_skin,
     parse_header,
 };
-pub use disk::{CacheLimits, MeshDiskCache};
+pub use disk::{AssetBytes, CacheLimits, MeshDiskCache};
 pub use entry::{MeshEntry, MeshReadLease};
 pub use fetcher::{AssetFetcher, FetchChunk, FetchError, MeshFetcher};
 pub use progress::{MeshProgress, MeshRequest, Priority};
+pub use seams::{SeamHit, UvSeamReport, analyze_uv_seams, uv_seam_hits};
 pub use sl_asset_sched::{GateStats, StoreStats};
 pub use store::{MeshError, MeshStore};
 

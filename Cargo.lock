@@ -5702,6 +5702,8 @@ dependencies = [
  "pretty_assertions",
  "sl-anim",
  "sl-client-bevy",
+ "sl-mesh",
+ "sl-proto",
  "sl-repl",
  "sl-terrain",
  "sl-texture",
