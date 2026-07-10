@@ -298,6 +298,82 @@ fn cluster_lines(hits: &[SeamHit], radius: f32) -> Vec<SeamLine> {
     lines.into_values().collect()
 }
 
+/// Report the raw UV bounds of each submesh of a cached mesh (R22h): a mesh-body
+/// region whose UVs leave `[0, 1]` renders white under a **clamp** sampler but tiles
+/// correctly under **repeat** (Firestorm's GL_REPEAT), so this pins whether the
+/// white-torso bug is an out-of-range-UV + wrong-sampler issue. Reuses the
+/// `SL_SEAM_MESH` cached mesh.
+#[test]
+#[ignore = "needs the on-disk mesh cache populated by a prior viewer run"]
+#[expect(
+    clippy::tests_outside_test_module,
+    clippy::print_stderr,
+    clippy::expect_used,
+    reason = "an integration-test binary is a test; it reports on stderr and fails loudly"
+)]
+fn mesh_uv_bounds() {
+    let Some(base) = cache_base() else {
+        eprintln!("SKIP: no HOME / SL_CACHE_DIR");
+        return;
+    };
+    let mesh_id: Uuid = std::env::var("SL_SEAM_MESH")
+        .unwrap_or_else(|_| DEFAULT_MESH.to_owned())
+        .parse()
+        .expect("valid mesh uuid");
+    let mesh_cache = MeshDiskCache::open(base.join("meshcache"), MeshCacheLimits::default())
+        .expect("open mesh cache");
+    let Some(mesh_bytes) = mesh_cache.read(mesh_id) else {
+        eprintln!("SKIP: mesh {mesh_id} not in cache — visit the avatar first");
+        return;
+    };
+    let asset = mesh_bytes.data();
+    let (header, header_size) = parse_header(asset).expect("parse mesh header");
+    let mut decoded = None;
+    for lod in [
+        MeshLod::High,
+        MeshLod::Medium,
+        MeshLod::Low,
+        MeshLod::Lowest,
+    ] {
+        let Some(block) = header.lod(lod) else {
+            continue;
+        };
+        let (start, end) = block.range(header_size);
+        if let Some(bytes) = asset.get(start..end)
+            && let Ok(mesh) = decode_lod(bytes, lod)
+        {
+            decoded = Some(mesh);
+            break;
+        }
+    }
+    let mesh = decoded.expect("no mesh LOD decoded");
+    eprintln!("mesh {mesh_id}: {} submesh(es)", mesh.submeshes.len());
+    for (index, submesh) in mesh.submeshes.iter().enumerate() {
+        if submesh.uvs.is_empty() {
+            continue;
+        }
+        let mut u_min = f32::INFINITY;
+        let mut u_max = f32::NEG_INFINITY;
+        let mut v_min = f32::INFINITY;
+        let mut v_max = f32::NEG_INFINITY;
+        let mut outside = 0_usize;
+        for &[u, v] in &submesh.uvs {
+            u_min = u_min.min(u);
+            u_max = u_max.max(u);
+            v_min = v_min.min(v);
+            v_max = v_max.max(v);
+            if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                outside = outside.saturating_add(1);
+            }
+        }
+        eprintln!(
+            "  submesh {index}: {} verts, u[{u_min:.3}, {u_max:.3}] v[{v_min:.3}, {v_max:.3}], \
+             {outside} vert(s) outside [0,1]",
+            submesh.uvs.len(),
+        );
+    }
+}
+
 /// The peak deltas of the largest seam lines, sorted worst-first, as text.
 fn summarise_peaks(lines: &[SeamLine]) -> String {
     let mut peaks: Vec<f32> = lines

@@ -3066,6 +3066,43 @@ avatar, so they are collected here to be worked one at a time.
     `invisible_body_slots` records the `IMG_INVISIBLE` base regions per avatar
     and `apply_avatar_part_visibility` hides them, matching the reference
     viewer's `isTextureVisible`. No-op for BOM / normal-bake avatars.
+  - [x] **R22h. Mesh-body upper region (torso + arms) renders a flat white
+    smear instead of its bake — a clamp-vs-wrap texture-sampler bug.** Root
+    cause: `to_bevy_image` built every texture with Bevy's default
+    **ClampToEdge** sampler, but Second Life samples with **GL_REPEAT** (the
+    reference viewer sets clamp only for the rare TE clamp flag). A face whose
+    mesh UVs sit on an **integer UV tile** — the mesh-body upper submesh here
+    has `v ∈ [1.02, 1.99]` for **all** 57 740 verts — then clamps to the
+    texture's edge texel instead of wrapping to the tiled image, painting the
+    whole region the edge colour (on the grid-skin: white edge lines, with the
+    magenta `(0,0)` corner where `u→0` — the "magenta bits"). The lower submesh
+    happened to sit in `[0,1]`, so it rendered correctly under clamp, which is
+    why legs worked and the torso/arms did not; other avatars with the same
+    upper-tile UVs showed it too. **Fixed** (`sl-client-bevy` `to_bevy_image`
+    now sets a Repeat sampler on all axes, keeping linear filtering — this also
+    fixes tiled prim / terrain textures that need wrap). Pending live
+    confirmation.
+    Diagnosis path (for the record, since the first three hypotheses were
+    wrong): a grid-skin A/B (a UV grid worn as the head/upper/lower skin
+    bodypaint so both viewers fetch the *identical* server bake) → then a
+    per-`(agent, slot)` BoM-resolution **tally** proved every BoM face *does*
+    resolve its bake (`9(upper) 1/1`, `8(head) 1/1`, `10(lower) 1/1`), killing
+    the "bake not applied / not fetched / read-as-not-visible" theories → then
+    an offline check of the on-disk caches showed upper and lower bakes are
+    byte-identical (**expected**, same grid bodypaint — not a cache bug) and
+    the cached body mesh (`a2a889c4`) decodes with `v ∈ [1, 2]`. Two permanent
+    diagnostics were added: the `apply_bom_face_materials` resolution tally
+    (gated by `SL_VIEWER_LOG_AVATAR_FACES`) and the `mesh_uv_bounds`
+    integration test in `tests/uv_seams.rs`. This likely **subsumes
+    R22d–R22f** (the arm is upper region): re-evaluate them after confirming.
+- [ ] **R23. Avatar stands too low — feet sink into the ground.** Our viewer
+  renders the avatar with its feet buried below the terrain surface; in
+  Firestorm the same avatar's feet rest *on* the ground. The avatar root is
+  placed at too low a Z by roughly the ankle-to-sole height, so the whole body
+  is offset downward. Candidates: a missing hover-height / foot-to-root offset
+  (the reference positions the avatar so the *soles* meet the ground, not the
+  pelvis-derived root), or the base-mesh / collision-volume foot offset not
+  applied. Cosmetic but consistently visible. **Open.**
 
 ## Non-goals (deferred; candidate follow-up roadmaps)
 

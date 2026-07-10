@@ -34,16 +34,18 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
+use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
-    CoarseLocation, Command, DecodedTexture, JointOverrides, MAX_FACES, MaskTexture, MeshSkin,
-    MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId, SkeletalDeformations,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture,
-    composite_region, decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh,
-    to_bevy_image, to_bevy_morphed_mesh,
+    CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES, MaskTexture,
+    MeshSkin, MorphWeights, Object, PartMorphMask, ResolvedParams, ScopedObjectId,
+    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
+    Uuid, avatar_texture, composite_region, decode_texture_entry, joint_position_overrides, pcode,
+    to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -211,6 +213,75 @@ pub(crate) fn log_avatar_faces_enabled() -> bool {
 /// still lit by the mesh normals). An A/B diagnostic for the R22 arm seams.
 fn debug_avatar_flat() -> bool {
     std::env::var("SL_VIEWER_DEBUG_AVATAR_FLAT").as_deref() == Ok("1")
+}
+
+/// Whether the bake-on-mesh diagnostic UV-grid mode is enabled
+/// (`SL_VIEWER_DEBUG_AVATAR_GRID=1`): renders every BoM face with a generated UV
+/// grid ([`uv_grid_image`]) instead of its baked texture, sampled through the same
+/// per-face UV transform the bake uses. The grid makes the mesh's UV mapping
+/// visible — a continuous grid across the arm means its UV layout is fine and the
+/// seams are baked *skin content*; a broken / offset grid means a UV-mapping
+/// problem. Takes precedence over [`debug_avatar_flat`].
+fn debug_avatar_grid() -> bool {
+    std::env::var("SL_VIEWER_DEBUG_AVATAR_GRID").as_deref() == Ok("1")
+}
+
+/// The side length of the generated UV-grid diagnostic texture.
+const UV_GRID_SIZE: usize = 512;
+/// The UV-grid cell size in texels (fine grid lines).
+const UV_GRID_CELL: usize = 16;
+/// The UV-grid coarse-line spacing in texels (every eighth fine line).
+const UV_GRID_COARSE: usize = 128;
+
+/// A UV-diagnostic grid texture (R22): an `x → red`, `y → green` position gradient
+/// (so any UV discontinuity shows as a colour jump) overlaid with black grid lines
+/// every [`UV_GRID_CELL`] texels and white lines every [`UV_GRID_COARSE`]. Rendered
+/// on a BoM face in [`debug_avatar_grid`] mode to reveal how the mesh UVs map a
+/// texture. Sampled nearest + repeat so the cells stay crisp.
+fn uv_grid_image() -> Image {
+    let size = UV_GRID_SIZE;
+    let mut pixels = vec![0_u8; size.saturating_mul(size).saturating_mul(4)];
+    for y in 0..size {
+        for x in 0..size {
+            let coarse = x.checked_rem(UV_GRID_COARSE) == Some(0)
+                || y.checked_rem(UV_GRID_COARSE) == Some(0);
+            let fine =
+                x.checked_rem(UV_GRID_CELL) == Some(0) || y.checked_rem(UV_GRID_CELL) == Some(0);
+            let rgb = if coarse {
+                [255, 255, 255]
+            } else if fine {
+                [0, 0, 0]
+            } else {
+                let r = u8::try_from(x.saturating_mul(255).checked_div(size).unwrap_or(0))
+                    .unwrap_or(255);
+                let g = u8::try_from(y.saturating_mul(255).checked_div(size).unwrap_or(0))
+                    .unwrap_or(255);
+                [r, g, 96]
+            };
+            let base = y.saturating_mul(size).saturating_add(x).saturating_mul(4);
+            if let Some(slot) = pixels.get_mut(base..base.saturating_add(4)) {
+                slot.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            }
+        }
+    }
+    let width = u32::try_from(size).unwrap_or(0);
+    let decoded = DecodedTexture {
+        width,
+        height: width,
+        components: 4,
+        discard_level: DiscardLevel::FULL,
+        pixels: Bytes::from(pixels),
+        aux: None,
+    };
+    let mut image = to_bevy_image(&decoded);
+    // Nearest + repeat: crisp grid lines, and tiling if a UV strays outside [0, 1].
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::nearest()
+    });
+    image
 }
 
 /// A marker on one skeleton-instance joint entity, tying it back to its avatar
@@ -1432,15 +1503,22 @@ pub(crate) fn ingest_avatar_bakes(
                 // service (`<svc>texture/<avatar>/<slot>/<uuid>`), not by UUID from
                 // the CDN which rejects it. Fall back to a plain fetch when the grid
                 // has no such service or the slot has no service name.
+                let slot_name = bake_service_slot_name(slot).unwrap_or("?");
                 match appearance_service
                     .as_ref()
                     .zip(bake_service_slot_name(slot))
                 {
                     Some((service, name)) => {
                         let url = format!("{service}texture/{}/{name}/{id}", appearance.avatar_id);
+                        // Per-slot request log (R22h): correlate a later
+                        // `texture <id> fetch/decode failed` warning to the region it
+                        // came from — the upper bake specifically fails to resolve on
+                        // some avatars while head / lower succeed.
+                        debug!("requesting server bake slot {slot} ({slot_name}) = {id}");
                         manager.request_server_bake(id, url);
                     }
                     None => {
+                        debug!("requesting bake slot {slot} ({slot_name}) = {id} (by-UUID)");
                         manager.request_boosted(id, crate::render_priority::AVATAR_BOOST_PRIORITY);
                     }
                 }
@@ -1504,9 +1582,20 @@ pub(crate) struct AvatarBakeMaterials {
     /// [`AlphaMode`] and, when [`Transparent`](BakeAlpha::Transparent), hides the
     /// base region outright ([`apply_avatar_part_visibility`]).
     alpha: HashMap<TextureKey, BakeAlpha>,
+    /// The [`uv_grid_image`] handle, built once on first use of the
+    /// [`debug_avatar_grid`] diagnostic mode.
+    debug_grid: Option<Handle<Image>>,
 }
 
 impl AvatarBakeMaterials {
+    /// The diagnostic UV-grid image handle ([`uv_grid_image`]), built and uploaded
+    /// once on first use (the [`debug_avatar_grid`] mode).
+    fn debug_grid(&mut self, images: &mut Assets<Image>) -> Handle<Image> {
+        self.debug_grid
+            .get_or_insert_with(|| images.add(uv_grid_image()))
+            .clone()
+    }
+
     /// The uploaded Bevy [`Image`] for a baked texture `id` together with its
     /// composited-alpha classification (P14.3), uploading and classifying it from
     /// the manager's decoded pixels on first use (both cached), or `None` if the
@@ -2514,6 +2603,10 @@ pub(crate) fn apply_avatar_part_visibility(
 /// use), falling back to the material draped on the wearer's matching base-body
 /// region by the client-side composite (OpenSim own avatar,
 /// [`apply_own_local_bake`]). Runs every frame and is idempotent.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: the ECS resources / queries it needs plus a diagnostic Local"
+)]
 pub(crate) fn apply_bom_face_materials(
     state: Res<AvatarState>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
@@ -2525,6 +2618,9 @@ pub(crate) fn apply_bom_face_materials(
         (&BomFace, &MeshMaterial3d<StandardMaterial>, &mut Visibility),
         Without<AvatarBodyPart>,
     >,
+    // Diagnostic-only (R22h): the last per-(agent, slot) resolution tally logged,
+    // so the summary is emitted only when it changes (see the loop below).
+    mut last_tally: Local<String>,
 ) {
     if faces.is_empty() {
         return;
@@ -2567,6 +2663,11 @@ pub(crate) fn apply_bom_face_materials(
     }
     // Phase 2: fill each face's own material + drive its visibility.
     let mut retextured = 0_usize;
+    // Diagnostic tally (R22h): per (agent, slot), how many visible BoM faces the
+    // wearer's bake resolved vs fell back to the neutral placeholder — the direct
+    // signal for "this avatar's `upper` never textures" (gated by
+    // `SL_VIEWER_LOG_AVATAR_FACES`; logged after the loop only when it changes).
+    let mut tally: HashMap<(AgentKey, usize), (usize, usize)> = HashMap::new();
     for (face, material, mut visibility) in &mut faces {
         // Alpha-cut / onion-shell hiding: a face the wearer set fully transparent
         // (TE tint alpha 0) is invisible in the reference — hide it rather than
@@ -2596,7 +2697,12 @@ pub(crate) fn apply_bom_face_materials(
         } else {
             AlphaMode::Opaque
         };
-        let (texture, base_color) = if debug_avatar_flat() {
+        let (texture, base_color) = if debug_avatar_grid() {
+            // Diagnostic (R22): render the mesh's UV mapping as a grid, so a broken
+            // grid (UV-mapping problem) can be told apart from a continuous one
+            // (seams are baked skin content). Same per-face UV transform as the bake.
+            (Some(bake_mats.debug_grid(&mut images)), Color::WHITE)
+        } else if debug_avatar_flat() {
             // Diagnostic (R22): drop the bake and render a flat neutral skin so a
             // texture/UV-seam artifact (vanishes) can be told apart from a
             // geometry/normals one (persists — still lit by the mesh normals).
@@ -2609,6 +2715,14 @@ pub(crate) fn apply_bom_face_materials(
                 None => (None, BOM_FALLBACK_COLOR),
             }
         };
+        if log_avatar_faces_enabled() {
+            let resolved = region_bake.contains_key(&(face.agent, face.slot));
+            let counts = tally.entry((face.agent, face.slot)).or_insert((0, 0));
+            counts.0 = counts.0.saturating_add(1);
+            if resolved {
+                counts.1 = counts.1.saturating_add(1);
+            }
+        }
         // Only touch the material when something actually changed — `get_mut` marks
         // the asset modified (rebuilding its bind group), so an unconditional write
         // every frame would needlessly re-upload every BoM face.
@@ -2632,6 +2746,21 @@ pub(crate) fn apply_bom_face_materials(
     }
     if retextured > 0 {
         debug!("retextured {retextured} bake-on-mesh face(s) from their wearer's bake");
+    }
+    if log_avatar_faces_enabled() && !tally.is_empty() {
+        let mut lines: Vec<String> = tally
+            .iter()
+            .map(|(&(agent, slot), &(total, resolved))| {
+                let name = bake_service_slot_name(slot).unwrap_or("?");
+                format!("{agent} {slot}({name}) {resolved}/{total}")
+            })
+            .collect();
+        lines.sort();
+        let summary = lines.join("; ");
+        if *last_tally != summary {
+            info!("BoM face bake resolution [agent slot(name) textured/total]: {summary}");
+            *last_tally = summary;
+        }
     }
 }
 
