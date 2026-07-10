@@ -41,6 +41,14 @@ const QUIT_GRACE_SECS: f32 = 3.0;
 pub(crate) struct ViewerSession {
     /// Whether the camera has been snapped to the agent's login position yet.
     camera_positioned: bool,
+    /// Whether the agent's own avatar object has arrived, i.e. the agent is
+    /// in-world with a live circuit to carry an `AgentUpdate`. Set independently
+    /// of [`camera_positioned`](Self::camera_positioned): a fixed `--camera-position`
+    /// suppresses the login camera-snap (so `camera_positioned` stays false), but
+    /// the agent is still in-world and its interest camera must still be reported —
+    /// otherwise a screenshot / fixed-camera run never streams content toward the
+    /// framed viewpoint (R22b).
+    agent_in_world: bool,
     /// Whether the `--play-animation` debug animation has been triggered yet, so
     /// it fires once on the first region handshake rather than on every one.
     play_on_login_done: bool,
@@ -131,7 +139,10 @@ pub(crate) fn report_camera_interest(
 ) {
     // Only once the agent is in-world (its avatar object has arrived, so a circuit
     // exists to carry the `AgentUpdate`); before then there is nothing to stream to.
-    if !session.camera_positioned {
+    // Gated on `agent_in_world`, not `camera_positioned`: a fixed `--camera-position`
+    // never fires the login camera-snap, but the fixed viewpoint must still drive the
+    // interest list so a headless screenshot run streams content toward it (R22b).
+    if !session.agent_in_world {
         return;
     }
     *since_last += time.delta_secs();
@@ -149,7 +160,15 @@ pub(crate) fn report_camera_interest(
     // `arithmetic_side_effects` lint, which `Vec3`'s `+` operator trips.
     let forward = transform.forward();
     let target = Vec3::new(eye.x + forward.x, eye.y + forward.y, eye.z + forward.z);
-    let camera = Camera::looking_at(bevy_to_sl_vec(eye), bevy_to_sl_vec(target));
+    let center = bevy_to_sl_vec(eye);
+    // R22b diagnostic: surface the interest camera actually reported to the sim, so a
+    // live run can confirm the viewpoint follows the fly-camera (and rule out the
+    // "camera never reaching the sim" hypothesis). Gated on the avatars-interest flag
+    // so it shares the one `SL_VIEWER_LOG_AVATAR_INTEREST=1` switch.
+    if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
+        info!("R22b report interest camera center={center:?}");
+    }
+    let camera = Camera::looking_at(center, bevy_to_sl_vec(target));
     commands.write(SlCommand(Command::SetCamera(camera)));
 }
 
@@ -229,12 +248,18 @@ pub(crate) fn drive_session(
                 }
             }
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                if camera_start.position.is_none()
-                    && !session.camera_positioned
-                    && identity
-                        .agent_id
-                        .is_some_and(|agent| agent.uuid() == object.full_id.uuid())
-                {
+                let is_own_avatar = identity
+                    .agent_id
+                    .is_some_and(|agent| agent.uuid() == object.full_id.uuid());
+                // The agent is in-world the moment its own avatar object arrives —
+                // a live circuit now exists to carry the interest-camera
+                // `AgentUpdate`. Tracked separately from the login camera-snap so a
+                // fixed `--camera-position` (which suppresses the snap) still reports
+                // its viewpoint (R22b).
+                if is_own_avatar {
+                    session.agent_in_world = true;
+                }
+                if camera_start.position.is_none() && !session.camera_positioned && is_own_avatar {
                     let position = sl_to_bevy_vec(&object.motion.position);
                     // Seat the fly-camera a few metres in front of the agent (along
                     // the way it faces), slightly above pelvis height, looking back
