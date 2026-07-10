@@ -10,7 +10,7 @@
 use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
 use bevy::asset::RenderAssetUsages;
-use bevy::image::Image;
+use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::{Affine2, Mat2, Vec2};
 use bytes::Bytes;
 use reqwest::StatusCode as ReqwestStatusCode;
@@ -23,7 +23,7 @@ use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 /// ready to insert into `Assets<Image>` and use as a rendered texture.
 #[must_use]
 pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width: decoded.width,
             height: decoded.height,
@@ -33,7 +33,21 @@ pub fn to_bevy_image(decoded: &DecodedImage) -> Image {
         decoded.pixels.to_vec(),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
-    )
+    );
+    // Second Life samples textures with GL_REPEAT by default (the reference viewer
+    // sets clamp only for the rare TE clamp flag); a UV outside `[0, 1]` must wrap,
+    // not clamp. Bevy's default sampler clamps to the edge, which renders a face
+    // whose mesh UVs sit on an integer UV tile — e.g. a mesh-body upper region with
+    // `v ∈ [1, 2]` — as a flat smear of the texture's edge texel instead of the
+    // tiled image (R22h: the "white torso" on an otherwise-correct bake). Wrap on
+    // all axes to match, keeping linear filtering.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
 }
 
 /// The per-face texture-placement transform of a [`TextureFace`] as a Bevy
