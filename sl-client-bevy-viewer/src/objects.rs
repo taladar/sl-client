@@ -48,12 +48,14 @@ use sl_client_bevy::{
     ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
     TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
     decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_grass_mesh, to_bevy_mesh,
-    to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry,
-    tree_geometry, tree_species,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, texture_face_uv_transform,
+    to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
+    tree_billboard_geometry, tree_geometry, tree_species,
 };
 
-use crate::avatars::{AvatarBody, AvatarState, BomFace};
+use crate::avatars::{
+    AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
+};
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
@@ -2337,7 +2339,7 @@ pub(crate) fn apply_rigged_attachments(
             &texture_entry,
             root,
             Some(agent),
-            body.skin_material(),
+            key,
             &mut commands,
             &mut meshes,
             &mut materials,
@@ -2399,7 +2401,7 @@ fn build_rigged_submeshes(
     texture_entry: &[u8],
     root: Entity,
     agent: Option<AgentKey>,
-    skin_placeholder: &Handle<StandardMaterial>,
+    mesh_key: MeshKey,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -2413,6 +2415,7 @@ fn build_rigged_submeshes(
     let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
         rigged_inverse_bindposes(skin),
     ));
+    let log_faces = agent.is_some() && log_avatar_faces_enabled();
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         if submesh.no_geometry {
@@ -2421,17 +2424,30 @@ fn build_rigged_submeshes(
         let mesh = meshes.add(to_bevy_rigged_mesh(submesh));
         let texture_face = entry.face(index).unwrap_or(&default_face);
         // A bake-on-mesh face (P17.3): its texture id is an `IMG_USE_BAKED_*`
-        // sentinel meaning "show the wearer's own baked skin here". Spawn it with an
-        // opaque skin placeholder and tag it [`BomFace`] so `apply_bom_face_materials`
-        // points it at the wearer's baked region material (never fetch the sentinel,
-        // which is not a real texture — the P17.2 invisible-shell finding). Only
-        // when the wearer's agent is known; otherwise fall through to a plain fetch.
+        // sentinel meaning "show the wearer's own baked skin here". Tag it [`BomFace`]
+        // (carrying the face's TE tint + UV) so `apply_bom_face_materials` textures it
+        // from the wearer's own bake with the reference viewer's per-face tint / hide /
+        // blend (R22) — never fetch the sentinel, which is not a real texture (the
+        // P17.2 invisible-shell finding). Only when the wearer's agent is known;
+        // otherwise fall through to a plain fetch.
         let bom = agent.and_then(|agent| {
-            avatar_texture::use_baked_slot(texture_face.texture_id)
-                .map(|slot| BomFace::new(agent, slot))
+            avatar_texture::use_baked_slot(texture_face.texture_id).map(|slot| {
+                BomFace::new(
+                    agent,
+                    slot,
+                    texture_face.color,
+                    texture_face_uv_transform(texture_face),
+                )
+            })
         });
-        let material = match bom {
-            Some(_) => skin_placeholder.clone(),
+        if log_faces {
+            log_rigged_face(mesh_key, index, texture_face, bom.as_ref());
+        }
+        let material = match &bom {
+            // A BoM face owns its material so `apply_bom_face_materials` can give it
+            // the reference per-face tint / blend / hide on the sampled bake; until
+            // then it shows the neutral fallback (not the reddish skin placeholder).
+            Some(bom) => materials.add(bom_face_material(bom.tint(), bom.uv())),
             // A rigged mesh is always a worn attachment, so its face textures are
             // boosted (P20.2) — its skinned entity transform does not reflect its
             // on-screen size, so the pixel-area pass cannot rank it.
@@ -2441,11 +2457,12 @@ fn build_rigged_submeshes(
                 manager,
                 prim_textures,
                 AVATAR_BOOST_PRIORITY,
-                // A rigged avatar / mesh-body face stays opaque when its texture
-                // carries alpha — the reference never auto-masks or auto-blends a
-                // rigged face off its texture alpha, so solid skin is not rendered
-                // see-through (R22d).
-                TextureAlpha::Opaque,
+                // A rigged face cannot alpha-mask (reference: `canRenderAsMask` is
+                // false for rigged), so one with a genuinely transparent texture
+                // alpha-*blends* — hair / eyelashes render soft, not as a solid card.
+                // A texture with no real transparency stays opaque. (A rigged face
+                // sampling a 5-channel bake is the separate BoM path in avatars.rs.)
+                TextureAlpha::Blend,
             ),
         };
         // The submesh index is the Linden face index; a mesh has few faces, so the
@@ -2475,6 +2492,25 @@ fn build_rigged_submeshes(
         face_entities.push(spawned.id());
     }
     face_entities
+}
+
+/// Log one rigged-mesh face's `TextureEntry` for BoM diagnostics (R22, gated by
+/// `SL_VIEWER_LOG_AVATAR_FACES=1`): its sampled bake slot (an `IMG_USE_BAKED_*`
+/// sentinel) or real texture id, plus the tint and UV placement the reference
+/// viewer applies. The tint alpha reveals a hidden alpha-cut / "onion shell" layer
+/// (`tint a=0`) and the slot reveals whether a mesh body's arm samples the classic
+/// `upper` bake or a `universal` (`leftarm`/`aux*`) one.
+fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Option<&BomFace>) {
+    let [r, g, b, a] = face.color;
+    let source = match bom {
+        Some(bom) => format!("BoM slot {}", bom.slot_name()),
+        None => format!("tex {}", face.texture_id),
+    };
+    info!(
+        "rigged face {mesh_key} #{index}: {source} tint=({r},{g},{b},a={a}) \
+         repeats=({:.3},{:.3}) offset=({:.3},{:.3}) rot={:.3}",
+        face.scale_s, face.scale_t, face.offset_s, face.offset_t, face.rotation
+    );
 }
 
 /// Build the deferred geometry of every sculpted prim waiting on a sculpt map

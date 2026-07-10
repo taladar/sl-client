@@ -34,6 +34,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -48,7 +49,7 @@ use sl_client_bevy::{
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
-use crate::textures::{TextureDecoded, TextureManager};
+use crate::textures::{TextureDecoded, TextureManager, tint_color};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -76,6 +77,14 @@ const BODY_TAG_HEIGHT: f32 = 1.9;
 /// A skin-toned base colour for the un-textured Phase-13.2 body, before the
 /// baked-texture phases (P14) drape real textures over it.
 const BODY_COLOR: Color = Color::srgb(0.85, 0.70, 0.62);
+
+/// The neutral fallback colour a bake-on-mesh face shows while its wearer's bake
+/// has not resolved (R22). The reference viewer falls back to the neutral
+/// `IMG_DEFAULT` for a missing baked texture (`getBakedTextureForMagicId`), *not*
+/// to skin tone — so an unresolved BoM slot must not borrow the reddish
+/// [`BODY_COLOR`] skin placeholder, which made a not-yet-resolved hand read redder
+/// than the resolved arm (R22f).
+const BOM_FALLBACK_COLOR: Color = Color::srgb(0.75, 0.75, 0.75);
 
 /// The channel count of a decoded RGBA8 texture — the pixel stride used when
 /// sampling a bake's alpha for the clothing-morph masks (P14.5).
@@ -140,15 +149,68 @@ pub(crate) struct BomFace {
     /// The wearer avatar whose bake textures this face samples.
     agent: AgentKey,
     /// The baked slot ([`avatar_texture`]) the sentinel named — the region whose
-    /// bake material this face mirrors.
+    /// bake this face samples.
     slot: usize,
+    /// The face's `TextureEntry` tint colour (RGBA). The reference viewer
+    /// multiplies the baked texture by this per-face colour (its vertex colour), so
+    /// a fully-transparent tint (`[_, _, _, 0]`) hides the face — a mesh body's
+    /// alpha-cut / "onion shell" layer — and a non-opaque tint blends it.
+    tint: [u8; 4],
+    /// The face's per-face UV placement (`scale_s`/`scale_t`/offset/rotation), as
+    /// the reference viewer's `xform`. Identity for an un-repeated bake.
+    uv: Affine2,
 }
 
 impl BomFace {
-    /// Build a marker for a bake-on-mesh face on `agent` sampling baked `slot`.
-    pub(crate) const fn new(agent: AgentKey, slot: usize) -> Self {
-        Self { agent, slot }
+    /// Build a marker for a bake-on-mesh face on `agent` sampling baked `slot`,
+    /// carrying the face's `TextureEntry` `tint` and `uv` placement so
+    /// [`apply_bom_face_materials`] can reproduce the reference viewer's per-face
+    /// tint / hide / blend on the sampled bake.
+    pub(crate) const fn new(agent: AgentKey, slot: usize, tint: [u8; 4], uv: Affine2) -> Self {
+        Self {
+            agent,
+            slot,
+            tint,
+            uv,
+        }
     }
+
+    /// The face's `TextureEntry` tint colour (RGBA).
+    pub(crate) const fn tint(&self) -> [u8; 4] {
+        self.tint
+    }
+
+    /// The face's per-face UV placement transform.
+    pub(crate) const fn uv(&self) -> Affine2 {
+        self.uv
+    }
+
+    /// The appearance-service name of this face's baked slot (`upper`, `leftarm`,
+    /// …), for diagnostics; `"?"` if the slot is not a known bake slot.
+    pub(crate) fn slot_name(&self) -> &'static str {
+        avatar_texture::BAKED
+            .iter()
+            .find_map(|&(slot, name)| (slot == self.slot).then_some(name))
+            .unwrap_or("?")
+    }
+}
+
+/// Whether per-face avatar / bake diagnostic logging is enabled
+/// (`SL_VIEWER_LOG_AVATAR_FACES=1`): logs each rigged-mesh face's `TextureEntry`
+/// (bake sentinel / real texture, tint, UV) and each decoded bake's dimensions +
+/// alpha classification, for diagnosing BoM mesh-body texturing (R22) against the
+/// Firestorm reference. Off by default (the dump is verbose).
+pub(crate) fn log_avatar_faces_enabled() -> bool {
+    std::env::var("SL_VIEWER_LOG_AVATAR_FACES").as_deref() == Ok("1")
+}
+
+/// Whether the bake-on-mesh diagnostic flat-skin mode is enabled
+/// (`SL_VIEWER_DEBUG_AVATAR_FLAT=1`): renders every BoM face with a flat neutral
+/// material instead of its baked texture, so a texture / UV-seam artifact (which
+/// disappears) can be distinguished from a geometry / normals one (which remains,
+/// still lit by the mesh normals). An A/B diagnostic for the R22 arm seams.
+fn debug_avatar_flat() -> bool {
+    std::env::var("SL_VIEWER_DEBUG_AVATAR_FLAT").as_deref() == Ok("1")
 }
 
 /// A marker on one skeleton-instance joint entity, tying it back to its avatar
@@ -349,13 +411,6 @@ impl AvatarBody {
     /// name the standard skeleton does not carry.
     pub(crate) fn joint_index(&self, name: &str) -> Option<usize> {
         self.joint_lookup.get(name).copied()
-    }
-
-    /// The shared un-textured body skin material (opaque skin tint), used as the
-    /// opaque placeholder for a bake-on-mesh rigged face until its wearer's baked
-    /// region material resolves (P17.3).
-    pub(crate) const fn skin_material(&self) -> &Handle<StandardMaterial> {
-        &self.material
     }
 
     /// The skeleton joint index a **rigid** base part (the eyeballs) is pinned to,
@@ -1468,6 +1523,12 @@ impl AvatarBakeMaterials {
         }
         let decoded = manager.decoded(id)?;
         let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        if log_avatar_faces_enabled() {
+            info!(
+                "bake {id}: {}x{} {}c discard={:?} -> {alpha:?}",
+                decoded.width, decoded.height, decoded.components, decoded.discard_level
+            );
+        }
         let handle = images.add(to_bevy_image(decoded));
         let _inserted = self.images.insert(id, handle.clone());
         let _classified = self.alpha.insert(id, alpha);
@@ -1555,6 +1616,29 @@ fn baked_region_material() -> StandardMaterial {
     }
 }
 
+/// The initial material for a bake-on-mesh face (R22): each BoM face owns its
+/// material (rather than sharing the region's) so [`apply_bom_face_materials`] can
+/// give it the reference viewer's per-face tint / blend / hide on the sampled
+/// bake. Until the wearer's bake resolves it shows the neutral
+/// [`BOM_FALLBACK_COLOR`] (matching `IMG_DEFAULT`), multiplied by the face `tint`
+/// alpha and placed by its `uv` transform. A fully-transparent tint is hidden by
+/// visibility, not material, so its base colour is left neutral.
+pub(crate) fn bom_face_material(tint: [u8; 4], uv: Affine2) -> StandardMaterial {
+    StandardMaterial {
+        base_color: BOM_FALLBACK_COLOR,
+        perceptual_roughness: 0.9,
+        uv_transform: uv,
+        // A rigged face never alpha-masks (reference: `LLFace::canRenderAsMask`
+        // returns false for rigged faces); a non-opaque tint blends, else opaque.
+        alpha_mode: if tint[3] < 255 {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        },
+        ..default()
+    }
+}
+
 /// Drape a decoded baked texture over a region material: set its diffuse image,
 /// reset `base_color` to white so the composited bake (which already carries the
 /// skin / clothing colour) is shown unmodified rather than tinted by the fallback
@@ -1568,15 +1652,17 @@ fn apply_bake_image(material: &mut StandardMaterial, image: Handle<Image>, alpha
 }
 
 /// The alpha threshold, as a fraction, below which a baked-texture fragment is
-/// discarded — an alpha wearable carved it away. Matches the classification
-/// cutoff [`BAKE_ALPHA_CUTOFF`] (`0.5 * 255`), and is the [`AlphaMode::Mask`]
-/// cutoff used for a masked region (P14.3).
-const BAKE_ALPHA_MASK_THRESHOLD: f32 = 0.5;
+/// discarded — an alpha wearable carved it away. This is the reference viewer's
+/// avatar alpha-mask cutoff `LLDrawPoolAvatar::sMinimumAlpha` (`0.2`), the
+/// `minimum_alpha` uniform the rigged / avatar alpha-mask shader discards below;
+/// a body bake's alpha *at or above* it renders fully opaque (which is why bare
+/// mesh-body skin is not see-through — R22d). Matches [`BAKE_ALPHA_CUTOFF`].
+const BAKE_ALPHA_MASK_THRESHOLD: f32 = 0.2;
 
 /// The 8-bit alpha value below which a baked-texture pixel counts as carved away
-/// when classifying a bake ([`classify_bake_alpha`]) — `0.5 * 255`, rounded, to
-/// match [`BAKE_ALPHA_MASK_THRESHOLD`].
-const BAKE_ALPHA_CUTOFF: u8 = 128;
+/// when classifying a bake ([`classify_bake_alpha`]) — `0.2 * 255`, rounded, to
+/// match the reference viewer's `sMinimumAlpha` and [`BAKE_ALPHA_MASK_THRESHOLD`].
+const BAKE_ALPHA_CUTOFF: u8 = 51;
 
 /// How a decoded baked texture's composited alpha channel renders its body
 /// region (P14.3): the alpha wearables the grid composited into the bake carve
@@ -2396,29 +2482,38 @@ pub(crate) fn apply_avatar_part_visibility(
     }
 }
 
-/// Keep every bake-on-mesh (BoM) rigged-mesh face pointing at its wearer's baked
-/// region material (P17.3): a modern mesh body's faces carry an `IMG_USE_BAKED_*`
-/// sentinel instead of a real texture, meaning "show the avatar's own baked skin
-/// here". Rather than fetch anything, each such [`BomFace`] mirrors the material
-/// the wearer's matching base body region wears — whichever bake resolved it (the
-/// server "Sunshine" bake on Second Life via [`assign_avatar_bake_materials`], or
-/// the client-side composite on OpenSim via [`apply_own_local_bake`]) — so the BoM
-/// body shows the same skin, honours the bake's composited alpha
-/// ([`apply_bake_image`] set the region material's [`AlphaMode`]), and updates in
-/// place as the bake decodes (both share one material handle).
+/// Texture each bake-on-mesh (BoM) rigged-mesh face from its wearer's own baked
+/// texture (P17.3 / R22): a modern mesh body's faces carry an `IMG_USE_BAKED_*`
+/// sentinel meaning "show the avatar's own baked skin here". Each such [`BomFace`]
+/// owns its material (built by [`bom_face_material`]); this system fills it every
+/// frame to reproduce the reference viewer's per-face handling of the sampled bake:
 ///
-/// Runs every frame after the region materials are (re)assigned and is idempotent:
-/// it only re-points a face whose material actually differs. A face whose region
-/// has no bake yet keeps the opaque skin placeholder it was spawned with (the
-/// shared body skin material), so a BoM body stays visibly present — never an
-/// invisible shell (the P17.2 finding) — while its bake loads.
+/// - **Per-face tint.** The reference multiplies the baked texture by the face's
+///   `TextureEntry` colour (its vertex colour, `llface.cpp`). A fully-transparent
+///   tint (alpha `0`) makes the face invisible — the mechanism a mesh body uses to
+///   hide its unused alpha-cut / "onion shell" layers — so such a face is hidden by
+///   visibility rather than drawn as opaque skin (R22d/R22e). A non-white tint
+///   multiplies the bake.
+/// - **Opaque — the bake alpha is ignored.** A 5-channel server bake never
+///   satisfies `getPoolTypeFromTE`'s `getComponents()==4` alpha test, so a
+///   BoM face with an opaque tint and no material is batched into `sSimpleFaces`
+///   (`llvovolume.cpp`) — the opaque simple pass, which does *not* alpha-test. The
+///   bake's composited alpha carves the *system* avatar body (and drives region
+///   hiding), not this mesh-body attachment; applying it here made bare skin
+///   see-through and cut UV-seam rings into the arm (R22d). Only a non-opaque
+///   *tint* blends; a fully-transparent tint hides the face (above).
+/// - **Neutral fallback.** Until the wearer's bake resolves the face shows the
+///   neutral [`BOM_FALLBACK_COLOR`] (matching the reference `IMG_DEFAULT`), not the
+///   reddish skin placeholder (R22f).
+/// - **UV placement.** The face's `TextureEntry` UV transform is applied, as the
+///   reference applies `xform` to a baked face like any other.
 ///
-/// A face on a **universal** baked slot (`leftarm` / `leftleg` / `aux*`) has no
-/// system-body region part, so its material is not among `parts`; it is resolved
-/// (and created on demand) straight from the avatar's fetched universal bake
-/// ([`UNIVERSAL_BAKE_SLOTS`]) so a mesh body's arm / leg shows the real baked skin
-/// rather than the flat placeholder (R22). Only when the avatar publishes no bake
-/// for that slot does the face keep the placeholder.
+/// The sampled bake comes from the wearer's fetched server / universal bake
+/// ([`AvatarBakeMaterials::ensure_bake`], covering both the classic
+/// [`BODY_BAKE_SLOTS`] and the [`UNIVERSAL_BAKE_SLOTS`] a mesh body's arms / legs
+/// use), falling back to the material draped on the wearer's matching base-body
+/// region by the client-side composite (OpenSim own avatar,
+/// [`apply_own_local_bake`]). Runs every frame and is idempotent.
 pub(crate) fn apply_bom_face_materials(
     state: Res<AvatarState>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
@@ -2426,50 +2521,117 @@ pub(crate) fn apply_bom_face_materials(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     parts: Query<(&AvatarBodyPart, &MeshMaterial3d<StandardMaterial>), Without<BomFace>>,
-    mut faces: Query<(&BomFace, &mut MeshMaterial3d<StandardMaterial>), Without<AvatarBodyPart>>,
+    mut faces: Query<
+        (&BomFace, &MeshMaterial3d<StandardMaterial>, &mut Visibility),
+        Without<AvatarBodyPart>,
+    >,
 ) {
     if faces.is_empty() {
         return;
     }
-    // The material each avatar body region currently wears, keyed by (agent, baked
-    // slot) — whatever the server / client bake assignment resolved it to (a real
-    // bake material, or the shared skin placeholder for a region with no bake).
+    // The material each avatar base-body region currently wears, keyed by (agent,
+    // baked slot) — used only as the fallback bake source for a classic-slot face on
+    // a grid whose bake reached the body region but not `baked_textures` (the
+    // OpenSim own-avatar client-side composite).
     let mut part_materials: HashMap<(AgentKey, usize), Handle<StandardMaterial>> = HashMap::new();
     for (part, material) in &parts {
         let _prev =
             part_materials.insert((part.agent, part.region.baked_slot()), material.0.clone());
     }
-    let mut retargeted = 0_usize;
-    for (face, mut material) in &mut faces {
-        let desired = if let Some(handle) = part_materials.get(&(face.agent, face.slot)) {
-            handle.clone()
-        } else if let Some(&id) = state
+    // Phase 1: resolve the bake each needed (agent, slot) samples to its decoded
+    // image + whether it carries alpha (so the face blends). Prefer the wearer's
+    // fetched bake — this covers both classic and universal slots — else read the
+    // image already draped on the base-body region material.
+    let mut needed: HashSet<(AgentKey, usize)> = HashSet::new();
+    for (face, _, _) in &faces {
+        let _new = needed.insert((face.agent, face.slot));
+    }
+    let mut region_bake: HashMap<(AgentKey, usize), (Handle<Image>, bool)> = HashMap::new();
+    for &(agent, slot) in &needed {
+        if let Some(&id) = state
             .baked_textures
-            .get(&face.agent)
-            .and_then(|bakes| bakes.get(&face.slot))
+            .get(&agent)
+            .and_then(|bakes| bakes.get(&slot))
+            && let Some((image, alpha)) = bake_mats.ensure_bake(id, &manager, &mut images)
         {
-            // A universal baked slot: no base-mesh part carries its material, so
-            // build one straight from the avatar's fetched universal bake (R22). The
-            // region material is filled when the bake decodes, like any other.
-            bake_mats.region_material(
-                face.agent,
-                face.slot,
-                id,
-                &manager,
-                &mut images,
-                &mut materials,
-            )
-        } else {
-            // No bake for this slot: keep the placeholder the face was spawned with.
+            let _prev = region_bake.insert((agent, slot), (image, alpha != BakeAlpha::Opaque));
             continue;
-        };
-        if material.0 != desired {
-            *material = MeshMaterial3d(desired);
-            retargeted = retargeted.saturating_add(1);
+        }
+        if let Some(handle) = part_materials.get(&(agent, slot))
+            && let Some(material) = materials.get(handle)
+            && let Some(image) = material.base_color_texture.clone()
+        {
+            let has_alpha = !matches!(material.alpha_mode, AlphaMode::Opaque);
+            let _prev = region_bake.insert((agent, slot), (image, has_alpha));
         }
     }
-    if retargeted > 0 {
-        debug!("retargeted {retargeted} bake-on-mesh face(s) to their wearer's bake material");
+    // Phase 2: fill each face's own material + drive its visibility.
+    let mut retextured = 0_usize;
+    for (face, material, mut visibility) in &mut faces {
+        // Alpha-cut / onion-shell hiding: a face the wearer set fully transparent
+        // (TE tint alpha 0) is invisible in the reference — hide it rather than
+        // drawing opaque skin over the layer it was meant to reveal.
+        if face.tint[3] == 0 {
+            if *visibility != Visibility::Hidden {
+                *visibility = Visibility::Hidden;
+            }
+            continue;
+        }
+        if *visibility == Visibility::Hidden {
+            *visibility = Visibility::Inherited;
+        }
+        // A mesh-body BoM face renders **opaque**, ignoring the bake's composited
+        // alpha channel. The reference proves this: a 5-channel server bake never
+        // satisfies `getPoolTypeFromTE`'s `getComponents()==4` alpha test, and with
+        // an opaque tint and no material the face has no renderable alpha — so it is
+        // batched into `sSimpleFaces` (`llvovolume.cpp`), the opaque simple pass,
+        // which does not alpha-test. The bake's alpha carves the *system* avatar
+        // body (and drives region hiding), not this attachment. Applying it here is
+        // what made bare skin see-through (R22d) and cut UV-seam rings into the arm.
+        // The per-face TE tint still applies: a non-opaque tint blends (the
+        // reference's `color_alpha` → alpha pool); a fully-transparent tint is
+        // hidden by visibility above.
+        let alpha_mode = if face.tint[3] < 255 {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        };
+        let (texture, base_color) = if debug_avatar_flat() {
+            // Diagnostic (R22): drop the bake and render a flat neutral skin so a
+            // texture/UV-seam artifact (vanishes) can be told apart from a
+            // geometry/normals one (persists — still lit by the mesh normals).
+            (None, Color::srgb(0.6, 0.6, 0.6))
+        } else {
+            match region_bake.get(&(face.agent, face.slot)) {
+                Some((image, _bake_alpha)) => (Some(image.clone()), tint_color(face.tint)),
+                // No bake resolved yet: neutral fallback (reference IMG_DEFAULT), not
+                // the reddish skin placeholder.
+                None => (None, BOM_FALLBACK_COLOR),
+            }
+        };
+        // Only touch the material when something actually changed — `get_mut` marks
+        // the asset modified (rebuilding its bind group), so an unconditional write
+        // every frame would needlessly re-upload every BoM face.
+        let up_to_date = materials.get(&material.0).is_some_and(|current| {
+            current.base_color_texture == texture
+                && current.base_color == base_color
+                && current.alpha_mode == alpha_mode
+                && current.uv_transform == face.uv
+        });
+        if up_to_date {
+            continue;
+        }
+        let Some(mut material) = materials.get_mut(&material.0) else {
+            continue;
+        };
+        material.base_color_texture = texture;
+        material.base_color = base_color;
+        material.alpha_mode = alpha_mode;
+        material.uv_transform = face.uv;
+        retextured = retextured.saturating_add(1);
+    }
+    if retextured > 0 {
+        debug!("retextured {retextured} bake-on-mesh face(s) from their wearer's bake");
     }
 }
 
@@ -2873,6 +3035,18 @@ mod tests {
         // A mix of kept and carved pixels → masked.
         assert_eq!(
             classify_bake_alpha(4, &[9, 9, 9, 255, 9, 9, 9, 0]),
+            BakeAlpha::Masked
+        );
+        // The cutoff is the reference `sMinimumAlpha` (0.2 → 51): a pixel at alpha
+        // 60 is *kept* (opaque), where the old 0.5 cutoff (128) would have carved it
+        // — which is what stopped bare mesh-body skin rendering see-through (R22d).
+        assert_eq!(
+            classify_bake_alpha(4, &[0, 0, 0, 60, 1, 1, 1, 255]),
+            BakeAlpha::Opaque
+        );
+        // A pixel just below the cutoff (40 < 51) still carves, so it masks.
+        assert_eq!(
+            classify_bake_alpha(4, &[0, 0, 0, 40, 1, 1, 1, 255]),
             BakeAlpha::Masked
         );
         // No pixels at all → opaque (nothing is carved away).

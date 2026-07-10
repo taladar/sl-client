@@ -658,18 +658,23 @@ pub(crate) struct PrimTextures {
 /// How a face treats a diffuse texture that carries its **own** alpha channel,
 /// matching the reference viewer's per-face alpha handling.
 ///
-/// The reference does **not** blend a face merely because its texture has an alpha
-/// channel: a face's blend (`PASS_ALPHA`) membership is driven by the TE *tint*
-/// alpha (`< 1`) and its `LLMaterial` diffuse alpha mode, while the texture's own
-/// alpha only qualifies the face for alpha-*masking* via `LLFace::canRenderAsMask`
-/// — and rigged faces are never auto-masked (`llface.cpp`: "never auto alpha-mask
-/// rigged faces"). So a texture-alpha face defaults to:
-/// - [`Mask`](Self::Mask): an ordinary prim / static-mesh / tree / grass face
-///   alpha-masks (opaque pass + alpha test), so a wholly transparent texel is cut
-///   (an invisible prim stays invisible) while a solid texel stays solid.
-/// - [`Opaque`](Self::Opaque): a rigged avatar / mesh-body face stays opaque (the
-///   reference never auto-masks or auto-blends a rigged face off its texture
-///   alpha), so solid skin is not rendered see-through.
+/// In the reference (`LLPipeline::getPoolTypeFromTE`), a face whose texture has an
+/// alpha channel (`getComponents() == 4`, or `2`) goes to the alpha pool. Which
+/// pass it draws in then depends on the face:
+/// - [`Mask`](Self::Mask): an ordinary prim / static-mesh / tree / grass face can
+///   alpha-*mask* (`LLFace::canRenderAsMask`) — opaque pass + alpha test — so a
+///   wholly transparent texel is cut while a solid texel stays solid (an invisible
+///   prim stays invisible).
+/// - [`Blend`](Self::Blend): a **rigged** face is *never* auto-masked (`llface.cpp`:
+///   "never auto alpha-mask rigged faces"), so a rigged face with a genuinely
+///   transparent texture (hair, eyelashes) alpha-*blends* — soft edges, not a hard
+///   cut or a solid card.
+///
+/// Note a rigged face sampling a 5-channel avatar **bake** (bake-on-mesh) is a
+/// different path handled in `avatars.rs`: a 5-channel texture does not satisfy the
+/// `== 4` test, so it renders in the avatar alpha-*mask* pass at `sMinimumAlpha`
+/// (0.2) — see `apply_bom_face_materials`. This enum is only for a rigged face
+/// sampling an ordinary fetched texture.
 ///
 /// This is only the *default* for a face with no explicit alpha mode: a non-opaque
 /// TE tint already forces blending when the material is built
@@ -678,10 +683,13 @@ pub(crate) struct PrimTextures {
 /// ([`legacy_alpha_override`](crate::legacy_materials)).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TextureAlpha {
-    /// Alpha-mask a texture-alpha face (ordinary faces).
+    /// Alpha-mask a texture-alpha face (ordinary prim / mesh / tree / grass faces).
     Mask,
-    /// Keep a texture-alpha face opaque (rigged avatar / mesh-body faces).
-    Opaque,
+    /// Alpha-blend a rigged face whose texture actually carries transparency (hair,
+    /// eyelashes) — rigged faces cannot mask, so they blend. A texture with no real
+    /// transparency stays opaque (so solid rigged clothing is not needlessly moved
+    /// into the transparent pass).
+    Blend,
 }
 
 /// The alpha-test cutoff a [`TextureAlpha::Mask`] face discards below — a texel
@@ -697,8 +705,8 @@ const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
 ///
 /// `texture_alpha` selects how a diffuse texture's own alpha channel is treated
 /// (the reference-faithful default before any `LLMaterial` alpha mode arrives):
-/// [`Mask`](TextureAlpha::Mask) for an ordinary face, [`Opaque`](TextureAlpha::Opaque)
-/// for a rigged one.
+/// [`Mask`](TextureAlpha::Mask) for an ordinary face, [`Blend`](TextureAlpha::Blend)
+/// for a rigged one (which cannot mask).
 ///
 /// A face with no texture (nil id) keeps just its flat tint.
 pub(crate) fn face_material(
@@ -798,11 +806,16 @@ pub(crate) fn apply_prim_textures(
             // Not a texture any prim face is waiting on (e.g. a terrain texture).
             continue;
         };
-        // Whether the decoded texture carries alpha, so a face showing it must
-        // blend (R5) — read before `prim_image` borrows `prim_textures` mutably.
+        // Whether the decoded texture carries an alpha channel (component-based),
+        // and whether that alpha holds real transparency (value-based) — read before
+        // `prim_image` borrows `prim_textures` mutably.
         let has_alpha = manager
             .decoded(id)
             .is_some_and(|decoded| texture_has_alpha(decoded));
+        let has_transparency = has_alpha
+            && manager
+                .decoded(id)
+                .is_some_and(|decoded| texture_has_transparency(decoded));
         let Some(image_handle) = prim_image(&manager, &mut prim_textures, &mut images, id) else {
             // The fetch failed: the parked faces keep their flat tint.
             continue;
@@ -810,18 +823,22 @@ pub(crate) fn apply_prim_textures(
         for (material_handle, texture_alpha) in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
                 material.base_color_texture = Some(image_handle.clone());
-                // Resolve a texture-alpha face's mode (R22d, reference-faithful): a
-                // face is NOT blended just because its texture carries alpha — only
-                // its tint / `LLMaterial` does. An ordinary face alpha-*masks* (so an
-                // invisible prim stays cut but solid texels stay solid); a rigged
-                // face stays opaque. A face already blending (a non-opaque tint) is
-                // left blending; a face whose `LLMaterial` later sets a mode wins.
-                if has_alpha && material.alpha_mode == AlphaMode::Opaque {
+                // Resolve a texture-alpha face's mode (reference-faithful, R22d): an
+                // ordinary face alpha-*masks* off its texture alpha (an invisible prim
+                // stays cut, solid texels stay solid); a rigged face cannot mask, so
+                // one with genuinely transparent texels alpha-*blends* (hair /
+                // eyelashes render soft, not as a solid card). A texture with no real
+                // transparency stays opaque. A face already blending (a non-opaque
+                // tint) is left blending; a `LLMaterial` mode later wins.
+                if material.alpha_mode == AlphaMode::Opaque {
                     match texture_alpha {
-                        TextureAlpha::Mask => {
+                        TextureAlpha::Mask if has_alpha => {
                             material.alpha_mode = AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF);
                         }
-                        TextureAlpha::Opaque => {}
+                        TextureAlpha::Blend if has_transparency => {
+                            material.alpha_mode = AlphaMode::Blend;
+                        }
+                        _keep_opaque => {}
                     }
                 }
             }
@@ -895,9 +912,31 @@ const fn texture_has_alpha(decoded: &DecodedTexture) -> bool {
     decoded.components == 2 || decoded.components >= 4
 }
 
+/// The 8-bit alpha value below which a decoded texel counts as genuinely
+/// transparent when deciding whether a rigged face must blend
+/// ([`texture_has_transparency`]) — half, so the near-opaque noise a lossy J2C
+/// leaves on a nominally opaque alpha channel does not force a solid texture into
+/// the transparent pass.
+const TRANSPARENCY_ALPHA_CUTOFF: u8 = 128;
+
+/// Whether a decoded texture holds **real** transparency — an alpha-bearing source
+/// with at least one texel below [`TRANSPARENCY_ALPHA_CUTOFF`]. Distinguishes a
+/// hair / eyelash texture (soft alpha, blends) from a solid texture that merely
+/// carries a fully-opaque alpha channel (stays opaque), so only the former moves a
+/// rigged face into the transparent pass.
+fn texture_has_transparency(decoded: &DecodedTexture) -> bool {
+    texture_has_alpha(decoded)
+        && decoded
+            .pixels
+            .iter()
+            .skip(3)
+            .step_by(4)
+            .any(|&alpha| alpha < TRANSPARENCY_ALPHA_CUTOFF)
+}
+
 /// Convert a face tint (RGBA bytes, `[255; 4]` = opaque white = no tint) into a
 /// Bevy sRGB [`Color`] to multiply the diffuse texture by.
-fn tint_color(color: [u8; 4]) -> Color {
+pub(crate) fn tint_color(color: [u8; 4]) -> Color {
     Color::srgba(
         f32::from(color[0]) / 255.0,
         f32::from(color[1]) / 255.0,
