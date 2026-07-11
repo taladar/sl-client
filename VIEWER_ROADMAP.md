@@ -2731,7 +2731,7 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   unit tests (shape-needs-geometry, resize detection, index-offset triangle
   merging,
   and building a convex hull / a trimesh from a cube).
-- [ ] **P31.4. Avatar dead-reckoning.** Extend the P31.2
+- [x] **P31.4. Avatar dead-reckoning.** Extend the P31.2
   `interpolateLinearMotion` port to the own and other avatars (the `avatars.rs`
   path, not the object path), so a laggy avatar dead-reckons from its sim-sent
   velocity / acceleration with the same phase-out and clamps. Avatars use the
@@ -2739,7 +2739,74 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   (`resolveLandHeightGlobal + 0.5*height` via `TerrainState::land_height`) so a
   laggy avatar does not sink under the terrain — the one guard P31.2 left
   permissive for objects. Keep avatars **kinematic** (sim-authoritative), like
-  the objects.
+  the objects. **Done:** the P31.2 object dead-reckoner was refactored so
+  its extrapolation core is shared — a new `MotionState` (the evolving
+  predicted pose + motion, all in Second Life space) plus an
+  `advance_motion` step (the dead-reckon + geometric-clamp + angular-spin,
+  taking a caller-supplied ground floor) now back **both** paths;
+  `PhysicsInterp` was reshaped to hold a `MotionState`, unchanged in
+  behaviour. On the avatar side, `apply_object` (`avatars.rs`) stamps each
+  full-object avatar's anchor with a new `AvatarMotion` (change-detected,
+  re-inserted every update — a rigged body root carries the object
+  rotation, a placeholder sphere does not), and a new `drive_avatar_motion`
+  system dead-reckons it with the **stricter avatar ground floor**
+  (`avatar_ground_floor` = `land + 0.5*height`, vs. the object floor's
+  permissive `land - radius`). Because the anchor's Bevy `Transform` also
+  carries the pelvis / shoe vertical render offset (owned by `apply_object`
+  / the appearance path), the driver moves it by the SL-space position
+  *delta* (the basis change is linear, so it converts directly) rather than
+  recomputing it absolutely, leaving that offset intact; on an
+  authoritative update `apply_object` has already snapped the anchor to
+  truth, so the driver only reseeds. Kept viewer-only (no runtime-parity
+  obligation). Eight new unit tests (avatar floor, the shared
+  `advance_motion` dead-reckoning + floor clamp + the still-body no-op, plus
+  the movement-control helpers below) on top of the P31.2 suite. Verified
+  live on OpenSim: the own rigged avatar was seeded (`avatar … →
+  dead-reckoned (height 1.90 m, rotates true)`) and — driven by the new
+  movement controls (P31.5) — walked / turned / flew **smoothly** between
+  the sim's updates (user-confirmed on screen), with a clean session and no
+  panics / avian / schedule errors. **Follow-up noted:** the avatar does
+  not yet *animate* while it moves → **P31.6**.
+- [x] **P31.5. Avatar movement controls.** A prerequisite that rode along
+  with P31.4: a fly-camera-only viewer never moves the own avatar, so
+  avatar dead-reckoning could not be *observed* (the stationary own avatar
+  reseeds to truth every frame). Second Life avatar motion is entirely
+  simulator-authoritative — the client advertises *intent* in `AgentUpdate`
+  (`ControlFlags` + the body facing the walk direction follows) and the sim
+  moves the avatar and streams it back — so this drives that intent from
+  the keyboard, which is exactly what feeds the P31.4 dead-reckoner. A new
+  `movement.rs` (viewer-only) reads keys that do **not** clash with the WASD
+  and mouse fly-camera: **↑ / ↓** walk forward / back (`AT_POS` / `AT_NEG`),
+  **← / →** turn the client-tracked heading (sent as the `AgentUpdate` body
+  rotation the walk follows, seeded once from the own avatar's reported
+  facing so the first step does not snap), **PageUp / PageDown** ascend /
+  descend, **F** toggle fly, **Shift + ↑ / ↓** run (`FAST_AT`). No stop key
+  — the flag set is recomputed from the held keys each frame, so releasing a
+  key drops its flag. It emits a command only when the intent *changes* (a
+  `SetControls` on a flag change, a throttled `SetRotation` while turning),
+  relying on the session's keep-alive re-send of the held controls. The
+  whole movement / rotation stack (`Command::SetControls` / `SetRotation`,
+  `ControlFlags`) already existed end-to-end through both runtimes, so this
+  was a viewer-only addition (module + registration). Verified in the same
+  live run above.
+- [ ] **P31.6. Locomotion / state animations.** Drive the avatar's
+  built-in state animations — the ones an animation overrider (AO) replaces
+  — from its movement state: **standing**, **walking** / **running**,
+  **turning left / right**, **flying** / **hovering**, **falling**,
+  **jumping**, **crouching**, **sitting**. On the wire the simulator drives
+  these: it plays a state animation on the avatar (e.g. `ANIM_AGENT_WALK`)
+  and pushes the set via `AvatarAnimation`, which the viewer already ingests
+  and plays through the Phase 18 pipeline. That pipeline is already proven —
+  on **aditi** the viewer has played the sim's standing animations in past
+  runs — so the first task is to find why the **local OpenSim** P31.4/P31.5
+  run showed no locomotion animation on the moving avatar: whether OpenSim
+  drives `AvatarAnimation` for these states at all, and whether the received
+  set is reaching the play path for the own avatar. Only then add a
+  **client-side** fallback (derive the state from the P31.4 velocity / the
+  movement `ControlFlags` and play the corresponding built-in `.anim` from
+  the `character/` set) for the own avatar's immediate feedback / where the
+  sim does not drive it. Reference: Firestorm `LLAgent` motion controllers
+  and `llvoavatar` `ANIM_AGENT_*` ids.
 
 ## Phase 32 — Flexi prims
 

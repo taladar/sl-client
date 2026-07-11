@@ -24,6 +24,7 @@ mod legacy_materials;
 mod lights;
 mod materials;
 mod meshes;
+mod movement;
 mod objects;
 mod particles;
 mod physics;
@@ -96,6 +97,7 @@ use crate::materials::{
     register_pbr_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
+use crate::movement::{AvatarControls, drive_avatar_controls};
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
     apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
@@ -486,6 +488,7 @@ fn run_session(
     .init_resource::<LocalLights>()
     .init_resource::<ParticleSim>()
     .init_resource::<AvatarState>()
+    .init_resource::<AvatarControls>()
     .init_resource::<ControlAvatarState>()
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
@@ -667,7 +670,10 @@ fn run_session(
             // exit once the grace period lapses. Nested into one tuple to stay
             // within Bevy's per-tuple system limit.
             (handle_quit_input, enforce_quit_deadline),
-            fly_camera,
+            // The fly-camera, plus walking / turning / flying the own avatar from
+            // the arrow keys (independent of the camera): the simulator moves the
+            // avatar and the P31.4 dead-reckoner smooths the returned motion.
+            (fly_camera, drive_avatar_controls),
         ),
     )
     // Opt-in diagnostic (SL_VIEWER_LOG_OBJECTS): flag region-sized / sky objects
