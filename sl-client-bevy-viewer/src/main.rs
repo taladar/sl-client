@@ -26,6 +26,7 @@ mod materials;
 mod meshes;
 mod objects;
 mod particles;
+mod physics;
 mod render_priority;
 mod screenshot;
 mod session;
@@ -102,6 +103,7 @@ use crate::objects::{
     update_objects,
 };
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
+use crate::physics::PhysicsPlugin;
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
@@ -449,6 +451,11 @@ fn run_session(
     // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
     // fogs everything below the water surface (reference `getWaterFogView`).
     .add_plugins(UnderwaterFogPlugin)
+    // The client-side physics foundation (P31.1): an avian3d physics world with
+    // Second Life gravity, a fixed timestep at the sim's target rate, and
+    // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34
+    // (avatar physics).
+    .add_plugins(PhysicsPlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).

@@ -2529,9 +2529,35 @@ Flexi prims (Phase 32) and avatar body physics (Phase 34) are client-side
 simulations. Rather than hand-rolling a solver for each, stand up a shared
 physics substrate on the `avian3d` Bevy physics engine first.
 
-- [ ] **P31.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
+- [x] **P31.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
   world with SL gravity, a fixed timestep, and coordinate bridging to the Y-up
   scene. Foundation reused by Phase 32 and Phase 34. New workspace dependency.
+  **Done:** `avian3d` `0.7.0` (its `bevy ^0.19` requirement matches the
+  workspace Bevy) is added to `sl-client-bevy-viewer` only — like the render
+  materials and the other viewer-only simulations (sky / water / particles) the
+  physics world is a viewer rendering concern, not a protocol capability, so the
+  runtime-parity rule does not apply and `sl-client-tokio` gets nothing. A new
+  viewer `physics` module owns a `PhysicsPlugin` that adds
+  `PhysicsPlugins::default()` and configures the three foundation pieces: (a)
+  **gravity** — Second Life's `-9.8` m/s² Z-up world gravity (Firestorm
+  `llmath.h` `GRAVITY`, OpenSim `world_gravityz`) carried through the single
+  Second Life → Bevy basis change (`coords::sl_to_bevy_vec`), so avian's
+  `Gravity` resource points along Bevy `-Y`; (b) **fixed timestep** — avian runs
+  its schedule in `FixedPostUpdate` driven by Bevy's `Time<Fixed>`, pinned to
+  the simulator's target physics rate `SL_PHYSICS_HZ = 45`; (c) **time
+  dilation** —
+  avian's physics-clock *relative speed* (its own docs call it "time dilation")
+  is set each frame from the agent region's `RegionData.TimeDilation` (already
+  surfaced as `Event::TimeDilation`, folded per-region into a
+  `RegionTimeDilation` resource and looked up by
+  `SlIdentity::region_handle`), so client-side dynamics slow in lock-step with a
+  laden sim instead of drifting
+  ahead of it, defaulting to full speed while the region is unknown / healthy.
+  The physics world is empty (no bodies) until P31.2 gives server-flagged prims
+  rigid bodies, so there is no visible change yet. Verified: clean
+  build/clippy + 3 unit tests (gravity axis map, dilation clamp, bad-value
+  guard) and an OpenSim login smoke run (region handshake + clean quit, no
+  panics / avian / schedule errors).
 - [ ] **P31.2. Physical objects.** Give server-flagged physical prims (the
   `LLViewerObject` physics flag / `LLPhysicsShapeType` — prim / convex hull /
   none) an avian rigid body + collider derived from the prim / mesh geometry.
