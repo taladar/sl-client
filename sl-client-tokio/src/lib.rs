@@ -159,6 +159,7 @@ mod inventory_cache;
 mod materials;
 mod media;
 pub mod meshes;
+mod retry;
 pub mod textures;
 mod upload;
 mod voice;
@@ -219,6 +220,17 @@ pub enum Error {
     /// The session unexpectedly had no login request to perform.
     #[error("the session produced no login request")]
     NoLoginRequest,
+    /// The region's capabilities could not be fetched from the seed URL, so login is
+    /// aborted rather than proceeding into a capless session (the seed-caps request
+    /// also advertises animesh support, and every cap-backed feature — asset fetch,
+    /// the event queue, inventory — would be dead). The initial-login
+    /// `CompleteAgentMovement` is deferred until caps arrive, so it is never sent and
+    /// the agent never fully arrives.
+    #[error("could not fetch region capabilities: {message}")]
+    NoCapabilities {
+        /// A readable description of why the capability fetch failed.
+        message: String,
+    },
 }
 
 /// A tokio-driven Second Life / OpenSim client wrapping a sans-I/O [`Session`].
@@ -435,7 +447,13 @@ impl Client {
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
-        let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+        // The region must serve capabilities: fail login (propagating the readable
+        // error) rather than proceed into a capless session. Releasing the deferred
+        // `CompleteAgentMovement` only now, on success, also guarantees the simulator
+        // knows we render animesh (the seed-caps request advertises it) before it
+        // streams the scene — its one-shot `ObjectAnimation` is gated on both.
+        let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await?;
+        self.session.notify_capabilities_ready(Instant::now())?;
         if let Some(reporter) = &self.caps_reporter {
             reporter.send(caps.clone()).await.ok();
         }
@@ -513,7 +531,12 @@ impl Client {
                 events.send(event).await.ok();
                 if region_changed {
                     abort_task(&mut caps_task);
-                    caps = fetch_capabilities(self.session.seed_capability(), &http).await;
+                    // A region change's cap fetch is best-effort: the session is
+                    // already established, so a failure degrades the new region
+                    // rather than failing the session (unlike the initial login).
+                    caps = fetch_capabilities(self.session.seed_capability(), &http)
+                        .await
+                        .unwrap_or_default();
                     if let Some(reporter) = &self.caps_reporter {
                         reporter.send(caps.clone()).await.ok();
                     }

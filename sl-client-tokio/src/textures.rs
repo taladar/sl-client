@@ -13,6 +13,8 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use sl_proto::TextureKey;
 use sl_texture::{FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
 /// A `GetTexture` codestream fetcher over a shared async `reqwest` client.
 #[derive(Debug)]
 pub struct ReqwestTextureFetcher {
@@ -80,35 +82,50 @@ impl TextureFetcher for ReqwestTextureFetcher {
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
         let url = self.source_url(id, source)?;
-        let response = self
-            .http
-            .get(&url)
-            .header("Accept", "image/x-j2c")
-            .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
-            .send()
-            .await
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        let status = response.status();
-        if status == ReqwestStatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound);
+        let mut attempt = 0_u32;
+        loop {
+            let response = self
+                .http
+                .get(&url)
+                .header("Accept", "image/x-j2c")
+                .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
+                .send()
+                .await
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            let status = response.status();
+            if status == ReqwestStatusCode::NOT_FOUND {
+                return Err(FetchError::NotFound);
+            }
+            // A range past the end of the asset means "no more bytes": report an
+            // empty chunk so the store stops growing and decodes what it has.
+            if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
+                return Ok(FetchChunk {
+                    bytes: Bytes::new(),
+                    whole: false,
+                });
+            }
+            // The `GetTexture` service answers `503` while it queues the texture;
+            // retry with exponential backoff rather than failing the fetch.
+            if is_transient_status(status) {
+                if attempt < MAX_TRANSIENT_RETRIES {
+                    tokio::time::sleep(transient_backoff(attempt)).await;
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                return Err(FetchError::Unavailable(format!(
+                    "unexpected status {status}"
+                )));
+            }
+            // 200 = the server ignored the range and returned the whole asset.
+            let whole = status == ReqwestStatusCode::OK;
+            if !status.is_success() {
+                return Err(FetchError::Transport(format!("unexpected status {status}")));
+            }
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            return Ok(FetchChunk { bytes, whole });
         }
-        // A range past the end of the asset means "no more bytes": report an empty
-        // chunk so the store stops growing and decodes what it has.
-        if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
-            return Ok(FetchChunk {
-                bytes: Bytes::new(),
-                whole: false,
-            });
-        }
-        // 200 = the server ignored the range and returned the whole asset.
-        let whole = status == ReqwestStatusCode::OK;
-        if !status.is_success() {
-            return Err(FetchError::Transport(format!("unexpected status {status}")));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        Ok(FetchChunk { bytes, whole })
     }
 }

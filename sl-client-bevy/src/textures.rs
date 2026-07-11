@@ -19,6 +19,8 @@ use sl_proto::{TextureFace, TextureKey};
 use sl_texture::{DecodedImage, FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
 /// Converts a decoded RGBA8 texture into a Bevy [`Image`] (`Rgba8UnormSrgb`),
 /// ready to insert into `Assets<Image>` and use as a rendered texture.
 #[must_use]
@@ -231,31 +233,46 @@ impl BevyTextureFetcher {
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
         let url = self.source_url(id, source)?;
-        let response = self
-            .http
-            .get(&url)
-            .header("Accept", "image/x-j2c")
-            .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
-            .send()
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        let status = response.status();
-        if status == ReqwestStatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound);
+        let mut attempt = 0_u32;
+        loop {
+            let response = self
+                .http
+                .get(&url)
+                .header("Accept", "image/x-j2c")
+                .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
+                .send()
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            let status = response.status();
+            if status == ReqwestStatusCode::NOT_FOUND {
+                return Err(FetchError::NotFound);
+            }
+            if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
+                return Ok(FetchChunk {
+                    bytes: Bytes::new(),
+                    whole: false,
+                });
+            }
+            // The `GetTexture` service answers `503` while it queues the texture;
+            // retry with exponential backoff rather than failing the fetch.
+            if is_transient_status(status) {
+                if attempt < MAX_TRANSIENT_RETRIES {
+                    std::thread::sleep(transient_backoff(attempt));
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                return Err(FetchError::Unavailable(format!(
+                    "unexpected status {status}"
+                )));
+            }
+            let whole = status == ReqwestStatusCode::OK;
+            if !status.is_success() {
+                return Err(FetchError::Transport(format!("unexpected status {status}")));
+            }
+            let bytes = response
+                .bytes()
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            return Ok(FetchChunk { bytes, whole });
         }
-        if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
-            return Ok(FetchChunk {
-                bytes: Bytes::new(),
-                whole: false,
-            });
-        }
-        let whole = status == ReqwestStatusCode::OK;
-        if !status.is_success() {
-            return Err(FetchError::Transport(format!("unexpected status {status}")));
-        }
-        let bytes = response
-            .bytes()
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        Ok(FetchChunk { bytes, whole })
     }
 }
 

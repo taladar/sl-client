@@ -43,23 +43,20 @@ pub(crate) fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
 pub(crate) async fn fetch_capabilities(
     seed: Option<&url::Url>,
     http: &ReqwestClient,
-) -> HashMap<String, String> {
-    let Some(seed_url) = seed else {
-        return HashMap::new();
-    };
-    let result = http
+) -> Result<HashMap<String, String>, crate::Error> {
+    let seed_url = seed.ok_or_else(|| crate::Error::NoCapabilities {
+        message: "the login response carried no capability-seed URL".to_owned(),
+    })?;
+    let response = http
         .post(seed_url.clone())
         .header("Content-Type", "application/llsd+xml")
         .body(build_seed_request(REQUESTED_CAPABILITIES))
         .send()
-        .await;
-    let Ok(response) = result else {
-        return HashMap::new();
-    };
-    let Ok(text) = response.text().await else {
-        return HashMap::new();
-    };
-    parse_seed_response(&text).unwrap_or_default()
+        .await?;
+    let text = response.text().await?;
+    parse_seed_response(&text).map_err(|error| crate::Error::NoCapabilities {
+        message: format!("the seed-capabilities response did not parse: {error}"),
+    })
 }
 
 /// GETs the `SimulatorFeatures` capability (when the region advertises it),

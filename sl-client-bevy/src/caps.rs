@@ -81,30 +81,62 @@ pub(crate) fn post_neighbour_seed(seed_url: url::Url) {
 pub(crate) fn run_caps(
     seed_url: url::Url,
     caps_tx: &Sender<(String, Llsd)>,
-    map_tx: &Sender<HashMap<String, String>>,
+    map_tx: &Sender<Result<HashMap<String, String>, String>>,
     stop: &AtomicBool,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let http = match ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
-    else {
-        return;
+    {
+        Ok(http) => http,
+        Err(error) => {
+            map_tx
+                .send(Err(format!(
+                    "could not build the caps HTTP client: {error}"
+                )))
+                .ok();
+            return;
+        }
     };
-    let Ok(response) = http
+    let response = match http
         .post(seed_url)
         .header("Content-Type", "application/llsd+xml")
         .body(build_seed_request(REQUESTED_CAPABILITIES))
         .send()
-    else {
-        return;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            map_tx
+                .send(Err(format!(
+                    "the seed-capabilities request failed: {error}"
+                )))
+                .ok();
+            return;
+        }
     };
-    let Ok(text) = response.text() else {
-        return;
+    let text = match response.text() {
+        Ok(text) => text,
+        Err(error) => {
+            map_tx
+                .send(Err(format!(
+                    "the seed-capabilities response body could not be read: {error}"
+                )))
+                .ok();
+            return;
+        }
     };
-    let Ok(capabilities) = parse_seed_response(&text) else {
-        return;
+    let capabilities = match parse_seed_response(&text) {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            map_tx
+                .send(Err(format!(
+                    "the seed-capabilities response did not parse: {error}"
+                )))
+                .ok();
+            return;
+        }
     };
-    map_tx.send(capabilities.clone()).ok();
+    map_tx.send(Ok(capabilities.clone())).ok();
     let Some(event_queue_url) = capabilities.get("EventQueueGet").cloned() else {
         return;
     };

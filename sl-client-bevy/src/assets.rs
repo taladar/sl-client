@@ -8,8 +8,6 @@
 //! the store's `get` is `async`, a Bevy app drives it by `block_on`-ing on a
 //! task/thread (this fetcher's HTTP is blocking, matching that use).
 
-use std::time::Duration;
-
 use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -17,25 +15,7 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_asset::{AssetFetcher, AssetRef, FetchChunk, FetchError};
 
-/// How many times to retry the `ViewerAsset` poll service on a transient "not
-/// ready" response before giving up.
-const MAX_POLL_RETRIES: u32 = 12;
-
-/// The delay between `ViewerAsset` poll retries.
-const POLL_RETRY_BACKOFF: Duration = Duration::from_millis(500);
-
-/// Whether `status` is a transient poll-service response the viewer's HTTP layer
-/// retries: the `ViewerAsset` service answers `503` (and, behind a proxy, `502`
-/// / `504`) while it queues the asset from the backing store, then serves the
-/// bytes once ready.
-fn is_transient(status: ReqwestStatusCode) -> bool {
-    matches!(
-        status,
-        ReqwestStatusCode::SERVICE_UNAVAILABLE
-            | ReqwestStatusCode::BAD_GATEWAY
-            | ReqwestStatusCode::GATEWAY_TIMEOUT
-    )
-}
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// Summarizes a failed HTTP response as a one-line `status; body: …` string
 /// (body whitespace-collapsed and truncated), so a fetch error carries what the
@@ -128,12 +108,12 @@ impl BevyAssetFetcher {
                     whole: false,
                 });
             }
-            // The poll service returns 503 while it queues the asset; retry a
-            // bounded number of times, as the viewer's HTTP layer does.
-            if is_transient(status) {
-                if attempt < MAX_POLL_RETRIES {
+            // The poll service returns 503 while it queues the asset; retry with
+            // exponential backoff rather than failing the fetch.
+            if is_transient_status(status) {
+                if attempt < MAX_TRANSIENT_RETRIES {
+                    std::thread::sleep(transient_backoff(attempt));
                     attempt = attempt.saturating_add(1);
-                    std::thread::sleep(POLL_RETRY_BACKOFF);
                     continue;
                 }
                 return Err(FetchError::Unavailable(describe_failure(response)));

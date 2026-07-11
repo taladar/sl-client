@@ -14,6 +14,8 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use sl_mesh::{AssetFetcher, FetchChunk, FetchError};
 use sl_proto::MeshKey;
 
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
 /// The `Accept` MIME type for a mesh asset (the viewer's
 /// `HTTP_CONTENT_VND_LL_MESH`).
 const MESH_ACCEPT: &str = "application/vnd.ll.mesh";
@@ -71,35 +73,51 @@ impl AssetFetcher<MeshKey> for ReqwestMeshFetcher {
             .load_full()
             .ok_or_else(|| FetchError::Transport("mesh capability not available".to_owned()))?;
         let url = format!("{cap}/?mesh_id={id}");
-        let response = self
-            .http
-            .get(&url)
-            .header("Accept", MESH_ACCEPT)
-            .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
-            .send()
-            .await
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        let status = response.status();
-        if status == ReqwestStatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound);
+        let mut attempt = 0_u32;
+        loop {
+            let response = self
+                .http
+                .get(&url)
+                .header("Accept", MESH_ACCEPT)
+                .header("Range", format!("bytes={start}-{}", end.saturating_sub(1)))
+                .send()
+                .await
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            let status = response.status();
+            if status == ReqwestStatusCode::NOT_FOUND {
+                return Err(FetchError::NotFound);
+            }
+            // A range past the end of the asset means "no more bytes": report an
+            // empty chunk so the store stops growing and decodes what it has.
+            if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
+                return Ok(FetchChunk {
+                    bytes: Bytes::new(),
+                    whole: false,
+                });
+            }
+            // The `GetMesh2` service answers `503` while it queues the mesh; retry
+            // with exponential backoff rather than failing the fetch (a mesh frozen
+            // at a coarse LOD, or a rigged mesh that never binds).
+            if is_transient_status(status) {
+                if attempt < MAX_TRANSIENT_RETRIES {
+                    tokio::time::sleep(transient_backoff(attempt)).await;
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                return Err(FetchError::Unavailable(format!(
+                    "unexpected status {status}"
+                )));
+            }
+            // 200 = the server ignored the range and returned the whole asset.
+            let whole = status == ReqwestStatusCode::OK;
+            if !status.is_success() {
+                return Err(FetchError::Transport(format!("unexpected status {status}")));
+            }
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|error| FetchError::Transport(error.to_string()))?;
+            return Ok(FetchChunk { bytes, whole });
         }
-        // A range past the end of the asset means "no more bytes": report an empty
-        // chunk so the store stops growing and decodes what it has.
-        if status == ReqwestStatusCode::RANGE_NOT_SATISFIABLE {
-            return Ok(FetchChunk {
-                bytes: Bytes::new(),
-                whole: false,
-            });
-        }
-        // 200 = the server ignored the range and returned the whole asset.
-        let whole = status == ReqwestStatusCode::OK;
-        if !status.is_success() {
-            return Err(FetchError::Transport(format!("unexpected status {status}")));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| FetchError::Transport(error.to_string()))?;
-        Ok(FetchChunk { bytes, whole })
     }
 }

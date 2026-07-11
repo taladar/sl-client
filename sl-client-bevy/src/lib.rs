@@ -76,30 +76,30 @@ pub use sl_proto::{
     Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
     MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NegativeBalanceError,
     NeighborInfo, NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayInfo, ParcelRequestResult, ParcelReturnType, ParcelStatus,
-    ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5,
-    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
-    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, Rotation,
-    SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, UpdatableAssetType, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
+    OpenRegionInfo, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
+    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
+    ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeTypes, PickInfo,
+    PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType,
+    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionFlags,
+    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, RegionTerrainComposition, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
+    Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
+    UpdatableAssetType, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
+    Wearable, WearableType, XferId, avatar_texture, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -284,6 +284,7 @@ mod materials;
 mod media;
 pub mod meshes;
 pub mod prims;
+mod retry;
 #[cfg(feature = "bevy_pbr")]
 pub mod sky;
 #[cfg(feature = "bevy_pbr")]
@@ -496,8 +497,10 @@ pub(crate) struct Caps {
     pub(crate) asset_rx: Receiver<SessionEvent>,
     /// A sender clone for spawning one-shot binary asset fetches.
     pub(crate) asset_tx: Sender<SessionEvent>,
-    /// Receives the region's capability map once the poller has fetched it.
-    pub(crate) map_rx: Receiver<HashMap<String, String>>,
+    /// Receives the region's capability map once the poller has fetched it, or a
+    /// readable error if the seed-capabilities fetch failed (which fails the login
+    /// while still awaiting initial caps, and merely degrades a region change).
+    pub(crate) map_rx: Receiver<Result<HashMap<String, String>, String>>,
     /// The cached capability map (cap name → URL), empty until discovered.
     pub(crate) map: HashMap<String, String>,
     /// Set on drop to ask the poller thread to stop at its next loop iteration.
@@ -750,7 +753,27 @@ fn advance_running(
     // Cache the capability map once the poller discovers it, then drain any CAPS
     // payloads (event-queue events plus inventory responses).
     if let Some(caps) = caps.as_mut() {
-        while let Ok(map) = caps.map_rx.try_recv() {
+        while let Ok(result) = caps.map_rx.try_recv() {
+            let map = match result {
+                Ok(map) => map,
+                Err(reason) => {
+                    // The seed-capabilities fetch failed. On the initial login,
+                    // abort rather than proceed into a capless session (the deferred
+                    // `CompleteAgentMovement` is then never sent); on a later region
+                    // change the session is already established, so only degrade.
+                    if session.is_awaiting_initial_capabilities() {
+                        session.fail_no_capabilities(reason);
+                    } else {
+                        tracing::warn!("region-change capability fetch failed: {reason}");
+                    }
+                    continue;
+                }
+            };
+            // The region served its capabilities: release the deferred initial-login
+            // `CompleteAgentMovement` now that the simulator has processed our
+            // seed-caps request (which advertised animesh support) — so it knows we
+            // render animesh before it streams the scene. A no-op on a region change.
+            session.notify_capabilities_ready(now).ok();
             // The viewer fetches `SimulatorFeatures` on arriving in a region, so
             // GET it once the capability map is known (at login and on each region
             // change), surfacing the flags as `Event::SimulatorFeatures`.
