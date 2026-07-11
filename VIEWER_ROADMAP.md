@@ -2529,6 +2529,73 @@ Flexi prims (Phase 32) and avatar body physics (Phase 34) are client-side
 simulations. Rather than hand-rolling a solver for each, stand up a shared
 physics substrate on the `avian3d` Bevy physics engine first.
 
+### Simulator authority & the Firestorm motion model (read before P31.2)
+
+Object **and avatar** position is *entirely* simulator-authoritative — the
+reference viewer never runs a client-side physics solve for their placement, and
+**does no collision/wall prediction** (not even for the own avatar; the agent
+body is the same `LLViewerObject` path). It only **dead-reckons** between
+updates from the sim-sent linear velocity + acceleration
+(`LLViewerObject::interpolateLinearMotion`, called from `idleUpdate`):
+`new_pos = (vel + 0.5*(dt - PHYSICS_TIMESTEP)*accel) * dt`. No geometry is
+consulted. The load-bearing protocol contract (verbatim from that function): the
+sim *"will NOT send updates if the object continues normally on the path
+predicted by the velocity and the acceleration (often gravity) sent to the
+viewer"* — so silence means "prediction still holds", and a deviation (a wall, a
+push, a settle, a script stop) is communicated by a **corrective update**, not
+foreseen by the client. During the round-trip the viewer genuinely extrapolates
+slightly *into* the wall and is then snapped back. There is **no** "settled"
+flag; rest is inferred from a terse update carrying ~zero linear/angular
+velocity.
+
+Because unbounded extrapolation "walks off into infinity" (and sinks avatars
+under the terrain / shoots them off on region crossings), the reference bounds
+the dead-reckoning with a layered set of guards that P31.2's smoothing step
+**must reproduce** rather than let a body free-run:
+
+- **Circuit-health phase-out.** After `sPhaseOutUpdateInterpolationTime` (2 s)
+  of silence *and* a blocked/stale circuit (`LLCircuitData::isBlocked` / no
+  packets
+  — checked on the whole circuit, since per-object silence is expected), a
+  `phase_out` factor ramps `1.0 → 0.0`, multiplying both the position delta and
+  velocity so the object **eases to a halt**; by `sMaxUpdateInterpolationTime`
+  (3 s) prediction is fully off. The circuit gate is essential: it separates
+  "quiet because the prediction is right" (keep going) from "quiet because the
+  sim is lagging" (taper off).
+- **Geometric clamps.** Each extrapolated step is clamped to a **ground floor**
+  (avatars use a real land-height lookup `resolveLandHeightGlobal + 0.5*height`
+  so a laggy avatar does not dead-reckon under the terrain), a
+  **region-height ceiling**, and an **off-region edge clip**
+  (`clipToVisibleRegions`) that, when the predicted position leaves into a void
+  with no neighbour, clips to the edge,
+  **zeros velocity + acceleration, and waits for a server update**.
+- **Region-crossing cap.** A tighter `sMaxRegionCrossingInterpolationTime` (1 s)
+  bounds interpolation across a border crossing (the classic "shot off across
+  the region" source).
+
+Implications for the implementation phases, to stay faithful:
+
+- **Keep server-driven prims *and* avatars kinematic** — driven by
+  `ObjectUpdate` transforms with, at most, this velocity+accel dead-reckoning
+  (the "avian smooths between updates" half of P31.2), *including* the phase-out
+  and clamps above. Do **not** integrate them as free dynamic bodies under the
+  configured gravity: the moment a server object free-runs, the "sim considers
+  it settled (and goes silent) but avian keeps simulating" divergence appears,
+  with no incoming update to correct it — the one case the corrective-update
+  model cannot close. avian's genuine *dynamic* bodies + the world `Gravity` are
+  for **client-only** motion the sim never simulates (Phase 32 / 34), not for
+  re-simulating server objects.
+- **Client-only physics self-settles, so it has no authority conflict.** Flexi
+  (Phase 32) and the avatar cloth/body params (Phase 34) are spring-damper
+  systems driven by the sim/animation-authored motion; with zero input they
+  relax to their rest morph rather than running away, so they cannot "un-settle"
+  a settled avatar/prim the way a gravity-driven rigid body would.
+
+The viewer today does **not** even dead-reckon — `objects.rs` snaps each
+transform straight to the last reported `object.motion.position`. So adding the
+Firestorm velocity extrapolation (with the guards above) is itself part of the
+P31.2 "smooths between updates" work, not a prerequisite already in place.
+
 - [x] **P31.1. Integrate `avian3d`.** Add the `avian3d` plugin: a physics
   world with SL gravity, a fixed timestep, and coordinate bridging to the Y-up
   scene. Foundation reused by Phase 32 and Phase 34. New workspace dependency.
@@ -2562,7 +2629,15 @@ physics substrate on the `avian3d` Bevy physics engine first.
   `LLViewerObject` physics flag / `LLPhysicsShapeType` — prim / convex hull /
   none) an avian rigid body + collider derived from the prim / mesh geometry.
   The sim stays authoritative — `ObjectUpdate` transforms drive the body while
-  avian smooths between updates and powers client-only dynamics.
+  avian smooths between updates and powers client-only dynamics. **Follow the
+  "Simulator authority & the Firestorm motion model" note above:** drive these
+  bodies **kinematically** (transform from `ObjectUpdate` + velocity/accel
+  dead-reckoning with the circuit-health phase-out and the ground /
+  region-height / off-region-edge clamps), **not** as free dynamic bodies under
+  the world gravity — otherwise a server object the sim has settled (and gone
+  silent about) keeps free-running in avian with no update to correct it.
+  Reserve avian's dynamic bodies for genuinely client-only motion
+  (Phases 32 / 34).
 
 ## Phase 32 — Flexi prims
 
