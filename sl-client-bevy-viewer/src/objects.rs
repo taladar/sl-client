@@ -61,6 +61,7 @@ use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
+use crate::particles::{apply_particles, particles_from_object};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
@@ -1652,6 +1653,11 @@ fn apply_object(
     // is reflected — [`apply_light`] inserts the component when present and
     // removes it when absent.
     let light = light_from_object(object);
+    // The object's particle-system block (P30.1): present only when the prim is a
+    // live particle source. Refreshed on every update so a source toggled off /
+    // retuned in-world is reflected — [`apply_particles`] inserts the component
+    // when present and removes it when absent (or null).
+    let particles = particles_from_object(object);
 
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
@@ -1686,6 +1692,7 @@ fn apply_object(
         apply_render_materials(existing.geometry, scoped, object, commands);
         apply_texture_animation(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);
+        apply_particles(existing.entity, particles, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
             // re-tessellate. A category change is subsumed here, since the
@@ -1760,6 +1767,9 @@ fn apply_object(
     // A light-source prim carries its decoded light block (P25.1); a plain prim
     // gets nothing.
     apply_light(entity, light, commands);
+    // A particle-source prim carries its decoded particle system (P30.1); a plain
+    // prim gets nothing.
+    apply_particles(entity, particles, commands);
     // The geometry holder: a child of the object entity carrying only the object's
     // scale, so the object's own faces are scaled while linkset children (which
     // parent to the object entity, not this) are not.

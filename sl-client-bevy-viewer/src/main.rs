@@ -25,6 +25,7 @@ mod lights;
 mod materials;
 mod meshes;
 mod objects;
+mod particles;
 mod render_priority;
 mod screenshot;
 mod session;
