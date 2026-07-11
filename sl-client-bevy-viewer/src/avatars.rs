@@ -538,6 +538,31 @@ impl AvatarBody {
     pub(crate) fn joint_overrides(&self, skin: &MeshSkin) -> JointOverrides {
         joint_position_overrides(skin, &self.joint_lookup, &self.joint_locals)
     }
+
+    /// Spawn a **bare** skeleton instance — one joint entity per skeleton joint,
+    /// in joint order, parented into the hierarchy under `root` — with no base-body
+    /// parts, attachment nodes, or name tag. Used by the animesh control avatar
+    /// (P29), which drives the standard skeleton for a scripted linkset that has no
+    /// wearer, so it needs the joints but none of the avatar body chrome.
+    ///
+    /// The joints carry no [`AvatarJoint`] marker (a control avatar is not an
+    /// agent-keyed avatar and is not touched by the appearance pass); the caller
+    /// owns them via the returned list and despawns them with the `root`
+    /// sub-hierarchy. Mirrors the joint-spawning half of [`AvatarState::spawn_body`].
+    pub(crate) fn spawn_bare_skeleton(&self, root: Entity, commands: &mut Commands) -> Vec<Entity> {
+        let joints: Vec<Entity> = self
+            .joint_locals
+            .iter()
+            .map(|local| commands.spawn((*local, Visibility::default())).id())
+            .collect();
+        for (entity, parent) in joints.iter().zip(self.joint_parents.iter().copied()) {
+            let target = parent
+                .and_then(|index| joints.get(index).copied())
+                .unwrap_or(root);
+            commands.entity(*entity).insert(ChildOf(target));
+        }
+        joints
+    }
 }
 
 /// A resolved attachment point on the shared body (P16.2): the joint index it

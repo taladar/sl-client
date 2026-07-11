@@ -43,8 +43,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_anim::{JointContribution, Motion, blend_joint, builtin_animation};
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
-    BlobFetcher, CAP_VIEWER_ASSET, PlayingAnimation, SlCapabilities, SlEvent, SlSessionEvent, Uuid,
-    sample_motion,
+    BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid, sample_motion,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -165,9 +164,15 @@ impl AnimationManager {
                 _absent => match store.get(id, AssetType::Animation).await {
                     Ok(entry) => match entry.data() {
                         Some(data) => data.to_vec(),
-                        None => return None,
+                        None => {
+                            warn!("animation {} fetched but has no data", id.uuid());
+                            return None;
+                        }
                     },
-                    Err(_error) => return None,
+                    Err(error) => {
+                        warn!("fetching animation {} over ViewerAsset: {error}", id.uuid());
+                        return None;
+                    }
                 },
             };
             match Motion::from_bytes(&bytes) {
@@ -299,10 +304,10 @@ pub(crate) fn poll_animations(mut manager: ResMut<AnimationManager>) {
     }
 }
 
-/// One animation an avatar is currently playing, tracked for playback timing and
-/// priority-blend ordering (P18.4).
+/// One animation an avatar (or an animesh control avatar, P29) is currently
+/// playing, tracked for playback timing and priority-blend ordering (P18.4).
 #[derive(Debug, Clone, Copy)]
-struct PlayState {
+pub(crate) struct PlayState {
     /// The simulator's per-avatar animation sequence number; a change means the
     /// animation (re)started, so the playback clock resets and it re-activates.
     sequence_id: i32,
@@ -360,23 +365,26 @@ pub(crate) struct AnimationPlayback {
 /// update at a time, so the last-*started* one wins. Assigning the monotonic
 /// stamp in UUID order within each update yields both behaviours from the one
 /// rule.
-fn reconcile_playing(
+///
+/// The signalled set is passed as `(anim_id, sequence_id)` pairs so both the
+/// avatar path (from [`PlayingAnimation`](sl_client_bevy::PlayingAnimation)) and
+/// the animesh control-avatar path (from
+/// [`ObjectPlayingAnimation`](sl_client_bevy::ObjectPlayingAnimation), P29)
+/// can drive it.
+pub(crate) fn reconcile_playing(
     entry: &mut HashMap<Uuid, PlayState>,
     next_order: &mut u64,
-    animations: &[PlayingAnimation],
+    animations: &[(Uuid, i32)],
     now: f32,
 ) {
-    let live: HashMap<Uuid, i32> = animations
-        .iter()
-        .map(|animation| (animation.anim_id, animation.sequence_id))
-        .collect();
+    let live: HashMap<Uuid, i32> = animations.iter().copied().collect();
     // Newly-activated (absent, or re-triggered with a changed sequence id); an
     // unchanged, still-signalled animation is left in place (and un-stopped).
     let mut newly: Vec<(Uuid, i32)> = Vec::new();
-    for animation in animations {
-        match entry.get_mut(&animation.anim_id) {
-            Some(state) if state.sequence_id == animation.sequence_id => state.stopped_at = None,
-            _new_or_restarted => newly.push((animation.anim_id, animation.sequence_id)),
+    for &(anim_id, sequence_id) in animations {
+        match entry.get_mut(&anim_id) {
+            Some(state) if state.sequence_id == sequence_id => state.stopped_at = None,
+            _new_or_restarted => newly.push((anim_id, sequence_id)),
         }
     }
     // Begin easing out every animation that left the authoritative set.
@@ -400,6 +408,81 @@ fn reconcile_playing(
         );
         *next_order = next_order.wrapping_add(1);
     }
+}
+
+/// Drop from one playing set every motion whose ease-out tail has fully passed
+/// (its [`Motion::is_finished`]), and any stopped motion with no decodable asset
+/// left to fade. Shared by the avatar driver and the animesh control-avatar
+/// driver (P29).
+pub(crate) fn retain_active(
+    anims: &mut HashMap<Uuid, PlayState>,
+    now: f32,
+    manager: &AnimationManager,
+) {
+    anims.retain(|id, state| {
+        let elapsed = now - state.start;
+        match manager.motion(AssetKey::from(*id)) {
+            Some(motion) => !motion.is_finished(elapsed, state.stopped_at),
+            None => state.stopped_at.is_none(),
+        }
+    });
+}
+
+/// Blend one playing set into a per-joint [`AnimationPose`], sampling each
+/// decoded motion at its elapsed time, weighting it by its ease-in/out
+/// [`pose_weight`](Motion::pose_weight), and resolving concurrent contributions
+/// per joint by priority ([`blend_joint`], P18.4). `joint_index` maps a motion's
+/// joint *name* to the skeleton index the pose is keyed by. Returns `None` when
+/// no playing motion is decoded / contributes (the skeleton then keeps its rest
+/// pose). Shared by the avatar driver and the animesh control-avatar driver (P29,
+/// which resolves names against the same standard skeleton).
+pub(crate) fn resolve_pose(
+    anims: &HashMap<Uuid, PlayState>,
+    now: f32,
+    manager: &AnimationManager,
+    joint_index: impl Fn(&str) -> Option<usize>,
+) -> Option<AnimationPose> {
+    // Gather every motion's weighted contribution per joint, then blend.
+    let mut contributions: HashMap<usize, Vec<JointContribution>> = HashMap::new();
+    for (anim_id, play) in anims {
+        let elapsed = now - play.start;
+        let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
+            continue;
+        };
+        let weight = motion.pose_weight(elapsed, play.stopped_at);
+        if weight <= 0.0 {
+            continue;
+        }
+        for sampled in sample_motion(motion, elapsed) {
+            let Some(index) = joint_index(sampled.name) else {
+                continue;
+            };
+            contributions
+                .entry(index)
+                .or_default()
+                .push(JointContribution {
+                    priority: sampled.priority,
+                    order: play.order,
+                    weight,
+                    rotation: sampled.rotation.map(|rotation| rotation.to_array()),
+                    position: sampled.position.map(|position| position.to_array()),
+                });
+        }
+    }
+    if contributions.is_empty() {
+        return None;
+    }
+    let mut pose = AnimationPose::new();
+    for (index, mut joint) in contributions {
+        let blended = blend_joint(&mut joint);
+        if let Some(rotation) = blended.rotation {
+            pose.set_rotation(index, Quat::from_array(rotation));
+        }
+        if let Some(position) = blended.position {
+            pose.set_position(index, Vec3::from_array(position));
+        }
+    }
+    Some(pose)
 }
 
 /// Resolve each rigged avatar's per-joint animation pose from the motions it is
@@ -435,20 +518,18 @@ pub(crate) fn drive_avatar_skeletons(
             ..
         } = &event.0
         {
+            let pairs: Vec<(Uuid, i32)> = animations
+                .iter()
+                .map(|animation| (animation.anim_id, animation.sequence_id))
+                .collect();
             let entry = playback.playing.entry(*avatar_id).or_default();
-            reconcile_playing(entry, &mut playback.next_order, animations, now);
+            reconcile_playing(entry, &mut playback.next_order, &pairs, now);
         }
     }
     // Drop fully-eased-out motions (their ease-out tail has passed), and any
     // stopped motion with no decodable asset to fade; forget emptied avatars.
     playback.playing.retain(|_agent, anims| {
-        anims.retain(|id, state| {
-            let elapsed = now - state.start;
-            match manager.motion(AssetKey::from(*id)) {
-                Some(motion) => !motion.is_finished(elapsed, state.stopped_at),
-                None => state.stopped_at.is_none(),
-            }
-        });
+        retain_active(anims, now, &manager);
         !anims.is_empty()
     });
     // Without the avatar asset library there are no skeleton instances to pose.
@@ -463,47 +544,9 @@ pub(crate) fn drive_avatar_skeletons(
         if state.joint_entities_of(agent).is_none() {
             continue;
         }
-        // Gather every motion's weighted contribution per joint, then blend.
-        let mut contributions: HashMap<usize, Vec<JointContribution>> = HashMap::new();
-        for (anim_id, play) in anims {
-            let elapsed = now - play.start;
-            let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
-                continue;
-            };
-            let weight = motion.pose_weight(elapsed, play.stopped_at);
-            if weight <= 0.0 {
-                continue;
-            }
-            for sampled in sample_motion(motion, elapsed) {
-                let Some(index) = body.joint_index(sampled.name) else {
-                    continue;
-                };
-                contributions
-                    .entry(index)
-                    .or_default()
-                    .push(JointContribution {
-                        priority: sampled.priority,
-                        order: play.order,
-                        weight,
-                        rotation: sampled.rotation.map(|rotation| rotation.to_array()),
-                        position: sampled.position.map(|position| position.to_array()),
-                    });
-            }
+        if let Some(pose) = resolve_pose(anims, now, &manager, |name| body.joint_index(name)) {
+            let _prev = poses.insert(agent, pose);
         }
-        if contributions.is_empty() {
-            continue;
-        }
-        let mut pose = AnimationPose::new();
-        for (index, mut joint) in contributions {
-            let blended = blend_joint(&mut joint);
-            if let Some(rotation) = blended.rotation {
-                pose.set_rotation(index, Quat::from_array(rotation));
-            }
-            if let Some(position) = blended.position {
-                pose.set_position(index, Vec3::from_array(position));
-            }
-        }
-        let _prev = poses.insert(agent, pose);
     }
     // Edge-triggered logging (not every frame): an avatar starting / stopping being
     // posed is the live signal that a keyframe motion decoded and drove the skeleton.

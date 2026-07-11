@@ -8,6 +8,7 @@
 //! phases.
 
 mod animations;
+mod animesh;
 mod appearance;
 mod avatar_assets;
 mod avatars;
@@ -57,6 +58,9 @@ use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
     poll_animations, pose_avatar_skeletons, update_animation_caps,
 };
+use crate::animesh::{
+    ControlAvatarState, drive_control_avatars, ingest_object_animations, pose_control_avatars,
+};
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
@@ -93,7 +97,8 @@ use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
     apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
-    log_suspicious_objects, pick_object, update_objects,
+    log_suspicious_objects, pick_object, prune_control_avatars, spawn_animesh_control_avatars,
+    update_objects,
 };
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
@@ -471,6 +476,7 @@ fn run_session(
     .init_resource::<TreeLodTargets>()
     .init_resource::<LocalLights>()
     .init_resource::<AvatarState>()
+    .init_resource::<ControlAvatarState>()
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
     .init_resource::<PrimTextures>()
@@ -743,16 +749,30 @@ fn run_session(
             repeat_debug_animation,
             report_camera_interest,
             report_agent_viewport,
+            // Animesh (P29): request each animated object's animation motions, drive
+            // its control-avatar skeleton from them (after its rigged meshes bind in
+            // `apply_rigged_attachments`), and drop control avatars whose object is
+            // gone (after `update_objects` has processed removals).
+            ingest_object_animations,
+            drive_control_avatars.after(apply_rigged_attachments),
+            // Spawn a control avatar as soon as an animesh has an animation playing
+            // (after `drive_control_avatars` folds the `ObjectAnimation` into the
+            // playback clock), so a late mesh bind does not lose an early animation.
+            spawn_animesh_control_avatars.after(drive_control_avatars),
+            prune_control_avatars.after(update_objects),
         ),
     )
-    // Write the posed avatars' animated joint world matrices straight into their
-    // `GlobalTransform`s (P18.3), after transform propagation has produced the rest
-    // globals this frame — so the animated pose is what skinning / render extraction
-    // reads, without the limb-shear a rotation overlaid on the baked-scale local
-    // transform would cause.
+    // Write the posed avatars' (and animesh control avatars') animated joint world
+    // matrices straight into their `GlobalTransform`s (P18.3 / P29.2), after
+    // transform propagation has produced the rest globals this frame — so the
+    // animated pose is what skinning / render extraction reads, without the
+    // limb-shear a rotation overlaid on the baked-scale local transform would cause.
     .add_systems(
         PostUpdate,
-        pose_avatar_skeletons.after(TransformSystems::Propagate),
+        (
+            pose_avatar_skeletons.after(TransformSystems::Propagate),
+            pose_control_avatars.after(TransformSystems::Propagate),
+        ),
     );
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.

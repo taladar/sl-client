@@ -36,7 +36,7 @@
 //! [`tessellate_sculpt`], and spawns its face the same way. Avatar placeholders
 //! (P10) attach their geometry to these entities in the same way.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bevy::camera::visibility::NoFrustumCulling;
@@ -44,7 +44,7 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, GRASS_MAX_BLADES, JointOverrides, MeshKey, MeshSkin,
-    Object, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority,
+    Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority,
     ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
     TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
     decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
@@ -53,6 +53,7 @@ use sl_client_bevy::{
     tree_billboard_geometry, tree_geometry, tree_species,
 };
 
+use crate::animesh::ControlAvatarState;
 use crate::avatars::{
     AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
@@ -212,6 +213,11 @@ struct TrackedObject {
     /// parent linkset children and attachments hang off. It has **no scale** (see
     /// [`object_transform`]).
     entity: Entity,
+    /// The object's full asset [`ObjectKey`] (the region-independent UUID), kept so
+    /// an animesh root can be matched to the `ObjectAnimation` (`object_id`) that
+    /// drives its control avatar (P29) and its control avatar pruned when the object
+    /// is gone. Distinct from the region-scoped local id this object is keyed by.
+    full_key: ObjectKey,
     /// The per-object geometry holder — a child of [`entity`](Self::entity)
     /// carrying the object's Second Life scale, onto which this object's own faces
     /// are parented so the scale never reaches the child prims below it.
@@ -1724,6 +1730,7 @@ fn apply_object(
         existing.is_root = is_root;
         existing.attachment_point = attachment_point;
         existing.animated = is_animated_object(object);
+        existing.full_key = object.full_id;
         return;
     }
 
@@ -1783,6 +1790,7 @@ fn apply_object(
         scoped,
         TrackedObject {
             entity,
+            full_key: object.full_id,
             geometry,
             shape,
             parent,
@@ -2194,32 +2202,30 @@ fn joint_overrides_enabled() -> bool {
     std::env::var("SL_VIEWER_JOINT_OVERRIDES").as_deref() != Ok("0")
 }
 
-/// Whether the object `scoped` belongs to an **animated object** (animesh) linkset:
-/// walk its parent chain (the animated flag sits on the linkset root) up to the
-/// avatar. An animesh drives its own control-avatar skeleton, so its rig joint
-/// positions must not override the wearer's skeleton (R1) — the reference viewer's
-/// `!vo->isAnimatedObject()` filter.
-fn belongs_to_animesh(state: &ObjectState, scoped: ScopedObjectId) -> bool {
+/// A guard on the linkset-chain walk in [`animesh_root`], against a malformed
+/// parent cycle.
+const MAX_LINKSET_DEPTH: usize = 32;
+
+/// The animesh linkset root that `scoped` belongs to (P29): walk its parent chain
+/// up to the object carrying the animated-object flag and return that root's full
+/// [`ObjectKey`] (the id `ObjectAnimation` names its control avatar by) and scene
+/// entity (the control-avatar skeleton parents to it so it follows the object).
+/// `None` if the chain reaches no animated-object root (not an animesh).
+fn animesh_root(state: &ObjectState, scoped: ScopedObjectId) -> Option<(ObjectKey, Entity)> {
     let mut current = scoped;
     for _ in 0..MAX_LINKSET_DEPTH {
-        let Some(tracked) = state.objects.get(&current) else {
-            return false;
-        };
+        let tracked = state.objects.get(&current)?;
         if tracked.animated {
-            return true;
+            return Some((tracked.full_key, tracked.entity));
         }
         // A root's `parent` is its own scoped id; stop before looping forever.
         if tracked.parent == current {
-            return false;
+            return None;
         }
         current = tracked.parent;
     }
-    false
+    None
 }
-
-/// A guard on the linkset-chain walk in [`belongs_to_animesh`], against a malformed
-/// parent cycle.
-const MAX_LINKSET_DEPTH: usize = 32;
 
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
 /// available (P17.2): for each object holding a [`PendingGeometry::RiggedMesh`],
@@ -2245,6 +2251,7 @@ const MAX_LINKSET_DEPTH: usize = 32;
 pub(crate) fn apply_rigged_attachments(
     mut state: ResMut<ObjectState>,
     mut avatars: ResMut<AvatarState>,
+    mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
     mut commands: Commands,
@@ -2275,22 +2282,45 @@ pub(crate) fn apply_rigged_attachments(
             continue;
         };
         let key = build.key;
-        // The wearer avatar, found by chasing this mesh's parent links up to the
-        // avatar root — a mesh body is worn as a multi-prim linkset whose parts
-        // parent to the linkset root prim, not the avatar directly, so its direct
-        // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
-        let Some(agent) = avatars.wearer_of(scoped) else {
+        // A rigged mesh that started on the managed coarse-LOD path (an animesh, or
+        // an attachment whose worn status resolved late) is being upgraded to the
+        // finest block asynchronously (`upgrade_to_finest`). Building now would bind
+        // the coarse geometry, and a rigged mesh is not on the LOD-swap rebuild path
+        // (`apply_object_meshes`), so it would stay frozen at that block — an animesh
+        // rendered from its few-vertex coarsest LOD (P29). Wait for the finest decode.
+        if mesh_manager.lod_change_inflight(key) {
             continue;
-        };
-        // The wearer's rigged body and its skeleton-instance joints; retry next
-        // frame if the avatar (or its body) is not spawned yet. The joint entities
-        // are cloned so the immutable `avatars` borrow ends before the override
-        // record below borrows it mutably.
-        let (Some(root), Some(joints)) = (
-            avatars.body_root_of(agent),
-            avatars.joint_entities_of(agent).cloned(),
-        ) else {
-            continue;
+        }
+        // Resolve the skeleton this rigged mesh binds to: an animated object
+        // (animesh) drives its OWN control-avatar skeleton (P29), spawned on demand
+        // as a child of the linkset root; every other rigged mesh binds to the
+        // wearer avatar it hangs off. The `bind_agent` (the wearer, keying its baked
+        // textures for a bake-on-mesh face) is `None` for an animesh — an animated
+        // object has no wearer bake, so its faces texture from ordinary fetches.
+        let animesh = animesh_root(&state, scoped);
+        let (root, joints, bind_agent) = if let Some((object, object_entity)) = animesh {
+            let (root, joints) =
+                control.ensure_spawned(object, object_entity, &body, &mut commands);
+            (root, joints, None)
+        } else {
+            // The wearer avatar, found by chasing this mesh's parent links up to the
+            // avatar root — a mesh body is worn as a multi-prim linkset whose parts
+            // parent to the linkset root prim, not the avatar directly, so its direct
+            // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
+            let Some(agent) = avatars.wearer_of(scoped) else {
+                continue;
+            };
+            // The wearer's rigged body and its skeleton-instance joints; retry next
+            // frame if the avatar (or its body) is not spawned yet. The joint entities
+            // are cloned so the immutable `avatars` borrow ends before the override
+            // record below borrows it mutably.
+            let (Some(root), Some(joints)) = (
+                avatars.body_root_of(agent),
+                avatars.joint_entities_of(agent).cloned(),
+            ) else {
+                continue;
+            };
+            (root, joints, Some(agent))
         };
         let Some(fallback) = joints.first().copied() else {
             continue;
@@ -2330,15 +2360,17 @@ pub(crate) fn apply_rigged_attachments(
             );
         }
         let texture_entry = build.texture_entry.clone();
-        // The wearer's agent id (resolved above) keys its baked textures (P17.3): a
-        // bake-on-mesh face is textured from the wearer's own bake, not a fetch.
+        // The wearer's agent id (when known) keys its baked textures (P17.3): a
+        // bake-on-mesh face is textured from the wearer's own bake, not a fetch. An
+        // animesh has no wearer bake (`bind_agent` is `None`), so its faces texture
+        // from ordinary fetches.
         let face_entities = build_rigged_submeshes(
             &decoded,
             &skin,
             &joint_entities,
             &texture_entry,
             root,
-            Some(agent),
+            bind_agent,
             key,
             &mut commands,
             &mut meshes,
@@ -2354,29 +2386,78 @@ pub(crate) fn apply_rigged_attachments(
             // must not also be pinned to a rigid attachment-point node.
             tracked.parented = true;
         }
-        // Fold the rig's joint position overrides into the wearer's skeleton (R1):
+        // Fold the rig's joint position overrides into the skeleton it binds to (R1):
         // a fitted mesh body/head repositions the joints its inverse-bind matrices
         // were baked against, so without these the mesh distorts at the extremities.
-        // Recording flags the avatar for a skeleton re-deform (the reference
-        // viewer's `addAttachmentOverridesForObject`). Skipped for an animesh (its
-        // overrides drive its own control avatar, not the wearer) and when disabled
-        // via `SL_VIEWER_JOINT_OVERRIDES=0` (A/B against the pre-override behaviour).
-        let overrides = if joint_overrides_enabled() && !belongs_to_animesh(&state, scoped) {
+        // For an animesh they go onto its own control avatar; for a worn mesh onto
+        // the wearer (flagging it for a skeleton re-deform, the reference viewer's
+        // `addAttachmentOverridesForObject`). Suppressible via
+        // `SL_VIEWER_JOINT_OVERRIDES=0` (A/B against the pre-override behaviour).
+        let overrides = if joint_overrides_enabled() {
             body.joint_overrides(&skin)
         } else {
             JointOverrides::default()
         };
         if !overrides.is_empty() {
             debug!(
-                "rigged mesh {key} on avatar {agent}: {} joint position override(s), \
-                 lock_scale={}",
+                "rigged mesh {key}: {} joint position override(s), lock_scale={}",
                 overrides.len(),
                 overrides.lock_scale()
             );
         }
-        avatars.record_joint_overrides(agent, key.uuid(), overrides);
-        debug!("bound rigged mesh {key} on avatar {agent} to its skeleton");
+        match (animesh, bind_agent) {
+            (Some((object, _entity)), _) => control.record_overrides(object, key.uuid(), overrides),
+            (None, Some(agent)) => avatars.record_joint_overrides(agent, key.uuid(), overrides),
+            (None, None) => {}
+        }
+        debug!("bound rigged mesh {key} to its skeleton");
     }
+}
+
+/// Spawn a control avatar (P29) for every tracked animesh root that already has an
+/// animation playing, as soon as the animation arrives — rather than waiting for
+/// its rigged mesh to bind (`apply_rigged_attachments`), which can be many seconds
+/// later once the mesh's finest LOD decodes. The reference viewer creates an
+/// `LLControlAvatar` when the object is detected as animated, not when its geometry
+/// loads; spawning early means an `ObjectAnimation` that arrives before the mesh
+/// decode is captured and posed the moment the mesh binds, instead of being lost in
+/// the gap. The skeleton is invisible until a mesh binds to it, so this only
+/// materialises for animesh we are actually animating (gated on `is_playing`).
+pub(crate) fn spawn_animesh_control_avatars(
+    state: Res<ObjectState>,
+    mut control: ResMut<ControlAvatarState>,
+    body: Option<Res<AvatarBody>>,
+    mut commands: Commands,
+) {
+    let Some(body) = body else {
+        return;
+    };
+    let roots: Vec<(ObjectKey, Entity)> = state
+        .objects
+        .values()
+        .filter(|tracked| tracked.animated && control.is_playing(tracked.full_key))
+        .map(|tracked| (tracked.full_key, tracked.entity))
+        .collect();
+    for (key, entity) in roots {
+        let _spawned = control.ensure_spawned(key, entity, &body, &mut commands);
+    }
+}
+
+/// Drop the control avatar of every animesh (P29) whose root object is no longer
+/// tracked — removed, or its region left. The skeleton entities parent under the
+/// object entity, so Bevy's recursive despawn already took them with the object;
+/// this only clears the stale [`ControlAvatarState`] bookkeeping (and its playback
+/// clock), so a re-rez rebuilds a fresh control avatar.
+pub(crate) fn prune_control_avatars(
+    state: Res<ObjectState>,
+    mut control: ResMut<ControlAvatarState>,
+) {
+    let live: HashSet<ObjectKey> = state
+        .objects
+        .values()
+        .map(|tracked| tracked.full_key)
+        .collect();
+    control.retain(|object| live.contains(&object));
 }
 
 /// Spawn one skinned child entity per non-empty submesh of a decoded rigged mesh

@@ -322,6 +322,17 @@ impl MeshManager {
         self.skins.get(&id)
     }
 
+    /// Whether a level-of-detail change for `id` is still in flight — chiefly the
+    /// [`upgrade_to_finest`](Self::upgrade_to_finest) a rigged mesh triggers when it
+    /// is discovered to be worn / an animesh after starting on the managed coarse
+    /// path. A rigged mesh must not be built from its coarse block while its finest
+    /// block is still decoding (rigged meshes are not on the LOD-swap rebuild path,
+    /// so a coarse build is frozen — an animesh renders as a few-vertex husk); the
+    /// skinned bind waits on this (P29).
+    pub(crate) fn lod_change_inflight(&self, id: MeshKey) -> bool {
+        self.lod_inflight.contains_key(&id)
+    }
+
     /// The currently decoded level of detail of `id`, and whether it is pixel-area
     /// LOD managed (an ordinary scene mesh) rather than boosted to the finest level
     /// (a worn attachment) — for the crosshair pick tool's LOD diagnostics (P21.2).
