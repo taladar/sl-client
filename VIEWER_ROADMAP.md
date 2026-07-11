@@ -2789,7 +2789,7 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   `ControlFlags`) already existed end-to-end through both runtimes, so this
   was a viewer-only addition (module + registration). Verified in the same
   live run above.
-- [ ] **P31.6. Locomotion / state animations.** Drive the avatar's
+- [x] **P31.6. Locomotion / state animations.** Drive the avatar's
   built-in state animations — the ones an animation overrider (AO) replaces
   — from its movement state: **standing**, **walking** / **running**,
   **turning left / right**, **flying** / **hovering**, **falling**,
@@ -2806,7 +2806,140 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   movement `ControlFlags` and play the corresponding built-in `.anim` from
   the `character/` set) for the own avatar's immediate feedback / where the
   sim does not drive it. Reference: Firestorm `LLAgent` motion controllers
-  and `llvoavatar` `ANIM_AGENT_*` ids.
+  and `llvoavatar` `ANIM_AGENT_*` ids. **Done — the investigation found the
+  planned premise wrong in two ways, so the fix is two library bug-fixes plus
+  a viewer fallback, not the assumed synthesis / local `.anim`.** (1) **Root
+  cause: an `sl-anim` registry misclassification.** walk / run / stand /
+  turn / crouch (and the female / `*_new` / `standup` variants) were marked
+  `BuiltinKind::Procedural` (no downloadable asset), so the resolver skipped
+  the fetch and *never played them*. But the reference viewer's
+  `LLKeyframeWalkMotion` / `LLKeyframeStandMotion` / `LLKeyframeFallMotion`
+  all **extend `LLKeyframeMotion`**, which downloads the keyframe asset by
+  UUID (`gAssetStorage->getAssetData`) and only layers a procedural
+  *adjustment* (foot IK / torso facing) on top — the assets are ordinary
+  downloadable `.anim`s (confirmed: OpenSim serves them under the exact
+  built-in UUIDs, e.g. `walk` `6ed24bd8…`). Fixed by reclassifying the 17
+  locomotion entries `Procedural → Keyframe`; the genuinely procedural ones
+  (the `LLEmote` `express_*`, `do_not_disturb`, and the always-on adjusters —
+  which the sim never signals and are absent from the table) stay
+  `Procedural`. Added `sl_anim::builtin_animation_by_name` (name → built-in)
+  for the viewer's state → UUID lookup. So there is **no local `.anim` from
+  `character/`** and **no synthesis** — the built-ins download from the grid
+  like any other, and the sim-driven path (the primary one, per the note
+  above) then works. (2) **A second, latent P18.4 bug the fix exposed:**
+  `reconcile_playing` stamped a dropped animation's `stopped_at` with the
+  **absolute wall clock** (`now`), while `Motion::pose_weight` /
+  `is_finished` compare it against `elapsed = now - start` (**motion-elapsed**
+  since that animation started). A *non-looping* motion was saved by its
+  natural ease-out (`min(stopped_at, duration - ease_out)` picks the smaller),
+  so gestures always faded correctly and the bug stayed hidden — but a
+  *looping* locomotion motion has no natural ease-out, so a stopped walk held
+  full weight until `elapsed` reached the (large, ever-growing) wall-clock
+  value: it "stuck" on walk for a few seconds early in a session and
+  effectively forever later. Fixed by storing `stopped_at = now - start`
+  (the documented motion-elapsed timeline); regression-tested. (3)
+  **Client-side fallback (`locomotion.rs`, viewer-only):** derives the own
+  avatar's state from the P31.5 advertised `ControlFlags` **intent** (walk /
+  run / turn / fly / ascend / descend) plus the P31.4 dead-reckoned
+  *vertical* velocity (fall / fly-vertical only), maps it to the built-in
+  animation via `builtin_animation_by_name`, and plays it on a new
+  client-driven slot on `AnimationPlayback` — **deferring entirely** while the
+  sim is driving the avatar (a new `has_active_sim_animation` gate), so the
+  two never double-drive. Intent (not velocity) drives walk/run/turn on
+  purpose: the intent clears the instant the key is released, whereas the
+  last-reported velocity lingers at walk speed until a corrective update — the
+  same "doesn't stop when you stop" trap in miniature. Diagnostics:
+  `SL_VIEWER_LOG_LOCOMOTION=1` (edge-logged state + the sim's per-update
+  `AvatarAnimation` set) and `SL_VIEWER_FORCE_CLIENT_LOCOMOTION=1` (force the
+  fallback on to exercise it on a root presence). Kept viewer-only (no
+  runtime-parity obligation); `sl-anim` is the only shared-library change.
+  Verified **live on OpenSim** (user-confirmed on screen): walk / stand fetch,
+  decode, and pose the skeleton; the own avatar walks and settles back to
+  standing **promptly** on key release (the wire log shows OpenSim broadcasts
+  clean `walk#n ↔ stand#n+1` transitions and the reconcile now eases the walk
+  out within its ~0.5 s ease-out); this login was a root presence so the sim
+  drove it and the client fallback correctly stayed deferred. **Scope: only the
+  base keyframe motion plays.** The reference viewer's *procedural adjustment*
+  overlay — the whole point of the `LLKeyframe*Motion` subclasses — is **not**
+  ported: `LLKeyframeWalkMotion`'s playback-speed match to ground velocity +
+  `LLWalkAdjustMotion` foot-plant IK / pelvis lag (anti-foot-skate),
+  `LLKeyframeStandMotion`'s lower-body twist to face the look direction with
+  foot IK, `LLKeyframeFallMotion`'s landing recovery, and the always-on
+  adjusters the sim never signals (`LLHeadRotMotion` head-track, `LLEyeMotion`,
+  `LLHandMotion`, `LLBodyNoiseMotion` idle sway, `LLBreatheMotionRot`). So feet
+  can skate, the stand does not turn its legs to the look direction, and there
+  is no head/eye/breathe idle motion → **P31.8**. **Follow-up noted:** avatar
+  turning is not interpolated like translation, so it reads choppy → **P31.7**
+  (a motion-smoothing gap, unrelated to the animations).
+- [ ] **P31.7. Interpolate avatar turning.** The own avatar's **rotation** is
+  not smoothed the way its **translation** is (P31.4): a live finding from the
+  P31.6 run is that turning left / right reads choppy while forward / backward
+  motion is smooth. The P31.4 avatar dead-reckoner (`drive_avatar_motion`)
+  advances position from the sim-sent linear velocity + acceleration and spins
+  the orientation from the angular velocity, but the own avatar's facing is
+  *driven client-side* by the P31.5 movement controls (a throttled
+  `SetRotation` at ~20 Hz seeds the sim, which streams the resulting facing
+  back as terse `ObjectUpdate`s), so between those sparse updates the anchor's
+  rotation snaps rather than interpolating. Smooth the avatar's orientation
+  between authoritative rotation updates (slerp toward the target facing, or
+  fold the client-tracked heading into the render transform continuously) so a
+  turn looks as fluid as a walk. Viewer-only; unrelated to the P31.6
+  animations. Reference: Firestorm `LLViewerObject::interpolateRotation` /
+  the agent's `mDrawable` orientation smoothing.
+- [ ] **P31.8. Procedural motion adjustments & always-on adjusters.** P31.6
+  plays each state's *base* downloadable keyframe (walk / run / stand / turn /
+  fall), but not the procedural layer the reference viewer stacks on top —
+  which is the whole reason those states are `LLKeyframe*Motion` **subclasses**
+  rather than plain `LLKeyframeMotion`. Port them as post-keyframe pose
+  adjustments over the Phase 18 blend (they run every frame after the sampled
+  pose, driven by agent state, not by an `AvatarAnimation`):
+  - **Locomotion adjustments** — `LLKeyframeWalkMotion` matches the walk/run
+    playback speed to the actual ground velocity, and the always-on
+    `LLWalkAdjustMotion` foot-plants with pelvis lag, together killing
+    foot-skate; `LLKeyframeStandMotion` twists the lower body / feet to face
+    the look direction with foot IK (so a standing avatar's legs follow the
+    camera); `LLKeyframeFallMotion` blends the landing recovery;
+    `LLFlyAdjustMotion` banks the fly.
+  - **Always-on idle adjusters** — `LLHeadRotMotion` (head / neck tracks the
+    look-at target), `LLEyeMotion` (eye saccades / tracking), `LLHandMotion`
+    (hand-pose morph), `LLBodyNoiseMotion` (subtle idle sway), and
+    `LLBreatheMotionRot` (chest breathing). The viewer runs these continuously
+    on every avatar; they are **not** signalled over `AvatarAnimation` and so
+    are absent from `sl-anim`'s table.
+  - **Activity-driven reach / aim** — `LLEditingMotion` reaches the hand toward
+    the object the agent has selected / is editing; `LLTargetingMotion` aims the
+    arm at a target (mouselook aim / the point gesture). Also locally driven,
+    also absent from the table.
+
+  (`LLPhysicsMotionController` avatar body-jiggle physics is separate — Phase
+  34.) Reference: `llkeyframewalkmotion.cpp` / `llkeyframestandmotion.cpp` /
+  `llkeyframefallmotion.cpp` and the adjuster motion classes in
+  `indra/newview/`; the `registerMotion` block in `llvoavatar.cpp`.
+- [ ] **P31.9. Typing animation & sound.** When an avatar types in nearby
+  chat the reference viewer plays `ANIM_AGENT_TYPE` (the hands-on-keyboard
+  gesture) plus the typing UI sound, and advertises the state so others see
+  it. For **other** avatars this should already flow through the P31.6-fixed
+  path — the simulator plays `ANIM_AGENT_TYPE` (a downloadable keyframe, now
+  correctly classified) and broadcasts it over `AvatarAnimation`, which Phase
+  18 plays — so the first task is to **verify** a typing neighbour animates
+  (a second `sl-repl` login sending `StartTyping`). For the **own** avatar,
+  drive it from local chat-entry state: on start-typing play the animation
+  locally *and* send `ChatFromViewer` `StartTyping` (the `ChatTyping` P11.1
+  already ingests for others), clear it on stop-typing; optionally the typing
+  sound. A sibling of P31.6 — an activity-driven state animation, not a
+  procedural adjuster. Reference: `LLAgent::startTyping` / `stopTyping`,
+  `ANIM_AGENT_TYPE`, `gAgent.sendAnimationRequest`.
+- [ ] **P31.10. Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is
+  a known gap, not an oversight).** The reference viewer animates an avatar's
+  mouth from the live voice **audio power** while it speaks
+  (`LLVoiceVisualizer` — a viseme / mouth-open morph driven by the speaker's
+  amplitude), plus the green voice-dots "who's speaking" indicator. Both need
+  the decoded voice **audio stream**, which sl-client does not carry: the
+  project models voice **signalling / session-state only**, not the
+  Vivox / WebRTC audio transport, and the speaking indicators are out too (see
+  the voice-signalling-only decision in the sl-client memory). So there is
+  nothing to drive lips or dots from. Left unchecked as a permanent,
+  intentional boundary; revisit only if voice audio is ever brought in scope.
 
 ## Phase 32 — Flexi prims
 

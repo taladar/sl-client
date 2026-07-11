@@ -33,4 +33,6 @@ pub use decode::{
     AnimDecodeError, Constraint, ConstraintTargetType, ConstraintType, HandPose, JointMotion,
     JointPriority, Motion, PositionKey, RotationKey,
 };
-pub use registry::{BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, builtin_animation};
+pub use registry::{
+    BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, builtin_animation, builtin_animation_by_name,
+};

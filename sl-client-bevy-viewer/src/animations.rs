@@ -265,10 +265,31 @@ pub(crate) fn ingest_avatar_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
 ) {
+    let log = std::env::var("SL_VIEWER_LOG_LOCOMOTION").as_deref() == Ok("1");
     for event in events.read() {
-        if let SlSessionEvent::AvatarAnimation { animations, .. } = &event.0 {
+        if let SlSessionEvent::AvatarAnimation {
+            avatar_id,
+            animations,
+            ..
+        } = &event.0
+        {
             for animation in animations {
                 manager.request(AssetKey::from(animation.anim_id));
+            }
+            // Wire-truth diagnostic (env `SL_VIEWER_LOG_LOCOMOTION=1`): the exact
+            // authoritative animation set the simulator broadcast for this avatar,
+            // resolved to built-in names, so a live run can see whether the grid
+            // drops `walk` on release (P31.6 investigation).
+            if log {
+                let names: Vec<String> = animations
+                    .iter()
+                    .map(|animation| {
+                        let name = builtin_animation(animation.anim_id)
+                            .map_or("uploaded", |builtin| builtin.name);
+                        format!("{name}#{}", animation.sequence_id)
+                    })
+                    .collect();
+                info!("P31.6 sim AvatarAnimation for {avatar_id}: {names:?}");
             }
         }
     }
@@ -333,8 +354,19 @@ pub(crate) struct PlayState {
 /// world matrices.
 #[derive(Resource, Default)]
 pub(crate) struct AnimationPlayback {
-    /// Each avatar's currently-playing animations, keyed by animation id.
+    /// Each avatar's currently-playing animations, keyed by animation id — the
+    /// authoritative simulator-driven set (from `AvatarAnimation`).
     playing: HashMap<AgentKey, HashMap<Uuid, PlayState>>,
+    /// The own avatar's **client-driven** locomotion animation (P31.6), kept apart
+    /// from the simulator-driven [`playing`](Self::playing) set so the two do not
+    /// fight over one map: this is the built-in walk / run / stand / turn / fly /
+    /// hover / fall the viewer plays for immediate feedback *when the simulator is
+    /// not driving the avatar itself* (e.g. an OpenSim child presence that never
+    /// broadcasts the agent's own animations). Reconciled by
+    /// [`set_client_locomotion`](Self::set_client_locomotion); merged with the
+    /// simulator set at pose time. Keyed by avatar for symmetry, though only the
+    /// own avatar is ever present.
+    client_locomotion: HashMap<AgentKey, HashMap<Uuid, PlayState>>,
     /// The next activation-recency stamp to hand out (monotonic across all
     /// avatars; only the relative order within an avatar is ever compared).
     next_order: u64,
@@ -344,14 +376,53 @@ pub(crate) struct AnimationPlayback {
     poses: HashMap<AgentKey, AnimationPose>,
 }
 
+impl AnimationPlayback {
+    /// Whether the simulator is currently driving at least one **active** (not
+    /// easing-out) animation on `agent`. The client-side locomotion fallback
+    /// (P31.6) defers to the simulator whenever this is true — a grid that
+    /// broadcasts the agent's own locomotion / stand set (a root presence, or an AO
+    /// on Second Life) already animates it, so the fallback only fills the gap when
+    /// the simulator says nothing.
+    #[must_use]
+    pub(crate) fn has_active_sim_animation(&self, agent: AgentKey) -> bool {
+        self.playing
+            .get(&agent)
+            .is_some_and(|anims| anims.values().any(|state| state.stopped_at.is_none()))
+    }
+
+    /// Reconcile the own avatar's client-driven locomotion set (P31.6) to a single
+    /// `desired` built-in animation, or `None` to ease out whatever is playing. An
+    /// unchanged desire keeps its playback clock (so a continuous walk keeps
+    /// looping); a change eases the old motion out and starts the new one, so
+    /// transitions blend rather than pop. Kept separate from the simulator-driven
+    /// [`playing`](Self::playing) set — the caller ([`crate::locomotion`]) gates on
+    /// [`has_active_sim_animation`](Self::has_active_sim_animation) so the two never
+    /// drive the same avatar at once.
+    pub(crate) fn set_client_locomotion(
+        &mut self,
+        agent: AgentKey,
+        desired: Option<Uuid>,
+        now: f32,
+    ) {
+        let entry = self.client_locomotion.entry(agent).or_default();
+        // A fixed sequence id: the animation *id* is what distinguishes one state
+        // from the next, so `reconcile_playing` keeps an unchanged desire in place
+        // and only (re)starts when the id itself changes.
+        let pairs: Vec<(Uuid, i32)> = desired.map(|id| (id, 0)).into_iter().collect();
+        reconcile_playing(entry, &mut self.next_order, &pairs, now);
+    }
+}
+
 /// Reconcile one avatar's playing-animation set with an authoritative
 /// `AvatarAnimation` update, reproducing the reference viewer's activation
 /// ordering (P18.4).
 ///
 /// An animation that stays signalled with the same sequence id keeps its start
 /// time and activation order (and is un-marked if it had begun easing out). One
-/// that leaves the set begins easing out (its `stopped_at` is stamped `now`) but
-/// stays until it has faded, so its ease-out tail is not cut off. A newly
+/// that leaves the set begins easing out (its `stopped_at` is stamped with its
+/// elapsed-since-start, `now - start`, the motion-elapsed timeline the ease-out
+/// weight uses) but stays until it has faded, so its ease-out tail is not cut off.
+/// A newly
 /// signalled animation — or one whose sequence id changed, i.e. the simulator
 /// re-triggered it — (re)activates: its clock resets and it takes a fresh, higher
 /// activation-order stamp so it wins ties in priority.
@@ -387,10 +458,19 @@ pub(crate) fn reconcile_playing(
             _new_or_restarted => newly.push((anim_id, sequence_id)),
         }
     }
-    // Begin easing out every animation that left the authoritative set.
+    // Begin easing out every animation that left the authoritative set. The stop
+    // time is stored **relative to that animation's own start** — the same
+    // motion-elapsed timeline [`Motion::pose_weight`] / [`Motion::is_finished`]
+    // compare against `elapsed = now - start` — not the absolute wall clock. A
+    // *non-looping* motion is saved by its natural ease-out (`min(stopped_at,
+    // duration - ease_out)` picks the smaller), which is why gestures always faded
+    // correctly; but a *looping* motion (walk / run / stand) has no natural
+    // ease-out, so an absolute `now` here (a large, ever-growing number) would push
+    // its ease-out start far into the future and leave the animation stuck at full
+    // weight for seconds — effectively forever late into a session (P31.6).
     for (id, state) in entry.iter_mut() {
         if !live.contains_key(id) && state.stopped_at.is_none() {
-            state.stopped_at = Some(now);
+            state.stopped_at = Some(now - state.start);
         }
     }
     // Activate the newcomers in UUID order, so the highest UUID takes the newest
@@ -426,6 +506,25 @@ pub(crate) fn retain_active(
             None => state.stopped_at.is_none(),
         }
     });
+}
+
+/// Merge an avatar's simulator-driven playing set with its client-driven
+/// locomotion set (P31.6) into one map for [`resolve_pose`]. Either side may be
+/// absent; when both are present the client entries are folded in on top (they
+/// never collide in practice, because [`crate::locomotion`] only drives the
+/// client set while the simulator set is idle). Returns an owned map so the pose
+/// resolver borrows one set regardless of how many contributed.
+fn merge_playing(
+    sim: Option<&HashMap<Uuid, PlayState>>,
+    client: Option<&HashMap<Uuid, PlayState>>,
+) -> HashMap<Uuid, PlayState> {
+    let mut merged = sim.cloned().unwrap_or_default();
+    if let Some(client) = client {
+        for (&id, &state) in client {
+            let _prev = merged.insert(id, state);
+        }
+    }
+    merged
 }
 
 /// Blend one playing set into a per-joint [`AnimationPose`], sampling each
@@ -527,8 +626,14 @@ pub(crate) fn drive_avatar_skeletons(
         }
     }
     // Drop fully-eased-out motions (their ease-out tail has passed), and any
-    // stopped motion with no decodable asset to fade; forget emptied avatars.
+    // stopped motion with no decodable asset to fade; forget emptied avatars. Both
+    // the simulator-driven set and the client-driven locomotion set (P31.6) are
+    // pruned the same way.
     playback.playing.retain(|_agent, anims| {
+        retain_active(anims, now, &manager);
+        !anims.is_empty()
+    });
+    playback.client_locomotion.retain(|_agent, anims| {
         retain_active(anims, now, &manager);
         !anims.is_empty()
     });
@@ -537,14 +642,21 @@ pub(crate) fn drive_avatar_skeletons(
         playback.poses.clear();
         return;
     };
-    // Resolve each avatar's blended per-joint pose from its playing motions.
+    // Resolve each avatar's blended per-joint pose from its playing motions — the
+    // union of the simulator-driven set and the own avatar's client locomotion.
+    let mut agents: HashSet<AgentKey> = playback.playing.keys().copied().collect();
+    agents.extend(playback.client_locomotion.keys().copied());
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
-    for (&agent, anims) in &playback.playing {
+    for agent in agents {
         // Only a rigged avatar (with skeleton-instance joints) can be posed.
         if state.joint_entities_of(agent).is_none() {
             continue;
         }
-        if let Some(pose) = resolve_pose(anims, now, &manager, |name| body.joint_index(name)) {
+        let merged = merge_playing(
+            playback.playing.get(&agent),
+            playback.client_locomotion.get(&agent),
+        );
+        if let Some(pose) = resolve_pose(&merged, now, &manager, |name| body.joint_index(name)) {
             let _prev = poses.insert(agent, pose);
         }
     }
@@ -640,5 +752,69 @@ pub(crate) fn pose_avatar_skeletons(
                 *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PlayState, reconcile_playing};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::Uuid;
+    use std::collections::HashMap;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect` when pulling a tracked entry out of the map.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// Two distinct stand-in animation ids (the reconcile logic is id-agnostic).
+    fn walk() -> Uuid {
+        Uuid::from_u128(1)
+    }
+    fn stand() -> Uuid {
+        Uuid::from_u128(2)
+    }
+
+    /// The stop time recorded for `id` (its `stopped_at`), or an error if `id` is
+    /// no longer tracked in `entry`.
+    fn stop_of(entry: &HashMap<Uuid, PlayState>, id: Uuid) -> Result<Option<f32>, TestError> {
+        Ok(entry.get(&id).ok_or("animation still tracked")?.stopped_at)
+    }
+
+    /// A looping motion dropped from the authoritative set records its stop time
+    /// **relative to its own start** (`now - start`), the motion-elapsed timeline
+    /// the ease-out weight uses — not the absolute wall clock. Storing the absolute
+    /// `now` is what left a looping walk stuck at full weight for seconds (P31.6).
+    #[test]
+    fn stopped_at_is_relative_to_start() -> Result<(), TestError> {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        // Walk started 10 s into the session.
+        reconcile_playing(&mut entry, &mut next_order, &[(walk(), 1)], 10.0);
+        // 40 s in, the sim drops walk (empty locomotion set).
+        reconcile_playing(&mut entry, &mut next_order, &[], 40.0);
+        // Relative stop time is 40 - 10 = 30 s, not the absolute 40 s.
+        assert_eq!(stop_of(&entry, walk())?, Some(30.0));
+        Ok(())
+    }
+
+    /// A still-signalled animation keeps its start (and is un-stopped if it had
+    /// begun easing out); a replacement animation starts fresh.
+    #[test]
+    fn resignal_keeps_start_and_new_starts_fresh() -> Result<(), TestError> {
+        let mut entry: HashMap<Uuid, PlayState> = HashMap::new();
+        let mut next_order = 0u64;
+        reconcile_playing(&mut entry, &mut next_order, &[(walk(), 1)], 5.0);
+        // Walk leaves, then is re-signalled with the same sequence id: un-stopped,
+        // start preserved.
+        reconcile_playing(&mut entry, &mut next_order, &[], 6.0);
+        assert_eq!(stop_of(&entry, walk())?, Some(1.0));
+        reconcile_playing(&mut entry, &mut next_order, &[(walk(), 1)], 7.0);
+        assert_eq!(stop_of(&entry, walk())?, None);
+        // Stand replaces walk: walk eases out (relative to its 5 s start), stand
+        // starts active.
+        reconcile_playing(&mut entry, &mut next_order, &[(stand(), 2)], 9.0);
+        assert_eq!(stop_of(&entry, walk())?, Some(9.0 - 5.0));
+        assert_eq!(stop_of(&entry, stand())?, None);
+        Ok(())
     }
 }

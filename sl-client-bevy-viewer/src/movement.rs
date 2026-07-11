@@ -71,6 +71,20 @@ pub(crate) struct AvatarControls {
     rotation_send_accum: f32,
 }
 
+impl AvatarControls {
+    /// The [`ControlFlags`] set last advertised to the simulator (walk / run /
+    /// fly / ascend / descend). The client-side locomotion fallback
+    /// ([`crate::locomotion`]) reads the same advertised intent that moves the
+    /// avatar to pick which built-in animation to play for immediate feedback.
+    ///
+    /// The set includes [`ControlFlags::FLY`] while flying is toggled on, so the
+    /// locomotion fallback reads the fly / hover states straight off it.
+    #[must_use]
+    pub(crate) const fn advertised(&self) -> ControlFlags {
+        self.last_controls
+    }
+}
+
 impl Default for AvatarControls {
     fn default() -> Self {
         Self {

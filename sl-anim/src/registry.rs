@@ -9,20 +9,32 @@
 //!
 //! - A [`BuiltinKind::Keyframe`] built-in is an ordinary keyframe-motion
 //!   (`.anim`) asset stored on the grid's asset server under its fixed UUID; a
-//!   viewer fetches and decodes it exactly like an uploaded animation (the
-//!   reference viewer registers these with `LLKeyframeMotion`).
+//!   viewer fetches and decodes it exactly like an uploaded animation. The
+//!   reference viewer registers these with `LLKeyframeMotion` **or one of its
+//!   subclasses** — `LLKeyframeWalkMotion` (the walks/runs/turns),
+//!   `LLKeyframeStandMotion` (the stands/crouch), and `LLKeyframeFallMotion`
+//!   (`standup`) all extend `LLKeyframeMotion`, which fetches the asset by UUID
+//!   (`gAssetStorage->getAssetData`); the subclass merely layers a *procedural
+//!   adjustment* (foot IK / torso facing / fall recovery) on top of the
+//!   downloaded keyframe motion. So the whole locomotion set is downloadable, not
+//!   synthesised — the earlier classification of walk/run/stand/turn/crouch as
+//!   [`BuiltinKind::Procedural`] was a bug that stopped a viewer from ever
+//!   fetching them (P31.6).
 //! - A [`BuiltinKind::Procedural`] built-in has **no** downloadable asset: the
-//!   reference viewer synthesises it from a dedicated C++ motion class
-//!   (`LLKeyframeWalkMotion` for the walks/runs/turns, `LLKeyframeStandMotion`
-//!   for the stands/crouch, `LLEmote` for the facial expressions, and the
-//!   always-on adjusters like head/eye/hand/breathe/physics). Fetching its UUID
-//!   over the asset capability would 404, so a resolver skips the fetch.
+//!   reference viewer synthesises it from a dedicated C++ motion class with no
+//!   `LLKeyframeMotion` base — `LLEmote` for the facial expressions, `LLNullMotion`
+//!   for `do_not_disturb`, and the always-on adjusters
+//!   (head/eye/hand/breathe/physics/pelvis/walk-adjust, which the simulator never
+//!   signals in an `AvatarAnimation` and so are absent from this table). Fetching
+//!   such a UUID over the asset capability would 404, so a resolver skips the fetch.
 //!
 //! The table is pure data ported from the reference viewer
 //! (`indra/llcharacter/llanimationstates.cpp` for the UUIDs;
-//! `indra/newview/llvoavatar.cpp`'s `registerMotion` block for which are
-//! procedural), keeping this crate Bevy-free and I/O-free — the fetch/decode
-//! and the procedural synthesis live in the runtime / viewer layers.
+//! `indra/newview/llvoavatar.cpp`'s `registerMotion` block for which motion class
+//! backs each — a `LLKeyframeMotion` subclass ⟹ [`BuiltinKind::Keyframe`],
+//! anything else ⟹ [`BuiltinKind::Procedural`]), keeping this crate Bevy-free and
+//! I/O-free — the fetch/decode and the procedural synthesis live in the runtime /
+//! viewer layers.
 
 use uuid::{Uuid, uuid};
 
@@ -35,9 +47,12 @@ pub enum BuiltinKind {
     /// `LLKeyframeMotion`).
     Keyframe,
     /// A procedurally generated motion with no downloadable asset — the
-    /// reference viewer synthesises it from a bespoke C++ motion class (the
-    /// walks/stands/turns, the `LLEmote` facial expressions, and the always-on
-    /// head/eye/hand/breathe/physics adjusters).
+    /// reference viewer synthesises it from a bespoke C++ motion class that does
+    /// **not** extend `LLKeyframeMotion` (the `LLEmote` facial expressions, the
+    /// `LLNullMotion` do-not-disturb, and the always-on head/eye/hand/breathe/
+    /// physics adjusters). The walks/stands/turns are **not** here: their
+    /// `LLKeyframe*Motion` classes download a keyframe asset, so they are
+    /// [`Keyframe`](Self::Keyframe).
     Procedural,
 }
 
@@ -158,12 +173,12 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "crouch",
         uuid!("201f3fdf-cb1f-dbec-201f-7333e328ae7c"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "crouchwalk",
         uuid!("47f5f6fb-22e5-ae44-f871-73aaaf4a6022"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "cry",
@@ -338,17 +353,17 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "female_run_new",
         uuid!("85995026-eade-5d78-d364-94a64512cb66"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "female_walk",
         uuid!("f5fc7433-043d-e819-8298-f519a119b688"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "female_walk_new",
         uuid!("d60c41d2-7c24-7074-d3fa-6101cea22a51"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "finger_wag",
@@ -543,12 +558,12 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "run",
         uuid!("05ddbff8-aaa9-92a1-2b74-8fe77a29b445"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "run_new",
         uuid!("1ab1b236-cd08-21e6-0cbc-0d923fc6eca2"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "sad",
@@ -633,32 +648,32 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "stand",
         uuid!("2408fe9e-df1d-1d7d-f4ff-1384fa7b350f"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "standup",
         uuid!("3da1d753-028a-5446-24f3-9c9b856d9422"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "stand_1",
         uuid!("15468e00-3400-bb66-cecc-646d7c14458e"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "stand_2",
         uuid!("370f3a20-6ca6-9971-848c-9a01bc42ae3c"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "stand_3",
         uuid!("42b46214-4b44-79ae-deb8-0df61424ff4b"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "stand_4",
         uuid!("f22fed8b-a5ed-2c93-64d5-bdd8b93c889f"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "stretch",
@@ -708,12 +723,12 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "turnleft",
         uuid!("56e0ba0d-4a9f-7f27-6117-32f2ebbf6135"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "turnright",
         uuid!("2d6daa51-3192-6794-8e2e-a15f8338ec30"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "type",
@@ -723,12 +738,12 @@ pub const BUILTIN_ANIMATIONS: &[BuiltinAnimation] = &[
     entry(
         "walk",
         uuid!("6ed24bd8-91aa-4b12-ccc7-c97c857ab4e0"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "walk_new",
         uuid!("33339176-7ddc-9397-94a4-bf3403cbc8f5"),
-        BuiltinKind::Procedural,
+        BuiltinKind::Keyframe,
     ),
     entry(
         "whisper",
@@ -786,6 +801,22 @@ pub fn builtin_animation(id: Uuid) -> Option<&'static BuiltinAnimation> {
         .find(|animation| animation.id == id)
 }
 
+/// Look a built-in agent animation up by its short lowercase [`name`], or `None`
+/// if no built-in carries that name. This is the reverse of [`builtin_animation`]:
+/// a caller that knows the *state* it wants (e.g. `"walk"`, `"stand"`, `"fly"`)
+/// resolves it to the fixed asset UUID to fetch/play — used by the viewer's
+/// client-side locomotion-animation fallback (P31.6). Names are unique in the
+/// table (`uuids_are_unique` guards the ids; the names come straight from the
+/// distinct `ANIM_AGENT_*` constants), so the first match is the only one.
+///
+/// [`name`]: BuiltinAnimation::name
+#[must_use]
+pub fn builtin_animation_by_name(name: &str) -> Option<&'static BuiltinAnimation> {
+    BUILTIN_ANIMATIONS
+        .iter()
+        .find(|animation| animation.name == name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -814,13 +845,43 @@ mod tests {
     }
 
     #[test]
-    fn walks_and_stands_are_procedural() -> Result<(), TestError> {
-        // The locomotion motions are synthesised, not downloaded.
-        for name in ["walk", "run", "stand", "crouch", "turnleft", "turnright"] {
-            let animation = BUILTIN_ANIMATIONS
-                .iter()
-                .find(|animation| animation.name == name)
-                .ok_or("built-in present")?;
+    fn walks_and_stands_are_downloadable_keyframes() -> Result<(), TestError> {
+        // The locomotion motions download a keyframe asset: the reference viewer's
+        // `LLKeyframeWalkMotion` / `LLKeyframeStandMotion` / `LLKeyframeFallMotion`
+        // all extend `LLKeyframeMotion` (which fetches the asset by UUID) and only
+        // layer a procedural *adjustment* on top. They are NOT procedural (P31.6).
+        for name in [
+            "walk",
+            "walk_new",
+            "run",
+            "run_new",
+            "stand",
+            "stand_1",
+            "standup",
+            "crouch",
+            "crouchwalk",
+            "turnleft",
+            "turnright",
+            "female_walk",
+            "female_run_new",
+        ] {
+            let animation = builtin_animation_by_name(name).ok_or("built-in present")?;
+            assert_eq!(
+                animation.kind,
+                BuiltinKind::Keyframe,
+                "{name} downloads a keyframe asset"
+            );
+            assert!(animation.is_downloadable());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn emotes_and_null_stay_procedural() -> Result<(), TestError> {
+        // The genuinely procedural built-ins — `LLEmote` expressions and the
+        // `LLNullMotion` do-not-disturb — have no downloadable asset.
+        for name in ["express_smile", "express_afraid", "do_not_disturb"] {
+            let animation = builtin_animation_by_name(name).ok_or("built-in present")?;
             assert_eq!(
                 animation.kind,
                 BuiltinKind::Procedural,
@@ -828,6 +889,15 @@ mod tests {
             );
             assert!(!animation.is_downloadable());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn lookup_by_name_resolves_and_rejects() -> Result<(), TestError> {
+        let walk = builtin_animation_by_name("walk").ok_or("walk is a built-in")?;
+        assert_eq!(walk.name, "walk");
+        assert_eq!(walk.kind, BuiltinKind::Keyframe);
+        assert!(builtin_animation_by_name("not_an_animation").is_none());
         Ok(())
     }
 

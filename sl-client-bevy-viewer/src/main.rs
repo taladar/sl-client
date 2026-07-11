@@ -22,6 +22,7 @@ mod diagnostics;
 mod environment;
 mod legacy_materials;
 mod lights;
+mod locomotion;
 mod materials;
 mod meshes;
 mod movement;
@@ -92,6 +93,7 @@ use crate::legacy_materials::{
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
 };
 use crate::lights::{LocalLights, drive_local_lights};
+use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
     MaterialManager, apply_material_overrides, apply_pbr_textures, poll_materials,
     register_pbr_materials, update_material_caps,
@@ -772,6 +774,15 @@ fn run_session(
             update_animation_caps,
             ingest_avatar_animations,
             poll_animations,
+            // Client-side locomotion / state animations for the own avatar (P31.6):
+            // derive its movement state from the P31.4 velocity + P31.5 controls and
+            // play the matching built-in animation when the simulator is silent about
+            // it. After the controls (so it reads the freshly advertised intent) and
+            // before the skeleton driver (so its client-driven set is reconciled into
+            // the same frame's pose).
+            drive_own_locomotion
+                .after(drive_avatar_controls)
+                .before(drive_avatar_skeletons),
             drive_avatar_skeletons.after(apply_avatar_appearance),
             repeat_debug_animation,
             report_camera_interest,

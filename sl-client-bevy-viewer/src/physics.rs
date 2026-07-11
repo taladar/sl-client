@@ -960,6 +960,15 @@ impl AvatarMotion {
         siny_cosp.atan2(cosy_cosp)
     }
 
+    /// The avatar's vertical (Second Life Z-up) velocity component (metres/second):
+    /// positive climbing, negative descending / falling. The client-side locomotion
+    /// fallback ([`crate::locomotion`]) reads this to pick the ascend / descend /
+    /// fall states — the only states with no advertised control-flag intent.
+    #[must_use]
+    pub(crate) const fn vertical_speed(&self) -> f32 {
+        self.velocity.z
+    }
+
     /// Build the authoritative motion from an avatar's object update. `apply_rotation`
     /// is `true` for a rigged body root (whose anchor carries the object rotation)
     /// and `false` for a placeholder sphere.
