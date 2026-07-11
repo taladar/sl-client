@@ -53,6 +53,7 @@ use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{
     metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
+use crate::physics::AvatarMotion;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
@@ -1026,6 +1027,11 @@ impl AvatarState {
     ) {
         let agent = AgentKey::from(object.full_id.uuid());
         let scoped = object.scoped_id();
+        // The authoritative motion the P31.4 dead-reckoner (`drive_avatar_motion`)
+        // extrapolates between updates; re-inserted on every update so its change
+        // detection reseeds the prediction. A rigged body root carries the object
+        // rotation, a placeholder sphere does not.
+        let avatar_motion = AvatarMotion::from_object(object, body.is_some());
         // A precise full object takes over from any coarse dot for this agent.
         if let Some(entities) = self.coarse.remove(&agent) {
             despawn_avatar(entities, commands);
@@ -1041,7 +1047,9 @@ impl AvatarState {
                 }
                 None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
             };
-            commands.entity(existing.anchor).insert(transform);
+            commands
+                .entity(existing.anchor)
+                .insert((transform, avatar_motion));
             return;
         }
         self.request_name(agent, writer);
@@ -1064,6 +1072,7 @@ impl AvatarState {
                 materials,
             ),
         };
+        commands.entity(entities.anchor).insert(avatar_motion);
         self.by_scoped.insert(scoped, agent);
         self.objects.insert(agent, entities);
         debug!(

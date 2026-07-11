@@ -58,6 +58,18 @@
 //! in. These colliders are inert on the kinematic movers themselves — they matter
 //! once Phases 32 / 34 add genuine dynamic bodies that collide against them.
 //!
+//! **P31.4 — avatar dead-reckoning.** The same `interpolateLinearMotion` port is
+//! extended to the own and other full-object avatars (the [`crate::avatars`] path,
+//! not the object path): [`apply_object`](crate::avatars) stamps each avatar's
+//! anchor with an [`AvatarMotion`] marker, and [`drive_avatar_motion`] dead-reckons
+//! it between updates with the same phase-out taper and geometric clamps — but with
+//! the **stricter avatar ground floor** ([`avatar_ground_floor`]:
+//! `land + 0.5 * height`) so a laggy avatar does not sink under the terrain. The
+//! shared [`MotionState`] + [`advance_motion`] step drive both the object and avatar
+//! paths; they differ only in that ground floor. Avatars stay kinematic
+//! (sim-authoritative); the predicted motion is applied to the anchor as a
+//! translation delta so the pelvis / shoe render offset is preserved.
+//!
 //! No `sl-client-tokio` counterpart is needed: like the render materials and the
 //! other viewer-only simulations (sky, water, particles), the physics world is a
 //! viewer rendering concern, not a protocol capability, so the runtime-parity
@@ -73,6 +85,7 @@ use sl_client_bevy::{
     SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
 };
 
+use crate::avatars::update_avatar_objects;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::objects::{GeometryHolder, ObjectState, update_objects};
 use crate::terrain::TerrainState;
@@ -154,6 +167,9 @@ impl Plugin for PhysicsPlugin {
                     // has attached / refreshed the [`PhysicalObject`] marker.
                     drive_physical_objects.after(update_objects),
                     detach_physical_bodies.after(update_objects),
+                    // P31.4: dead-reckon avatars between updates (the avatars.rs
+                    // path), after `apply_object` has refreshed the [`AvatarMotion`].
+                    drive_avatar_motion.after(update_avatar_objects),
                     // P31.3: replace the placeholder cuboid with a shape-aware
                     // collider once the physics data and geometry are available.
                     refine_physical_colliders
@@ -304,13 +320,14 @@ pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Comm
     }
 }
 
-/// The viewer-side interpolation state for one physical object, owned entirely by
-/// [`drive_physical_objects`]: the extrapolated (predicted) pose advanced each
-/// frame between server updates, the timing the phase-out reads, and the collider
-/// scale (to rebuild the cuboid only on a genuine resize). Mirrors the reference
-/// viewer's per-`LLViewerObject` interpolation bookkeeping.
-#[derive(Component)]
-pub(crate) struct PhysicsInterp {
+/// The evolving dead-reckoning prediction shared by the object
+/// ([`PhysicsInterp`]) and avatar ([`AvatarInterp`]) motion drivers: the
+/// extrapolated (predicted) region-local pose plus the motion state that
+/// [`advance_motion`] steps forward each frame between authoritative server
+/// updates. All of it is in Second Life space (Z-up, pre basis-change), so the
+/// same math serves both paths — they differ only in the ground floor they apply
+/// (permissive for objects, stricter for avatars).
+struct MotionState {
     /// The predicted region-local position (Second Life Z-up metres).
     position: [f32; 3],
     /// The predicted orientation, in Second Life space (pre basis-change).
@@ -322,8 +339,93 @@ pub(crate) struct PhysicsInterp {
     acceleration: [f32; 3],
     /// The angular velocity (axis·radians/second).
     angular_velocity: [f32; 3],
-    /// The object's region, for the region-edge / neighbour lookups.
+    /// The object's / avatar's region, for the region-edge / neighbour lookups.
     region_handle: RegionHandle,
+    /// While predicted to be crossing a border, the elapsed-seconds deadline after
+    /// which motion is stopped (`mRegionCrossExpire`); `None` when not crossing.
+    region_cross_expire: Option<f64>,
+}
+
+impl MotionState {
+    /// Seed the prediction from an authoritative update's motion fields.
+    fn new(
+        position: &Vector,
+        velocity: &Vector,
+        acceleration: &Vector,
+        rotation: &Rotation,
+        angular_velocity: &Vector,
+        region_handle: RegionHandle,
+    ) -> Self {
+        Self {
+            position: vector_to_array(position),
+            rotation: sl_rotation_to_quat(rotation),
+            velocity: vector_to_array(velocity),
+            acceleration: vector_to_array(acceleration),
+            angular_velocity: vector_to_array(angular_velocity),
+            region_handle,
+            region_cross_expire: None,
+        }
+    }
+}
+
+/// Advance a [`MotionState`] one dead-reckoning frame, exactly as the reference
+/// viewer's `LLViewerObject::interpolateLinearMotion` does: extrapolate the
+/// linear motion (only for an actually-moving body — the reference's
+/// `!accel.isExactlyZero() || !vel.isExactlyZero()` gate), apply the geometric
+/// clamps, then spin the orientation by the angular velocity. `floor_at` resolves
+/// the ground floor for the *predicted* horizontal position — the object and
+/// avatar paths differ only in this floor, so the caller supplies it.
+fn advance_motion<F>(
+    motion: &mut MotionState,
+    neighbours: [bool; 4],
+    dt: f32,
+    phase_out: f32,
+    now: f64,
+    floor_at: F,
+) where
+    F: FnOnce(f32, f32) -> Option<f32>,
+{
+    let moving = motion
+        .velocity
+        .iter()
+        .chain(&motion.acceleration)
+        .any(|c| c.abs() > f32::EPSILON);
+    if moving {
+        let (predicted, velocity) = dead_reckon(
+            motion.position,
+            motion.velocity,
+            motion.acceleration,
+            dt,
+            phase_out,
+        );
+        let [predicted_x, predicted_y, _] = predicted;
+        let clamped = clamp_prediction(ClampInput {
+            position: predicted,
+            velocity,
+            acceleration: motion.acceleration,
+            floor: floor_at(predicted_x, predicted_y),
+            neighbours,
+            region_cross_expire: motion.region_cross_expire,
+            now,
+        });
+        motion.position = clamped.position;
+        motion.velocity = clamped.velocity;
+        motion.acceleration = clamped.acceleration;
+        motion.region_cross_expire = clamped.region_cross_expire;
+    }
+    // Angular velocity is applied even for a purely spinning body.
+    motion.rotation = angular_step(motion.rotation, motion.angular_velocity, dt);
+}
+
+/// The viewer-side interpolation state for one physical object, owned entirely by
+/// [`drive_physical_objects`]: the extrapolated (predicted) pose advanced each
+/// frame between server updates, the timing the phase-out reads, and the collider
+/// scale (to rebuild the cuboid only on a genuine resize). Mirrors the reference
+/// viewer's per-`LLViewerObject` interpolation bookkeeping.
+#[derive(Component)]
+pub(crate) struct PhysicsInterp {
+    /// The shared dead-reckoning prediction (pose + motion) advanced each frame.
+    motion: MotionState,
     /// Elapsed seconds when the last server update was ingested
     /// (`mLastMessageUpdateSecs`).
     last_message_secs: f64,
@@ -331,43 +433,42 @@ pub(crate) struct PhysicsInterp {
     last_interp_secs: f64,
     /// The collider's current extents (metres), to detect a resize.
     collider_scale: [f32; 3],
-    /// While predicted to be crossing a border, the elapsed-seconds deadline after
-    /// which motion is stopped (`mRegionCrossExpire`); `None` when not crossing.
-    region_cross_expire: Option<f64>,
 }
 
 impl PhysicsInterp {
     /// Seed the interpolation state from an authoritative update at time `now`.
     fn seeded(phys: &PhysicalObject, now: f64) -> Self {
         Self {
-            position: vector_to_array(&phys.position),
-            rotation: sl_rotation_to_quat(&phys.rotation),
-            velocity: vector_to_array(&phys.velocity),
-            acceleration: vector_to_array(&phys.acceleration),
-            angular_velocity: vector_to_array(&phys.angular_velocity),
-            region_handle: phys.region_handle,
+            motion: MotionState::new(
+                &phys.position,
+                &phys.velocity,
+                &phys.acceleration,
+                &phys.rotation,
+                &phys.angular_velocity,
+                phys.region_handle,
+            ),
             last_message_secs: now,
             last_interp_secs: now,
             collider_scale: collider_extents(&phys.scale),
-            region_cross_expire: None,
         }
     }
 
     /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
     /// snapping the prediction back to the server truth and restarting the timers.
     fn reseed(&mut self, phys: &PhysicalObject, now: f64) {
-        self.position = vector_to_array(&phys.position);
-        self.rotation = sl_rotation_to_quat(&phys.rotation);
-        self.velocity = vector_to_array(&phys.velocity);
-        self.acceleration = vector_to_array(&phys.acceleration);
-        self.angular_velocity = vector_to_array(&phys.angular_velocity);
-        self.region_handle = phys.region_handle;
+        self.motion = MotionState::new(
+            &phys.position,
+            &phys.velocity,
+            &phys.acceleration,
+            &phys.rotation,
+            &phys.angular_velocity,
+            phys.region_handle,
+        );
         self.last_message_secs = now;
         self.last_interp_secs = now;
         // Keep the cached scale current so the ground-floor bounding radius (and a
         // later collider resize by [`refine_physical_colliders`]) track a resize.
         self.collider_scale = collider_extents(&phys.scale);
-        self.region_cross_expire = None;
     }
 }
 
@@ -719,16 +820,13 @@ pub(crate) fn drive_physical_objects(
         // [`refine_physical_colliders`]; `reseed` only refreshes the cached scale.
         if phys.is_changed() {
             interp.reseed(&phys, now);
-            place(&mut transform, &phys.position, &interp.rotation);
+            place(&mut transform, &phys.position, &interp.motion.rotation);
             continue;
         }
 
         // Between updates: dead-reckon forward.
-        let region_dilation = dilations
-            .per_region
-            .get(&interp.region_handle)
-            .copied()
-            .unwrap_or(1.0);
+        let region = interp.motion.region_handle;
+        let region_dilation = dilations.per_region.get(&region).copied().unwrap_or(1.0);
         let dt = clamp_dilation(region_dilation) * dt_raw;
         let time_since_last_update = now - interp.last_message_secs;
         if dt <= 0.0 || time_since_last_update <= 0.0 {
@@ -742,63 +840,49 @@ pub(crate) fn drive_physical_objects(
             interp.last_interp_secs - interp.last_message_secs > PHASE_OUT_START_SECS,
             circuit_stale,
         );
-        // Only an actually-moving object dead-reckons (the reference viewer's
-        // `!accel.isExactlyZero() || !vel.isExactlyZero()` gate).
-        let moving = interp
-            .velocity
-            .iter()
-            .chain(&interp.acceleration)
-            .any(|c| c.abs() > f32::EPSILON);
         #[expect(
             clippy::as_conversions,
             clippy::cast_possible_truncation,
             reason = "phase_out is a 0.0..=1.0 ratio; f32 precision is ample"
         )]
         let phase_out_f32 = phase_out as f32;
-        if moving {
-            let (predicted, velocity) = dead_reckon(
-                interp.position,
-                interp.velocity,
-                interp.acceleration,
-                dt,
-                phase_out_f32,
-            );
-            let [predicted_x, predicted_y, _] = predicted;
-            let [scale_x, scale_y, scale_z] = interp.collider_scale;
-            let floor = ground_floor(
-                terrain.land_height(interp.region_handle, predicted_x, predicted_y),
-                &Vector {
-                    x: scale_x,
-                    y: scale_y,
-                    z: scale_z,
-                },
-            );
-            let clamped = clamp_prediction(ClampInput {
-                position: predicted,
-                velocity,
-                acceleration: interp.acceleration,
-                floor,
-                neighbours: neighbours_known(&dilations, interp.region_handle),
-                region_cross_expire: interp.region_cross_expire,
-                now,
-            });
-            interp.position = clamped.position;
-            interp.velocity = clamped.velocity;
-            interp.acceleration = clamped.acceleration;
-            interp.region_cross_expire = clamped.region_cross_expire;
-        }
-        // Angular velocity is applied even for a purely spinning object.
-        interp.rotation = angular_step(interp.rotation, interp.angular_velocity, dt);
+        let neighbours = neighbours_known(&dilations, region);
+        let [scale_x, scale_y, scale_z] = interp.collider_scale;
+        advance_motion(
+            &mut interp.motion,
+            neighbours,
+            dt,
+            phase_out_f32,
+            now,
+            // Objects use the permissive ground floor (they may sink underground);
+            // only a laggy prediction running arbitrarily far below is stopped.
+            |predicted_x, predicted_y| {
+                ground_floor(
+                    terrain.land_height(region, predicted_x, predicted_y),
+                    &Vector {
+                        x: scale_x,
+                        y: scale_y,
+                        z: scale_z,
+                    },
+                )
+            },
+        );
         interp.last_interp_secs = now;
 
-        let [pos_x, pos_y, pos_z] = interp.position;
-        let position = Vector {
-            x: pos_x,
-            y: pos_y,
-            z: pos_z,
-        };
-        place(&mut transform, &position, &interp.rotation);
+        place(
+            &mut transform,
+            &array_to_vector(interp.motion.position),
+            &interp.motion.rotation,
+        );
     }
+}
+
+/// A `[f32; 3]` motion component triple as a Second Life [`Vector`], for handing a
+/// predicted position back to [`place`] (destructured rather than indexed to satisfy
+/// the workspace lints).
+const fn array_to_vector(array: [f32; 3]) -> Vector {
+    let [x, y, z] = array;
+    Vector { x, y, z }
 }
 
 /// Write a physical object's Second Life region-local pose into its Bevy world
@@ -821,6 +905,247 @@ pub(crate) fn detach_physical_bodies(
         commands
             .entity(entity)
             .remove::<(RigidBody, Collider, PhysicsInterp, RefinedCollider)>();
+    }
+}
+
+/// The stricter `getMinAllowedZ` ground floor the reference viewer applies to an
+/// **avatar**: the land height under it plus half its bounding-box height, so a
+/// laggy avatar's reported (near-pelvis) position stays above the terrain and its
+/// feet do not sink under it (`resolveLandHeightGlobal + 0.5 * size.mV[VZ]`). This
+/// is the one guard [`ground_floor`] deliberately keeps permissive for objects
+/// (which may legitimately sink underground). `None` land height (terrain not yet
+/// ingested) means no floor.
+fn avatar_ground_floor(land_height: Option<f32>, height: f32) -> Option<f32> {
+    land_height.map(|land| land + 0.5 * height)
+}
+
+/// The authoritative kinematic motion of a full-object avatar (`pcode` 47) as of
+/// its last `ObjectUpdate`, attached to the avatar's anchor entity by
+/// [`apply_object`](crate::avatars) and change-detected: a fresh insert on every
+/// update reseeds the interpolation. Its presence marks the avatar anchors
+/// [`drive_avatar_motion`] dead-reckons between updates. Coarse (minimap-only)
+/// avatars carry no velocity and so get no [`AvatarMotion`].
+#[derive(Component, Clone)]
+pub(crate) struct AvatarMotion {
+    /// Region-local position (metres, Second Life Z-up frame).
+    position: Vector,
+    /// Linear velocity (metres/second).
+    velocity: Vector,
+    /// Linear acceleration (metres/second²).
+    acceleration: Vector,
+    /// Orientation (a Second Life unit quaternion).
+    rotation: Rotation,
+    /// Angular velocity (rotation axis scaled by radians/second).
+    angular_velocity: Vector,
+    /// The region this avatar lives in, for the region-edge / neighbour lookups.
+    region_handle: RegionHandle,
+    /// The avatar's bounding-box height (object scale Z), for the ground floor.
+    height: f32,
+    /// Whether the anchor applies the object's orientation (a rigged body root) or
+    /// stays upright (a placeholder sphere, which does not visibly rotate).
+    apply_rotation: bool,
+}
+
+impl AvatarMotion {
+    /// The avatar's current heading (yaw about the Second Life up axis, radians),
+    /// extracted from its reported orientation. The viewer's movement controls
+    /// ([`crate::movement`]) seed the walk heading from this so the first step does
+    /// not snap the avatar to an arbitrary facing.
+    #[must_use]
+    pub(crate) fn yaw(&self) -> f32 {
+        let Rotation { x, y, z, s } = &self.rotation;
+        // Yaw about Z from a unit quaternion (`atan2(2(sz + xy), 1 - 2(y² + z²))`).
+        let siny_cosp = 2.0 * (s * z + x * y);
+        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
+        siny_cosp.atan2(cosy_cosp)
+    }
+
+    /// Build the authoritative motion from an avatar's object update. `apply_rotation`
+    /// is `true` for a rigged body root (whose anchor carries the object rotation)
+    /// and `false` for a placeholder sphere.
+    #[must_use]
+    pub(crate) fn from_object(object: &Object, apply_rotation: bool) -> Self {
+        Self {
+            position: object.motion.position.clone(),
+            velocity: object.motion.velocity.clone(),
+            acceleration: object.motion.acceleration.clone(),
+            rotation: object.motion.rotation.clone(),
+            angular_velocity: object.motion.angular_velocity.clone(),
+            region_handle: object.region_handle,
+            height: object.scale.z,
+            apply_rotation,
+        }
+    }
+}
+
+/// The viewer-side interpolation state for one avatar, owned entirely by
+/// [`drive_avatar_motion`]: the shared dead-reckoning prediction plus the avatar's
+/// ground-floor height and whether its anchor carries the object rotation. Unlike
+/// the object path, this driver moves the anchor by the *delta* between successive
+/// predictions, so the pelvis / shoe vertical render offset (owned by
+/// [`apply_object`](crate::avatars) and refreshed by the appearance path) is left
+/// untouched.
+#[derive(Component)]
+pub(crate) struct AvatarInterp {
+    /// The shared dead-reckoning prediction (pose + motion) advanced each frame.
+    motion: MotionState,
+    /// Elapsed seconds when the last server update was ingested.
+    last_message_secs: f64,
+    /// Elapsed seconds at the last interpolation step.
+    last_interp_secs: f64,
+    /// The avatar's bounding-box height, for the stricter ground floor.
+    height: f32,
+    /// Whether to write the predicted orientation onto the anchor (a rigged body).
+    apply_rotation: bool,
+}
+
+impl AvatarInterp {
+    /// Seed the interpolation state from an authoritative update at time `now`.
+    fn seeded(motion: &AvatarMotion, now: f64) -> Self {
+        Self {
+            motion: MotionState::new(
+                &motion.position,
+                &motion.velocity,
+                &motion.acceleration,
+                &motion.rotation,
+                &motion.angular_velocity,
+                motion.region_handle,
+            ),
+            last_message_secs: now,
+            last_interp_secs: now,
+            height: motion.height,
+            apply_rotation: motion.apply_rotation,
+        }
+    }
+
+    /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
+    /// snapping the prediction back to the server truth and restarting the timers.
+    fn reseed(&mut self, motion: &AvatarMotion, now: f64) {
+        self.motion = MotionState::new(
+            &motion.position,
+            &motion.velocity,
+            &motion.acceleration,
+            &motion.rotation,
+            &motion.angular_velocity,
+            motion.region_handle,
+        );
+        self.last_message_secs = now;
+        self.last_interp_secs = now;
+        self.height = motion.height;
+        self.apply_rotation = motion.apply_rotation;
+    }
+}
+
+/// Dead-reckon every full-object avatar between server updates (P31.4), the avatar
+/// counterpart of [`drive_physical_objects`]: on the frame an [`AvatarMotion`]
+/// update lands, [`apply_object`](crate::avatars) has already snapped the anchor to
+/// the authoritative pose, so this only (re)seeds the interpolation; between
+/// updates it advances the predicted pose with the same phase-out taper and
+/// geometric clamps as the object path — but with the **stricter avatar ground
+/// floor** ([`avatar_ground_floor`]) so a laggy avatar does not sink under the
+/// terrain. The avatar stays kinematic (sim-authoritative); the predicted motion is
+/// applied to the anchor as a translation *delta* (plus, for a rigged body, the
+/// predicted orientation), leaving the pelvis / shoe render offset intact.
+pub(crate) fn drive_avatar_motion(
+    time: Res<Time>,
+    liveness: Res<CircuitLiveness>,
+    dilations: Res<RegionTimeDilation>,
+    terrain: Res<TerrainState>,
+    mut avatars: Query<(
+        Entity,
+        Ref<AvatarMotion>,
+        Option<&mut AvatarInterp>,
+        &mut Transform,
+    )>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs_f64();
+    let dt_raw = time.delta_secs();
+    let circuit_stale = liveness
+        .last_event_secs
+        .is_some_and(|seen| now - seen > PHASE_OUT_START_SECS);
+
+    for (entity, motion, interp, mut transform) in &mut avatars {
+        let Some(mut interp) = interp else {
+            // Newly tracked: seed the interpolation. The anchor is already at the
+            // authoritative pose (placed by `apply_object`), so nothing to move.
+            debug!(
+                "avatar {entity} → dead-reckoned (height {:.2} m, rotates {})",
+                motion.height, motion.apply_rotation
+            );
+            commands
+                .entity(entity)
+                .insert(AvatarInterp::seeded(&motion, now));
+            continue;
+        };
+
+        // A fresh server update: `apply_object` already snapped the anchor to truth,
+        // so just reseed the prediction and restart the timers.
+        if motion.is_changed() {
+            interp.reseed(&motion, now);
+            continue;
+        }
+
+        // Between updates: dead-reckon forward.
+        let region = interp.motion.region_handle;
+        let region_dilation = dilations.per_region.get(&region).copied().unwrap_or(1.0);
+        let dt = clamp_dilation(region_dilation) * dt_raw;
+        let time_since_last_update = now - interp.last_message_secs;
+        if dt <= 0.0 || time_since_last_update <= 0.0 {
+            interp.last_interp_secs = now;
+            continue;
+        }
+
+        let phase_out = phase_out_factor(
+            time_since_last_update,
+            now - interp.last_interp_secs,
+            interp.last_interp_secs - interp.last_message_secs > PHASE_OUT_START_SECS,
+            circuit_stale,
+        );
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "phase_out is a 0.0..=1.0 ratio; f32 precision is ample"
+        )]
+        let phase_out_f32 = phase_out as f32;
+        let neighbours = neighbours_known(&dilations, region);
+        let height = interp.height;
+        let previous = interp.motion.position;
+        advance_motion(
+            &mut interp.motion,
+            neighbours,
+            dt,
+            phase_out_f32,
+            now,
+            // Avatars use the stricter ground floor so a laggy avatar does not sink
+            // under the terrain (the one guard the object path leaves permissive).
+            |predicted_x, predicted_y| {
+                avatar_ground_floor(
+                    terrain.land_height(region, predicted_x, predicted_y),
+                    height,
+                )
+            },
+        );
+        interp.last_interp_secs = now;
+
+        // Apply the Second Life-space position change as a Bevy translation delta
+        // (the basis change is linear, so the delta converts directly), so the
+        // pelvis / shoe vertical render offset baked into the anchor is preserved.
+        let [prev_x, prev_y, prev_z] = previous;
+        let [next_x, next_y, next_z] = interp.motion.position;
+        let delta = sl_to_bevy_vec(&Vector {
+            x: next_x - prev_x,
+            y: next_y - prev_y,
+            z: next_z - prev_z,
+        });
+        transform.translation = Vec3::new(
+            transform.translation.x + delta.x,
+            transform.translation.y + delta.y,
+            transform.translation.z + delta.z,
+        );
+        if interp.apply_rotation {
+            transform.rotation = sl_to_bevy_rotation().mul_quat(interp.motion.rotation);
+        }
     }
 }
 
@@ -1123,17 +1448,17 @@ pub(crate) fn refine_physical_colliders(
 #[cfg(test)]
 mod tests {
     use super::{
-        ClampInput, MAX_INTERP_SECS, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M, REGION_WIDTH_M,
-        SL_GRAVITY_Z, angular_step, append_triangles, clamp_dilation, clamp_prediction,
-        dead_reckon, extents_differ, ground_floor, neighbours_known, phase_out_factor,
-        shape_wants_geometry, sl_gravity,
+        ClampInput, MAX_INTERP_SECS, MotionState, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M,
+        REGION_WIDTH_M, SL_GRAVITY_Z, advance_motion, angular_step, append_triangles,
+        avatar_ground_floor, clamp_dilation, clamp_prediction, dead_reckon, extents_differ,
+        ground_floor, neighbours_known, phase_out_factor, shape_wants_geometry, sl_gravity,
     };
     use crate::physics::RegionTimeDilation;
     use avian3d::prelude::{Collider, SimpleCollider as _};
     use bevy::math::{Quat, Vec3};
     use bevy::mesh::Indices;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{PhysicsShapeType, RegionHandle, Vector};
+    use sl_client_bevy::{PhysicsShapeType, RegionHandle, Rotation, Vector};
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
     /// forbid a strict `float_cmp`, and the clamp results are exact anyway).
@@ -1430,5 +1755,99 @@ mod tests {
             (aabb.max.x - 2.0).abs() < 1.0e-4 && (aabb.max.y - 2.0).abs() < 1.0e-4,
             "trimesh aabb should span the 2x2 quad, got {aabb:?}"
         );
+    }
+
+    /// The avatar ground floor is the land height plus half the avatar's height —
+    /// stricter than the object floor (which *subtracts* the radius) so the avatar's
+    /// near-pelvis position stays above the terrain — and is absent without a land
+    /// height.
+    #[test]
+    fn avatar_ground_floor_lifts_above_terrain() {
+        // land 20 + 0.5 * height 2 = 21.
+        let floor = avatar_ground_floor(Some(20.0), 2.0);
+        assert!(
+            floor.is_some_and(|f| (f - 21.0).abs() <= 1.0e-4),
+            "avatar floor should be about 21.0, got {floor:?}"
+        );
+        assert!(
+            avatar_ground_floor(None, 2.0).is_none(),
+            "no floor without a known land height"
+        );
+    }
+
+    /// A zero-length rotation. The identity Second Life quaternion, for seeding a
+    /// [`MotionState`] whose orientation should stay put.
+    fn identity_rotation() -> Rotation {
+        Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            s: 1.0,
+        }
+    }
+
+    /// A falling body advances its position by the reference dead-reckoning step,
+    /// and the supplied (avatar) ground floor lifts a prediction that drops below the
+    /// terrain — the same `advance_motion` step drives both the object and avatar
+    /// paths, differing only in that floor.
+    #[test]
+    fn advance_motion_dead_reckons_and_floors() {
+        let vel = Vector {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let accel = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut motion = MotionState::new(
+            &Vector {
+                x: 10.0,
+                y: 10.0,
+                z: 30.0,
+            },
+            &vel,
+            &accel,
+            &identity_rotation(),
+            &Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            RegionHandle::from_global(1000 * 256, 1000 * 256),
+        );
+        // One second at full phase-out, all neighbours known (no edge clip). The
+        // floor closure lifts the body to a high floor to prove the clamp runs.
+        advance_motion(&mut motion, [true; 4], 1.0, 1.0, 0.0, |_x, _y| Some(100.0));
+        let [x, _y, z] = motion.position;
+        near(x, 12.0);
+        near(z, 100.0);
+    }
+
+    /// A stationary avatar (zero velocity and acceleration) does not dead-reckon its
+    /// position, however long it is silent — only a moving body extrapolates.
+    #[test]
+    fn advance_motion_leaves_a_still_body_put() {
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let mut motion = MotionState::new(
+            &Vector {
+                x: 5.0,
+                y: 6.0,
+                z: 7.0,
+            },
+            &zero,
+            &zero,
+            &identity_rotation(),
+            &zero,
+            RegionHandle::from_global(1000 * 256, 1000 * 256),
+        );
+        advance_motion(&mut motion, [true; 4], 1.0, 1.0, 0.0, |_x, _y| None);
+        near3(motion.position, [5.0, 6.0, 7.0]);
     }
 }
