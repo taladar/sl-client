@@ -456,6 +456,25 @@ pub(crate) struct ObjectState {
     objects: HashMap<ScopedObjectId, TrackedObject>,
 }
 
+impl ObjectState {
+    /// The full (grid-wide) [`ObjectKey`] of a tracked object, looked up by its
+    /// region-scoped id. Used by the physics module (P31.3) to translate a pushed
+    /// `ObjectPhysicsProperties` event — which keys by [`ScopedObjectId`] — onto the
+    /// same [`ObjectKey`] the `GetObjectPhysicsData` capability reply uses.
+    pub(crate) fn full_key(&self, scoped: &ScopedObjectId) -> Option<ObjectKey> {
+        self.objects.get(scoped).map(|tracked| tracked.full_key)
+    }
+}
+
+/// Marker for the per-object **geometry holder** entity — the child of an object
+/// entity that carries the object's own faces (and its Second Life scale), spawned
+/// in [`apply_object`]. It lets the physics module (P31.3) find an object's own
+/// tessellated geometry to build a shape-aware collider from, without walking into
+/// the linkset **child** prims that also parent to the object entity (they have
+/// their own holders and scales).
+#[derive(Component)]
+pub(crate) struct GeometryHolder;
+
 /// The [`PrimLod`] the render-priority driver (P21.3) wants each plain prim
 /// re-tessellated at, keyed by scoped id. The driver ([`drive_render_priority`])
 /// computes a prim's level from its on-screen size each throttled pass and writes
@@ -1782,6 +1801,7 @@ fn apply_object(
     // parent to the object entity, not this) are not.
     let geometry = commands
         .spawn((
+            GeometryHolder,
             holder_transform(object, category),
             Visibility::default(),
             ChildOf(entity),

@@ -41,19 +41,40 @@
 //! (Phases 32 / 34). This is why the guards matter: silence means "prediction
 //! still holds", so a bounded, corrected extrapolation is the faithful model.
 //!
+//! **P31.3 — physics-shape-aware colliders.** P31.2's collider is a placeholder
+//! cuboid sized to the prim scale, regardless of the object's real collision
+//! shape. P31.3 replaces it with a collider that matches the simulator's
+//! `LLPhysicsShapeType`, fetched via the `GetObjectPhysicsData` capability
+//! ([`Command::RequestObjectPhysicsData`], requested by
+//! [`request_object_physics_data`] the first time an object is flagged physical)
+//! and folded — together with any unsolicited `ObjectPhysicsProperties` event
+//! pushes — into [`ObjectPhysicsShapes`] by [`ingest_object_physics_data`]. Once a
+//! shape type is known, [`refine_physical_colliders`] builds the matching avian
+//! [`Collider`] from the geometry the viewer already tessellates (gathered from the
+//! object's own [`GeometryHolder`] faces, so linkset children are excluded):
+//! **none** → no collider; **convex hull** → [`Collider::convex_hull`] of the prim
+//! / mesh vertices; **prim** → a [`Collider::trimesh`] of that geometry. Until the
+//! shape data and the geometry are both available, the placeholder cuboid stands
+//! in. These colliders are inert on the kinematic movers themselves — they matter
+//! once Phases 32 / 34 add genuine dynamic bodies that collide against them.
+//!
 //! No `sl-client-tokio` counterpart is needed: like the render materials and the
 //! other viewer-only simulations (sky, water, particles), the physics world is a
 //! viewer rendering concern, not a protocol capability, so the runtime-parity
 //! rule does not apply.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use avian3d::prelude::{Collider, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody};
+use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
-use sl_client_bevy::{Object, RegionHandle, Rotation, SlEvent, SlIdentity, SlSessionEvent, Vector};
+use sl_client_bevy::{
+    Command, Object, ObjectKey, ObjectPhysicsData, PhysicsShapeType, RegionHandle, Rotation,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
+};
 
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::objects::update_objects;
+use crate::objects::{GeometryHolder, ObjectState, update_objects};
 use crate::terrain::TerrainState;
 
 /// Second Life's world gravity along its Z (up) axis, in metres per second
@@ -118,16 +139,27 @@ impl Plugin for PhysicsPlugin {
             .insert_resource(Time::<Fixed>::from_hz(SL_PHYSICS_HZ))
             .init_resource::<RegionTimeDilation>()
             .init_resource::<CircuitLiveness>()
+            .init_resource::<ObjectPhysicsShapes>()
             .add_systems(
                 Update,
                 (
                     (ingest_time_dilation, drive_physics_time_dilation).chain(),
                     ingest_circuit_liveness,
+                    // P31.3: fold the object physics-shape data (capability reply +
+                    // event-queue pushes) and request it for newly-physical objects.
+                    ingest_object_physics_data,
+                    request_object_physics_data,
                     // P31.2: give server-flagged physical prims a kinematic body and
                     // dead-reckon them between updates. Runs after `update_objects`
                     // has attached / refreshed the [`PhysicalObject`] marker.
                     drive_physical_objects.after(update_objects),
                     detach_physical_bodies.after(update_objects),
+                    // P31.3: replace the placeholder cuboid with a shape-aware
+                    // collider once the physics data and geometry are available.
+                    refine_physical_colliders
+                        .after(update_objects)
+                        .after(drive_physical_objects)
+                        .after(ingest_object_physics_data),
                 ),
             );
     }
@@ -228,6 +260,10 @@ const fn is_physical_root(object: &Object) -> bool {
 /// alone marks the entities [`drive_physical_objects`] gives a kinematic body.
 #[derive(Component, Clone)]
 pub(crate) struct PhysicalObject {
+    /// The object's full (grid-wide) key — the id the `GetObjectPhysicsData`
+    /// capability request and its reply use, and the key
+    /// [`ObjectPhysicsShapes`] stores this object's physics data under.
+    full_key: ObjectKey,
     /// Region-local position (metres, Second Life Z-up frame).
     position: Vector,
     /// Linear velocity (metres/second).
@@ -254,6 +290,7 @@ pub(crate) struct PhysicalObject {
 pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
     if is_physical_root(object) {
         commands.entity(entity).insert(PhysicalObject {
+            full_key: object.full_id,
             position: object.motion.position.clone(),
             velocity: object.motion.velocity.clone(),
             acceleration: object.motion.acceleration.clone(),
@@ -327,6 +364,9 @@ impl PhysicsInterp {
         self.region_handle = phys.region_handle;
         self.last_message_secs = now;
         self.last_interp_secs = now;
+        // Keep the cached scale current so the ground-floor bounding radius (and a
+        // later collider resize by [`refine_physical_colliders`]) track a resize.
+        self.collider_scale = collider_extents(&phys.scale);
         self.region_cross_expire = None;
     }
 }
@@ -674,17 +714,10 @@ pub(crate) fn drive_physical_objects(
             continue;
         };
 
-        // A fresh server update: snap the prediction back to truth and restart.
+        // A fresh server update: snap the prediction back to truth and restart. The
+        // collider itself (including a rebuild on resize) is owned by
+        // [`refine_physical_colliders`]; `reseed` only refreshes the cached scale.
         if phys.is_changed() {
-            let [ex, ey, ez] = collider_extents(&phys.scale);
-            let resized = [ex, ey, ez]
-                .iter()
-                .zip(&interp.collider_scale)
-                .any(|(new, old)| (new - old).abs() > f32::EPSILON);
-            if resized {
-                commands.entity(entity).insert(Collider::cuboid(ex, ey, ez));
-                interp.collider_scale = [ex, ey, ez];
-            }
             interp.reseed(&phys, now);
             place(&mut transform, &phys.position, &interp.rotation);
             continue;
@@ -787,7 +820,303 @@ pub(crate) fn detach_physical_bodies(
     for entity in &stale {
         commands
             .entity(entity)
-            .remove::<(RigidBody, Collider, PhysicsInterp)>();
+            .remove::<(RigidBody, Collider, PhysicsInterp, RefinedCollider)>();
+    }
+}
+
+/// The per-object physics-shape data the viewer has learned, keyed by full
+/// [`ObjectKey`] (the id the `GetObjectPhysicsData` capability reply uses). Folded
+/// by [`ingest_object_physics_data`] from both the capability reply
+/// ([`SlSessionEvent::ObjectPhysicsData`]) and the unsolicited event-queue push
+/// ([`SlSessionEvent::ObjectPhysicsProperties`]), and read by
+/// [`refine_physical_colliders`] to pick each physical object's collision shape.
+#[derive(Resource, Default)]
+pub(crate) struct ObjectPhysicsShapes {
+    /// The latest physics data for each object, keyed by full key.
+    data: HashMap<ObjectKey, ObjectPhysicsData>,
+    /// The objects a `GetObjectPhysicsData` request has already been sent for, so
+    /// [`request_object_physics_data`] asks the grid exactly once per object.
+    requested: HashSet<ObjectKey>,
+}
+
+/// Request the `GetObjectPhysicsData` capability data for every newly-flagged
+/// physical object exactly once. The grid only *pushes* `ObjectPhysicsProperties`
+/// when a prim's physics material changes (OpenSim `SceneGraph.UpdateExtraPhysics`),
+/// so a proactive request is the reliable way to learn a streamed-in object's
+/// collision shape. A no-op when the region seed omits the capability.
+pub(crate) fn request_object_physics_data(
+    new_physical: Query<&PhysicalObject, Added<PhysicalObject>>,
+    mut shapes: ResMut<ObjectPhysicsShapes>,
+    mut writer: MessageWriter<SlCommand>,
+) {
+    let mut object_ids = Vec::new();
+    for phys in &new_physical {
+        if shapes.requested.insert(phys.full_key) {
+            object_ids.push(phys.full_key);
+        }
+    }
+    if !object_ids.is_empty() {
+        writer.write(SlCommand(Command::RequestObjectPhysicsData { object_ids }));
+    }
+}
+
+/// Fold the object physics data from both delivery paths into
+/// [`ObjectPhysicsShapes`]: the `GetObjectPhysicsData` capability reply (already
+/// keyed by full [`ObjectKey`]) and the unsolicited `ObjectPhysicsProperties`
+/// event-queue push (keyed by [`ScopedObjectId`](sl_client_bevy::ScopedObjectId),
+/// translated to the full key via the tracked object table so both paths land
+/// under the same key).
+pub(crate) fn ingest_object_physics_data(
+    mut events: MessageReader<SlEvent>,
+    objects: Res<ObjectState>,
+    mut shapes: ResMut<ObjectPhysicsShapes>,
+) {
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::ObjectPhysicsData(entries) => {
+                for (key, data) in entries {
+                    shapes.data.insert(*key, *data);
+                }
+            }
+            SlSessionEvent::ObjectPhysicsProperties(entries) => {
+                for (scoped, data) in entries {
+                    if let Some(key) = objects.full_key(scoped) {
+                        shapes.data.insert(key, *data);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Records which collision shape (and at what scale) the current avian [`Collider`]
+/// on a physical object was built for, so [`refine_physical_colliders`] rebuilds it
+/// only when the shape data, the geometry, or the scale actually change.
+#[derive(Component)]
+pub(crate) struct RefinedCollider {
+    /// The physics-shape type the collider was built for, or [`None`] while the
+    /// object's physics data has not yet arrived (a placeholder cuboid stands in).
+    shape: Option<PhysicsShapeType>,
+    /// Whether the collider is the real geometry-derived shape (`true`) or a
+    /// stand-in cuboid awaiting the shape data / the object's tessellated geometry
+    /// (`false`) — the latter is retried each frame until the geometry is ready.
+    from_geometry: bool,
+    /// The object scale (floored extents, metres per axis) the collider was built
+    /// for, so a genuine resize rebuilds it.
+    scale: [f32; 3],
+}
+
+/// Whether a physics-shape type needs the object's tessellated geometry to build
+/// its collider (convex hull / prim / an unrecognised type), as opposed to
+/// [`PhysicsShapeType::None`] (no collider) which needs no geometry.
+const fn shape_wants_geometry(shape: PhysicsShapeType) -> bool {
+    matches!(
+        shape,
+        PhysicsShapeType::Prim | PhysicsShapeType::ConvexHull | PhysicsShapeType::Other(_)
+    )
+}
+
+/// Whether two floored collider-extent triples differ enough to warrant a rebuild.
+fn extents_differ(a: [f32; 3], b: [f32; 3]) -> bool {
+    a.iter().zip(&b).any(|(x, y)| (x - y).abs() > f32::EPSILON)
+}
+
+/// Append a mesh's triangle indices to `out`, offsetting each vertex index by
+/// `base` (the count of vertices already gathered from earlier faces) so several
+/// faces combine into one trimesh index buffer. Handles both `u16` and `u32` index
+/// buffers; a non-triangle-list remainder is ignored.
+fn append_triangles(out: &mut Vec<[u32; 3]>, indices: &Indices, base: u32) {
+    match indices {
+        Indices::U16(values) => {
+            for tri in values.chunks_exact(3) {
+                if let [a, b, c] = tri {
+                    out.push([
+                        base.saturating_add(u32::from(*a)),
+                        base.saturating_add(u32::from(*b)),
+                        base.saturating_add(u32::from(*c)),
+                    ]);
+                }
+            }
+        }
+        Indices::U32(values) => {
+            for tri in values.chunks_exact(3) {
+                if let [a, b, c] = tri {
+                    out.push([
+                        base.saturating_add(*a),
+                        base.saturating_add(*b),
+                        base.saturating_add(*c),
+                    ]);
+                }
+            }
+        }
+    }
+}
+
+/// Gather a physical object's own tessellated geometry — the faces under its
+/// [`GeometryHolder`] child, **excluding** the linkset child prims that also parent
+/// to the object entity — as a point cloud plus a triangle index buffer, each
+/// vertex scaled by the object scale into the object entity's local frame (the
+/// frame its avian [`Collider`] lives in, matching how the same faces render
+/// through the geometry holder's scale). Empty until the geometry has been spawned
+/// and its meshes uploaded (an object still waiting on a mesh / sculpt fetch).
+fn gather_object_geometry(
+    object_entity: Entity,
+    scale: [f32; 3],
+    children_q: &Query<&Children>,
+    holders: &Query<(), With<GeometryHolder>>,
+    mesh_handles: &Query<&Mesh3d>,
+    meshes: &Assets<Mesh>,
+) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let mut points = Vec::new();
+    let mut indices = Vec::new();
+    let [sx, sy, sz] = scale;
+    let Ok(object_children) = children_q.get(object_entity) else {
+        return (points, indices);
+    };
+    // The object's own geometry hangs off its single geometry-holder child; its
+    // linkset children (separate `SceneObject`s with their own holders/scales) are
+    // skipped so a root prim's collider is its own shape, not the whole linkset.
+    let Some(holder) = object_children
+        .iter()
+        .find(|&child| holders.get(child).is_ok())
+    else {
+        return (points, indices);
+    };
+    let Ok(faces) = children_q.get(holder) else {
+        return (points, indices);
+    };
+    for &face in faces {
+        let Ok(mesh3d) = mesh_handles.get(face) else {
+            continue;
+        };
+        let Some(mesh) = meshes.get(&mesh3d.0) else {
+            continue;
+        };
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        let base = u32::try_from(points.len()).unwrap_or(u32::MAX);
+        for position in positions {
+            let [x, y, z] = *position;
+            points.push(Vec3::new(x * sx, y * sy, z * sz));
+        }
+        if let Some(mesh_indices) = mesh.indices() {
+            append_triangles(&mut indices, mesh_indices, base);
+        }
+    }
+    (points, indices)
+}
+
+/// Replace the P31.2 placeholder cuboid on each physical object with a collider
+/// that matches its simulator `LLPhysicsShapeType` and geometry, once both the
+/// physics-shape data ([`ObjectPhysicsShapes`]) and the object's tessellated
+/// geometry are available:
+///
+/// - **unknown** (data not yet in) → keep the placeholder cuboid;
+/// - **none** ([`PhysicsShapeType::None`]) → no collider (a physical prim that
+///   collides with nothing);
+/// - **convex hull** → [`Collider::convex_hull`] of the prim / mesh vertices;
+/// - **prim** (or an unrecognised type) → a [`Collider::trimesh`] of that geometry.
+///
+/// The result is recorded in [`RefinedCollider`] so a collider is rebuilt only on a
+/// real change (new shape data, a resize, or geometry finally arriving). These
+/// colliders are inert on the kinematic movers themselves — they matter once Phases
+/// 32 / 34 add dynamic bodies that collide against them.
+pub(crate) fn refine_physical_colliders(
+    shapes: Res<ObjectPhysicsShapes>,
+    objects: Query<(Entity, &PhysicalObject, Option<&RefinedCollider>), With<PhysicsInterp>>,
+    children_q: Query<&Children>,
+    holders: Query<(), With<GeometryHolder>>,
+    mesh_handles: Query<&Mesh3d>,
+    meshes: Res<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    for (entity, phys, existing) in &objects {
+        let desired = shapes
+            .data
+            .get(&phys.full_key)
+            .map(|data| data.physics_shape_type);
+        let scale = collider_extents(&phys.scale);
+        let scale_changed = existing.is_none_or(|state| extents_differ(state.scale, scale));
+        let shape_changed = existing.is_none_or(|state| state.shape != desired);
+        // A geometry-needing shape whose collider is still the placeholder cuboid:
+        // retry the geometry gather each frame until the meshes are uploaded.
+        let geometry_pending = existing.is_some_and(|state| !state.from_geometry)
+            && desired.is_some_and(shape_wants_geometry);
+        if !(scale_changed || shape_changed || geometry_pending) {
+            continue;
+        }
+        let [ex, ey, ez] = scale;
+
+        match desired {
+            // Physics data not yet learned: keep the P31.2 placeholder cuboid, sized
+            // to the current scale, until the shape type arrives.
+            None => {
+                commands.entity(entity).insert((
+                    Collider::cuboid(ex, ey, ez),
+                    RefinedCollider {
+                        shape: None,
+                        from_geometry: false,
+                        scale,
+                    },
+                ));
+            }
+            // No collision shape: strip any collider, leaving the kinematic body.
+            Some(PhysicsShapeType::None) => {
+                debug!("physical object {entity} → no collider (PhysicsShapeType::None)");
+                commands.entity(entity).remove::<Collider>();
+                commands.entity(entity).insert(RefinedCollider {
+                    shape: desired,
+                    from_geometry: true,
+                    scale,
+                });
+            }
+            // Convex hull / exact prim / an unrecognised type: build from the
+            // object's own tessellated geometry.
+            Some(shape) => {
+                let (points, indices) = gather_object_geometry(
+                    entity,
+                    scale,
+                    &children_q,
+                    &holders,
+                    &mesh_handles,
+                    &meshes,
+                );
+                if points.is_empty() {
+                    // Geometry not spawned / uploaded yet: keep a placeholder cuboid
+                    // (installed only on a real change, not on a pure retry) and try
+                    // again next frame.
+                    if scale_changed || shape_changed {
+                        commands.entity(entity).insert(Collider::cuboid(ex, ey, ez));
+                    }
+                    commands.entity(entity).insert(RefinedCollider {
+                        shape: desired,
+                        from_geometry: false,
+                        scale,
+                    });
+                    continue;
+                }
+                let point_count = points.len();
+                let collider = match shape {
+                    PhysicsShapeType::ConvexHull => Collider::convex_hull(points)
+                        .unwrap_or_else(|| Collider::cuboid(ex, ey, ez)),
+                    // Prim (and any unrecognised type) uses the exact geometry.
+                    _ => Collider::trimesh(points, indices),
+                };
+                debug!("physical object {entity} → {shape:?} collider from {point_count} vertices");
+                commands.entity(entity).insert((
+                    collider,
+                    RefinedCollider {
+                        shape: desired,
+                        from_geometry: true,
+                        scale,
+                    },
+                ));
+            }
+        }
     }
 }
 
@@ -795,13 +1124,16 @@ pub(crate) fn detach_physical_bodies(
 mod tests {
     use super::{
         ClampInput, MAX_INTERP_SECS, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M, REGION_WIDTH_M,
-        SL_GRAVITY_Z, angular_step, clamp_dilation, clamp_prediction, dead_reckon, ground_floor,
-        neighbours_known, phase_out_factor, sl_gravity,
+        SL_GRAVITY_Z, angular_step, append_triangles, clamp_dilation, clamp_prediction,
+        dead_reckon, extents_differ, ground_floor, neighbours_known, phase_out_factor,
+        shape_wants_geometry, sl_gravity,
     };
     use crate::physics::RegionTimeDilation;
+    use avian3d::prelude::{Collider, SimpleCollider as _};
     use bevy::math::{Quat, Vec3};
+    use bevy::mesh::Indices;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{RegionHandle, Vector};
+    use sl_client_bevy::{PhysicsShapeType, RegionHandle, Vector};
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
     /// forbid a strict `float_cmp`, and the clamp results are exact anyway).
@@ -1028,6 +1360,75 @@ mod tests {
         assert_eq!(
             neighbours_known(&dilations, home),
             [false, true, false, false]
+        );
+    }
+
+    /// Convex hull and prim shapes need the object geometry to build a collider;
+    /// the "no shape" type needs none.
+    #[test]
+    fn shape_geometry_requirements() {
+        assert!(shape_wants_geometry(PhysicsShapeType::Prim));
+        assert!(shape_wants_geometry(PhysicsShapeType::ConvexHull));
+        assert!(shape_wants_geometry(PhysicsShapeType::Other(7)));
+        assert!(!shape_wants_geometry(PhysicsShapeType::None));
+    }
+
+    /// A resize past the float tolerance forces a collider rebuild; an unchanged
+    /// scale does not.
+    #[test]
+    fn extents_differ_detects_a_resize() {
+        assert!(!extents_differ([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]));
+        assert!(extents_differ([1.0, 2.0, 3.0], [1.0, 2.5, 3.0]));
+    }
+
+    /// Combining several faces into one trimesh index buffer offsets each face's
+    /// indices by the running vertex count, and both `u16` and `u32` index buffers
+    /// are handled.
+    #[test]
+    fn append_triangles_offsets_indices() {
+        let mut out = Vec::new();
+        // First face: three vertices at base 0.
+        append_triangles(&mut out, &Indices::U16(vec![0, 1, 2]), 0);
+        // Second face: its own 0/1/2 shifted past the first face's three vertices.
+        append_triangles(&mut out, &Indices::U32(vec![0, 1, 2]), 3);
+        assert_eq!(out, vec![[0, 1, 2], [3, 4, 5]]);
+    }
+
+    /// A convex hull can be built from the eight corners of a unit cube (the
+    /// convex-hull physics-shape path), yielding a valid collider.
+    #[test]
+    fn convex_hull_from_cube_corners_builds() {
+        let corners = vec![
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+            Vec3::new(0.5, 0.5, -0.5),
+            Vec3::new(-0.5, -0.5, 0.5),
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+        ];
+        assert!(
+            Collider::convex_hull(corners).is_some(),
+            "eight cube corners should form a convex hull"
+        );
+    }
+
+    /// A trimesh collider can be built from a two-triangle quad (the exact-prim
+    /// physics-shape path) — the aabb spans the quad's extent.
+    #[test]
+    fn trimesh_from_quad_builds() {
+        let vertices = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let collider = Collider::trimesh(vertices, vec![[0, 1, 2], [0, 2, 3]]);
+        let aabb = collider.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!(
+            (aabb.max.x - 2.0).abs() < 1.0e-4 && (aabb.max.y - 2.0).abs() < 1.0e-4,
+            "trimesh aabb should span the 2x2 quad, got {aabb:?}"
         );
     }
 }
