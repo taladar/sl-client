@@ -101,6 +101,7 @@ use crate::objects::{
     log_suspicious_objects, pick_object, prune_control_avatars, spawn_animesh_control_avatars,
     update_objects,
 };
+use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
@@ -476,6 +477,7 @@ fn run_session(
     .init_resource::<PrimLodTargets>()
     .init_resource::<TreeLodTargets>()
     .init_resource::<LocalLights>()
+    .init_resource::<ParticleSim>()
     .init_resource::<AvatarState>()
     .init_resource::<ControlAvatarState>()
     .init_resource::<ChatOverlay>()
@@ -518,6 +520,8 @@ fn run_session(
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
             setup_avatar_body,
+            // P30.2: upload the procedural default particle sprite.
+            setup_particles,
         ),
     )
     .add_systems(
@@ -689,6 +693,15 @@ fn run_session(
             // prims as Bevy point / spot lights, after the fly-camera so the
             // distance-based budget selection uses the current viewpoint.
             drive_local_lights.after(fly_camera),
+            // Particles (P30.2): advance each source's CPU particle simulation and
+            // rebuild its camera-facing billboard mesh, after the fly-camera so the
+            // billboards face the current viewpoint.
+            drive_particles.after(fly_camera),
+            // Debug (env `SL_VIEWER_PARTICLE_FOCUS`): aim the camera at the busiest
+            // particle cloud so an unattended screenshot frames a real emitter.
+            focus_camera_on_particles
+                .after(drive_particles)
+                .after(fly_camera),
             // Animated textures (P28.2): advance every prim's `llSetTextureAnim`
             // and fold the current frame's UV / flipbook placement into its faces,
             // then reset a face to its static placement when the animation stops.
