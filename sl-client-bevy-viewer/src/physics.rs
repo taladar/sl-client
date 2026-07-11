@@ -604,6 +604,48 @@ fn angular_step(rotation: Quat, angular_velocity: [f32; 3], dt: f32) -> Quat {
         .normalize()
 }
 
+/// The Bevy-world orientation of a predicted motion: its Second Life-space rotation
+/// composed with the Second Life → Bevy basis change, matching the root transform
+/// [`body_root_transform`](crate::avatars) writes on an authoritative update.
+fn bevy_rotation_of(motion: &MotionState) -> Quat {
+    sl_to_bevy_rotation().mul_quat(motion.rotation)
+}
+
+/// Exponential-smoothing time constant (seconds) for easing the avatar's *rendered*
+/// orientation toward its authoritative / dead-reckoned facing (P31.7). The own
+/// avatar's facing arrives only as sparse `ObjectUpdate`s echoing the client-driven
+/// `SetRotation` (P31.5, throttled to ~20 Hz and coarser once the sim re-broadcasts
+/// it), so the target jumps in steps; a ~80 ms constant smooths those steps into a
+/// fluid turn while staying responsive (it covers ~63 % of a step in one constant,
+/// ~95 % in three) and converges to the target once turning stops, leaving no
+/// standing lag.
+const ROTATION_SMOOTHING_TAU_SECS: f32 = 0.08;
+
+/// The exponential-smoothing blend factor for a frame of length `dt` seconds
+/// (`1 - e^(-dt/τ)`), the framerate-independent easing toward the target facing. A
+/// non-positive `dt` blends fully (snap) so a paused / first frame cannot stall.
+fn rotation_smoothing_alpha(dt: f32) -> f32 {
+    if dt <= 0.0 {
+        return 1.0;
+    }
+    1.0 - (-dt / ROTATION_SMOOTHING_TAU_SECS).exp()
+}
+
+/// Ease the avatar anchor's rendered orientation toward its current authoritative /
+/// dead-reckoned facing and write it to the anchor (P31.7). A no-op for a
+/// placeholder sphere (which does not carry the object rotation), so only rigged
+/// bodies smooth-turn. `dt` is the real (undilated) frame time — the smoothing is a
+/// visual concern, independent of the physics clock.
+fn apply_smoothed_rotation(interp: &mut AvatarInterp, transform: &mut Transform, dt: f32) {
+    if !interp.apply_rotation {
+        return;
+    }
+    let target = bevy_rotation_of(&interp.motion);
+    let alpha = rotation_smoothing_alpha(dt);
+    interp.rendered_rotation = interp.rendered_rotation.slerp(target, alpha);
+    transform.rotation = interp.rendered_rotation;
+}
+
 /// Which of the four axis-neighbour regions (`[-x, +x, -y, +y]`) are currently
 /// known (a circuit / terrain seen for them), from the regions the session has
 /// reported a time dilation for — the analogue of the reference viewer's
@@ -1006,24 +1048,36 @@ pub(crate) struct AvatarInterp {
     height: f32,
     /// Whether to write the predicted orientation onto the anchor (a rigged body).
     apply_rotation: bool,
+    /// The orientation actually written to the anchor this frame (Bevy space), eased
+    /// toward the authoritative / dead-reckoned facing each frame rather than snapped
+    /// to it (P31.7). This decouples the rendered turn from the sparse authoritative
+    /// rotation updates — the own avatar's facing arrives only as terse
+    /// `ObjectUpdate`s echoing the client-driven `SetRotation` (P31.5), so without
+    /// this easing a turn snaps between those updates while translation stays smooth.
+    rendered_rotation: Quat,
 }
 
 impl AvatarInterp {
     /// Seed the interpolation state from an authoritative update at time `now`.
     fn seeded(motion: &AvatarMotion, now: f64) -> Self {
+        let motion_state = MotionState::new(
+            &motion.position,
+            &motion.velocity,
+            &motion.acceleration,
+            &motion.rotation,
+            &motion.angular_velocity,
+            motion.region_handle,
+        );
+        // Start the eased orientation at the authoritative facing so the avatar does
+        // not visibly rotate into place from identity on its first frame.
+        let rendered_rotation = bevy_rotation_of(&motion_state);
         Self {
-            motion: MotionState::new(
-                &motion.position,
-                &motion.velocity,
-                &motion.acceleration,
-                &motion.rotation,
-                &motion.angular_velocity,
-                motion.region_handle,
-            ),
+            motion: motion_state,
             last_message_secs: now,
             last_interp_secs: now,
             height: motion.height,
             apply_rotation: motion.apply_rotation,
+            rendered_rotation,
         }
     }
 
@@ -1088,10 +1142,13 @@ pub(crate) fn drive_avatar_motion(
             continue;
         };
 
-        // A fresh server update: `apply_object` already snapped the anchor to truth,
-        // so just reseed the prediction and restart the timers.
+        // A fresh server update: `apply_object` already snapped the anchor's
+        // translation to truth, so just reseed the prediction and restart the timers.
+        // The orientation, though, is *not* snapped — it eases toward the new facing
+        // (P31.7), so a client-driven turn stays fluid across sparse rotation updates.
         if motion.is_changed() {
             interp.reseed(&motion, now);
+            apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
             continue;
         }
 
@@ -1102,6 +1159,7 @@ pub(crate) fn drive_avatar_motion(
         let time_since_last_update = now - interp.last_message_secs;
         if dt <= 0.0 || time_since_last_update <= 0.0 {
             interp.last_interp_secs = now;
+            apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
             continue;
         }
 
@@ -1152,9 +1210,9 @@ pub(crate) fn drive_avatar_motion(
             transform.translation.y + delta.y,
             transform.translation.z + delta.z,
         );
-        if interp.apply_rotation {
-            transform.rotation = sl_to_bevy_rotation().mul_quat(interp.motion.rotation);
-        }
+        // Ease (not snap) the rendered facing toward the dead-reckoned orientation,
+        // the rotation counterpart of the smoothed translation above (P31.7).
+        apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
     }
 }
 
@@ -1458,9 +1516,10 @@ pub(crate) fn refine_physical_colliders(
 mod tests {
     use super::{
         ClampInput, MAX_INTERP_SECS, MotionState, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M,
-        REGION_WIDTH_M, SL_GRAVITY_Z, advance_motion, angular_step, append_triangles,
-        avatar_ground_floor, clamp_dilation, clamp_prediction, dead_reckon, extents_differ,
-        ground_floor, neighbours_known, phase_out_factor, shape_wants_geometry, sl_gravity,
+        REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS, SL_GRAVITY_Z, advance_motion, angular_step,
+        append_triangles, avatar_ground_floor, clamp_dilation, clamp_prediction, dead_reckon,
+        extents_differ, ground_floor, neighbours_known, phase_out_factor, rotation_smoothing_alpha,
+        shape_wants_geometry, sl_gravity,
     };
     use crate::physics::RegionTimeDilation;
     use avian3d::prelude::{Collider, SimpleCollider as _};
@@ -1858,5 +1917,44 @@ mod tests {
         );
         advance_motion(&mut motion, [true; 4], 1.0, 1.0, 0.0, |_x, _y| None);
         near3(motion.position, [5.0, 6.0, 7.0]);
+    }
+
+    /// The rotation-smoothing blend (P31.7) is `0` for a zero frame and rises toward
+    /// `1` with the frame length, reaching ~63 % at exactly one time constant — the
+    /// framerate-independent easing that turns sparse facing updates into a fluid
+    /// turn. A non-positive frame snaps (blend `1`) so a paused frame cannot stall.
+    #[test]
+    fn rotation_smoothing_alpha_eases_by_frame_time() {
+        near(rotation_smoothing_alpha(0.0), 1.0);
+        near(rotation_smoothing_alpha(-1.0), 1.0);
+        // One time constant covers 1 - 1/e ≈ 63.2 %.
+        near(
+            rotation_smoothing_alpha(ROTATION_SMOOTHING_TAU_SECS),
+            1.0 - core::f32::consts::E.recip(),
+        );
+        // A longer frame eases further, but never past a full snap.
+        let short = rotation_smoothing_alpha(0.008);
+        let long = rotation_smoothing_alpha(0.033);
+        assert!(short > 0.0 && short < long && long < 1.0);
+    }
+
+    /// Slerping the rendered facing toward a turned target by the per-frame blend
+    /// advances part-way each frame (never snapping) and converges to the target once
+    /// it stops moving — the whole point of P31.7. Yaw about the up axis stands in for
+    /// the turning avatar.
+    #[test]
+    fn rotation_smoothing_converges_without_snapping() {
+        let target = Quat::from_rotation_y(core::f32::consts::FRAC_PI_2);
+        let mut rendered = Quat::IDENTITY;
+        let alpha = rotation_smoothing_alpha(0.016);
+        // The first frame closes part of the gap but does not reach the target.
+        rendered = rendered.slerp(target, alpha);
+        let after_one = rendered.angle_between(target);
+        assert!(after_one > 0.0 && after_one < core::f32::consts::FRAC_PI_2);
+        // Held steady, successive frames converge onto the target.
+        for _ in 0..200 {
+            rendered = rendered.slerp(target, alpha);
+        }
+        assert!(rendered.angle_between(target) < 1.0e-3);
     }
 }

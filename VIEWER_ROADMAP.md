@@ -2871,7 +2871,7 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   is no head/eye/breathe idle motion → **P31.8**. **Follow-up noted:** avatar
   turning is not interpolated like translation, so it reads choppy → **P31.7**
   (a motion-smoothing gap, unrelated to the animations).
-- [ ] **P31.7. Interpolate avatar turning.** The own avatar's **rotation** is
+- [x] **P31.7. Interpolate avatar turning.** The own avatar's **rotation** is
   not smoothed the way its **translation** is (P31.4): a live finding from the
   P31.6 run is that turning left / right reads choppy while forward / backward
   motion is smooth. The P31.4 avatar dead-reckoner (`drive_avatar_motion`)
@@ -2885,7 +2885,30 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   fold the client-tracked heading into the render transform continuously) so a
   turn looks as fluid as a walk. Viewer-only; unrelated to the P31.6
   animations. Reference: Firestorm `LLViewerObject::interpolateRotation` /
-  the agent's `mDrawable` orientation smoothing.
+  the agent's `mDrawable` orientation smoothing. **Done — viewer-only, in
+  `physics.rs` (`drive_avatar_motion` / `AvatarInterp`).** Root cause matched
+  the premise: the own avatar's facing arrives only as sparse `ObjectUpdate`s
+  echoing the client-driven `SetRotation` (essentially zero angular velocity,
+  so the dead-reckoner's `angular_step` never advanced it between updates), and
+  both the update-frame snap (`apply_object` writing `body_root_transform`) and
+  the between-update path wrote the *authoritative* facing straight onto the
+  anchor — so the rotation stepped while translation eased. Fix: `AvatarInterp`
+  now carries a `rendered_rotation` (Bevy space) that each frame **slerps**
+  toward the current authoritative / dead-reckoned facing
+  (`apply_smoothed_rotation`) with a framerate-independent exponential blend
+  (`rotation_smoothing_alpha`, `1 - e^(-dt/τ)`, τ = 80 ms) instead of snapping;
+  the reseed and both dead-reckon exit paths route through it, so the
+  smoothing spans the update boundary. Chosen over folding the client-tracked
+  heading in because it is general (smooths **every** avatar's turning, not
+  just the own one) and needs no cross-module coupling to `movement.rs`. τ =
+  80 ms converges to the target and leaves no standing lag once turning stops,
+  so a stationary facing is still exact. Unit-tested (`rotation_smoothing_alpha`
+  easing curve + slerp convergence-without-snap); the base transform snap was
+  never the visible artifact so no regression there. **Verified live on
+  OpenSim** (user-confirmed on screen): ← / → turning now reads as fluid as
+  the ↑ / ↓ walk. Only the *base* facing is smoothed — the reference viewer's
+  `LLKeyframeStandMotion` lower-body twist to the look direction is still
+  P31.8.
 - [ ] **P31.8. Procedural motion adjustments & always-on adjusters.** P31.6
   plays each state's *base* downloadable keyframe (walk / run / stand / turn /
   fall), but not the procedural layer the reference viewer stacks on top —
@@ -2940,6 +2963,23 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   the voice-signalling-only decision in the sl-client memory). So there is
   nothing to drive lips or dots from. Left unchecked as a permanent,
   intentional boundary; revisit only if voice audio is ever brought in scope.
+- [ ] **P31.11. Auto-stop flying on landing.** In the reference viewer, flying
+  down to the ground automatically turns flight off — once the avatar touches
+  (or nears) the ground / a surface, the viewer clears the fly state so the
+  agent lands and stands rather than hovering just above the ground still in
+  fly mode. Our viewer's P31.5 fly toggle (`movement.rs`, **F**) never clears
+  itself: it stays `flying = true` until the user presses **F** again, so a
+  descent to the ground leaves the avatar stuck in a hovering fly state. Detect
+  the landing — the reference path is `LLAgent::setFlying(FALSE)` driven from
+  the fly state machine (`FS_STATE`/`fly` handling in `llagent.cpp`) when the
+  agent is on / very close to the ground while descending (roughly: fly is on,
+  `UP_NEG`/no lift, and the dead-reckoned height is at the ground floor), and
+  the sim itself also stops broadcasting the fly animation — and clear
+  `AvatarControls::flying` (dropping `ControlFlags::FLY` from the advertised
+  intent, which also lets the P31.6 locomotion fallback fall back out of the
+  fly / hover states). Keep the manual **F** toggle for taking off again.
+  Viewer-only (movement / control-flag plumbing already exists end-to-end).
+  Reference: `LLAgent::setFlying` / the ground-detect in `llagent.cpp`.
 
 ## Phase 32 — Flexi prims
 
