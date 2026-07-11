@@ -2625,7 +2625,7 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   build/clippy + 3 unit tests (gravity axis map, dilation clamp, bad-value
   guard) and an OpenSim login smoke run (region handshake + clean quit, no
   panics / avian / schedule errors).
-- [ ] **P31.2. Physical objects.** Give server-flagged physical prims (the
+- [x] **P31.2. Physical objects.** Give server-flagged physical prims (the
   `LLViewerObject` physics flag / `LLPhysicsShapeType` — prim / convex hull /
   none) an avian rigid body + collider derived from the prim / mesh geometry.
   The sim stays authoritative — `ObjectUpdate` transforms drive the body while
@@ -2637,7 +2637,65 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   the world gravity — otherwise a server object the sim has settled (and gone
   silent about) keeps free-running in avian with no update to correct it.
   Reserve avian's dynamic bodies for genuinely client-only motion
-  (Phases 32 / 34).
+  (Phases 32 / 34). **Done:** `objects.rs`'s `apply_object` now stamps every
+  server-flagged physical **root** prim (`FLAGS_USE_PHYSICS`, non-attachment —
+  attachments follow their wearer's joint, and linkset children ride the Bevy
+  hierarchy) with a `PhysicalObject` marker (the `apply_light` /
+  `apply_particles` insert-or-remove pattern), change-detected so a fresh insert
+  on every update reseeds. From that marker `physics.rs`'s
+  `drive_physical_objects` attaches a **kinematic** avian `RigidBody` + a
+  `Collider::cuboid` sized to the prim scale (rebuilt only on a genuine resize),
+  snaps the body to each authoritative update, and between updates dead-reckons
+  the pose forward as a faithful port of
+  `LLViewerObject::interpolateLinearMotion`: the
+  `(vel + 0.5*(dt - PHYSICS_TIMESTEP)*accel) * dt` extrapolation (scaled by
+  region time dilation, the reference's `idleUpdate`
+  `dt = time_dilation * dt_raw`), the `applyAngularVelocity` spin, the
+  circuit-health **phase-out** (ramps `1 → 0` between 2 s and 3 s of silence
+  *only once the circuit looks stalled* — a new `CircuitLiveness` resource
+  tracking the last inbound event stands in for `LLCircuitData::isBlocked` / the
+  last-packet time, so "quiet because prediction holds" keeps going while "quiet
+  because the sim lags" eases to a halt), and the geometric clamps
+  (region-height ceiling, a permissive `getMinAllowedZ` ground floor from a new
+  `TerrainState::land_height` land lookup, and the off-region-edge clip /
+  region-crossing cap that zero velocity when a prediction would leave into a
+  void vs. a known neighbour — neighbours read from the time-dilation-seen
+  region set, the `clipToVisibleRegions` analogue). Kept viewer-only (no
+  runtime-parity obligation, like the P31.1 world). The whole extrapolation is
+  per-component `f32` / `Quat`-method math to satisfy the workspace
+  `arithmetic_side_effects` lint. Verified: clean build/clippy + 12 unit tests
+  (dead-reckon formula, phase-out ramp/gating, angular step, the ceiling /
+  floor / void-clip / region-crossing clamps, ground-floor radius, neighbour
+  lookup) and a **live OpenSim** run — a 1 m physical box dropped mid-session (a
+  `<Flags>Physics</Flags>` OAR merge-loaded while the viewer was already
+  streaming, so it fell live under the region's `ubODE` engine) was received
+  flagged physical, given a `1.00×1.00×1.00 m` kinematic body, and dead-reckoned
+  through its fall onto the avatar (user-confirmed on screen), with a clean quit
+  and no panics / avian / schedule errors. Two aspects are deliberately deferred
+  to their own points below: the CAPS `LLPhysicsShapeType` (prim / hull / none)
+  and a real geometry-derived collider (the P31.2 collider is a scale-sized
+  cuboid regardless) → **P31.3**; and dead-reckoning of **avatars** (a separate
+  `avatars.rs` path) → **P31.4**.
+- [ ] **P31.3. Physics-shape-aware colliders.** Replace P31.2's placeholder
+  scale-sized cuboid with a collider that matches the object's real
+  `LLPhysicsShapeType` and geometry. Fetch it from the CAPS
+  `GetObjectPhysicsData` (`ObjectPhysicsProperties`, surfaced as
+  `Event::ObjectPhysicsProperties`): **none** → no collider (a physics prim with
+  no collision shape); **convex hull** → an avian convex hull from the prim /
+  mesh vertices; **prim** → the tessellated prim / mesh geometry (or its convex
+  decomposition). Uses avian's `collider-from-mesh` (already a default feature)
+  over the geometry the viewer already tessellates. Matters once P32 / P34 add
+  genuine dynamic bodies that collide against these kinematic movers — until
+  then the cuboid is inert.
+- [ ] **P31.4. Avatar dead-reckoning.** Extend the P31.2
+  `interpolateLinearMotion` port to the own and other avatars (the `avatars.rs`
+  path, not the object path), so a laggy avatar dead-reckons from its sim-sent
+  velocity / acceleration with the same phase-out and clamps. Avatars use the
+  stricter **ground floor** the reference viewer applies to them
+  (`resolveLandHeightGlobal + 0.5*height` via `TerrainState::land_height`) so a
+  laggy avatar does not sink under the terrain — the one guard P31.2 left
+  permissive for objects. Keep avatars **kinematic** (sim-authoritative), like
+  the objects.
 
 ## Phase 32 — Flexi prims
 

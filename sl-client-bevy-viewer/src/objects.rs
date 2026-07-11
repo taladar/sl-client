@@ -62,6 +62,7 @@ use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::particles::{apply_particles, particles_from_object};
+use crate::physics::apply_physics;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
@@ -1693,6 +1694,9 @@ fn apply_object(
         apply_texture_animation(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);
         apply_particles(existing.entity, particles, commands);
+        // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
+        // physical (or moved by this terse update) is driven kinematically.
+        apply_physics(existing.entity, object, commands);
         if existing.shape != shape {
             // A genuine shape (or category) change: drop the old face meshes and
             // re-tessellate. A category change is subsumed here, since the
@@ -1770,6 +1774,9 @@ fn apply_object(
     // A particle-source prim carries its decoded particle system (P30.1); a plain
     // prim gets nothing.
     apply_particles(entity, particles, commands);
+    // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
+    // any other object gets nothing (the marker's absence is the signal).
+    apply_physics(entity, object, commands);
     // The geometry holder: a child of the object entity carrying only the object's
     // scale, so the object's own faces are scaled while linkset children (which
     // parent to the object entity, not this) are not.

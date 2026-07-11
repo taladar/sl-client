@@ -116,6 +116,47 @@ pub(crate) struct TerrainState {
     decoded: HashMap<TextureKey, Handle<Image>>,
 }
 
+impl TerrainState {
+    /// The ground height at region-local metre position (`x`, `y`) in `region`,
+    /// read from the nearest decoded land-patch cell, or `None` when that region's
+    /// terrain has not been ingested (or the point is off-region / non-finite).
+    ///
+    /// A land patch holds `size`×`size` height samples spanning `size` metres (one
+    /// sample per metre for a standard 16-cell patch), so cell `(⌊x⌋, ⌊y⌋)` within
+    /// the patch is the nearest sample. Used by the physics dead-reckoning (P31.2)
+    /// as the ground floor an extrapolating object is clamped to
+    /// (`getMinAllowedZ`).
+    pub(crate) fn land_height(&self, region: RegionHandle, x: f32, y: f32) -> Option<f32> {
+        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+            return None;
+        }
+        for (&(patch_region, _, _), patch) in &self.raw_patches {
+            if patch_region != region || !patch.layer.is_land() {
+                continue;
+            }
+            let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
+            let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
+            let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
+            if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
+                continue;
+            }
+            // The floored offset into the patch, in `0..size`. The subtraction is
+            // non-negative (guarded above) and below `size`, so the truncating cast
+            // is exact.
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the offset is in 0.0..size, so it fits u32 exactly"
+            )]
+            let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
+            let last = patch.size.saturating_sub(1);
+            return patch.value(cell_x.min(last), cell_y.min(last));
+        }
+        None
+    }
+}
+
 /// Keep the scene origin on the root region: when a border crossing promotes a
 /// neighbour to root, re-centre every terrain patch on the new region and shift
 /// the fly-camera by the same delta, so coordinates stay small while the world

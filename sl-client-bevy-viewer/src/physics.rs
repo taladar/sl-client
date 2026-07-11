@@ -4,8 +4,8 @@
 //! This module stands up a shared physics substrate that later phases build on
 //! — Phase 32 (flexi prims) and Phase 34 (avatar cloth / body physics) drive
 //! their client-side simulations through it rather than hand-rolling a solver.
-//! P31.1 is foundation only: the physics world runs (empty until P31.2 gives
-//! server-flagged prims rigid bodies), configured with three things:
+//! P31.1 stood up the world; P31.2 (below) populates it with the server-flagged
+//! physical prims. The world is configured with three foundation pieces:
 //!
 //! - **Second Life gravity.** Second Life's world gravity is `-9.8` m/s² along
 //!   its Z (up) axis (Firestorm `llmath.h` `GRAVITY = -9.8`, matched by
@@ -25,6 +25,22 @@
 //!   dynamics then slow down in lock-step with the dilated sim instead of
 //!   drifting ahead of it.
 //!
+//! **P31.2 — physical objects.** Every server-flagged physical root prim
+//! ([`FLAGS_USE_PHYSICS`], marked by [`apply_physics`] from
+//! [`apply_object`](crate::objects)) gets a **kinematic** avian [`RigidBody`] and
+//! a cuboid [`Collider`] sized to its prim scale. The simulator stays
+//! authoritative: [`drive_physical_objects`] snaps the body to each
+//! `ObjectUpdate` and, between updates, dead-reckons the pose forward exactly as
+//! the reference viewer's `LLViewerObject::interpolateLinearMotion` does — the
+//! velocity/acceleration extrapolation, the circuit-health phase-out (easing a
+//! silent object to a halt once the circuit looks stalled), and the geometric
+//! clamps (region-height ceiling, permissive ground floor, off-region-edge clip,
+//! region-crossing cap). The body is **never** free-run under the world gravity,
+//! so a settled object the sim has gone silent about cannot drift; avian's
+//! genuine dynamic bodies + [`Gravity`] are reserved for client-only motion
+//! (Phases 32 / 34). This is why the guards matter: silence means "prediction
+//! still holds", so a bounded, corrected extrapolation is the faithful model.
+//!
 //! No `sl-client-tokio` counterpart is needed: like the render materials and the
 //! other viewer-only simulations (sky, water, particles), the physics world is a
 //! viewer rendering concern, not a protocol capability, so the runtime-parity
@@ -32,11 +48,13 @@
 
 use std::collections::HashMap;
 
-use avian3d::prelude::{Gravity, Physics, PhysicsPlugins, PhysicsTime as _};
+use avian3d::prelude::{Collider, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody};
 use bevy::prelude::*;
-use sl_client_bevy::{RegionHandle, SlEvent, SlIdentity, SlSessionEvent, Vector};
+use sl_client_bevy::{Object, RegionHandle, Rotation, SlEvent, SlIdentity, SlSessionEvent, Vector};
 
-use crate::coords::sl_to_bevy_vec;
+use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::objects::update_objects;
+use crate::terrain::TerrainState;
 
 /// Second Life's world gravity along its Z (up) axis, in metres per second
 /// squared (Firestorm `llmath.h` `GRAVITY = -9.8`; OpenSim `world_gravityz =
@@ -99,9 +117,18 @@ impl Plugin for PhysicsPlugin {
             // to the Second Life simulator's target physics rate.
             .insert_resource(Time::<Fixed>::from_hz(SL_PHYSICS_HZ))
             .init_resource::<RegionTimeDilation>()
+            .init_resource::<CircuitLiveness>()
             .add_systems(
                 Update,
-                (ingest_time_dilation, drive_physics_time_dilation).chain(),
+                (
+                    (ingest_time_dilation, drive_physics_time_dilation).chain(),
+                    ingest_circuit_liveness,
+                    // P31.2: give server-flagged physical prims a kinematic body and
+                    // dead-reckon them between updates. Runs after `update_objects`
+                    // has attached / refreshed the [`PhysicalObject`] marker.
+                    drive_physical_objects.after(update_objects),
+                    detach_physical_bodies.after(update_objects),
+                ),
             );
     }
 }
@@ -143,10 +170,638 @@ pub(crate) fn drive_physics_time_dilation(
     }
 }
 
+/// The `FLAGS_USE_PHYSICS` bit of an object's update flags (`object_flags.h`):
+/// the object is simulated by the server's physics engine. This is the "physical
+/// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
+const FLAGS_USE_PHYSICS: u32 = 1 << 0;
+
+/// The simulator's physics timestep, in seconds (`llviewerobject.cpp`
+/// `PHYSICS_TIMESTEP = 1/45`). The dead-reckoning correction below uses it to
+/// account for the fact that an object update's velocity is the *average* over
+/// the last step rather than the final velocity.
+const PHYSICS_TIMESTEP: f32 = 1.0 / 45.0;
+
+/// Seconds of silence after which motion prediction begins to taper off
+/// (`sPhaseOutUpdateInterpolationTime`), *if* the circuit also looks stalled.
+const PHASE_OUT_START_SECS: f64 = 2.0;
+
+/// Seconds of silence after which motion prediction is fully off
+/// (`sMaxUpdateInterpolationTime`) — the object is eased to a halt by then.
+const MAX_INTERP_SECS: f64 = 3.0;
+
+/// The tighter interpolation cap while an object is predicted to be crossing a
+/// region border (`sMaxRegionCrossingInterpolationTime`) — the classic "shot off
+/// across the region" source is bounded to a second.
+const REGION_CROSSING_CAP_SECS: f64 = 1.0;
+
+/// A standard region's edge length, in metres. Variable-region sizes are out of
+/// scope here; the off-region-edge clip below assumes the 256 m grid the local
+/// test grid and Second Life mainland use.
+const REGION_WIDTH_M: f32 = 256.0;
+
+/// The region-height ceiling an extrapolated object is clamped under
+/// (`getRegionMaxHeight`). Second Life's `SL_MAX_OBJECT_Z`; OpenSim's is higher
+/// (`OS_MAX_OBJECT_Z = 10000`), but this only bounds runaway *prediction* — an
+/// authoritative update always reseeds the true position first — and Second Life
+/// is the primary target.
+const REGION_MAX_HEIGHT_M: f32 = 4096.0;
+
+/// The smallest collider extent, in metres, so a prim with a degenerate (zero)
+/// scale axis still gets a valid, non-panicking avian cuboid.
+const MIN_COLLIDER_EXTENT_M: f32 = 0.01;
+
+/// Whether `object` is a server-flagged **physical root prim** the viewer drives
+/// kinematically: it carries [`FLAGS_USE_PHYSICS`], is a linkset root (its
+/// children ride along via the Bevy hierarchy), and is not a worn attachment (the
+/// reference viewer skips linear interpolation for attachments — they follow
+/// their wearer's skeleton joint instead).
+const fn is_physical_root(object: &Object) -> bool {
+    object.update_flags & FLAGS_USE_PHYSICS != 0
+        && object.parent_id.get() == 0
+        && object.attachment_point_id().is_none()
+}
+
+/// The authoritative kinematic state of a server-flagged physical root prim as of
+/// its last `ObjectUpdate`, attached to the object entity by [`apply_physics`] and
+/// change-detected: a fresh insert on every update reseeds the interpolation. The
+/// component is absent on any object that is not a physical root, so its presence
+/// alone marks the entities [`drive_physical_objects`] gives a kinematic body.
+#[derive(Component, Clone)]
+pub(crate) struct PhysicalObject {
+    /// Region-local position (metres, Second Life Z-up frame).
+    position: Vector,
+    /// Linear velocity (metres/second).
+    velocity: Vector,
+    /// Linear acceleration (metres/second²) — usually gravity for a falling prim.
+    acceleration: Vector,
+    /// Orientation (a Second Life unit quaternion).
+    rotation: Rotation,
+    /// Angular velocity (rotation axis scaled by radians/second).
+    angular_velocity: Vector,
+    /// The region this object lives in, for the region-edge / neighbour lookups.
+    region_handle: RegionHandle,
+    /// The object's size (metres per axis), the source for its cuboid collider.
+    scale: Vector,
+}
+
+/// Attach, refresh, or remove the [`PhysicalObject`] marker on an object entity to
+/// match its current physical-root status — the physics counterpart of
+/// [`apply_light`](crate::lights) / `apply_particles`, called from
+/// [`apply_object`](crate::objects) on every add and update so a prim toggled
+/// physical / non-physical (or moved by a terse update) is reflected. The avian
+/// [`RigidBody`] / [`Collider`] themselves are managed by
+/// [`drive_physical_objects`] from this marker's presence.
+pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
+    if is_physical_root(object) {
+        commands.entity(entity).insert(PhysicalObject {
+            position: object.motion.position.clone(),
+            velocity: object.motion.velocity.clone(),
+            acceleration: object.motion.acceleration.clone(),
+            rotation: object.motion.rotation.clone(),
+            angular_velocity: object.motion.angular_velocity.clone(),
+            region_handle: object.region_handle,
+            scale: object.scale.clone(),
+        });
+    } else {
+        commands.entity(entity).remove::<PhysicalObject>();
+    }
+}
+
+/// The viewer-side interpolation state for one physical object, owned entirely by
+/// [`drive_physical_objects`]: the extrapolated (predicted) pose advanced each
+/// frame between server updates, the timing the phase-out reads, and the collider
+/// scale (to rebuild the cuboid only on a genuine resize). Mirrors the reference
+/// viewer's per-`LLViewerObject` interpolation bookkeeping.
+#[derive(Component)]
+pub(crate) struct PhysicsInterp {
+    /// The predicted region-local position (Second Life Z-up metres).
+    position: [f32; 3],
+    /// The predicted orientation, in Second Life space (pre basis-change).
+    rotation: Quat,
+    /// The current linear velocity (metres/second), decaying under the phase-out.
+    velocity: [f32; 3],
+    /// The current linear acceleration (metres/second²); zeroed on a region cross
+    /// or an empty-edge clip, matching the reference viewer.
+    acceleration: [f32; 3],
+    /// The angular velocity (axis·radians/second).
+    angular_velocity: [f32; 3],
+    /// The object's region, for the region-edge / neighbour lookups.
+    region_handle: RegionHandle,
+    /// Elapsed seconds when the last server update was ingested
+    /// (`mLastMessageUpdateSecs`).
+    last_message_secs: f64,
+    /// Elapsed seconds at the last interpolation step (`mLastInterpUpdateSecs`).
+    last_interp_secs: f64,
+    /// The collider's current extents (metres), to detect a resize.
+    collider_scale: [f32; 3],
+    /// While predicted to be crossing a border, the elapsed-seconds deadline after
+    /// which motion is stopped (`mRegionCrossExpire`); `None` when not crossing.
+    region_cross_expire: Option<f64>,
+}
+
+impl PhysicsInterp {
+    /// Seed the interpolation state from an authoritative update at time `now`.
+    fn seeded(phys: &PhysicalObject, now: f64) -> Self {
+        Self {
+            position: vector_to_array(&phys.position),
+            rotation: sl_rotation_to_quat(&phys.rotation),
+            velocity: vector_to_array(&phys.velocity),
+            acceleration: vector_to_array(&phys.acceleration),
+            angular_velocity: vector_to_array(&phys.angular_velocity),
+            region_handle: phys.region_handle,
+            last_message_secs: now,
+            last_interp_secs: now,
+            collider_scale: collider_extents(&phys.scale),
+            region_cross_expire: None,
+        }
+    }
+
+    /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
+    /// snapping the prediction back to the server truth and restarting the timers.
+    fn reseed(&mut self, phys: &PhysicalObject, now: f64) {
+        self.position = vector_to_array(&phys.position);
+        self.rotation = sl_rotation_to_quat(&phys.rotation);
+        self.velocity = vector_to_array(&phys.velocity);
+        self.acceleration = vector_to_array(&phys.acceleration);
+        self.angular_velocity = vector_to_array(&phys.angular_velocity);
+        self.region_handle = phys.region_handle;
+        self.last_message_secs = now;
+        self.last_interp_secs = now;
+        self.region_cross_expire = None;
+    }
+}
+
+/// A [`Vector`]'s components as a plain `[f32; 3]` for the per-component
+/// dead-reckoning math (Bevy's `Vec3` arithmetic operators are forbidden by the
+/// workspace `arithmetic_side_effects` lint — see [`crate::camera`]).
+const fn vector_to_array(vector: &Vector) -> [f32; 3] {
+    [vector.x, vector.y, vector.z]
+}
+
+/// The cuboid collider extents for a prim scale, each floored to a valid
+/// non-degenerate length.
+const fn collider_extents(scale: &Vector) -> [f32; 3] {
+    [
+        scale.x.max(MIN_COLLIDER_EXTENT_M),
+        scale.y.max(MIN_COLLIDER_EXTENT_M),
+        scale.z.max(MIN_COLLIDER_EXTENT_M),
+    ]
+}
+
+/// The last elapsed-seconds time any inbound session event was seen, a proxy for
+/// the reference viewer's per-circuit last-packet time (`getLastPacketInTime`):
+/// the phase-out taper only engages once this goes stale, separating "quiet
+/// because the prediction is right" from "quiet because the sim is lagging".
+#[derive(Resource, Default)]
+pub(crate) struct CircuitLiveness {
+    /// Elapsed seconds at the most recent inbound [`SlEvent`], or `None` before
+    /// any event has arrived (treated as freshly alive).
+    last_event_secs: Option<f64>,
+}
+
+/// Refresh [`CircuitLiveness`] whenever any inbound session event arrives: a
+/// healthy circuit keeps a steady stream flowing (object, terrain, ping, …), so a
+/// stale timestamp means the circuit — not just one silent object — has gone
+/// quiet, which is exactly when the reference viewer tapers off prediction.
+pub(crate) fn ingest_circuit_liveness(
+    time: Res<Time>,
+    mut events: MessageReader<SlEvent>,
+    mut liveness: ResMut<CircuitLiveness>,
+) {
+    // Drain the frame's events (advancing the cursor); any inbound traffic marks
+    // the circuit alive right now.
+    if events.read().count() > 0 {
+        liveness.last_event_secs = Some(time.elapsed_secs_f64());
+    }
+}
+
+/// The `getMinAllowedZ`-style ground floor for a physical object: the land height
+/// under it minus the object's bounding radius (half its scale length). The
+/// reference viewer deliberately keeps this permissive for objects (they may sink
+/// underground) — it only stops a laggy prediction running arbitrarily far below
+/// the terrain. `None` land height (terrain not yet ingested) means no floor.
+fn ground_floor(land_height: Option<f32>, scale: &Vector) -> Option<f32> {
+    land_height.map(|height| {
+        let radius = 0.5 * (scale.x * scale.x + scale.y * scale.y + scale.z * scale.z).sqrt();
+        height - radius
+    })
+}
+
+/// The interpolation phase-out factor (`1.0` full prediction … `0.0` stopped),
+/// reproducing `LLViewerObject::interpolateLinearMotion`'s ramp. `now`-relative
+/// times are elapsed seconds; `circuit_stale` is whether the circuit looks lagged
+/// (only then does prediction taper — otherwise silence means the prediction is
+/// still correct and we keep going at `1.0`).
+fn phase_out_factor(
+    time_since_last_update: f64,
+    time_since_last_interp: f64,
+    last_update_already_phased: bool,
+    circuit_stale: bool,
+) -> f64 {
+    if time_since_last_update <= PHASE_OUT_START_SECS || !circuit_stale {
+        return 1.0;
+    }
+    if time_since_last_update > MAX_INTERP_SECS {
+        // Past the limit: stop the object.
+        return 0.0;
+    }
+    let raw = if last_update_already_phased {
+        // The previous step was already tapering: ramp relative to it.
+        let denom = MAX_INTERP_SECS - time_since_last_interp;
+        if denom.abs() < f64::EPSILON {
+            1.0
+        } else {
+            (MAX_INTERP_SECS - time_since_last_update) / denom
+        }
+    } else {
+        // Start the taper from the full value.
+        (MAX_INTERP_SECS - time_since_last_update) / (MAX_INTERP_SECS - PHASE_OUT_START_SECS)
+    };
+    raw.clamp(0.0, 1.0)
+}
+
+/// Advance a predicted position/velocity one dead-reckoning step, reproducing the
+/// reference viewer's `new_pos = (vel + 0.5*(dt - PHYSICS_TIMESTEP)*accel) * dt`
+/// (scaled by the phase-out), returning the new `(position, velocity)`.
+fn dead_reckon(
+    position: [f32; 3],
+    velocity: [f32; 3],
+    acceleration: [f32; 3],
+    dt: f32,
+    phase_out: f32,
+) -> ([f32; 3], [f32; 3]) {
+    let half_correction = 0.5 * (dt - PHYSICS_TIMESTEP);
+    let [px, py, pz] = position;
+    let [vx, vy, vz] = velocity;
+    let [ax, ay, az] = acceleration;
+    // One axis's predicted `(position, velocity)` step.
+    let step = |p: f32, v: f32, a: f32| -> (f32, f32) {
+        let delta = (v + half_correction * a) * dt * phase_out;
+        (p + delta, v + a * dt * phase_out)
+    };
+    let (npx, nvx) = step(px, vx, ax);
+    let (npy, nvy) = step(py, vy, ay);
+    let (npz, nvz) = step(pz, vz, az);
+    ([npx, npy, npz], [nvx, nvy, nvz])
+}
+
+/// Advance an orientation by its angular velocity over `dt`, reproducing
+/// `LLViewerObject::applyAngularVelocity` (a delta quaternion about the normalised
+/// angular-velocity axis). A near-zero angular velocity leaves the rotation
+/// unchanged.
+fn angular_step(rotation: Quat, angular_velocity: [f32; 3], dt: f32) -> Quat {
+    let [ax, ay, az] = angular_velocity;
+    let omega_sq = ax * ax + ay * ay + az * az;
+    if omega_sq <= 1.0e-8 {
+        return rotation;
+    }
+    let omega = omega_sq.sqrt();
+    let angle = omega * dt;
+    let axis = Vec3::new(ax / omega, ay / omega, az / omega);
+    rotation
+        .mul_quat(Quat::from_axis_angle(axis, angle))
+        .normalize()
+}
+
+/// Which of the four axis-neighbour regions (`[-x, +x, -y, +y]`) are currently
+/// known (a circuit / terrain seen for them), from the regions the session has
+/// reported a time dilation for — the analogue of the reference viewer's
+/// `clipToVisibleRegions`.
+fn neighbours_known(dilations: &RegionTimeDilation, region: RegionHandle) -> [bool; 4] {
+    let (gx, gy) = region.global_coordinates();
+    let width = 256_u32;
+    let known = |x: Option<u32>, y: Option<u32>| match (x, y) {
+        (Some(x), Some(y)) => dilations
+            .per_region
+            .contains_key(&RegionHandle::from_global(x, y)),
+        _ => false,
+    };
+    [
+        known(gx.checked_sub(width), Some(gy)),
+        known(gx.checked_add(width), Some(gy)),
+        known(Some(gx), gy.checked_sub(width)),
+        known(Some(gx), gy.checked_add(width)),
+    ]
+}
+
+/// The inputs to [`clamp_prediction`]: an extrapolated pose plus the world facts
+/// its guards need.
+struct ClampInput {
+    /// The extrapolated region-local position (Second Life Z-up metres).
+    position: [f32; 3],
+    /// The extrapolated linear velocity (metres/second).
+    velocity: [f32; 3],
+    /// The current linear acceleration (metres/second²).
+    acceleration: [f32; 3],
+    /// The ground floor to clamp the height above, or `None` for no floor.
+    floor: Option<f32>,
+    /// Which axis-neighbour regions are known (`[-x, +x, -y, +y]`).
+    neighbours: [bool; 4],
+    /// The current region-cross deadline (elapsed seconds), if crossing.
+    region_cross_expire: Option<f64>,
+    /// The current time (elapsed seconds).
+    now: f64,
+}
+
+/// The result of [`clamp_prediction`]: the clamped pose and the (possibly zeroed)
+/// motion state to store back.
+struct ClampOutput {
+    /// The clamped region-local position.
+    position: [f32; 3],
+    /// The velocity to store (zeroed on an empty-edge clip / crossing timeout).
+    velocity: [f32; 3],
+    /// The acceleration to store (zeroed on an empty-edge clip or a crossing).
+    acceleration: [f32; 3],
+    /// The updated region-cross deadline.
+    region_cross_expire: Option<f64>,
+}
+
+/// The clamp result for one horizontal axis: its clamped coordinate, whether it
+/// left the region into a void (an empty edge), and whether it left into a known
+/// neighbour (a border crossing).
+struct AxisClip {
+    /// The coordinate after an empty-edge clip (unchanged when in-region or
+    /// crossing into a neighbour).
+    coordinate: f32,
+    /// Left the region with no neighbour to enter.
+    into_void: bool,
+    /// Left the region into a known neighbour.
+    crossing: bool,
+}
+
+/// Clip one horizontal coordinate against the region bounds, given whether the
+/// lower / upper neighbour region is known.
+fn clip_axis(coordinate: f32, lower_known: bool, upper_known: bool) -> AxisClip {
+    if coordinate < 0.0 {
+        if lower_known {
+            AxisClip {
+                coordinate,
+                into_void: false,
+                crossing: true,
+            }
+        } else {
+            AxisClip {
+                coordinate: 0.0,
+                into_void: true,
+                crossing: false,
+            }
+        }
+    } else if coordinate > REGION_WIDTH_M {
+        if upper_known {
+            AxisClip {
+                coordinate,
+                into_void: false,
+                crossing: true,
+            }
+        } else {
+            AxisClip {
+                coordinate: REGION_WIDTH_M,
+                into_void: true,
+                crossing: false,
+            }
+        }
+    } else {
+        AxisClip {
+            coordinate,
+            into_void: false,
+            crossing: false,
+        }
+    }
+}
+
+/// The geometric guards on an extrapolated step, reproducing the reference
+/// viewer's clamps: a region-height ceiling, a (permissive) ground floor, and the
+/// off-region-edge clip / region-crossing cap. Returns the clamped position and
+/// the (possibly zeroed) velocity / acceleration / region-cross deadline to store.
+///
+/// - Leaving the region into a **void** (no known neighbour): clip to the edge and
+///   zero velocity + acceleration, waiting for a server update.
+/// - Leaving into a **known neighbour**: a border crossing — zero acceleration and
+///   bound the crossing to [`REGION_CROSSING_CAP_SECS`], stopping motion past it.
+fn clamp_prediction(input: ClampInput) -> ClampOutput {
+    let [x, y, z] = input.position;
+    let mut velocity = input.velocity;
+    let mut acceleration = input.acceleration;
+
+    // Region-height ceiling and (permissive) ground floor.
+    let mut clamped_z = z.min(REGION_MAX_HEIGHT_M);
+    if let Some(floor) = input.floor {
+        clamped_z = clamped_z.max(floor);
+    }
+
+    // Off-region-edge clip, per horizontal axis. `neighbours` is `[-x, +x, -y, +y]`.
+    let [neg_x, pos_x, neg_y, pos_y] = input.neighbours;
+    let clip_x = clip_axis(x, neg_x, pos_x);
+    let clip_y = clip_axis(y, neg_y, pos_y);
+    let position = [clip_x.coordinate, clip_y.coordinate, clamped_z];
+    let into_void = clip_x.into_void || clip_y.into_void;
+    let crossing = clip_x.crossing || clip_y.crossing;
+
+    let mut region_cross_expire = input.region_cross_expire;
+    if into_void {
+        // Hit an empty region edge: stop motion and wait for a server update.
+        velocity = [0.0; 3];
+        acceleration = [0.0; 3];
+        region_cross_expire = None;
+    } else if crossing {
+        // A predicted border crossing: no acceleration while crossing, and bound
+        // the extrapolation to a second so a laggy crossing does not shoot off.
+        acceleration = [0.0; 3];
+        match region_cross_expire {
+            None => region_cross_expire = Some(input.now + REGION_CROSSING_CAP_SECS),
+            Some(expire) if input.now > expire => {
+                velocity = [0.0; 3];
+                region_cross_expire = None;
+            }
+            Some(_) => {}
+        }
+    } else {
+        region_cross_expire = None;
+    }
+
+    ClampOutput {
+        position,
+        velocity,
+        acceleration,
+        region_cross_expire,
+    }
+}
+
+/// Give each server-flagged physical prim a kinematic avian body and drive it: on
+/// the frame an [`PhysicalObject`] update lands, snap to the authoritative pose
+/// and (re)seed the interpolation; between updates, dead-reckon the pose forward
+/// with the phase-out taper and the geometric clamps, exactly as the reference
+/// viewer's `interpolateLinearMotion` does. The body stays **kinematic** (the sim
+/// is authoritative) — it is never free-run under world gravity, so a settled
+/// object the sim has gone silent about cannot drift.
+pub(crate) fn drive_physical_objects(
+    time: Res<Time>,
+    liveness: Res<CircuitLiveness>,
+    dilations: Res<RegionTimeDilation>,
+    terrain: Res<TerrainState>,
+    mut objects: Query<(
+        Entity,
+        Ref<PhysicalObject>,
+        Option<&mut PhysicsInterp>,
+        &mut Transform,
+    )>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs_f64();
+    let dt_raw = time.delta_secs();
+    // The circuit looks stalled if no inbound event has been seen for longer than
+    // the phase-out window (the analogue of `isBlocked` / a stale last-packet time).
+    let circuit_stale = liveness
+        .last_event_secs
+        .is_some_and(|seen| now - seen > PHASE_OUT_START_SECS);
+
+    for (entity, phys, interp, mut transform) in &mut objects {
+        let Some(mut interp) = interp else {
+            // Newly physical: attach the kinematic body + cuboid collider, seed the
+            // interpolation, and place the entity at the authoritative pose.
+            let [ex, ey, ez] = collider_extents(&phys.scale);
+            debug!("physical object {entity} → kinematic body ({ex:.2}×{ey:.2}×{ez:.2} m)");
+            place(
+                &mut transform,
+                &phys.position,
+                &sl_rotation_to_quat(&phys.rotation),
+            );
+            commands.entity(entity).insert((
+                RigidBody::Kinematic,
+                Collider::cuboid(ex, ey, ez),
+                PhysicsInterp::seeded(&phys, now),
+            ));
+            continue;
+        };
+
+        // A fresh server update: snap the prediction back to truth and restart.
+        if phys.is_changed() {
+            let [ex, ey, ez] = collider_extents(&phys.scale);
+            let resized = [ex, ey, ez]
+                .iter()
+                .zip(&interp.collider_scale)
+                .any(|(new, old)| (new - old).abs() > f32::EPSILON);
+            if resized {
+                commands.entity(entity).insert(Collider::cuboid(ex, ey, ez));
+                interp.collider_scale = [ex, ey, ez];
+            }
+            interp.reseed(&phys, now);
+            place(&mut transform, &phys.position, &interp.rotation);
+            continue;
+        }
+
+        // Between updates: dead-reckon forward.
+        let region_dilation = dilations
+            .per_region
+            .get(&interp.region_handle)
+            .copied()
+            .unwrap_or(1.0);
+        let dt = clamp_dilation(region_dilation) * dt_raw;
+        let time_since_last_update = now - interp.last_message_secs;
+        if dt <= 0.0 || time_since_last_update <= 0.0 {
+            interp.last_interp_secs = now;
+            continue;
+        }
+
+        let phase_out = phase_out_factor(
+            time_since_last_update,
+            now - interp.last_interp_secs,
+            interp.last_interp_secs - interp.last_message_secs > PHASE_OUT_START_SECS,
+            circuit_stale,
+        );
+        // Only an actually-moving object dead-reckons (the reference viewer's
+        // `!accel.isExactlyZero() || !vel.isExactlyZero()` gate).
+        let moving = interp
+            .velocity
+            .iter()
+            .chain(&interp.acceleration)
+            .any(|c| c.abs() > f32::EPSILON);
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "phase_out is a 0.0..=1.0 ratio; f32 precision is ample"
+        )]
+        let phase_out_f32 = phase_out as f32;
+        if moving {
+            let (predicted, velocity) = dead_reckon(
+                interp.position,
+                interp.velocity,
+                interp.acceleration,
+                dt,
+                phase_out_f32,
+            );
+            let [predicted_x, predicted_y, _] = predicted;
+            let [scale_x, scale_y, scale_z] = interp.collider_scale;
+            let floor = ground_floor(
+                terrain.land_height(interp.region_handle, predicted_x, predicted_y),
+                &Vector {
+                    x: scale_x,
+                    y: scale_y,
+                    z: scale_z,
+                },
+            );
+            let clamped = clamp_prediction(ClampInput {
+                position: predicted,
+                velocity,
+                acceleration: interp.acceleration,
+                floor,
+                neighbours: neighbours_known(&dilations, interp.region_handle),
+                region_cross_expire: interp.region_cross_expire,
+                now,
+            });
+            interp.position = clamped.position;
+            interp.velocity = clamped.velocity;
+            interp.acceleration = clamped.acceleration;
+            interp.region_cross_expire = clamped.region_cross_expire;
+        }
+        // Angular velocity is applied even for a purely spinning object.
+        interp.rotation = angular_step(interp.rotation, interp.angular_velocity, dt);
+        interp.last_interp_secs = now;
+
+        let [pos_x, pos_y, pos_z] = interp.position;
+        let position = Vector {
+            x: pos_x,
+            y: pos_y,
+            z: pos_z,
+        };
+        place(&mut transform, &position, &interp.rotation);
+    }
+}
+
+/// Write a physical object's Second Life region-local pose into its Bevy world
+/// [`Transform`], applying the single Second Life → Bevy basis change (the same
+/// mapping a root object's `object_transform` uses). The entity carries no scale
+/// (it rides the geometry holder), so only translation and rotation are set.
+fn place(transform: &mut Transform, position: &Vector, sl_rotation: &Quat) {
+    transform.translation = sl_to_bevy_vec(position);
+    transform.rotation = sl_to_bevy_rotation().mul_quat(*sl_rotation);
+}
+
+/// Strip the kinematic body from an entity that is no longer a physical root (its
+/// [`PhysicalObject`] marker was removed by [`apply_physics`] — e.g. a prim made
+/// non-physical, relinked as a child, or attached), so it stops being driven.
+pub(crate) fn detach_physical_bodies(
+    stale: Query<Entity, (With<PhysicsInterp>, Without<PhysicalObject>)>,
+    mut commands: Commands,
+) {
+    for entity in &stale {
+        commands
+            .entity(entity)
+            .remove::<(RigidBody, Collider, PhysicsInterp)>();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SL_GRAVITY_Z, clamp_dilation, sl_gravity};
-    use bevy::math::Vec3;
+    use super::{
+        ClampInput, MAX_INTERP_SECS, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M, REGION_WIDTH_M,
+        SL_GRAVITY_Z, angular_step, clamp_dilation, clamp_prediction, dead_reckon, ground_floor,
+        neighbours_known, phase_out_factor, sl_gravity,
+    };
+    use crate::physics::RegionTimeDilation;
+    use bevy::math::{Quat, Vec3};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{RegionHandle, Vector};
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
     /// forbid a strict `float_cmp`, and the clamp results are exact anyway).
@@ -155,6 +810,23 @@ mod tests {
             (actual - expected).abs() <= f32::EPSILON,
             "{actual} should equal {expected}"
         );
+    }
+
+    /// Assert two `f32` are equal within a looser tolerance for accumulated
+    /// floating-point arithmetic.
+    fn near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= 1.0e-4,
+            "{actual} should be about {expected}"
+        );
+    }
+
+    /// Component-wise [`near`] for a 3-vector (the workspace lints forbid a strict
+    /// float-array equality).
+    fn near3(actual: [f32; 3], expected: [f32; 3]) {
+        for (a, e) in actual.iter().zip(&expected) {
+            near(*a, *e);
+        }
     }
 
     /// Second Life's Z-up gravity maps to a Bevy `-Y` vector of the same
@@ -184,5 +856,178 @@ mod tests {
         approx(clamp_dilation(2.0), 1.0);
         approx(clamp_dilation(f32::NAN), 1.0);
         approx(clamp_dilation(f32::INFINITY), 1.0);
+    }
+
+    /// Dead-reckoning at full phase-out advances position by the reference
+    /// viewer's `(vel + 0.5*(dt - PHYSICS_TIMESTEP)*accel) * dt` and velocity by
+    /// `accel * dt`. With `dt == PHYSICS_TIMESTEP` the acceleration correction
+    /// vanishes, so the position step is exactly `vel * dt`.
+    #[test]
+    fn dead_reckon_matches_reference_formula() {
+        let dt = 1.0 / 45.0;
+        let (position, velocity) =
+            dead_reckon([0.0, 0.0, 10.0], [2.0, 0.0, 0.0], [0.0, 0.0, -9.8], dt, 1.0);
+        let [px, _, pz] = position;
+        near(px, 2.0 * dt);
+        // The Z position step is `vel_z * dt` (the accel term is zero at this dt).
+        near(pz, 10.0);
+        let [_, _, vz] = velocity;
+        near(vz, -9.8 * dt);
+    }
+
+    /// A zero phase-out freezes the object: no position or velocity change.
+    #[test]
+    fn dead_reckon_phase_out_zero_freezes() {
+        let (position, velocity) =
+            dead_reckon([5.0, 6.0, 7.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0], 0.1, 0.0);
+        near3(position, [5.0, 6.0, 7.0]);
+        near3(velocity, [1.0, 1.0, 1.0]);
+    }
+
+    /// The phase-out stays at full strength until the circuit looks stalled and
+    /// the silence exceeds the start threshold, then ramps `1.0 → 0.0` between the
+    /// start and max windows, reaching zero past the max.
+    #[test]
+    fn phase_out_ramps_only_when_stalled() {
+        // A healthy circuit never tapers, however long the object is silent.
+        assert!((phase_out_factor(10.0, 0.0, false, false) - 1.0).abs() < 1.0e-9);
+        // Stalled but still inside the start window: full strength.
+        assert!((phase_out_factor(1.0, 0.0, false, true) - 1.0).abs() < 1.0e-9);
+        // Halfway between start (2 s) and max (3 s): half strength.
+        let mid = 0.5 * (PHASE_OUT_START_SECS + MAX_INTERP_SECS);
+        assert!((phase_out_factor(mid, 0.0, false, true) - 0.5).abs() < 1.0e-9);
+        // Past the max window: fully stopped.
+        assert!(phase_out_factor(MAX_INTERP_SECS + 1.0, 0.0, false, true).abs() < 1.0e-9);
+    }
+
+    /// A spin about Z advances the orientation by `omega * dt` radians; a zero
+    /// angular velocity leaves it untouched.
+    #[test]
+    fn angular_step_rotates_about_axis() {
+        let quarter = core::f32::consts::FRAC_PI_2;
+        let rotated = angular_step(Quat::IDENTITY, [0.0, 0.0, quarter], 1.0);
+        let expected = Quat::from_rotation_z(quarter);
+        assert!(rotated.abs_diff_eq(expected, 1.0e-5) || rotated.abs_diff_eq(-expected, 1.0e-5));
+        let still = angular_step(Quat::IDENTITY, [0.0, 0.0, 0.0], 1.0);
+        assert!(still.abs_diff_eq(Quat::IDENTITY, 1.0e-6));
+    }
+
+    /// The height clamps: an object predicted above the region ceiling is capped
+    /// to it, and one predicted below the ground floor is lifted to it.
+    #[test]
+    fn clamp_prediction_bounds_height() {
+        let ceilinged = clamp_prediction(ClampInput {
+            position: [100.0, 100.0, REGION_MAX_HEIGHT_M + 500.0],
+            velocity: [0.0; 3],
+            acceleration: [0.0; 3],
+            floor: None,
+            neighbours: [true; 4],
+            region_cross_expire: None,
+            now: 0.0,
+        });
+        let [_, _, z] = ceilinged.position;
+        near(z, REGION_MAX_HEIGHT_M);
+
+        let floored = clamp_prediction(ClampInput {
+            position: [100.0, 100.0, -50.0],
+            velocity: [0.0; 3],
+            acceleration: [0.0; 3],
+            floor: Some(20.0),
+            neighbours: [true; 4],
+            region_cross_expire: None,
+            now: 0.0,
+        });
+        let [_, _, z] = floored.position;
+        near(z, 20.0);
+    }
+
+    /// Leaving the region into a **void** (no neighbour) clips the position to the
+    /// edge and zeroes velocity + acceleration — the object waits for a server
+    /// update instead of dead-reckoning off into infinity.
+    #[test]
+    fn clamp_prediction_clips_at_empty_edge() {
+        let out = clamp_prediction(ClampInput {
+            position: [-5.0, 100.0, 30.0],
+            velocity: [-3.0, 0.0, 0.0],
+            acceleration: [0.0, 0.0, -9.8],
+            floor: None,
+            neighbours: [false, false, false, false],
+            region_cross_expire: None,
+            now: 0.0,
+        });
+        let [x, _, _] = out.position;
+        near(x, 0.0);
+        near3(out.velocity, [0.0; 3]);
+        near3(out.acceleration, [0.0; 3]);
+    }
+
+    /// Leaving into a **known neighbour** is a border crossing: the position is
+    /// left beyond the edge (it continues into the neighbour), acceleration is
+    /// zeroed, and a crossing deadline is opened; past the deadline motion stops.
+    #[test]
+    fn clamp_prediction_bounds_region_crossing() {
+        let entering = clamp_prediction(ClampInput {
+            position: [REGION_WIDTH_M + 5.0, 100.0, 30.0],
+            velocity: [3.0, 0.0, 0.0],
+            acceleration: [0.0, 0.0, -9.8],
+            floor: None,
+            neighbours: [false, true, false, false],
+            region_cross_expire: None,
+            now: 10.0,
+        });
+        let [x, _, _] = entering.position;
+        near(x, REGION_WIDTH_M + 5.0);
+        near3(entering.acceleration, [0.0; 3]);
+        assert!(entering.region_cross_expire.is_some());
+
+        let expired = clamp_prediction(ClampInput {
+            position: [REGION_WIDTH_M + 5.0, 100.0, 30.0],
+            velocity: [3.0, 0.0, 0.0],
+            acceleration: [0.0, 0.0, 0.0],
+            floor: None,
+            neighbours: [false, true, false, false],
+            region_cross_expire: Some(10.5),
+            now: 12.0,
+        });
+        near3(expired.velocity, [0.0; 3]);
+        assert!(expired.region_cross_expire.is_none());
+    }
+
+    /// The ground floor is the land height minus the object's bounding radius
+    /// (half its scale length), and is absent when no land height is known.
+    #[test]
+    fn ground_floor_subtracts_bounding_radius() {
+        let scale = Vector {
+            x: 2.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        // radius = 0.5 * |(2,0,0)| = 1.0, so floor = 25.0 - 1.0.
+        let floor = ground_floor(Some(25.0), &scale);
+        assert!(
+            floor.is_some_and(|f| (f - 24.0).abs() <= 1.0e-4),
+            "floor should be about 24.0, got {floor:?}"
+        );
+        assert!(
+            ground_floor(None, &scale).is_none(),
+            "no floor without a known land height"
+        );
+    }
+
+    /// Only the neighbour regions the session has actually heard from count as
+    /// known — the analogue of the reference viewer's `clipToVisibleRegions`.
+    #[test]
+    fn neighbours_known_reads_seen_regions() {
+        let width = 256_u32;
+        let home = RegionHandle::from_global(1000 * width, 1000 * width);
+        let east = RegionHandle::from_global(1001 * width, 1000 * width);
+        let mut dilations = RegionTimeDilation::default();
+        dilations.per_region.insert(home, 1.0);
+        dilations.per_region.insert(east, 1.0);
+        // `[-x, +x, -y, +y]`: only the eastern (+x) neighbour is known.
+        assert_eq!(
+            neighbours_known(&dilations, home),
+            [false, true, false, false]
+        );
     }
 }
