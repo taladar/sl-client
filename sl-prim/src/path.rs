@@ -378,7 +378,7 @@ fn radius_for_sides(sides: usize) -> f32 {
 
 /// The quaternion `(x, y, z, w)` for a rotation of `angle` radians about the Z
 /// axis (Firestorm `setQuat(angle, 0, 0, 1)`).
-fn quat_axis_z(angle: f32) -> [f32; 4] {
+pub(crate) fn quat_axis_z(angle: f32) -> [f32; 4] {
     let half = angle * 0.5;
     [0.0, 0.0, half.sin(), half.cos()]
 }
@@ -393,7 +393,7 @@ fn quat_axis_x(angle: f32) -> [f32; 4] {
 /// The reference viewer's quaternion product `a * b` (Firestorm
 /// `LLQuaternion::operator*`), in `(x, y, z, w)` order. In its row-vector
 /// convention, `v * (a * b) == (v * a) * b`, so `a` is applied before `b`.
-fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+pub(crate) fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     let [ax, ay, az, aw] = a;
     let [bx, by, bz, bw] = b;
     [
@@ -407,7 +407,7 @@ fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
 /// Rotate `vector` by quaternion `rot` in the reference viewer's row-vector
 /// convention (Firestorm `LLVector3 operator*(const LLVector3&, const
 /// LLQuaternion&)`).
-fn rotate_vector(rot: [f32; 4], vector: [f32; 3]) -> [f32; 3] {
+pub(crate) fn rotate_vector(rot: [f32; 4], vector: [f32; 3]) -> [f32; 3] {
     let [qx, qy, qz, qw] = rot;
     let [vx, vy, vz] = vector;
     let rw = -qx * vx - qy * vy - qz * vz;
@@ -422,7 +422,7 @@ fn rotate_vector(rot: [f32; 4], vector: [f32; 3]) -> [f32; 3] {
 }
 
 /// The linear interpolation `a + (b - a) * t`.
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 

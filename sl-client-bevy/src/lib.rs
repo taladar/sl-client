@@ -179,8 +179,8 @@ pub use sl_material::{
 // dequantized float shape is aliased `PrimShapeFloat` so it does not collide
 // with `sl_proto`'s quantized rez-params `PrimShape`.
 pub use sl_prim::{
-    HoleType, PathCurve, PrimFace, PrimFaceId, PrimLod, PrimMesh, PrimShape as PrimShapeFloat,
-    ProfileCurve, tessellate,
+    FlexiAttributes, FlexiChain, HoleType, PathCurve, PrimFace, PrimFaceId, PrimLod, PrimMesh,
+    PrimShape as PrimShapeFloat, ProfileCurve, tessellate, tessellate_with_path,
 };
 
 // The pure sculpt-texture tessellation geometry (the sculpt counterpart of

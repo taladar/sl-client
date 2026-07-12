@@ -84,8 +84,26 @@ const NORMAL_EPSILON: f32 = 1.0e-12;
 pub fn tessellate(shape: &PrimShape, lod: PrimLod) -> PrimMesh {
     let split = split_for(shape, lod);
     let path = Path::generate(shape, lod, split);
+    tessellate_with_path(shape, lod, &path)
+}
+
+/// Tessellate `shape` into a [`PrimMesh`] sweeping its profile along a
+/// **caller-supplied** [`Path`], instead of the one [`tessellate`] generates from
+/// the shape.
+///
+/// This is the join point the flexible-prim ([`crate::flexi`]) simulation drives:
+/// its chain solver deforms the extrusion path each frame, and this re-sweeps the
+/// prim's profile along that deformed path — the reference viewer's
+/// `LLVolumeImplFlexible::doFlexibleUpdate` overwriting `LLPath::mPath` before the
+/// volume regenerates its faces. The profile ring (and its per-edge split) is
+/// still derived from `shape` at `lod`; only the path is substituted, so the face
+/// count, order, and [`PrimFaceId`] slots match [`tessellate`] for the same shape
+/// and a path of the same length / open-ness.
+#[must_use]
+pub fn tessellate_with_path(shape: &PrimShape, lod: PrimLod, path: &Path) -> PrimMesh {
+    let split = split_for(shape, lod);
     let profile = Profile::generate(shape, lod, path.is_open(), split);
-    let grid = SweptGrid::new(&path, &profile);
+    let grid = SweptGrid::new(path, &profile);
 
     let mut mesh = PrimMesh::new();
     for (index, face) in profile.faces.iter().enumerate() {
@@ -99,7 +117,7 @@ pub fn tessellate(shape: &PrimShape, lod: PrimLod) -> PrimMesh {
                 build_cap(&grid, &profile, face, face_id)
             }
         } else {
-            build_side(&grid, &profile, &path, shape, face, face_id)
+            build_side(&grid, &profile, path, shape, face, face_id)
         };
         mesh.faces.push(prim_face);
     }

@@ -34,15 +34,45 @@
 //! transform the way the reference viewer's `LLVolumeImplFlexible` anchors its
 //! chain at the prim's root.
 //!
-//! [`apply_object`]: crate::objects
+//! **Simulate (P32.2).** [`simulate_flexi`] runs the CPU chain solver each frame:
+//! for every flexi prim it reads the prim's live world pose from its
+//! `GlobalTransform`, steps the [`FlexiChain`] (`sl_prim`'s faithful port of
+//! Firestorm's `LLVolumeImplFlexible::doFlexibleUpdate`), reads the deformed
+//! extrusion path back out, re-sweeps the prim's profile along it
+//! ([`tessellate_with_path`]), and overwrites each face mesh's positions / normals
+//! in place. The chain solver lives in `sl_prim` (pure, unit-tested); this module
+//! owns the ECS glue — the persistent [`FlexiSimState`], the per-frame step, and
+//! the mesh rewrite.
 //!
-//! Reference (read-only): Firestorm `LLVOVolume::isFlexible` / `setIsFlexible`
-//! (`indra/newview/llvovolume.cpp`), `LLVolumeImplFlexible`
-//! (`indra/newview/llflexibleobject.cpp`), and `LLFlexibleObjectData`
-//! (`indra/llprimitive/llprimitive.{h,cpp}`).
+//! The whole deformation is client-side spring / gravity / tension physics, not
+//! rigid-body dynamics, so — unlike the P31 physical prims — it is **not** built on
+//! `avian3d`: the reference is a bespoke chain solver (a distance-constrained,
+//! angle-clamped node chain) that avian's rigid bodies do not model, so a faithful
+//! port of that solver is the natural fit the roadmap's "where practical"
+//! anticipates.
+//!
+//! Two documented simplifications ride on `sl_prim`'s solver (no wind field, no
+//! screen-area LOD throttling) plus one here: the face **UVs** are set once at
+//! build and not re-projected as the prim bends, so a planar-texgen face's
+//! projection is frozen at the rest pose (ordinary per-face texgen UVs are
+//! parametric and stay correct under any bend).
+//!
+//! [`apply_object`]: crate::objects
+//! [`FlexiChain`]: sl_client_bevy::FlexiChain
+//! [`tessellate_with_path`]: sl_client_bevy::tessellate_with_path
 
+use crate::coords::bevy_to_sl_vec;
 use bevy::prelude::*;
-use sl_client_bevy::{FlexibleData, Object};
+use sl_client_bevy::{
+    FlexiAttributes, FlexiChain, FlexibleData, Object, PrimLod, PrimShapeFloat,
+    tessellate_with_path,
+};
+
+/// The level of detail the flexi profile ring is tessellated at (P32.2). The
+/// profile point count must stay constant between the initial build and the
+/// per-frame deform (the mesh is rewritten in place), so it is fixed rather than
+/// pixel-area managed; flexi prims are thin and few, so a smooth profile is cheap.
+pub(crate) const FLEXI_LOD: PrimLod = PrimLod::High;
 
 /// A component marking an object entity as a **flexible ("flexi") prim**, carrying
 /// the decoded `LLFlexibleObjectData` parameters in Second Life semantics — ready
@@ -57,6 +87,11 @@ pub(crate) struct ObjectFlexi {
     /// path tension (stiffness), air friction (damping), gravity on the tip, wind
     /// sensitivity, and the constant user force pushing the path.
     pub(crate) data: FlexibleData,
+    /// The prim's Second Life metre scale, refreshed every update so a **resized**
+    /// flexi prim's chain length and profile size stay correct (P32.2). The chain
+    /// bakes this into its metre geometry, so — unlike a rigid prim — the scale is
+    /// carried here rather than on an (identity) geometry holder.
+    pub(crate) scale: [f32; 3],
 }
 
 /// Lift an object's flexible-object block onto an [`ObjectFlexi`], or `None` when
@@ -67,11 +102,10 @@ pub(crate) struct ObjectFlexi {
 /// (`getFlexibleObjectData()`), so this is a straight `Option` lift with no
 /// sentinel to reject (unlike the particle system's zero-CRC "null" form).
 pub(crate) fn flexi_from_object(object: &Object) -> Option<ObjectFlexi> {
-    object
-        .extra
-        .flexible
-        .clone()
-        .map(|data| ObjectFlexi { data })
+    object.extra.flexible.clone().map(|data| ObjectFlexi {
+        data,
+        scale: [object.scale.x, object.scale.y, object.scale.z],
+    })
 }
 
 /// Reconcile an object entity's [`ObjectFlexi`] component (P32.1) with its current
@@ -100,6 +134,128 @@ pub(crate) fn apply_flexi(entity: Entity, flexi: Option<ObjectFlexi>, commands: 
         }
         None => {
             commands.entity(entity).remove::<ObjectFlexi>();
+        }
+    }
+}
+
+/// The persistent per-prim state driving the flexi chain simulation (P32.2),
+/// attached to a flexi prim's object entity alongside its [`ObjectFlexi`] block.
+///
+/// Holds the [`FlexiChain`] (the solver's node state, carried across frames so the
+/// chain has inertia), the prim's dequantized shape (to re-sweep the profile along
+/// the deformed path), the geometry-holder entity (read each frame for the prim's
+/// live metre scale, so a resized flexi prim stays correct), the softness the
+/// chain was built at (to skip a frame if a rebuild for a changed softness is
+/// pending), and the prim's face entities (whose meshes are rewritten in place).
+///
+/// Created / refreshed by [`apply_object`](crate::objects) on the spawn and shape-
+/// rebuild paths, and removed when a prim is toggled rigid. [`simulate_flexi`]
+/// advances it every frame.
+#[derive(Component)]
+pub(crate) struct FlexiSimState {
+    /// The chain solver's persistent node state.
+    pub(crate) chain: FlexiChain,
+    /// The prim's dequantized shape, re-swept along the deformed path each frame.
+    pub(crate) shape: PrimShapeFloat,
+    /// The softness the chain was built at; a live change needs a fresh chain (the
+    /// node count changes), so a mismatch skips this frame until the shape rebuild
+    /// re-creates the state.
+    pub(crate) softness: u8,
+    /// The prim's face entities (one per non-empty tessellated face, in order),
+    /// whose position / normal attributes are overwritten each frame.
+    pub(crate) face_entities: Vec<Entity>,
+}
+
+/// Map a decoded [`FlexibleData`] block onto the pure solver's [`FlexiAttributes`]
+/// (the same fields, with the user force flattened to a plain array).
+pub(crate) const fn flexi_attributes(data: &FlexibleData) -> FlexiAttributes {
+    FlexiAttributes {
+        softness: data.softness,
+        tension: data.tension,
+        air_friction: data.air_friction,
+        gravity: data.gravity,
+        wind_sensitivity: data.wind_sensitivity,
+        user_force: [data.user_force.x, data.user_force.y, data.user_force.z],
+    }
+}
+
+/// The prim's world pose in Second Life region-local space (Z-up metres), read
+/// from its Bevy `GlobalTransform` — the anchor pose the chain solver needs.
+///
+/// Reads through the hierarchy uniformly (root prim, linkset child, or worn
+/// attachment) since the object entities carry no scale, so their global transform
+/// is a rigid rotate + translate. Inverting the single Second Life → Bevy basis
+/// change (a `-90°` turn about X, [`sl_to_bevy_rotation`](crate::coords)) recovers
+/// the Second Life rotation; a single quaternion's `(x, y, z, w)` components denote
+/// the same rotation in Bevy's `glam` (column-vector) convention and `sl_prim`'s
+/// row-vector one, so they carry across verbatim (only *composition* order differs,
+/// which the solver keeps internally consistent). The translation inverts the
+/// position basis change directly.
+fn sl_world_pose(global: &GlobalTransform) -> ([f32; 3], [f32; 4]) {
+    let (_scale, rotation, translation) = global.to_scale_rotation_translation();
+    let basis_inverse = Quat::from_rotation_x(core::f32::consts::FRAC_PI_2);
+    let sl_rotation = basis_inverse.mul_quat(rotation);
+    let sl_position = bevy_to_sl_vec(translation);
+    (
+        [sl_position.x, sl_position.y, sl_position.z],
+        [sl_rotation.x, sl_rotation.y, sl_rotation.z, sl_rotation.w],
+    )
+}
+
+/// Advance every flexi prim's chain one frame and re-tessellate its geometry
+/// (P32.2) — the flexi counterpart of [`drive_particles`](crate::particles).
+///
+/// For each prim carrying a [`FlexiSimState`]: read its live world pose (anchor)
+/// and metre scale, step the chain by the frame's `dt`, read the deformed path out,
+/// re-sweep the profile along it, and overwrite each face mesh's positions /
+/// normals in place (the face count and vertex layout are stable, so the meshes are
+/// mutated rather than respawned). A prim whose softness changed since the chain was
+/// built is skipped for the frame — the shape-fingerprint rebuild (which re-creates
+/// the state at the new node count) has already run this frame in `update_objects`.
+pub(crate) fn simulate_flexi(
+    time: Res<Time>,
+    mut sims: Query<(&ObjectFlexi, &mut FlexiSimState, &GlobalTransform)>,
+    face_meshes: Query<&Mesh3d>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let dt = time.delta_secs();
+    if dt <= 0.0 {
+        return;
+    }
+    for (flexi, mut sim, global) in &mut sims {
+        // A pending softness change: the chain has the old node count until the
+        // shape rebuild re-creates this state, so leave the geometry as-is.
+        if flexi.data.softness != sim.softness {
+            continue;
+        }
+        let attributes = flexi_attributes(&flexi.data);
+        // The prim's live metre scale (refreshed on the component each update), so a
+        // resize is reflected in the chain length and the baked metre geometry.
+        let scale = flexi.scale;
+        let (base_position, base_rotation) = sl_world_pose(global);
+
+        sim.chain
+            .step(&attributes, scale, base_position, base_rotation, dt);
+        let path = sim.chain.path(base_position, base_rotation, scale);
+        let prim = tessellate_with_path(&sim.shape, FLEXI_LOD, &path);
+
+        // Rewrite each face mesh in place. The non-empty faces are produced in the
+        // same order the initial build spawned `face_entities`, so they zip up.
+        let mut faces = prim.faces.iter().filter(|face| !face.is_empty());
+        for &face_entity in &sim.face_entities {
+            let Some(face) = faces.next() else {
+                break;
+            };
+            let Ok(Mesh3d(handle)) = face_meshes.get(face_entity) else {
+                continue;
+            };
+            let Some(mut mesh) = meshes.get_mut(handle) else {
+                continue;
+            };
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, face.positions.clone());
+            if !face.normals.is_empty() {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, face.normals.clone());
+            }
         }
     }
 }
@@ -203,12 +359,19 @@ mod tests {
         assert_eq!(flexi_from_object(&bare_object()), None);
     }
 
-    /// A prim carrying a flexible-object block lifts into a component holding it.
+    /// A prim carrying a flexible-object block lifts into a component holding it
+    /// and the prim's scale (for the P32.2 metre-baked chain geometry).
     #[test]
     fn flexi_block_becomes_a_component() {
         let mut object = bare_object();
         let data = flexi_data();
         object.extra.flexible = Some(data.clone());
-        assert_eq!(flexi_from_object(&object), Some(ObjectFlexi { data }));
+        assert_eq!(
+            flexi_from_object(&object),
+            Some(ObjectFlexi {
+                data,
+                scale: [1.0, 1.0, 1.0],
+            })
+        );
     }
 }

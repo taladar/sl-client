@@ -43,14 +43,15 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, DecodedMesh, DecodedTexture, GRASS_MAX_BLADES, JointOverrides, MeshKey, MeshSkin,
-    Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh, PrimShapeFloat, PrimShapeParams, Priority,
-    ScopedObjectId, SculptOrMeshKey, SlEvent, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
-    TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
-    decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, texture_face_uv_transform,
-    to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
-    tree_billboard_geometry, tree_geometry, tree_species,
+    AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
+    JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
+    PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey, SlEvent,
+    SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod,
+    Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode,
+    planar_texgen_uv, rigged_inverse_bindposes, tessellate, tessellate_sculpt,
+    tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh,
+    to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry,
+    tree_geometry, tree_species,
 };
 
 use crate::animesh::ControlAvatarState;
@@ -58,7 +59,7 @@ use crate::avatars::{
     AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
-use crate::flexi::{apply_flexi, flexi_from_object};
+use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
@@ -110,6 +111,13 @@ struct ShapeFingerprint {
     /// scale baked in (P26.3) — and never a prim / mesh / sculpt / tree (whose
     /// scale rides the geometry holder, so a resize needs no rebuild).
     grass_spread: Option<(i32, i32)>,
+    /// For a **flexi** prim (P32.2): the flexible block's softness (`Some(0..3)`),
+    /// else `None`. A flexi prim's geometry is built at a section count of
+    /// `1 << softness`, so toggling flexi on / off or changing the softness must
+    /// rebuild the faces (and re-seed the chain state); the other flexi params
+    /// (tension / gravity / …) drive the sim live and need no rebuild, so they are
+    /// deliberately excluded.
+    flexi_softness: Option<u8>,
 }
 
 impl ShapeFingerprint {
@@ -135,6 +143,7 @@ impl ShapeFingerprint {
                     (object.scale.y * 1000.0).round() as i32,
                 )
             }),
+            flexi_softness: object.extra.flexible.as_ref().map(|flexi| flexi.softness),
         }
     }
 }
@@ -568,6 +577,12 @@ const fn geometry_transform(object: &Object) -> Transform {
 /// - a small `-0.1 m` Z nudge that plants the trunk base slightly underground
 ///   (the reference's `pos.z - 0.1` translation).
 fn holder_transform(object: &Object, category: ObjectCategory) -> Transform {
+    // A flexi prim's geometry is baked in absolute metres by the chain simulation
+    // (P32.2, like grass), so — unlike a rigid prim — its holder applies no scale;
+    // a non-uniform scale here would shear the bent cross-section.
+    if object.extra.flexible.is_some() {
+        return Transform::IDENTITY;
+    }
     match category {
         ObjectCategory::Tree => {
             let scale_length = Vec3::new(object.scale.x, object.scale.y, object.scale.z).length()
@@ -997,6 +1012,19 @@ fn apply_texture_animation(geometry: Entity, object: &Object, commands: &mut Com
     }
 }
 
+/// The result of [`build_object_geometry`]: the spawned face entities plus the
+/// category-specific follow-up state — a deferred asset build ([`PendingGeometry`],
+/// a mesh / sculpt), the plain-prim LOD re-tessellation inputs ([`PendingPrim`]),
+/// the tree regeneration inputs ([`PendingTree`]), and a flexi prim's seeded
+/// [`FlexiChain`]; at most one of the last three is ever `Some`.
+type ObjectGeometryBuild = (
+    Vec<Entity>,
+    Option<PendingGeometry>,
+    Option<PendingPrim>,
+    Option<PendingTree>,
+    Option<FlexiChain>,
+);
+
 /// Build an object's renderable geometry for its category, returning the spawned
 /// child entities and — for a mesh or sculpt whose asset has not decoded yet — the
 /// pending build to finish once the asset arrives.
@@ -1012,9 +1040,11 @@ fn apply_texture_animation(geometry: Entity, object: &Object, commands: &mut Com
 /// (P26.2) and returns a [`PendingTree`] so [`apply_tree_lod`] can regenerate it
 /// at a different [`TreeTier`]. Every other category renders nothing here.
 ///
-/// The last two returns are the plain-prim re-tessellation inputs
-/// ([`PendingPrim`], P21.3) and the tree regeneration inputs ([`PendingTree`],
-/// P26.2); at most one is ever `Some`.
+/// The last three returns are the plain-prim re-tessellation inputs
+/// ([`PendingPrim`], P21.3), the tree regeneration inputs ([`PendingTree`],
+/// P26.2), and a **flexi** prim's seeded [`FlexiChain`] (P32.2, in place of
+/// `PendingPrim` — a flexi prim is chain-driven, not pixel-area LOD managed); at
+/// most one of the three is ever `Some`.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
@@ -1029,16 +1059,28 @@ fn build_object_geometry(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
-) -> (
-    Vec<Entity>,
-    Option<PendingGeometry>,
-    Option<PendingPrim>,
-    Option<PendingTree>,
-) {
+) -> ObjectGeometryBuild {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
     let priority = worn_base_priority(object);
     match category {
+        // A flexi prim (P32.2) builds its geometry from the chain's rest path (at
+        // the softness's section count) and is driven by [`simulate_flexi`], so it
+        // is NOT on the pixel-area LOD re-tessellation path (no `PendingPrim`); the
+        // returned chain seeds its [`FlexiSimState`].
+        ObjectCategory::Prim if object.extra.flexible.is_some() => {
+            let (faces, chain) = build_flexi_faces(
+                object,
+                entity,
+                commands,
+                meshes,
+                materials,
+                manager,
+                prim_textures,
+                priority,
+            );
+            (faces, None, None, None, Some(chain))
+        }
         ObjectCategory::Prim => (
             build_prim_faces(
                 object,
@@ -1062,10 +1104,11 @@ fn build_object_geometry(
                 priority,
             }),
             None,
+            None,
         ),
         ObjectCategory::Mesh => {
             let Some(key) = mesh_key(object) else {
-                return (Vec::new(), None, None, None);
+                return (Vec::new(), None, None, None, None);
             };
             mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -1088,6 +1131,7 @@ fn build_object_geometry(
                     None,
                     None,
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -1099,12 +1143,13 @@ fn build_object_geometry(
                     })),
                     None,
                     None,
+                    None,
                 ),
             }
         }
         ObjectCategory::Sculpt => {
             let Some((map, sculpt_type)) = sculpt_key(object) else {
-                return (Vec::new(), None, None, None);
+                return (Vec::new(), None, None, None, None);
             };
             manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -1127,6 +1172,7 @@ fn build_object_geometry(
                     None,
                     None,
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -1137,6 +1183,7 @@ fn build_object_geometry(
                         scale: [object.scale.x, object.scale.y, object.scale.z],
                         priority,
                     })),
+                    None,
                     None,
                     None,
                 ),
@@ -1162,6 +1209,7 @@ fn build_object_geometry(
                 species: object.state,
                 priority,
             }),
+            None,
         ),
         ObjectCategory::Grass => (
             build_grass_faces(
@@ -1182,8 +1230,9 @@ fn build_object_geometry(
             None,
             None,
             None,
+            None,
         ),
-        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None, None),
+        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None, None, None),
     }
 }
 
@@ -1236,6 +1285,121 @@ fn build_prim_faces(
         prim_textures,
         priority,
     )
+}
+
+/// The Second Life default flexible-object parameters (Firestorm's
+/// `FLEXIBLE_OBJECT_DEFAULT_*`), used only as an unreachable fallback when
+/// [`build_flexi_faces`] is somehow called on a prim without a flexible block (the
+/// caller gates on its presence).
+const DEFAULT_FLEXI: FlexiAttributes = FlexiAttributes {
+    softness: 2,
+    tension: 1.0,
+    air_friction: 0.0,
+    gravity: 0.3,
+    wind_sensitivity: 0.0,
+    user_force: [0.0, 0.0, 0.0],
+};
+
+/// Tessellate a **flexi** prim at its chain's rest pose and spawn its face
+/// entities under `parent` (the geometry holder), returning them alongside the
+/// seeded [`FlexiChain`] (P32.2).
+///
+/// A flexi prim's geometry is the prim's profile swept along the deformed chain
+/// path, at a section count of `1 << softness` (fixed, not pixel-area managed). The
+/// chain is initialised from the prim's current pose and the rest path built from
+/// it, so the spawn geometry is a straight rest chain;
+/// [`simulate_flexi`](crate::flexi::simulate_flexi) then
+/// deforms and rewrites these same meshes each frame. Because the meshes are
+/// rewritten in place as the chain bends, each face opts out of frustum culling
+/// (its spawn-time AABB does not cover the bent geometry), the way the particle and
+/// skinned-mesh paths do.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs, like the sibling build fns"
+)]
+fn build_flexi_faces(
+    object: &Object,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+) -> (Vec<Entity>, FlexiChain) {
+    let shape = PrimShapeFloat::from_params(&object.shape);
+    let attributes = object
+        .extra
+        .flexible
+        .as_ref()
+        .map_or(DEFAULT_FLEXI, flexi_attributes);
+    let scale = [object.scale.x, object.scale.y, object.scale.z];
+    // The prim's pose seeds the chain: for a root this is its world pose, for a
+    // child its parent-local pose (the first simulate step re-anchors it from the
+    // live world transform, so a child briefly catches up — see `simulate_flexi`).
+    let base_position = [
+        object.motion.position.x,
+        object.motion.position.y,
+        object.motion.position.z,
+    ];
+    let base_rotation = [
+        object.motion.rotation.x,
+        object.motion.rotation.y,
+        object.motion.rotation.z,
+        object.motion.rotation.s,
+    ];
+    let chain = FlexiChain::new(&shape, &attributes, scale, base_position, base_rotation);
+    let path = chain.path(base_position, base_rotation, scale);
+    let prim = tessellate_with_path(&shape, FLEXI_LOD, &path);
+    let face_entities = spawn_prim_faces(
+        &prim,
+        &object.texture_entry,
+        scale,
+        parent,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+    );
+    for &face in &face_entities {
+        commands.entity(face).insert(NoFrustumCulling);
+    }
+    (face_entities, chain)
+}
+
+/// Seed or clear a flexi prim's [`FlexiSimState`] (P32.2) on the object entity: a
+/// prim that built a chain (`Some`) gets the state so
+/// [`simulate_flexi`](crate::flexi::simulate_flexi) drives it;
+/// one that did not (a rigid prim, or a prim toggled rigid) has any stale state
+/// removed. Mirrors the [`apply_flexi`] block-component reconcile, but for the
+/// solver state that rides the built geometry.
+fn apply_flexi_sim(
+    entity: Entity,
+    chain: Option<FlexiChain>,
+    object: &Object,
+    face_entities: &[Entity],
+    commands: &mut Commands,
+) {
+    match chain {
+        Some(chain) => {
+            let softness = object
+                .extra
+                .flexible
+                .as_ref()
+                .map_or(0, |data| data.softness);
+            commands.entity(entity).insert(FlexiSimState {
+                chain,
+                shape: PrimShapeFloat::from_params(&object.shape),
+                softness,
+                face_entities: face_entities.to_vec(),
+            });
+        }
+        None => {
+            commands.entity(entity).remove::<FlexiSimState>();
+        }
+    }
 }
 
 /// Stitch a sculpted prim's decoded sculpt map into geometry and spawn its face
@@ -1729,16 +1893,27 @@ fn apply_object(
             // fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, pending, prim_rebuild, tree_rebuild) = build_object_geometry(
+            let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain) =
+                build_object_geometry(
+                    object,
+                    category,
+                    existing.geometry,
+                    commands,
+                    meshes,
+                    materials,
+                    manager,
+                    prim_textures,
+                    mesh_manager,
+                );
+            // Seed or clear the flexi chain state (P32.2): a prim that is (still) flexi
+            // gets a fresh chain at the new softness / geometry; one toggled rigid drops
+            // it so [`simulate_flexi`] stops driving stale faces.
+            apply_flexi_sim(
+                existing.entity,
+                flexi_chain,
                 object,
-                category,
-                existing.geometry,
+                &face_entities,
                 commands,
-                meshes,
-                materials,
-                manager,
-                prim_textures,
-                mesh_manager,
             );
             existing.face_entities = face_entities;
             existing.pending = pending;
@@ -1822,7 +1997,7 @@ fn apply_object(
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let (face_entities, pending, prim_rebuild, tree_rebuild) = build_object_geometry(
+    let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain) = build_object_geometry(
         object,
         category,
         geometry,
@@ -1833,6 +2008,9 @@ fn apply_object(
         prim_textures,
         mesh_manager,
     );
+    // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
+    // (P32.2); a rigid prim gets nothing.
+    apply_flexi_sim(entity, flexi_chain, object, &face_entities, commands);
     state.objects.insert(
         scoped,
         TrackedObject {

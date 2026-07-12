@@ -90,6 +90,7 @@ use crate::diagnostics::{
     toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
+use crate::flexi::simulate_flexi;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -714,6 +715,10 @@ fn run_session(
             // rebuild its camera-facing billboard mesh, after the fly-camera so the
             // billboards face the current viewpoint.
             drive_particles.after(fly_camera),
+            // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
+            // and rewrite its deformed geometry in place, after `update_objects` so
+            // this frame's spawns / rebuilds have seeded their chain state.
+            simulate_flexi.after(update_objects),
             // Debug (env `SL_VIEWER_PARTICLE_FOCUS`): aim the camera at the busiest
             // particle cloud so an unattended screenshot frames a real emitter.
             focus_camera_on_particles

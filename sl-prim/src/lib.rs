@@ -23,6 +23,7 @@
 //! Phase 3.1 lands the types (LOD, shape, geometry containers), Phase 3.2 the
 //! [`profile`] ring, Phase 3.3 the [`path`], and Phase 3.4 the [`volume`] sweep.
 
+pub mod flexi;
 pub mod geometry;
 pub mod lod;
 pub mod path;
@@ -30,9 +31,10 @@ pub mod profile;
 pub mod shape;
 pub mod volume;
 
+pub use flexi::{FlexiAttributes, FlexiChain};
 pub use geometry::{PrimFace, PrimFaceId, PrimMesh};
 pub use lod::{MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
 pub use path::{Path, PathPoint};
 pub use profile::{Profile, ProfileFace, ProfileFaceId, ProfilePoint};
 pub use shape::{HoleType, PathCurve, PrimShape, ProfileCurve};
-pub use volume::tessellate;
+pub use volume::{tessellate, tessellate_with_path};
