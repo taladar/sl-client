@@ -58,6 +58,7 @@ use crate::avatars::{
     AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::flexi::{apply_flexi, flexi_from_object};
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
@@ -1678,6 +1679,11 @@ fn apply_object(
     // retuned in-world is reflected — [`apply_particles`] inserts the component
     // when present and removes it when absent (or null).
     let particles = particles_from_object(object);
+    // The object's flexible-object block (P32.1): present only when the prim is a
+    // flexi prim. Refreshed on every update so a prim toggled flexi off / on
+    // in-world is reflected — [`apply_flexi`] inserts the component when present
+    // and removes it when absent.
+    let flexi = flexi_from_object(object);
 
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
@@ -1713,6 +1719,7 @@ fn apply_object(
         apply_texture_animation(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);
         apply_particles(existing.entity, particles, commands);
+        apply_flexi(existing.entity, flexi, commands);
         // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
         // physical (or moved by this terse update) is driven kinematically.
         apply_physics(existing.entity, object, commands);
@@ -1793,6 +1800,9 @@ fn apply_object(
     // A particle-source prim carries its decoded particle system (P30.1); a plain
     // prim gets nothing.
     apply_particles(entity, particles, commands);
+    // A flexi prim carries its decoded flexible-object block (P32.1); a rigid prim
+    // gets nothing.
+    apply_flexi(entity, flexi, commands);
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
     apply_physics(entity, object, commands);

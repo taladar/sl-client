@@ -20,6 +20,7 @@ mod chat;
 mod coords;
 mod diagnostics;
 mod environment;
+mod flexi;
 mod legacy_materials;
 mod lights;
 mod locomotion;
