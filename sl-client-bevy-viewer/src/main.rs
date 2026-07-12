@@ -30,6 +30,7 @@ mod movement;
 mod objects;
 mod particles;
 mod physics;
+mod probes;
 mod procedural;
 mod render_priority;
 mod screenshot;
@@ -111,6 +112,7 @@ use crate::objects::{
 };
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::physics::PhysicsPlugin;
+use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
@@ -463,6 +465,11 @@ fn run_session(
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34
     // (avatar physics).
     .add_plugins(PhysicsPlugin)
+    // The reflection-probe pipeline (P33): captures a scene environment cubemap and
+    // binds it as image-based lighting — a default (global) probe on the main view,
+    // the scene-render half Bevy's env-map filter / consumer expect but never
+    // produce.
+    .add_plugins(ReflectionProbePlugin)
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).

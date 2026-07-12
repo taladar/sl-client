@@ -3117,11 +3117,33 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
 
 ## Phase 33 — Reflection probes
 
-- [ ] **P33.1. Reflection-probe volumes.** Detect reflection-probe volumes
-  (the prim reflection-probe flag / extra params — `LLReflectionMap`) and map
-  them to Bevy light-probe / reflection-probe components, generating an
-  environment cubemap per probe. Complements the Phase 27 PBR materials that
-  sample them. Reference: `LLReflectionMapManager` / `RenderReflectionProbe`.
+- [x] **P33.1. Default (global) reflection probe.** Ingest reflection-probe
+  volumes (the `LLReflectionProbeParams` extra-param — `ExtraParams` `0x90`)
+  onto an `ObjectReflectionProbe` component, and drive the scene-wide
+  **default** probe: the reference viewer's fallback probe used where no local
+  probe applies. Six 90° cameras capture the scene around the viewpoint into a
+  cube `Image` (via six colour targets + a render-world blit, amortized as a
+  brief burst a few times a second), which a Bevy `GeneratedEnvironmentMapLight`
+  filters into the diffuse / specular maps the Phase 27 PBR materials sample.
+  For consistency the sky-set `GlobalAmbientLight` is dropped and the custom
+  terrain / water shaders sample the probe too (terrain: diffuse irradiance as
+  ambient; water: specular reflection). Reference: `LLReflectionMapManager` /
+  `RenderReflectionProbe`. NOTE: reflection / ambient **brightness calibration
+  is deliberately deferred** (see P33.3) — the intensity and residual-ambient
+  are exposed as `SL_VIEWER_PROBE_INTENSITY` / `SL_VIEWER_PROBE_AMBIENT_SCALE`
+  knobs, and `SL_VIEWER_PROBE_TEST_SPHERE=1` spawns a mirror ball to inspect the
+  captured environment.
+- [ ] **P33.2. Per-object local reflection probes.** Place the ingested
+  `ObjectReflectionProbe`s as Bevy `LightProbe` + `EnvironmentMapLight` box /
+  sphere volumes (from the prim scale + the box-volume flag), each with its own
+  captured cubemap, selected by a nearest-N budget the way local lights (P25)
+  are. Reuses the default probe's capture machinery. Deferred out of P33.1 so
+  the global fallback ships first.
+- [ ] **P33.3. Reflection-probe brightness calibration.** Calibrate the probe's
+  reflection / ambient contribution against the viewer's mixed material /
+  exposure model (custom sky / terrain / water vs `StandardMaterial`), ideally
+  once ambient occlusion (a reference `LLReflectionMapManager` companion) is in,
+  so the tuning is done against the full lighting model rather than piecemeal.
 
 ## Phase 34 — Avatar cloth & body physics
 

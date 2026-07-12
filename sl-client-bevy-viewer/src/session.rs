@@ -246,9 +246,26 @@ pub(crate) fn handle_quit_input(
     }
     if keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyQ) {
         info!("quit requested; logging out");
-        commands.write(SlCommand(Command::Logout));
-        session.quit_deadline = Some(time.elapsed_secs() + QUIT_GRACE_SECS);
+        request_logout(&mut session, &mut commands, time.elapsed_secs());
     }
+}
+
+/// Request a clean grid logout and arm the quit deadline (idempotent): queue a
+/// [`Command::Logout`] and record the wall-clock time by which
+/// [`enforce_quit_deadline`] forces the exit if no `LoggedOut` arrives. Shared by
+/// the quit key ([`handle_quit_input`]) and the screenshot harness so both leave the
+/// avatar cleanly logged out — an abrupt process exit strands the grid session and
+/// blocks the next login.
+pub(crate) fn request_logout(
+    session: &mut ViewerSession,
+    commands: &mut MessageWriter<SlCommand>,
+    now: f32,
+) {
+    if session.quit_deadline.is_some() {
+        return;
+    }
+    commands.write(SlCommand(Command::Logout));
+    session.quit_deadline = Some(now + QUIT_GRACE_SECS);
 }
 
 /// Force the app to exit once the post-quit grace period has elapsed, in case a

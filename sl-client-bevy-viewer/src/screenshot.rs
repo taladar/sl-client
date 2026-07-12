@@ -12,6 +12,9 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use sl_client_bevy::SlCommand;
+
+use crate::session::{ViewerSession, request_logout};
 
 /// The screenshot capture schedule, inserted only in screenshot mode.
 #[derive(Resource)]
@@ -62,13 +65,20 @@ impl ScreenshotSchedule {
     }
 }
 
-/// Capture the primary window to `frame_NNN.png` on the schedule, then exit once
-/// the last frame is requested.
+/// Capture the primary window to `frame_NNN.png` on the schedule, then request a
+/// clean grid logout once the last frame is taken.
+///
+/// The logout (rather than an immediate `AppExit`) is what lets the run leave the
+/// avatar cleanly logged out: an abrupt process exit strands the grid session, and
+/// the next login is then rejected until the grid times the stale presence out. The
+/// actual exit is driven by the session systems (on `LoggedOut`, or the quit-deadline
+/// fallback), the same as the `Esc` / `Q` quit key.
 pub(crate) fn capture_screenshots(
     time: Res<Time>,
     mut schedule: ResMut<ScreenshotSchedule>,
     mut commands: Commands,
-    mut exit: MessageWriter<AppExit>,
+    mut session: ResMut<ViewerSession>,
+    mut sl_commands: MessageWriter<SlCommand>,
 ) {
     let now = time.elapsed_secs();
     let start_delay = schedule.start_delay;
@@ -77,8 +87,11 @@ pub(crate) fn capture_screenshots(
         return;
     }
     if schedule.index >= schedule.max_frames {
-        info!("screenshot: captured {} frames; exiting", schedule.index);
-        exit.write(AppExit::Success);
+        info!(
+            "screenshot: captured {} frames; logging out",
+            schedule.index
+        );
+        request_logout(&mut session, &mut sl_commands, now);
         return;
     }
     let path = schedule

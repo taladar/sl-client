@@ -20,7 +20,16 @@
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings as view_bindings,
     view_transformations::position_world_to_clip,
+}
+
+// Rotate a direction by a quaternion — the reflection-probe view rotation applied
+// to an environment-map sample direction (a local copy of the reference
+// `bevy_pbr::environment_map::quat_rotate`, inlined to avoid importing that
+// `#ifdef`-heavy module).
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
 
 // The water inputs for one frame: the region's EEP `LLSettingsWater` values the
@@ -180,7 +189,45 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // fallback `applyWaterFogViewLinear(_, white)`) blended toward the reflected
     // radiance (here the sky reflection tint) by the reflection amount.
     let fb = water.water_fog_color;
-    let radiance = water.reflection_color * radiance_scale;
+    // The reflected environment: sample the reflection-probe specular map in the
+    // mirror direction (P33) so the water reflects the real surroundings rather than
+    // a flat sky tint, falling back to that tint when no probe is bound. Sampled
+    // directly (no `intensity_for_view`), like the terrain ambient, since this
+    // shader's colour is exposed only later by the tonemapper.
+    var reflection = water.reflection_color;
+#ifdef ENVIRONMENT_MAP
+    if (view_bindings::light_probes.view_cubemap_index >= 0) {
+        var refl_dir = reflect(vv, normal);
+        refl_dir = quat_rotate(view_bindings::light_probes.view_rotation, refl_dir);
+        // Cube maps are left-handed, so negate z (matching the reference sampler).
+        refl_dir.z = -refl_dir.z;
+        // A blurrier mip for rougher (windier) water.
+        let level = clamp(water.blur_multiplier, 0.0, 1.0)
+            * f32(view_bindings::light_probes.smallest_specular_mip_level_for_view);
+#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
+        let cube = u32(view_bindings::light_probes.view_cubemap_index);
+        reflection = textureSampleLevel(
+            view_bindings::specular_environment_maps[cube],
+            view_bindings::environment_map_sampler,
+            refl_dir,
+            level,
+        ).rgb;
+#else
+        reflection = textureSampleLevel(
+            view_bindings::specular_environment_map,
+            view_bindings::environment_map_sampler,
+            refl_dir,
+            level,
+        ).rgb;
+#endif
+        // Scale by the probe intensity and view exposure (as the terrain ambient
+        // and the PBR objects do) so one intensity knob drives the whole scene.
+        reflection = reflection
+            * view_bindings::light_probes.intensity_for_view
+            * view_bindings::view.exposure;
+    }
+#endif
+    let radiance = reflection * radiance_scale;
     var color = mix(fb, radiance, reflect_amount);
 
     // --- The `punctual` sun specular (a Blinn-Phong stand-in for the reference's

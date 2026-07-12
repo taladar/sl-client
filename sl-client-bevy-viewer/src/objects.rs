@@ -65,6 +65,7 @@ use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::particles::{apply_particles, particles_from_object};
 use crate::physics::apply_physics;
+use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
@@ -1848,6 +1849,11 @@ fn apply_object(
     // in-world is reflected — [`apply_flexi`] inserts the component when present
     // and removes it when absent.
     let flexi = flexi_from_object(object);
+    // The object's reflection-probe block (P33): present only when the prim is a
+    // PBR reflection probe. Refreshed on every update so a probe toggled off /
+    // resized in-world is reflected — [`apply_reflection_probe`] inserts the
+    // component when present and removes it when absent.
+    let reflection_probe = reflection_probe_from_object(object);
 
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
@@ -1884,6 +1890,7 @@ fn apply_object(
         apply_light(existing.entity, light, commands);
         apply_particles(existing.entity, particles, commands);
         apply_flexi(existing.entity, flexi, commands);
+        apply_reflection_probe(existing.entity, reflection_probe, commands);
         // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
         // physical (or moved by this terse update) is driven kinematically.
         apply_physics(existing.entity, object, commands);
@@ -1978,6 +1985,9 @@ fn apply_object(
     // A flexi prim carries its decoded flexible-object block (P32.1); a rigid prim
     // gets nothing.
     apply_flexi(entity, flexi, commands);
+    // A reflection-probe prim carries its decoded probe block (P33); any other
+    // object gets nothing.
+    apply_reflection_probe(entity, reflection_probe, commands);
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
     apply_physics(entity, object, commands);

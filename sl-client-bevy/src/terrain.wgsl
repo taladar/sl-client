@@ -63,6 +63,14 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
+// Rotate a direction by a quaternion — the reflection-probe view rotation applied
+// to an environment-map sample direction (a local copy of the reference
+// `bevy_pbr::environment_map::quat_rotate`, inlined to avoid importing that
+// `#ifdef`-heavy module).
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Re-normalise the interpolated weights so the blend stays energy-preserving
@@ -108,8 +116,43 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // A flat ambient fill plus the shadowed direct (sun / moon) term.
+    // Ambient fill: the reflection-probe environment map's diffuse irradiance
+    // (P33) in the surface-normal direction when a probe is bound, so the ground's
+    // ambient tracks the captured surroundings (sky above, terrain around) and stays
+    // consistent with the probe-lit PBR objects. A flat grey fill otherwise.
+    var ambient = vec3<f32>(0.35);
+#ifdef ENVIRONMENT_MAP
+    if (view_bindings::light_probes.view_cubemap_index >= 0) {
+        var dir = quat_rotate(view_bindings::light_probes.view_rotation, normal);
+        // Cube maps are left-handed, so negate z (matching the reference sampler).
+        dir.z = -dir.z;
+#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
+        let cube = u32(view_bindings::light_probes.view_cubemap_index);
+        ambient = textureSampleLevel(
+            view_bindings::diffuse_environment_maps[cube],
+            view_bindings::environment_map_sampler,
+            dir,
+            0.0,
+        ).rgb;
+#else
+        ambient = textureSampleLevel(
+            view_bindings::diffuse_environment_map,
+            view_bindings::environment_map_sampler,
+            dir,
+            0.0,
+        ).rgb;
+#endif
+        // Scale by the probe intensity and the view exposure, the same factors the
+        // PBR path applies to objects' image-based lighting, so one intensity knob
+        // drives the whole scene consistently. (This shader is not otherwise
+        // exposed — only the later tonemapper is — so the exposure is applied here.)
+        ambient = ambient
+            * view_bindings::light_probes.intensity_for_view
+            * view_bindings::view.exposure;
+    }
+#endif
+    // Ambient fill plus the shadowed direct (sun / moon) term.
     let diffuse = max(dot(normal, sun_dir), 0.0);
-    let light = 0.35 + 0.65 * diffuse * shadow;
+    let light = ambient + vec3<f32>(0.65 * diffuse * shadow);
     return vec4<f32>(base.rgb * light, 1.0);
 }
