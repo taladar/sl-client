@@ -14,4 +14,5 @@ module, which loads TOML credentials, redacts secrets, and acquires
 wall-clock-aligned MFA (TOTP) tokens by running a configured shell command — a
 small, synchronous slice of I/O the binaries invoke once before login.
 
-See `SL_REPL_ROAD_MAP.md` in the workspace root for the phased plan.
+See the `repl` topic in the workspace `roadmap/` tree for the phased plan
+(`roadmap/context/repl.md` plus the `repl-*` task files).

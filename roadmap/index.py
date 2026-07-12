@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Roadmap index generator and validator.
+
+Walks ``roadmap/<status>/*.md``, parses each task file's YAML-ish front
+matter, and either regenerates ``roadmap/INDEX.md`` (default) or validates
+the tree (``--check``). This is a dev tool; it is deliberately **not** a
+member of the cargo workspace, so it carries none of the workspace lints.
+
+Front matter is a small, fixed subset of YAML (scalars plus inline ``[a, b]``
+lists), parsed by hand so the script has no third-party dependency.
+
+Usage::
+
+    python3 roadmap/index.py            # rewrite roadmap/INDEX.md
+    python3 roadmap/index.py --check    # validate only, exit non-zero on error
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+ROADMAP_DIR = Path(__file__).resolve().parent
+STATUSES = ["ideas", "ready", "in-progress", "bugs", "done", "deferred"]
+# Topic display order for the generated index.
+TOPICS = [
+    "protocol",
+    "viewer",
+    "idiomatic",
+    "chat",
+    "permission",
+    "inventory",
+    "missing",
+    "test",
+    "api",
+    "repl",
+    "aditi",
+]
+
+WIKILINK = re.compile(r"\[\[([a-z0-9][a-z0-9-]*)\]\]")
+
+
+class Task:
+    """One parsed task file."""
+
+    def __init__(self, path: Path, status_dir: str, meta: dict, body: str):
+        self.path = path
+        self.status_dir = status_dir
+        self.meta = meta
+        self.body = body
+
+    @property
+    def id(self) -> str:
+        return self.meta.get("id", "")
+
+    @property
+    def title(self) -> str:
+        return self.meta.get("title", "")
+
+    @property
+    def topic(self) -> str:
+        return self.meta.get("topic", "")
+
+    @property
+    def refs(self) -> list:
+        # Front-matter refs plus inline [[id]] links in the body, de-duplicated
+        # while preserving first-seen order.
+        seen = {}
+        for ref in list(self.meta.get("refs", [])) + WIKILINK.findall(self.body):
+            seen.setdefault(ref, None)
+        return list(seen)
+
+
+def parse_scalar(value: str):
+    """Parse a front-matter value: an inline list ``[a, b]`` or a scalar."""
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [item.strip() for item in inner.split(",") if item.strip()]
+    return value
+
+
+def parse_front_matter(text: str):
+    """Split ``text`` into (meta dict, body). Returns (None, text) if no
+    front matter is present."""
+    if not text.startswith("---\n"):
+        return None, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return None, text
+    block = text[4:end]
+    body = text[end + 5 :]
+    meta = {}
+    for line in block.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        meta[key.strip()] = parse_scalar(value)
+    return meta, body
+
+
+def load_tasks():
+    """Load every task file under the status directories."""
+    tasks = []
+    for status in STATUSES:
+        status_path = ROADMAP_DIR / status
+        if not status_path.is_dir():
+            continue
+        for path in sorted(status_path.glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            meta, body = parse_front_matter(text)
+            if meta is None:
+                print(f"warning: {path} has no front matter", file=sys.stderr)
+                meta = {}
+            tasks.append(Task(path, status, meta, body))
+    return tasks
+
+
+def validate(tasks):
+    """Return (errors, ref_warnings).
+
+    ``errors`` are always fatal (missing/duplicate id, status/directory
+    mismatch, unknown topic). ``ref_warnings`` are dangling ``[[ref]]`` links,
+    which are expected mid-migration (a ref may point at a topic not yet
+    migrated) and only become fatal under ``--check``."""
+    errors = []
+    ref_warnings = []
+    ids = {}
+    for task in tasks:
+        if not task.id:
+            errors.append(f"{task.path}: missing 'id'")
+            continue
+        if task.id in ids:
+            errors.append(
+                f"duplicate id '{task.id}': {task.path} and {ids[task.id].path}"
+            )
+        ids[task.id] = task
+    for task in tasks:
+        declared = task.meta.get("status", "")
+        if declared and declared != task.status_dir:
+            errors.append(
+                f"{task.path}: status '{declared}' != directory '{task.status_dir}'"
+            )
+        if task.topic and task.topic not in TOPICS:
+            errors.append(f"{task.path}: unknown topic '{task.topic}'")
+    for task in tasks:
+        for ref in task.refs:
+            if ref not in ids:
+                ref_warnings.append(f"{task.path}: dangling ref '[[{ref}]]'")
+    return errors, ref_warnings
+
+
+def render_index(tasks) -> str:
+    """Build the INDEX.md contents grouped by status, then topic."""
+    lines = [
+        "<!-- GENERATED by roadmap/index.py — do not edit by hand. -->",
+        "<!-- Regenerate: python3 roadmap/index.py && rumdl fmt roadmap/INDEX.md -->",
+        "",
+        "# Roadmap index",
+        "",
+        "Every task is one file under a status directory; a task's status is the",
+        "directory it lives in. Move a file between directories to change its",
+        "status. Regenerate this file with `python3 roadmap/index.py`.",
+        "",
+    ]
+    total = len(tasks)
+    counts = {status: 0 for status in STATUSES}
+    for task in tasks:
+        counts[task.status_dir] += 1
+    lines.append("## Counts")
+    lines.append("")
+    lines.append("| Status | Tasks |")
+    lines.append("| --- | --- |")
+    for status in STATUSES:
+        lines.append(f"| {status} | {counts[status]} |")
+    lines.append(f"| **total** | **{total}** |")
+    lines.append("")
+
+    by_status = {status: [] for status in STATUSES}
+    for task in tasks:
+        by_status[task.status_dir].append(task)
+    for status in STATUSES:
+        group = by_status[status]
+        if not group:
+            continue
+        lines.append(f"## {status} ({len(group)})")
+        lines.append("")
+        by_topic = {}
+        for task in group:
+            by_topic.setdefault(task.topic or "misc", []).append(task)
+        ordered = [t for t in TOPICS if t in by_topic]
+        ordered += [t for t in sorted(by_topic) if t not in TOPICS]
+        for topic in ordered:
+            lines.append(f"### {topic}")
+            lines.append("")
+            for task in sorted(by_topic[topic], key=lambda t: t.id):
+                rel = task.path.relative_to(ROADMAP_DIR).as_posix()
+                title = task.title or task.id
+                lines.append(f"- [`{task.id}`]({rel}) — {title}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def main() -> int:
+    check = "--check" in sys.argv[1:]
+    tasks = load_tasks()
+    errors, ref_warnings = validate(tasks)
+    for warning in ref_warnings:
+        label = "error" if check else "warning"
+        print(f"{label}: {warning}", file=sys.stderr)
+    if check:
+        errors = errors + ref_warnings
+    if errors:
+        for error in errors:
+            if error not in ref_warnings:
+                print(f"error: {error}", file=sys.stderr)
+        print(f"\n{len(errors)} error(s)", file=sys.stderr)
+        return 1
+    if check:
+        print(f"ok: {len(tasks)} task(s), no errors")
+        return 0
+    (ROADMAP_DIR / "INDEX.md").write_text(render_index(tasks), encoding="utf-8")
+    print(f"wrote INDEX.md ({len(tasks)} task(s))")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

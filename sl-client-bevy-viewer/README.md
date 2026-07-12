@@ -14,8 +14,9 @@ event stream. Geometry arrives in Second Life's right-handed **Z-up** space; a
 single `sl_to_bevy` conversion is applied at the entity `Transform` / camera
 boundary to Bevy's **Y-up**.
 
-See `VIEWER_ROADMAP.md` in the repository root for the staged plan. This is a
-Phase 0 scaffold: the windowed app lands in later phases.
+See the `viewer` topic in the workspace `roadmap/` tree for the staged plan
+(`roadmap/context/viewer.md` plus the `viewer-*` task files). This is a Phase 0
+scaffold: the windowed app lands in later phases.
 
 ## Non-goals
 

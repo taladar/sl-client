@@ -8,9 +8,11 @@ Where to go for the authoritative details this book summarizes.
   list of every LLUDP message, its frequency, trust, encoding, blocks, and
   fields. When in doubt about a UDP message's exact shape, this file is the
   source of truth. See [Messages & the Template](../comms/messages.md).
-- **`ROADMAP.md`** (repository root) — a detailed, per-feature gap analysis and
-  fidelity audit of the protocol coverage. Use it as the feature-coverage matrix
-  that complements this book's conceptual overview.
+- **`roadmap/`** (repository root) — the planning tree: one small markdown file
+  per task, sorted by status, with a generated `roadmap/INDEX.md` overview. The
+  per-feature gap analysis and fidelity audit lives under the `protocol` topic
+  (`roadmap/context/protocol.md` plus the `protocol-*` task files); use it as
+  the feature-coverage matrix that complements this book's conceptual overview.
 - **Crate `lib.rs` docs and per-crate `README.md`** — API-level documentation,
   generated with `cargo doc`. This book is the *conceptual* layer above them.
 - **Examples** under `sl-client-tokio/examples/` — runnable end-to-end uses of

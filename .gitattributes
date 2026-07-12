@@ -1,0 +1,4 @@
+# Roadmap task files carry YAML front matter but are markdown, not standalone
+# YAML documents; yamllint parses the whole file as YAML and errors on the prose
+# body. Skip the yaml check for them (rumdl still lints the markdown).
+roadmap/*/*.md skipchecks=yaml:::yamllint;;;markdown[[space]]front[[space]]matter[[space]]not[[space]]standalone[[space]]YAML
