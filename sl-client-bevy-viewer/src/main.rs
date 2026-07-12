@@ -426,6 +426,9 @@ fn run_session(
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "sl-client-bevy-viewer".to_owned(),
+                    // Wayland app-id (also X11 WM_CLASS) so compositors can
+                    // match window rules / icons to this application.
+                    name: Some("sl-client-bevy-viewer".to_owned()),
                     ..default()
                 }),
                 primary_cursor_options: Some(cursor_options),
