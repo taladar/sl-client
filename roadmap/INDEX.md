@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 38 |
+| ready | 37 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 425 |
+| done | 426 |
 | deferred | 7 |
 | **total** | **476** |
 
-## ready (38)
+## ready (37)
 
 ### viewer
 
@@ -72,8 +72,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   info / find by name
 - [`test-experience-permissions`](ready/test-experience-permissions-request-set-experience-permission.md)
   — request / set experience permission
-- [`test-gestures`](ready/test-gestures-activate-deactivate-gestures.md) —
-  activate / deactivate gestures
 - [`test-group-proposal-vote`](ready/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
   — start a proposal, cast a ballot
 - [`test-kick-user`](ready/test-kick-user-observe-kickuser-handling.md) —
@@ -123,7 +121,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (425)
+## done (426)
 
 ### protocol
 
@@ -745,6 +743,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — offer, accept, confirm both friend lists
 - [`test-friendship-terminate`](done/test-friendship-terminate-terminate-confirm-removal.md)
   — terminate, confirm removal
+- [`test-gestures`](done/test-gestures-activate-deactivate-gestures.md) —
+  activate / deactivate gestures
 - [`test-give-inventory`](done/test-give-inventory-give-an-item-to-another-avatar-peer-accepts.md)
   — give an item to another avatar; peer accepts
 - [`test-grant-user-rights`](done/test-grant-user-rights-grant-see-online-map-modify-rights-confirm.md)

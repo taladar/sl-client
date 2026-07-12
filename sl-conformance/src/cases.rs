@@ -27,6 +27,7 @@ pub mod estate_access;
 pub mod estate_info;
 pub mod friendship_offer_accept;
 pub mod friendship_terminate;
+pub mod gestures;
 pub mod give_inventory;
 pub mod grant_user_rights;
 pub mod group_accounting;

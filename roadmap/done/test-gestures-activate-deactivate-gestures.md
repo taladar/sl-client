@@ -2,7 +2,7 @@
 id: test-gestures
 title: activate / deactivate gestures
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 14 — Appearance, attachments & animations `[both]`
 ---
 
