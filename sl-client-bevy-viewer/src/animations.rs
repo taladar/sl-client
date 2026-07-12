@@ -698,6 +698,7 @@ pub(crate) fn drive_avatar_skeletons(
 /// `GlobalTransform` the driver overwrote, so the driver owns every rigged avatar's
 /// joint globals outright.
 pub(crate) fn pose_avatar_skeletons(
+    time: Res<Time>,
     playback: Res<AnimationPlayback>,
     library: Option<Res<AvatarAssetLibrary>>,
     body: Option<Res<AvatarBody>>,
@@ -708,9 +709,13 @@ pub(crate) fn pose_avatar_skeletons(
     let (Some(library), Some(body)) = (library, body) else {
         return;
     };
-    let empty = AnimationPose::default();
+    let now = time.elapsed_secs();
     for agent in state.rigged_agents() {
-        let pose = playback.poses.get(&agent).unwrap_or(&empty);
+        // Start from the resolved keyframe pose (or an empty rest pose), then fold
+        // in the always-on procedural idle adjusters (P31.8) so every avatar
+        // breathes and sways subtly even when no animation is playing.
+        let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
+        crate::procedural::apply_idle_adjustments(&mut pose, now, |name| body.joint_index(name));
         let Some(root) = state.body_root_of(agent) else {
             continue;
         };
@@ -723,7 +728,7 @@ pub(crate) fn pose_avatar_skeletons(
         let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
         let world = library
             .skeleton()
-            .deformed_world_matrices(deform, &overrides, pose);
+            .deformed_world_matrices(deform, &overrides, &pose);
         // The avatar-root global carries the SL → Bevy axis change and the world
         // placement; each joint's Bevy global is that composed with its Second Life
         // world matrix. Copied out so the mutable joint writes below do not overlap

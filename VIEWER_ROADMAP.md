@@ -2909,7 +2909,7 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   the ↑ / ↓ walk. Only the *base* facing is smoothed — the reference viewer's
   `LLKeyframeStandMotion` lower-body twist to the look direction is still
   P31.8.
-- [ ] **P31.8. Procedural motion adjustments & always-on adjusters.** P31.6
+- [x] **P31.8. Procedural motion adjustments & always-on adjusters.** P31.6
   plays each state's *base* downloadable keyframe (walk / run / stand / turn /
   fall), but not the procedural layer the reference viewer stacks on top —
   which is the whole reason those states are `LLKeyframe*Motion` **subclasses**
@@ -2937,7 +2937,35 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   (`LLPhysicsMotionController` avatar body-jiggle physics is separate — Phase
   34.) Reference: `llkeyframewalkmotion.cpp` / `llkeyframestandmotion.cpp` /
   `llkeyframefallmotion.cpp` and the adjuster motion classes in
-  `indra/newview/`; the `registerMotion` block in `llvoavatar.cpp`.
+  `indra/newview/`; the `registerMotion` block in `llvoavatar.cpp`. **Done — the
+  two always-on idle adjusters that need no external input landed; every other
+  adjuster listed above is deferred to its own item (P31.12–P31.15) because it
+  needs state this pass has no access to.** New `procedural.rs` (viewer-only,
+  like the P31.6 locomotion fallback) ports the input-free always-on pair as
+  pure, unit-tested functions folded into `pose_avatar_skeletons` as a
+  post-keyframe pass over the resolved [`AnimationPose`]: **breathe**
+  (`LLBreatheMotionRot`) — a slow `sin(time)·0.05` pitch of `mChest` about its
+  local Y, an exact port; and **body noise** (`LLBodyNoiseMotion`) — a subtle
+  ≤1° low-frequency sway of `mTorso` about local X/Y at `TORSO_NOISE_SPEED`.
+  Each is composed as a small delta *on top of* whatever the keyframe pose
+  already animates for that joint (`base·delta`), so a playing animation still
+  dominates and the idle motion only shows where the joint is otherwise at rest
+  — the effect the reference gets from these motions' additive / low-priority
+  blend. Applied to every rigged avatar each frame, so an idle avatar breathes
+  and sways instead of standing frozen. Body noise is faithful in *character*
+  but not a bit-for-bit Perlin port: the reference `noise2` tables are
+  `llrand`-seeded every viewer startup, so there is no canonical waveform to
+  match, and a full port would also need a lint-scoped `as` on the one float→
+  lattice-index truncation (Rust std has no `From`/`TryFrom` for float→int); a
+  cast-free incommensurate-sine noise reproduces the slow wander for less code.
+  Not ported (each gates its motion by avatar pixel area — not modelled
+  here, the pose pass already runs only for rigged avatars): head/eye look-at
+  tracking, hand-pose morph, the IK locomotion adjustments, and the reach/aim
+  motions → **P31.12–P31.15**. Library change: `AnimationPose::{rotation,
+  position}` made `pub` in `sl-client-bevy` for the viewer to read-modify-write
+  a joint's resolved rotation. Verified: unit tests (breathe rest/peak, sway
+  amplitude bound, sway moves over time, delta-composes-on-keyframe-base, absent
+  joints skipped); build + clippy clean.
 - [ ] **P31.9. Typing animation & sound.** When an avatar types in nearby
   chat the reference viewer plays `ANIM_AGENT_TYPE` (the hands-on-keyboard
   gesture) plus the typing UI sound, and advertises the state so others see
@@ -2980,6 +3008,43 @@ P31.2 "smooths between updates" work, not a prerequisite already in place.
   fly / hover states). Keep the manual **F** toggle for taking off again.
   Viewer-only (movement / control-flag plumbing already exists end-to-end).
   Reference: `LLAgent::setFlying` / the ground-detect in `llagent.cpp`.
+- [ ] **P31.12. Head & eye look-at tracking (`LLHeadRotMotion` /
+  `LLEyeMotion`).** The always-on adjusters split out of P31.8 that need a world
+  **look-at target**, which the viewer does not yet track. `LLHeadRotMotion`
+  turns the head toward the target and lags the neck (`NECK_LAG`) and torso
+  (`TORSO_LAG`) behind it, constrained to `HEAD_ROTATION_CONSTRAINT`; with no
+  target it faces the root forward (rest), so it is a near no-op until a target
+  exists. `LLEyeMotion` aims the eyes at the target with vergence, layers random
+  saccades / look-away jitter on top (bounded by `EYE_ROT_LIMIT_ANGLE`), and
+  blinks by driving the `Blink_Left` / `Blink_Right` **morph visual-params**
+  (needs runtime per-frame visual-param morphs, which the appearance pipeline
+  bakes once — an extra prerequisite). First provide the look-at target: for the
+  own avatar derive it from the camera / cursor focus; for others from the
+  sim-relayed `LookAt` (the `ViewerEffect` look-at the P11-era data carries).
+  Then port head/neck/torso lag and the eye aim + saccades. Reference:
+  `llheadrotmotion.cpp` (`LLHeadRotMotion` / `LLEyeMotion`).
+- [ ] **P31.13. Hand-pose morph (`LLHandMotion`).** The always-on adjuster split
+  out of P31.8 that morphs the hand between the named hand-pose animations (the
+  `HandPose` a `.anim` header carries, P18.1), cross-fading when the pose
+  changes. Needs the hand-pose animation assets and a morph/blend between two
+  keyframe hand poses. Reference: `LLHandMotion` in `indra/newview/`.
+- [ ] **P31.14. Locomotion IK adjustments.** The locomotion group split out of
+  P31.8 — every piece needs an **inverse-kinematics solver** the project does
+  not have. `LLKeyframeWalkMotion` matches the walk/run playback speed to the
+  ground velocity, and the always-on `LLWalkAdjustMotion` foot-plants with
+  pelvis lag to kill foot-skate; `LLKeyframeStandMotion` twists the lower body /
+  feet to face the look direction with foot IK (a standing avatar's legs follow
+  the camera); `LLKeyframeFallMotion` blends the landing recovery;
+  `LLFlyAdjustMotion` banks the fly. Build a small foot / limb IK pass first,
+  then layer these over the P18 blend. Reference: `llkeyframewalkmotion.cpp` /
+  `llkeyframestandmotion.cpp` / `llkeyframefallmotion.cpp`.
+- [ ] **P31.15. Activity-driven reach / aim (`LLEditingMotion` /
+  `LLTargetingMotion`).** The activity group split out of P31.8, needing
+  selection / target state the viewer does not track. `LLEditingMotion` reaches
+  the hand toward the object the agent has selected / is editing;
+  `LLTargetingMotion` aims the arm at a target (mouselook aim / the point
+  gesture). Both are locally driven and want a limb IK reach (shares the P31.14
+  solver). Reference: the two motion classes in `indra/newview/`.
 
 ## Phase 32 — Flexi prims
 

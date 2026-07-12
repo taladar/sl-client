@@ -218,13 +218,17 @@ impl AnimationPose {
         self.rotations.is_empty() && self.positions.is_empty()
     }
 
-    /// The animated local rotation of joint `index`, if any.
-    fn rotation(&self, index: usize) -> Option<Quat> {
+    /// The animated local rotation of joint `index`, if any. Public so a
+    /// consumer (the viewer's procedural idle adjusters, P31.8) can read the
+    /// resolved keyframe rotation of a joint and compose a small delta onto it.
+    #[must_use]
+    pub fn rotation(&self, index: usize) -> Option<Quat> {
         self.rotations.get(&index).copied()
     }
 
     /// The animated local position of joint `index`, if any.
-    fn position(&self, index: usize) -> Option<Vec3> {
+    #[must_use]
+    pub fn position(&self, index: usize) -> Option<Vec3> {
         self.positions.get(&index).copied()
     }
 }

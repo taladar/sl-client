@@ -29,6 +29,7 @@ mod movement;
 mod objects;
 mod particles;
 mod physics;
+mod procedural;
 mod render_priority;
 mod screenshot;
 mod session;
