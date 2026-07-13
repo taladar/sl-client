@@ -2,7 +2,7 @@
 id: test-dir-places-land-classified
 title: places / land / classified queries
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 16 — Directory & search `[both]`
 ---
 

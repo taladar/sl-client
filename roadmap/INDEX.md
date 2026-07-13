@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 49 |
+| ready | 48 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 436 |
+| done | 437 |
 | deferred | 4 |
 | **total** | **532** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (49)
+## ready (48)
 
 ### viewer
 
@@ -136,8 +136,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-dir-places-land-classified`](ready/test-dir-places-land-classified-places-land-classified-queries.md)
-  — places / land / classified queries
 - [`test-event-info`](ready/test-event-info-event-info-notification-add-remove.md)
   — event info / notification add-remove
 - [`test-experience-admin-contributor`](ready/test-experience-admin-contributor-admin-contributor-owned-region-queries.md)
@@ -217,7 +215,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (436)
+## done (437)
 
 ### protocol
 
@@ -829,6 +827,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)
   — DirFindQuery across types
+- [`test-dir-places-land-classified`](done/test-dir-places-land-classified-places-land-classified-queries.md)
+  — places / land / classified queries
 - [`test-display-names`](done/test-display-names-caps-getdisplaynames.md) — CAPS
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
