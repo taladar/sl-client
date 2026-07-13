@@ -1,0 +1,20 @@
+---
+id: viewer-prim-texture-editing
+title: Prim texture / material editing
+topic: viewer
+status: ideas
+origin: reference-viewer feature-cluster survey (2026-07)
+---
+
+Context: [context/viewer.md](../context/viewer.md).
+
+The texture / material tab: per-face texture, colour, transparency,
+repeats / offset / rotation, bump / shiny / glow / fullbright, and assigning a
+legacy or GLTF / PBR material — with face-select to target a single face.
+
+Reference (Firestorm, read-only): `llpanelface`, `lltoolface`; messages
+`ObjectImage`, `RenderMaterials`.
+
+Builds on: `materials.rs`, `legacy_materials.rs`, `textures.rs`.
+
+Deps: [[viewer-object-selection]], [[viewer-ui-framework]].

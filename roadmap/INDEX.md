@@ -11,13 +11,85 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 0 |
+| ideas | 37 |
 | ready | 36 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 427 |
 | deferred | 7 |
-| **total** | **476** |
+| **total** | **513** |
+
+## ideas (37)
+
+### viewer
+
+- [`viewer-camera-system`](ideas/viewer-camera-system.md) — Camera system
+- [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
+- [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
+  trigger UI
+- [`viewer-i18n-localization`](ideas/viewer-i18n-localization.md) —
+  Internationalisation & translation
+- [`viewer-image-upload`](ideas/viewer-image-upload.md) — Image / texture (and
+  sound / animation) upload
+- [`viewer-input-system`](ideas/viewer-input-system.md) — Input system
+  (rebindable keys + script capture)
+- [`viewer-inventory-ui`](ideas/viewer-inventory-ui.md) — Inventory browser UI
+- [`viewer-lsl-script-editor`](ideas/viewer-lsl-script-editor.md) — LSL script
+  editor
+- [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
+  Media-on-a-prim & embedded web browser
+- [`viewer-mesh-model-upload`](ideas/viewer-mesh-model-upload.md) — Mesh / model
+  importer & upload
+- [`viewer-minimap-worldmap-ui`](ideas/viewer-minimap-worldmap-ui.md) — Minimap
+  / radar & world-map UI
+- [`viewer-money-economy-ui`](ideas/viewer-money-economy-ui.md) — Money /
+  economy / L$ UI
+- [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
+  Notifications, toasts & dialogs
+- [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
+  from inventory
+- [`viewer-object-selection`](ideas/viewer-object-selection.md) — Object
+  selection & edit-floater shell
+- [`viewer-parcel-join-split`](ideas/viewer-parcel-join-split.md) — Parcel join
+  / split
+- [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
+  viewing & editing
+- [`viewer-preferences-ui`](ideas/viewer-preferences-ui.md) — Preferences /
+  settings UI
+- [`viewer-prim-creation`](ideas/viewer-prim-creation.md) — Prim creation
+- [`viewer-prim-inventory-editing`](ideas/viewer-prim-inventory-editing.md) —
+  Prim inventory (contents) editing
+- [`viewer-prim-linking`](ideas/viewer-prim-linking.md) — Prim linking &
+  unlinking
+- [`viewer-prim-parameter-editing`](ideas/viewer-prim-parameter-editing.md) —
+  Prim parameter editing
+- [`viewer-prim-texture-editing`](ideas/viewer-prim-texture-editing.md) — Prim
+  texture / material editing
+- [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
+  option viewing & editing
+- [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand
+- [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
+- [`viewer-snapshot-tools`](ideas/viewer-snapshot-tools.md) — Snapshot / photo
+  tools
+- [`viewer-social-panels`](ideas/viewer-social-panels.md) — People / friends /
+  groups / profiles / IM UI
+- [`viewer-sound-effects`](ideas/viewer-sound-effects.md) — Spatial
+  sound-effects engine
+- [`viewer-space-navigator`](ideas/viewer-space-navigator.md) — 3Dconnexion
+  SpaceNavigator / 6-DOF input
+- [`viewer-streaming-audio`](ideas/viewer-streaming-audio.md) — Parcel
+  streaming-audio / media-audio player
+- [`viewer-teleport-flow`](ideas/viewer-teleport-flow.md) — Teleport flow —
+  offers, acceptance & progress
+- [`viewer-terrain-editing`](ideas/viewer-terrain-editing.md) — Terrain editing
+- [`viewer-transform-gizmos`](ideas/viewer-transform-gizmos.md) — Position /
+  rotation / scale gizmos
+- [`viewer-ui-framework`](ideas/viewer-ui-framework.md) — In-viewer UI /
+  floater-panel-menu framework
+- [`viewer-url-linkification`](ideas/viewer-url-linkification.md) — URLs in chat
+  & other text contexts
+- [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
+  (WebRTC + Vivox)
 
 ## ready (36)
 
