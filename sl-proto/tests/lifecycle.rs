@@ -34,11 +34,11 @@ mod test {
         ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions,
         Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType,
         ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
-        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
-        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
-        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
-        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
+        RegionInfoUpdate, RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion,
+        RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale,
+        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissionStatus,
+        ScriptPermissions, SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
         TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
         TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
         UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
@@ -10043,6 +10043,111 @@ mod test {
         // 32-bit flags, and protocols default to 0.
         assert_eq!(identity.region_flags_extended, 0x40);
         assert_eq!(identity.region_protocols, 0);
+        Ok(())
+    }
+
+    /// Builds an `ObjectUpdate` for the agent's **own** avatar (pcode 47, full id =
+    /// the `success()` fixture's agent id `1`) at `position`, so the session learns
+    /// the own-avatar object and its position for parcel resolution.
+    fn own_avatar_update(local_id: u32, position: Vector) -> AnyMessage {
+        let mut update = object_update(local_id, 1, position);
+        if let AnyMessage::ObjectUpdate(ref mut object) = update
+            && let Some(block) = object.object_data.first_mut()
+        {
+            block.p_code = pcode::AVATAR;
+        }
+        update
+    }
+
+    /// A session past the region handshake, with the given region flags, ready to
+    /// receive the own-avatar object and parcel pushes.
+    fn handshaken_with_region_flags(now: Instant, region_flags: u32) -> Result<Session, TestError> {
+        let mut session = awaiting_handshake(now)?;
+        let handshake = server_message(
+            &region_handshake_msg(13, region_flags, "TestRegion", "", ""),
+            1,
+            true,
+        )?;
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        Ok(session)
+    }
+
+    /// The session resolves the agent's current parcel from the own-avatar position
+    /// and the parcel bitmap, and `can_fly` tracks the parcel's `ALLOW_FLY`.
+    #[test]
+    fn current_parcel_and_can_fly_track_the_agent_parcel() -> Result<(), TestError> {
+        let now = Instant::now();
+        // A region that does not block flying region-wide.
+        let mut session = handshaken_with_region_flags(now, 0)?;
+
+        // Nothing known yet: no parcel resolved, and (permissively) fly-able.
+        assert!(session.current_parcel().is_none());
+        assert!(!session.region_blocks_fly());
+        assert!(session.can_fly());
+
+        // The own avatar arrives at (10, 10); still no covering parcel, so the
+        // resolution stays empty and `can_fly` stays permissive.
+        let avatar = server_message(&own_avatar_update(55, vec3(10.0, 10.0, 25.0)), 2, true)?;
+        session.handle_datagram(sim_addr(), &avatar, now)?;
+        drain_events(&mut session);
+        assert!(session.current_parcel().is_none());
+        assert!(session.can_fly());
+
+        // A fly-allowing parcel (ALLOW_FLY = 1 << 0) covering the whole region.
+        let allow = server_message(
+            &parcel_properties_msg(0, 7, 0x1_0000, 1, 0, 0, vec3(256.0, 256.0, 0.0)),
+            3,
+            true,
+        )?;
+        session.handle_datagram(sim_addr(), &allow, now)?;
+        drain_events(&mut session);
+        let parcel = session
+            .current_parcel()
+            .ok_or("expected the agent's current parcel to resolve")?;
+        assert_eq!(parcel.local_id, RegionLocalParcelId(7));
+        assert!(parcel.allow_fly());
+        assert!(session.can_fly());
+
+        // The same parcel toggles fly off (ALLOW_FLY cleared): `can_fly` follows.
+        let deny = server_message(
+            &parcel_properties_msg(0, 7, 0x1_0000, 0, 0, 0, vec3(256.0, 256.0, 0.0)),
+            4,
+            true,
+        )?;
+        session.handle_datagram(sim_addr(), &deny, now)?;
+        drain_events(&mut session);
+        let parcel = session
+            .current_parcel()
+            .ok_or("expected the current parcel to still resolve")?;
+        assert!(!parcel.allow_fly());
+        assert!(!session.can_fly());
+        Ok(())
+    }
+
+    /// A region-wide fly block overrides a fly-allowing parcel: `can_fly` is false
+    /// even before any parcel is known and stays false once one arrives.
+    #[test]
+    fn region_block_fly_forbids_takeoff_regardless_of_parcel() -> Result<(), TestError> {
+        let now = Instant::now();
+        // REGION_FLAGS_BLOCK_FLY = 1 << 19.
+        let mut session = handshaken_with_region_flags(now, 1 << 19)?;
+        assert!(session.region_blocks_fly());
+        assert!(!session.can_fly());
+
+        // A fly-allowing parcel under the avatar does not lift the region block.
+        let avatar = server_message(&own_avatar_update(55, vec3(10.0, 10.0, 25.0)), 2, true)?;
+        session.handle_datagram(sim_addr(), &avatar, now)?;
+        let allow = server_message(
+            &parcel_properties_msg(0, 7, 0x1_0000, 1, 0, 0, vec3(256.0, 256.0, 0.0)),
+            3,
+            true,
+        )?;
+        session.handle_datagram(sim_addr(), &allow, now)?;
+        drain_events(&mut session);
+        assert!(session.current_parcel().is_some());
+        assert!(!session.can_fly());
         Ok(())
     }
 

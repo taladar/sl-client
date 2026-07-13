@@ -4,8 +4,8 @@
 use crate::bookkeeping_ids::{PingId, XferId};
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, TerrainPatch,
-    Throttle,
+    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, ParcelInfo,
+    TerrainPatch, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -15,6 +15,7 @@ use sl_wire::CircuitCode;
 use sl_wire::ControlFlags;
 use sl_wire::RegionHandle;
 use sl_wire::RegionLocalObjectId;
+use sl_wire::RegionLocalParcelId;
 use sl_wire::SequenceNumber;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::net::SocketAddr;
@@ -1129,6 +1130,22 @@ pub struct Session {
     /// label terrain patches, which the `LayerData` message does not itself tag
     /// with a region handle.
     regions: BTreeMap<CircuitId, RegionHandle>,
+    /// The raw 32-bit `RegionFlags` most recently learned for each circuit
+    /// instance, folded from that region's `RegionHandshake`. Read via
+    /// [`Session::region_blocks_fly`] (the `BLOCK_FLY` bit) — the region half of
+    /// [`Session::can_fly`]. Dropped with the rest of a circuit's state when it
+    /// goes away.
+    region_flags: BTreeMap<CircuitId, u32>,
+    /// The parcels learned for each circuit instance, keyed by region-local id.
+    /// Folded from every `ParcelProperties` (UDP and the CAPS event-queue path):
+    /// the simulator auto-pushes the agent's parcel (`SequenceID == 0`) on region
+    /// entry and every parcel crossing, so passively folding the pushes keeps the
+    /// agent's parcel current. Read via [`Session::current_parcel`] (resolved from
+    /// the own-avatar position and each parcel's membership bitmap) and
+    /// [`Session::can_fly`]. This is an API-convenience read model; the simulator
+    /// stays authoritative. Dropped with the rest of a circuit's state when it
+    /// goes away.
+    parcels: BTreeMap<CircuitId, BTreeMap<RegionLocalParcelId, ParcelInfo>>,
     /// The most recent raw `RegionData.TimeDilation` (a `u16`) seen for each
     /// circuit instance, used to de-duplicate [`Event::TimeDilation`] so it is
     /// emitted only when the region's frame time-dilation actually changes

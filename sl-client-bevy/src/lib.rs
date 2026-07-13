@@ -324,7 +324,8 @@ use crate::voice::{run_voice_cap, run_voice_signaling};
 use crate::world::{SlRegionIndex, maintain_world};
 
 pub use crate::world::{
-    SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlRegion, SlRegionIdentity, SlRegionLimits,
+    SlAgentParcel, SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlRegion, SlRegionIdentity,
+    SlRegionLimits,
 };
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
@@ -380,6 +381,7 @@ impl Plugin for SlClientPlugin {
                 background_inventory_fetch: self.background_inventory_fetch,
             })
             .init_resource::<SlIdentity>()
+            .init_resource::<SlAgentParcel>()
             .init_resource::<SlRegionIndex>()
             .add_systems(Startup, start_login)
             // `maintain_world` reads the events `drive` writes, so chain it after.
@@ -565,6 +567,7 @@ fn drive(
     mut diagnostics: MessageWriter<SlDiagnostic>,
     mut capabilities: MessageWriter<SlCapabilities>,
     mut identity: ResMut<SlIdentity>,
+    mut agent_parcel: ResMut<SlAgentParcel>,
     mut mfa: MessageWriter<SlMfaChallenge>,
     mut rejected: MessageWriter<SlLoginRejected>,
     mut commands: MessageReader<SlCommand>,
@@ -606,6 +609,11 @@ fn drive(
         ),
         SlInner::Done => SlInner::Done,
     };
+    // Mirror the driven session's current parcel / fly permission for ECS systems
+    // (e.g. the viewer's take-off gate) to read as a resource.
+    if let SlInner::Running { session, .. } = &state.inner {
+        agent_parcel.refresh_from(session);
+    }
 }
 
 /// Handles the logging-in phase, transitioning to `Running` once the login

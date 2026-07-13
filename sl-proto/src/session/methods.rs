@@ -72,17 +72,17 @@ use crate::types::{
     NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
     ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo,
-    ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionInfoUpdate, RegionStats,
-    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
-    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
-    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
-    StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, Transmit,
-    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType,
+    ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate,
+    PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
+    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -95,7 +95,7 @@ use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
     MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
-    Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
+    Reader, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
     VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
     parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
     parse_experience_ids, parse_experience_infos, parse_experience_permissions,
@@ -208,6 +208,8 @@ impl Session {
             objects: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
+            region_flags: BTreeMap::new(),
+            parcels: BTreeMap::new(),
             time_dilation: BTreeMap::new(),
             own_avatar: BTreeMap::new(),
             inventory: Inventory::new(),
@@ -328,6 +330,11 @@ impl Session {
         match message {
             "ParcelProperties" => {
                 if let Some(parcel) = parcel_info_from_llsd(body) {
+                    // The event queue rides the root region's circuit, so a CAPS
+                    // parcel push describes the root region.
+                    if let Some(circuit_id) = self.root_circuit_id() {
+                        self.note_parcel(circuit_id, &parcel);
+                    }
                     self.events
                         .push_back(Event::ParcelProperties(Box::new(parcel)));
                 } else {
@@ -1511,11 +1518,12 @@ impl Session {
                     .circuit_id_for(from)
                     .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
                     .unwrap_or(RegionHandle(0));
+                let identity = region_identity(handshake, region_handle)?;
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_region_flags(circuit_id, identity.region_flags);
+                }
                 self.events
-                    .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
-                        handshake,
-                        region_handle,
-                    )?)));
+                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -2120,6 +2128,68 @@ impl Session {
             .map(|&local_id| ScopedObjectId::new(circuit.id, local_id))
     }
 
+    /// Records the raw `RegionFlags` a `RegionHandshake` carried for the region on
+    /// `circuit`, so [`Session::region_blocks_fly`] can read the current region's
+    /// fly setting.
+    fn note_region_flags(&mut self, circuit: CircuitId, flags: u32) {
+        self.region_flags.insert(circuit, flags);
+    }
+
+    /// Folds a `ParcelProperties` into the per-circuit parcel cache for `circuit`,
+    /// keyed by the parcel's region-local id.
+    fn note_parcel(&mut self, circuit: CircuitId, parcel: &ParcelInfo) {
+        self.parcels
+            .entry(circuit)
+            .or_default()
+            .insert(parcel.local_id, parcel.clone());
+    }
+
+    /// Whether the agent's current region blocks flying region-wide (the
+    /// `REGION_FLAGS_BLOCK_FLY` bit of the region's `RegionHandshake` flags — the
+    /// region half of the reference viewer's `LLAgent::canFly`). `false` before
+    /// the root region's handshake has been seen (flags unknown).
+    #[must_use]
+    pub fn region_blocks_fly(&self) -> bool {
+        self.root_circuit_id()
+            .and_then(|circuit| self.region_flags.get(&circuit).copied())
+            .is_some_and(|flags| RegionFlags::from_bits(flags).contains(RegionFlags::BLOCK_FLY))
+    }
+
+    /// The parcel the agent's own avatar currently stands on, resolved from the
+    /// own-avatar object's region-local position and each known parcel's
+    /// membership [`bitmap`](ParcelInfo::bitmap) (one bit per 4×4 m block).
+    /// `None` before the own-avatar object or the covering parcel is known (the
+    /// simulator pushes the agent's parcel on region entry / parcel crossing).
+    #[must_use]
+    pub fn current_parcel(&self) -> Option<&ParcelInfo> {
+        let circuit = self.circuit.as_ref()?;
+        let local_id = self.own_avatar.get(&circuit.id)?;
+        let object = self.objects.get(&circuit.id)?.get(local_id)?;
+        let parcels = self.parcels.get(&circuit.id)?;
+        let position = &object.motion.position;
+        parcels
+            .values()
+            .find(|parcel| parcel.contains_point(position.x, position.y))
+    }
+
+    /// Whether the agent may **start** flying where it currently stands, mirroring
+    /// the reference viewer's `LLAgent::canFly`: `false` if the region blocks fly
+    /// ([`region_blocks_fly`](Self::region_blocks_fly)), otherwise the current
+    /// parcel's `ALLOW_FLY` ([`ParcelInfo::allow_fly`]).
+    ///
+    /// Unlike the reference (which denies when it has no agent parcel), this is
+    /// **permissive** when the parcel is not yet resolved — a take-off should not
+    /// be blocked in the window before the simulator's parcel push arrives. Only
+    /// a positively-known block (region flag set, or a resolved parcel that
+    /// disallows fly) returns `false`.
+    #[must_use]
+    pub fn can_fly(&self) -> bool {
+        if self.region_blocks_fly() {
+            return false;
+        }
+        self.current_parcel().is_none_or(ParcelInfo::allow_fly)
+    }
+
     /// Drops every cached object for the circuit instance `circuit_id` (it has
     /// gone away), emitting an [`Event::ObjectRemoved`] for each so consumers
     /// can prune.
@@ -2128,6 +2198,8 @@ impl Session {
         // this circuit go stale too.
         self.terrain.remove(&circuit_id);
         self.regions.remove(&circuit_id);
+        self.region_flags.remove(&circuit_id);
+        self.parcels.remove(&circuit_id);
         self.time_dilation.remove(&circuit_id);
         self.own_avatar.remove(&circuit_id);
         // Drop any permission grants scoped to this retiring (child/neighbour)
@@ -2168,11 +2240,12 @@ impl Session {
                         .circuit_id_for(from)
                         .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
                         .unwrap_or(RegionHandle(0));
+                    let identity = region_identity(handshake, region_handle)?;
+                    if let Some(circuit_id) = self.circuit_id_for(from) {
+                        self.note_region_flags(circuit_id, identity.region_flags);
+                    }
                     self.events
-                        .push_back(Event::RegionInfoHandshake(Box::new(region_identity(
-                            handshake,
-                            region_handle,
-                        )?)));
+                        .push_back(Event::RegionInfoHandshake(Box::new(identity)));
                     self.complete_arrival(now);
                 }
             }
@@ -2211,8 +2284,12 @@ impl Session {
                     .push_back(Event::EconomyData(Box::new(economy_data(data)?)));
             }
             AnyMessage::ParcelProperties(props) => {
+                let parcel = parcel_info(props)?;
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_parcel(circuit_id, &parcel);
+                }
                 self.events
-                    .push_back(Event::ParcelProperties(Box::new(parcel_info(props)?)));
+                    .push_back(Event::ParcelProperties(Box::new(parcel)));
             }
             AnyMessage::ParcelOverlay(overlay) => {
                 self.events

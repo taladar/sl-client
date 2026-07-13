@@ -17,6 +17,9 @@
 //! - **← / →** — turn the body left / right (client-tracked heading, sent as the
 //!   `AgentUpdate` body rotation the walk direction follows).
 //! - **PageUp / PageDown** — ascend / descend ([`UP_POS`] / [`UP_NEG`], while flying).
+//!   Holding **PageUp** while standing on the ground also *starts* flying (P31.16),
+//!   once held past a short threshold and if the region / parcel permit it — a quick
+//!   tap does not, matching the reference viewer's hold-to-fly.
 //! - **F** — toggle flying ([`ControlFlags::FLY`]). Flight also stops itself on
 //!   landing (P31.11): descending onto the ground with no ascend key held drops
 //!   the fly intent so the avatar stands rather than hovering; **F** takes off again.
@@ -35,7 +38,7 @@
 //! [`UP_NEG`]: ControlFlags::UP_NEG
 
 use bevy::prelude::*;
-use sl_client_bevy::{Command, ControlFlags, Rotation, SlCommand, SlIdentity};
+use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, SlIdentity};
 
 use crate::avatars::AvatarState;
 use crate::physics::AvatarMotion;
@@ -56,6 +59,12 @@ const LANDING_HEIGHT_MARGIN_M: f32 = 0.5;
 /// A tiny negative threshold (rather than `< 0.0`) ignores dead-reckoning jitter so
 /// level low-altitude flight is not mistaken for a descent onto the ground.
 const LANDING_DESCENT_SPEED_MPS: f32 = -0.1;
+
+/// How long (seconds) the ascend key must be held while standing before flight
+/// auto-engages (P31.16), matching the reference viewer's `FLY_TIME` — a quick tap
+/// is a jump / hop, a sustained hold takes off. It also debounces the take-off
+/// from the P31.11 auto-land, so a landing does not instantly re-launch.
+const TAKE_OFF_HOLD_SECS: f32 = 0.5;
 
 /// The minimum interval, in seconds, between the body-rotation `AgentUpdate`s sent
 /// while turning (~20 Hz), so a held turn key does not flood the circuit — the
@@ -84,6 +93,9 @@ pub(crate) struct AvatarControls {
     last_controls: ControlFlags,
     /// Seconds accumulated since the last rotation send, for the turning throttle.
     rotation_send_accum: f32,
+    /// Seconds the ascend key has been held while standing and not flying, for the
+    /// P31.16 hold-to-take-off; reset whenever that precondition lapses.
+    ascend_hold_secs: f32,
 }
 
 impl AvatarControls {
@@ -109,6 +121,7 @@ impl Default for AvatarControls {
             sent_initial_rotation: false,
             last_controls: ControlFlags::empty(),
             rotation_send_accum: ROTATION_SEND_INTERVAL_SECS,
+            ascend_hold_secs: 0.0,
         }
     }
 }
@@ -133,7 +146,7 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
 /// dead-reckoner to extrapolate.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system reading time, keyboard, identity, avatars, terrain, and the avatar motions plus the controls state and command writer"
+    reason = "a Bevy system reading time, keyboard, identity, avatars, terrain, the fly permission, and the avatar motions plus the controls state and command writer"
 )]
 pub(crate) fn drive_avatar_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -141,6 +154,7 @@ pub(crate) fn drive_avatar_controls(
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     terrain: Res<TerrainState>,
+    fly_rights: Res<SlAgentParcel>,
     motions: Query<&AvatarMotion>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
@@ -166,6 +180,28 @@ pub(crate) fn drive_avatar_controls(
     // F toggles flying.
     if keyboard.just_pressed(KeyCode::KeyF) {
         controls.flying = !controls.flying;
+    }
+
+    // Auto-take-off (P31.16): holding the ascend key while standing engages flight
+    // once held past the threshold, if flying is permitted here (region + parcel,
+    // resolved by the session). A quick tap does not take off (that is a jump);
+    // holding the ascend key also keeps the P31.11 auto-land below from firing, so
+    // a take-off is not immediately undone. The manual F toggle still works.
+    if !controls.flying && keyboard.pressed(KeyCode::PageUp) {
+        controls.ascend_hold_secs += dt;
+    } else {
+        controls.ascend_hold_secs = 0.0;
+    }
+    let grounded =
+        own_motion.is_none_or(|motion| motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M));
+    if should_take_off(
+        controls.flying,
+        grounded,
+        controls.ascend_hold_secs,
+        fly_rights.can_fly,
+    ) {
+        controls.flying = true;
+        controls.ascend_hold_secs = 0.0;
     }
 
     // Auto-stop flying on landing (P31.11): descending onto (or already at) the
@@ -277,6 +313,18 @@ fn should_auto_stop_flying(
     flying && !ascend_key && descending && at_ground_floor
 }
 
+/// Whether the auto-take-off rule (P31.16) fires this frame: the avatar is not
+/// already `flying`, is `grounded` (standing on the ground), flying is permitted
+/// here (`can_fly` — the region + parcel decision from the session), and the
+/// ascend key has been held for at least [`TAKE_OFF_HOLD_SECS`]. The hold
+/// requirement is what makes a quick tap a jump but a sustained press a take-off,
+/// and debounces it from the P31.11 auto-land. Pure so the decision is
+/// unit-testable without a live terrain / avatar.
+#[must_use]
+fn should_take_off(flying: bool, grounded: bool, ascend_held_secs: f32, can_fly: bool) -> bool {
+    !flying && grounded && can_fly && ascend_held_secs >= TAKE_OFF_HOLD_SECS
+}
+
 /// Wrap an angle (radians) into `(-π, π]`, keeping the tracked heading bounded over
 /// a long session.
 #[must_use]
@@ -293,9 +341,34 @@ fn wrap_angle(angle: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        LANDING_DESCENT_SPEED_MPS, rotation_from_yaw, should_auto_stop_flying, wrap_angle,
+        LANDING_DESCENT_SPEED_MPS, TAKE_OFF_HOLD_SECS, rotation_from_yaw, should_auto_stop_flying,
+        should_take_off, wrap_angle,
     };
     use sl_client_bevy::Rotation;
+
+    /// Holding the ascend key past the threshold while standing with fly permission
+    /// takes off; a short hold, being airborne, no permission, or already flying
+    /// does not.
+    #[test]
+    fn auto_take_off_needs_a_sustained_grounded_permitted_ascend() {
+        // Not flying, grounded, permitted, held past the threshold → take off.
+        assert!(should_take_off(false, true, TAKE_OFF_HOLD_SECS, true));
+        assert!(should_take_off(false, true, TAKE_OFF_HOLD_SECS + 1.0, true));
+
+        // Held, but not long enough yet → keep standing (a tap is a jump).
+        assert!(!should_take_off(
+            false,
+            true,
+            TAKE_OFF_HOLD_SECS - 0.01,
+            true
+        ));
+        // Flying disallowed here (region / parcel) → no take-off.
+        assert!(!should_take_off(false, true, TAKE_OFF_HOLD_SECS, false));
+        // Already flying → nothing to start.
+        assert!(!should_take_off(true, true, TAKE_OFF_HOLD_SECS, true));
+        // Airborne (not standing) → the hold-to-fly is a standing gesture.
+        assert!(!should_take_off(false, false, TAKE_OFF_HOLD_SECS, true));
+    }
 
     /// Descending onto the ground with no ascend key held stops flight; the same
     /// situation while ascending, while airborne, or while not flying does not.

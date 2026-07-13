@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 5 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 443 |
+| done | 445 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **532** |
+| **total** | **534** |
 
 ## ideas (37)
 
@@ -229,7 +229,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (443)
+## done (445)
 
 ### protocol
 
@@ -346,6 +346,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Materials service pairing (extends #25, Tier C). DONE
 - [`protocol-65`](done/protocol-65-map-service-pairing-extends-12-tier-b-done.md)
   — Map service pairing (extends #12, Tier B). Done
+- [`protocol-66`](done/protocol-66-session-current-parcel-fly-permission.md) —
+  Session tracks the agent's current parcel & fly permission
 - [`protocol-7`](done/protocol-7-group-support.md) — Group support
 - [`protocol-8`](done/protocol-8-script-dialogs-permissions.md) — Script dialogs
   & permissions
@@ -471,6 +473,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p31-1`](done/viewer-p31-1-integrate-avian3d.md) — Integrate avian3d
 - [`viewer-p31-11`](done/viewer-p31-11-auto-stop-flying-on-landing.md) —
   Auto-stop flying on landing
+- [`viewer-p31-16`](done/viewer-p31-16-auto-take-off-flying-on-ascend.md) —
+  Auto-take-off flying on ascend while standing
 - [`viewer-p31-2`](done/viewer-p31-2-physical-objects.md) — Physical objects
 - [`viewer-p31-3`](done/viewer-p31-3-physics-shape-aware-colliders.md) —
   Physics-shape-aware colliders

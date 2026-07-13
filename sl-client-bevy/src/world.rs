@@ -19,7 +19,7 @@ use bevy::prelude::*;
 
 use sl_proto::{
     AgentKey, CircuitCode, CircuitId, Event as SessionEvent, ParcelInfo, RegionHandle,
-    RegionIdentity, RegionLimits, RegionLocalParcelId, Uuid,
+    RegionIdentity, RegionLimits, RegionLocalParcelId, Session, Uuid,
 };
 
 use crate::SlEvent;
@@ -60,6 +60,39 @@ pub struct SlIdentity {
     /// / [`ScopedObjectId`](sl_proto::ScopedObjectId) the scoped parcel/object
     /// commands take.
     pub circuit_id: Option<CircuitId>,
+}
+
+/// The agent's current parcel and derived fly permission, mirrored from the
+/// driven [`Session`] each frame so ECS systems can read them without holding the
+/// session. The resolution logic lives in `sl-proto`
+/// ([`Session::current_parcel`] / [`Session::can_fly`]) so the tokio client
+/// shares it; this resource is just the Bevy-side bridge.
+///
+/// [`current`](Self::current) is `None` until the agent's parcel resolves (the
+/// simulator pushes it on region entry / parcel crossing);
+/// [`can_fly`](Self::can_fly) combines the region-wide fly block and the parcel's
+/// `ALLOW_FLY`, and is permissive while the parcel is unknown (so a take-off is
+/// not blocked before the push arrives) — but `false` before login.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SlAgentParcel {
+    /// The parcel the agent currently stands on, or `None` before it resolves.
+    pub current: Option<ParcelInfo>,
+    /// Whether the agent may start flying where it currently stands.
+    pub can_fly: bool,
+}
+
+impl SlAgentParcel {
+    /// Refreshes the mirror from the driven session: the fly permission is read
+    /// every frame (cheap), while the current parcel is re-cloned only when it
+    /// actually changes (a structural compare avoids cloning its ~½ KiB bitmap
+    /// and strings on every unchanged frame).
+    pub(crate) fn refresh_from(&mut self, session: &Session) {
+        self.can_fly = session.can_fly();
+        let current = session.current_parcel();
+        if self.current.as_ref() != current {
+            self.current = current.cloned();
+        }
+    }
 }
 
 /// A region the client knows about — the login/root region and every neighbour

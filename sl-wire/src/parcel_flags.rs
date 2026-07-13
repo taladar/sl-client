@@ -112,8 +112,13 @@ impl RegionFlags {
     pub const SKIP_SCRIPTS: Self = Self { bits: 1 << 13 };
     /// Physics is disabled region-wide.
     pub const SKIP_PHYSICS: Self = Self { bits: 1 << 14 };
+    /// Flying is blocked region-wide (the viewer's `REGION_FLAGS_BLOCK_FLY` —
+    /// `LLViewerRegion::getBlockFly`, part of `LLAgent::canFly`).
+    pub const BLOCK_FLY: Self = Self { bits: 1 << 19 };
     /// The region restricts access to age-verified avatars.
     pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 24 };
+    /// Flying above the region's height cap is blocked (`REGION_FLAGS_BLOCK_FLYOVER`).
+    pub const BLOCK_FLYOVER: Self = Self { bits: 1 << 27 };
 
     /// Builds flags from a raw value.
     #[must_use]

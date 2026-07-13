@@ -290,6 +290,27 @@ impl ParcelInfo {
         sl_wire::ParcelFlags::from_bits(self.raw_parcel_flags)
     }
 
+    /// Anyone may fly over the parcel (the viewer's `PF_ALLOW_FLY` /
+    /// `LLParcel::getAllowFly`, one input to [`Session::can_fly`](crate::Session::can_fly)).
+    #[must_use]
+    pub const fn allow_fly(&self) -> bool {
+        self.flags().contains(sl_wire::ParcelFlags::ALLOW_FLY)
+    }
+
+    /// Whether the region-local point `(x, y)` (metres) lies on this parcel,
+    /// tested against the membership [`bitmap`](Self::bitmap) — one bit per 4×4 m
+    /// block, row-major, least-significant-bit first (the parcel's block at
+    /// `⌊x/4⌋, ⌊y/4⌋`). The region's blocks-per-edge is derived from the bitmap
+    /// length (`isqrt(bits)`) so the test works for both standard 256 m regions
+    /// (a 64×64 grid, 512-byte bitmap) and variable-size regions without needing
+    /// the region dimensions. Points outside the region or off the bitmap return
+    /// `false`. Used by [`Session::current_parcel`](crate::Session::current_parcel)
+    /// to find the parcel the agent stands on.
+    #[must_use]
+    pub fn contains_point(&self, x: f32, y: f32) -> bool {
+        bitmap_contains_point(&self.bitmap, x, y)
+    }
+
     /// Anyone may create (rez) objects here — a public rez zone.
     #[must_use]
     pub const fn create_objects(&self) -> bool {
@@ -320,6 +341,57 @@ impl ParcelInfo {
     pub const fn deny_anonymous(&self) -> bool {
         self.flags().contains(sl_wire::ParcelFlags::DENY_ANONYMOUS)
     }
+}
+
+/// Whether the region-local point `(x, y)` (metres) lies on the parcel described
+/// by a membership `bitmap` — one bit per 4×4 m block, row-major, LSB-first. The
+/// region's blocks-per-edge is derived from the bitmap length (`isqrt(bits)`), so
+/// it handles standard 256 m regions (64×64, 512 bytes) and variable-size regions
+/// alike. Points outside the region or off the bitmap yield `false`. This is the
+/// core of [`ParcelInfo::contains_point`].
+fn bitmap_contains_point(bitmap: &[u8], x: f32, y: f32) -> bool {
+    /// Metres along each edge of one parcel bitmap block.
+    const BLOCK_METRES: f32 = 4.0;
+    if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+        return false;
+    }
+    let edge = bitmap.len().saturating_mul(8).isqrt();
+    let (Some(block_x), Some(block_y)) =
+        (block_index(x, BLOCK_METRES), block_index(y, BLOCK_METRES))
+    else {
+        return false;
+    };
+    if block_x >= edge || block_y >= edge {
+        return false;
+    }
+    // Bounded above (`block_x`, `block_y` < `edge`, so `bit` < `edge²` ≤ bits), but
+    // use saturating ops to satisfy the arithmetic-side-effects lint.
+    let bit = block_y.saturating_mul(edge).saturating_add(block_x);
+    bitmap
+        .get(bit / 8)
+        .is_some_and(|byte| byte & (1_u8 << (bit % 8)) != 0)
+}
+
+/// The parcel-bitmap block index `⌊coord / block⌋` for a region-local `coord`
+/// (metres), or `None` when `coord` is negative, non-finite, or beyond any sane
+/// region extent. Kept free of unguarded `as` casts: the quotient is floored and
+/// range-checked before the (now exact) conversion.
+fn block_index(coord: f32, block: f32) -> Option<usize> {
+    /// The largest block index worth considering — far beyond the largest
+    /// variable-size region, so anything past it is off the map, not an index.
+    const MAX_BLOCK: f32 = 65_536.0;
+    let quotient = (coord / block).floor();
+    if !(0.0..=MAX_BLOCK).contains(&quotient) {
+        return None;
+    }
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "quotient is a non-negative finite value bounded to 0..=MAX_BLOCK just above, so the floored block index converts exactly"
+    )]
+    let index = quotient as usize;
+    Some(index)
 }
 
 /// A region parcel-ownership overlay chunk, parsed from `ParcelOverlay`.
@@ -752,5 +824,82 @@ impl Default for ParcelDetails {
             sale_price: None,
             auction_id: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bitmap_contains_point;
+
+    /// A 64×64-block (standard 256 m region) membership bitmap with a single block
+    /// set at `(block_x, block_y)`; the 4096-bit map is 512 bytes.
+    fn one_block_bitmap(block_x: usize, block_y: usize) -> Vec<u8> {
+        let mut bitmap = vec![0_u8; 512];
+        let bit = block_y.saturating_mul(64).saturating_add(block_x);
+        // The one block owned by this parcel.
+        if let Some(byte) = bitmap.get_mut(bit / 8) {
+            *byte |= 1_u8 << (bit % 8);
+        }
+        bitmap
+    }
+
+    /// A point inside the owned 4×4 m block is on the parcel; the block's whole
+    /// 4 m span (and only it) counts.
+    #[test]
+    fn a_point_in_the_owned_block_is_on_the_parcel() {
+        // Block (2, 3) spans x ∈ [8, 12), y ∈ [12, 16).
+        let bitmap = one_block_bitmap(2, 3);
+        assert!(bitmap_contains_point(&bitmap, 8.0, 12.0));
+        assert!(bitmap_contains_point(&bitmap, 11.9, 15.9));
+        // Just outside the block on every side.
+        assert!(!bitmap_contains_point(&bitmap, 7.9, 13.0));
+        assert!(!bitmap_contains_point(&bitmap, 12.0, 13.0));
+        assert!(!bitmap_contains_point(&bitmap, 10.0, 11.9));
+        assert!(!bitmap_contains_point(&bitmap, 10.0, 16.0));
+    }
+
+    /// The block index is row-major (`x + y*edge`), so swapping x and y picks a
+    /// different block — a regression guard against transposed indexing.
+    #[test]
+    fn indexing_is_row_major_not_transposed() {
+        let bitmap = one_block_bitmap(1, 5);
+        // The owned block (1, 5): x ∈ [4, 8), y ∈ [20, 24).
+        assert!(bitmap_contains_point(&bitmap, 5.0, 21.0));
+        // The transposed point (block (5, 1)) is a different, unowned block.
+        assert!(!bitmap_contains_point(&bitmap, 21.0, 5.0));
+    }
+
+    /// Points off the region, negative, or non-finite are never on a parcel, and
+    /// an empty bitmap owns nothing.
+    #[test]
+    fn out_of_range_and_degenerate_inputs_are_rejected() {
+        let bitmap = one_block_bitmap(0, 0);
+        assert!(bitmap_contains_point(&bitmap, 0.0, 0.0));
+        // Negative / non-finite coordinates.
+        assert!(!bitmap_contains_point(&bitmap, -1.0, 0.0));
+        assert!(!bitmap_contains_point(&bitmap, 0.0, f32::NAN));
+        assert!(!bitmap_contains_point(&bitmap, f32::INFINITY, 0.0));
+        // Past the 256 m region edge (block ≥ 64).
+        assert!(!bitmap_contains_point(&bitmap, 256.0, 0.0));
+        // An empty bitmap has a zero edge and owns nothing.
+        assert!(!bitmap_contains_point(&[], 0.0, 0.0));
+    }
+
+    /// The blocks-per-edge is derived from the bitmap length, so a smaller region
+    /// (here 32×32 blocks = 128 bytes, a 128 m region) indexes correctly.
+    #[test]
+    fn edge_is_derived_from_bitmap_length() {
+        // 32×32 blocks → 1024 bits → 128 bytes. Own block (10, 20).
+        let edge = 32_usize;
+        let mut bitmap = vec![0_u8; edge.saturating_mul(edge) / 8];
+        let bit = 20_usize.saturating_mul(edge).saturating_add(10);
+        if let Some(byte) = bitmap.get_mut(bit / 8) {
+            *byte |= 1_u8 << (bit % 8);
+        }
+        // Block (10, 20): x ∈ [40, 44), y ∈ [80, 84).
+        assert!(bitmap_contains_point(&bitmap, 41.0, 81.0));
+        // The same block coordinates read as a 64-edge region would land on a
+        // different byte/bit, so this confirms the edge came from the length.
+        assert!(!bitmap_contains_point(&bitmap, 41.0, 41.0));
     }
 }
