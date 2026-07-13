@@ -4,6 +4,7 @@ title: 3Dconnexion SpaceNavigator / 6-DOF input
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-input-system, viewer-camera-system]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

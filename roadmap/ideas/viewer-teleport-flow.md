@@ -4,6 +4,7 @@ title: Teleport flow — offers, acceptance & progress
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-notifications-dialogs, viewer-minimap-worldmap-ui, viewer-ui-framework]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

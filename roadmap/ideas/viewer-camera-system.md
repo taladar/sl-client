@@ -4,6 +4,7 @@ title: Camera system
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-input-system, viewer-ui-framework]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

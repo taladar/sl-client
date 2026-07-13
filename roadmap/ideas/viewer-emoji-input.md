@@ -4,6 +4,7 @@ title: Colon-based emoji input
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-ui-framework, viewer-social-panels]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

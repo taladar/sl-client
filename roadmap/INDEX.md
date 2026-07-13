@@ -12,12 +12,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 41 |
-| blocked | 2 |
+| ready | 38 |
+| blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 441 |
-| deferred | 4 |
+| deferred | 5 |
 | wont-do | 1 |
 | **total** | **532** |
 
@@ -26,79 +26,95 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 ### viewer
 
 - [`viewer-camera-system`](ideas/viewer-camera-system.md) — Camera system
+  (blocked by `viewer-input-system`, `viewer-ui-framework`)
 - [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
+  (blocked by `viewer-ui-framework`, `viewer-social-panels`)
 - [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
-  trigger UI
+  trigger UI (blocked by `viewer-ui-framework`, `viewer-sound-effects`)
 - [`viewer-i18n-localization`](ideas/viewer-i18n-localization.md) —
-  Internationalisation & translation
+  Internationalisation & translation (blocked by `viewer-ui-framework`)
 - [`viewer-image-upload`](ideas/viewer-image-upload.md) — Image / texture (and
-  sound / animation) upload
+  sound / animation) upload (blocked by `viewer-ui-framework`)
 - [`viewer-input-system`](ideas/viewer-input-system.md) — Input system
-  (rebindable keys + script capture)
+  (rebindable keys + script capture) (blocked by `viewer-preferences-ui`,
+  `viewer-ui-framework`)
 - [`viewer-inventory-ui`](ideas/viewer-inventory-ui.md) — Inventory browser UI
+  (blocked by `viewer-ui-framework`)
 - [`viewer-lsl-script-editor`](ideas/viewer-lsl-script-editor.md) — LSL script
-  editor
+  editor (blocked by `viewer-ui-framework`, `viewer-prim-inventory-editing`)
 - [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
-  Media-on-a-prim & embedded web browser
+  Media-on-a-prim & embedded web browser (blocked by `viewer-ui-framework`,
+  `viewer-streaming-audio`)
 - [`viewer-mesh-model-upload`](ideas/viewer-mesh-model-upload.md) — Mesh / model
-  importer & upload
+  importer & upload (blocked by `viewer-ui-framework`,
+  `viewer-prim-texture-editing`)
 - [`viewer-minimap-worldmap-ui`](ideas/viewer-minimap-worldmap-ui.md) — Minimap
-  / radar & world-map UI
+  / radar & world-map UI (blocked by `viewer-ui-framework`)
 - [`viewer-money-economy-ui`](ideas/viewer-money-economy-ui.md) — Money /
-  economy / L$ UI
+  economy / L$ UI (blocked by `viewer-ui-framework`,
+  `viewer-media-prim-browser`)
 - [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
-  Notifications, toasts & dialogs
+  Notifications, toasts & dialogs (blocked by `viewer-ui-framework`)
 - [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
-  from inventory
+  from inventory (blocked by `viewer-inventory-ui`, `viewer-object-selection`)
 - [`viewer-object-selection`](ideas/viewer-object-selection.md) — Object
-  selection & edit-floater shell
+  selection & edit-floater shell (blocked by `viewer-ui-framework`)
 - [`viewer-parcel-join-split`](ideas/viewer-parcel-join-split.md) — Parcel join
-  / split
+  / split (blocked by `viewer-ui-framework`, `viewer-input-system`)
 - [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
-  viewing & editing
+  viewing & editing (blocked by `viewer-ui-framework`)
 - [`viewer-preferences-ui`](ideas/viewer-preferences-ui.md) — Preferences /
-  settings UI
+  settings UI (blocked by `viewer-ui-framework`)
 - [`viewer-prim-creation`](ideas/viewer-prim-creation.md) — Prim creation
+  (blocked by `viewer-object-selection`, `viewer-ui-framework`)
 - [`viewer-prim-inventory-editing`](ideas/viewer-prim-inventory-editing.md) —
-  Prim inventory (contents) editing
+  Prim inventory (contents) editing (blocked by `viewer-object-selection`,
+  `viewer-inventory-ui`)
 - [`viewer-prim-linking`](ideas/viewer-prim-linking.md) — Prim linking &
-  unlinking
+  unlinking (blocked by `viewer-object-selection`)
 - [`viewer-prim-parameter-editing`](ideas/viewer-prim-parameter-editing.md) —
-  Prim parameter editing
+  Prim parameter editing (blocked by `viewer-object-selection`,
+  `viewer-ui-framework`)
 - [`viewer-prim-texture-editing`](ideas/viewer-prim-texture-editing.md) — Prim
-  texture / material editing
+  texture / material editing (blocked by `viewer-object-selection`,
+  `viewer-ui-framework`)
 - [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
-  option viewing & editing
-- [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand
+  option viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand (blocked by
+  `viewer-object-selection`, `viewer-camera-system`)
 - [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
+  (blocked by `viewer-teleport-flow`, `viewer-ui-framework`)
 - [`viewer-snapshot-tools`](ideas/viewer-snapshot-tools.md) — Snapshot / photo
-  tools
+  tools (blocked by `viewer-ui-framework`, `viewer-image-upload`)
 - [`viewer-social-panels`](ideas/viewer-social-panels.md) — People / friends /
-  groups / profiles / IM UI
+  groups / profiles / IM UI (blocked by `viewer-ui-framework`)
 - [`viewer-sound-effects`](ideas/viewer-sound-effects.md) — Spatial
-  sound-effects engine
+  sound-effects engine (blocked by `viewer-streaming-audio`)
 - [`viewer-space-navigator`](ideas/viewer-space-navigator.md) — 3Dconnexion
-  SpaceNavigator / 6-DOF input
+  SpaceNavigator / 6-DOF input (blocked by `viewer-input-system`,
+  `viewer-camera-system`)
 - [`viewer-streaming-audio`](ideas/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-teleport-flow`](ideas/viewer-teleport-flow.md) — Teleport flow —
-  offers, acceptance & progress
+  offers, acceptance & progress (blocked by `viewer-notifications-dialogs`,
+  `viewer-minimap-worldmap-ui`, `viewer-ui-framework`)
 - [`viewer-terrain-editing`](ideas/viewer-terrain-editing.md) — Terrain editing
+  (blocked by `viewer-ui-framework`, `viewer-input-system`,
+  `viewer-region-options`)
 - [`viewer-transform-gizmos`](ideas/viewer-transform-gizmos.md) — Position /
-  rotation / scale gizmos
+  rotation / scale gizmos (blocked by `viewer-object-selection`,
+  `viewer-input-system`, `viewer-camera-system`)
 - [`viewer-ui-framework`](ideas/viewer-ui-framework.md) — In-viewer UI /
   floater-panel-menu framework
 - [`viewer-url-linkification`](ideas/viewer-url-linkification.md) — URLs in chat
-  & other text contexts
+  & other text contexts (blocked by `viewer-ui-framework`)
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
-  (WebRTC + Vivox)
+  (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (41)
+## ready (38)
 
 ### viewer
 
-- [`viewer-p29-2`](ready/viewer-p29-2-drive-its-animations.md) — Drive its
-  animations
 - [`viewer-p31-10`](ready/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight)
@@ -120,9 +136,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe brightness calibration
 - [`viewer-p34-1`](ready/viewer-p34-1-ingest-the-physics-wearable.md) — Ingest
   the physics wearable
-- [`viewer-p34-2`](ready/viewer-p34-2-drive-them.md) — Drive them
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
-- [`viewer-p35-2`](ready/viewer-p35-2-hud-rendering.md) — HUD rendering
 
 ### test
 
@@ -183,7 +197,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (2)
+## blocked (4)
+
+### viewer
+
+- [`viewer-p34-2`](blocked/viewer-p34-2-drive-them.md) — Drive them (blocked by
+  `viewer-p34-1`)
+- [`viewer-p35-2`](blocked/viewer-p35-2-hud-rendering.md) — HUD rendering
+  (blocked by `viewer-p35-1`)
 
 ### test
 
@@ -1054,7 +1075,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (4)
+## deferred (5)
 
 ### protocol
 
@@ -1065,6 +1086,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
   — Non-goals (deferred; candidate follow-up roadmaps)
+- [`viewer-p29-2`](deferred/viewer-p29-2-drive-its-animations.md) — Drive its
+  animations
 
 ### idiomatic
 

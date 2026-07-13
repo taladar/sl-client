@@ -2,7 +2,7 @@
 id: viewer-p29-2
 title: Drive its animations
 topic: viewer
-status: ready
+status: deferred
 origin: VIEWER_ROADMAP.md — Phase 29 — Animesh
 ---
 

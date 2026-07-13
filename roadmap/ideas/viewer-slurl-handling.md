@@ -4,6 +4,7 @@ title: SLURL handling
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-teleport-flow, viewer-ui-framework]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -23,5 +24,8 @@ Reference (Firestorm, read-only): `llslurl`, `llurldispatcher`,
 
 Builds on: `sl-map-tools` (SLURL / map-URL parsing).
 
-Deps: [[viewer-teleport-flow]] (teleport action), [[viewer-url-linkification]]
-(SLURLs surfaced as clickable links), [[viewer-ui-framework]].
+Deps: [[viewer-teleport-flow]] (teleport action), [[viewer-ui-framework]].
+Independent of [[viewer-url-linkification]]: this dispatches SLURL actions to
+their UI targets regardless of where the SLURL came from (chat, an external
+browser, the command line), while linkification only turns text into clickable
+links.

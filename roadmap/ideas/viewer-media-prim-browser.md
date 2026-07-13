@@ -4,6 +4,7 @@ title: Media-on-a-prim & embedded web browser
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
+blocked_by: [viewer-ui-framework, viewer-streaming-audio]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

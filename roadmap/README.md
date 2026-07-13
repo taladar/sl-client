@@ -80,18 +80,30 @@ and is described next.
 ## Blocking & partial order
 
 `blocked_by:` is a list of task ids that must reach `done/` before this task may
-be worked. It turns the flat status buckets into a **partial order**: a task
-whose dependency isn't finished lives in `blocked/` and moves to `ready/` only
-once the blocker lands.
+be worked. It turns the flat status buckets into a **partial order**. The field
+is **plain dependency metadata that any status may carry** (an `ideas/` note can
+already record what it will depend on); the `blocked/` *directory* is separate,
+and narrower — see below.
 
 - A blocker is **cleared** only when the task it names is in `done/`; any other
   status leaves it **open**.
-- Put a task in `blocked/` exactly when it has an open blocker. When its last
-  open blocker reaches `done/`, move it to `ready/` (or straight to
-  `in-progress/`).
-- Use `blocked_by:` only when the blocker is another **roadmap task**. For a
-  non-task wait (an external prerequisite, a pending investigation), use
-  `deferred/` and describe it in prose.
+- `blocked/` is one outcome of the fleshed-out pipeline
+  (`ideas/` → plan → `ready/` | `blocked/` | `in-progress/` | `deferred/`). Put
+  a **fleshed-out** task in `blocked/` exactly when its *only* remaining barrier
+  is an open blocker; when the last one reaches `done/`, move it to `ready/`
+  (or straight to `in-progress/`).
+- An `ideas/` note **keeps its `blocked_by` but stays in `ideas/`** — it is not
+  ready to work regardless of its dependencies, so it never lives in `blocked/`.
+  The same holds for `deferred/`: a task parked for a *non-task* reason (an
+  external prerequisite, a pending investigation) may also carry `blocked_by`,
+  but its directory reflects the manual park, not the dependency.
+- `blocked_by` must stay **acyclic**, and records only real directed
+  prerequisites. An apparent cycle usually means a task boundary is drawn wrong
+  — separate the concerns rather than papering over it (e.g.
+  `viewer-url-linkification` renders text as clickable links, while
+  `viewer-slurl-handling` dispatches SLURL actions to their UI targets; they
+  read as co-dependent but are actually independent). Keep looser "related to"
+  notes in prose, not in `blocked_by`.
 
 `index.py --check` enforces the ordering (all breaches are fatal):
 
@@ -99,7 +111,8 @@ once the blocker lands.
 - a `blocked/` task has at least one open blocker (else: move it to `ready/`);
 - no task in `ready/`, `in-progress/`, or `done/` has an open blocker (else:
   move it to `blocked/`) — you cannot start, work, or finish a task ahead of its
-  dependency.
+  dependency. (`ideas/` and `deferred/` are exempt: they may hold open
+  blockers.)
 
 A dependency on a `wont-do/` task is a **warning** (fatal only under `--check`):
 it can never clear, so the dependent is parked forever — drop the edge or

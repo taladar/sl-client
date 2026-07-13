@@ -24,3 +24,6 @@ bom.json
 perf.data
 perf.data.old
 flamegraph.svg
+# Python bytecode cache (roadmap/index.py is imported by ad-hoc tooling)
+__pycache__/
+*.pyc
