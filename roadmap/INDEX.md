@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 44 |
+| ready | 43 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 438 |
+| done | 439 |
 | deferred | 6 |
 | wont-do | 1 |
 | **total** | **532** |
@@ -92,7 +92,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (44)
+## ready (43)
 
 ### viewer
 
@@ -139,8 +139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-experience-admin-contributor`](ready/test-experience-admin-contributor-admin-contributor-owned-region-queries.md)
   — admin / contributor / owned / region queries
-- [`test-experience-info`](ready/test-experience-info-info-find-by-name.md) —
-  info / find by name
 - [`test-experience-permissions`](ready/test-experience-permissions-request-set-experience-permission.md)
   — request / set experience permission
 - [`test-friendship-offer-accept-aditi`](ready/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
@@ -208,7 +206,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (438)
+## done (439)
 
 ### protocol
 
@@ -836,6 +834,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   request estate info / covenant
 - [`test-event-info`](done/test-event-info-event-info-notification-add-remove.md)
   — event info / notification add-remove
+- [`test-experience-info`](done/test-experience-info-info-find-by-name.md) —
+  info / find by name
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-terminate`](done/test-friendship-terminate-terminate-confirm-removal.md)

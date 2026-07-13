@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, GroupKey,
-    InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, MeshKey, RegionHandle,
-    StartLocation,
+    AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, ExperienceKey,
+    GroupKey, InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, MeshKey,
+    RegionHandle, StartLocation,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -704,6 +704,14 @@ impl TestContext {
     #[must_use]
     pub const fn mesh_asset(&self) -> Option<MeshKey> {
         self.fixtures.mesh_asset()
+    }
+
+    /// The configured stable experience the `experience-info` case resolves and
+    /// searches for, if any. When absent the case records `partial` (the test
+    /// avatar owns no experience and OpenSim has no experience backend).
+    #[must_use]
+    pub const fn experience(&self) -> Option<ExperienceKey> {
+        self.fixtures.experience()
     }
 
     /// The primary session.

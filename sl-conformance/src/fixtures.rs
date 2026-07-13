@@ -37,11 +37,17 @@
 //! # Optional: absent it, the case scans the region's object stream for a
 //! # mesh-shaped prim and records `partial` if it finds none.
 //! mesh_asset = "33333333-3333-3333-3333-333333333333"
+//!
+//! # A stable experience the `experience-info` case resolves over
+//! # `GetExperienceInfo` and searches for by name. Experiences are a Second Life
+//! # feature the test avatar owns none of by default, so absent this the case
+//! # records `partial`.
+//! experience = "44444444-4444-4444-4444-444444444444"
 //! ```
 
 use std::path::{Path, PathBuf};
 
-use sl_client_tokio::{AgentKey, GroupKey, MeshKey, Uuid};
+use sl_client_tokio::{AgentKey, ExperienceKey, GroupKey, MeshKey, Uuid};
 
 use crate::grid::Grid;
 
@@ -60,6 +66,12 @@ pub struct Fixtures {
     /// decodes. Optional: when absent the case instead scans the region's object
     /// stream for a mesh-shaped prim, and records `partial` if it finds none.
     mesh_asset: Option<MeshKey>,
+    /// A stable experience the `experience-info` case resolves over
+    /// `GetExperienceInfo` (and searches for by name over `FindExperienceByName`).
+    /// Experiences are a Second Life feature with no stock OpenSim backend, and
+    /// the test avatar owns none by default, so absent this the case has no
+    /// guaranteed experience to resolve and records `partial`.
+    experience: Option<ExperienceKey>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -78,6 +90,10 @@ struct RawFixtures {
     /// [`Fixtures::mesh_asset`].
     #[serde(default)]
     mesh_asset: Option<String>,
+    /// The experience id as a UUID string, parsed into
+    /// [`Fixtures::experience`].
+    #[serde(default)]
+    experience: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -199,10 +215,22 @@ impl Fixtures {
                     })
             })
             .transpose()?;
+        let experience = raw
+            .experience
+            .map(|value| {
+                Uuid::parse_str(&value)
+                    .map(ExperienceKey::from)
+                    .map_err(|_invalid| FixturesError::BadUuid {
+                        field: "experience",
+                        value,
+                    })
+            })
+            .transpose()?;
         Ok(Self {
             premade_groups,
             other_avatar,
             mesh_asset,
+            experience,
         })
     }
 
@@ -229,6 +257,14 @@ impl Fixtures {
     #[must_use]
     pub const fn mesh_asset(&self) -> Option<MeshKey> {
         self.mesh_asset
+    }
+
+    /// The configured stable experience the `experience-info` case resolves and
+    /// searches for, if any. When absent the case has no guaranteed experience to
+    /// resolve and records `partial`.
+    #[must_use]
+    pub const fn experience(&self) -> Option<ExperienceKey> {
+        self.experience
     }
 }
 
@@ -278,6 +314,7 @@ mod tests {
             ],
             other_avatar: None,
             mesh_asset: None,
+            experience: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -299,6 +336,7 @@ mod tests {
             premade_groups: Vec::new(),
             other_avatar: Some("33333333-4444-5555-6666-777777777777".to_owned()),
             mesh_asset: None,
+            experience: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -313,6 +351,7 @@ mod tests {
             premade_groups: Vec::new(),
             other_avatar: None,
             mesh_asset: Some("44444444-5555-6666-7777-888888888888".to_owned()),
+            experience: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -327,6 +366,7 @@ mod tests {
             premade_groups: Vec::new(),
             other_avatar: None,
             mesh_asset: Some("not-a-uuid".to_owned()),
+            experience: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -344,6 +384,7 @@ mod tests {
             premade_groups: Vec::new(),
             other_avatar: Some("not-a-uuid".to_owned()),
             mesh_asset: None,
+            experience: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -362,11 +403,46 @@ mod tests {
             premade_groups: vec!["not-a-uuid".to_owned()],
             other_avatar: None,
             mesh_asset: None,
+            experience: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
             Err(super::FixturesError::BadUuid {
                 field: "premade_groups",
+                ..
+            })
+        ));
+    }
+
+    /// A well-formed `experience` parses into a typed key; an absent one is
+    /// `None`.
+    #[test]
+    fn parses_experience() -> Result<(), super::FixturesError> {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: None,
+            mesh_asset: None,
+            experience: Some("55555555-6666-7777-8888-999999999999".to_owned()),
+        };
+        let fixtures = Fixtures::from_raw(raw)?;
+        assert!(fixtures.experience().is_some());
+        assert_eq!(Fixtures::default().experience(), None);
+        Ok(())
+    }
+
+    /// A malformed `experience` is a `BadUuid` error, not a silent drop.
+    #[test]
+    fn rejects_bad_experience() {
+        let raw = RawFixtures {
+            premade_groups: Vec::new(),
+            other_avatar: None,
+            mesh_asset: None,
+            experience: Some("not-a-uuid".to_owned()),
+        };
+        assert!(matches!(
+            Fixtures::from_raw(raw),
+            Err(super::FixturesError::BadUuid {
+                field: "experience",
                 ..
             })
         ));
