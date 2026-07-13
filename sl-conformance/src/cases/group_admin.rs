@@ -44,7 +44,7 @@
 //! `2av`. Runs on OpenSim today (local secondary `Friend Tester`, Groups V2
 //! enabled — see the setup memory); the Aditi variant — and a multi-member
 //! role/roster assertion that wants a third avatar — is deferred to Phase Z
-//! pending more Aditi avatars (and a configured pre-made group).
+//! pending its Aditi run (and a configured pre-made group).
 
 use std::time::{Duration, Instant, SystemTime};
 

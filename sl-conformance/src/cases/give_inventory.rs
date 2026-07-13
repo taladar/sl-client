@@ -45,8 +45,8 @@
 //! no-op). The giver's original keeps its Copy permission, so the grid does not
 //! delete it (a give of a copyable item leaves the original behind).
 //!
-//! `2av`. `[opensim]` only; the Aditi variant is deferred to Phase Z pending a
-//! second Aditi avatar. The flow is plain LLUDP `ImprovedInstantMessage` in both
+//! `2av`. `[opensim]` only; the Aditi variant is deferred to Phase Z pending
+//! its Aditi run. The flow is plain LLUDP `ImprovedInstantMessage` in both
 //! directions, identical on both grids.
 
 use std::time::{Duration, Instant};

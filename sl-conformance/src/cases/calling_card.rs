@@ -46,7 +46,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, secs_metric};
 /// to Phase Z (aditi); the run is marked partial to record that gap.
 ///
 /// `2av`. `[opensim]` only; the Aditi variant (which can prove the offerer-side
-/// accept confirmation) is deferred to Phase Z pending a second Aditi avatar.
+/// accept confirmation) is deferred to Phase Z pending its Aditi run.
 #[derive(Debug)]
 pub struct CallingCard;
 

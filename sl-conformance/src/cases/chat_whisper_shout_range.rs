@@ -83,7 +83,7 @@ enum Heard {
 /// of where they logged in.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
-/// variant is deferred to Phase Z pending a second Aditi avatar. The flow is
+/// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ChatFromViewer`/`ChatFromSimulator` and `TeleportLocationRequest`,
 /// identical on both grids.
 #[derive(Debug)]

@@ -60,7 +60,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metri
 ///
 /// `2av`, `[opensim]` only. The flow is plain LLUDP `GrantUserRights` /
 /// `ChangeUserRights`, identical on both grids; the Aditi variant is deferred to
-/// Phase Z pending a second Aditi avatar. The friendship is terminated at the
+/// Phase Z pending its Aditi run. The friendship is terminated at the
 /// end so re-runs start from a clean slate.
 #[derive(Debug)]
 pub struct GrantUserRights;

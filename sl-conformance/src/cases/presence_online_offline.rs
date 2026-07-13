@@ -48,7 +48,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, secs_metric};
 ///
 /// `2av`, `[opensim]` only. The flow is plain LLUDP `OnlineNotification` /
 /// `OfflineNotification`, identical on both grids; the Aditi variant is deferred
-/// to Phase Z pending a second Aditi avatar. The friendship is terminated at the
+/// to Phase Z pending its Aditi run. The friendship is terminated at the
 /// end so re-runs start from a clean slate.
 #[derive(Debug)]
 pub struct PresenceOnlineOffline;

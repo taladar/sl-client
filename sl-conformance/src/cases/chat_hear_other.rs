@@ -32,7 +32,7 @@ const PUBLIC_CHANNEL: ChatChannel = ChatChannel(0);
 /// within `say` range, rather than the simulator emitting an out-of-range stub.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
-/// variant is deferred to Phase Z pending a second Aditi avatar. The flow is
+/// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ChatFromViewer`/`ChatFromSimulator`, identical on both grids.
 #[derive(Debug)]
 pub struct ChatHearOther;

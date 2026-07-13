@@ -49,8 +49,8 @@ use crate::support::{
 /// local join (the simulator already added us when it routed the invite) and the
 /// decline is a UDP `SessionLeave` the module ignores — both observable only as
 /// the client-side registry transition under test. Asserting the `ChatSessionRequest`
-/// POST and its reply roster is the Aditi variant, deferred to Phase Z pending a
-/// second Aditi avatar.
+/// POST and its reply roster is the Aditi variant, deferred to Phase Z pending
+/// its Aditi run.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`, Groups V2
 /// enabled — see the setup memory); `[opensim]` only, Aditi → Phase Z.

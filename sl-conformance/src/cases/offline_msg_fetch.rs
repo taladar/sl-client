@@ -67,8 +67,7 @@ const STORED_REPLY_FRAGMENT: &str = "Message saved";
 /// [`Session::relogin`](crate::context::Session::relogin) now waits out the
 /// aditi login cooldown rather than bypassing it, so the mid-run relogin is no
 /// longer the blocker for an Aditi run; the remaining Aditi work — branching the
-/// fetch to the CAPS `ReadOfflineMsgs` path and a second Aditi avatar — is
-/// deferred to Phase Z.
+/// fetch to the CAPS `ReadOfflineMsgs` path — is deferred to Phase Z.
 #[derive(Debug)]
 pub struct OfflineMsgFetch;
 

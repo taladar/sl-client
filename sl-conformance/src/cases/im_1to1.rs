@@ -34,7 +34,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, secs_metric};
 /// confirms the IM was addressed to this agent rather than broadcast.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
-/// variant is deferred to Phase Z pending a second Aditi avatar. The flow is
+/// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ImprovedInstantMessage` in both directions, identical on both
 /// grids.
 #[derive(Debug)]

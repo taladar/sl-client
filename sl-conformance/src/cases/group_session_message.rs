@@ -71,7 +71,7 @@ impl Delivery {
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`, Groups V2
 /// enabled — see the setup memory); the Aditi variant is deferred to Phase Z
-/// pending a second Aditi avatar.
+/// pending its Aditi run.
 #[derive(Debug)]
 pub struct GroupSessionMessage;
 

@@ -37,7 +37,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, count_metric, secs
 /// identical on both grids; only the inbound IMs that seed the unread count touch
 /// the wire, and those are plain LLUDP `ImprovedInstantMessage`. `2av`. Runs on
 /// OpenSim today (local secondary `Friend Tester`); `[opensim]` only, the Aditi
-/// variant deferred to Phase Z pending a second Aditi avatar.
+/// variant deferred to Phase Z pending its Aditi run.
 #[derive(Debug)]
 pub struct SessionMarkRead;
 

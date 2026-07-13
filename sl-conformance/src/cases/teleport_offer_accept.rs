@@ -44,8 +44,8 @@
 //! observed phase sequence and progress-update count, the arrival kind
 //! (`local` / `region-changed`), and the request-to-arrival time.
 //!
-//! `2av`. `[opensim]` only; the Aditi variant is deferred to Phase Z pending a
-//! second Aditi avatar. The flow is plain LLUDP `StartLure` /
+//! `2av`. `[opensim]` only; the Aditi variant is deferred to Phase Z pending
+//! its Aditi run. The flow is plain LLUDP `StartLure` /
 //! `ImprovedInstantMessage` / `TeleportLureRequest`, and no new client code —
 //! the [`Command::OfferTeleport`] / [`Command::AcceptTeleportLure`] surface and
 //! the lure-accept teleport handover already existed from earlier IM and

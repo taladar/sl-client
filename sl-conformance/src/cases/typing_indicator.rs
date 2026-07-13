@@ -32,7 +32,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, secs_metric};
 /// check, so the relay does not depend on how close the two avatars logged in.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); the Aditi
-/// variant is deferred to Phase Z pending a second Aditi avatar. The flow is
+/// variant is deferred to Phase Z pending its Aditi run. The flow is
 /// plain LLUDP `ChatFromViewer`/`ChatFromSimulator`, identical on both grids.
 #[derive(Debug)]
 pub struct TypingIndicator;

@@ -53,7 +53,7 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric
 /// the card under a zero folder regardless), so the case passes the nil folder.
 ///
 /// `2av`. Runs on OpenSim today (local secondary `Friend Tester`); `[opensim]`
-/// only, the Aditi variant deferred to Phase Z pending a second Aditi avatar.
+/// only, the Aditi variant deferred to Phase Z pending its Aditi run.
 /// The flow is plain LLUDP `ImprovedInstantMessage` plus `AcceptFriendship` in
 /// both directions, identical on both grids.
 #[derive(Debug)]

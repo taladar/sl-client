@@ -12,12 +12,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 32 |
+| ready | 51 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 431 |
-| deferred | 7 |
-| **total** | **513** |
+| done | 434 |
+| deferred | 4 |
+| **total** | **532** |
 
 ## ideas (37)
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (32)
+## ready (51)
 
 ### viewer
 
@@ -128,6 +128,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — observe AgentAlertMessage / AlertMessage
 - [`test-avatar-picker`](ready/test-avatar-picker-avatar-picker-request.md) —
   avatar picker request
+- [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
+  — Calling card — [aditi] variant
+- [`test-chat-hear-other-aditi`](ready/test-chat-hear-other-aditi-add-the-aditi-variant.md)
+  — Chat hear other — [aditi] variant
+- [`test-chat-invite-accept-decline-aditi`](ready/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
+  — Chat invite accept/decline — [aditi] variant
+- [`test-chat-whisper-shout-range-aditi`](ready/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
+  — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-dir-find-people-groups-events`](ready/test-dir-find-people-groups-events-dirfindquery-across-types.md)
@@ -142,18 +150,48 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   info / find by name
 - [`test-experience-permissions`](ready/test-experience-permissions-request-set-experience-permission.md)
   — request / set experience permission
+- [`test-friendship-offer-accept-aditi`](ready/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
+  — Friendship offer/accept — [aditi] variant
+- [`test-friendship-terminate-aditi`](ready/test-friendship-terminate-aditi-add-the-aditi-variant.md)
+  — Friendship terminate — [aditi] variant
+- [`test-give-inventory-aditi`](ready/test-give-inventory-aditi-add-the-aditi-variant.md)
+  — Give inventory — [aditi] variant
+- [`test-grant-user-rights-aditi`](ready/test-grant-user-rights-aditi-add-the-aditi-variant.md)
+  — Grant user rights — [aditi] variant
+- [`test-group-admin-aditi`](ready/test-group-admin-aditi-add-the-aditi-variant.md)
+  — Group admin — [aditi] variant
+- [`test-group-join-leave-aditi`](ready/test-group-join-leave-aditi-add-the-aditi-variant.md)
+  — Group join/leave — [aditi] variant
+- [`test-group-notice-aditi`](ready/test-group-notice-aditi-add-the-aditi-variant.md)
+  — Group notice — [aditi] variant
 - [`test-group-proposal-vote`](ready/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
   — start a proposal, cast a ballot
+- [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
+  — Group session message — [aditi] variant
+- [`test-im-1to1-aditi`](ready/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
+  1:1 — [aditi] variant
+- [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
+  — IM typing — [aditi] variant
 - [`test-kick-user`](ready/test-kick-user-observe-kickuser-handling.md) —
   observe KickUser handling
+- [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
+  — Offline message fetch — [aditi] variant
 - [`test-parcel-voice-info`](ready/test-parcel-voice-info-request-parcel-voice-info.md)
   — request parcel voice info
+- [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
+  — Presence online/offline — [aditi] variant
 - [`test-reliable-retransmit`](ready/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
   — exercise reliable resend under loss
 - [`test-server-error`](ready/test-server-error-provoke-and-assert-error-featuredisabled.md)
   — provoke and assert Error / FeatureDisabled
+- [`test-session-mark-read-aditi`](ready/test-session-mark-read-aditi-add-the-aditi-variant.md)
+  — Session mark-read — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
+- [`test-teleport-offer-accept-aditi`](ready/test-teleport-offer-accept-aditi-add-the-aditi-variant.md)
+  — Teleport offer/accept — [aditi] variant
+- [`test-typing-indicator-aditi`](ready/test-typing-indicator-aditi-add-the-aditi-variant.md)
+  — Typing indicator — [aditi] variant
 - [`test-voice-account`](ready/test-voice-account-provision-a-voice-account.md)
   — provision a voice account
 - [`test-voice-signaling`](ready/test-voice-signaling-exchange-voice-signalling.md)
@@ -183,7 +221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (431)
+## done (434)
 
 ### protocol
 
@@ -893,6 +931,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request object owners / return objects
 - [`test-parcel-properties`](done/test-parcel-properties-request-parcel-properties-note-the-caps-eventqueue-path-on-s.md)
   — request parcel properties (note the CAPS EventQueue path on SL vs UDP)
+- [`test-phase-z-deferred-01`](done/test-phase-z-deferred-01-provision-a-2nd-aditi-avatar-add-it-to-credentials-aditi-tom.md)
+  — Provision a 2nd Aditi avatar; add it to credentials.aditi.toml
+- [`test-phase-z-deferred-02`](done/test-phase-z-deferred-02-provision-a-3rd-aditi-avatar-for-conference-group-roster.md)
+  — Provision a 3rd Aditi avatar (for conference / group-roster only)
+- [`test-phase-z-deferred-03`](done/test-phase-z-deferred-03-add-aditi-variants-of-the-deferred-cases-as-the-avatars-land.md)
+  — Add [aditi] variants of the deferred cases as the avatars land
 - [`test-picks-classifieds`](done/test-picks-classifieds-request-and-edit-picks-classifieds.md)
   — request and edit picks / classifieds
 - [`test-presence-online-offline`](done/test-presence-online-offline-observe-onlinenotification-offlinenotification-as-the-peer-l.md)
@@ -1005,7 +1049,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (7)
+## deferred (4)
 
 ### protocol
 
@@ -1024,11 +1068,5 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-phase-z-deferred-01`](deferred/test-phase-z-deferred-01-provision-a-2nd-aditi-avatar-add-it-to-credentials-aditi-tom.md)
-  — Provision a 2nd Aditi avatar; add it to credentials.aditi.toml
-- [`test-phase-z-deferred-02`](deferred/test-phase-z-deferred-02-provision-a-3rd-aditi-avatar-for-conference-group-roster.md)
-  — Provision a 3rd Aditi avatar (for conference / group-roster only)
-- [`test-phase-z-deferred-03`](deferred/test-phase-z-deferred-03-add-aditi-variants-of-the-deferred-cases-as-the-avatars-land.md)
-  — Add [aditi] variants of the deferred cases as the avatars land
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
