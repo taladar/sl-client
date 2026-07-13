@@ -1025,6 +1025,18 @@ pub enum Command {
     /// Request the region's estate config + access lists (`getinfo`); replies
     /// arrive as [`Event::EstateInfo`](crate::Event::EstateInfo) and [`Event::EstateAccessList`](crate::Event::EstateAccessList).
     RequestEstateInfo,
+    /// Download the current region's terrain as an LL **RAW** heightmap over the
+    /// legacy `Xfer` path (`EstateOwnerMessage`/`terrain`
+    /// `["download filename", …]`). The simulator serialises the region
+    /// heightmap and offers it back via `InitiateDownload`, which the session
+    /// follows automatically; the assembled bytes arrive as
+    /// [`Event::ServerFileDownloaded`](crate::Event::ServerFileDownloaded).
+    /// Region-owner/god gated.
+    RequestRegionTerrainDownload {
+        /// The local viewer-side filename the download is labelled with; echoed
+        /// back on the completion event and otherwise opaque to the simulator.
+        viewer_filename: String,
+    },
     /// Add/remove an agent or group on an estate access list (`estateaccessdelta`).
     UpdateEstateAccess {
         /// Which list change to apply.

@@ -1290,6 +1290,9 @@ impl Client {
                         Some(Command::RequestEstateInfo) => {
                             self.session.request_estate_info(Instant::now())?;
                         }
+                        Some(Command::RequestRegionTerrainDownload { viewer_filename }) => {
+                            self.session.request_region_terrain_download(&viewer_filename, Instant::now())?;
+                        }
                         Some(Command::UpdateEstateAccess { delta, target }) => {
                             self.session.update_estate_access(delta, target, Instant::now())?;
                         }

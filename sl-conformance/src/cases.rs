@@ -83,6 +83,7 @@ pub mod teleport_failed;
 pub mod teleport_local_phases;
 pub mod teleport_offer_accept;
 pub mod terrain_composition;
+pub mod terrain_raw_download;
 pub mod texture_fetch_http;
 pub mod throttle_set;
 pub mod typing_indicator;

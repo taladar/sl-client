@@ -95,12 +95,30 @@ its purpose:
 
 - a **mute list** is parsed into `Event::MuteList`;
 - a **task-inventory listing** is parsed into `Event::TaskInventoryContents`;
-- a **generic** request surfaces the raw bytes as `Event::XferDownloaded`.
+- a **generic** request surfaces the raw bytes as `Event::XferDownloaded`;
+- a **server-initiated** offer (an `InitiateDownload`, today only the region
+  terrain RAW) surfaces the raw bytes as `Event::ServerFileDownloaded`, tagged
+  with the viewer filename it echoed back.
 
 The generic path is the public building block: `Session::request_xfer(filename)`
 starts a download and returns the `XferId` that tags its completion event, so a
 caller handed a raw Xfer `filename` by some other message can fetch the bytes
 directly.
+
+## The server-initiated (terrain RAW) consumer
+
+Some downloads are pushed the *other* way round: instead of the viewer naming a
+file it already knows, the simulator hands the viewer a file it just produced.
+The estate **terrain RAW download** is the one live example. The viewer sends an
+`EstateOwnerMessage "terrain"` with `["download filename", <viewer name>]`
+(`Session::request_region_terrain_download`); the simulator serialises the
+region heightmap to an LL RAW file, stashes it under a random Xfer name, and
+sends an `InitiateDownload` naming that server-side file and echoing back the
+viewer name. The client follows the offer automatically — an Xfer download for
+the named file, exactly as the reference viewer's `process_initiate_download` —
+and surfaces the assembled bytes as `Event::ServerFileDownloaded`. This is
+region-owner/god gated and has no capability on either grid, so it is the
+`Xfer`-download path's non-mute-list, non-task-inventory consumer.
 
 ## The task-inventory consumer
 
@@ -186,9 +204,12 @@ messages is kept for the server-side `SimSession` and the trace tool.
 >   half) was removed with the legacy asset upload and will return when terrain
 >   RAW upload lands.
 > - Public API: `Session::request_xfer` (→ `Event::XferDownloaded`),
->   `Session::request_mute_list` (→ `Event::MuteList`), and
->   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`). The
->   runtime commands are `Command::RequestXfer` / `Command::FetchTaskInventory`,
+>   `Session::request_mute_list` (→ `Event::MuteList`),
+>   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`), and
+>   `Session::request_region_terrain_download` (→ `Event::ServerFileDownloaded`,
+>   after the simulator's `InitiateDownload` the handler follows automatically).
+>   The runtime commands are `Command::RequestXfer` /
+>   `Command::FetchTaskInventory` / `Command::RequestRegionTerrainDownload`,
 >   wired identically in `sl-client-tokio` and `sl-client-bevy`.
 > - The task-inventory text parser is `parse_task_inventory` in
 >   `sl-proto/src/session/conversions.rs` (alongside `parse_mute_list`),

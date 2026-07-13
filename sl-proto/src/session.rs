@@ -675,6 +675,17 @@ enum XferPurpose {
     /// A caller-initiated raw download: surface the bytes verbatim as
     /// [`Event::XferDownloaded`](crate::Event::XferDownloaded).
     Generic,
+    /// A file the *simulator* offered via `InitiateDownload` (today only the
+    /// region terrain RAW download): surface the assembled bytes as
+    /// [`Event::ServerFileDownloaded`](crate::Event::ServerFileDownloaded),
+    /// tagged with the viewer filename we asked for (echoed back in the
+    /// `InitiateDownload`).
+    ServerInitiated {
+        /// The viewer-side filename we named in the download request, echoed by
+        /// the simulator's `InitiateDownload` and returned on the event so a
+        /// caller can correlate the bytes to the file it requested.
+        viewer_filename: String,
+    },
 }
 
 /// An in-flight inbound `Xfer` file download: the accumulated bytes and what to

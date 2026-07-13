@@ -662,6 +662,20 @@ pub enum Event {
         /// The complete downloaded file bytes.
         data: Vec<u8>,
     },
+    /// A file the simulator offered over `InitiateDownload` finished
+    /// downloading over the `Xfer` path. Today the only trigger is the region
+    /// **terrain RAW** download (`EstateOwnerMessage`/`terrain`
+    /// `["download filename", …]`, see
+    /// [`Session::request_region_terrain_download`](crate::Session::request_region_terrain_download)):
+    /// the simulator serialises the region heightmap to an LL RAW file and
+    /// streams it back, and the assembled bytes surface here.
+    ServerFileDownloaded {
+        /// The viewer-side filename named in the download request and echoed by
+        /// the simulator's `InitiateDownload`.
+        viewer_filename: String,
+        /// The complete downloaded file bytes.
+        data: Vec<u8>,
+    },
     /// The agent's own account contact preferences (`UserInfoReply`), in reply
     /// to a `UserInfoRequest`.
     UserInfo(UserInfo),

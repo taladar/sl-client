@@ -1988,6 +1988,11 @@ fn advance_running(
             Command::RequestEstateInfo => {
                 session.request_estate_info(now).ok();
             }
+            Command::RequestRegionTerrainDownload { viewer_filename } => {
+                session
+                    .request_region_terrain_download(viewer_filename, now)
+                    .ok();
+            }
             Command::UpdateEstateAccess { delta, target } => {
                 session.update_estate_access(*delta, *target, now).ok();
             }

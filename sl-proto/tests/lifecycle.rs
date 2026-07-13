@@ -100,11 +100,11 @@ mod test {
         ImagePacketImageIDBlock, ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
         ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
         ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
-        ImprovedTerseObjectUpdateRegionDataBlock, InventoryDescendents,
-        InventoryDescendentsAgentDataBlock, InventoryDescendentsFolderDataBlock,
-        InventoryDescendentsItemDataBlock, KickUser, KickUserTargetBlockBlock,
-        KickUserUserInfoBlock, KillObject, KillObjectObjectDataBlock, LargeGenericMessage,
-        LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
+        ImprovedTerseObjectUpdateRegionDataBlock, InitiateDownload, InitiateDownloadAgentDataBlock,
+        InitiateDownloadFileDataBlock, InventoryDescendents, InventoryDescendentsAgentDataBlock,
+        InventoryDescendentsFolderDataBlock, InventoryDescendentsItemDataBlock, KickUser,
+        KickUserTargetBlockBlock, KickUserUserInfoBlock, KillObject, KillObjectObjectDataBlock,
+        LargeGenericMessage, LargeGenericMessageAgentDataBlock, LargeGenericMessageMethodDataBlock,
         LargeGenericMessageParamListBlock, LayerData, LayerDataLayerDataBlock,
         LayerDataLayerIDBlock, LogoutRequest, LogoutRequestAgentDataBlock, MapBlockReply,
         MapBlockReplyAgentDataBlock, MapBlockReplyDataBlock, MapBlockReplySizeBlock, MapItemReply,
@@ -5487,6 +5487,123 @@ mod test {
         assert_eq!(second.name, "SpamBot");
         assert_eq!(second.mute_type, MuteType::ByName);
         assert_eq!(second.flags.0, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn terrain_download_follows_initiate_download_over_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // Requesting the terrain RAW sends an `EstateOwnerMessage`/`terrain` with
+        // the `["download filename", <viewer name>]` parameters.
+        session.request_region_terrain_download("terrain.raw", now)?;
+        let sent = drain(&mut session)?;
+        let estate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EstateOwnerMessage(e) => Some(e),
+                _ => None,
+            })
+            .ok_or("expected an EstateOwnerMessage")?;
+        assert_eq!(trimmed(&estate.method_data.method), "terrain");
+        assert_eq!(param_at(&estate.param_list, 0), "download filename");
+        assert_eq!(param_at(&estate.param_list, 1), "terrain.raw");
+
+        // The simulator offers the serialised file back with an `InitiateDownload`
+        // naming the server-side Xfer file and echoing our viewer filename.
+        let sim_filename = "a1b2c3d4-0000-0000-0000-000000000000";
+        let initiate = AnyMessage::InitiateDownload(InitiateDownload {
+            agent_data: InitiateDownloadAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            file_data: InitiateDownloadFileDataBlock {
+                sim_filename: format!("{sim_filename}\0").into_bytes(),
+                viewer_filename: b"terrain.raw\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&initiate, 9, true)?, now)?;
+
+        // The client should follow it with a `RequestXfer` for the sim filename.
+        let sent = drain(&mut session)?;
+        let request = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestXfer(r) => Some(r),
+                _ => None,
+            })
+            .ok_or("expected a RequestXfer")?;
+        let xfer_id = request.xfer_id.id;
+        assert_ne!(xfer_id, 0);
+        assert_eq!(trimmed(&request.xfer_id.filename), sim_filename);
+
+        // The sim streams the file in a single (first+last) packet: a 4-byte
+        // length prefix the handler strips and ignores (as the mute-list test
+        // does), then the RAW bytes.
+        let raw = vec![7u8; 26]; // two 13-byte LL RAW points
+        let mut data = vec![0u8; 4];
+        data.extend_from_slice(&raw);
+        let packet = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id,
+                packet: 0x8000_0000, // sequence 0 + last-packet flag
+            },
+            data_packet: SendXferPacketDataPacketBlock { data },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&packet, 10, true)?, now)?;
+
+        // The client confirms the packet and surfaces the assembled file, tagged
+        // with the viewer filename, over `Event::ServerFileDownloaded`.
+        let sent = drain(&mut session)?;
+        let confirm = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ConfirmXferPacket(c) => Some(c),
+                _ => None,
+            })
+            .ok_or("expected a ConfirmXferPacket")?;
+        assert_eq!(confirm.xfer_id.id, xfer_id);
+
+        let (viewer_filename, downloaded) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ServerFileDownloaded {
+                    viewer_filename,
+                    data,
+                } => Some((viewer_filename, data)),
+                _ => None,
+            })
+            .ok_or("expected a ServerFileDownloaded event")?;
+        assert_eq!(viewer_filename, "terrain.raw");
+        assert_eq!(downloaded, raw);
+        Ok(())
+    }
+
+    #[test]
+    fn initiate_download_for_other_agent_is_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // An `InitiateDownload` addressed to a different agent must not start a
+        // transfer (guards against acting on a misrouted/spoofed offer).
+        let initiate = AnyMessage::InitiateDownload(InitiateDownload {
+            agent_data: InitiateDownloadAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(0xDEAD),
+            },
+            file_data: InitiateDownloadFileDataBlock {
+                sim_filename: b"somefile\0".to_vec(),
+                viewer_filename: b"terrain.raw\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&initiate, 9, true)?, now)?;
+
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent.iter().any(|m| matches!(m, AnyMessage::RequestXfer(_))),
+            "expected no RequestXfer for another agent's InitiateDownload"
+        );
         Ok(())
     }
 

@@ -2913,6 +2913,25 @@ impl Session {
             AnyMessage::UseCachedMuteList(_) => {
                 self.events.push_back(Event::MuteListUnchanged);
             }
+            AnyMessage::InitiateDownload(initiate) => {
+                // The simulator has a file ready for us (today only the region
+                // terrain RAW download): it names the server-side Xfer file
+                // (`sim_filename`) and echoes back the viewer filename we asked
+                // for. Kick off the Xfer download that streams the bytes, tagged
+                // so completion surfaces as `Event::ServerFileDownloaded`. Mirrors
+                // the reference viewer's `process_initiate_download`.
+                if self.agent_id().map(|a| a.uuid()) == Some(initiate.agent_data.agent_id) {
+                    let sim_filename = trimmed_string(&initiate.file_data.sim_filename);
+                    let viewer_filename = trimmed_string(&initiate.file_data.viewer_filename);
+                    if !sim_filename.is_empty() {
+                        self.start_xfer_download(
+                            XferPurpose::ServerInitiated { viewer_filename },
+                            &sim_filename,
+                            now,
+                        )?;
+                    }
+                }
+            }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
                 let packet_num = packet.xfer_id.packet;
@@ -6887,6 +6906,12 @@ impl Session {
                     data: download.buffer,
                 });
             }
+            XferPurpose::ServerInitiated { viewer_filename } => {
+                self.events.push_back(Event::ServerFileDownloaded {
+                    viewer_filename,
+                    data: download.buffer,
+                });
+            }
         }
         Ok(())
     }
@@ -9562,6 +9587,36 @@ impl Session {
     pub fn request_estate_info(&mut self, now: Instant) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_estate_owner_message("getinfo", &[], now)?;
+        Ok(())
+    }
+
+    /// Requests a download of the current region's terrain as an LL **RAW**
+    /// heightmap file, via `EstateOwnerMessage`/`terrain` with the
+    /// `["download filename", <viewer_filename>]` parameters. The simulator
+    /// serialises the region heightmap to a RAW file and offers it back over the
+    /// legacy `Xfer` path: it first sends an `InitiateDownload` naming the file,
+    /// which this session follows to download the bytes automatically, surfacing
+    /// them as [`Event::ServerFileDownloaded`] (tagged with `viewer_filename`).
+    ///
+    /// `viewer_filename` is the local name the download is labelled with; it is
+    /// echoed back verbatim on the event and is otherwise opaque to the
+    /// simulator (the reference viewer uses the save-dialog path, e.g.
+    /// `terrain.raw`). The command is region-owner/god gated — a non-owner gets
+    /// no reply. There is no capability for this on either grid, so it always
+    /// rides `Xfer`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_region_terrain_download(
+        &mut self,
+        viewer_filename: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = ["download filename".to_owned(), viewer_filename.to_owned()];
+        circuit.send_estate_owner_message("terrain", &params, now)?;
         Ok(())
     }
 

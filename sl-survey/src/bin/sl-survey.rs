@@ -702,6 +702,7 @@ impl Survey {
             | Event::TaskInventoryReply(..)
             | Event::TaskInventoryContents { .. }
             | Event::XferDownloaded { .. }
+            | Event::ServerFileDownloaded { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }
