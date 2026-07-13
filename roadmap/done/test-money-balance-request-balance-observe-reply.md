@@ -2,7 +2,7 @@
 id: test-money-balance
 title: request balance; observe reply
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 15 — Money & economy `[both]`
 ---
 

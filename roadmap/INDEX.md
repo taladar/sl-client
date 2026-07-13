@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 34 |
+| ready | 33 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 429 |
+| done | 430 |
 | deferred | 7 |
 | **total** | **513** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (34)
+## ready (33)
 
 ### viewer
 
@@ -146,8 +146,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start a proposal, cast a ballot
 - [`test-kick-user`](ready/test-kick-user-observe-kickuser-handling.md) —
   observe KickUser handling
-- [`test-money-balance`](ready/test-money-balance-request-balance-observe-reply.md)
-  — request balance; observe reply
 - [`test-money-transfer`](ready/test-money-transfer-send-a-transfer-mark-partial-where-no-real-backend.md)
   — send a transfer (mark partial where no real backend)
 - [`test-parcel-voice-info`](ready/test-parcel-voice-info-request-parcel-voice-info.md)
@@ -187,7 +185,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (429)
+## done (430)
 
 ### protocol
 
@@ -853,6 +851,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — HTTP CAPS mesh fetch + decode
 - [`test-modify-land`](done/test-modify-land-raise-lower-terrain-then-undo.md) —
   raise/lower terrain, then undo
+- [`test-money-balance`](done/test-money-balance-request-balance-observe-reply.md)
+  — request balance; observe reply
 - [`test-mute-list`](done/test-mute-list-mute-unmute-and-fetch-the-mute-list.md)
   — mute / unmute and fetch the mute list
 - [`test-notecard-create-update`](done/test-notecard-create-update-create-an-empty-notecard-createinventoryitem-then-set-its-bo.md)
