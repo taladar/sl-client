@@ -17,7 +17,9 @@
 //! - **← / →** — turn the body left / right (client-tracked heading, sent as the
 //!   `AgentUpdate` body rotation the walk direction follows).
 //! - **PageUp / PageDown** — ascend / descend ([`UP_POS`] / [`UP_NEG`], while flying).
-//! - **F** — toggle flying ([`ControlFlags::FLY`]).
+//! - **F** — toggle flying ([`ControlFlags::FLY`]). Flight also stops itself on
+//!   landing (P31.11): descending onto the ground with no ascend key held drops
+//!   the fly intent so the avatar stands rather than hovering; **F** takes off again.
 //! - **Shift + ↑ / ↓** — run ([`ControlFlags::FAST_AT`]).
 //!
 //! There is no stop key: the control flags are recomputed from the currently-held
@@ -37,10 +39,23 @@ use sl_client_bevy::{Command, ControlFlags, Rotation, SlCommand, SlIdentity};
 
 use crate::avatars::AvatarState;
 use crate::physics::AvatarMotion;
+use crate::terrain::TerrainState;
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
 /// (~183°/s — a brisk turn that feels responsive rather than sluggish).
 const TURN_RATE_RAD_PER_SEC: f32 = 3.2;
+
+/// The slack (metres) above the stricter avatar ground floor still counted as
+/// "on / very close to the ground" for the P31.11 auto-stop-flying-on-landing
+/// rule — a small margin so flight ends as the avatar settles onto the surface
+/// rather than only once its reported position reaches the floor exactly.
+const LANDING_HEIGHT_MARGIN_M: f32 = 0.5;
+
+/// The vertical speed (metres/second, negative = downward) below which the avatar
+/// counts as descending for the P31.11 landing check when no descend key is held.
+/// A tiny negative threshold (rather than `< 0.0`) ignores dead-reckoning jitter so
+/// level low-altitude flight is not mistaken for a descent onto the ground.
+const LANDING_DESCENT_SPEED_MPS: f32 = -0.1;
 
 /// The minimum interval, in seconds, between the body-rotation `AgentUpdate`s sent
 /// while turning (~20 Hz), so a held turn key does not flood the circuit — the
@@ -116,23 +131,33 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
 /// they change) and, while turning, the body rotation the walk direction follows
 /// (throttled). The simulator moves the avatar and streams it back for the P31.4
 /// dead-reckoner to extrapolate.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading time, keyboard, identity, avatars, terrain, and the avatar motions plus the controls state and command writer"
+)]
 pub(crate) fn drive_avatar_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
+    terrain: Res<TerrainState>,
     motions: Query<&AvatarMotion>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
     let dt = time.delta_secs();
 
+    // The own avatar's authoritative motion (facing, vertical speed, ground floor),
+    // used to seed the walk heading and to auto-stop flying on landing.
+    let own_motion = identity
+        .agent_id
+        .and_then(|own| avatars.body_root_of(own))
+        .and_then(|anchor| motions.get(anchor).ok());
+
     // Seed the walk heading from the own avatar's reported facing the first time it
     // is available, so the first step keeps its orientation instead of snapping.
     if !controls.seeded
-        && let Some(own) = identity.agent_id
-        && let Some(anchor) = avatars.body_root_of(own)
-        && let Ok(motion) = motions.get(anchor)
+        && let Some(motion) = own_motion
     {
         controls.yaw = motion.yaw();
         controls.seeded = true;
@@ -141,6 +166,23 @@ pub(crate) fn drive_avatar_controls(
     // F toggles flying.
     if keyboard.just_pressed(KeyCode::KeyF) {
         controls.flying = !controls.flying;
+    }
+
+    // Auto-stop flying on landing (P31.11): descending onto (or already at) the
+    // ground with no ascend key held drops the fly intent — clearing it here means
+    // `FLY` is left out of the flag set assembled below, so the resulting
+    // `SetControls` advertises the landed intent and the P31.6 locomotion fallback
+    // leaves the fly / hover states. The manual F toggle still takes off again.
+    if let Some(motion) = own_motion
+        && should_auto_stop_flying(
+            controls.flying,
+            keyboard.pressed(KeyCode::PageUp),
+            keyboard.pressed(KeyCode::PageDown),
+            motion.vertical_speed(),
+            motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M),
+        )
+    {
+        controls.flying = false;
     }
 
     // Assemble the control-flag set from the currently-held keys (releasing a key
@@ -212,6 +254,29 @@ pub(crate) fn drive_avatar_controls(
     }
 }
 
+/// Whether the auto-stop-flying-on-landing rule (P31.11) fires this frame: the
+/// avatar is `flying`, is not being held aloft (`ascend_key`, i.e. PageUp), is
+/// descending (`descend_key` / PageDown held, or moving downward faster than
+/// [`LANDING_DESCENT_SPEED_MPS`]), and is `at_ground_floor` (on / very close to the
+/// ground). Requiring a descent — not merely the absence of lift — means pressing
+/// **F** to take off from the ground does not immediately re-land the avatar. Pure
+/// so the decision is unit-testable without a live terrain / avatar.
+#[must_use]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "the landing decision is a conjunction of independent binary conditions — flying, ascend / descend key held, and at the ground floor — that read clearest as the flags they are"
+)]
+fn should_auto_stop_flying(
+    flying: bool,
+    ascend_key: bool,
+    descend_key: bool,
+    vertical_speed: f32,
+    at_ground_floor: bool,
+) -> bool {
+    let descending = descend_key || vertical_speed < LANDING_DESCENT_SPEED_MPS;
+    flying && !ascend_key && descending && at_ground_floor
+}
+
 /// Wrap an angle (radians) into `(-π, π]`, keeping the tracked heading bounded over
 /// a long session.
 #[must_use]
@@ -227,8 +292,40 @@ fn wrap_angle(angle: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{rotation_from_yaw, wrap_angle};
+    use super::{
+        LANDING_DESCENT_SPEED_MPS, rotation_from_yaw, should_auto_stop_flying, wrap_angle,
+    };
     use sl_client_bevy::Rotation;
+
+    /// Descending onto the ground with no ascend key held stops flight; the same
+    /// situation while ascending, while airborne, or while not flying does not.
+    #[test]
+    fn auto_stop_flying_only_on_a_grounded_descent() {
+        // Flying, descending (downward speed past the threshold), at the ground,
+        // ascend key up → land.
+        assert!(should_auto_stop_flying(true, false, false, -1.0, true));
+        // The descend key counts as descending even with no downward speed reported.
+        assert!(should_auto_stop_flying(true, false, true, 0.0, true));
+
+        // Not flying → nothing to stop.
+        assert!(!should_auto_stop_flying(false, false, false, -1.0, true));
+        // Holding the ascend key keeps the avatar aloft even at the ground floor,
+        // so pressing F to take off is not immediately undone.
+        assert!(!should_auto_stop_flying(true, true, false, -1.0, true));
+        // Level / rising flight near the ground (no descent) keeps flying.
+        assert!(!should_auto_stop_flying(true, false, false, 0.0, true));
+        assert!(!should_auto_stop_flying(true, false, false, 5.0, true));
+        // Descending but still high above the ground keeps flying.
+        assert!(!should_auto_stop_flying(true, false, false, -5.0, false));
+        // A downward drift slower than the threshold is jitter, not a landing.
+        assert!(!should_auto_stop_flying(
+            true,
+            false,
+            false,
+            LANDING_DESCENT_SPEED_MPS + 0.01,
+            true
+        ));
+    }
 
     /// A zero heading is the identity rotation; a quarter turn about the up axis is a
     /// unit quaternion with the expected Z / W components.

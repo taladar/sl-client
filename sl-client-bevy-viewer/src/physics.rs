@@ -1011,6 +1011,22 @@ impl AvatarMotion {
         self.velocity.z
     }
 
+    /// Whether this avatar's authoritative position sits at (or within `margin`
+    /// metres above) the **stricter avatar ground floor** ([`avatar_ground_floor`]:
+    /// `land + 0.5 * height`) for the terrain beneath it — i.e. the avatar is on /
+    /// very close to the ground rather than up in the air. The viewer's movement
+    /// controls ([`crate::movement`]) use this to auto-stop flying on landing
+    /// (P31.11). Returns `false` when the land height under the avatar is not yet
+    /// known (terrain not ingested), so an unknown floor never forces a landing.
+    #[must_use]
+    pub(crate) fn at_ground_floor(&self, terrain: &TerrainState, margin: f32) -> bool {
+        avatar_ground_floor(
+            terrain.land_height(self.region_handle, self.position.x, self.position.y),
+            self.height,
+        )
+        .is_some_and(|floor| self.position.z <= floor + margin)
+    }
+
     /// Build the authoritative motion from an avatar's object update. `apply_rotation`
     /// is `true` for a rigged body root (whose anchor carries the object rotation)
     /// and `false` for a placeholder sphere.

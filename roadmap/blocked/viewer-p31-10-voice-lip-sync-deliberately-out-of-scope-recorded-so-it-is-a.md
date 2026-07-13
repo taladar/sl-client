@@ -2,8 +2,9 @@
 id: viewer-p31-10
 title: Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap, not an oversight)
 topic: viewer
-status: ready
+status: blocked
 origin: VIEWER_ROADMAP.md — Simulator authority & the Firestorm motion model (read before P31.2)
+blocked_by: [viewer-voice-audio]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -17,5 +18,9 @@ the decoded voice **audio stream**, which sl-client does not carry: the
 project models voice **signalling / session-state only**, not the
 Vivox / WebRTC audio transport, and the speaking indicators are out too (see
 the voice-signalling-only decision in the sl-client memory). So there is
-nothing to drive lips or dots from. Left unchecked as a permanent,
-intentional boundary; revisit only if voice audio is ever brought in scope.
+nothing to drive lips or dots from.
+
+**Blocked on [[viewer-voice-audio]]:** this needs the viewer's not-yet-built
+voice **audio** engine (the same decoded WebRTC stream that would power a "who's
+speaking" indicator). It stays out of scope until that lands — revisit only if
+voice audio is ever brought in scope; not an oversight.

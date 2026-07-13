@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 37 |
-| blocked | 4 |
+| ready | 35 |
+| blocked | 5 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 442 |
+| done | 443 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **532** |
@@ -111,15 +111,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (37)
+## ready (35)
 
 ### viewer
 
-- [`viewer-p31-10`](ready/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
-  — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
-  not an oversight)
-- [`viewer-p31-11`](ready/viewer-p31-11-auto-stop-flying-on-landing.md) —
-  Auto-stop flying on landing
 - [`viewer-p31-12`](ready/viewer-p31-12-head-eye-look-at-tracking-llheadrotmotion-lleyemotion.md)
   — Head & eye look-at tracking (LLHeadRotMotion / LLEyeMotion)
 - [`viewer-p31-13`](ready/viewer-p31-13-hand-pose-morph-llhandmotion.md) —
@@ -195,10 +190,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (4)
+## blocked (5)
 
 ### viewer
 
+- [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
+  — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
+  not an oversight) (blocked by `viewer-voice-audio`)
 - [`viewer-p34-2`](blocked/viewer-p34-2-drive-them.md) — Drive them (blocked by
   `viewer-p34-1`)
 - [`viewer-p35-2`](blocked/viewer-p35-2-hud-rendering.md) — HUD rendering
@@ -231,7 +229,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (442)
+## done (443)
 
 ### protocol
 
@@ -471,6 +469,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   particle systems
 - [`viewer-p30-2`](done/viewer-p30-2-simulate-render.md) — Simulate + render
 - [`viewer-p31-1`](done/viewer-p31-1-integrate-avian3d.md) — Integrate avian3d
+- [`viewer-p31-11`](done/viewer-p31-11-auto-stop-flying-on-landing.md) —
+  Auto-stop flying on landing
 - [`viewer-p31-2`](done/viewer-p31-2-physical-objects.md) — Physical objects
 - [`viewer-p31-3`](done/viewer-p31-3-physics-shape-aware-colliders.md) —
   Physics-shape-aware colliders
