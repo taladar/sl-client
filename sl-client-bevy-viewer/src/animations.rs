@@ -367,6 +367,18 @@ pub(crate) struct AnimationPlayback {
     /// simulator set at pose time. Keyed by avatar for symmetry, though only the
     /// own avatar is ever present.
     client_locomotion: HashMap<AgentKey, HashMap<Uuid, PlayState>>,
+    /// The own avatar's **client-driven** typing animation (P31.9): `ANIM_AGENT_TYPE`,
+    /// the hands-on-keyboard gesture the viewer plays locally while the user is
+    /// entering local chat, for immediate feedback in step with the `StartTyping` /
+    /// `StopTyping` it broadcasts for others. Kept in its own slot rather than the
+    /// [`client_locomotion`](Self::client_locomotion) one because typing is an
+    /// *overlay* — it plays concurrently with stand / walk (the reference viewer
+    /// requests it as an ordinary priority-blended animation), whereas the
+    /// locomotion slot holds a single mutually-exclusive state. Reconciled by
+    /// [`set_client_typing`](Self::set_client_typing); merged with the other two sets
+    /// at pose time. Keyed by avatar for symmetry, though only the own avatar is ever
+    /// present.
+    client_typing: HashMap<AgentKey, HashMap<Uuid, PlayState>>,
     /// The next activation-recency stamp to hand out (monotonic across all
     /// avatars; only the relative order within an avatar is ever compared).
     next_order: u64,
@@ -408,6 +420,19 @@ impl AnimationPlayback {
         // A fixed sequence id: the animation *id* is what distinguishes one state
         // from the next, so `reconcile_playing` keeps an unchanged desire in place
         // and only (re)starts when the id itself changes.
+        let pairs: Vec<(Uuid, i32)> = desired.map(|id| (id, 0)).into_iter().collect();
+        reconcile_playing(entry, &mut self.next_order, &pairs, now);
+    }
+
+    /// Reconcile the own avatar's client-driven typing set (P31.9) to a single
+    /// `desired` animation (`ANIM_AGENT_TYPE` while typing), or `None` to ease it
+    /// out. Mirrors [`set_client_locomotion`](Self::set_client_locomotion) but on a
+    /// separate slot so typing overlays — rather than replaces — the locomotion /
+    /// simulator animation: an unchanged desire keeps its playback clock, a change
+    /// (start ⟷ stop) eases the old motion out and starts the new one so the
+    /// hands-on-keyboard gesture fades in and out rather than popping.
+    pub(crate) fn set_client_typing(&mut self, agent: AgentKey, desired: Option<Uuid>, now: f32) {
+        let entry = self.client_typing.entry(agent).or_default();
         let pairs: Vec<(Uuid, i32)> = desired.map(|id| (id, 0)).into_iter().collect();
         reconcile_playing(entry, &mut self.next_order, &pairs, now);
     }
@@ -509,17 +534,22 @@ pub(crate) fn retain_active(
 }
 
 /// Merge an avatar's simulator-driven playing set with its client-driven
-/// locomotion set (P31.6) into one map for [`resolve_pose`]. Either side may be
-/// absent; when both are present the client entries are folded in on top (they
-/// never collide in practice, because [`crate::locomotion`] only drives the
-/// client set while the simulator set is idle). Returns an owned map so the pose
+/// locomotion set (P31.6) and typing set (P31.9) into one map for
+/// [`resolve_pose`]. Any side may be absent; the client sets are folded in on top
+/// of the simulator set. The locomotion set never collides with the simulator set
+/// (the P31.6 driver only fills genuine simulator silence); the typing set is a
+/// deliberate overlay whose `ANIM_AGENT_TYPE` blends against whatever else is
+/// playing by priority in [`resolve_pose`], so its only per-map collision is the
+/// benign one where the simulator echoes the agent's own typing back under the
+/// same id (the client entry then simply wins). Returns an owned map so the pose
 /// resolver borrows one set regardless of how many contributed.
 fn merge_playing(
     sim: Option<&HashMap<Uuid, PlayState>>,
-    client: Option<&HashMap<Uuid, PlayState>>,
+    client_locomotion: Option<&HashMap<Uuid, PlayState>>,
+    client_typing: Option<&HashMap<Uuid, PlayState>>,
 ) -> HashMap<Uuid, PlayState> {
     let mut merged = sim.cloned().unwrap_or_default();
-    if let Some(client) = client {
+    for client in [client_locomotion, client_typing].into_iter().flatten() {
         for (&id, &state) in client {
             let _prev = merged.insert(id, state);
         }
@@ -626,26 +656,30 @@ pub(crate) fn drive_avatar_skeletons(
         }
     }
     // Drop fully-eased-out motions (their ease-out tail has passed), and any
-    // stopped motion with no decodable asset to fade; forget emptied avatars. Both
-    // the simulator-driven set and the client-driven locomotion set (P31.6) are
-    // pruned the same way.
-    playback.playing.retain(|_agent, anims| {
-        retain_active(anims, now, &manager);
-        !anims.is_empty()
-    });
-    playback.client_locomotion.retain(|_agent, anims| {
-        retain_active(anims, now, &manager);
-        !anims.is_empty()
-    });
+    // stopped motion with no decodable asset to fade; forget emptied avatars. The
+    // simulator-driven set and both client-driven sets — locomotion (P31.6) and
+    // typing (P31.9) — are pruned the same way.
+    for set in [
+        &mut playback.playing,
+        &mut playback.client_locomotion,
+        &mut playback.client_typing,
+    ] {
+        set.retain(|_agent, anims| {
+            retain_active(anims, now, &manager);
+            !anims.is_empty()
+        });
+    }
     // Without the avatar asset library there are no skeleton instances to pose.
     let Some(body) = body else {
         playback.poses.clear();
         return;
     };
     // Resolve each avatar's blended per-joint pose from its playing motions — the
-    // union of the simulator-driven set and the own avatar's client locomotion.
+    // union of the simulator-driven set and the own avatar's client locomotion and
+    // typing sets.
     let mut agents: HashSet<AgentKey> = playback.playing.keys().copied().collect();
     agents.extend(playback.client_locomotion.keys().copied());
+    agents.extend(playback.client_typing.keys().copied());
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
     for agent in agents {
         // Only a rigged avatar (with skeleton-instance joints) can be posed.
@@ -655,6 +689,7 @@ pub(crate) fn drive_avatar_skeletons(
         let merged = merge_playing(
             playback.playing.get(&agent),
             playback.client_locomotion.get(&agent),
+            playback.client_typing.get(&agent),
         );
         if let Some(pose) = resolve_pose(&merged, now, &manager, |name| body.joint_index(name)) {
             let _prev = poses.insert(agent, pose);

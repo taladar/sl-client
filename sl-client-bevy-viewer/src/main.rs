@@ -39,6 +39,7 @@ mod sky;
 mod terrain;
 mod texture_anim;
 mod textures;
+mod typing;
 mod underwater_fog;
 mod water;
 
@@ -130,6 +131,7 @@ use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
     update_texture_caps,
 };
+use crate::typing::{TypingState, drive_own_typing};
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
 
@@ -504,6 +506,7 @@ fn run_session(
     .init_resource::<ParticleSim>()
     .init_resource::<AvatarState>()
     .init_resource::<AvatarControls>()
+    .init_resource::<TypingState>()
     .init_resource::<ControlAvatarState>()
     .init_resource::<ChatOverlay>()
     .init_resource::<TextureManager>()
@@ -800,6 +803,12 @@ fn run_session(
             drive_own_locomotion
                 .after(drive_avatar_controls)
                 .before(drive_avatar_skeletons),
+            // Typing state animation for the own avatar (P31.9): toggle the typing
+            // state (the T key stands in for a chat-entry box), play `ANIM_AGENT_TYPE`
+            // locally, and broadcast a `StartTyping` / `StopTyping` `ChatFromViewer`.
+            // Like locomotion it must reconcile its client-driven set before the
+            // skeleton driver folds it into the frame's pose.
+            drive_own_typing.before(drive_avatar_skeletons),
             drive_avatar_skeletons.after(apply_avatar_appearance),
             repeat_debug_animation,
             report_camera_interest,

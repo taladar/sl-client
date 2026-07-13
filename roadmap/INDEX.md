@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 38 |
+| ready | 37 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 441 |
+| done | 442 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **532** |
@@ -111,7 +111,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (38)
+## ready (37)
 
 ### viewer
 
@@ -128,8 +128,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Locomotion IK adjustments
 - [`viewer-p31-15`](ready/viewer-p31-15-activity-driven-reach-aim-lleditingmotion-lltargetingmotion.md)
   — Activity-driven reach / aim (LLEditingMotion / LLTargetingMotion)
-- [`viewer-p31-9`](ready/viewer-p31-9-typing-animation-sound.md) — Typing
-  animation & sound
 - [`viewer-p33-2`](ready/viewer-p33-2-per-object-local-reflection-probes.md) —
   Per-object local reflection probes
 - [`viewer-p33-3`](ready/viewer-p33-3-reflection-probe-brightness-calibration.md)
@@ -233,7 +231,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (441)
+## done (442)
 
 ### protocol
 
@@ -486,6 +484,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Interpolate avatar turning
 - [`viewer-p31-8`](done/viewer-p31-8-procedural-motion-adjustments-always-on-adjusters.md)
   — Procedural motion adjustments & always-on adjusters
+- [`viewer-p31-9`](done/viewer-p31-9-typing-animation-sound.md) — Typing
+  animation & sound
 - [`viewer-p32-1`](done/viewer-p32-1-ingest-flexible-object-data.md) — Ingest
   flexible-object data
 - [`viewer-p32-2`](done/viewer-p32-2-simulate.md) — Simulate
