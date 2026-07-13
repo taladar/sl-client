@@ -156,6 +156,16 @@ impl Session {
         self.circuit_id
     }
 
+    /// The avatar's own first (account) name, from the login credentials. Cases
+    /// that must supply a real, grid-present name at runtime — without baking an
+    /// avatar name into the source or the record — derive their query from this
+    /// (e.g. the `avatar-picker` name autocomplete searches for the agent's own
+    /// name, which the grid is guaranteed to hold).
+    #[must_use]
+    pub fn avatar_first_name(&self) -> &str {
+        self.avatar.first()
+    }
+
     /// A snapshot of the protocol diagnostics seen so far on this session.
     ///
     /// Diagnostics are collected on a background task, so a case that has just

@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 51 |
+| ready | 50 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 434 |
+| done | 435 |
 | deferred | 4 |
 | **total** | **532** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (51)
+## ready (50)
 
 ### viewer
 
@@ -126,8 +126,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-agent-alert`](ready/test-agent-alert-observe-agentalertmessage-alertmessage.md)
   — observe AgentAlertMessage / AlertMessage
-- [`test-avatar-picker`](ready/test-avatar-picker-avatar-picker-request.md) —
-  avatar picker request
 - [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
   — Calling card — [aditi] variant
 - [`test-chat-hear-other-aditi`](ready/test-chat-hear-other-aditi-add-the-aditi-variant.md)
@@ -221,7 +219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (434)
+## done (435)
 
 ### protocol
 
@@ -813,6 +811,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — rez attachment, then detach into inventory
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —
   write and read avatar notes
+- [`test-avatar-picker`](done/test-avatar-picker-avatar-picker-request.md) —
+  avatar picker request
 - [`test-avatar-properties`](done/test-avatar-properties-request-another-avatar-s-properties.md)
   — request another avatar's properties
 - [`test-baked-texture-upload`](done/test-baked-texture-upload-upload-a-client-baked-avatar-texture-over-the-uploadbakedtex.md)

@@ -70,6 +70,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::asset_decode::AssetDecode),
         Box::new(crate::cases::avatar_properties::AvatarProperties),
         Box::new(crate::cases::avatar_notes::AvatarNotes),
+        Box::new(crate::cases::avatar_picker::AvatarPicker),
         Box::new(crate::cases::profile_edit_roundtrip::ProfileEditRoundtrip),
         Box::new(crate::cases::picks_classifieds::PicksClassifieds),
         Box::new(crate::cases::display_names::DisplayNames),
