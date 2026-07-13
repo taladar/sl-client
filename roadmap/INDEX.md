@@ -12,11 +12,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 47 |
+| ready | 44 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 438 |
-| deferred | 4 |
+| deferred | 6 |
+| wont-do | 1 |
 | **total** | **532** |
 
 ## ideas (37)
@@ -91,7 +92,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (47)
+## ready (44)
 
 ### viewer
 
@@ -168,8 +169,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   observe KickUser handling
 - [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
   — Offline message fetch — [aditi] variant
-- [`test-parcel-voice-info`](ready/test-parcel-voice-info-request-parcel-voice-info.md)
-  — request parcel voice info
 - [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
   — Presence online/offline — [aditi] variant
 - [`test-reliable-retransmit`](ready/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
@@ -184,10 +183,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Teleport offer/accept — [aditi] variant
 - [`test-typing-indicator-aditi`](ready/test-typing-indicator-aditi-add-the-aditi-variant.md)
   — Typing indicator — [aditi] variant
-- [`test-voice-account`](ready/test-voice-account-provision-a-voice-account.md)
-  — provision a voice account
-- [`test-voice-signaling`](ready/test-voice-signaling-exchange-voice-signalling.md)
-  — exchange voice signalling
 
 ### repl
 
@@ -1049,7 +1044,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (4)
+## deferred (6)
 
 ### protocol
 
@@ -1070,3 +1065,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
+- [`test-voice-account`](deferred/test-voice-account-provision-a-voice-account.md)
+  — provision a voice account
+- [`test-voice-signaling`](deferred/test-voice-signaling-exchange-voice-signalling.md)
+  — exchange voice signalling
+
+## wont-do (1)
+
+### test
+
+- [`test-parcel-voice-info`](wont-do/test-parcel-voice-info-request-parcel-voice-info.md)
+  — request parcel voice info

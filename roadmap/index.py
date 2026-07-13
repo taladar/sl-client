@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 ROADMAP_DIR = Path(__file__).resolve().parent
-STATUSES = ["ideas", "ready", "in-progress", "bugs", "done", "deferred"]
+STATUSES = ["ideas", "ready", "in-progress", "bugs", "done", "deferred", "wont-do"]
 # Topic display order for the generated index.
 TOPICS = [
     "protocol",

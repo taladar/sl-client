@@ -28,7 +28,8 @@ multi-thousand-line file.
 | `in-progress/` | Tasks actively being worked on. |
 | `bugs/` | Known bugs / defects. |
 | `done/` | Completed work (kept for the record). |
-| `deferred/` | Explicitly parked or out-of-scope items. |
+| `deferred/` | Parked for now, but expected to be picked up later (e.g. blocked on a prerequisite not yet built). |
+| `wont-do/` | Decided against — will never be implemented (obsolete, superseded, or out of scope for good). |
 
 ## Topics and IDs
 
