@@ -1176,6 +1176,98 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   - Viewer-only (no runtime parity), like the P31.6 locomotion fallback; pure
     math unit-tested in `procedural.rs`, not live-verified (the sway is subtle).
 
+- **Phase 31 P31.12 head & eye look-at DONE (rotation only; blink split out).**
+  New `look_at.rs` module (not `procedural.rs` — it needs cross-frame state and
+  resources the input-free idle adjusters don't). Full design is in the roadmap/
+  viewer topic P31.12 Done note; don't restate. Durable facts NOT in
+  git/roadmap:
+  - **The whole port runs in the avatar-local Second Life frame** (root at
+    identity, `+X` forward, `+Z` up) — the same frame `deformed_world_matrices`
+    produces — so the reference's world-space head math drops its
+    `* ~rootRotWorld` inverse-root term and becomes a direct basis build. The
+    one thing that needs the Bevy world is turning a look-at *target point* into
+    a *direction in that local frame*: `root_global.rotation()` (the
+    `AvatarAnchor` global, which already carries the SL→Bevy basis change) maps
+    local→Bevy, so its inverse maps the Bevy head→target vector back. This
+    sidesteps needing the avatar's SL object rotation at all.
+  - **The pose pass now runs `deformed_world_matrices` TWICE for an avatar that
+    has a look-at target** — once to read the head/eye joint world positions the
+    aim needs, then again after folding the head/eye rotations. Untargeted
+    avatars still run it once (the eyes only jitter, needing no positions), so
+    the extra cost is paid only while actually gazing.
+  - **Eyes are folded as local joint rotations on `mEyeLeft`/`mEyeRight` (+ the
+    `mFaceEyeAlt*` pair when present); the eyeballs are rigid parts re-placed
+    from their eye joint's posed matrix, so the fold rotates them for free.**
+    The eye jitter is always-on (every rendered avatar's eyes drift), matching
+    the reference; only the *aim* + vergence gate on having a target.
+  - **The aim REPLACES the neck/head keyframe and is computed against the
+    animated spine's ACTUAL world rotation — two live-testing fixes.** First cut
+    folded the aim as `keyframe · delta` like the idle adjusters → the gaze
+    **drifted back to the animation's head angle every idle-loop cycle** (the
+    delta rode the looping head keyframe). Second cut replaced head/neck/torso
+    but computed their locals assuming a *rest* spine → with an animation
+    playing, the intermediate `mChest` keyframe (never accounted for) threw the
+    head off the target entirely → **no visible tracking at all**. Final design:
+    aim only `mNeck` + `mHead`, and derive each joint's *local* from its
+    **parent's actual current world rotation** read out of the pre-fold deformed
+    pass (`world0`, which already has the animation + idle folded in) —
+    `neck_local = neck_parent_world⁻¹ · neck_world`,
+    `head_local = neck_world⁻¹ · aim` — so the head lands exactly on the aim and
+    *holds*, whatever the animation does to the spine. The reference reads
+    `getWorldRotation()` live for the same reason. The reference's small
+    **torso lag is dropped**: driving `mTorso` would invalidate the `world0`
+    parent-world read for the neck (its `mChest` ancestor would have moved), so
+    `mChest`/`mTorso` are left to the animation. Aiming still `slerp`s
+    keyframe→absolute by an eased per-avatar `weight`
+    (`LOOK_AT_WEIGHT_HALF_LIFE`), 1 while a target exists and easing to 0 after,
+    so idle head motion returns smoothly. Consequence: the own avatar (always
+    has the camera target) always head-tracks, overriding idle head motion —
+    matching the reference's head-track priority.
+  - **The rotation LIMIT is applied relative to the animated upper body, not the
+    rest pose (third live-testing fix).** Clamping the aim to ±72° from *rest*
+    forward looked lopsided — an idle stand animation that turns the body a few
+    degrees made the head turn far over one shoulder but stop short the other.
+    So `head_target_rotation` now returns the aim **unconstrained** and
+    `apply_to_pose` clamps it in the neck-parent's frame
+    (`neck_parent_world · constrain(neck_parent_world⁻¹ · raw_aim)`) — exactly
+    why the reference constrains `targetHeadRotWorld · ~currentRootRotWorld`
+    rather than the world aim. Now the ±limit is symmetric about wherever the
+    body currently faces.
+  - **Own-avatar look-at targets the fly-camera's own position** (the avatar
+    tracks / makes eye contact with the viewer's camera) since the free-fly
+    camera has no mouselook / cursor-focus analog for the reference's
+    `LookAtPoint`. This was chosen over "aim along the camera forward" after
+    live testing: forward-aim turned the head a lot (`head_angle` ~1 rad in the
+    logs) but tracked a point *past* the avatar, so from behind one's own camera
+    it read as no/ambiguous motion; looking *at* the camera makes the head+eyes
+    visibly follow the viewer as you orbit. Others' look-at comes from the
+    `ViewerEffect` `LookAt` (already surfaced as
+    `SlSessionEvent::ViewerEffect`); its `GlobalCoordinates` target is placed
+    with the agent region's SW corner as the scene origin (as terrain does), and
+    targets expire after `LOOK_AT_TARGET_TTL` so a stale gaze relaxes to rest.
+  - **Saccades use a per-avatar deterministic SplitMix64 PRNG** seeded from the
+    agent uuid (no `rand` dep, no global RNG) — the reference's `ll_frand` table
+    is itself re-seeded every startup, so only the *character* matters. `f32` in
+    `[0,1)` is drawn cast-free via a 16-bit `u16::try_from` split (the
+    `no as`-conversions rule).
+  - **Added `ViewerEffect`/`ViewerEffectData`/`ViewerEffectType`/`LookAtType`
+    to the `sl-client-bevy` re-export** (were reachable in `sl-proto` but not
+    the Bevy façade the viewer imports from).
+  - **Blink deferred as a real prerequisite chain, not hand-waved:** it drives
+    `Blink_Left`/`Blink_Right` morph visual-params every frame, which the
+    appearance pipeline (bakes morphs into geometry once) cannot do. Split into
+    P31.12a (per-frame morph pipeline — also what P34 body-physics bounce needs)
+    and P31.12b (the blink timer itself, `Saccade` is its future home).
+  - Viewer-only (no runtime parity); the pure math is unit-tested in
+    `look_at.rs`. **Live-verified** via `SL_VIEWER_LOOK_AT_TEST=1` (forces every
+    avatar's head to crane ~72° left so the fold is unmistakable) +
+    `SL_VIEWER_LOG_LOOK_AT=1` (per-avatar target / applied head-angle /
+    head-joint log): heads turn and eyes shift, `mHead` resolves, and the own
+    avatar shows `target=true` (the camera path sets it). The **real**
+    own-avatar turn is invisible when the camera looks forward past the avatar
+    (look dir ≈ `+X` → identity) — aim the camera to a side to see it; idle
+    neighbours send no gaze, so `target=false` for them is correct, not a bug.
+
 - **Phase 32 P32.1 ingest flexible-object data DONE** (skipping the blocked
   P29.2 animesh + the rest of P31 per the user). Full design is in the roadmap/
   viewer topic P32.1 Done note; don't restate. Viewer-only (no runtime parity —

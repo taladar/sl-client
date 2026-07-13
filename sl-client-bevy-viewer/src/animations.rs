@@ -48,6 +48,7 @@ use sl_client_bevy::{
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarState};
+use crate::look_at::{LookAtJoints, LookAtMotion, LookAtTargets};
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -732,12 +733,19 @@ pub(crate) fn drive_avatar_skeletons(
 /// Bevy's dirty-bit transform propagation cannot recompute a static joint whose
 /// `GlobalTransform` the driver overwrote, so the driver owns every rigged avatar's
 /// joint globals outright.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries; the \
+              look-at fold (P31.12) adds the look-at target and motion resources"
+)]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
     playback: Res<AnimationPlayback>,
     library: Option<Res<AvatarAssetLibrary>>,
     body: Option<Res<AvatarBody>>,
     state: Res<AvatarState>,
+    look_targets: Res<LookAtTargets>,
+    mut look_motion: ResMut<LookAtMotion>,
     parts: Query<(Entity, &AvatarBodyPart)>,
     mut globals: Query<&mut GlobalTransform>,
 ) {
@@ -745,6 +753,8 @@ pub(crate) fn pose_avatar_skeletons(
         return;
     };
     let now = time.elapsed_secs();
+    let dt = time.delta_secs();
+    let look_debug = crate::look_at::LookAtDebug::from_env();
     for agent in state.rigged_agents() {
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
@@ -761,16 +771,66 @@ pub(crate) fn pose_avatar_skeletons(
             continue;
         };
         let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
-        let world = library
-            .skeleton()
-            .deformed_world_matrices(deform, &overrides, &pose);
         // The avatar-root global carries the SL → Bevy axis change and the world
         // placement; each joint's Bevy global is that composed with its Second Life
-        // world matrix. Copied out so the mutable joint writes below do not overlap
-        // the read.
+        // world matrix. Copied out so it survives the mutable joint writes below.
         let Ok(root_global) = globals.get(root) else {
             continue;
         };
+        let root_global = *root_global;
+        let skeleton = library.skeleton();
+        // Fold in the head & eye look-at adjusters (P31.12) before the final world
+        // matrices. When the avatar has a look-at target the head aim needs its head
+        // and eye joint world positions, so resolve them from an initial deformed
+        // pass; without one the eyes only jitter and the head relaxes to rest, so no
+        // positions are needed and the single pass below suffices.
+        let look_joints = LookAtJoints {
+            neck: body.joint_index("mNeck"),
+            head: body.joint_index("mHead"),
+            eye_left: body.joint_index("mEyeLeft"),
+            eye_right: body.joint_index("mEyeRight"),
+            alt_eye_left: body.joint_index("mFaceEyeAltLeft"),
+            alt_eye_right: body.joint_index("mFaceEyeAltRight"),
+        };
+        // With a target, resolve from an initial deformed pass (which already has
+        // the animation + idle pose folded in): the head / eye joint world positions
+        // the aim uses, plus the neck parent's current world rotation so the head is
+        // aimed against where the animated spine actually is. Without a target the
+        // eyes only jitter and the head relaxes, so none of this is needed.
+        let (head_pos, eye_positions, neck_parent_world) = if look_targets.point(agent).is_some() {
+            let world0 = skeleton.deformed_world_matrices(deform, &overrides, &pose);
+            let joint_pos = |index: Option<usize>| {
+                index
+                    .and_then(|i| world0.get(i))
+                    .map(|matrix| matrix.w_axis.truncate())
+            };
+            let eyes = joint_pos(look_joints.eye_left).zip(joint_pos(look_joints.eye_right));
+            // The neck joint's parent world rotation (avatar-local Second Life frame).
+            let neck_parent = look_joints
+                .neck
+                .and_then(|neck| skeleton.parents().get(neck).copied().flatten())
+                .and_then(|parent| world0.get(parent))
+                .map_or(Quat::IDENTITY, |matrix| {
+                    matrix.to_scale_rotation_translation().1
+                });
+            (joint_pos(look_joints.head), eyes, neck_parent)
+        } else {
+            (None, None, Quat::IDENTITY)
+        };
+        crate::look_at::apply(
+            &mut pose,
+            agent,
+            &look_targets,
+            &mut look_motion,
+            &root_global,
+            head_pos,
+            eye_positions,
+            look_joints,
+            neck_parent_world,
+            dt,
+            look_debug,
+        );
+        let world = skeleton.deformed_world_matrices(deform, &overrides, &pose);
         // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
         // `arithmetic_side_effects` lint the glam operators trip.
         let root_matrix = root_global.to_matrix();

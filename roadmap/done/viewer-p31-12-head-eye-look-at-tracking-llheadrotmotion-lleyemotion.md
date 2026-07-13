@@ -2,11 +2,21 @@
 id: viewer-p31-12
 title: Head & eye look-at tracking (LLHeadRotMotion / LLEyeMotion)
 topic: viewer
-status: ready
+status: done
 origin: VIEWER_ROADMAP.md — Simulator authority & the Firestorm motion model (read before P31.2)
+refs: [viewer-p31-12a, viewer-p31-12b]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Done (head & eye rotation only).** The look-at target sourcing (own avatar
+from the fly-camera, others from the sim-relayed `ViewerEffect` look-at),
+`LLHeadRotMotion` head/neck/torso lag, and the `LLEyeMotion` eye aim + saccades
+/ look-away jitter landed in `crate::look_at`. The **blink** was split out —
+it drives the `Blink_Left` / `Blink_Right` morph visual-params per frame, which
+needs a per-frame visual-param morph pipeline the appearance bake lacks:
+[[viewer-p31-12a]] (the pipeline prerequisite) and [[viewer-p31-12b]] (the blink
+itself).
 
 **P31.12. Head & eye look-at tracking (`LLHeadRotMotion` /
 `LLEyeMotion`).** The always-on adjusters split out of P31.8 that need a world
