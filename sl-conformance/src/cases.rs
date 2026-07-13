@@ -30,6 +30,7 @@ pub mod environment;
 pub mod estate_access;
 pub mod estate_info;
 pub mod event_info;
+pub mod experience_admin_contributor;
 pub mod experience_info;
 pub mod experience_permissions;
 pub mod friendship_offer_accept;
