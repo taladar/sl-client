@@ -75,6 +75,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::dir_places_land_classified::DirPlacesLandClassified),
         Box::new(crate::cases::event_info::EventInfo),
         Box::new(crate::cases::experience_info::ExperienceInfo),
+        Box::new(crate::cases::experience_permissions::ExperiencePermissions),
         Box::new(crate::cases::profile_edit_roundtrip::ProfileEditRoundtrip),
         Box::new(crate::cases::picks_classifieds::PicksClassifieds),
         Box::new(crate::cases::display_names::DisplayNames),
