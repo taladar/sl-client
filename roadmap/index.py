@@ -28,7 +28,23 @@ import sys
 from pathlib import Path
 
 ROADMAP_DIR = Path(__file__).resolve().parent
-STATUSES = ["ideas", "ready", "in-progress", "bugs", "done", "deferred", "wont-do"]
+STATUSES = [
+    "ideas",
+    "ready",
+    "blocked",
+    "in-progress",
+    "bugs",
+    "done",
+    "deferred",
+    "wont-do",
+]
+# A blocker counts as *cleared* only once the task it points at is done; any
+# other status leaves it *open* and still holding its dependents back.
+DONE_STATUSES = {"done"}
+# Statuses in which an open blocker is a contradiction: a task cannot be startable
+# (`ready`), being worked (`in-progress`), or finished (`done`) while a task it
+# depends on is not yet done. Such a task belongs in `blocked/`.
+BLOCK_INTOLERANT_STATUSES = {"ready", "in-progress", "done"}
 # Topic display order for the generated index.
 TOPICS = [
     "protocol",
@@ -75,6 +91,19 @@ class Task:
         seen = {}
         for ref in list(self.meta.get("refs", [])) + WIKILINK.findall(self.body):
             seen.setdefault(ref, None)
+        return list(seen)
+
+    @property
+    def blocked_by(self) -> list:
+        # The ids of tasks that must reach `done/` before this one may be worked.
+        # Normalised to a list (a lone scalar `blocked_by: id` parses to a str),
+        # de-duplicated while preserving first-seen order.
+        value = self.meta.get("blocked_by", [])
+        if isinstance(value, str):
+            value = [value] if value else []
+        seen = {}
+        for blocker in value:
+            seen.setdefault(blocker, None)
         return list(seen)
 
 
@@ -130,10 +159,13 @@ def load_tasks():
 def validate(tasks):
     """Return (errors, ref_warnings).
 
-    ``errors`` are always fatal (missing/duplicate id, status/directory
-    mismatch, unknown topic). ``ref_warnings`` are dangling ``[[ref]]`` links,
-    which are expected mid-migration (a ref may point at a topic not yet
-    migrated) and only become fatal under ``--check``."""
+    ``errors`` are always fatal: missing/duplicate id, status/directory
+    mismatch, unknown topic, and every ``blocked_by`` partial-ordering breach
+    (dangling/self/cyclic dependency, a `blocked/` task with no open blocker, a
+    startable/started/finished task with an open blocker). ``ref_warnings`` are
+    softer signals — dangling ``[[ref]]`` links (expected mid-migration) and a
+    dependency on a `wont-do/` task (a permanent block worth reconsidering) —
+    which print as warnings but become fatal under ``--check``."""
     errors = []
     ref_warnings = []
     ids = {}
@@ -158,7 +190,92 @@ def validate(tasks):
         for ref in task.refs:
             if ref not in ids:
                 ref_warnings.append(f"{task.path}: dangling ref '[[{ref}]]'")
+    validate_blocked_by(tasks, ids, errors, ref_warnings)
     return errors, ref_warnings
+
+
+def validate_blocked_by(tasks, ids, errors, ref_warnings):
+    """Check the ``blocked_by`` partial-ordering graph, appending to ``errors``
+    and ``ref_warnings`` in place.
+
+    Enforces that every declared blocker resolves, that no task blocks itself or
+    forms a dependency cycle, that a `blocked/` task has at least one *open* (not
+    yet done) blocker, and that no task in a
+    [block-intolerant status](BLOCK_INTOLERANT_STATUSES) still carries one. A
+    dependency on a `wont-do/` task is a soft warning: it can never clear, so the
+    dependent is parked forever and should be reconsidered."""
+    for task in tasks:
+        blockers = task.blocked_by
+        resolved = []
+        for blocker in blockers:
+            if blocker == task.id:
+                errors.append(f"{task.path}: task blocks itself via 'blocked_by'")
+                continue
+            other = ids.get(blocker)
+            if other is None:
+                errors.append(f"{task.path}: dangling blocked_by '{blocker}'")
+                continue
+            resolved.append(other)
+            if other.status_dir == "wont-do":
+                ref_warnings.append(
+                    f"{task.path}: blocked_by '{blocker}' is wont-do — a permanent "
+                    f"block; drop the dependency or reconsider this task"
+                )
+
+        open_blockers = [b for b in resolved if b.status_dir not in DONE_STATUSES]
+        if task.status_dir == "blocked" and not open_blockers:
+            if not blockers:
+                errors.append(
+                    f"{task.path}: in blocked/ but declares no 'blocked_by' — move "
+                    f"it to ready/ or add the blocker it waits on"
+                )
+            elif resolved:
+                # All declared blockers resolve and every one is done. (When none
+                # resolve, the dangling/self errors above already explain it.)
+                errors.append(
+                    f"{task.path}: in blocked/ but every blocker is done — move it "
+                    f"to ready/"
+                )
+        if task.status_dir in BLOCK_INTOLERANT_STATUSES and open_blockers:
+            names = ", ".join(f"'{b.id}' ({b.status_dir})" for b in open_blockers)
+            errors.append(
+                f"{task.path}: in {task.status_dir}/ but has open blocker(s) "
+                f"{names} — move it to blocked/"
+            )
+
+    detect_cycles(ids, errors)
+
+
+def detect_cycles(ids, errors):
+    """Append one error per ``blocked_by`` dependency cycle among resolvable ids.
+
+    A three-colour DFS: WHITE unvisited, GREY on the current path, BLACK fully
+    explored. An edge back to a GREY node closes a cycle, reported once as the
+    id chain from the re-entered node around to itself."""
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour = {task_id: WHITE for task_id in ids}
+    reported = set()
+
+    def visit(task_id, stack):
+        colour[task_id] = GREY
+        stack.append(task_id)
+        for blocker in ids[task_id].blocked_by:
+            if blocker not in ids or blocker == task_id:
+                continue  # dangling / self-loop already reported elsewhere
+            if colour[blocker] == GREY:
+                cycle = stack[stack.index(blocker) :] + [blocker]
+                key = frozenset(cycle)
+                if key not in reported:
+                    reported.add(key)
+                    errors.append("blocked_by cycle: " + " -> ".join(cycle))
+            elif colour[blocker] == WHITE:
+                visit(blocker, stack)
+        stack.pop()
+        colour[task_id] = BLACK
+
+    for task_id in ids:
+        if colour[task_id] == WHITE:
+            visit(task_id, [])
 
 
 def render_index(tasks) -> str:
@@ -175,6 +292,7 @@ def render_index(tasks) -> str:
         "",
     ]
     total = len(tasks)
+    status_by_id = {task.id: task.status_dir for task in tasks if task.id}
     counts = {status: 0 for status in STATUSES}
     for task in tasks:
         counts[task.status_dir] += 1
@@ -207,9 +325,26 @@ def render_index(tasks) -> str:
             for task in sorted(by_topic[topic], key=lambda t: t.id):
                 rel = task.path.relative_to(ROADMAP_DIR).as_posix()
                 title = task.title or task.id
-                lines.append(f"- [`{task.id}`]({rel}) — {title}")
+                suffix = blocked_by_suffix(task, status_by_id)
+                lines.append(f"- [`{task.id}`]({rel}) — {title}{suffix}")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def blocked_by_suffix(task, status_by_id) -> str:
+    """The ` (blocked by …)` annotation for a task's index line, or ``""``.
+
+    Lists each declared blocker as inline code; a blocker already in `done/` is
+    tagged ``(done)`` so a nearly-unblocked task is visible at a glance."""
+    if not task.blocked_by:
+        return ""
+    parts = []
+    for blocker in task.blocked_by:
+        if status_by_id.get(blocker) in DONE_STATUSES:
+            parts.append(f"`{blocker}` (done)")
+        else:
+            parts.append(f"`{blocker}`")
+    return " (blocked by " + ", ".join(parts) + ")"
 
 
 def main() -> int:

@@ -2,15 +2,17 @@
 id: test-voice-signaling
 title: exchange voice signalling
 topic: test
-status: deferred
+status: blocked
 origin: TEST_ROADMAP.md — Phase 17 — Voice signalling `[aditi] 1av`
+blocked_by: [test-voice-account]
 ---
 
 Context: [context/test.md](../context/test.md).
 
 `voice-signaling` — exchange voice signalling. `1av`/`2av`.
 
-**Deferred: needs the viewer's not-yet-built WebRTC voice engine.** The
+**Blocked on [[test-voice-account]] (itself blocked on the viewer's
+not-yet-built WebRTC voice engine).** The
 `VoiceSignalingRequest` capability trickles WebRTC ICE candidates keyed by the
 `viewer_session` from a prior WebRTC provision reply — both the candidates and
 the session come from a real WebRTC peer connection this signalling-only client

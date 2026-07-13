@@ -13,10 +13,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 37 |
 | ready | 41 |
+| blocked | 2 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 441 |
-| deferred | 6 |
+| deferred | 4 |
 | wont-do | 1 |
 | **total** | **532** |
 
@@ -181,6 +182,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 ### repl
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
+
+## blocked (2)
+
+### test
+
+- [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
+  — provision a voice account (blocked by `viewer-voice-audio`)
+- [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
+  — exchange voice signalling (blocked by `test-voice-account`)
 
 ## bugs (6)
 
@@ -1044,7 +1054,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (6)
+## deferred (4)
 
 ### protocol
 
@@ -1065,10 +1075,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
-- [`test-voice-account`](deferred/test-voice-account-provision-a-voice-account.md)
-  — provision a voice account
-- [`test-voice-signaling`](deferred/test-voice-signaling-exchange-voice-signalling.md)
-  — exchange voice signalling
 
 ## wont-do (1)
 
