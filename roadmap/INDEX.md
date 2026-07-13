@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 37 |
+| ideas | 38 |
 | ready | 35 |
 | blocked | 5 |
 | in-progress | 0 |
@@ -19,12 +19,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 445 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **534** |
+| **total** | **535** |
 
-## ideas (37)
+## ideas (38)
 
 ### viewer
 
+- [`viewer-beacons`](ideas/viewer-beacons.md) — Tracking beacons (map-position
+  beams) & their dismiss arrows (blocked by `viewer-ui-framework`)
 - [`viewer-camera-system`](ideas/viewer-camera-system.md) — Camera system
   (blocked by `viewer-input-system`, `viewer-ui-framework`)
 - [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
