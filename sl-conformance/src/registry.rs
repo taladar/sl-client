@@ -145,6 +145,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::gestures::Gestures),
         Box::new(crate::cases::economy_data::EconomyDataCase),
         Box::new(crate::cases::money_balance::MoneyBalanceCase),
+        Box::new(crate::cases::money_transfer::MoneyTransfer),
     ]
 }
 
