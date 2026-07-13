@@ -2,7 +2,7 @@
 id: test-dir-find-people-groups-events
 title: DirFindQuery across types
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 16 — Directory & search `[both]`
 ---
 
