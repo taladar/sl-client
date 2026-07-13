@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 48 |
+| ready | 47 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 437 |
+| done | 438 |
 | deferred | 4 |
 | **total** | **532** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (48)
+## ready (47)
 
 ### viewer
 
@@ -136,8 +136,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-event-info`](ready/test-event-info-event-info-notification-add-remove.md)
-  — event info / notification add-remove
 - [`test-experience-admin-contributor`](ready/test-experience-admin-contributor-admin-contributor-owned-region-queries.md)
   — admin / contributor / owned / region queries
 - [`test-experience-info`](ready/test-experience-info-info-find-by-name.md) —
@@ -215,7 +213,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (437)
+## done (438)
 
 ### protocol
 
@@ -841,6 +839,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   update estate access list
 - [`test-estate-info`](done/test-estate-info-request-estate-info-covenant.md) —
   request estate info / covenant
+- [`test-event-info`](done/test-event-info-event-info-notification-add-remove.md)
+  — event info / notification add-remove
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-terminate`](done/test-friendship-terminate-terminate-confirm-removal.md)

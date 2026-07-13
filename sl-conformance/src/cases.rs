@@ -29,6 +29,7 @@ pub mod economy_data;
 pub mod environment;
 pub mod estate_access;
 pub mod estate_info;
+pub mod event_info;
 pub mod friendship_offer_accept;
 pub mod friendship_terminate;
 pub mod gestures;
