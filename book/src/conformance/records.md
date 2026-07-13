@@ -39,6 +39,20 @@ Each run records:
 
 The history is capped at ten runs; git history preserves anything older.
 
+## No login identity in records
+
+Records deliberately carry **no avatar / login identity** — no `avatar` field,
+no First/Last name, no account id. Which avatar produced a run is irrelevant to
+the result, and committing a real login name (especially a Second Life account)
+is a lasting privacy leak once it is pushed. The runner keeps the avatar label
+only for the *gitignored* local aditi-login cooldown stamp, never in the record.
+
+More generally, **never commit a specific avatar name** — in a record, a commit
+message, a fixture, or prose. Where a document needs to distinguish avatars, use
+generic `avatar1` / `avatar2` labels. Real names belong only in the gitignored
+`credentials*.toml`. (Live-test assertion code may compare against a grid's
+returned display name, but avoid personally-identifying login names even there.)
+
 ## The behaviour-aware dirty rule
 
 A record stamps the commit at which a feature was last verified. A plain

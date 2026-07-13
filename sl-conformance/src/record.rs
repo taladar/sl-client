@@ -125,6 +125,12 @@ pub enum Outcome {
 }
 
 /// One recorded run of a test against a grid.
+///
+/// Deliberately carries **no avatar / login identity** (no name or account id):
+/// which avatar produced the run is irrelevant to the result, and a real login
+/// name is a lasting privacy leak once committed. Do not add an identity field
+/// here — the runner keeps the avatar label only for the gitignored aditi-login
+/// cooldown stamp. See `book/src/conformance/records.md`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Run {
     /// The behaviour-aware describe at which the run happened.
