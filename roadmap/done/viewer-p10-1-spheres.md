@@ -29,7 +29,7 @@ children — attachment parenting stays with the object entity in `objects.rs`,
 unchanged). The spheres sit in the root region's frame like `objects.rs` (no
 multi-region origin offset yet). New re-export: `CoarseLocation` from
 `sl-client-bevy`. Verified live on OpenSim with a second avatar (a
-`sl-repl-tokio` login of `Friend Tester`): the viewer spawns a sphere for its
+`sl-repl-tokio` login of `avatar2`): the viewer spawns a sphere for its
 own avatar and one for the second avatar. **Added on user request (beyond the
 base sphere spec):** a floating **name tag** per avatar — a `bevy_ui` text
 node anchored bottom-centre over the sphere each frame by projecting the
@@ -40,5 +40,5 @@ resolve once per agent through a `UUIDNameRequest`
 per-agent name cache (plus an "already requested" set) so a frequently-updated
 avatar is never re-requested; the tag shows a short id fragment until the real
 legacy name arrives. New re-export: `AvatarName` from `sl-client-bevy`.
-Verified live: the two tags resolve to `Avatar Tester` and `Friend Tester` and
+Verified live: the two tags resolve to `avatar1` and `avatar2` and
 render centred over their spheres (user-confirmed).

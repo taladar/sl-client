@@ -25,7 +25,7 @@ the case asserts the reply's `avatar_id` equals the requested target and
 differs from the logged-in primary, and that the grid returned real account
 data (a non-empty `born_on`) rather than the "profile not available"
 placeholder. The "other avatar" id is resolved per grid: OpenSim falls back to
-the local secondary test avatar (`Friend Tester`, a fixed-UUID account on the
+the local secondary test avatar (`avatar2`, a fixed-UUID account on the
 workspace grid) so no configuration is needed; Second Life has no built-in
 second avatar, so the aditi run reads the `other_avatar` configured in
 `fixtures.aditi.toml` (a new fixtures field), recording `partial` when that

@@ -15,7 +15,7 @@ the literal text `"typing"`, routed by the grid's IM service to one named
 recipient and carrying the canonical 1:1 session id (`agent_id XOR
 to_agent_id`) — the IM-session analogue of `typing-indicator`'s local-chat
 broadcast. The primary `Command::ImTyping`s `typing: true` then
-`typing: false` to the secondary (`Friend Tester`), which — a separate
+`typing: false` to the secondary (`avatar2`), which — a separate
 session — observes the matching `Event::ImTyping`s attributed to the primary
 on that session. The predicate matches the primary's `from_agent_id`, and the
 case asserts the observed `session_id` equals the canonical id of the

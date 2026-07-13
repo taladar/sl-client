@@ -546,7 +546,7 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   clump (rez trees still need the small ~0.5 scale).
 - **`.env` estate-owner login is currently broken** — `SL_ESTATE_OWNER_*` fails
   with `LoginRejected BadCredentials reason:"key"` on the local grid. The rez
-  examples run fine as the **primary** avatar (Avatar Tester); rezzing
+  examples run fine as the **primary** avatar (avatar1); rezzing
   grass/trees is not permission-gated on the local standalone. (Reset the
   estate-owner password in OpenSim `auth.db` if an estate/owner test needs it.)
 - **New R21 logged** (the roadmap/ viewer topic R section): a large flat

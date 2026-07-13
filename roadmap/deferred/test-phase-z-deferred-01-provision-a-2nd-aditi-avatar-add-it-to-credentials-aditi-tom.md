@@ -23,7 +23,7 @@ Provisioning needed:
   assertion (Phase 6).
 
 OpenSim `2av`/`3av` equivalents do NOT wait on Aditi — the local secondary
-`Friend Tester` already exists, extra console avatars are cheap, and the Phase 0
+`avatar2` already exists, extra console avatars are cheap, and the Phase 0
 tertiary-avatar harness support is the only prerequisite for OpenSim `3av`.
 
 Provision a 2nd Aditi avatar; add it to `credentials.aditi.toml`.

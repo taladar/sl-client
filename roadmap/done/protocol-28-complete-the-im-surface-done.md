@@ -46,7 +46,7 @@ give-folder buckets, the inventory-offer decode + accept/decline round-trip, the
 conference start/send/leave encodings and inbound decode, the
 `RetrieveInstantMessages` trigger, the `ReadOfflineMsgs` array decode, and the
 `ChatterBoxInvitation` decode). *Live-verified against the local OpenSim with
-two accounts (Avatar Tester + Friend Tester): A offered B a teleport (B received
+two accounts (avatar1 + avatar2): A offered B a teleport (B received
 the `LureUser` IM and declined), and A gave B a worn body-part item — B received
 the `InventoryOffered` IM (OpenSim having rewritten the session id to the copy
 id, as the viewer expects), accepted it into B's inventory root, and the

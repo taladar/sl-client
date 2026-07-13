@@ -24,7 +24,7 @@ Context: [context/inventory.md](../context/inventory.md).
       sharing one cache dir — first-login fetch-and-write, then
       second-login-load-and-skip — observable via the per-login
       `InventoryDescendents`-reply count it logs.
-- [x] Live verify on OpenSim (`opensim.service`, test avatar `Avatar Tester`):
+- [x] Live verify on OpenSim (`opensim.service`, test avatar `avatar1`):
       cold login fetched **68** folder-contents replies (80 sub-folders, 157
       items) and wrote `<uuid>.inv.llsd.gz` + `.lib.inv.llsd.gz` (version header
       `0x00000005`); warm login fetched **0** — the cache loaded and skipped all

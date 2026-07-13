@@ -141,8 +141,6 @@ pub struct Run {
     pub completeness_note: Option<String>,
     /// When the run was recorded (RFC 3339, UTC).
     pub recorded_at: String,
-    /// The credentials avatar label the run logged in as.
-    pub avatar: String,
     /// The version of this harness that produced the run.
     pub sl_conformance_version: String,
     /// The metrics the test wrote, keyed by name.
@@ -300,7 +298,6 @@ mod tests {
             completeness: Completeness::Complete,
             completeness_note: None,
             recorded_at: "2026-06-28T19:42:11Z".to_owned(),
-            avatar: "primary".to_owned(),
             sl_conformance_version: "0.1.0".to_owned(),
             metrics,
             metric_meta,

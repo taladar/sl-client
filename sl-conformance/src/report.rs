@@ -272,7 +272,6 @@ mod tests {
             completeness,
             completeness_note: None,
             recorded_at: "2026-06-28T00:00:00Z".to_owned(),
-            avatar: "primary".to_owned(),
             sl_conformance_version: "0.1.0".to_owned(),
             metrics,
             metric_meta,

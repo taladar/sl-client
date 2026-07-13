@@ -30,10 +30,10 @@ messages are filtered so blank lines never accumulate. Viewer-only, no
 library change: `ChatMessage`, `ChatType`, and the other chat value types
 were already re-exported from `sl-client-bevy`.
 Verified live on OpenSim with a second avatar (a `sl-repl-tokio` login of
-`Friend Tester` co-located in the Default Region): the viewer rendered all
-three volumes correctly — `Friend Tester: hello from Friend Tester`,
-`[whisper] Friend Tester: psst over here`, and
-`[shout] Friend Tester: HELLO EVERYONE` — and the lines persist in the corner
+`avatar2` co-located in the Default Region): the viewer rendered all
+three volumes correctly — `avatar2: hello from avatar2`,
+`[whisper] avatar2: psst over here`, and
+`[shout] avatar2: HELLO EVERYONE` — and the lines persist in the corner
 (user-confirmed).
 
 The remaining phases replace the placeholder avatar spheres (Phase 10) with real

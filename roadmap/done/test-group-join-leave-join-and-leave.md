@@ -21,7 +21,7 @@ two-event transition — `GroupsModule.LeaveGroupRequest` sends
 `AgentDropGroup` (`Event::DroppedFromGroup`), the membership-list update
 that proves the agent is genuinely out, not merely acked. The case asserts
 both so the leave is a real transition rather than a bare reply. Green on
-OpenSim (local secondary `Friend Tester`, Groups V2 enabled): create
+OpenSim (local secondary `avatar2`, Groups V2 enabled): create
 ≈ 0.20 s, join ≈ 0.12 s, leave ≈ 0.11 s loopback. **Pre-made-group reuse
 (new support):** group creation on Second Life costs **L$100**, an emptied
 group purges only ~48 h after dropping below two members, and the founder

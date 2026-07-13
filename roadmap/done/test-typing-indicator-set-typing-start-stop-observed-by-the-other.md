@@ -13,7 +13,7 @@ Context: [context/test.md](../context/test.md).
 `ChatFromViewer` with no text and a `StartTyping`/`StopTyping` chat type (the
 animation trigger a viewer fires while editing the chat bar); the simulator
 broadcasts it to nearby avatars, surfaced as `Event::ChatTyping`. The
-secondary (`Friend Tester`) sends `Command::Typing(true)` then
+secondary (`avatar2`) sends `Command::Typing(true)` then
 `Command::Typing(false)`, and the primary — a separate session sharing the
 region — observes `typing: true` then `typing: false`, both attributed to the
 secondary's agent id. Where `chat-hear-other` proves the simulator relays a

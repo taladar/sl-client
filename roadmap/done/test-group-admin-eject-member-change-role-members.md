@@ -32,7 +32,7 @@ state for the next run. The group comes from `support::membership_group`
 (index 0): a throwaway created per run on OpenSim (the primary becomes
 founder/owner, holding the `RoleAssignMember` + `MemberEject` powers), or a
 reused pre-made group on Second Life. Green on OpenSim (local secondary
-`Friend Tester`, Groups V2 enabled): create ≈ 0.43 s, role-add ≈ 48 ms,
+`avatar2`, Groups V2 enabled): create ≈ 0.43 s, role-add ≈ 48 ms,
 role-remove ≈ 68 ms, eject ≈ 82 ms loopback. `[opensim]` only; the Aditi
 variant — and a multi-member role/roster assertion that wants a **`3av`**
 third avatar — is deferred to Phase Z pending more Aditi avatars (and a

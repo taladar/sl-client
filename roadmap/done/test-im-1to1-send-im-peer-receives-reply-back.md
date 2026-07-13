@@ -13,7 +13,7 @@ Context: [context/test.md](../context/test.md).
 `ImprovedInstantMessage` with the `IM_NOTHING_SPECIAL` dialog
 (`ImDialog::Message`), routed by the grid's IM service rather than broadcast
 to the region like local chat. The primary `Command::InstantMessage`s the
-secondary (`Friend Tester`), which — a separate session — observes the
+secondary (`avatar2`), which — a separate session — observes the
 matching `Event::InstantMessageReceived` attributed to the primary, then
 replies with its own IM, and the primary observes the matching reply. Each
 direction tags its text with the sender's agent id so the predicate ignores

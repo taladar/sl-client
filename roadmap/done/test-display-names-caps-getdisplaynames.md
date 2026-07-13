@@ -26,7 +26,7 @@ lists Display Names under SL-only, but stock OpenSim *does* serve
 (`BunchOfCaps.cs`), returning the legacy name as a default
 (`is_display_name_default = true`) display name — so the read round-trip is
 assertable on both grids. The second avatar (the `other_avatar` fixture on SL,
-the local secondary `Friend Tester` on OpenSim) is added only to exercise
+the local secondary `avatar2` on OpenSim) is added only to exercise
 multi-id batching; its resolution is best-effort (recorded, not asserted),
 because OpenSim resolves only avatars its region user-management component
 already knows — the logged-in agent always, a not-recently-seen fixed-UUID

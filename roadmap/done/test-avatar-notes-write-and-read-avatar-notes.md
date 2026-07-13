@@ -21,7 +21,7 @@ note *toggles* between two fixed markers keyed off the last read, so every
 re-run is a real, detectable change and an interrupted run self-heals; after
 asserting, the case writes the original back to leave the profile as it found
 it. The "other avatar" is resolved per grid like `avatar-properties`: OpenSim
-falls back to the local secondary (`Friend Tester`, fixed UUID); Second Life
+falls back to the local secondary (`avatar2`, fixed UUID); Second Life
 reads the `other_avatar` fixture, `partial` if absent. **Live OpenSim finding
 (worked around, not fixed):** stock OpenSim leaves the `avatarnotesrequest`
 query *unanswered* — the same unresponsive-`GenericMessage` class

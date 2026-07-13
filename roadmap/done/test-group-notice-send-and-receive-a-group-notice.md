@@ -32,7 +32,7 @@ attachment — proving the notice was stored, not merely echoed, exercising the
 `support::membership_group` (index 0): a throwaway created per run on OpenSim,
 or a reused pre-made group on Second Life; the secondary leaves any group it
 joined, restoring a reused fixture to its founder-only state. Green on OpenSim
-(local secondary `Friend Tester`, Groups V2 enabled): create ≈ 0.32 s, join
+(local secondary `avatar2`, Groups V2 enabled): create ≈ 0.32 s, join
 ≈ 0.06 s, notice deliver ≈ 44 ms, history fetch ≈ 16 ms loopback (1 listed
 notice). `[both]`; the Aditi run is deferred with the batch (needs a second
 Aditi avatar and a configured pre-made group; no aditi record this session).
