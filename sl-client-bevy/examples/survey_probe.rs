@@ -224,6 +224,8 @@ fn on_events(
             | SlSessionEvent::TaskInventoryContents { .. }
             | SlSessionEvent::XferDownloaded { .. }
             | SlSessionEvent::ServerFileDownloaded { .. }
+            | SlSessionEvent::XferUploaded { .. }
+            | SlSessionEvent::XferAborted { .. }
             | SlSessionEvent::UserInfo(..)
             | SlSessionEvent::DeRezAck { .. }
             | SlSessionEvent::ForceObjectSelect { .. }

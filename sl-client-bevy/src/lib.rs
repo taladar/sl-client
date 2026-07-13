@@ -1993,6 +1993,14 @@ fn advance_running(
                     .request_region_terrain_download(viewer_filename, now)
                     .ok();
             }
+            Command::RequestRegionTerrainUpload {
+                viewer_filename,
+                data,
+            } => {
+                session
+                    .request_region_terrain_upload(viewer_filename, data.clone(), now)
+                    .ok();
+            }
             Command::UpdateEstateAccess { delta, target } => {
                 session.update_estate_access(*delta, *target, now).ok();
             }

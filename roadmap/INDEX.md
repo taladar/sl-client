@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 36 |
+| ready | 35 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 427 |
+| done | 428 |
 | deferred | 7 |
 | **total** | **513** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (36)
+## ready (35)
 
 ### viewer
 
@@ -160,8 +160,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — provoke and assert Error / FeatureDisabled
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
-- [`test-terrain-raw-transfer-upload`](ready/test-terrain-raw-transfer-upload-upload-a-raw-heightmap-over-the-xfer-path.md)
-  — upload a RAW heightmap over the Xfer path
 - [`test-voice-account`](ready/test-voice-account-provision-a-voice-account.md)
   — provision a voice account
 - [`test-voice-signaling`](ready/test-voice-signaling-exchange-voice-signalling.md)
@@ -191,7 +189,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (427)
+## done (428)
 
 ### protocol
 
@@ -933,6 +931,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — read the region's terrain detail assets and their elevation bands, and
 - [`test-terrain-raw-transfer-download`](done/test-terrain-raw-transfer-download-download-the-region-s-raw-heightmap-over-the-xfer-path.md)
   — download the region's RAW heightmap over the Xfer path
+- [`test-terrain-raw-transfer-upload`](done/test-terrain-raw-transfer-upload-upload-a-raw-heightmap-over-the-xfer-path.md)
+  — upload a RAW heightmap over the Xfer path
 - [`test-texture-fetch-http`](done/test-texture-fetch-http-http-caps-texture-fetch-decode-extends-asset-decode.md)
   — HTTP CAPS texture fetch + decode (extends asset-decode)
 - [`test-throttle-set`](done/test-throttle-set-apply-a-throttle-preset-and-confirm-it-is-accepted.md)

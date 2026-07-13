@@ -47,9 +47,9 @@ mod test {
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
-        AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardFolderDataBlock,
-        AcceptCallingCardTransactionBlockBlock, AgentDataUpdate, AgentDataUpdateAgentDataBlock,
-        AgentGroupDataUpdate, AgentGroupDataUpdateAgentDataBlock,
+        AbortXfer, AbortXferXferIDBlock, AcceptCallingCard, AcceptCallingCardAgentDataBlock,
+        AcceptCallingCardFolderDataBlock, AcceptCallingCardTransactionBlockBlock, AgentDataUpdate,
+        AgentDataUpdateAgentDataBlock, AgentGroupDataUpdate, AgentGroupDataUpdateAgentDataBlock,
         AgentGroupDataUpdateGroupDataBlock, AgentMovementComplete,
         AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
         AgentMovementCompleteSimDataBlock, AgentWearablesUpdate,
@@ -68,24 +68,25 @@ mod test {
         ChangeUserRightsRightsBlock, ChatFromSimulator, ChatFromSimulatorChatDataBlock,
         ClassifiedInfoReply, ClassifiedInfoReplyAgentDataBlock, ClassifiedInfoReplyDataBlock,
         CoarseLocationUpdate, CoarseLocationUpdateAgentDataBlock, CoarseLocationUpdateIndexBlock,
-        CoarseLocationUpdateLocationBlock, CrossedRegion, CrossedRegionAgentDataBlock,
-        CrossedRegionInfoBlock, CrossedRegionRegionDataBlock, DeRezAck,
-        DeRezAckTransactionDataBlock, DeclineCallingCard, DeclineCallingCardAgentDataBlock,
-        DeclineCallingCardTransactionBlockBlock, DirPeopleReply, DirPeopleReplyAgentDataBlock,
-        DirPeopleReplyQueryDataBlock, DirPeopleReplyQueryRepliesBlock, DisableSimulator,
-        EconomyData, EconomyDataInfoBlock, EjectGroupMemberReply,
-        EjectGroupMemberReplyAgentDataBlock, EjectGroupMemberReplyEjectDataBlock,
-        EjectGroupMemberReplyGroupDataBlock, Error as ErrorMessage, ErrorAgentDataBlock,
-        ErrorDataBlock, EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessage,
-        EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
-        EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
-        EventInfoReplyEventDataBlock, FeatureDisabled as WireFeatureDisabled,
-        FeatureDisabledFailureInfoBlock, FindAgent, FindAgentAgentBlockBlock,
-        FindAgentLocationBlockBlock, ForceObjectSelect, ForceObjectSelectDataBlock,
-        ForceObjectSelectHeaderBlock, GenericMessage, GenericMessageAgentDataBlock,
-        GenericMessageMethodDataBlock, GenericMessageParamListBlock, GenericStreamingMessage,
-        GenericStreamingMessageDataBlockBlock, GenericStreamingMessageMethodDataBlock,
-        GrantGodlikePowers, GrantGodlikePowersAgentDataBlock, GrantGodlikePowersGrantDataBlock,
+        CoarseLocationUpdateLocationBlock, ConfirmXferPacket, ConfirmXferPacketXferIDBlock,
+        CrossedRegion, CrossedRegionAgentDataBlock, CrossedRegionInfoBlock,
+        CrossedRegionRegionDataBlock, DeRezAck, DeRezAckTransactionDataBlock, DeclineCallingCard,
+        DeclineCallingCardAgentDataBlock, DeclineCallingCardTransactionBlockBlock, DirPeopleReply,
+        DirPeopleReplyAgentDataBlock, DirPeopleReplyQueryDataBlock,
+        DirPeopleReplyQueryRepliesBlock, DisableSimulator, EconomyData, EconomyDataInfoBlock,
+        EjectGroupMemberReply, EjectGroupMemberReplyAgentDataBlock,
+        EjectGroupMemberReplyEjectDataBlock, EjectGroupMemberReplyGroupDataBlock,
+        Error as ErrorMessage, ErrorAgentDataBlock, ErrorDataBlock, EstateCovenantReply,
+        EstateCovenantReplyDataBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock, EventInfoReply,
+        EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock,
+        FeatureDisabled as WireFeatureDisabled, FeatureDisabledFailureInfoBlock, FindAgent,
+        FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, ForceObjectSelect,
+        ForceObjectSelectDataBlock, ForceObjectSelectHeaderBlock, GenericMessage,
+        GenericMessageAgentDataBlock, GenericMessageMethodDataBlock, GenericMessageParamListBlock,
+        GenericStreamingMessage, GenericStreamingMessageDataBlockBlock,
+        GenericStreamingMessageMethodDataBlock, GrantGodlikePowers,
+        GrantGodlikePowersAgentDataBlock, GrantGodlikePowersGrantDataBlock,
         GroupAccountSummaryReply, GroupAccountSummaryReplyAgentDataBlock,
         GroupAccountSummaryReplyMoneyDataBlock, GroupActiveProposalItemReply,
         GroupActiveProposalItemReplyAgentDataBlock, GroupActiveProposalItemReplyProposalDataBlock,
@@ -142,23 +143,24 @@ mod test {
         RemoveInventoryItemAgentDataBlock, RemoveInventoryItemInventoryDataBlock,
         RemoveInventoryObjects, RemoveInventoryObjectsAgentDataBlock,
         RemoveInventoryObjectsFolderDataBlock, RemoveInventoryObjectsItemDataBlock,
-        ReplyTaskInventory, ReplyTaskInventoryInventoryDataBlock, ScriptDialog,
-        ScriptDialogButtonsBlock, ScriptDialogDataBlock, ScriptDialogOwnerDataBlock,
-        ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock, ScriptRunningReply,
-        ScriptRunningReplyScriptBlock, ScriptTeleportRequest, ScriptTeleportRequestDataBlock,
-        ScriptTeleportRequestOptionsBlock, SendXferPacket, SendXferPacketDataPacketBlock,
-        SendXferPacketXferIDBlock, SimStats, SimStatsPidStatBlock, SimStatsRegionBlock,
-        SimStatsRegionInfoBlock, SimStatsStatBlock, SimulatorViewerTimeMessage,
-        SimulatorViewerTimeMessageTimeInfoBlock, SoundTrigger, SoundTriggerSoundDataBlock,
-        TelehubInfo as TelehubInfoMessage, TelehubInfoSpawnPointBlockBlock,
-        TelehubInfoTelehubBlockBlock, TeleportFailed, TeleportFailedAlertInfoBlock,
-        TeleportFailedInfoBlock, TeleportFinish, TeleportFinishInfoBlock, TerminateFriendship,
-        TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock, UUIDNameReply,
-        UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
-        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
-        UseCachedMuteList, UseCachedMuteListAgentDataBlock, UserInfoReply,
-        UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
-        ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+        ReplyTaskInventory, ReplyTaskInventoryInventoryDataBlock, RequestXfer,
+        RequestXferXferIDBlock, ScriptDialog, ScriptDialogButtonsBlock, ScriptDialogDataBlock,
+        ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
+        ScriptQuestionExperienceBlock, ScriptRunningReply, ScriptRunningReplyScriptBlock,
+        ScriptTeleportRequest, ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
+        SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock, SimStats,
+        SimStatsPidStatBlock, SimStatsRegionBlock, SimStatsRegionInfoBlock, SimStatsStatBlock,
+        SimulatorViewerTimeMessage, SimulatorViewerTimeMessageTimeInfoBlock, SoundTrigger,
+        SoundTriggerSoundDataBlock, TelehubInfo as TelehubInfoMessage,
+        TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
+        TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
+        TeleportFinishInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
+        TerminateFriendshipExBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
+        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
+        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
+        UseCachedMuteListAgentDataBlock, UserInfoReply, UserInfoReplyAgentDataBlock,
+        UserInfoReplyUserDataBlock, ViewerEffect as ViewerEffectMessage,
+        ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
@@ -5603,6 +5605,246 @@ mod test {
         assert!(
             !sent.iter().any(|m| matches!(m, AnyMessage::RequestXfer(_))),
             "expected no RequestXfer for another agent's InitiateDownload"
+        );
+        Ok(())
+    }
+
+    /// Extracts the sole `SendXferPacket` from a batch of sent messages, failing
+    /// if there is not exactly one.
+    fn only_send_xfer_packet(sent: &[AnyMessage]) -> Result<&SendXferPacket, TestError> {
+        let mut found = sent.iter().filter_map(|m| match m {
+            AnyMessage::SendXferPacket(p) => Some(p),
+            _ => None,
+        });
+        let packet = found.next().ok_or("expected a SendXferPacket")?;
+        if found.next().is_some() {
+            return Err("expected exactly one SendXferPacket".into());
+        }
+        Ok(packet)
+    }
+
+    #[test]
+    fn terrain_upload_streams_over_xfer_on_request_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A 2500-byte RAW payload: a recognisable ramp so each streamed chunk can
+        // be checked in order. It spans three packets: 1000 + 1000 + 500.
+        let data: Vec<u8> = (0..2500u32)
+            .map(|i| u8::try_from(i & 0xFF).unwrap_or_default())
+            .collect();
+        session.request_region_terrain_upload("terrain.raw", data.clone(), now)?;
+
+        // Requesting the upload sends the `EstateOwnerMessage`/`terrain` trigger
+        // with the `["upload filename", <viewer name>]` parameters, and nothing
+        // streams until the simulator asks for the file.
+        let sent = drain(&mut session)?;
+        let estate = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::EstateOwnerMessage(e) => Some(e),
+                _ => None,
+            })
+            .ok_or("expected an EstateOwnerMessage")?;
+        assert_eq!(trimmed(&estate.method_data.method), "terrain");
+        assert_eq!(param_at(&estate.param_list, 0), "upload filename");
+        assert_eq!(param_at(&estate.param_list, 1), "terrain.raw");
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_))),
+            "expected no SendXferPacket before the RequestXfer"
+        );
+
+        // The simulator answers with a `RequestXfer` naming the same file and
+        // picking the transfer id.
+        let server_xfer_id = 0x1122_3344_5566_7788_u64;
+        let request = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: server_xfer_id,
+                filename: b"terrain.raw\0".to_vec(),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: uuid::Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&request, 9, true)?, now)?;
+
+        // First packet: sequence 0, a 4-byte little-endian total-size prefix, then
+        // the first 1000 bytes.
+        let sent = drain(&mut session)?;
+        let packet = only_send_xfer_packet(&sent)?;
+        assert_eq!(packet.xfer_id.id, server_xfer_id);
+        assert_eq!(packet.xfer_id.packet, 0);
+        assert_eq!(packet.data_packet.data.len(), 1004);
+        #[expect(
+            clippy::little_endian_bytes,
+            reason = "the Xfer first-packet size prefix is wire-defined little-endian"
+        )]
+        let prefix = 2500_u32.to_le_bytes();
+        assert_eq!(packet.data_packet.data.get(0..4), Some(prefix.as_slice()));
+        assert_eq!(packet.data_packet.data.get(4..), data.get(0..1000));
+
+        // Confirming packet 0 releases packet 1: sequence 1, the next 1000 bytes,
+        // no prefix.
+        let confirm0 = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: server_xfer_id,
+                packet: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&confirm0, 10, true)?, now)?;
+        let sent = drain(&mut session)?;
+        let packet = only_send_xfer_packet(&sent)?;
+        assert_eq!(packet.xfer_id.packet, 1);
+        assert_eq!(
+            Some(packet.data_packet.data.as_slice()),
+            data.get(1000..2000)
+        );
+
+        // Confirming packet 1 releases the final packet: sequence 2 with the
+        // high-bit end-of-file marker, the last 500 bytes.
+        let confirm1 = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: server_xfer_id,
+                packet: 1,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&confirm1, 11, true)?, now)?;
+        let sent = drain(&mut session)?;
+        let packet = only_send_xfer_packet(&sent)?;
+        assert_eq!(packet.xfer_id.packet, 2 | 0x8000_0000);
+        assert_eq!(
+            Some(packet.data_packet.data.as_slice()),
+            data.get(2000..2500)
+        );
+
+        // Confirming the final packet completes the upload and surfaces it.
+        let confirm2 = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: server_xfer_id,
+                packet: 2 | 0x8000_0000,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&confirm2, 12, true)?, now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_))),
+            "expected no further SendXferPacket after the final one is confirmed"
+        );
+        let uploaded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::XferUploaded {
+                    xfer_id,
+                    viewer_filename,
+                    byte_count,
+                } => Some((xfer_id, viewer_filename, byte_count)),
+                _ => None,
+            })
+            .ok_or("expected an XferUploaded event")?;
+        assert_eq!(uploaded.0.get(), server_xfer_id);
+        assert_eq!(uploaded.1, "terrain.raw");
+        assert_eq!(uploaded.2, 2500);
+        Ok(())
+    }
+
+    #[test]
+    fn request_xfer_for_unexpected_file_is_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A `RequestXfer` for a file we never offered must not stream anything
+        // (guards against uploading arbitrary files on a misrouted/spoofed
+        // request).
+        let request = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: 0x9999,
+                filename: b"secrets.raw\0".to_vec(),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: uuid::Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&request, 9, true)?, now)?;
+
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_))),
+            "expected no SendXferPacket for an unexpected RequestXfer"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn xfer_upload_aborted_by_simulator_surfaces_event() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let data = vec![7_u8; 26];
+        session.request_region_terrain_upload("terrain.raw", data, now)?;
+        drain(&mut session)?;
+
+        // The simulator asks for the file and we send the first packet.
+        let server_xfer_id = 0x4242_4242_u64;
+        let request = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: server_xfer_id,
+                filename: b"terrain.raw\0".to_vec(),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: uuid::Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&request, 9, true)?, now)?;
+        drain(&mut session)?;
+
+        // The simulator aborts the transfer; the client surfaces it and forgets
+        // the upload.
+        let abort = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: server_xfer_id,
+                result: -39,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&abort, 10, true)?, now)?;
+        let aborted = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::XferAborted { xfer_id, result } => Some((xfer_id, result)),
+                _ => None,
+            })
+            .ok_or("expected an XferAborted event")?;
+        assert_eq!(aborted.0.get(), server_xfer_id);
+        assert_eq!(aborted.1, -39);
+
+        // A late confirmation for the aborted upload must be a no-op.
+        let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+            xfer_id: ConfirmXferPacketXferIDBlock {
+                id: server_xfer_id,
+                packet: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&confirm, 11, true)?, now)?;
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_))),
+            "expected no SendXferPacket after an aborted upload"
         );
         Ok(())
     }

@@ -703,6 +703,8 @@ impl Survey {
             | Event::TaskInventoryContents { .. }
             | Event::XferDownloaded { .. }
             | Event::ServerFileDownloaded { .. }
+            | Event::XferUploaded { .. }
+            | Event::XferAborted { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }

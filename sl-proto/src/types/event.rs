@@ -676,6 +676,34 @@ pub enum Event {
         /// The complete downloaded file bytes.
         data: Vec<u8>,
     },
+    /// An outbound `Xfer` file **upload** finished — the simulator confirmed the
+    /// final packet. Today the only trigger is the region **terrain RAW** upload
+    /// (`EstateOwnerMessage`/`terrain` `["upload filename", …]`, see
+    /// [`Session::request_region_terrain_upload`](crate::Session::request_region_terrain_upload)):
+    /// the client streams the RAW heightmap up over `Xfer`, the simulator loads
+    /// it and re-broadcasts the changed terrain as
+    /// [`Event::TerrainPatch`](Event::TerrainPatch)es.
+    XferUploaded {
+        /// The simulator-assigned transfer id from the `RequestXfer` that started
+        /// the upload.
+        xfer_id: XferId,
+        /// The viewer-side filename the upload was named with.
+        viewer_filename: String,
+        /// The number of file bytes uploaded.
+        byte_count: usize,
+    },
+    /// An in-flight `Xfer` transfer (upload or download) was aborted by the
+    /// simulator (`AbortXfer`), so it will not complete. Surfaced so a caller
+    /// waiting on [`Event::XferUploaded`](Event::XferUploaded) /
+    /// [`Event::ServerFileDownloaded`](Event::ServerFileDownloaded) is not left
+    /// hanging.
+    XferAborted {
+        /// The transfer id that was aborted.
+        xfer_id: XferId,
+        /// The simulator's abort reason code (an `LLTErrorCode`; negative on
+        /// error, per the reference viewer).
+        result: i32,
+    },
     /// The agent's own account contact preferences (`UserInfoReply`), in reply
     /// to a `UserInfoRequest`.
     UserInfo(UserInfo),

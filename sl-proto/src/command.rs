@@ -1037,6 +1037,22 @@ pub enum Command {
         /// back on the completion event and otherwise opaque to the simulator.
         viewer_filename: String,
     },
+    /// Upload `data` as the current region's terrain, an LL **RAW** heightmap,
+    /// over the legacy `Xfer` path (`EstateOwnerMessage`/`terrain`
+    /// `["upload filename", …]`). The simulator answers with a `RequestXfer`,
+    /// which the session follows to stream the RAW up one `SendXferPacket` at a
+    /// time; the final confirmation surfaces as
+    /// [`Event::XferUploaded`](crate::Event::XferUploaded), and the simulator
+    /// then re-broadcasts the changed terrain as
+    /// [`Event::TerrainPatch`](crate::Event::TerrainPatch)es. Region-owner/god
+    /// gated.
+    RequestRegionTerrainUpload {
+        /// The local viewer-side filename the upload is labelled with; echoed by
+        /// the simulator in its `RequestXfer` and otherwise opaque.
+        viewer_filename: String,
+        /// The RAW heightmap bytes to upload.
+        data: Vec<u8>,
+    },
     /// Add/remove an agent or group on an estate access list (`estateaccessdelta`).
     UpdateEstateAccess {
         /// Which list change to apply.

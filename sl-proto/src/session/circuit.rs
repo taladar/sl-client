@@ -190,7 +190,8 @@ use sl_wire::messages::{
     RezSingleAttachmentFromInvAgentDataBlock, RezSingleAttachmentFromInvObjectDataBlock,
     ScriptAnswerYes, ScriptAnswerYesAgentDataBlock, ScriptAnswerYesDataBlock, ScriptDialogReply,
     ScriptDialogReplyAgentDataBlock, ScriptDialogReplyDataBlock, SendPostcard,
-    SendPostcardAgentDataBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
+    SendPostcardAgentDataBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+    SendXferPacketXferIDBlock, SetGroupAcceptNotices, SetGroupAcceptNoticesAgentDataBlock,
     SetGroupAcceptNoticesDataBlock, SetGroupAcceptNoticesNewDataBlock, SetGroupContribution,
     SetGroupContributionAgentDataBlock, SetGroupContributionDataBlock, StartLure,
     StartLureAgentDataBlock, StartLureInfoBlock, StartLureTargetDataBlock, StartPingCheck,
@@ -2133,6 +2134,30 @@ impl Circuit {
             xfer_id: ConfirmXferPacketXferIDBlock {
                 id: xfer_id.get(),
                 packet,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `SendXferPacket` reliably, streaming one chunk of an outbound
+    /// `Xfer` upload. `packet` is the encoded packet number: the low 31 bits are
+    /// the sequence (0 for the first packet), the high bit set on the final one.
+    /// `data` is the raw chunk — for the first packet (sequence 0) the caller has
+    /// already prepended the 4-byte little-endian total-size prefix.
+    pub(crate) fn send_xfer_packet(
+        &mut self,
+        xfer_id: XferId,
+        packet: u32,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id.get(),
+                packet,
+            },
+            data_packet: SendXferPacketDataPacketBlock {
+                data: data.to_vec(),
             },
         });
         self.send(&message, Reliability::Reliable, now)

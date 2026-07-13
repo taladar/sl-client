@@ -42,8 +42,8 @@ use super::{
     InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
     MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
     SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, VoiceChannelInfo, XferDownload, XferPurpose, deadline,
-    merge_deadline,
+    TeleportPhase, TextureDownload, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE, XferDownload,
+    XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -199,6 +199,8 @@ impl Session {
             agent_appearance_service: None,
             login_account: None,
             xfer_downloads: BTreeMap::new(),
+            pending_xfer_uploads: BTreeMap::new(),
+            xfer_uploads: BTreeMap::new(),
             next_xfer_id: XferId(1),
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
@@ -2956,6 +2958,61 @@ impl Session {
                     if is_last && let Some(download) = self.xfer_downloads.remove(&xfer_id) {
                         self.finish_xfer_download(xfer_id, download)?;
                     }
+                }
+            }
+            AnyMessage::RequestXfer(request) => {
+                // The simulator is asking us to stream up a file it named — the
+                // answer to a client upload trigger (today only the region
+                // terrain RAW upload). It picks the `XferId`. Only honour it for
+                // a file we explicitly offered (mirrors the reference viewer's
+                // `expectFileForTransfer` gate), then send the first packet.
+                let filename = trimmed_string(&request.xfer_id.filename);
+                if let Some(data) = self.pending_xfer_uploads.remove(&filename) {
+                    let xfer_id = XferId(request.xfer_id.id);
+                    self.xfer_uploads.insert(
+                        xfer_id,
+                        XferUpload {
+                            viewer_filename: filename,
+                            data,
+                            sent: 0,
+                            next_sequence: 0,
+                            last_sent: false,
+                        },
+                    );
+                    self.send_next_xfer_upload_packet(xfer_id, now)?;
+                }
+            }
+            AnyMessage::ConfirmXferPacket(confirm) => {
+                // The simulator confirmed the packet we last sent for an outbound
+                // upload; release the next one, or finish if that was the final
+                // packet. `Xfer` upload is strictly one-packet-at-a-time.
+                let xfer_id = XferId(confirm.xfer_id.id);
+                if let Some(upload) = self.xfer_uploads.get(&xfer_id) {
+                    if upload.last_sent {
+                        if let Some(upload) = self.xfer_uploads.remove(&xfer_id) {
+                            self.events.push_back(Event::XferUploaded {
+                                xfer_id,
+                                viewer_filename: upload.viewer_filename,
+                                byte_count: upload.data.len(),
+                            });
+                        }
+                    } else {
+                        self.send_next_xfer_upload_packet(xfer_id, now)?;
+                    }
+                }
+            }
+            AnyMessage::AbortXfer(abort) => {
+                // Either side can abort an in-flight transfer. Drop any matching
+                // upload or download and surface the reason so a caller waiting on
+                // completion is not left hanging.
+                let xfer_id = XferId(abort.xfer_id.id);
+                let aborted = self.xfer_uploads.remove(&xfer_id).is_some()
+                    || self.xfer_downloads.remove(&xfer_id).is_some();
+                if aborted {
+                    self.events.push_back(Event::XferAborted {
+                        xfer_id,
+                        result: abort.xfer_id.result,
+                    });
                 }
             }
             AnyMessage::ImageData(image) => {
@@ -6916,6 +6973,52 @@ impl Session {
         Ok(())
     }
 
+    /// Streams the next chunk of the in-flight outbound `Xfer` upload `xfer_id`
+    /// as a `SendXferPacket`. The first packet (sequence 0) carries a 4-byte
+    /// little-endian total-size prefix before the data; the final packet sets the
+    /// high-bit end-of-file marker in its packet number. A no-op if the upload is
+    /// already gone. Advances the upload's cursor so the next
+    /// `ConfirmXferPacket` sends the following chunk.
+    fn send_next_xfer_upload_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
+        let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) else {
+            return Ok(());
+        };
+        let sequence = upload.next_sequence;
+        let is_first = sequence == 0;
+        let remaining = upload.data.len().saturating_sub(upload.sent);
+        let take = remaining.min(XFER_UPLOAD_CHUNK_SIZE);
+        let end = upload.sent.saturating_add(take);
+        let chunk = upload.data.get(upload.sent..end).unwrap_or(&[]);
+        // The first packet is prefixed with the total file size (little-endian
+        // u32), matching the reference viewer's `LLXfer::sendPacket`.
+        let mut payload = Vec::with_capacity(take.saturating_add(4));
+        if is_first {
+            #[expect(
+                clippy::little_endian_bytes,
+                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
+            )]
+            let total_le = u32::try_from(upload.data.len())
+                .unwrap_or(u32::MAX)
+                .to_le_bytes();
+            payload.extend_from_slice(&total_le);
+        }
+        payload.extend_from_slice(chunk);
+        upload.sent = end;
+        let is_last = upload.sent >= upload.data.len();
+        upload.last_sent = is_last;
+        upload.next_sequence = sequence.wrapping_add(1);
+        // The high bit of the packet number marks the final packet.
+        let packet = if is_last {
+            sequence | 0x8000_0000
+        } else {
+            sequence
+        };
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_xfer_packet(xfer_id, packet, &payload, now)?;
+        }
+        Ok(())
+    }
+
     /// Downloads an arbitrary named file over the legacy `Xfer` path
     /// (`RequestXfer`), surfacing the assembled bytes as
     /// [`Event::XferDownloaded`] tagged with the returned [`XferId`]. This is the
@@ -9617,6 +9720,41 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let params = ["download filename".to_owned(), viewer_filename.to_owned()];
         circuit.send_estate_owner_message("terrain", &params, now)?;
+        Ok(())
+    }
+
+    /// Uploads `data` as the current region's terrain, an LL **RAW** heightmap,
+    /// over the legacy `Xfer` path. Sends an `EstateOwnerMessage`/`terrain` with
+    /// the `["upload filename", <viewer_filename>]` parameters and registers the
+    /// bytes as an offered upload; the simulator answers with a `RequestXfer`
+    /// naming that filename, which this session follows to stream the RAW up one
+    /// `SendXferPacket` at a time (each released by the previous packet's
+    /// `ConfirmXferPacket`). When the final packet is confirmed the upload
+    /// surfaces as [`Event::XferUploaded`]; the simulator then loads the
+    /// heightmap and re-broadcasts the changed terrain as
+    /// [`Event::TerrainPatch`](crate::Event::TerrainPatch)es.
+    ///
+    /// `viewer_filename` is the local name the upload is labelled with; the
+    /// simulator echoes it back in its `RequestXfer` (the reference viewer passes
+    /// the picked file's path, e.g. `terrain.raw`). The command is
+    /// region-owner/god gated — a non-owner gets no `RequestXfer`. There is no
+    /// capability for this on either grid, so it always rides `Xfer`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn request_region_terrain_upload(
+        &mut self,
+        viewer_filename: &str,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let params = ["upload filename".to_owned(), viewer_filename.to_owned()];
+        circuit.send_estate_owner_message("terrain", &params, now)?;
+        self.pending_xfer_uploads
+            .insert(viewer_filename.to_owned(), data);
         Ok(())
     }
 

@@ -1293,6 +1293,9 @@ impl Client {
                         Some(Command::RequestRegionTerrainDownload { viewer_filename }) => {
                             self.session.request_region_terrain_download(&viewer_filename, Instant::now())?;
                         }
+                        Some(Command::RequestRegionTerrainUpload { viewer_filename, data }) => {
+                            self.session.request_region_terrain_upload(&viewer_filename, data, Instant::now())?;
+                        }
                         Some(Command::UpdateEstateAccess { delta, target }) => {
                             self.session.update_estate_access(delta, target, Instant::now())?;
                         }

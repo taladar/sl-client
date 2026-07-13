@@ -701,6 +701,40 @@ struct XferDownload {
     buffer: Vec<u8>,
 }
 
+/// The maximum number of file bytes carried in a single outbound
+/// `SendXferPacket`, matching the reference viewer's default `LL_XFER_CHUNK_SIZE`
+/// (the small-payload size used when the `RequestXfer` did not ask for big
+/// packets, as OpenSim's terrain upload does not). The first packet additionally
+/// carries a 4-byte length prefix on top of this.
+pub(crate) const XFER_UPLOAD_CHUNK_SIZE: usize = 1000;
+
+/// An in-flight outbound `Xfer` file upload: the file bytes and how far we have
+/// streamed them. Registered by a `RequestXfer` the simulator sends in answer to
+/// a client trigger (today only `EstateOwnerMessage`/`terrain`
+/// `["upload filename", …]`, see
+/// [`Session::request_region_terrain_upload`](Session::request_region_terrain_upload)),
+/// and keyed by the **simulator-assigned** [`XferId`] in
+/// [`Session::xfer_uploads`](Session::xfer_uploads). Unlike downloads, the
+/// simulator drives the pacing: each `SendXferPacket` we queue is released only
+/// once the previous one's `ConfirmXferPacket` arrives.
+#[derive(Debug)]
+struct XferUpload {
+    /// The viewer-side filename this upload was named with, echoed back on
+    /// [`Event::XferUploaded`](crate::Event::XferUploaded) once the final packet
+    /// is confirmed.
+    viewer_filename: String,
+    /// The complete file bytes being streamed out.
+    data: Vec<u8>,
+    /// How many bytes of [`data`](Self::data) have already been sent.
+    sent: usize,
+    /// The sequence number to assign the next `SendXferPacket` (the first packet
+    /// is sequence 0).
+    next_sequence: u32,
+    /// Whether the final packet (with the high-bit end-of-file marker) has been
+    /// sent and is only awaiting its confirmation.
+    last_sent: bool,
+}
+
 /// The UDP circuit to a single simulator.
 #[derive(Debug)]
 struct Circuit {
@@ -1042,6 +1076,20 @@ pub struct Session {
     /// `ReplyTaskInventory`, or [`Session::request_xfer`]; the single
     /// `SendXferPacket` handler drains and routes them.
     xfer_downloads: BTreeMap<XferId, XferDownload>,
+    /// Files offered for outbound `Xfer` upload but not yet requested, keyed by
+    /// the filename we named to the simulator. When the simulator answers a
+    /// client upload trigger (today `EstateOwnerMessage`/`terrain`
+    /// `["upload filename", …]`) with a `RequestXfer` naming this filename, the
+    /// bytes move into [`xfer_uploads`](Self::xfer_uploads) under the
+    /// simulator-assigned [`XferId`] and start streaming. Mirrors the reference
+    /// viewer's `expectFileForTransfer` registry: we only upload a file the
+    /// caller explicitly offered.
+    pending_xfer_uploads: BTreeMap<String, Vec<u8>>,
+    /// In-flight outbound `Xfer` file uploads, keyed by the **simulator-assigned**
+    /// [`XferId`] from the `RequestXfer`. Each `ConfirmXferPacket` releases the
+    /// next `SendXferPacket`; the final confirmation surfaces
+    /// [`Event::XferUploaded`](crate::Event::XferUploaded).
+    xfer_uploads: BTreeMap<XferId, XferUpload>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: XferId,
     /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked
