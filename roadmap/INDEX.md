@@ -12,10 +12,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 37 |
-| ready | 35 |
+| ready | 34 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 428 |
+| done | 429 |
 | deferred | 7 |
 | **total** | **513** |
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox)
 
-## ready (35)
+## ready (34)
 
 ### viewer
 
@@ -134,8 +134,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — DirFindQuery across types
 - [`test-dir-places-land-classified`](ready/test-dir-places-land-classified-places-land-classified-queries.md)
   — places / land / classified queries
-- [`test-economy-data`](ready/test-economy-data-request-economy-data.md) —
-  request economy data
 - [`test-event-info`](ready/test-event-info-event-info-notification-add-remove.md)
   — event info / notification add-remove
 - [`test-experience-admin-contributor`](ready/test-experience-admin-contributor-admin-contributor-owned-region-queries.md)
@@ -189,7 +187,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (428)
+## done (429)
 
 ### protocol
 
@@ -801,6 +799,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-economy-data`](done/test-economy-data-request-economy-data.md) —
+  request economy data
 - [`test-environment`](done/test-environment-request-environment-settings.md) —
   request environment settings
 - [`test-estate-access`](done/test-estate-access-update-estate-access-list.md) —

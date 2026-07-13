@@ -2,7 +2,7 @@
 id: test-economy-data
 title: request economy data
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 15 — Money & economy `[both]`
 ---
 

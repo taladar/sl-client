@@ -22,6 +22,7 @@ pub mod chat_whisper_shout_range;
 pub mod current_outfit_folder;
 pub mod display_names;
 pub mod draw_distance;
+pub mod economy_data;
 pub mod environment;
 pub mod estate_access;
 pub mod estate_info;
