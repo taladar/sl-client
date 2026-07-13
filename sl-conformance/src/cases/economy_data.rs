@@ -65,19 +65,22 @@ impl GridTest for EconomyDataCase {
 
             // The prices are grid policy (OpenSim's defaults are not SL's), so
             // assert only the region capacity is coherent: a positive object
-            // capacity, with the current count within it.
+            // capacity (Land Impact budget), with the current usage within it.
+            // The Land Impact fields are `u32`, so non-negativity is guaranteed
+            // by the type; the meaningful checks are a non-zero budget and a
+            // usage that does not exceed it.
             check(
-                data.object_capacity > 0,
+                data.object_capacity.0 > 0,
                 "expected a positive region object capacity in the economy data",
             )?;
             check(
-                data.object_count >= 0 && data.object_count <= data.object_capacity,
-                "expected the region object count to be within [0, capacity]",
+                data.object_count <= data.object_capacity,
+                "expected the region object usage to be within the capacity",
             )?;
 
             let metrics = ctx.metrics();
-            metrics.set("object_capacity", i64::from(data.object_capacity));
-            metrics.set("object_count", i64::from(data.object_count));
+            metrics.set("object_capacity", i64::from(data.object_capacity.0));
+            metrics.set("object_count", i64::from(data.object_count.0));
             metrics.set(
                 "price_upload",
                 i64::try_from(data.price_upload.0).unwrap_or(-1),

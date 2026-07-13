@@ -956,18 +956,19 @@ pub(crate) fn server_appearance_update_from_llsd(body: &Llsd) -> Event {
 
 /// Builds [`EconomyData`] from an `EconomyData` message's info block.
 ///
-/// The L$ price fields are decoded at the codec boundary
-/// ([`linden_from_wire`](crate::types::linden_from_wire)); a negative price
-/// (which a conforming simulator never sends) rejects the whole message with
-/// [`WireError::ValueOutOfRange`].
+/// The L$ price fields and the Land Impact capacity/count fields are decoded at
+/// the codec boundary ([`linden_from_wire`](crate::types::linden_from_wire) /
+/// [`land_impact_from_wire`](crate::types::land_impact_from_wire)); a negative
+/// value (which a conforming simulator never sends) rejects the whole message
+/// with [`WireError::ValueOutOfRange`].
 pub(crate) fn economy_data(
     data: &sl_wire::messages::EconomyData,
 ) -> Result<EconomyData, sl_wire::WireError> {
-    use crate::types::linden_from_wire;
+    use crate::types::{land_impact_from_wire, linden_from_wire};
     let info = &data.info;
     Ok(EconomyData {
-        object_capacity: info.object_capacity,
-        object_count: info.object_count,
+        object_capacity: land_impact_from_wire("ObjectCapacity", info.object_capacity)?,
+        object_count: land_impact_from_wire("ObjectCount", info.object_count)?,
         price_energy_unit: linden_from_wire("PriceEnergyUnit", info.price_energy_unit)?,
         price_object_claim: linden_from_wire("PriceObjectClaim", info.price_object_claim)?,
         price_public_object_decay: linden_from_wire(

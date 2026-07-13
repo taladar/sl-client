@@ -199,6 +199,29 @@ pub(crate) fn linden_from_wire(
     }
 }
 
+/// Decode a non-negative Land Impact wire field (a signed 32-bit integer) into
+/// a [`LandImpact`](crate::types::LandImpact).
+///
+/// This is the codec boundary for the region object-budget fields (the
+/// `ObjectCapacity` / `ObjectCount` of an `EconomyData` reply), which a
+/// conforming simulator only ever sends non-negative. A negative value is
+/// rejected with
+/// [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) rather
+/// than silently coerced, so a malformed message is dropped (and surfaced as a
+/// diagnostic) instead of masquerading as `0`.
+pub(crate) fn land_impact_from_wire(
+    field: &'static str,
+    value: i32,
+) -> Result<crate::types::LandImpact, sl_wire::WireError> {
+    match u32::try_from(value) {
+        Ok(magnitude) => Ok(crate::types::LandImpact(magnitude)),
+        Err(_negative) => Err(sl_wire::WireError::ValueOutOfRange {
+            field,
+            value: i64::from(value),
+        }),
+    }
+}
+
 /// Encode a [`LindenAmount`](sl_types::money::LindenAmount) back into a signed
 /// 32-bit L$ wire field, the inverse of [`linden_from_wire`].
 ///
@@ -386,7 +409,7 @@ pub use directory::{
     DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,
 };
 pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
-pub use economy::{EconomyData, MoneyBalance, MoneyTransaction, MoneyTransactionType};
+pub use economy::{EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType};
 pub use editing::{
     ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,

@@ -24,7 +24,7 @@ mod test {
         ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolder,
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, InventoryOwner, InventoryType, InviteChannel, ItemInfo, LandArea,
-        LandBrushAction, LandBrushSize, LandEdit, LandingType, LightData, LindenAmount,
+        LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandingType, LightData, LindenAmount,
         LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
         Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
         MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
@@ -11400,7 +11400,8 @@ mod test {
                 _ => None,
             })
             .ok_or("expected an EconomyData event")?;
-        assert_eq!(economy.object_capacity, 15000);
+        assert_eq!(economy.object_capacity, LandImpact(15000));
+        assert_eq!(economy.object_count, LandImpact(1200));
         assert_eq!(economy.price_upload, LindenAmount(0));
         assert_eq!(economy.price_energy_unit, LindenAmount(100));
         assert_eq!(economy.teleport_min_price, LindenAmount(2));

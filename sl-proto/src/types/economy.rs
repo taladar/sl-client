@@ -95,16 +95,89 @@ impl MoneyTransactionType {
     }
 }
 
+/// A Land Impact amount: the resource cost a single object contributes to a
+/// region or parcel's object budget, and the unit that budget is denominated in.
+///
+/// Land Impact (LI) generalises the legacy prim count. Since mesh, an object's
+/// contribution is the maximum of its streaming (download), physics, and server
+/// weights, with each legacy prim counting as 1 LI; a region's total budget and
+/// current usage — the [`object_capacity`](EconomyData::object_capacity) and
+/// [`object_count`](EconomyData::object_count) of [`EconomyData`] — are
+/// expressed in these units. On OpenSim the budget is the plain `MaxPrims` prim
+/// count (1 prim = 1 LI); on Second Life a full 256×256 region carries a 20 000
+/// LI budget.
+///
+/// The wire carries this as a signed 32-bit integer, but a conforming simulator
+/// only ever sends non-negative values, so it is decoded into a `u32` at the
+/// codec boundary (`land_impact_from_wire`); a negative value is rejected rather
+/// than coerced.
+///
+/// TODO: move this to `sl_types` (alongside [`LindenAmount`] and `LandArea`) the
+/// next time shared value types are migrated there. Kept local to `sl-proto` for
+/// now to avoid cutting an `sl-types` release for a single newtype.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct LandImpact(pub u32);
+
+impl std::fmt::Display for LandImpact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self(value) = self;
+        write!(f, "{value} LI")
+    }
+}
+
+impl std::ops::Add for LandImpact {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let Self(lhs) = self;
+        let Self(rhs) = rhs;
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "matches the wrapping/overflow behaviour of the same operation on the underlying integer, which is the least surprising result for the caller"
+        )]
+        Self(lhs + rhs)
+    }
+}
+
+impl std::ops::Sub for LandImpact {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let Self(lhs) = self;
+        let Self(rhs) = rhs;
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "matches the wrapping/overflow behaviour of the same operation on the underlying integer, which is the least surprising result for the caller"
+        )]
+        Self(lhs - rhs)
+    }
+}
+
+impl From<u32> for LandImpact {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<LandImpact> for u32 {
+    fn from(value: LandImpact) -> Self {
+        let LandImpact(value) = value;
+        value
+    }
+}
+
 /// Grid economy prices and the region's object capacity, parsed from an
 /// `EconomyData` reply to
 /// [`Session::request_economy_data`](crate::Session::request_economy_data). All
 /// prices are in L$ unless noted.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EconomyData {
-    /// The region's total object/prim capacity.
-    pub object_capacity: i32,
-    /// The region's current object/prim count.
-    pub object_count: i32,
+    /// The region's total object capacity (its Land Impact budget).
+    pub object_capacity: LandImpact,
+    /// The region's current object usage (Land Impact in use). Note that some
+    /// simulators stub this to zero in the `EconomyData` reply and report live
+    /// usage elsewhere (region stats / per-parcel data) instead.
+    pub object_count: LandImpact,
     /// Price per energy unit.
     pub price_energy_unit: LindenAmount,
     /// Price to claim an object.
