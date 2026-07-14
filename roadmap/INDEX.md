@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 38 |
-| ready | 31 |
+| ready | 30 |
 | blocked | 5 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 452 |
+| done | 453 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **538** |
@@ -113,12 +113,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (31)
+## ready (30)
 
 ### viewer
 
-- [`viewer-p33-2`](ready/viewer-p33-2-per-object-local-reflection-probes.md) —
-  Per-object local reflection probes
 - [`viewer-p33-3`](ready/viewer-p33-3-reflection-probe-brightness-calibration.md)
   — Reflection-probe brightness calibration
 - [`viewer-p34-1`](ready/viewer-p34-1-ingest-the-physics-wearable.md) — Ingest
@@ -223,7 +221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (452)
+## done (453)
 
 ### protocol
 
@@ -501,6 +499,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p32-2`](done/viewer-p32-2-simulate.md) — Simulate
 - [`viewer-p33-1`](done/viewer-p33-1-default-global-reflection-probe.md) —
   Default (global) reflection probe
+- [`viewer-p33-2`](done/viewer-p33-2-per-object-local-reflection-probes.md) —
+  Per-object local reflection probes
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

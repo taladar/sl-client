@@ -1,10 +1,11 @@
 //! Reflection probes (Phase 33): fold a prim's `LLReflectionProbeParams`
-//! extra-param block into the scene mirror, and drive the scene-wide **default**
-//! reflection probe — a real-time captured environment cubemap — the way the
-//! reference viewer's `LLReflectionMapManager` provides its fallback probe.
+//! extra-param block into the scene mirror, and drive both the scene-wide
+//! **default** reflection probe and the **per-object local** probes — each a
+//! real-time captured environment cubemap — the way the reference viewer's
+//! `LLReflectionMapManager` does.
 //!
-//! **Detect (ingest).** A reflection probe is not a `PrimFlags` bit — a prim is a
-//! probe exactly when it carries the `LLReflectionProbeParams` extra-param block
+//! **Detect (ingest, P33.1).** A reflection probe is not a `PrimFlags` bit — a prim
+//! is a probe exactly when it carries the `LLReflectionProbeParams` extra-param block
 //! (`ExtraParams` type `0x90`), the way `LLViewerObject::getReflectionProbeParams`
 //! keys off the block's presence. sl-proto already decodes that block into a
 //! [`ReflectionProbe`] on `Object::extra.reflection_probe` (the two packed floats —
@@ -16,30 +17,49 @@
 //! [`apply_light`](crate::lights) / [`apply_particles`](crate::particles) do — a
 //! prim toggled probe on or off in-world flips the block present / absent, so the
 //! component is refreshed every update. The component also carries the prim's metre
-//! scale, from which a *local* probe's box / sphere influence volume is derived —
-//! but placing those per-object local probes is a later roadmap item; this module
-//! implements only the ingest plus the default (global) probe.
+//! scale, from which the local probe's influence volume is derived.
 //!
-//! **Default probe capture & render (see [`ReflectionProbePlugin`]).** Bevy 0.19 has
-//! the sink side of reflection probes — a [`GeneratedEnvironmentMapLight`] on the
-//! view is the "global" probe that lights every PBR surface (the reference viewer's
-//! default probe). What Bevy lacks is the *source*: it never renders the scene into
-//! a cubemap. This module supplies that missing half — mirroring
-//! `LLReflectionMapManager`'s real-time capture — by pointing six 90° cameras at the
-//! viewpoint (one per cube face) that render the scene into six `Rgba16Float` colour
-//! targets; a render-world blit ([`copy_probe_faces`]) copies those into the six
-//! layers of a cube [`Image`], which a [`GeneratedEnvironmentMapLight`] filters
-//! (irradiance + roughness-mipped radiance) into the diffuse / specular maps the PBR
-//! shader samples. Six separate colour targets plus a copy (rather than rendering
-//! straight into the cube's layers) keeps camera sizing on Bevy's ordinary
-//! image-target path — a cube-layer render target would need render-world manual
-//! texture views that the main-world camera-sizing pass cannot resolve.
+//! **Capture (P33.1 / P33.2).** Bevy 0.19 has the sink side of reflection probes — a
+//! [`GeneratedEnvironmentMapLight`] on the view is the "global" probe that lights
+//! every PBR surface (the reference viewer's default probe), and the same component
+//! beside a [`LightProbe`] on an ordinary entity is a *local* reflection probe whose
+//! cuboid influence volume overrides it inside. What Bevy lacks is the *source*: it
+//! never renders the scene into a cubemap. This module supplies that missing half —
+//! mirroring `LLReflectionMapManager`'s real-time capture — with a **capture rig**
+//! ([`CaptureRig`]) per probe: six 90° cameras (one per cube face) that render the
+//! scene into six `Rgba16Float` colour targets, which a render-world blit
+//! ([`copy_probe_faces`]) copies into the six layers of a cube [`Image`], which a
+//! [`GeneratedEnvironmentMapLight`] filters (irradiance + roughness-mipped radiance)
+//! into the diffuse / specular maps the PBR shader samples. Six separate colour
+//! targets plus a copy (rather than rendering straight into the cube's layers) keeps
+//! camera sizing on Bevy's ordinary image-target path — a cube-layer render target
+//! would need render-world manual texture views that the main-world camera-sizing
+//! pass cannot resolve.
 //!
-//! The capture is amortized ([`CAPTURE_PERIOD_FRAMES`]): the six faces are
-//! re-rendered one per frame in a brief burst a few times per second, then the
-//! cameras idle, so the costly six-face scene re-render (each with its own shadow
-//! pass) is not paid every frame. The environment changes slowly, so the staleness
-//! is imperceptible while the frame rate stays near the un-probed baseline.
+//! Rig 0 is the **default probe**, captured around the viewpoint and bound globally
+//! to the main view. Rigs `1..=`[`MAX_LOCAL_PROBES`] are a **pool** handed to the
+//! nearest local probes ([`drive_local_probes`]) — the budget local lights (P25.2)
+//! spend the same way, and the reason the pool is small: each rig costs six scene
+//! re-renders per refresh, so the probes that cannot influence what is on screen must
+//! not pay for one.
+//!
+//! **Local probe volumes (P33.2).** A rig's holder is a [`LightProbe`] entity
+//! parented to the probe prim, so it rides the prim's position and rotation, with a
+//! local scale that reproduces the reference viewer's influence volume: for a
+//! **box**-volume probe the prim's own metre scale (`LLReflectionMap::getBox` uses
+//! `scale * 0.5` as the box half-extents); for a **sphere**-volume probe a cube of
+//! side `scale.x` — the smallest one containing the reference's
+//! `radius = scale.x * 0.5` sphere — softened by a [`SPHERE_FALLOFF`] taper, since
+//! Bevy's light-probe volume is always a cuboid. Bevy then picks the nearest
+//! applicable probe per fragment, falling back to the view's default probe outside
+//! every volume, exactly the layering the reference shader does.
+//!
+//! **Capture cadence.** The capture is amortized ([`CaptureSchedule`]): only one cube
+//! face anywhere in the scene is re-rendered per frame, in six-frame bursts, so a rig
+//! is refreshed every [`CAPTURE_PERIOD_FRAMES`] and the total cost stays proportional
+//! to the number of *live* probes rather than to the frame rate. A freshly assigned
+//! rig jumps the queue ([`CaptureSchedule::urgent`]) so a probe entering the budget
+//! shows its own surroundings almost immediately instead of the previous tenant's.
 //!
 //! **Consistent image-based lighting.** Bevy applies the view environment map only
 //! to `StandardMaterial` (prims, meshes, avatars). The viewer's custom sky / terrain
@@ -54,7 +74,11 @@
 //! ([`PROBE_INTENSITY`] / `SL_VIEWER_PROBE_INTENSITY`) and the residual ambient
 //! ([`probe_ambient_scale`] / `SL_VIEWER_PROBE_AMBIENT_SCALE`) are exposed as tuning
 //! knobs, and `SL_VIEWER_PROBE_TEST_SPHERE=1` spawns a mirror ball to inspect the
-//! captured environment.
+//! captured environment. A probe's **ambiance** — which in the reference scales only
+//! the irradiance half of its contribution — is part of that calibration and is not
+//! applied yet; its **dynamic** flag is implicitly always on (a rig re-renders the
+//! whole scene, avatars included); and its **mirror** flag (the reference's separate
+//! screen-space "hero" probe) is out of scope.
 //!
 //! [`apply_object`]: crate::objects
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
@@ -75,6 +99,7 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags};
+use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 
 /// A component marking an object entity as a **reflection probe**, carrying the
@@ -95,6 +120,70 @@ pub(crate) struct ObjectReflectionProbe {
     /// bounding radius) stays correct. The reference viewer likewise derives the
     /// probe volume from the prim's dimensions, not from the probe params.
     pub(crate) scale: [f32; 3],
+}
+
+impl ObjectReflectionProbe {
+    /// Whether this probe's influence volume is a **box** (the prim's oriented
+    /// bounding box) rather than a **sphere** — the `BOX_VOLUME` flag, which the
+    /// reference reads as `LLVOVolume::getReflectionProbeIsBox`.
+    const fn is_box_volume(&self) -> bool {
+        self.data.flags.contains(ReflectionProbeFlags::BOX_VOLUME)
+    }
+
+    /// The influence volume as a scale for Bevy's unit-cube [`LightProbe`] volume,
+    /// in the prim's **local** frame (the frame below the object entity, i.e. still
+    /// Second Life axes — the object entity carries the basis change, exactly as the
+    /// geometry holder's scale does).
+    ///
+    /// A **box** probe scales the unit cube by the prim's metre scale, so the volume
+    /// is the prim's own oriented box (`LLReflectionMap::getBox`: half-extents
+    /// `scale * 0.5`). A **sphere** probe has no cuboid counterpart in Bevy, so it
+    /// becomes the smallest cube containing the reference's sphere — whose radius is
+    /// `scale.x * 0.5`, the *X* extent alone (`LLReflectionMap::update`) — and the
+    /// corners the cube adds beyond that sphere are taken back out by
+    /// [`SPHERE_FALLOFF`].
+    const fn volume_scale(&self) -> Vec3 {
+        let [x, y, z] = self.scale;
+        if self.is_box_volume() {
+            Vec3::new(x, y, z)
+        } else {
+            Vec3::splat(x)
+        }
+    }
+
+    /// The [`LightProbe`] falloff (per axis, as a fraction of the volume) this
+    /// probe's influence tapers over: a hard-edged [`BOX_FALLOFF`] for a box volume,
+    /// the far softer [`SPHERE_FALLOFF`] for a sphere approximated by a cube.
+    const fn falloff(&self) -> Vec3 {
+        if self.is_box_volume() {
+            Vec3::splat(BOX_FALLOFF)
+        } else {
+            Vec3::splat(SPHERE_FALLOFF)
+        }
+    }
+
+    /// The probe's influence radius in metres, as `LLReflectionMap::update` computes
+    /// it: the half-diagonal of the prim's box for a box volume, half the prim's *X*
+    /// extent for a sphere. Used to rank probes by distance (the reference's
+    /// `mDistance = |eye - origin| - radius`), so a large probe the camera is just
+    /// outside of outranks a tiny one the same distance away.
+    fn radius(&self) -> f32 {
+        let [x, y, z] = self.scale;
+        if self.is_box_volume() {
+            Vec3::new(x * 0.5, y * 0.5, z * 0.5).length()
+        } else {
+            x * 0.5
+        }
+    }
+
+    /// The near-clip distance the probe's capture cameras render with — the probe's
+    /// own clip distance, floored at [`MIN_NEAR_CLIP`] the way
+    /// `LLReflectionMap::getNearClip` floors it at `MINIMUM_NEAR_CLIP`. It is how a
+    /// probe inside a room excludes the walls of the prim (or the furniture) it sits
+    /// in from its own reflection.
+    const fn near_clip(&self) -> f32 {
+        self.data.clip_distance.max(MIN_NEAR_CLIP)
+    }
 }
 
 /// Lift an object's reflection-probe block onto an [`ObjectReflectionProbe`], or
@@ -154,13 +243,44 @@ const CAPTURE_SIZE: u32 = 128;
 /// The number of cube faces (and therefore capture cameras) per probe.
 const FACE_COUNT: usize = 6;
 
-/// Frames between environment re-captures. The six faces are re-rendered one per
-/// frame over a short burst (the first [`FACE_COUNT`] frames of each period), then
-/// the capture cameras idle — so the expensive six-face scene re-render (each with
-/// its own shadow pass) is paid only in a brief burst a few times per second rather
-/// than every frame. The environment changes slowly, so the resulting staleness is
-/// imperceptible while the frame rate stays near the un-probed baseline.
+/// How many **per-object local** probes (P33.2) are captured and bound at once —
+/// the nearest ones win, the way the nearest / brightest prim lights win the P25.2
+/// [`MAX_LOCAL_LIGHTS`](crate::lights) budget.
+///
+/// Each one costs a capture rig: six scene re-renders per refresh plus a cubemap
+/// filter, so the budget is deliberately small. Bevy in any case binds at most
+/// `MAX_VIEW_LIGHT_PROBES` (8) reflection probes per view, and the reference viewer
+/// likewise keeps only a bounded set of probes resident
+/// (`LLReflectionMapManager::mReflectionProbeCount`).
+const MAX_LOCAL_PROBES: usize = 4;
+
+/// The total number of capture rigs: the default (global) probe plus the local pool.
+const RIG_COUNT: usize = MAX_LOCAL_PROBES.saturating_add(1);
+
+/// Frames between two refreshes of the *same* rig. The six faces of a rig are
+/// re-rendered one per frame in a burst, then the schedule moves on to the next rig
+/// — so the expensive six-face scene re-render (each with its own shadow pass) is
+/// paid only in brief bursts, and the whole scene's probes are refreshed on this
+/// period regardless of how many are live. The environment changes slowly, so the
+/// resulting staleness is imperceptible while the frame rate stays near the un-probed
+/// baseline.
 const CAPTURE_PERIOD_FRAMES: usize = 180;
+
+/// The smallest near-clip distance a probe's capture cameras may use, in metres —
+/// `LLReflectionMap::getNearClip`'s `MINIMUM_NEAR_CLIP`.
+const MIN_NEAR_CLIP: f32 = 0.1;
+
+/// The [`LightProbe`] falloff of a **box**-volume local probe: the fraction of the
+/// volume over which its influence tapers out toward the faces of the box. Small, so
+/// a box probe's reflection fills the room it bounds (as the reference's box probes
+/// do) and only blends out right at the boundary rather than fading across it.
+const BOX_FALLOFF: f32 = 0.1;
+
+/// The [`LightProbe`] falloff of a **sphere**-volume local probe. Bevy's influence
+/// volume is always a cuboid, so a sphere probe is bound as the cube circumscribing
+/// its sphere; a broad taper pulls the influence back in toward the sphere, so the
+/// corners the cube adds contribute little.
+const SPHERE_FALLOFF: f32 = 0.5;
 
 /// The intensity (cd/m²) the captured environment contributes as image-based
 /// lighting. The capture cameras render **linear scene radiance** (HDR, no
@@ -198,36 +318,110 @@ fn probe_intensity() -> f32 {
         .unwrap_or(PROBE_INTENSITY)
 }
 
-/// A component on each capture camera marking it as one face of the reflection
-/// probe's cubemap (the face / cube-array-layer index it renders), so the driver
-/// can pose and toggle the six cameras.
+/// A component on each capture camera marking it as one face of one probe's cubemap
+/// (which rig it belongs to and which face it renders), so the capture driver can
+/// pose and toggle the six cameras of the rig whose turn it is.
 #[derive(Component, Debug, Clone, Copy)]
 struct ProbeCaptureCamera {
+    /// The [`CaptureRig`] this camera belongs to, indexed as in
+    /// [`ProbeRigs::rigs`] — `0` is the default (global) probe, `1..=`
+    /// [`MAX_LOCAL_PROBES`] the local pool.
+    rig: usize,
     /// The cube face (array layer, `0..6`) this camera renders — indexed the same
     /// as [`CUBE_MAP_FACES`], so the camera's look direction and the cube layer the
     /// copy writes agree.
     face: usize,
 }
 
-/// The scene-wide **default reflection probe** (the reference viewer's fallback
-/// probe): a single environment cubemap captured around the viewpoint and bound to
-/// the main view as a global [`EnvironmentMapLight`],
-/// lighting every PBR surface that is not inside a nearer local probe's volume.
+/// One probe's **capture rig**: everything needed to re-render the scene around a
+/// point into an environment cubemap — the destination cube [`Image`] and the six
+/// per-face colour targets the rig's six capture cameras draw into. The cameras
+/// themselves are found through their [`ProbeCaptureCamera`] component (which names
+/// the rig and face each belongs to), not held here.
 ///
-/// Holds the cube [`Image`] the capture is assembled into (and the filter reads),
-/// the six per-face colour targets the capture cameras render into, and those six
-/// camera entities. Created once by [`setup_global_probe`].
-#[derive(Resource)]
-struct GlobalProbe {
+/// Rig `0` is the default (global) probe; the rest are the pool
+/// [`drive_local_probes`] hands to the nearest per-object probes. All are created
+/// once, at startup, by [`setup_probe_rigs`] — a rig is *reassigned*, never rebuilt,
+/// so no render-target churn happens as the camera moves through a scene.
+struct CaptureRig {
     /// The cube [`Image`] (six `Rgba16Float` layers) the six face targets are
-    /// copied into and that the view's [`GeneratedEnvironmentMapLight`] filters.
+    /// copied into and that this probe's [`GeneratedEnvironmentMapLight`] filters.
     cube: Handle<Image>,
-    /// The six capture-camera entities, indexed as [`CUBE_MAP_FACES`]. Each holds
-    /// its face colour target alive through its `RenderTarget::Image` handle.
-    cameras: [Entity; FACE_COUNT],
+    /// The six face colour targets, in cube-layer order — kept so the render-world
+    /// blit ([`copy_probe_faces`]) can name them by asset id.
+    faces: [Handle<Image>; FACE_COUNT],
+}
+
+/// The local probe a pool rig is currently assigned to (P33.2).
+struct LocalBinding {
+    /// The probe **prim**'s object entity — the one carrying the
+    /// [`ObjectReflectionProbe`], whose world transform poses both the capture
+    /// cameras and the influence volume.
+    object: Entity,
+    /// The [`LightProbe`] holder entity spawned as a child of `object`: it carries
+    /// the influence volume (its local scale) and the rig's
+    /// [`GeneratedEnvironmentMapLight`].
+    holder: Entity,
+    /// The probe parameters last applied to the holder, so an unchanged probe costs
+    /// no per-frame component churn (the same trick the P25.2 light budget plays).
+    applied: ObjectReflectionProbe,
+}
+
+/// Every capture rig in the scene: the default (global) probe's, plus the pool of
+/// [`MAX_LOCAL_PROBES`] rigs the nearest per-object probes are assigned.
+#[derive(Resource)]
+struct ProbeRigs {
+    /// The rigs, index `0` the default probe and `1..=`[`MAX_LOCAL_PROBES`] the
+    /// local pool. Created once by [`setup_probe_rigs`].
+    rigs: Vec<CaptureRig>,
+    /// What each rig is currently bound to, indexed the same as
+    /// [`rigs`](Self::rigs): `None` for the global probe (index `0`, which is bound
+    /// to the view, not to an object) and for a free pool rig.
+    bindings: Vec<Option<LocalBinding>>,
     /// Whether the global [`GeneratedEnvironmentMapLight`] has been installed on the
     /// main view yet (it is deferred until the fly-camera entity exists).
     installed: bool,
+}
+
+impl ProbeRigs {
+    /// The pool rig currently assigned to `object`'s probe, if it holds one.
+    fn rig_of(&self, object: Entity) -> Option<usize> {
+        self.bindings
+            .iter()
+            .position(|binding| binding.as_ref().is_some_and(|bound| bound.object == object))
+    }
+
+    /// The lowest-indexed **free** pool rig, or `None` when the whole pool is spoken
+    /// for. Rig `0` is the global probe and is never free.
+    fn free_rig(&self) -> Option<usize> {
+        self.bindings
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(index, binding)| binding.is_none().then_some(index))
+    }
+}
+
+/// The amortized capture schedule: which rig is being re-rendered right now, and
+/// which is next. Only ever **one cube face in the whole scene** is re-rendered per
+/// frame, so the scene re-render cost is bounded no matter how many probes are live.
+///
+/// A rig's six faces are captured over six consecutive frames (a *burst*); the
+/// schedule then idles ([`idle_frames`]) before starting the next rig's burst, sized
+/// so that each live rig comes round again every [`CAPTURE_PERIOD_FRAMES`].
+#[derive(Resource, Default)]
+struct CaptureSchedule {
+    /// The rig currently mid-burst and the next face of it to render, if any.
+    active: Option<(usize, usize)>,
+    /// Frames still to idle before the next burst begins.
+    idle: usize,
+    /// Rigs needing an out-of-turn capture — a pool rig just assigned to a new probe,
+    /// whose cube still holds the *previous* tenant's surroundings. Drained ahead of
+    /// the round-robin so a probe entering the budget shows its own environment
+    /// within a few frames rather than after a full period.
+    urgent: VecDeque<usize>,
+    /// The round-robin cursor over the rig indices, for the routine refresh.
+    cursor: usize,
 }
 
 /// One probe's face-target → cube-layer copy mapping, snapshotted for the render
@@ -243,36 +437,41 @@ struct ProbeCubeCopy {
 /// The render-world work-list of probe cubes to reassemble each frame, extracted
 /// from the main world. [`copy_probe_faces`] walks it and blits each probe's six
 /// captured face textures into its cube's six array layers.
+///
+/// Only the **live** rigs are listed (the default probe plus the assigned pool
+/// rigs), so a free rig's stale faces are not re-blitted every frame.
 #[derive(Resource, Clone, Default, ExtractResource)]
 struct ProbeCubeCopies {
-    /// One entry per probe (currently just the global default probe).
+    /// One entry per live probe: the default probe, plus each assigned local probe.
     copies: Vec<ProbeCubeCopy>,
 }
 
-/// The reflection-probe plugin (Phase 33): captures a scene environment cubemap and
-/// drives it as image-based lighting, supplying the scene-render half of reflection
+/// The reflection-probe plugin (Phase 33): captures scene environment cubemaps and
+/// drives them as image-based lighting, supplying the scene-render half of reflection
 /// probes that Bevy's [`GeneratedEnvironmentMapLight`] filter and
-/// [`EnvironmentMapLight`] consumer expect but never
-/// produce themselves.
+/// [`EnvironmentMapLight`] consumer expect but never produce themselves.
 ///
-/// This slice installs the **default** probe: one cubemap captured around the
-/// viewpoint, bound globally to the main view (the reference viewer's fallback probe
-/// used wherever no nearer local probe applies). The per-object local probes
-/// ([`ObjectReflectionProbe`]) reuse the same capture machinery (a cube plus six
-/// face cameras) once their volume placement lands.
+/// It installs the **default** probe (P33.1) — one cubemap captured around the
+/// viewpoint, bound globally to the main view, the reference viewer's fallback probe
+/// used wherever no nearer local probe applies — and the **per-object local** probes
+/// (P33.2): the nearest [`MAX_LOCAL_PROBES`] probe prims each get a rig of their own
+/// and a [`LightProbe`] volume (box or sphere, from the prim) that overrides the
+/// default inside it.
 pub(crate) struct ReflectionProbePlugin;
 
 impl Plugin for ReflectionProbePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProbeCubeCopies>()
+            .init_resource::<CaptureSchedule>()
             .init_resource::<ProbeTestSphere>()
             .add_plugins(ExtractResourcePlugin::<ProbeCubeCopies>::default())
-            .add_systems(Startup, setup_global_probe)
+            .add_systems(Startup, setup_probe_rigs)
             .add_systems(
                 Update,
                 (
                     install_global_probe,
-                    drive_global_probe,
+                    drive_local_probes,
+                    drive_probe_captures,
                     spawn_probe_test_sphere,
                 )
                     .chain(),
@@ -332,72 +531,82 @@ fn create_cube_image(images: &mut Assets<Image>) -> Handle<Image> {
 }
 
 /// Spawn one cube-face capture camera: a 90°-FOV square HDR camera rendering the
-/// world into `face_image`, initially inactive (the driver toggles it on its slow
-/// capture cadence).
-fn spawn_capture_camera(commands: &mut Commands, face: usize, face_image: Handle<Image>) -> Entity {
-    commands
-        .spawn((
-            Camera3d::default(),
-            Camera {
-                // Render before the main view (order 0). The env-map filter reads the
-                // cube a frame later, so ordering among the capture cameras is
-                // irrelevant; a single negative order keeps them all ahead of the view.
-                order: -1,
-                // Toggled on by `drive_global_probe` only when a face is due for
-                // re-capture, so the six-face scene re-render is amortized.
-                is_active: false,
-                ..default()
-            },
-            // A 2D colour target (not a window), so camera sizing resolves from the
-            // image and no manual texture-view plumbing is needed.
-            RenderTarget::Image(face_image.into()),
-            Projection::Perspective(PerspectiveProjection {
-                fov: FRAC_PI_2,
-                aspect_ratio: 1.0,
-                near: 0.05,
-                far: 4096.0,
-                ..default()
-            }),
-            Transform::default(),
-            // The face target is `Rgba16Float`, so the camera must render HDR and
-            // single-sampled (the target is not multisampled), and must not tonemap —
-            // the cube holds linear scene radiance for image-based lighting.
-            Hdr,
-            Msaa::Off,
-            Tonemapping::None,
-            ProbeCaptureCamera { face },
-        ))
-        .id()
+/// world into `face_image`, initially inactive (the schedule toggles it on when its
+/// rig's turn to re-capture comes round).
+fn spawn_capture_camera(
+    commands: &mut Commands,
+    rig: usize,
+    face: usize,
+    face_image: Handle<Image>,
+) {
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            // Render before the main view (order 0). The env-map filter reads the
+            // cube a frame later, so ordering among the capture cameras is
+            // irrelevant; a single negative order keeps them all ahead of the view.
+            order: -1,
+            // Toggled on by `drive_probe_captures` only when this face is due for
+            // re-capture, so the six-face scene re-render is amortized.
+            is_active: false,
+            ..default()
+        },
+        // A 2D colour target (not a window), so camera sizing resolves from the
+        // image and no manual texture-view plumbing is needed.
+        RenderTarget::Image(face_image.into()),
+        Projection::Perspective(PerspectiveProjection {
+            fov: FRAC_PI_2,
+            aspect_ratio: 1.0,
+            near: MIN_NEAR_CLIP,
+            far: 4096.0,
+            ..default()
+        }),
+        Transform::default(),
+        // The face target is `Rgba16Float`, so the camera must render HDR and
+        // single-sampled (the target is not multisampled), and must not tonemap —
+        // the cube holds linear scene radiance for image-based lighting.
+        Hdr,
+        Msaa::Off,
+        Tonemapping::None,
+        ProbeCaptureCamera { rig, face },
+    ));
 }
 
-/// Startup: create the default probe's cube and six face targets, spawn its six
-/// capture cameras, and register the cube for the render-world blit.
-fn setup_global_probe(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-    mut copies: ResMut<ProbeCubeCopies>,
-) {
-    let cube = create_cube_image(&mut images);
-    let faces: [Handle<Image>; FACE_COUNT] =
-        core::array::from_fn(|_| create_face_image(&mut images));
-    // `.get(face)` (rather than `faces[face]`) to stay clear of the workspace
-    // `indexing_slicing` lint; the `from_fn` index is always in range.
-    let cameras: [Entity; FACE_COUNT] = core::array::from_fn(|face| {
+/// Build one capture rig: its cube, its six face colour targets, and the six cameras
+/// that render them (all initially idle).
+fn create_capture_rig(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    rig: usize,
+) -> CaptureRig {
+    let cube = create_cube_image(images);
+    let faces: [Handle<Image>; FACE_COUNT] = core::array::from_fn(|_| create_face_image(images));
+    for face in 0..FACE_COUNT {
+        // `.get(face)` (rather than `faces[face]`) to stay clear of the workspace
+        // `indexing_slicing` lint; the loop index is always in range.
         let handle = faces.get(face).cloned().unwrap_or_default();
-        spawn_capture_camera(&mut commands, face, handle)
-    });
+        spawn_capture_camera(commands, rig, face, handle);
+    }
+    CaptureRig { cube, faces }
+}
 
-    copies.copies.push(ProbeCubeCopy {
-        cube: cube.id(),
-        faces: core::array::from_fn(|face| faces.get(face).map(Handle::id).unwrap_or_default()),
-    });
-
-    commands.insert_resource(GlobalProbe {
-        cube,
-        cameras,
+/// Startup: create every capture rig — the default (global) probe's, plus the pool
+/// of [`MAX_LOCAL_PROBES`] rigs the nearest per-object probes are handed. The rigs
+/// exist for the process's lifetime; a probe entering or leaving the budget only
+/// *rebinds* one (see [`drive_local_probes`]).
+fn setup_probe_rigs(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let rigs: Vec<CaptureRig> = (0..RIG_COUNT)
+        .map(|rig| create_capture_rig(&mut commands, &mut images, rig))
+        .collect();
+    commands.insert_resource(ProbeRigs {
+        rigs,
+        bindings: std::iter::repeat_with(|| None).take(RIG_COUNT).collect(),
         installed: false,
     });
-    debug!("reflection probes: default (global) probe capture set up at {CAPTURE_SIZE}² per face");
+    debug!(
+        "reflection probes: {RIG_COUNT} capture rig(s) set up at {CAPTURE_SIZE}² per face \
+         (1 default + {MAX_LOCAL_PROBES} local)"
+    );
 }
 
 /// Install the default probe's [`GeneratedEnvironmentMapLight`] on the main view
@@ -406,63 +615,336 @@ fn setup_global_probe(
 /// idles (the flag guards against re-inserting).
 fn install_global_probe(
     mut commands: Commands,
-    mut probe: ResMut<GlobalProbe>,
+    mut probes: ResMut<ProbeRigs>,
     camera: Query<Entity, With<FlyCamera>>,
 ) {
-    if probe.installed {
+    if probes.installed {
         return;
     }
     let Ok(view) = camera.single() else {
         return;
     };
+    let Some(global) = probes.rigs.first() else {
+        return;
+    };
     commands.entity(view).insert(GeneratedEnvironmentMapLight {
-        environment_map: probe.cube.clone(),
+        environment_map: global.cube.clone(),
         intensity: probe_intensity(),
         // The cube is captured directly in Bevy world space, so it samples with no
         // extra reorientation.
         rotation: Quat::IDENTITY,
         affects_lightmapped_mesh_diffuse: true,
     });
-    probe.installed = true;
+    probes.installed = true;
     debug!("reflection probes: installed default environment map on the main view");
 }
 
-/// Drive the amortized environment capture: during the first [`FACE_COUNT`] frames
-/// of each [`CAPTURE_PERIOD_FRAMES`] period, re-centre the capture cameras on the
-/// viewpoint and activate one face per frame (re-rendering the whole cube over the
-/// burst); the rest of the period the cameras idle, so the costly six-face scene
-/// re-render is paid only briefly a few times per second rather than every frame.
-fn drive_global_probe(
-    probe: Res<GlobalProbe>,
+/// Rank the probe prims for the [`MAX_LOCAL_PROBES`] budget: nearest first, by the
+/// reference viewer's measure (`LLReflectionMapManager::update`'s
+/// `mDistance = |eye - origin| - radius`), so a big probe whose volume the camera is
+/// about to enter outranks a small one the same distance away.
+fn rank_local_probes(
+    eye: Vec3,
+    probes: &Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+) -> Vec<Entity> {
+    let mut ranked: Vec<(Entity, f32)> = probes
+        .iter()
+        .map(|(entity, probe, transform)| {
+            let distance = eye.distance(transform.translation()) - probe.radius();
+            (entity, distance)
+        })
+        .collect();
+    ranked.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    ranked.truncate(MAX_LOCAL_PROBES);
+    ranked
+        .into_iter()
+        .map(|(entity, _distance)| entity)
+        .collect()
+}
+
+/// Spawn a pool rig's [`LightProbe`] holder as a child of the probe prim: the entity
+/// that carries the influence volume (its local scale — see
+/// [`ObjectReflectionProbe::volume_scale`]) and binds the rig's captured cube as an
+/// [`EnvironmentMapLight`] over it. Parenting to the prim is what makes the volume
+/// track the prim's position and rotation for free.
+fn spawn_probe_holder(
+    commands: &mut Commands,
+    object: Entity,
+    cube: Handle<Image>,
+    probe: &ObjectReflectionProbe,
+) -> Entity {
+    commands
+        .spawn((
+            LightProbe {
+                falloff: probe.falloff(),
+            },
+            GeneratedEnvironmentMapLight {
+                environment_map: cube,
+                intensity: probe_intensity(),
+                rotation: Quat::IDENTITY,
+                affects_lightmapped_mesh_diffuse: true,
+            },
+            Transform::from_scale(probe.volume_scale()),
+            ChildOf(object),
+        ))
+        .id()
+}
+
+/// Hand the nearest probe prims the pool of capture rigs (P33.2).
+///
+/// Ranks every [`ObjectReflectionProbe`] by distance ([`rank_local_probes`]), frees
+/// the rigs of probes that fell out of the [`MAX_LOCAL_PROBES`] budget (or whose prim
+/// despawned), and binds a free rig to each newcomer — spawning its [`LightProbe`]
+/// holder and queueing it for an immediate re-capture, since the rig's cube still
+/// holds the previous tenant's surroundings. A probe that keeps its rig only has its
+/// holder touched when its params or its prim's scale actually changed, so a settled
+/// scene does no per-frame ECS churn (the same discipline as the P25.2 light budget).
+///
+/// Finally it republishes the render-world blit work-list ([`ProbeCubeCopies`]) —
+/// the default probe plus exactly the bound local probes.
+fn drive_local_probes(
+    mut commands: Commands,
+    mut rigs: ResMut<ProbeRigs>,
+    mut schedule: ResMut<CaptureSchedule>,
+    mut copies: ResMut<ProbeCubeCopies>,
     camera: Query<&GlobalTransform, With<FlyCamera>>,
-    mut cameras: Query<(&ProbeCaptureCamera, &mut Transform, &mut Camera)>,
-    mut phase: Local<usize>,
+    probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+    mut last_bound: Local<usize>,
+) {
+    let Ok(view) = camera.single() else {
+        return;
+    };
+    let candidates = probes.iter().len();
+    let selected = rank_local_probes(view.translation(), &probes);
+
+    // Free the rigs of probes that dropped out of the budget or whose prim is gone.
+    // Bevy's hierarchy already despawns a holder whose parent object despawned, so
+    // `try_despawn` covers that race.
+    for (index, binding) in rigs.bindings.iter_mut().enumerate().skip(1) {
+        let stale = binding
+            .as_ref()
+            .is_some_and(|bound| !selected.contains(&bound.object));
+        if stale && let Some(bound) = binding.take() {
+            commands.entity(bound.holder).try_despawn();
+            debug!("reflection probes: local probe released capture rig {index}");
+        }
+    }
+
+    for object in selected {
+        // The entity came straight from this frame's query, so the lookup cannot
+        // miss; skip defensively rather than unwrap.
+        let Ok((_, probe, _)) = probes.get(object) else {
+            continue;
+        };
+        match rigs.rig_of(object) {
+            // Already bound: refresh the holder only when the probe actually changed
+            // (a resized prim, or one switched between a box and a sphere volume).
+            Some(index) => {
+                let Some(Some(bound)) = rigs.bindings.get_mut(index) else {
+                    continue;
+                };
+                if bound.applied != *probe {
+                    commands.entity(bound.holder).insert((
+                        LightProbe {
+                            falloff: probe.falloff(),
+                        },
+                        Transform::from_scale(probe.volume_scale()),
+                    ));
+                    bound.applied = *probe;
+                }
+            }
+            // A newcomer: bind it to a free rig, if the budget still has one.
+            None => {
+                let Some(index) = rigs.free_rig() else {
+                    continue;
+                };
+                let Some(cube) = rigs.rigs.get(index).map(|rig| rig.cube.clone()) else {
+                    continue;
+                };
+                let holder = spawn_probe_holder(&mut commands, object, cube, probe);
+                if let Some(slot) = rigs.bindings.get_mut(index) {
+                    *slot = Some(LocalBinding {
+                        object,
+                        holder,
+                        applied: *probe,
+                    });
+                }
+                // Its cube still holds the last probe's environment: re-capture now
+                // rather than at this rig's next turn in the round-robin.
+                schedule.urgent.push_back(index);
+                debug!("reflection probes: local probe took capture rig {index}");
+            }
+        }
+    }
+
+    // Republish the blit work-list: the default probe, plus every bound local probe.
+    copies.copies.clear();
+    for (index, rig) in rigs.rigs.iter().enumerate() {
+        let live = index == 0
+            || rigs
+                .bindings
+                .get(index)
+                .is_some_and(|binding| binding.is_some());
+        if live {
+            copies.copies.push(ProbeCubeCopy {
+                cube: rig.cube.id(),
+                faces: core::array::from_fn(|face| {
+                    rig.faces.get(face).map(Handle::id).unwrap_or_default()
+                }),
+            });
+        }
+    }
+
+    let bound = copies.copies.len().saturating_sub(1);
+    if bound != *last_bound {
+        debug!(
+            "local reflection probes: {bound} of {candidates} probe prim(s) captured \
+             (budget {MAX_LOCAL_PROBES})"
+        );
+        *last_bound = bound;
+    }
+}
+
+/// The frames to idle between two capture bursts, given how many rigs are `live`
+/// (the default probe plus the bound local probes). Sized so each live rig comes
+/// round again every [`CAPTURE_PERIOD_FRAMES`]: with `live` rigs each taking
+/// [`FACE_COUNT`] render frames plus this idle, one full cycle is
+/// `live * (FACE_COUNT + idle)` frames. So the capture cost scales with the number of
+/// *live* probes, and every probe refreshes on the same wall-clock cadence no matter
+/// how many there are.
+fn idle_frames(live: usize) -> usize {
+    CAPTURE_PERIOD_FRAMES
+        .checked_div(live.max(1))
+        .unwrap_or(CAPTURE_PERIOD_FRAMES)
+        .saturating_sub(FACE_COUNT)
+}
+
+/// Where a rig's capture cameras sit and how near they clip: the viewpoint (and the
+/// default near clip) for the default probe; the probe prim's world origin (and the
+/// probe's own near clip, which is how a probe excludes the prim or the furniture it
+/// sits inside from its own reflection) for a bound local probe.
+fn rig_capture_pose(
+    rig: usize,
+    rigs: &ProbeRigs,
+    eye: Vec3,
+    probes: &Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+) -> Option<(Vec3, f32)> {
+    match rigs.bindings.get(rig) {
+        Some(Some(bound)) => {
+            let (_, probe, transform) = probes.get(bound.object).ok()?;
+            Some((transform.translation(), probe.near_clip()))
+        }
+        // Rig 0 (the default probe) is bound to the view, not to an object; a free
+        // pool rig has nothing to capture.
+        _other if rig == 0 => Some((eye, MIN_NEAR_CLIP)),
+        _other => None,
+    }
+}
+
+/// Drive the amortized environment capture across every live rig.
+///
+/// At most **one** cube face in the whole scene is re-rendered per frame: a rig's six
+/// faces are captured over six consecutive frames (a burst), then the schedule idles
+/// ([`idle_frames`]) before moving on to the next live rig, so every probe is
+/// refreshed every [`CAPTURE_PERIOD_FRAMES`] and the costly scene re-render (each
+/// with its own shadow pass) never spikes a frame with more than one face. A rig just
+/// handed to a new probe jumps the queue, so it does not show the previous probe's
+/// surroundings for a whole period.
+fn drive_probe_captures(
+    rigs: Res<ProbeRigs>,
+    mut schedule: ResMut<CaptureSchedule>,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+    mut cameras: Query<(
+        &ProbeCaptureCamera,
+        &mut Transform,
+        &mut Camera,
+        &mut Projection,
+    )>,
 ) {
     let Ok(view) = camera.single() else {
         return;
     };
     let eye = view.translation();
-    // The phase within the capture period; the first `FACE_COUNT` frames capture one
-    // face each, the remainder idle. Kept in range by an explicit wrap rather than
-    // `%` (the workspace `arithmetic_side_effects` lint).
-    let this_phase = *phase;
-    *phase = phase.wrapping_add(1);
-    if *phase >= CAPTURE_PERIOD_FRAMES {
-        *phase = 0;
-    }
-    let capturing = this_phase < FACE_COUNT;
 
-    for &entity in &probe.cameras {
-        let Ok((capture, mut transform, mut cam)) = cameras.get_mut(entity) else {
-            continue;
-        };
-        // Pose the camera only while the burst may render it (idle frames leave the
-        // transform untouched — the camera is inactive anyway).
-        if capturing && let Some(face) = CUBE_MAP_FACES.get(capture.face) {
-            *transform = Transform::from_translation(eye).looking_to(face.target, face.up);
+    // The rigs worth capturing: the default probe and every bound local probe.
+    let live: Vec<usize> = (0..rigs.rigs.len())
+        .filter(|&rig| {
+            rig == 0
+                || rigs
+                    .bindings
+                    .get(rig)
+                    .is_some_and(|binding| binding.is_some())
+        })
+        .collect();
+
+    // Pick the frame's work: continue the running burst, idle, or start the next
+    // rig's burst (a freshly bound rig first, else the round-robin).
+    let burst = match schedule.active {
+        Some(active) => Some(active),
+        None if schedule.idle > 0 => {
+            schedule.idle = schedule.idle.saturating_sub(1);
+            None
         }
-        cam.is_active = capturing && capture.face == this_phase;
+        None => {
+            let urgent = loop {
+                match schedule.urgent.pop_front() {
+                    // A rig queued for an urgent re-capture may have been freed again
+                    // before its turn came; drop those.
+                    Some(rig) if live.contains(&rig) => break Some(rig),
+                    Some(_freed) => continue,
+                    None => break None,
+                }
+            };
+            let next = urgent.or_else(|| {
+                let cursor = schedule.cursor.checked_rem(live.len()).unwrap_or(0);
+                schedule.cursor = cursor.saturating_add(1);
+                live.get(cursor).copied()
+            });
+            next.map(|rig| (rig, 0))
+        }
+    };
+
+    // Where the burst's rig captures from — `None` if it has nothing to capture (its
+    // probe prim vanished this very frame), in which case no camera renders.
+    let pose = burst.and_then(|(rig, _face)| rig_capture_pose(rig, &rigs, eye, &probes));
+    let capturing = burst.zip(pose);
+
+    // Only the one face being captured this frame renders; every other camera idles.
+    // The components are touched only when something actually changes, so the idle
+    // cameras cost no change-detection churn.
+    for (capture, mut transform, mut camera, mut projection) in &mut cameras {
+        let pose = capturing.and_then(|((rig, face), pose)| {
+            (capture.rig == rig && capture.face == face).then_some(pose)
+        });
+        if let Some((origin, near)) = pose {
+            if let Some(face) = CUBE_MAP_FACES.get(capture.face) {
+                *transform = Transform::from_translation(origin).looking_to(face.target, face.up);
+            }
+            if let Projection::Perspective(perspective) = projection.as_mut() {
+                perspective.near = near;
+            }
+        }
+        let active = pose.is_some();
+        if camera.is_active != active {
+            camera.is_active = active;
+        }
     }
+
+    // Advance the burst: after the sixth face the rig is done, and the schedule idles
+    // long enough that every live rig is refreshed once per capture period.
+    schedule.active = match burst {
+        Some((rig, face)) => {
+            let next = face.saturating_add(1);
+            if next < FACE_COUNT {
+                Some((rig, next))
+            } else {
+                schedule.idle = idle_frames(live.len());
+                None
+            }
+        }
+        None => None,
+    };
 }
 
 /// Whether the reflection-probe diagnostic mirror ball is enabled
@@ -578,7 +1060,11 @@ fn copy_probe_faces(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectReflectionProbe, reflection_probe_from_object};
+    use super::{
+        BOX_FALLOFF, CAPTURE_PERIOD_FRAMES, FACE_COUNT, MIN_NEAR_CLIP, ObjectReflectionProbe,
+        SPHERE_FALLOFF, idle_frames, reflection_probe_from_object,
+    };
+    use bevy::prelude::Vec3;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags, Vector};
 
@@ -674,5 +1160,89 @@ mod tests {
                 scale: [2.0, 4.0, 6.0],
             })
         );
+    }
+
+    /// Build a probe component on a prim of `scale` with the given flags.
+    fn probe(scale: [f32; 3], flags: ReflectionProbeFlags) -> ObjectReflectionProbe {
+        ObjectReflectionProbe {
+            data: ReflectionProbe {
+                ambiance: 0.0,
+                clip_distance: 1.0,
+                flags,
+            },
+            scale,
+        }
+    }
+
+    /// Tolerance for the float comparisons below (the workspace denies strict float
+    /// equality).
+    const EPS: f32 = 1.0e-6;
+
+    /// A **box**-volume probe's influence volume is the prim's own box: Bevy's unit
+    /// cube scaled by the prim's metre scale, i.e. half-extents `scale * 0.5` — the
+    /// reference viewer's `LLReflectionMap::getBox`. Its ranking radius is that box's
+    /// half-diagonal.
+    #[test]
+    fn box_volume_is_the_prim_box() {
+        let probe = probe([2.0, 4.0, 6.0], ReflectionProbeFlags::BOX_VOLUME);
+        assert!(probe.is_box_volume());
+        assert!(
+            probe
+                .volume_scale()
+                .abs_diff_eq(Vec3::new(2.0, 4.0, 6.0), EPS)
+        );
+        assert!(probe.falloff().abs_diff_eq(Vec3::splat(BOX_FALLOFF), EPS));
+        // |(1, 2, 3)| = sqrt(14).
+        assert!((probe.radius() - 14.0_f32.sqrt()).abs() < EPS);
+    }
+
+    /// A **sphere**-volume probe (no box flag) takes its radius from the prim's *X*
+    /// extent alone (`LLReflectionMap::update`), and — Bevy having only cuboid probe
+    /// volumes — is bound as the cube circumscribing that sphere, softened by the
+    /// broader sphere falloff.
+    #[test]
+    fn sphere_volume_uses_the_x_extent() {
+        let probe = probe([2.0, 4.0, 6.0], ReflectionProbeFlags::empty());
+        assert!(!probe.is_box_volume());
+        assert!(probe.volume_scale().abs_diff_eq(Vec3::splat(2.0), EPS));
+        assert!(
+            probe
+                .falloff()
+                .abs_diff_eq(Vec3::splat(SPHERE_FALLOFF), EPS)
+        );
+        assert!((probe.radius() - 1.0).abs() < EPS);
+    }
+
+    /// The capture near clip is the probe's own clip distance, floored at the
+    /// reference's `MINIMUM_NEAR_CLIP` — so the common "unset" zero does not make the
+    /// capture cameras degenerate.
+    #[test]
+    fn near_clip_is_floored() {
+        let mut zero_clip = probe([1.0, 1.0, 1.0], ReflectionProbeFlags::empty());
+        zero_clip.data.clip_distance = 0.0;
+        assert!((zero_clip.near_clip() - MIN_NEAR_CLIP).abs() < EPS);
+
+        let mut far_clip = zero_clip;
+        far_clip.data.clip_distance = 2.5;
+        assert!((far_clip.near_clip() - 2.5).abs() < EPS);
+    }
+
+    /// However many probes are live, each one's rig comes round again once per
+    /// capture period: a rig's cycle is its six face frames plus the idle the
+    /// schedule waits between bursts, and all live rigs take a turn within it.
+    #[test]
+    fn every_live_rig_refreshes_once_per_period() {
+        for live in 1..=super::RIG_COUNT {
+            let cycle = FACE_COUNT
+                .saturating_add(idle_frames(live))
+                .saturating_mul(live);
+            // Integer division of the period among the rigs loses at most one frame
+            // per rig, so the cycle lands just at or below the nominal period.
+            assert!(cycle <= CAPTURE_PERIOD_FRAMES, "live={live} cycle={cycle}");
+            assert!(
+                cycle > CAPTURE_PERIOD_FRAMES.saturating_sub(live),
+                "live={live} cycle={cycle}"
+            );
+        }
     }
 }

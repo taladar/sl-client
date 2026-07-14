@@ -2,7 +2,7 @@
 id: viewer-p33-2
 title: Per-object local reflection probes
 topic: viewer
-status: ready
+status: done
 origin: VIEWER_ROADMAP.md — Phase 33 — Reflection probes
 ---
 
