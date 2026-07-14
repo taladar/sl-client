@@ -1,26 +1,45 @@
-//! Collision-volume morph resolution (P34.3): the per-volume scale and position
-//! displacements an avatar's *shape* imposes on its collision volumes.
+//! Collision-volume displacement resolution (P34.3, P34.4): the per-volume scale
+//! and position displacements an avatar's *shape* imposes on its collision volumes.
 //!
-//! A `<param_morph>` does not only move base-mesh vertices. Around thirty of them —
-//! `Big_Chest`, `Small_Chest`, `Fat_Torso`, `Breast_Gravity`, `Muscular_Torso`,
-//! `Squash_Stretch_Head`, `Bowed_Legs`, `Foot_Size`, … — also carry
-//! [`VolumeMorph`](crate::VolumeMorph) children, which add `effective_weight * scale` and
-//! `effective_weight * pos` to one of the avatar's **collision volumes**
-//! (`LEFT_PEC`, `BELLY`, `BUTT`, `HEAD`, `L_UPPER_LEG`, …) — the volume pass of
-//! Firestorm's `LLPolyMorphTarget::apply`.
+//! The shape reaches the volumes by **two** independent mechanisms, and this module
+//! resolves both into one accumulation.
 //!
-//! Since [[viewer-p17-2]] those volumes are bindable joints, so this — not the mesh
+//! **The morph pass (P34.3).** A `<param_morph>` does not only move base-mesh
+//! vertices. Around thirty of them — `Big_Chest`, `Small_Chest`, `Fat_Torso`,
+//! `Breast_Gravity`, `Muscular_Torso`, `Squash_Stretch_Head`, `Bowed_Legs`,
+//! `Foot_Size`, … — also carry [`VolumeMorph`](crate::VolumeMorph) children, which
+//! add `effective_weight * scale` and `effective_weight * pos` to one of the
+//! avatar's **collision volumes** (`LEFT_PEC`, `BELLY`, `BUTT`, `HEAD`,
+//! `L_UPPER_LEG`, …) — the volume pass of Firestorm's `LLPolyMorphTarget::apply`.
+//!
+//! **The skeletal-inheritance pass (P34.4).** A `<param_skeleton>` — `Height`,
+//! `Thickness`, `Torso Length`, `Leg Length`, `Head Size`, `Hip Width`, … — scales
+//! bones, and a collision volume is the *one* kind of joint that inherits its
+//! parent bone's scale deformation (Firestorm's `LLAvatarJointCollisionVolume`
+//! overrides `inheritScale()` to true, and `LLPolySkeletalDistortion::setInfo` walks
+//! each deformed bone's children to record `cv_rest_scale ⊙ bone_scale_deformation`
+//! as a further deformation, applied at the param's weight alongside the bone's
+//! own). So a body-thickness or leg-length slider fattens or stretches the volumes
+//! as well as the bones. This is proportional, not additive: because the recorded
+//! delta is the volume's *rest* scale times the bone's deformation, a bone scaled by
+//! `+0.3` grows its volume by 30%, whatever size that volume is.
+//!
+//! Since [[viewer-p17-2]] the volumes are bindable joints, so this — not the mesh
 //! morph target — is how a worn **rigged mesh** body or piece of clothing follows
 //! the avatar's shape sliders. (The system body does not care: it is skinned to the
-//! `m*` bones, not to the volumes, which is why the volume pass could go missing so
-//! long unnoticed.)
+//! `m*` bones, not to the volumes, which is why both passes could go missing so long
+//! unnoticed.)
 //!
 //! [`VolumeDeformations`] resolves an appearance vector into that per-volume
 //! accumulation. It is the collision-volume counterpart of
 //! [`SkeletalDeformations`](crate::SkeletalDeformations) — same
 //! [`ResolvedParams`] input, same pure, I/O-free, Bevy-free Second Life Z-up
 //! metres — and the Bevy layer folds it into the collision-volume joints of the
-//! skeleton instance, on top of their `avatar_skeleton.xml` rest transform.
+//! skeleton instance, on top of their `avatar_skeleton.xml` rest transform. The
+//! skeletal pass additionally needs the [`Skeleton`] (for each bone's volumes and
+//! their rest scales), so it lives behind
+//! [`from_resolved_with_skeleton`](VolumeDeformations::from_resolved_with_skeleton);
+//! the morph-only constructors serve a caller with no skeleton at hand.
 //!
 //! The [runtime morph params](crate::RUNTIME_MORPH_PARAMS) are **excluded**: the
 //! body-physics `*_Driven` params carry volume morphs too, but they are driven per
@@ -35,6 +54,7 @@ use std::collections::HashMap;
 use crate::morph::is_runtime_morph_param;
 use crate::params::{ParamEffect, VisualParams};
 use crate::resolve::ResolvedParams;
+use crate::skeleton::Skeleton;
 
 /// One collision volume's accumulated displacement: the per-axis delta added to
 /// its rest scale and the per-axis delta added to its rest position, in Second
@@ -80,7 +100,9 @@ impl VolumeDeformations {
     }
 
     /// Resolve the displacements from a visual-param table and already-resolved
-    /// [`ResolvedParams`] (driver propagation + sex already applied).
+    /// [`ResolvedParams`] (driver propagation + sex already applied), **morph pass
+    /// only** — the skeletal params' inherited volume scale needs the skeleton, so
+    /// it takes [`from_resolved_with_skeleton`](Self::from_resolved_with_skeleton).
     ///
     /// Each morph param's `<volume_morph>` children contribute
     /// `effective_weight * (scale, pos)` to the volume they name, summed across
@@ -109,6 +131,51 @@ impl VolumeDeformations {
             }
         }
         Self { by_volume }
+    }
+
+    /// The full resolution: the morph pass of [`from_resolved`](Self::from_resolved)
+    /// **plus** the skeletal params' scale inheritance (P34.4), which needs
+    /// `skeleton` to know which collision volumes hang off each deformed bone and at
+    /// what rest scale.
+    ///
+    /// For every `param_skeleton` bone with a significant weight, each collision
+    /// volume of that bone takes an extra scale delta of
+    /// `effective_weight * (volume_rest_scale ⊙ bone_scale_deformation)` — the
+    /// deformation Firestorm's `LLPolySkeletalDistortion::setInfo` records for every
+    /// child joint whose `inheritScale()` is true, which only a
+    /// `LLAvatarJointCollisionVolume` is. A bone the skeleton does not have (or one
+    /// with no volumes) contributes nothing. Skeletal params carry no volume
+    /// *position* deformation: a volume follows its bone's offset through the
+    /// ordinary parent-child transform, so only the scale is inherited.
+    #[must_use]
+    pub fn from_resolved_with_skeleton(
+        params: &VisualParams,
+        resolved: &ResolvedParams,
+        skeleton: &Skeleton,
+    ) -> Self {
+        let mut deformations = Self::from_resolved(params, resolved);
+        for param in params.all() {
+            let ParamEffect::Skeleton(bones) = &param.effect else {
+                continue;
+            };
+            let weight = resolved.effective_weight(param);
+            if !is_significant(weight) {
+                continue;
+            }
+            for bone in bones {
+                let Some(joint) = skeleton.joint_by_name(&bone.bone) else {
+                    continue;
+                };
+                for volume in &joint.collision_volumes {
+                    let deform = deformations
+                        .by_volume
+                        .entry(volume.name.clone())
+                        .or_default();
+                    add_scaled(&mut deform.scale, product(volume.scale, bone.scale), weight);
+                }
+            }
+        }
+        deformations
     }
 
     /// The accumulated displacement of the named volume, if any morph moves it.
@@ -176,6 +243,13 @@ impl VolumeDeformations {
     }
 }
 
+/// The component-wise product of two vectors (Firestorm's `LLVector3::scaleVec`).
+fn product(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    [ax * bx, ay * by, az * bz]
+}
+
 /// Add `scale * delta` into `target` component-wise.
 fn add_scaled(target: &mut [f32; 3], delta: [f32; 3], scale: f32) {
     let [tx, ty, tz] = target;
@@ -195,10 +269,17 @@ fn is_significant(weight: f32) -> bool {
 mod tests {
     use super::VolumeDeformations;
     use crate::params::VisualParams;
+    use crate::resolve::ResolvedParams;
+    use crate::skeleton::Skeleton;
     use pretty_assertions::assert_eq;
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The committed 4-bone skeleton fixture: `PELVIS` (rest scale `0.12 0.16 0.17`)
+    /// hangs off `mPelvis`, `BELLY` (`0.09 0.13 0.15`) off `mTorso`; `mChest` and
+    /// `mHipRight` carry none.
+    const MINI_SKELETON: &str = include_str!("../tests/fixtures/mini_skeleton.xml");
 
     /// A table with two transmitted shape morphs carrying volume morphs — `Big_Chest`
     /// (id 1, scaling and lifting both pecs) and `Fat_Torso` (id 2, also widening the
@@ -338,6 +419,91 @@ mod tests {
         assert!(close(deform.scale("HEAD"), [0.0, 0.0, 0.015]));
         // …and the one declared with a volume morph on both parts applies twice.
         assert!(close(deform.position("HEAD"), [0.0, 0.0, 0.02]));
+        Ok(())
+    }
+
+    /// A table exercising the P34.4 skeletal-inheritance pass against
+    /// [`MINI_SKELETON`]: a morph `Fat_Torso` (id 1) that widens `BELLY` directly,
+    /// a skeletal `Height` (id 33) that stretches `mTorso` (whose volume is
+    /// `BELLY`), and a skeletal `Thickness` (id 34) that fattens `mPelvis` (whose
+    /// volume is `PELVIS`) and also names a bone the skeleton does not have. Wire
+    /// order is by ascending id: [1, 33, 34].
+    const SKEL_VOLUME_LAD: &str = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <mesh type="upperBodyMesh" lod="0" file_name="avatar_upper_body.llm">
+    <param id="1" group="0" name="Fat_Torso" value_min="0" value_max="1" value_default="0">
+      <param_morph>
+        <volume_morph name="BELLY" scale="0.01 0.0 0.0" pos="0.0 0.0 0.002"/>
+      </param_morph>
+    </param>
+  </mesh>
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="33" group="0" name="Height" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mTorso" scale="0 0 0.1" offset="0 0 0.02"/>
+      </param_skeleton>
+    </param>
+    <param id="34" group="0" name="Thickness" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mPelvis" scale="0.3 0.3 0"/>
+        <bone name="mNotInTheSkeleton" scale="0.5 0.5 0.5"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+</linden_avatar>"#;
+
+    #[test]
+    fn a_skeletal_param_scales_its_bones_collision_volumes() -> Result<(), TestError> {
+        let params = VisualParams::from_xml(SKEL_VOLUME_LAD)?;
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        // Height (slot 1) to full: mTorso's +0.1 Z stretches BELLY by its own rest
+        // scale times that deformation — 0.15 * 0.1 — not by the raw 0.1.
+        let resolved = ResolvedParams::from_appearance(&params, &[0, 255, 0]);
+        let deform = VolumeDeformations::from_resolved_with_skeleton(&params, &resolved, &skeleton);
+        assert!(close(deform.scale("BELLY"), [0.0, 0.0, 0.015]));
+        // The bone's *offset* is not inherited — a volume rides its bone's position
+        // through the ordinary parent-child transform.
+        assert!(close(deform.position("BELLY"), [0.0, 0.0, 0.0]));
+        // A bone with no deforming param leaves its volume at rest.
+        assert!(deform.get("PELVIS").is_none());
+
+        // Half the weight, half the inherited delta.
+        let half = ResolvedParams::from_appearance(&params, &[0, 128, 0]);
+        let half = VolumeDeformations::from_resolved_with_skeleton(&params, &half, &skeleton);
+        assert!(close(half.scale("BELLY"), [0.0, 0.0, 0.007_53]));
+        Ok(())
+    }
+
+    #[test]
+    fn the_inherited_scale_is_proportional_to_the_volumes_rest_scale() -> Result<(), TestError> {
+        let params = VisualParams::from_xml(SKEL_VOLUME_LAD)?;
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        // Thickness (slot 2) to full: mPelvis's +0.3 X/Y fattens PELVIS (rest scale
+        // 0.12 0.16 0.17) by 30% of each axis — 0.036, 0.048 — and leaves Z alone.
+        let resolved = ResolvedParams::from_appearance(&params, &[0, 0, 255]);
+        let deform = VolumeDeformations::from_resolved_with_skeleton(&params, &resolved, &skeleton);
+        assert!(close(deform.scale("PELVIS"), [0.036, 0.048, 0.0]));
+        // The bone the skeleton does not have is simply skipped: it neither panics
+        // nor invents a volume.
+        assert_eq!(deform.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn the_two_passes_accumulate_onto_one_volume() -> Result<(), TestError> {
+        let params = VisualParams::from_xml(SKEL_VOLUME_LAD)?;
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        // Fat_Torso (the morph pass) and Height (the skeletal pass) both reach BELLY.
+        let resolved = ResolvedParams::from_appearance(&params, &[255, 255, 0]);
+        let both = VolumeDeformations::from_resolved_with_skeleton(&params, &resolved, &skeleton);
+        assert!(close(both.scale("BELLY"), [0.01, 0.0, 0.015]));
+        assert!(close(both.position("BELLY"), [0.0, 0.0, 0.002]));
+
+        // Without the skeleton only the morph pass lands — which is precisely what
+        // P34.4 adds to the resolution.
+        let morphs_only = VolumeDeformations::from_resolved(&params, &resolved);
+        assert!(close(morphs_only.scale("BELLY"), [0.01, 0.0, 0.0]));
+        assert!(close(morphs_only.position("BELLY"), [0.0, 0.0, 0.002]));
         Ok(())
     }
 }

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 40 |
-| ready | 29 |
+| ready | 28 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 458 |
+| done | 459 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **543** |
@@ -117,12 +117,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (29)
+## ready (28)
 
 ### viewer
 
-- [`viewer-p34-4`](ready/viewer-p34-4-collision-volume-scale-inheritance.md) —
-  Collision-volume scale inheritance from the skeletal params
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
 
 ### test
@@ -221,7 +219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (458)
+## done (459)
 
 ### protocol
 
@@ -511,6 +509,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p34-2`](done/viewer-p34-2-drive-them.md) — Drive them
 - [`viewer-p34-3`](done/viewer-p34-3-shape-volume-morphs-on-collision-volumes.md)
   — Shape volume morphs on collision volumes
+- [`viewer-p34-4`](done/viewer-p34-4-collision-volume-scale-inheritance.md) —
+  Collision-volume scale inheritance from the skeletal params
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

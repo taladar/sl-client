@@ -19,9 +19,14 @@
 //! `scaleChildOffset` mechanism that makes height / limb-length work) is applied
 //! there by the world-transform recurrence.
 //!
-//! Collision-volume scale inheritance (Firestorm's `inheritScale()` child pass)
-//! is deliberately omitted: only `LLAvatarJointCollisionVolume` inherits, and
-//! collision volumes are not part of the rendered / skinned skeleton.
+//! Collision-volume scale inheritance (Firestorm's `inheritScale()` child pass —
+//! only `LLAvatarJointCollisionVolume` inherits) is *not* resolved here even
+//! though it, too, comes from the `param_skeleton` params: since [[viewer-p17-2]]
+//! the volumes are bindable joints a rigged mesh body rides, so their
+//! displacement is accumulated together with the shape morphs' volume pass, in
+//! [`VolumeDeformations::from_resolved_with_skeleton`](crate::VolumeDeformations::from_resolved_with_skeleton)
+//! (P34.4) — one type carries everything the shape does to a volume, and the Bevy
+//! layer folds one accumulation into the volume joints.
 
 use std::collections::HashMap;
 

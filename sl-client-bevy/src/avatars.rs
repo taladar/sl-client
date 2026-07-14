@@ -1023,7 +1023,9 @@ mod tests {
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams, VolumeDeformations};
+    use sl_avatar::{
+        BaseMesh, ResolvedParams, SkeletalDeformations, Skeleton, VisualParams, VolumeDeformations,
+    };
     use sl_mesh::MeshSkin;
 
     /// A row-major, row-vector 4×4 matrix (the `sl_mesh` layout) whose only
@@ -1379,6 +1381,61 @@ mod tests {
                 .ok_or("torso rest")?
                 .abs_diff_eq(*moved.get(torso).ok_or("torso moved")?, 1e-5)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_skeletal_param_scales_the_collision_volume_it_deforms() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let params = VisualParams::from_xml(TORSO_SCALE_LAD)?;
+        // `mTorso` scaled up along Z by 0.1 at full Height weight — an ordinary
+        // proportion slider, which reaches `BELLY` only through the P34.4 inheritance.
+        let resolved = ResolvedParams::from_appearance(&params, &[255]);
+        let deform = SkeletalDeformations::from_resolved(&params, &resolved);
+        let volumes =
+            VolumeDeformations::from_resolved_with_skeleton(&params, &resolved, &skeleton);
+        let overrides = JointOverrides::default();
+        let pose = AnimationPose::default();
+
+        let belly = bevy.find("BELLY").ok_or("BELLY volume present")?;
+        let rest = bevy.deformed_world_matrices(
+            &SkeletalDeformations::default(),
+            &VolumeDeformations::default(),
+            &overrides,
+            &pose,
+        );
+        let moved = bevy.deformed_world_matrices(&deform, &volumes, &overrides, &pose);
+
+        let (rest_scale, _, _) = rest
+            .get(belly)
+            .ok_or("belly rest")?
+            .to_scale_rotation_translation();
+        let (scale, _, _) = moved
+            .get(belly)
+            .ok_or("belly moved")?
+            .to_scale_rotation_translation();
+        // The volume grows by 10% of its own Z (rest 0.15 -> 0.165): the bone's +0.1
+        // deformation times the volume's rest scale, so a rigged mesh body bound to
+        // `BELLY` stretches with the torso instead of staying at the default height.
+        assert!(
+            (scale.z - 0.165).abs() < 1e-4,
+            "belly z scale {scale} (rest {rest_scale})"
+        );
+
+        // Without the skeletal pass the volume stays at rest — the bone stretches and
+        // the fitted body's belly does not follow, the bug P34.4 fixes.
+        let unaware = bevy.deformed_world_matrices(
+            &deform,
+            &VolumeDeformations::from_resolved(&params, &resolved),
+            &overrides,
+            &pose,
+        );
+        let (unaware_scale, _, _) = unaware
+            .get(belly)
+            .ok_or("belly unaware")?
+            .to_scale_rotation_translation();
+        assert!((unaware_scale - rest_scale).length() < 1e-4);
         Ok(())
     }
 

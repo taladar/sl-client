@@ -737,16 +737,19 @@ fn body_root_transform(object: &Object, pelvis_height: f32, shoe_lift: f32) -> T
 }
 
 /// A debug affordance (env `SL_VIEWER_VOLUME_FOCUS`): aim the fly-camera at the
-/// avatar whose shape displaces its **collision volumes** the most (P34.3), from a
-/// few metres back — the counterpart of
+/// avatar whose shape displaces its **collision volumes** the most (P34.3 / P34.4),
+/// from a few metres back — the counterpart of
 /// [`focus_camera_on_particles`](crate::particles::focus_camera_on_particles).
 ///
-/// The volume morphs move only a worn *fitted* rigged mesh, and only as far as the
-/// wearer's own shape sliders take them: a slim, near-default shape displaces its
-/// volumes by millimetres and shows nothing however hard the effect is amplified.
-/// So a live check needs the most extreme shape *present in the region*, which is
-/// rarely the agent's own — this finds it. `SL_VIEWER_CAMERA_DISTANCE` sets how far
-/// back to stand (default 3 m).
+/// The displacement moves only a worn *fitted* rigged mesh, and only as far as the
+/// wearer's own shape sliders take them. That was a real obstacle for the P34.3
+/// morph pass, which a slim, near-default shape barely engages: it displaces its
+/// volumes by millimetres and shows nothing however hard the effect is amplified, so
+/// a live check needed the most extreme shape *present in the region*, rarely the
+/// agent's own — this finds it. The P34.4 skeletal pass is less picky (every avatar
+/// has a height and a thickness, and the inherited delta is a *fraction* of the
+/// volume's own size), but the same ranking still picks the clearest subject.
+/// `SL_VIEWER_CAMERA_DISTANCE` sets how far back to stand (default 3 m).
 ///
 /// Runs after the fly-camera (so it overrides the login snap and the input pose).
 pub(crate) fn focus_camera_on_volume_shape(
@@ -821,9 +824,9 @@ pub(crate) fn focus_camera_on_volume_shape(
         target.z + flat.z * distance,
     );
     info!(
-        "P34.3 volume focus: framing {agent} (displacement score {score:.4}) \
+        "volume focus: framing {agent} (displacement score {score:.4}) \
          at chest {target:?} from {eye:?}; the camera is yours from here — press V to \
-         toggle the collision-volume displacement"
+         toggle the collision-volume displacement (P34.3 / P34.4)"
     );
     *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
     *framed = true;
@@ -841,8 +844,9 @@ fn volume_displacement_score(volumes: &VolumeDeformations) -> f32 {
         .sum()
 }
 
-/// The live A/B state of the shape's collision-volume displacement (P34.3): the
-/// gain every resolved [`VolumeDeformations`] is scaled by.
+/// The live A/B state of the shape's collision-volume displacement (P34.3 morph
+/// pass + P34.4 skeletal inheritance): the gain every resolved
+/// [`VolumeDeformations`] is scaled by.
 ///
 /// A resource rather than a plain env read so the effect can be toggled **during a
 /// session** ([`toggle_volume_morphs`], the `V` key). Two logins can never be
@@ -853,8 +857,8 @@ fn volume_displacement_score(volumes: &VolumeDeformations) -> f32 {
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct VolumeMorphGain {
     /// The multiplier on every volume displacement: `1` is faithful, `0` reproduces
-    /// the pre-P34.3 rest volumes, and a large value exaggerates a shape whose real
-    /// displacements are only centimetres.
+    /// the rest volumes an avatar had before either pass existed, and a large value
+    /// exaggerates a shape whose real displacements are only centimetres.
     pub(crate) gain: f32,
 }
 
@@ -868,11 +872,11 @@ impl Default for VolumeMorphGain {
 
 /// The `V` key: toggle the shape's collision-volume displacement between faithful
 /// (`1`) and off (`0`) and re-resolve every avatar's appearance, so the effect can
-/// be seen appearing and disappearing on one avatar, live (P34.3).
+/// be seen appearing and disappearing on one avatar, live (P34.3 / P34.4).
 ///
-/// The volume morphs move only a worn *fitted* mesh body, so this is the one way to
-/// watch the effect land on a real avatar without trusting a cross-login screenshot
-/// pair.
+/// The volume displacement moves only a worn *fitted* mesh body, so this is the one
+/// way to watch the effect land on a real avatar without trusting a cross-login
+/// screenshot pair.
 pub(crate) fn toggle_volume_morphs(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut gain: ResMut<VolumeMorphGain>,
@@ -883,7 +887,8 @@ pub(crate) fn toggle_volume_morphs(
     }
     gain.gain = if gain.gain > 0.5 { 0.0 } else { 1.0 };
     info!(
-        "P34.3 collision-volume displacement {} (gain {})",
+        "collision-volume displacement {} (gain {}) — the shape's volume morphs \
+         (P34.3) and the skeletal params' inherited bone scale (P34.4)",
         if gain.gain > 0.5 { "ON" } else { "OFF" },
         gain.gain
     );
@@ -893,8 +898,8 @@ pub(crate) fn toggle_volume_morphs(
 }
 
 /// The debug A/B gain (env `SL_VIEWER_VOLUME_MORPH_GAIN`, default `1`) applied to
-/// the shape's collision-volume displacements (P34.3) — `0` leaves every volume at
-/// its `avatar_skeleton.xml` rest transform, reproducing the pre-P34.3 rigged-mesh
+/// the shape's collision-volume displacements (P34.3 / P34.4) — `0` leaves every
+/// volume at its `avatar_skeleton.xml` rest transform, reproducing the rigged-mesh
 /// body that ignores the shape sliders entirely; a large value exaggerates them.
 ///
 /// The displacements are centimetres, and they move *only* a worn rigged mesh (the
@@ -2767,11 +2772,17 @@ pub(crate) fn apply_avatar_appearance(
             }
             physics.insert(agent, body);
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
-            // The shape morphs' collision-volume displacements (P34.3): the volumes
-            // are bindable joints, so this is what makes a worn rigged-mesh body
-            // follow the chest / belly / butt / head shape sliders — the system
-            // body's morph targets cannot reach it.
-            let mut volume = VolumeDeformations::from_resolved(library.params(), &resolved);
+            // The shape's collision-volume displacements: the volumes are bindable
+            // joints, so this is what makes a worn rigged-mesh body follow the shape
+            // sliders — the system body's morph targets cannot reach it. Both the
+            // morph params' `<volume_morph>` children (P34.3, the chest / belly /
+            // butt / head sliders) and the skeletal params' inherited bone scale
+            // (P34.4, height / thickness / limb length) land in the one accumulation.
+            let mut volume = VolumeDeformations::from_resolved_with_skeleton(
+                library.params(),
+                &resolved,
+                library.character_skeleton(),
+            );
             if (volume_gain - 1.0).abs() > f32::EPSILON {
                 volume.amplify(volume_gain);
             }

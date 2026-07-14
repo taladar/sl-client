@@ -230,6 +230,11 @@ pub(crate) enum AvatarAssetError {
 pub(crate) struct AvatarAssetLibrary {
     /// The avatar skeleton, converted to the Bevy joint-instance data.
     skeleton: BevySkeleton,
+    /// The same skeleton as parsed from `avatar_skeleton.xml`, kept because the
+    /// collision-volume displacement resolver needs each bone's volumes and their
+    /// rest scales to apply the skeletal params' scale inheritance (P34.4) — data
+    /// the flattened [`BevySkeleton`] joint list no longer distinguishes.
+    character_skeleton: Skeleton,
     /// The resolved base parts (those whose binding resolved).
     parts: Vec<LoadedPart>,
     /// The visual-param table (used by later morph phases).
@@ -257,9 +262,9 @@ impl AvatarAssetLibrary {
     /// base-part mesh cannot be read or parsed. A base part whose skeleton
     /// binding does not resolve is skipped (logged), not an error.
     pub(crate) fn load(dir: &Path) -> Result<Self, AvatarAssetError> {
-        let skeleton =
+        let character_skeleton =
             Skeleton::from_xml(&fs_err::read_to_string(dir.join("avatar_skeleton.xml"))?)?;
-        let mut skeleton = BevySkeleton::from_skeleton(&skeleton);
+        let mut skeleton = BevySkeleton::from_skeleton(&character_skeleton);
         // The reference viewer synthesizes an `mRoot` joint above `mPelvis` (it is
         // not in `avatar_skeleton.xml`); add it so the avatar-centre attachment
         // point (`joint="mRoot"`) resolves to a real joint entity (P16.1).
@@ -304,6 +309,7 @@ impl AvatarAssetLibrary {
 
         let library = Self {
             skeleton,
+            character_skeleton,
             parts,
             params,
             masks,
@@ -324,6 +330,13 @@ impl AvatarAssetLibrary {
     /// The Bevy skeleton (joint rest transforms, parents, bind poses).
     pub(crate) const fn skeleton(&self) -> &BevySkeleton {
         &self.skeleton
+    }
+
+    /// The `avatar_skeleton.xml` skeleton as parsed — the bone hierarchy with each
+    /// bone's collision volumes, which the collision-volume displacement resolver
+    /// needs for the skeletal params' scale inheritance (P34.4).
+    pub(crate) const fn character_skeleton(&self) -> &Skeleton {
+        &self.character_skeleton
     }
 
     /// The resolved base parts.
