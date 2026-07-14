@@ -585,6 +585,11 @@ struct Cloud {
     system: ParticleSystem,
     /// Whether the cloud's diffuse texture has been resolved onto its material yet.
     texture_applied: bool,
+    /// Whether the cloud entity is currently visible (has live geometry). Tracked so
+    /// the `Visibility` component is only rewritten on a change, and so an empty
+    /// (zero-particle) cloud's mesh is left untouched rather than re-inserted empty
+    /// every frame — which trips bevy's mesh allocator (R26).
+    visible: bool,
 }
 
 /// The scene-wide particle simulation state (P30.2): one [`Cloud`] per live
@@ -966,7 +971,10 @@ pub(crate) fn drive_particles(
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
                     Transform::IDENTITY,
-                    Visibility::default(),
+                    // Starts hidden: the mesh is empty until the first particles are
+                    // built into it, and an empty mesh must not be rendered / uploaded
+                    // (R26). Flipped to visible once it has geometry.
+                    Visibility::Hidden,
                     NotShadowCaster,
                     // The billboard mesh is rebuilt in place every frame, so its
                     // `Aabb` (computed once when `Mesh3d` was added, from the then
@@ -985,6 +993,7 @@ pub(crate) fn drive_particles(
                 material,
                 system: system.clone(),
                 texture_applied: false,
+                visible: false,
             }
         });
 
@@ -1030,9 +1039,26 @@ pub(crate) fn drive_particles(
             &default_image,
         );
 
-        // Rebuild the billboard mesh from the current particles.
-        let mesh = build_cloud_mesh(&cloud.particles, camera_pos);
-        let _replaced = meshes.insert(&cloud.mesh, mesh);
+        // Rebuild the billboard mesh from the current particles — but only when the
+        // cloud has any. Re-inserting an empty (zero-vertex) mesh makes bevy's mesh
+        // allocator log a "use-after-free: unallocated key" error every frame (it
+        // skips allocating a zero-size vertex buffer but still tries to copy into it,
+        // R26), so an idle / zero-particle cloud instead leaves its last mesh
+        // untouched and hides the entity. Visibility is only rewritten on a change.
+        let want_visible = !cloud.particles.is_empty();
+        if want_visible {
+            let mesh = build_cloud_mesh(&cloud.particles, camera_pos);
+            let _replaced = meshes.insert(&cloud.mesh, mesh);
+        }
+        if cloud.visible != want_visible {
+            cloud.visible = want_visible;
+            let visibility = if want_visible {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+            commands.entity(cloud.entity).insert(visibility);
+        }
     }
 
     // Periodic live-count diagnostic: how many sources and particles the sim holds.

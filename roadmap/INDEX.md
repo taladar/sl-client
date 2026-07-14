@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 35 |
 | blocked | 6 |
 | in-progress | 0 |
-| bugs | 7 |
-| done | 446 |
+| bugs | 6 |
+| done | 447 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **538** |
@@ -213,7 +213,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## bugs (7)
+## bugs (6)
 
 ### viewer
 
@@ -223,8 +223,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar stands too low — feet sink into the ground
 - [`viewer-r25`](bugs/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
   — Prims that should be transparent render opaque
-- [`viewer-r26`](bugs/viewer-r26-slab-allocator-use-after-free-spam.md) —
-  bevy_render slab-allocator "use-after-free / unallocated key" log spam
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 
@@ -235,7 +233,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (446)
+## done (447)
 
 ### protocol
 
@@ -543,6 +541,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-r24`](done/viewer-r24-neighbour-region-avatars-get-no-coarse-dot-child-circuit-coa.md)
   — Neighbour-region avatars get no coarse dot — child-circuit
   CoarseLocationUpdate was dropped
+- [`viewer-r26`](done/viewer-r26-slab-allocator-use-after-free-spam.md) —
+  bevy_render slab-allocator "use-after-free / unallocated key" log spam
 - [`viewer-r2b`](done/viewer-r2b-broader-static-tga-bake-layers.md) — Broader
   static-TGA bake layers
 - [`viewer-r3`](done/viewer-r3-system-eyes-teeth-show-through-a-bom-head.md) —
