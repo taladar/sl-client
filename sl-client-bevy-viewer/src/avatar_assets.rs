@@ -191,6 +191,21 @@ pub(crate) struct AttachmentPointInfo {
     pub(crate) rotation_euler_deg: [f32; 3],
 }
 
+/// One HUD (screen-space) attachment point from `avatar_lad.xml` (P35.1): its
+/// fixed local offset from the `mScreen` pseudo-joint the reference viewer hangs
+/// the HUD points off. Unlike an [`AttachmentPointInfo`] it resolves no skeleton
+/// joint — `mScreen` is not part of the skeleton — so the viewer hangs these off
+/// its own [HUD screen](crate::hud::HudScreen) instead.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HudPointInfo {
+    /// The point's local translation from the screen, in metres (Second Life Z-up,
+    /// so `+y` is screen-left and `+z` screen-up).
+    pub(crate) position: [f32; 3],
+    /// The point's local rotation from the screen, as Second Life Euler XYZ angles
+    /// in degrees.
+    pub(crate) rotation_euler_deg: [f32; 3],
+}
+
 /// A base part's resolved skeleton binding.
 #[derive(Debug)]
 pub(crate) enum LoadedBinding {
@@ -378,6 +393,31 @@ impl AvatarAssetLibrary {
                         },
                     )
                 })
+            })
+            .collect()
+    }
+
+    /// The HUD attachment-point table from `avatar_lad.xml` (P35.1): for each
+    /// `hud="true"` `<attachment_point>`, its raw numeric id paired with its fixed
+    /// local offset from the `mScreen` pseudo-joint.
+    ///
+    /// Exactly the points [`attachment_points`](Self::attachment_points) omits: a
+    /// HUD point hangs off `mScreen`, which is not a skeleton joint, so it resolves
+    /// no joint index there. The viewer parents these to its own
+    /// [HUD screen](crate::hud::HudScreen) rather than to an avatar.
+    pub(crate) fn hud_attachment_points(&self) -> HashMap<u8, HudPointInfo> {
+        self.attachment_points
+            .all()
+            .iter()
+            .filter(|def| def.is_hud)
+            .map(|def| {
+                (
+                    def.id,
+                    HudPointInfo {
+                        position: def.position,
+                        rotation_euler_deg: def.rotation,
+                    },
+                )
             })
             .collect()
     }

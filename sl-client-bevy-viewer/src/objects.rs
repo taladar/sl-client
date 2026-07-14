@@ -46,12 +46,12 @@ use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
     JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
     PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey, SlEvent,
-    SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod,
-    Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode,
-    planar_texgen_uv, rigged_inverse_bindposes, tessellate, tessellate_sculpt,
-    tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh,
-    to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry,
-    tree_geometry, tree_species,
+    SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace,
+    TextureKey, TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry,
+    grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
+    tessellate_sculpt, tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh,
+    to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
+    tree_billboard_geometry, tree_geometry, tree_species,
 };
 
 use crate::animesh::ControlAvatarState;
@@ -61,13 +61,14 @@ use crate::avatars::{
 use crate::camera::FlyCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
+use crate::hud::{HudState, is_hud_point};
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::particles::{apply_particles, particles_from_object};
 use crate::physics::apply_physics;
 use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
+use crate::render_priority::{AVATAR_BOOST_PRIORITY, HUD_BOOST_PRIORITY};
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
 
@@ -246,7 +247,10 @@ struct TrackedObject {
     /// Whether this object's entity has been parented to its root entity yet (a
     /// child whose root has not arrived stays `false` until it does). For an
     /// attachment (see [`attachment_point`](Self::attachment_point)) this instead
-    /// tracks whether it has been parented to its avatar's skeleton joint (P16.1).
+    /// tracks whether it has been parented to its avatar's skeleton joint (P16.1)
+    /// — or, for one worn on a HUD point, whether it has been *routed*: parented
+    /// to the HUD screen or hidden as another avatar's (P35.1, terminal either
+    /// way).
     parented: bool,
     /// The raw attachment-point id if this object is an attachment worn on an
     /// avatar (its `parent` is the avatar), else `None`. An attachment is parented
@@ -317,15 +321,52 @@ fn is_animated_object(object: &Object) -> bool {
 /// the driver never demotes below) is what keeps it ahead. Ordinary scene objects
 /// start [idle](Priority::IDLE) and are ranked purely by on-screen pixel area.
 ///
+/// A HUD attachment (P35.1) is boosted a step higher still, mirroring the
+/// reference viewer's `BOOST_HUD`: it hangs off the screen, always in front of the
+/// eye and at full size, so it is never worth deferring behind world content.
+///
 /// Keyed on the object carrying an attachment point (a worn attachment root); a
 /// linkset child of a multi-prim attachment is not itself flagged, so this is the
-/// common single-object attachment case.
+/// common single-object attachment case. (A HUD linkset's children are boosted by
+/// the render-priority pass instead, which sees the whole routed subtree.)
 const fn worn_base_priority(object: &Object) -> Priority {
-    if object.attachment_point_id().is_some() {
-        AVATAR_BOOST_PRIORITY
-    } else {
-        Priority::IDLE
+    match object.attachment_point_id() {
+        Some(point_id) if is_hud_point(point_id) => HUD_BOOST_PRIORITY,
+        Some(_) => AVATAR_BOOST_PRIORITY,
+        None => Priority::IDLE,
     }
+}
+
+/// How far up a parent chain [`in_hud_attachment`] walks before giving up. An
+/// attachment's chain is short — object → (linkset root) → avatar — so this only
+/// guards against a malformed (cyclic) parent link in the object stream.
+const MAX_PARENT_WALK: usize = 8;
+
+/// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
+/// itself worn on a HUD point, or it is a linkset child of an object that is (the
+/// reference viewer's `getRootEdit()`-based `LLVOVolume::isHUDAttachment`).
+///
+/// Only an attachment *root* carries the attachment point, so a multi-prim HUD's
+/// child prims have to be recognised by walking up to it. Used to keep every part
+/// of a HUD out of the world-scene paths — the rigged-mesh bind, which would
+/// otherwise skin a HUD mesh onto the wearer's in-world skeleton.
+fn in_hud_attachment(state: &ObjectState, scoped: ScopedObjectId) -> bool {
+    let mut current = scoped;
+    for _ in 0..MAX_PARENT_WALK {
+        let Some(tracked) = state.objects.get(&current) else {
+            return false;
+        };
+        if tracked.attachment_point.is_some_and(is_hud_point) {
+            return true;
+        }
+        if tracked.is_root {
+            // A linkset root that is not an attachment (or the avatar an attachment
+            // hangs off, which is a root object): the chain ends here.
+            return false;
+        }
+        current = tracked.parent;
+    }
+    false
 }
 
 /// A deferred geometry build waiting on an asset fetch — a mesh object on its
@@ -2131,7 +2172,9 @@ fn adopt_pending_children(
 
 /// Parent every tracked attachment that is not yet parented to its avatar's
 /// attachment-point node (P16.1/P16.2), so it follows the posed skeleton at the
-/// stored local offset rather than sitting at a fixed world offset.
+/// stored local offset rather than sitting at a fixed world offset — or, for one
+/// worn on a HUD point, route it out of the world scene onto the screen-space HUD
+/// layer (P35.1).
 ///
 /// Attachments arrive in the same object stream as everything else but hang off a
 /// **pcode-47 avatar** (not a prim linkset), so [`apply_object`] holds them
@@ -2141,17 +2184,28 @@ fn adopt_pending_children(
 /// entity ([`AvatarState::attachment_point_entity`]), a child of the skeleton
 /// joint carrying the fixed `avatar_lad.xml` offset (P16.2), onto which the
 /// object's own local transform composes. An attachment whose avatar / point node
-/// is not present yet (a HUD point, a sphere-only avatar, or the avatar simply not
-/// spawned yet) stays pending and is retried on a later frame.
+/// is not present yet (a sphere-only avatar, or the avatar simply not spawned yet)
+/// stays pending and is retried on a later frame.
 ///
 /// When no `--viewer-assets` avatar body is loaded the avatars are placeholder
 /// spheres with no skeleton, so an attachment instead falls back to the avatar's
 /// own object entity (its previous, position-only parent) so it at least tracks
 /// the avatar's location.
+///
+/// A **HUD** attachment ([`is_hud_point`]) takes neither path: its point hangs off
+/// the reference viewer's `mScreen` pseudo-joint, not the skeleton, so it is
+/// parented to the [`HudState`] node for its point — the screen-space subtree
+/// (P35.1) — and only when the wearer is the agent itself. Another avatar's HUD
+/// attachment is hidden instead: `LLVOAvatar::initAttachmentPoints` creates the
+/// HUD joints for `isSelf()` alone, so there such an object never attaches and
+/// never renders, and it must not become world geometry here either. Both are
+/// terminal: the object is marked parented (routed) and not retried.
 pub(crate) fn adopt_pending_attachments(
     mut state: ResMut<ObjectState>,
     avatars: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
+    hud: Res<HudState>,
+    identity: Res<SlIdentity>,
     mut commands: Commands,
 ) {
     // Snapshot the pending attachments first so the target lookup can read
@@ -2166,6 +2220,26 @@ pub(crate) fn adopt_pending_attachments(
         })
         .collect();
     for (scoped, entity, point_id, avatar) in pending {
+        if is_hud_point(point_id) {
+            // The wearer's agent id, needed to tell our own HUD from someone else's.
+            // An attachment can arrive before the avatar object it hangs off, so an
+            // unresolved wearer is retried next frame rather than taken for a
+            // stranger's (which would hide our own HUD for the whole session).
+            let Some(agent) = avatars.agent_of(avatar) else {
+                continue;
+            };
+            let own = identity.agent_id == Some(agent);
+            route_hud_attachment(
+                &mut state,
+                scoped,
+                entity,
+                point_id,
+                own,
+                &hud,
+                &mut commands,
+            );
+            continue;
+        }
         let target = match body.as_deref() {
             // Rigged body: parent to the avatar's attachment-point node, which sits
             // at the stored `avatar_lad.xml` offset from its skeleton joint, so the
@@ -2182,6 +2256,45 @@ pub(crate) fn adopt_pending_attachments(
             }
             debug!("parented attachment {scoped} (point {point_id}) to avatar {avatar} joint");
         }
+    }
+}
+
+/// Route one attachment worn on a HUD point (P35.1): parent the agent's **own**
+/// HUD to the screen node for its point, and hide anyone else's (or any HUD at
+/// all when the run has no avatar assets, so no HUD screen was spawned).
+///
+/// Either way the object leaves the world scene — a HUD's local transform is
+/// relative to the screen, so left in the world it would sit as loose geometry at
+/// the region origin, which is exactly what it did before this phase. Both
+/// outcomes are terminal, so the caller marks it routed and stops retrying.
+fn route_hud_attachment(
+    state: &mut ObjectState,
+    scoped: ScopedObjectId,
+    entity: Entity,
+    point_id: u8,
+    own: bool,
+    hud: &HudState,
+    commands: &mut Commands,
+) {
+    match hud.point_entity(point_id).filter(|_node| own) {
+        Some(node) => {
+            commands.entity(entity).insert(ChildOf(node));
+            debug!("routed own HUD attachment {scoped} to HUD point {point_id}");
+        }
+        None => {
+            commands.entity(entity).insert(Visibility::Hidden);
+            debug!(
+                "hid HUD attachment {scoped} (point {point_id}): {}",
+                if own {
+                    "no HUD screen (no avatar assets)"
+                } else {
+                    "not the agent's own"
+                }
+            );
+        }
+    }
+    if let Some(tracked) = state.objects.get_mut(&scoped) {
+        tracked.parented = true;
     }
 }
 
@@ -2257,7 +2370,32 @@ pub(crate) fn apply_object_meshes(
         // skinned to a skeleton. It defers to [`apply_rigged_attachments`], which
         // finds its wearer by walking the parent chain to an avatar root.
         let is_rigged = mesh_manager.skin(key).is_some();
-        for tracked in state.objects.values_mut() {
+        // …except on a HUD (P35.1), which has no skeleton: the reference viewer
+        // warns the user outright that a rigged mesh does not belong on a HUD
+        // (the `RiggedMeshAttachedToHUD` notification). Binding it would skin its
+        // submeshes onto the wearer's *in-world* body root — dragging the HUD back
+        // into the world scene this phase routes it out of — so a HUD-worn rigged
+        // mesh is built as static geometry in the HUD's own space instead.
+        let hud_rigged: HashSet<ScopedObjectId> = if is_rigged {
+            state
+                .objects
+                .iter()
+                .filter(|(_scoped, tracked)| {
+                    matches!(&tracked.pending, Some(PendingGeometry::Mesh(pending)) if pending.key == key)
+                })
+                .map(|(&scoped, _tracked)| scoped)
+                .filter(|&scoped| in_hud_attachment(&state, scoped))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        if !hud_rigged.is_empty() {
+            warn!(
+                "rigged mesh {key} is worn on a HUD: building it as static HUD geometry \
+                 (the reference viewer warns the user this is unsupported)"
+            );
+        }
+        for (&scoped, tracked) in &mut state.objects {
             // First build: an object pending on this mesh key. A build pending on a
             // *different* asset (another mesh, or a sculpt) is left untouched.
             if matches!(&tracked.pending, Some(PendingGeometry::Mesh(pending)) if pending.key == key)
@@ -2265,7 +2403,7 @@ pub(crate) fn apply_object_meshes(
                 let Some(PendingGeometry::Mesh(pending)) = tracked.pending.take() else {
                     continue;
                 };
-                if is_rigged {
+                if is_rigged && !hud_rigged.contains(&scoped) {
                     // Defer the skinned build to `apply_rigged_attachments`. This is
                     // gated on the mesh being rigged, NOT on `attachment_point`: an
                     // attachment's point can arrive in a later update than the mesh

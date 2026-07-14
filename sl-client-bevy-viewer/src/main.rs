@@ -24,6 +24,7 @@ mod environment;
 mod flexi;
 mod ground;
 mod hand_pose;
+mod hud;
 mod ik;
 mod legacy_materials;
 mod lights;
@@ -53,6 +54,8 @@ mod water;
 
 use std::path::{Path, PathBuf};
 
+use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
+use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::camera::{Exposure, Hdr};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
@@ -104,6 +107,7 @@ use crate::diagnostics::{
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
+use crate::hud::{HudState, setup_hud_screen};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -518,6 +522,16 @@ fn run_session(
     // the scene-render half Bevy's env-map filter / consumer expect but never
     // produce.
     .add_plugins(ReflectionProbePlugin)
+    // The HUD layer (P35.1): the HUD screen puts its whole subtree — the routed
+    // attachments and their faces — on `HUD_RENDER_LAYER` by propagating a single
+    // `RenderLayers` down the hierarchy, so the world camera (default layer) never
+    // draws a HUD. Propagation runs before Bevy decides what each camera sees, so a
+    // just-routed attachment is layered in the very frame it is parented.
+    .add_plugins(HierarchyPropagatePlugin::<RenderLayers>::new(PostUpdate))
+    .configure_sets(
+        PostUpdate,
+        PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
+    )
     // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
     // overlay (the rendering-fidelity phases lean hard on the fetch/decode
     // pipeline, so make the frame budget visible).
@@ -542,6 +556,8 @@ fn run_session(
     .init_resource::<VolumeMorphGain>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
+    // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
+    .init_resource::<HudState>()
     // The water-render bookkeeping (P23.1) is created by `setup_water` at
     // startup, so no `init_resource` is needed here; the surface level the
     // underwater-fog pass reads is a small resource published by `drive_water`.
@@ -604,6 +620,9 @@ fn run_session(
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
             setup_avatar_body,
+            // P35.1: the screen-space HUD screen + its attachment-point nodes, which
+            // a worn HUD is routed onto instead of a body joint.
+            setup_hud_screen,
             // P30.2: upload the procedural default particle sprite.
             setup_particles,
         ),

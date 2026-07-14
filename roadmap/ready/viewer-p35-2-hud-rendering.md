@@ -2,7 +2,7 @@
 id: viewer-p35-2
 title: HUD rendering
 topic: viewer
-status: blocked
+status: ready
 origin: VIEWER_ROADMAP.md — Phase 35 — HUD attachments
 blocked_by: [viewer-p35-1]
 ---

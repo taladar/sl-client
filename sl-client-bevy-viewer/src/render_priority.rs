@@ -41,14 +41,16 @@
 //! not starved behind nearer prims. The own avatar / attachments / HUD would map
 //! to the same full-resolution boost; those consumers arrive with later phases.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{
     DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey, TreeLod,
 };
 
 use crate::camera::FlyCamera;
+use crate::hud::on_hud_layer;
 use crate::meshes::MeshManager;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject, TreeLodTargets,
@@ -96,6 +98,17 @@ pub(crate) const TERRAIN_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP
 /// its bakes ahead of the surrounding scene.
 pub(crate) const AVATAR_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 2);
 
+/// The fixed boost priority for a **HUD** attachment's textures and mesh geometry
+/// (`LLGLTexture::BOOST_HUD`, which likewise outranks the avatar and terrain
+/// boosts): a HUD hangs off the screen rather than the world, always in front of
+/// the eye and at full size, so the reference viewer treats every HUD face as
+/// covering the whole screen (`LLVOVolume::updateTextureVirtualSize`) and pins it
+/// to the finest level of detail (`calcLOD`). The world's pixel-area pass cannot
+/// rank it at all — its entity sits in the HUD's own screen space, where the
+/// camera distance is meaningless — so this boost, plus the full-screen area the
+/// pass hands it instead, is what keeps a HUD sharp (P35.1).
+pub(crate) const HUD_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 4);
+
 /// The fixed boost priority for the sky's referenced textures — the rainbow /
 /// halo (and, later, sun / moon / cloud / bloom) maps the atmospheric sky dome
 /// samples (`LLGLTexture::BOOST_HIGH`). In the boost band so a sky texture
@@ -116,6 +129,14 @@ pub(crate) const SKY_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 3
 ///
 /// Boosted assets (terrain, avatar) are requested at a fixed priority and are not
 /// in these queries, so this pass leaves them at their boost.
+///
+/// A **HUD** attachment (P35.1) *is* in these queries — it is an ordinary object
+/// entity, merely routed onto the HUD layer — but it is not in the world, so its
+/// distance from the world camera says nothing about how large it appears. It is
+/// therefore given the reference viewer's HUD treatment instead of a computed
+/// area: every HUD face counts as covering the whole screen, its textures and
+/// mesh take [`HUD_BOOST_PRIORITY`], and its geometry is pinned to the finest
+/// level of detail.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading the camera, window, scene faces / objects, and both asset managers"
@@ -128,8 +149,13 @@ pub(crate) fn drive_render_priority(
     // fails — which silently switched this whole re-prioritisation off.
     camera: Query<(&GlobalTransform, &Projection), With<FlyCamera>>,
     windows: Query<&Window>,
-    faces: Query<(&GlobalTransform, &FaceTextureDebug)>,
-    objects: Query<(&GlobalTransform, &ObjectDebugInfo, &SceneObject)>,
+    faces: Query<(&GlobalTransform, &FaceTextureDebug, Option<&RenderLayers>)>,
+    objects: Query<(
+        &GlobalTransform,
+        &ObjectDebugInfo,
+        &SceneObject,
+        Option<&RenderLayers>,
+    )>,
     mut textures: ResMut<TextureManager>,
     mut meshes: ResMut<MeshManager>,
     mut prim_targets: ResMut<PrimLodTargets>,
@@ -149,12 +175,24 @@ pub(crate) fn drive_render_priority(
     };
     let metrics = ScreenMetrics::new(window.height(), perspective.fov);
     let camera_position = camera_transform.translation();
+    // The area the reference viewer credits a HUD face with: the whole screen
+    // (`LLViewerCamera::getScreenPixelArea`).
+    let hud_area = window.width() * window.height();
 
     // The largest pixel area any face reached for each texture — the reference
     // viewer's per-texture `mMaxVirtualSize`.
     let mut texture_area: HashMap<TextureKey, f32> = HashMap::new();
-    for (transform, FaceTextureDebug(face)) in &faces {
-        let area = face_pixel_area(&metrics, transform, camera_position);
+    // The textures and meshes of HUD attachments, boosted below rather than ranked
+    // by an on-screen area the HUD's own space cannot supply (P35.1).
+    let mut hud_textures: HashSet<TextureKey> = HashSet::new();
+    let mut hud_meshes: HashSet<MeshKey> = HashSet::new();
+    for (transform, FaceTextureDebug(face), layers) in &faces {
+        let area = if on_hud_layer(layers) {
+            hud_textures.insert(face.texture_id);
+            hud_area
+        } else {
+            face_pixel_area(&metrics, transform, camera_position)
+        };
         let slot = texture_area.entry(face.texture_id).or_insert(0.0);
         *slot = slot.max(area);
     }
@@ -175,7 +213,12 @@ pub(crate) fn drive_render_priority(
     // / `apply_tree_lod` drain them.
     prim_targets.0.clear();
     tree_targets.0.clear();
-    for (transform, info, scene) in &objects {
+    for (transform, info, scene, layers) in &objects {
+        // A HUD attachment is not in the world: its entity sits in the HUD's own
+        // screen space, so the camera distance below would rank it by nonsense.
+        // The reference viewer pins it to the finest detail and treats it as
+        // full-screen instead (P35.1).
+        let hud = on_hud_layer(layers);
         // The object's full scale-vector length: its half is the bounding-sphere
         // radius for pixel area, while `LLVOVolume::calcLOD` ranks LOD against the
         // full length (`getScale().length()`), so the two uses differ (P21.2/P21.3).
@@ -188,23 +231,40 @@ pub(crate) fn drive_render_priority(
             // Each prim tessellates its own shape, so — unlike a shared mesh asset
             // — there is no cross-instance aggregation.
             if scene.category == ObjectCategory::Prim {
-                let desired = PrimLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+                let desired = if hud {
+                    PrimLod::FINEST
+                } else {
+                    PrimLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR)
+                };
                 prim_targets.0.insert(scene.scoped_id, desired);
-            } else if scene.category == ObjectCategory::Tree {
+            } else if scene.category == ObjectCategory::Tree && !hud {
                 // A tree is procedurally generated (like a prim, no asset): pick the
                 // branching tier its on-screen size warrants, or the billboard
-                // imposter once it is tiny on screen (P26.2).
+                // imposter once it is tiny on screen (P26.2). A tree cannot be worn,
+                // so a HUD one is left at the tier it was built with.
                 let area = metrics.pixel_area(0.5 * scale_length, distance);
                 let desired = tree_tier_for_size(scale_length, distance, area);
                 tree_targets.0.insert(scene.scoped_id, desired);
             }
             continue;
         };
-        let area = metrics.pixel_area(0.5 * scale_length, distance);
+        let area = if hud {
+            hud_area
+        } else {
+            metrics.pixel_area(0.5 * scale_length, distance)
+        };
         let mesh_key = MeshKey::from(asset);
+        if hud {
+            hud_meshes.insert(mesh_key);
+            hud_textures.insert(TextureKey::from(asset));
+        }
         let area_slot = mesh_area.entry(mesh_key).or_insert(0.0);
         *area_slot = area_slot.max(area);
-        let desired = MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+        let desired = if hud {
+            MeshLod::FINEST
+        } else {
+            MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR)
+        };
         let lod_slot = mesh_lod.entry(mesh_key).or_insert(MeshLod::COARSEST);
         *lod_slot = lod_slot.finer_of(desired);
         // Offer the same area to the texture store, aggregated by the maximum, for
@@ -214,14 +274,26 @@ pub(crate) fn drive_render_priority(
     }
 
     for (id, area) in texture_area {
-        textures.set_priority(id, Priority::from_pixel_area(area));
+        let priority = if hud_textures.contains(&id) {
+            HUD_BOOST_PRIORITY
+        } else {
+            Priority::from_pixel_area(area)
+        };
+        textures.set_priority(id, priority);
         // Pixel-area LOD (P21.1): pick the discard level the on-screen size of
         // the face warrants and upgrade / downgrade the store entry toward it.
-        // A no-op for a boosted (full-resolution) or not-yet-decoded texture.
+        // A no-op for a boosted (full-resolution) or not-yet-decoded texture. A HUD
+        // face's area is the whole screen, so a LOD-managed texture it shares with
+        // world geometry is pulled to its finest level rather than discarded.
         textures.set_lod_for_area(id, area);
     }
     for (mesh_key, area) in mesh_area {
-        meshes.set_priority(mesh_key, Priority::from_pixel_area(area));
+        let priority = if hud_meshes.contains(&mesh_key) {
+            HUD_BOOST_PRIORITY
+        } else {
+            Priority::from_pixel_area(area)
+        };
+        meshes.set_priority(mesh_key, priority);
     }
     for (mesh_key, desired) in mesh_lod {
         // Mesh LOD (P21.2): upgrade / downgrade the managed mesh toward the finest

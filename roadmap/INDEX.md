@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 40 |
 | ready | 29 |
-| blocked | 4 |
+| blocked | 3 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 459 |
+| done | 460 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **544** |
@@ -121,7 +121,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
+- [`viewer-p35-2`](ready/viewer-p35-2-hud-rendering.md) — HUD rendering (blocked
+  by `viewer-p35-1` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 
@@ -184,15 +185,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (4)
+## blocked (3)
 
 ### viewer
 
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
-- [`viewer-p35-2`](blocked/viewer-p35-2-hud-rendering.md) — HUD rendering
-  (blocked by `viewer-p35-1`)
 
 ### test
 
@@ -221,7 +220,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (459)
+## done (460)
 
 ### protocol
 
@@ -513,6 +512,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Shape volume morphs on collision volumes
 - [`viewer-p34-4`](done/viewer-p34-4-collision-volume-scale-inheritance.md) —
   Collision-volume scale inheritance from the skeletal params
+- [`viewer-p35-1`](done/viewer-p35-1-detect-hud.md) — Detect HUD
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

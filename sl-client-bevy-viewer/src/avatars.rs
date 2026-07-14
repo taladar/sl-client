@@ -1311,6 +1311,17 @@ impl AvatarState {
         self.clear_joint_overrides(agent);
     }
 
+    /// The agent whose avatar is tracked under the scoped object id `avatar_scoped`
+    /// — the wearer of an attachment whose parent is that object. `None` if no
+    /// avatar object with that scoped id is tracked (yet).
+    ///
+    /// The HUD routing (P35.1) needs it to tell the agent's **own** HUD attachments
+    /// (which go to the screen-space HUD layer) from another avatar's (which are
+    /// hidden: the reference viewer gives a non-self avatar no HUD joints at all).
+    pub(crate) fn agent_of(&self, avatar_scoped: ScopedObjectId) -> Option<AgentKey> {
+        self.by_scoped.get(&avatar_scoped).copied()
+    }
+
     /// The attachment-point node entity a worn attachment parents to (P16.2): the
     /// node for raw attachment-point `point_id` on the rigged body of the avatar
     /// tracked under `avatar_scoped`, carrying the fixed `avatar_lad.xml` offset
