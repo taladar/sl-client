@@ -35,5 +35,5 @@ pub use decode::{
 };
 pub use registry::{
     BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, KeyframeMotionClass, builtin_animation,
-    builtin_animation_by_name, is_walk_adjust_trigger, keyframe_motion_class,
+    builtin_animation_by_name, is_gun_aim_trigger, is_walk_adjust_trigger, keyframe_motion_class,
 };

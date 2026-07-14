@@ -57,6 +57,7 @@ use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
 use crate::physics::AvatarMotion;
+use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -479,17 +480,25 @@ impl AnimationPlayback {
     /// lowest [`PlayState::order`] stamp. (Note this is the opposite of the per-joint
     /// pose blend, where the most recent activation wins a tie; both fall out of the
     /// one active-list order, and both are reproduced faithfully.)
+    ///
+    /// A *procedural* motion may request a hand pose too — the editing reach (P31.15) asks
+    /// for [`EDITING_HAND_POSE`](crate::reach::EDITING_HAND_POSE) while it reaches, as the
+    /// reference's `LLEditingMotion` does. Such a request arrives as `procedural` and takes
+    /// part in the same contest, at its own priority (the reference writes it *last*, after
+    /// every keyframe motion, so it wins any tie — hence the `order` of 0 here).
     pub(crate) fn requested_hand_pose(
         &self,
         agent: AgentKey,
         manager: &AnimationManager,
+        procedural: Option<(JointPriority, HandPose)>,
     ) -> Option<HandPose> {
         let merged = merge_playing(
             self.playing.get(&agent),
             self.client_locomotion.get(&agent),
             self.client_typing.get(&agent),
         );
-        let mut winner: Option<(JointPriority, u64, HandPose)> = None;
+        let mut winner: Option<(JointPriority, u64, HandPose)> =
+            procedural.map(|(priority, pose)| (priority, 0, pose));
         for (anim_id, play) in &merged {
             let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
                 continue;
@@ -547,6 +556,24 @@ impl AnimationPlayback {
             }
         }
         anims
+    }
+
+    /// Whether `agent` is **aiming** — one of the reference's `AGENT_GUN_AIM_ANIMS` is
+    /// signalled, which is what switches `LLTargetingMotion` on (P31.15) so the avatar's
+    /// torso twists until its right hand points at its look-at target.
+    ///
+    /// Read from the same merged set as [`adjuster_anims`](Self::adjuster_anims), and with
+    /// the same rule: a motion already easing out no longer drives an adjuster.
+    #[must_use]
+    pub(crate) fn is_aiming(&self, agent: AgentKey) -> bool {
+        let merged = merge_playing(
+            self.playing.get(&agent),
+            self.client_locomotion.get(&agent),
+            self.client_typing.get(&agent),
+        );
+        merged.iter().any(|(&anim_id, play)| {
+            play.stopped_at.is_none() && sl_anim::is_gun_aim_trigger(anim_id)
+        })
     }
 
     /// Advance the speed-scaled playback clocks (P31.14): every
@@ -904,8 +931,9 @@ pub(crate) fn drive_avatar_skeletons(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries; the \
-              look-at fold (P31.12) adds the look-at target and motion resources, and \
-              the locomotion adjusters (P31.14) the adjuster state, terrain and motions"
+              look-at fold (P31.12) adds the look-at target and motion resources, the \
+              locomotion adjusters (P31.14) the adjuster state, terrain and motions, and \
+              the reach & aim adjusters (P31.15) the point-at targets and their state"
 )]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
@@ -917,6 +945,8 @@ pub(crate) fn pose_avatar_skeletons(
     mut ground: ResMut<AvatarGround>,
     look_targets: Res<LookAtTargets>,
     mut look_motion: ResMut<LookAtMotion>,
+    point_at_targets: Res<PointAtTargets>,
+    mut reach_motion: ResMut<ReachMotion>,
     mut adjust: ResMut<LocomotionAdjust>,
     mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
     motions: Query<&AvatarMotion>,
@@ -930,10 +960,13 @@ pub(crate) fn pose_avatar_skeletons(
     let dt = time.delta_secs();
     let look_debug = crate::look_at::LookAtDebug::from_env();
     let log_ik = crate::locomotion_ik::log_enabled();
+    let log_reach = crate::reach::log_enabled();
     let rigged = state.rigged_agents();
     // Forget the adjuster state of avatars that have despawned.
     adjust.retain(&|agent| rigged.contains(&agent));
+    reach_motion.retain(&|agent| rigged.contains(&agent));
     let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
+    let reach_joints = ReachJoints::resolve(|name| body.joint_index(name));
     for agent in rigged {
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
@@ -1015,6 +1048,41 @@ pub(crate) fn pose_avatar_skeletons(
         );
         runtime_morphs.set(agent, BLINK_LEFT_PARAM, blink.left);
         runtime_morphs.set(agent, BLINK_RIGHT_PARAM, blink.right);
+        // Fold in the activity-driven reach & aim adjusters (P31.15): the left-arm IK reach
+        // toward whatever the avatar has selected (its point-at target) and the torso twist
+        // that aims its right hand at its look-at target while a gun-aim animation plays.
+        // Like the locomotion fold below, they read the current geometry out of `world0`.
+        let reach_report = crate::reach::apply(
+            &mut pose,
+            &mut reach_motion,
+            &ReachInput {
+                agent,
+                world: &world0,
+                root: &root_global,
+                joints: reach_joints,
+                point_at: point_at_targets.point(agent),
+                look_at: look_targets.point(agent),
+                aiming: playback.is_aiming(agent),
+                dt,
+            },
+        );
+        if log_reach {
+            info!(
+                "P31.15 reach agent={agent} edit_w={:.2} point_err={:.1}deg aim_w={:.2} \
+                 twist={:.1}deg residual={:.1}deg aim_dir=({:+.2},{:+.2},{:+.2}) aiming={} \
+                 target={}",
+                reach_report.edit_weight,
+                reach_report.point_error.to_degrees(),
+                reach_report.aim_weight,
+                reach_report.torso_twist.to_degrees(),
+                reach_report.aim_residual.to_degrees(),
+                reach_report.aim_dir.x,
+                reach_report.aim_dir.y,
+                reach_report.aim_dir.z,
+                playback.is_aiming(agent),
+                point_at_targets.point(agent).is_some(),
+            );
+        }
         // Fold in the locomotion adjusters (P31.14): the walk-speed servo that keeps
         // the walk cycle's feet in step with the ground, the foot IK that plants a
         // standing avatar's ankles on it, the landing recovery's ground alignment, and

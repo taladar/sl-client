@@ -46,6 +46,7 @@ use sl_client_bevy::{AgentKey, HAND_POSE_MORPH_PARAMS, hand_pose_morph_param};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::avatars::{AvatarRuntimeMorphs, AvatarState};
+use crate::reach::{EDITING_HAND_POSE, EDITING_HAND_POSE_PRIORITY, PointAtTargets};
 
 /// Seconds one hand-pose morph takes to fully cross-fade into another (reference
 /// `HAND_MORPH_BLEND_TIME`).
@@ -215,6 +216,7 @@ pub(crate) fn drive_hand_poses(
     state: Res<AvatarState>,
     playback: Res<AnimationPlayback>,
     manager: Res<AnimationManager>,
+    point_at: Res<PointAtTargets>,
     mut motion: ResMut<HandPoseMotion>,
     mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
 ) {
@@ -223,7 +225,12 @@ pub(crate) fn drive_hand_poses(
     let log = log_hand_pose();
     let agents = state.rigged_agents();
     for &agent in &agents {
-        let requested = forced.or_else(|| playback.requested_hand_pose(agent, &manager));
+        // The editing reach (P31.15) asks for its own hand shape while it reaches, at its
+        // own priority — the reference's `LLEditingMotion::sHandPose`.
+        let editing = point_at
+            .is_editing(agent)
+            .then_some((EDITING_HAND_POSE_PRIORITY, EDITING_HAND_POSE));
+        let requested = forced.or_else(|| playback.requested_hand_pose(agent, &manager, editing));
         let hands = motion.states.entry(agent).or_default();
         let changed = hands.update(requested, dt);
         for (index, param) in HAND_POSE_MORPH_PARAMS.into_iter().enumerate() {

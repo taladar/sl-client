@@ -875,6 +875,15 @@ const FALL_MOTIONS: &[&str] = &["standup"];
 /// how the same avatar looks in the reference viewer.
 const WALK_ADJUST_TRIGGERS: &[&str] = &["walk", "run", "crouchwalk", "turnleft", "turnright"];
 
+/// The reference viewer's `AGENT_GUN_AIM_ANIMS` (`llanimationstates.cpp`): the
+/// signalled animations that switch the always-on `LLTargetingMotion` on, so the
+/// avatar's torso twists until its right hand points at its look-at target (P31.15).
+///
+/// The four *aim* animations only — the matching `AGENT_GUN_HOLD_ANIMS` (weapon at
+/// rest) do **not** aim, exactly as in the reference, which also stops the idle body
+/// noise while any of these is playing.
+const GUN_AIM_ANIMS: &[&str] = &["aim_rifle_r", "aim_handgun_r", "aim_bazooka_r", "aim_bow_l"];
+
 /// The `LLKeyframeMotion` subclass the reference viewer backs animation `id` with
 /// — [`Plain`](KeyframeMotionClass::Plain) for an uploaded animation or any
 /// built-in with no locomotion adjustment.
@@ -909,6 +918,17 @@ pub fn keyframe_motion_class(id: Uuid) -> KeyframeMotionClass {
 #[must_use]
 pub fn is_walk_adjust_trigger(id: Uuid) -> bool {
     builtin_animation(id).is_some_and(|builtin| WALK_ADJUST_TRIGGERS.contains(&builtin.name))
+}
+
+/// Whether `id` is one of the reference viewer's `AGENT_GUN_AIM_ANIMS` — the set whose
+/// presence in an avatar's signalled animations activates `LLTargetingMotion` (P31.15),
+/// which twists the torso until the avatar's right hand points at its look-at target.
+///
+/// The reference gates the aim on the *aim* animations alone: an avatar merely
+/// **holding** a weapon (`hold_rifle_r` …) does not track anything.
+#[must_use]
+pub fn is_gun_aim_trigger(id: Uuid) -> bool {
+    builtin_animation(id).is_some_and(|builtin| GUN_AIM_ANIMS.contains(&builtin.name))
 }
 
 #[cfg(test)]
@@ -1073,6 +1093,32 @@ mod tests {
                 !is_walk_adjust_trigger(id(name)?),
                 "{name} does not trigger"
             );
+        }
+        Ok(())
+    }
+
+    /// The gun-aim trigger set is the reference's `AGENT_GUN_AIM_ANIMS`: the four aim
+    /// animations, and *not* the matching hold ones (an avatar holding a weapon at rest
+    /// aims at nothing).
+    #[test]
+    fn gun_aim_triggers_are_the_four_aim_anims() -> Result<(), TestError> {
+        let id = |name: &str| -> Result<Uuid, TestError> {
+            Ok(builtin_animation_by_name(name)
+                .ok_or("built-in present")?
+                .id)
+        };
+        for name in ["aim_rifle_r", "aim_handgun_r", "aim_bazooka_r", "aim_bow_l"] {
+            assert!(is_gun_aim_trigger(id(name)?), "{name} aims");
+        }
+        for name in [
+            "hold_rifle_r",
+            "hold_handgun_r",
+            "hold_bazooka_r",
+            "hold_bow_l",
+            "shoot_bow_l",
+            "stand",
+        ] {
+            assert!(!is_gun_aim_trigger(id(name)?), "{name} does not aim");
         }
         Ok(())
     }

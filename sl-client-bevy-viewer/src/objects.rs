@@ -475,6 +475,20 @@ impl ObjectState {
     pub(crate) fn full_key(&self, scoped: &ScopedObjectId) -> Option<ObjectKey> {
         self.objects.get(scoped).map(|tracked| tracked.full_key)
     }
+
+    /// The entity of the object with grid-wide key `key`, or [`None`] if this viewer does
+    /// not have it. The reverse of [`full_key`](Self::full_key), used by the point-at
+    /// receive path (P31.15) to resolve another avatar's point-at effect — whose target is
+    /// named by its full key — against the target object's current transform.
+    ///
+    /// Objects are keyed by their region-scoped id, so this is a scan; it runs only per
+    /// received effect (a handful a second at most), not per frame.
+    pub(crate) fn entity_of(&self, key: ObjectKey) -> Option<Entity> {
+        self.objects
+            .values()
+            .find(|tracked| tracked.full_key == key)
+            .map(|tracked| tracked.entity)
+    }
 }
 
 /// Marker for the per-object **geometry holder** entity — the child of an object

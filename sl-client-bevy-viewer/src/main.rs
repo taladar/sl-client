@@ -37,6 +37,7 @@ mod particles;
 mod physics;
 mod probes;
 mod procedural;
+mod reach;
 mod render_priority;
 mod screenshot;
 mod session;
@@ -513,6 +514,9 @@ fn run_session(
     .init_resource::<AvatarRuntimeMorphs>()
     .init_resource::<look_at::LookAtTargets>()
     .init_resource::<look_at::LookAtMotion>()
+    .init_resource::<reach::PointAtTargets>()
+    .init_resource::<reach::PointAtSelection>()
+    .init_resource::<reach::ReachMotion>()
     .init_resource::<hand_pose::HandPoseMotion>()
     .init_resource::<locomotion_ik::LocomotionAdjust>()
     .init_resource::<ground::AvatarGround>()
@@ -840,6 +844,17 @@ fn run_session(
             // look-at gaze hints. The pose pass (PostUpdate) reads both.
             look_at::update_own_look_at_target,
             look_at::receive_look_at_effects,
+            // Activity-driven reach & aim (P31.15): the own avatar's object selection
+            // (the E key) and the point-at effect it publishes, other avatars' point-at
+            // effects, and the G key that plays an aim animation through the simulator
+            // so the targeting motion engages the way a scripted weapon would drive it.
+            // The pose pass (PostUpdate) reads the resulting targets.
+            (
+                reach::select_object_under_crosshair,
+                reach::drive_own_point_at.after(reach::select_object_under_crosshair),
+                reach::receive_point_at_effects,
+                reach::drive_aim_animation,
+            ),
             // Avatar ground probe (P31.14): raycast what is under each avatar's root
             // and ankles, for the foot IK and the landing recovery. It reads the joint
             // globals the pose pass wrote *last* frame — it cannot run inside that pass,

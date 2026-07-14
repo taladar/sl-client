@@ -533,7 +533,7 @@ pub(crate) fn smooth_interpolant(half_life: f32, dt: f32) -> f32 {
 /// Constrain a rotation to at most `max_angle` radians about its axis (the
 /// reference `LLQuaternion::constrain`): rotations within the limit pass through,
 /// larger ones are clamped to the limit keeping their axis.
-fn constrain(rotation: Quat, max_angle: f32) -> Quat {
+pub(crate) fn constrain(rotation: Quat, max_angle: f32) -> Quat {
     let angle = Quat::IDENTITY.angle_between(rotation);
     if angle <= max_angle {
         return rotation;
@@ -547,7 +547,7 @@ fn constrain(rotation: Quat, max_angle: f32) -> Quat {
 /// reference `LLQuaternion(fwd, left, up)` constructor forms (`left = up × fwd`,
 /// `up = fwd × left`). `forward` must be non-degenerate; a near-zero or
 /// near-vertical `forward` is handled by the callers.
-fn basis_rotation(forward: Vec3) -> Quat {
+pub(crate) fn basis_rotation(forward: Vec3) -> Quat {
     let fwd = forward.normalize_or_zero();
     let left = Vec3::Z.cross(fwd).normalize_or_zero();
     let up = fwd.cross(left);

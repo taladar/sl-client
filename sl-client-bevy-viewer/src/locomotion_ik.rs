@@ -189,7 +189,7 @@ const FOOT_GROUND_TIME_CONSTANT: f32 = 0.08;
 /// A linear rescale of `x` from `x1..x2` onto `y1..y2`, clamped to the `y` range in
 /// whichever order it was given — the reference's `clamp_rescale` (`llmath.h`), used
 /// by the walk servo's floor and the fly bank's speed ramp.
-fn clamp_rescale(x: f32, x1: f32, x2: f32, y1: f32, y2: f32) -> f32 {
+pub(crate) fn clamp_rescale(x: f32, x1: f32, x2: f32, y1: f32, y2: f32) -> f32 {
     let span = x2 - x1;
     if span.abs() < f32::EPSILON {
         return y1;
