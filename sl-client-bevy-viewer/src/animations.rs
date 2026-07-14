@@ -47,8 +47,10 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
-use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarState};
-use crate::look_at::{LookAtJoints, LookAtMotion, LookAtTargets};
+use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs, AvatarState};
+use crate::look_at::{
+    BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
+};
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -746,6 +748,7 @@ pub(crate) fn pose_avatar_skeletons(
     state: Res<AvatarState>,
     look_targets: Res<LookAtTargets>,
     mut look_motion: ResMut<LookAtMotion>,
+    mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
     parts: Query<(Entity, &AvatarBodyPart)>,
     mut globals: Query<&mut GlobalTransform>,
 ) {
@@ -817,7 +820,9 @@ pub(crate) fn pose_avatar_skeletons(
         } else {
             (None, None, Quat::IDENTITY)
         };
-        crate::look_at::apply(
+        // The look-at fold also advances the eye-blink timer (P31.12b); drive the two
+        // eyelid morph params through the per-frame runtime-morph pipeline (P31.12a).
+        let blink = crate::look_at::apply(
             &mut pose,
             agent,
             &look_targets,
@@ -830,6 +835,8 @@ pub(crate) fn pose_avatar_skeletons(
             dt,
             look_debug,
         );
+        runtime_morphs.set(agent, BLINK_LEFT_PARAM, blink.left);
+        runtime_morphs.set(agent, BLINK_RIGHT_PARAM, blink.right);
         let world = skeleton.deformed_world_matrices(deform, &overrides, &pose);
         // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
         // `arithmetic_side_effects` lint the glam operators trip.

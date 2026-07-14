@@ -2647,10 +2647,6 @@ pub(crate) struct AvatarRuntimeMorphs {
 impl AvatarRuntimeMorphs {
     /// Set the per-frame weight of one runtime morph `param` on `agent` (a
     /// driver calls this every frame it wants the param off its rest value).
-    #[expect(
-        dead_code,
-        reason = "used by the runtime-morph drivers (P31.12b / P34)"
-    )]
     pub(crate) fn set(&mut self, agent: AgentKey, param: &str, weight: f32) {
         self.by_agent
             .entry(agent)
@@ -2662,7 +2658,7 @@ impl AvatarRuntimeMorphs {
     /// still-present parts fall back to their rest weights.
     #[expect(
         dead_code,
-        reason = "used by the runtime-morph drivers (P31.12b / P34)"
+        reason = "used by the body-physics runtime-morph driver (P34)"
     )]
     pub(crate) fn clear_agent(&mut self, agent: AgentKey) {
         self.by_agent.remove(&agent);

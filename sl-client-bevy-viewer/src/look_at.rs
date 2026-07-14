@@ -21,13 +21,15 @@
 //!   target it faces forward (rest), so it is a near no-op until a target exists.
 //!   (The reference also lags the torso a little; that is dropped here — see below.)
 //! - **`LLEyeMotion`** aims the eyes at the target with vergence and layers
-//!   random saccade / look-away jitter on top (bounded by [`EYE_ROT_LIMIT_ANGLE`]).
-//!
-//! **Not** ported here (deliberately deferred, tracked as its own roadmap items):
-//! the eye **blink**, which the reference drives by morphing the `Blink_Left` /
-//! `Blink_Right` visual-params every frame. The viewer's appearance pipeline bakes
-//! morphs into geometry once at appearance time, so per-frame visual-param morphs
-//! are a separate prerequisite (viewer P31.12a) the blink (P31.12b) builds on.
+//!   random saccade / look-away jitter on top (bounded by [`EYE_ROT_LIMIT_ANGLE`]),
+//!   and drives the eye **blink** (P31.12b): a random blink timer
+//!   ([`EYE_BLINK_MIN_TIME`]..[`EYE_BLINK_MAX_TIME`] between blinks) morphs the
+//!   `Blink_Left` / `Blink_Right` visual-params shut and open each blink, plus an
+//!   opportunistic blink whenever the eyes look away. The eyelid morphs are driven
+//!   every frame through the per-frame runtime-morph pipeline ([`crate::avatars`]
+//!   `AvatarRuntimeMorphs`, P31.12a) rather than the joint pose, since the
+//!   appearance pipeline bakes shape morphs into geometry once at appearance time
+//!   and cannot animate a param per frame.
 //!
 //! Like the idle adjusters this is viewer-only (no runtime parity). Unlike them the
 //! aim **replaces** the neck / head keyframe while engaged (the reference's
@@ -131,6 +133,39 @@ const FOVEAL_OFFSET: f32 = 4.0 * (core::f32::consts::PI / 180.0);
 /// target, eyes strongly crossed) jitter is suppressed (reference `-0.05f`).
 const VERGENCE_JITTER_THRESHOLD: f32 = -0.05;
 
+/// Minimum seconds between eye blinks (reference `EYE_BLINK_MIN_TIME`).
+const EYE_BLINK_MIN_TIME: f32 = 0.5;
+
+/// Maximum seconds between eye blinks (reference `EYE_BLINK_MAX_TIME`).
+const EYE_BLINK_MAX_TIME: f32 = 8.0;
+
+/// Seconds an eye stays fully shut in the middle of a blink (reference
+/// `EYE_BLINK_CLOSE_TIME`).
+const EYE_BLINK_CLOSE_TIME: f32 = 0.03;
+
+/// Seconds one eyelid takes to fully open or close during a blink — the morph
+/// ramp rate (reference `EYE_BLINK_SPEED`).
+const EYE_BLINK_SPEED: f32 = 0.015;
+
+/// Seconds the right eye lags the left in a blink, so the two eyelids do not move
+/// in perfect lockstep (reference `EYE_BLINK_TIME_DELTA`).
+const EYE_BLINK_TIME_DELTA: f32 = 0.005;
+
+/// Probability (per look-away toggle) that the eyes do **not** take the chance to
+/// blink while moving — the reference blinks when `ll_frand() > 0.1`, i.e. an
+/// opportunistic blink fires on 90% of look-away toggles (reference
+/// `LLEyeMotion::onUpdate`).
+const EYE_BLINK_SKIP_WHILE_MOVING: f32 = 0.1;
+
+/// The `avatar_lad.xml` visual-param name of the left eyelid blink morph the blink
+/// timer drives through the per-frame runtime-morph pipeline (P31.12a); reference
+/// `LLEyeMotion::onUpdate`'s `setVisualParamWeight("Blink_Left", …)`.
+pub(crate) const BLINK_LEFT_PARAM: &str = "Blink_Left";
+
+/// The `avatar_lad.xml` visual-param name of the right eyelid blink morph (see
+/// [`BLINK_LEFT_PARAM`]).
+pub(crate) const BLINK_RIGHT_PARAM: &str = "Blink_Right";
+
 /// Seconds a received `ViewerEffect` look-at target stays valid before it is
 /// pruned and the head returns to rest. The reference resends an active look-at
 /// periodically; this outlives the resend interval but drops a stale gaze.
@@ -224,9 +259,9 @@ impl Rng {
     }
 }
 
-/// The eye saccade state machine (reference `LLEyeMotion`'s jitter / look-away
-/// timers), advanced each frame to produce a small extra yaw / pitch layered on
-/// the eye aim. The blink timer is intentionally omitted (see the module docs).
+/// The eye saccade + blink state machine (reference `LLEyeMotion`'s jitter /
+/// look-away / blink timers), advanced each frame to produce a small extra yaw /
+/// pitch layered on the eye aim and the two eyelid morph weights (P31.12b).
 struct Saccade {
     /// Seconds elapsed on the jitter timer since it last fired.
     jitter_elapsed: f32,
@@ -242,6 +277,16 @@ struct Saccade {
     look_away_yaw: f32,
     /// Current look-away pitch (radians); zero when not looking away.
     look_away_pitch: f32,
+    /// Seconds elapsed on the blink timer since it last reset (reference
+    /// `mEyeBlinkTimer`).
+    blink_elapsed: f32,
+    /// The blink timer threshold: while the eyes are open, the wait until the next
+    /// blink starts; while they are shut, the [`EYE_BLINK_CLOSE_TIME`] hold before
+    /// they reopen (reference `mEyeBlinkTime`).
+    blink_time: f32,
+    /// Whether the eyes are currently in the shut-then-opening half of a blink
+    /// (reference `mEyesClosed`).
+    eyes_closed: bool,
 }
 
 impl Default for Saccade {
@@ -255,6 +300,9 @@ impl Default for Saccade {
             look_away_time: EYE_LOOK_AWAY_MIN_TIME,
             look_away_yaw: 0.0,
             look_away_pitch: 0.0,
+            blink_elapsed: 0.0,
+            blink_time: 0.0,
+            eyes_closed: false,
         }
     }
 }
@@ -268,12 +316,35 @@ struct SaccadeOffset {
     pitch: f32,
 }
 
+/// The eye-blink morph weights for one frame: how shut each eyelid is, `0.0`
+/// (open) .. `1.0` (fully closed), driving the `Blink_Left` / `Blink_Right`
+/// visual-param morphs through the per-frame runtime-morph pipeline (P31.12a).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BlinkWeights {
+    /// The left eyelid morph weight ([`BLINK_LEFT_PARAM`]).
+    pub(crate) left: f32,
+    /// The right eyelid morph weight ([`BLINK_RIGHT_PARAM`]).
+    pub(crate) right: f32,
+}
+
+/// The eye state produced by one [`Saccade::advance`]: the jitter / look-away
+/// rotation offset for the eye aim plus this frame's blink morph weights.
+#[derive(Clone, Copy)]
+struct EyeSaccade {
+    /// The jitter + look-away rotation offset.
+    offset: SaccadeOffset,
+    /// The eyelid blink morph weights.
+    blink: BlinkWeights,
+}
+
 impl Saccade {
-    /// Advance the jitter / look-away timers by `dt` seconds, drawing new random
-    /// targets as they fire, and return the combined offset for this frame. Mirrors
-    /// `LLEyeMotion::onUpdate`'s timer logic minus the blink.
-    fn advance(&mut self, dt: f32, rng: &mut Rng) -> SaccadeOffset {
-        self.jitter_elapsed += dt.max(0.0);
+    /// Advance the jitter / look-away / blink timers by `dt` seconds, drawing new
+    /// random targets as they fire, and return the eye offset + blink weights for
+    /// this frame. Mirrors `LLEyeMotion::onUpdate`'s timer logic.
+    fn advance(&mut self, dt: f32, rng: &mut Rng) -> EyeSaccade {
+        let dt = dt.max(0.0);
+        self.jitter_elapsed += dt;
+        self.blink_elapsed += dt;
         if self.jitter_elapsed > self.jitter_time {
             self.jitter_time =
                 EYE_JITTER_MIN_TIME + rng.unit() * (EYE_JITTER_MAX_TIME - EYE_JITTER_MIN_TIME);
@@ -284,6 +355,13 @@ impl Saccade {
             self.look_away_time -= self.jitter_elapsed.max(0.0);
             self.jitter_elapsed = 0.0;
         } else if self.jitter_elapsed > self.look_away_time {
+            // Blink while moving the eyes some percentage of the time (reference:
+            // `ll_frand() > 0.1f`): force the blink threshold to now so a blink
+            // starts this frame. Drawn before the look-away offsets to keep the
+            // reference's RNG-draw order.
+            if rng.unit() > EYE_BLINK_SKIP_WHILE_MOVING {
+                self.blink_time = self.blink_elapsed;
+            }
             if self.look_away_yaw == 0.0 && self.look_away_pitch == 0.0 {
                 // Start a look-away: pick an off-target offset held for a short
                 // "look back" interval.
@@ -299,9 +377,59 @@ impl Saccade {
                     + rng.unit() * (EYE_LOOK_AWAY_MAX_TIME - EYE_LOOK_AWAY_MIN_TIME);
             }
         }
-        SaccadeOffset {
-            yaw: self.jitter_yaw + self.look_away_yaw,
-            pitch: self.jitter_pitch + self.look_away_pitch,
+        EyeSaccade {
+            offset: SaccadeOffset {
+                yaw: self.jitter_yaw + self.look_away_yaw,
+                pitch: self.jitter_pitch + self.look_away_pitch,
+            },
+            blink: self.advance_blink(rng),
+        }
+    }
+
+    /// Advance the blink half of the state machine and return this frame's eyelid
+    /// morph weights, mirroring the "do blinking" block of `LLEyeMotion::onUpdate`.
+    ///
+    /// Uses the blink timer already advanced by [`advance`](Self::advance) this
+    /// frame. The right eye lags the left by [`EYE_BLINK_TIME_DELTA`], each eyelid
+    /// ramping shut / open over [`EYE_BLINK_SPEED`]; a completed close holds the
+    /// eyes shut for [`EYE_BLINK_CLOSE_TIME`], and a completed open picks the next
+    /// random blink interval. Between blinks the eyes stay fully open (`0.0`).
+    fn advance_blink(&mut self, rng: &mut Rng) -> BlinkWeights {
+        if !self.eyes_closed {
+            if self.blink_elapsed < self.blink_time {
+                // Waiting between blinks: eyes fully open.
+                return BlinkWeights::default();
+            }
+            // Closing: both eyelids ramp 0 → 1, the right lagging the left.
+            let since = self.blink_elapsed - self.blink_time;
+            let left = (since / EYE_BLINK_SPEED).clamp(0.0, 1.0);
+            let right = ((since - EYE_BLINK_TIME_DELTA) / EYE_BLINK_SPEED).clamp(0.0, 1.0);
+            if right >= 1.0 {
+                // Fully shut: hold closed for the close time before reopening.
+                self.eyes_closed = true;
+                self.blink_time = EYE_BLINK_CLOSE_TIME;
+                self.blink_elapsed = 0.0;
+            }
+            BlinkWeights { left, right }
+        } else if self.blink_elapsed < self.blink_time {
+            // Held shut for the close time: eyes fully closed.
+            BlinkWeights {
+                left: 1.0,
+                right: 1.0,
+            }
+        } else {
+            // Opening: both eyelids ramp 1 → 0, the right lagging the left.
+            let since = self.blink_elapsed - self.blink_time;
+            let left = 1.0 - (since / EYE_BLINK_SPEED).clamp(0.0, 1.0);
+            let right = 1.0 - ((since - EYE_BLINK_TIME_DELTA) / EYE_BLINK_SPEED).clamp(0.0, 1.0);
+            if right <= 0.0 {
+                // Fully open: schedule the next blink.
+                self.eyes_closed = false;
+                self.blink_time =
+                    EYE_BLINK_MIN_TIME + rng.unit() * (EYE_BLINK_MAX_TIME - EYE_BLINK_MIN_TIME);
+                self.blink_elapsed = 0.0;
+            }
+            BlinkWeights { left, right }
         }
     }
 }
@@ -533,7 +661,7 @@ fn apply_to_pose(
     neck_parent_world: Quat,
     dt: f32,
     state: &mut AgentLookAt,
-) -> f32 {
+) -> (f32, BlinkWeights) {
     // --- Head / neck (LLHeadRotMotion) ---
     // The desired head **world** rotation (avatar-local frame) to face the target,
     // then the rotation limit — applied **relative to the animated upper body**
@@ -572,8 +700,8 @@ fn apply_to_pose(
     // head-local space — the aim itself once engaged.
     let head_world = aim;
 
-    // --- Eyes (LLEyeMotion, minus blink) ---
-    let saccade = state.saccade.advance(dt, &mut state.rng);
+    // --- Eyes (LLEyeMotion): aim, jitter / look-away, and blink ---
+    let eye = state.saccade.advance(dt, &mut state.rng);
     let (target, vergence, aiming) = match look_dir {
         Some(dir) => (
             eye_target_rotation(dir, head_world),
@@ -582,7 +710,7 @@ fn apply_to_pose(
         ),
         None => (Quat::IDENTITY, FOVEAL_OFFSET, false),
     };
-    let (left, right) = eye_rotations(target, vergence, aiming, saccade);
+    let (left, right) = eye_rotations(target, vergence, aiming, eye.offset);
     // The eyes rest at identity local rotation, so the aim replaces rather than
     // layers — but `compose` on an identity base is exactly that.
     compose(pose, joints.eye_left, left);
@@ -591,8 +719,9 @@ fn apply_to_pose(
     compose(pose, joints.alt_eye_right, right);
 
     // The head rotation angle (radians) effectively applied this frame — the aim
-    // angle scaled by the eased weight — for diagnostics.
-    Quat::IDENTITY.angle_between(aim) * state.weight
+    // angle scaled by the eased weight — for diagnostics, plus the eyelid blink
+    // morph weights for the per-frame runtime-morph pipeline (P31.12b).
+    (Quat::IDENTITY.angle_between(aim) * state.weight, eye.blink)
 }
 
 /// Apply the head & eye look-at adjusters for one avatar, resolving its look-at
@@ -653,7 +782,7 @@ pub(crate) fn apply(
     neck_parent_world: Quat,
     dt: f32,
     debug: LookAtDebug,
-) {
+) -> BlinkWeights {
     let real_dir = targets.point(agent).zip(head_pos).map(|(point, head)| {
         // Direction from the head to the target, in Bevy world space, rotated back
         // into the avatar-local Second Life frame the deformed skeleton uses.
@@ -663,7 +792,7 @@ pub(crate) fn apply(
     });
     let look_dir = debug.force_dir.or(real_dir);
     let interocular = eye_positions.map_or(0.0, |(left, right)| vsub(left, right).length());
-    let head_angle = apply_to_pose(
+    let (head_angle, blink) = apply_to_pose(
         pose,
         look_dir,
         interocular,
@@ -675,11 +804,14 @@ pub(crate) fn apply(
     if debug.log {
         let dir = look_dir.map(|d| (d.x, d.y, d.z));
         info!(
-            "P31.12 look-at agent={agent} target={} dir_local={dir:?} head_angle={head_angle:.3}rad head_joint={:?}",
+            "P31.12 look-at agent={agent} target={} dir_local={dir:?} head_angle={head_angle:.3}rad head_joint={:?} blink=({:.2},{:.2})",
             targets.point(agent).is_some(),
             joints.head,
+            blink.left,
+            blink.right,
         );
     }
+    blink
 }
 
 /// Derive the own avatar's look-at target from the debug fly-camera: the camera's
@@ -981,7 +1113,7 @@ mod tests {
         let pitch_bound = EYE_JITTER_MAX_PITCH + EYE_LOOK_AWAY_MAX_PITCH + 1e-6;
         let mut moved = false;
         for _ in 0..5000 {
-            let offset = saccade.advance(0.05, &mut rng);
+            let offset = saccade.advance(0.05, &mut rng).offset;
             assert!(
                 offset.yaw.abs() <= yaw_bound,
                 "yaw {} exceeds {yaw_bound}",
@@ -997,6 +1129,56 @@ mod tests {
             }
         }
         assert!(moved, "saccade never produced any eye motion");
+    }
+
+    #[test]
+    fn blink_weights_stay_in_range_and_the_eyes_actually_blink() {
+        // Over a long run the eyelid morph weights never leave [0, 1], and the eyes
+        // both fully close and fully reopen at least once.
+        let mut saccade = Saccade::default();
+        let mut rng = Rng::new(0x0BAD_F00D);
+        let mut saw_fully_shut = false;
+        let mut saw_fully_open_after_shut = false;
+        for _ in 0..20_000 {
+            let blink = saccade.advance(0.02, &mut rng).blink;
+            for w in [blink.left, blink.right] {
+                assert!(
+                    (0.0..=1.0).contains(&w),
+                    "blink weight {w} out of range [0, 1]"
+                );
+            }
+            if blink.left >= 1.0 && blink.right >= 1.0 {
+                saw_fully_shut = true;
+            }
+            if saw_fully_shut && blink.left <= 0.0 && blink.right <= 0.0 {
+                saw_fully_open_after_shut = true;
+            }
+        }
+        assert!(saw_fully_shut, "the eyes never fully closed");
+        assert!(
+            saw_fully_open_after_shut,
+            "the eyes never reopened after a blink"
+        );
+    }
+
+    #[test]
+    fn a_blink_closes_the_right_eye_no_earlier_than_the_left() {
+        // The right eyelid lags the left by EYE_BLINK_TIME_DELTA while closing, so it
+        // is never further shut than the left during a blink's closing ramp.
+        let mut saccade = Saccade::default();
+        let mut rng = Rng::new(0x1357_9BDF);
+        for _ in 0..2_000 {
+            let blink = saccade.advance(0.005, &mut rng).blink;
+            // While closing (not yet fully shut) the right must trail the left.
+            if blink.left < 1.0 && !saccade.eyes_closed {
+                assert!(
+                    blink.right <= blink.left + 1e-6,
+                    "right eye {} closed ahead of left {}",
+                    blink.right,
+                    blink.left
+                );
+            }
+        }
     }
 
     #[test]

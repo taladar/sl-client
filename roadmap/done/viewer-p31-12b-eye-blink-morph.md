@@ -2,7 +2,7 @@
 id: viewer-p31-12b
 title: Eye-blink morph (LLEyeMotion blink)
 topic: viewer
-status: ready
+status: done
 origin: VIEWER_ROADMAP.md — split out of P31.12 (head & eye look-at)
 refs: [viewer-p31-12]
 blocked_by: [viewer-p31-12a]
