@@ -518,7 +518,11 @@ fn vlerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
 /// `dt`, i.e. the reference `LLSmoothInterpolation::getInterpolant`
 /// (`1 - 2^(-dt / half_life)`), clamped to `[0, 1]`. A non-positive half-life
 /// snaps immediately.
-fn smooth_interpolant(half_life: f32, dt: f32) -> f32 {
+///
+/// The reference's one critically-damped smoothing primitive, shared by every
+/// adjuster it drives — the head lag here, and the walk-speed servo / fly bank of
+/// [`crate::locomotion_ik`] (P31.14).
+pub(crate) fn smooth_interpolant(half_life: f32, dt: f32) -> f32 {
     if half_life <= 0.0 || !dt.is_finite() {
         return 1.0;
     }

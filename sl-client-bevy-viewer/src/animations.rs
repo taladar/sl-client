@@ -40,7 +40,10 @@ use std::sync::Arc;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
-use sl_anim::{HandPose, JointContribution, JointPriority, Motion, blend_joint, builtin_animation};
+use sl_anim::{
+    HandPose, JointContribution, JointPriority, KeyframeMotionClass, Motion, blend_joint,
+    builtin_animation,
+};
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
     BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid, sample_motion,
@@ -48,9 +51,12 @@ use sl_client_bevy::{
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs, AvatarState};
+use crate::ground::AvatarGround;
+use crate::locomotion_ik::{AdjustInput, AdjusterAnims, LegJoints, LocomotionAdjust};
 use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
+use crate::physics::AvatarMotion;
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -342,6 +348,22 @@ pub(crate) struct PlayState {
     /// from the avatar's set, so it eases out over its remaining tail rather than
     /// popping; `None` while it is still signalled.
     stopped_at: Option<f32>,
+    /// The accumulated drift (seconds) between this animation's **playback** clock and
+    /// wall time, for a motion whose playback is speed-scaled (P31.14): the reference
+    /// viewer's `LLKeyframeWalkMotion` advances its own clock by `dt * "Walk Speed"`
+    /// rather than by `dt`, so a walk cycle keeps pace with the ground. Zero — the
+    /// default, and the value every non-walk motion keeps — means the playback clock
+    /// *is* wall time, exactly as before.
+    ///
+    /// Kept as an offset rather than as an absolute clock so nothing that does not
+    /// speed-scale (every gesture, and the whole animesh control-avatar path, P29) has
+    /// to know this exists: `anim_elapsed = (now - start) + anim_offset`.
+    ///
+    /// Only the *sampling* clock is scaled. A motion's ease-in / ease-out weight and
+    /// its expiry still run on wall time, as they do in the reference (the ease is
+    /// driven by `LLMotionController` from the activation timestamp, never by the
+    /// motion's own adjusted time).
+    anim_offset: f32,
     /// This animation's activation recency (a per-avatar monotonic stamp): higher
     /// means more recently started, so it wins ties in priority — the reference
     /// viewer pushes each newly-started motion to the front of its active list.
@@ -482,6 +504,96 @@ impl AnimationPlayback {
         }
         winner.map(|(_priority, _order, pose)| pose)
     }
+
+    /// Which locomotion adjusters (P31.14) `agent`'s currently-playing animation set
+    /// calls for, and — for the fall recovery — how far into its motion it is.
+    ///
+    /// The three questions the reference viewer answers from the same signalled set:
+    /// is any of `AGENT_WALK_ANIMS` playing (so `LLWalkAdjustMotion` runs and publishes
+    /// a walk speed), is an `LLKeyframeStandMotion` playing (so its lower body is
+    /// foot-IK'd), and is the `LLKeyframeFallMotion` (`standup`) playing (so the pelvis
+    /// blends up from the ground normal). Every set the avatar is playing takes part —
+    /// the simulator's and both client-driven ones.
+    #[must_use]
+    pub(crate) fn adjuster_anims(
+        &self,
+        agent: AgentKey,
+        now: f32,
+        manager: &AnimationManager,
+    ) -> AdjusterAnims {
+        let merged = merge_playing(
+            self.playing.get(&agent),
+            self.client_locomotion.get(&agent),
+            self.client_typing.get(&agent),
+        );
+        let mut anims = AdjusterAnims::default();
+        for (&anim_id, play) in &merged {
+            // A motion already easing out no longer drives an adjuster (the reference
+            // stops the adjust motions on the state change, not on the fade).
+            if play.stopped_at.is_some() {
+                continue;
+            }
+            if sl_anim::is_walk_adjust_trigger(anim_id) {
+                anims.walking = true;
+            }
+            match sl_anim::keyframe_motion_class(anim_id) {
+                KeyframeMotionClass::Stand => anims.standing = true,
+                KeyframeMotionClass::Fall => {
+                    if let Some(motion) = manager.motion(AssetKey::from(anim_id)) {
+                        anims.fall = Some((now - play.start, motion.duration));
+                    }
+                }
+                KeyframeMotionClass::Walk | KeyframeMotionClass::Plain => {}
+            }
+        }
+        anims
+    }
+
+    /// Advance the speed-scaled playback clocks (P31.14): every
+    /// [`Walk`](KeyframeMotionClass::Walk) motion an avatar is playing has its sampling
+    /// clock advanced by `dt * walk_speed(agent)` rather than by `dt`, so the walk
+    /// cycle's feet keep pace with the ground the walk-adjust servo measured.
+    ///
+    /// This is `LLKeyframeWalkMotion::onUpdate`: it is the *motion* that scales its own
+    /// clock by the `"Walk Speed"` the always-on adjust motion publishes, which is why
+    /// only the walk-class motions are touched and everything else keeps wall time. A
+    /// clock driven negative (the avatar is walking backwards, so the cycle plays in
+    /// reverse) wraps up into the motion's loop rather than clamping at zero, as the
+    /// reference's `getDuration() + fmod(adjusted_time, getDuration())` does.
+    pub(crate) fn advance_walk_speed(
+        &mut self,
+        now: f32,
+        dt: f32,
+        manager: &AnimationManager,
+        walk_speed: impl Fn(AgentKey) -> f32,
+    ) {
+        for set in [
+            &mut self.playing,
+            &mut self.client_locomotion,
+            &mut self.client_typing,
+        ] {
+            for (&agent, anims) in set.iter_mut() {
+                let speed = walk_speed(agent);
+                for (&anim_id, play) in anims.iter_mut() {
+                    if sl_anim::keyframe_motion_class(anim_id) != KeyframeMotionClass::Walk {
+                        continue;
+                    }
+                    play.anim_offset += dt * (speed - 1.0);
+                    // Keep a reversed clock inside the loop rather than pinned at 0.
+                    let Some(motion) = manager.motion(AssetKey::from(anim_id)) else {
+                        continue;
+                    };
+                    if !motion.loops || motion.duration <= 0.0 {
+                        continue;
+                    }
+                    let elapsed = now - play.start + play.anim_offset;
+                    if elapsed < 0.0 {
+                        play.anim_offset += motion.duration * (-elapsed / motion.duration).ceil();
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Reconcile one avatar's playing-animation set with an authoritative
@@ -555,6 +667,7 @@ pub(crate) fn reconcile_playing(
                 start: now,
                 stopped_at: None,
                 order: *next_order,
+                anim_offset: 0.0,
             },
         );
         *next_order = next_order.wrapping_add(1);
@@ -624,11 +737,15 @@ pub(crate) fn resolve_pose(
         let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
             continue;
         };
+        // The ease-in/out weight runs on **wall** time; only the *sampling* clock is
+        // speed-scaled (P31.14), and only for a walk-class motion (whose `anim_offset`
+        // is the only non-zero one). See [`PlayState::anim_offset`].
         let weight = motion.pose_weight(elapsed, play.stopped_at);
         if weight <= 0.0 {
             continue;
         }
-        for sampled in sample_motion(motion, elapsed) {
+        let anim_elapsed = elapsed + play.anim_offset;
+        for sampled in sample_motion(motion, anim_elapsed) {
             let Some(index) = joint_index(sampled.name) else {
                 continue;
             };
@@ -680,10 +797,12 @@ pub(crate) fn drive_avatar_skeletons(
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
     mut playback: ResMut<AnimationPlayback>,
+    adjust: Res<LocomotionAdjust>,
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
 ) {
     let now = time.elapsed_secs();
+    let dt = time.delta_secs();
     let playback = playback.as_mut();
     // Reconcile the playback clock with each authoritative animation set.
     for event in events.read() {
@@ -715,6 +834,10 @@ pub(crate) fn drive_avatar_skeletons(
             !anims.is_empty()
         });
     }
+    // Advance the walk-class motions' speed-scaled playback clocks by the walk speed
+    // the previous frame's walk-adjust servo published (P31.14). Every other motion
+    // keeps wall time.
+    playback.advance_walk_speed(now, dt, &manager, |agent| adjust.walk_speed(agent));
     // Without the avatar asset library there are no skeleton instances to pose.
     let Some(body) = body else {
         playback.poses.clear();
@@ -781,17 +904,22 @@ pub(crate) fn drive_avatar_skeletons(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries; the \
-              look-at fold (P31.12) adds the look-at target and motion resources"
+              look-at fold (P31.12) adds the look-at target and motion resources, and \
+              the locomotion adjusters (P31.14) the adjuster state, terrain and motions"
 )]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
+    manager: Res<AnimationManager>,
     playback: Res<AnimationPlayback>,
     library: Option<Res<AvatarAssetLibrary>>,
     body: Option<Res<AvatarBody>>,
     state: Res<AvatarState>,
+    mut ground: ResMut<AvatarGround>,
     look_targets: Res<LookAtTargets>,
     mut look_motion: ResMut<LookAtMotion>,
+    mut adjust: ResMut<LocomotionAdjust>,
     mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
+    motions: Query<&AvatarMotion>,
     parts: Query<(Entity, &AvatarBodyPart)>,
     mut globals: Query<&mut GlobalTransform>,
 ) {
@@ -801,7 +929,12 @@ pub(crate) fn pose_avatar_skeletons(
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
     let look_debug = crate::look_at::LookAtDebug::from_env();
-    for agent in state.rigged_agents() {
+    let log_ik = crate::locomotion_ik::log_enabled();
+    let rigged = state.rigged_agents();
+    // Forget the adjuster state of avatars that have despawned.
+    adjust.retain(&|agent| rigged.contains(&agent));
+    let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
+    for agent in rigged {
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
         // breathes and sways subtly even when no animation is playing.
@@ -838,20 +971,22 @@ pub(crate) fn pose_avatar_skeletons(
             alt_eye_left: body.joint_index("mFaceEyeAltLeft"),
             alt_eye_right: body.joint_index("mFaceEyeAltRight"),
         };
-        // With a target, resolve from an initial deformed pass (which already has
-        // the animation + idle pose folded in): the head / eye joint world positions
-        // the aim uses, plus the neck parent's current world rotation so the head is
-        // aimed against where the animated spine actually is. Without a target the
-        // eyes only jitter and the head relaxes, so none of this is needed.
+        // An initial deformed pass (with the keyframe + idle pose already folded in),
+        // which the procedural adjusters that need to know *where the avatar's joints
+        // currently are* read from: the look-at's head / eye positions and the neck
+        // parent's rotation, and the locomotion adjusters' whole leg geometry (P31.14).
+        let world0 = skeleton.deformed_world_matrices(deform, &overrides, &pose);
+        let joint_pos = |index: Option<usize>| {
+            index
+                .and_then(|i| world0.get(i))
+                .map(|matrix| matrix.w_axis.truncate())
+        };
+        // Only resolve the look-at inputs when the avatar actually has a target;
+        // without one the eyes only jitter and the head relaxes to rest.
         let (head_pos, eye_positions, neck_parent_world) = if look_targets.point(agent).is_some() {
-            let world0 = skeleton.deformed_world_matrices(deform, &overrides, &pose);
-            let joint_pos = |index: Option<usize>| {
-                index
-                    .and_then(|i| world0.get(i))
-                    .map(|matrix| matrix.w_axis.truncate())
-            };
             let eyes = joint_pos(look_joints.eye_left).zip(joint_pos(look_joints.eye_right));
-            // The neck joint's parent world rotation (avatar-local Second Life frame).
+            // The neck joint's parent world rotation (avatar-local Second Life frame),
+            // so the head is aimed against where the animated spine actually is.
             let neck_parent = look_joints
                 .neck
                 .and_then(|neck| skeleton.parents().get(neck).copied().flatten())
@@ -880,6 +1015,75 @@ pub(crate) fn pose_avatar_skeletons(
         );
         runtime_morphs.set(agent, BLINK_LEFT_PARAM, blink.left);
         runtime_morphs.set(agent, BLINK_RIGHT_PARAM, blink.right);
+        // Fold in the locomotion adjusters (P31.14): the walk-speed servo that keeps
+        // the walk cycle's feet in step with the ground, the foot IK that plants a
+        // standing avatar's ankles on it, the landing recovery's ground alignment, and
+        // the fly bank. They read the leg geometry out of `world0` — the pose as it
+        // stands after the keyframe, idle and look-at folds — and correct it.
+        let avatar_motion = state
+            .body_root_of(agent)
+            .and_then(|anchor| motions.get(anchor).ok());
+        // Publish this avatar's **pre-IK** ankle world positions for the next frame's
+        // ground probe. `world0` is the pose *before* the locomotion fold, so the probe
+        // stays a function of the animation alone and the foot IK cannot perturb its own
+        // input — see [`crate::ground::AvatarGround::targets`].
+        if let (Some(left), Some(right)) = (
+            leg_joints
+                .left
+                .and_then(|(_h, _k, ankle)| joint_pos(Some(ankle))),
+            leg_joints
+                .right
+                .and_then(|(_h, _k, ankle)| joint_pos(Some(ankle))),
+        ) {
+            ground.set_probe_targets(
+                agent,
+                root_global.transform_point(left),
+                root_global.transform_point(right),
+            );
+        }
+        let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
+        let report = crate::locomotion_ik::apply(
+            &mut pose,
+            &mut adjust,
+            &AdjustInput {
+                agent,
+                world: &world0,
+                root: &root_global,
+                joints: leg_joints,
+                motion: avatar_motion,
+                ground: ground.get(agent),
+                anims,
+                dt,
+            },
+        );
+        if log_ik {
+            // The knee bend angles *after* the fold, recomputed from the final pose: the
+            // number that says whether a jitter is the ground under the feet moving or
+            // the solve itself flipping between two solutions.
+            let posed = skeleton.deformed_world_matrices(deform, &overrides, &pose);
+            let bend = |leg: Option<(usize, usize, usize)>| -> f32 {
+                leg.map_or(0.0, |(hip, knee, ankle)| {
+                    crate::locomotion_ik::knee_bend_degrees(&posed, hip, knee, ankle)
+                })
+            };
+            info!(
+                "P31.14 locomotion-ik agent={agent} walking={} standing={} fall={} \
+                 walk_speed={:.3} ik_w={:.2} roll={:.3} ground={:?} disp=({:+.3},{:+.3}) \
+                 slope={:.1}deg knee=({:.1},{:.1})deg",
+                anims.walking,
+                anims.standing,
+                anims.fall.is_some(),
+                report.walk_speed,
+                report.foot_ik_weight,
+                report.roll,
+                report.ground,
+                report.displacement.0,
+                report.displacement.1,
+                report.slope_deg,
+                bend(leg_joints.left),
+                bend(leg_joints.right),
+            );
+        }
         let world = skeleton.deformed_world_matrices(deform, &overrides, &pose);
         // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
         // `arithmetic_side_effects` lint the glam operators trip.

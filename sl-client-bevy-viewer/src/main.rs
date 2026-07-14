@@ -21,10 +21,13 @@ mod coords;
 mod diagnostics;
 mod environment;
 mod flexi;
+mod ground;
 mod hand_pose;
+mod ik;
 mod legacy_materials;
 mod lights;
 mod locomotion;
+mod locomotion_ik;
 mod look_at;
 mod materials;
 mod meshes;
@@ -511,6 +514,8 @@ fn run_session(
     .init_resource::<look_at::LookAtTargets>()
     .init_resource::<look_at::LookAtMotion>()
     .init_resource::<hand_pose::HandPoseMotion>()
+    .init_resource::<locomotion_ik::LocomotionAdjust>()
+    .init_resource::<ground::AvatarGround>()
     .init_resource::<AvatarControls>()
     .init_resource::<TypingState>()
     .init_resource::<ControlAvatarState>()
@@ -835,6 +840,11 @@ fn run_session(
             // look-at gaze hints. The pose pass (PostUpdate) reads both.
             look_at::update_own_look_at_target,
             look_at::receive_look_at_effects,
+            // Avatar ground probe (P31.14): raycast what is under each avatar's root
+            // and ankles, for the foot IK and the landing recovery. It reads the joint
+            // globals the pose pass wrote *last* frame — it cannot run inside that pass,
+            // which writes the very `GlobalTransform`s `MeshRayCast` reads.
+            ground::probe_avatar_ground,
             // Animesh (P29): request each animated object's animation motions, drive
             // its control-avatar skeleton from them (after its rigged meshes bind in
             // `apply_rigged_attachments`), and drop control avatars whose object is

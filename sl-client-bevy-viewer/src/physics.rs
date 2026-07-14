@@ -1027,6 +1027,33 @@ impl AvatarMotion {
         .is_some_and(|floor| self.position.z <= floor + margin)
     }
 
+    /// The region this avatar is in — the frame the terrain queries and its reported
+    /// position are expressed in.
+    #[must_use]
+    pub(crate) const fn region(&self) -> RegionHandle {
+        self.region_handle
+    }
+
+    /// The avatar's reported linear velocity (Second Life Z-up metres/second, region
+    /// frame). The walk-adjust foot-slip servo (P31.14) matches the walk animation's
+    /// playback speed to this.
+    #[must_use]
+    pub(crate) const fn sl_velocity(&self) -> Vec3 {
+        Vec3::new(self.velocity.x, self.velocity.y, self.velocity.z)
+    }
+
+    /// The avatar's reported angular velocity (rotation axis scaled by radians/second,
+    /// region frame). The fly-adjust bank (P31.14) rolls the pelvis into a turn by its
+    /// Z component, exactly as the reference's `LLFlyAdjustMotion` does.
+    #[must_use]
+    pub(crate) const fn sl_angular_velocity(&self) -> Vec3 {
+        Vec3::new(
+            self.angular_velocity.x,
+            self.angular_velocity.y,
+            self.angular_velocity.z,
+        )
+    }
+
     /// Build the authoritative motion from an avatar's object update. `apply_rotation`
     /// is `true` for a rigged body root (whose anchor carries the object rotation)
     /// and `false` for a placeholder sphere.

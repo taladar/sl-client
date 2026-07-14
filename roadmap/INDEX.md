@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 38 |
-| ready | 33 |
+| ready | 32 |
 | blocked | 5 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 450 |
+| done | 451 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **538** |
@@ -113,12 +113,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (33)
+## ready (32)
 
 ### viewer
 
-- [`viewer-p31-14`](ready/viewer-p31-14-locomotion-ik-adjustments.md) —
-  Locomotion IK adjustments
 - [`viewer-p31-15`](ready/viewer-p31-15-activity-driven-reach-aim-lleditingmotion-lltargetingmotion.md)
   — Activity-driven reach / aim (LLEditingMotion / LLTargetingMotion)
 - [`viewer-p33-2`](ready/viewer-p33-2-per-object-local-reflection-probes.md) —
@@ -227,7 +225,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (450)
+## done (451)
 
 ### protocol
 
@@ -479,6 +477,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (LLEyeMotion blink) (blocked by `viewer-p31-12a` (done))
 - [`viewer-p31-13`](done/viewer-p31-13-hand-pose-morph-llhandmotion.md) —
   Hand-pose morph (LLHandMotion) (blocked by `viewer-p31-12a` (done))
+- [`viewer-p31-14`](done/viewer-p31-14-locomotion-ik-adjustments.md) —
+  Locomotion IK adjustments
 - [`viewer-p31-16`](done/viewer-p31-16-auto-take-off-flying-on-ascend.md) —
   Auto-take-off flying on ascend while standing
 - [`viewer-p31-2`](done/viewer-p31-2-physical-objects.md) — Physical objects

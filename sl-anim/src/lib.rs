@@ -34,5 +34,6 @@ pub use decode::{
     JointPriority, Motion, PositionKey, RotationKey,
 };
 pub use registry::{
-    BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, builtin_animation, builtin_animation_by_name,
+    BUILTIN_ANIMATIONS, BuiltinAnimation, BuiltinKind, KeyframeMotionClass, builtin_animation,
+    builtin_animation_by_name, is_walk_adjust_trigger, keyframe_motion_class,
 };

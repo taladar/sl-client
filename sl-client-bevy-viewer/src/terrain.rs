@@ -116,6 +116,17 @@ pub(crate) struct TerrainState {
     decoded: HashMap<TextureKey, Handle<Image>>,
 }
 
+/// Marks a rendered land-patch entity as a **walkable ground surface**, so the
+/// avatar ground probe ([`crate::ground`], P31.14) can accept it as something the
+/// feet may plant on — the same role the reference viewer's
+/// `LLWorld::resolveStepHeightGlobal` gives the land when its object raycast misses.
+///
+/// The probe only ever accepts geometry that is explicitly ground-like (this, and
+/// object faces), so it never plants an avatar's feet on the water plane, a particle
+/// billboard, the sky dome, or another avatar.
+#[derive(Component)]
+pub(crate) struct TerrainSurface;
+
 impl TerrainState {
     /// The ground height at region-local metre position (`x`, `y`) in `region`,
     /// read from the nearest decoded land-patch cell, or `None` when that region's
@@ -299,7 +310,12 @@ fn spawn_or_replace_patch(
         }
         None => {
             let entity = commands
-                .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    transform,
+                    TerrainSurface,
+                ))
                 .id();
             state.patches.insert(key, entity);
             debug!(

@@ -817,6 +817,100 @@ pub fn builtin_animation_by_name(name: &str) -> Option<&'static BuiltinAnimation
         .find(|animation| animation.name == name)
 }
 
+/// Which `LLKeyframeMotion` **subclass** the reference viewer registers for a
+/// built-in animation, and hence which procedural *locomotion adjustment* it layers
+/// on top of the downloaded keyframe asset (P31.14).
+///
+/// Every one of these downloads its `.anim` asset the same way ([`BuiltinKind::Keyframe`]);
+/// the subclass only adds a per-frame adjustment, so a viewer that ignores this
+/// still plays the raw keyframes correctly. Ported from the `registerMotion` block
+/// in `llvoavatar.cpp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyframeMotionClass {
+    /// Plain `LLKeyframeMotion`: the keyframes play as authored. Every uploaded
+    /// animation and every non-locomotion built-in (the waves, bows, dances, sits).
+    Plain,
+    /// `LLKeyframeWalkMotion` (the walks / runs / turns / crouchwalk): its playback
+    /// clock is scaled by the `"Walk Speed"` the always-on `LLWalkAdjustMotion`
+    /// publishes, so the feet keep pace with the ground rather than skating.
+    Walk,
+    /// `LLKeyframeStandMotion` (the stands and the crouch): the lower body is
+    /// foot-IK'd so the ankles stay planted on the ground while the pelvis turns.
+    Stand,
+    /// `LLKeyframeFallMotion` (`standup`): the pelvis starts aligned to the ground
+    /// normal and blends back upright over the motion's recovery.
+    Fall,
+}
+
+/// The names the reference viewer registers with `LLKeyframeWalkMotion`.
+const WALK_MOTIONS: &[&str] = &[
+    "crouchwalk",
+    "female_run_new",
+    "female_walk",
+    "female_walk_new",
+    "run",
+    "run_new",
+    "turnleft",
+    "turnright",
+    "walk",
+    "walk_new",
+];
+
+/// The names the reference viewer registers with `LLKeyframeStandMotion`.
+const STAND_MOTIONS: &[&str] = &[
+    "crouch", "stand", "stand_1", "stand_2", "stand_3", "stand_4",
+];
+
+/// The names the reference viewer registers with `LLKeyframeFallMotion`.
+const FALL_MOTIONS: &[&str] = &["standup"];
+
+/// The reference viewer's `AGENT_WALK_ANIMS` (`llanimationstates.cpp`): the
+/// signalled animations that switch the always-on `LLWalkAdjustMotion` on, so it
+/// publishes the `"Walk Speed"` the [`Walk`](KeyframeMotionClass::Walk) motions
+/// scale their playback by.
+///
+/// Deliberately **narrower** than [`WALK_MOTIONS`] — the reference list omits the
+/// `*_new` and `female_*` variants, so those play at their authored speed. Kept
+/// faithful rather than "fixed": a viewer that speed-scaled them would diverge from
+/// how the same avatar looks in the reference viewer.
+const WALK_ADJUST_TRIGGERS: &[&str] = &["walk", "run", "crouchwalk", "turnleft", "turnright"];
+
+/// The `LLKeyframeMotion` subclass the reference viewer backs animation `id` with
+/// — [`Plain`](KeyframeMotionClass::Plain) for an uploaded animation or any
+/// built-in with no locomotion adjustment.
+#[must_use]
+pub fn keyframe_motion_class(id: Uuid) -> KeyframeMotionClass {
+    let Some(builtin) = builtin_animation(id) else {
+        return KeyframeMotionClass::Plain;
+    };
+    if WALK_MOTIONS.contains(&builtin.name) {
+        return KeyframeMotionClass::Walk;
+    }
+    if STAND_MOTIONS.contains(&builtin.name) {
+        return KeyframeMotionClass::Stand;
+    }
+    if FALL_MOTIONS.contains(&builtin.name) {
+        return KeyframeMotionClass::Fall;
+    }
+    KeyframeMotionClass::Plain
+}
+
+/// Whether `id` is one of the reference viewer's `AGENT_WALK_ANIMS` — the set whose
+/// presence in an avatar's signalled animations activates `LLWalkAdjustMotion`
+/// (P31.14), so that it publishes the `"Walk Speed"` the
+/// [`Walk`](KeyframeMotionClass::Walk) motions scale their playback by.
+///
+/// Deliberately **narrower** than the set of [`Walk`](KeyframeMotionClass::Walk) motions:
+/// the reference's list is only `walk` / `run` / `crouchwalk` / `turnleft` / `turnright`,
+/// omitting the `*_new` and `female_*` variants, which therefore never see a published
+/// walk speed and play at their authored rate. Kept faithful rather than "fixed" — a
+/// viewer that speed-scaled them too would make the same avatar look different from how
+/// the reference viewer renders it.
+#[must_use]
+pub fn is_walk_adjust_trigger(id: Uuid) -> bool {
+    builtin_animation(id).is_some_and(|builtin| WALK_ADJUST_TRIGGERS.contains(&builtin.name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -932,5 +1026,54 @@ mod tests {
     #[test]
     fn lookup_rejects_an_unknown_uuid() {
         assert!(builtin_animation(uuid!("00000000-0000-0000-0000-000000000000")).is_none());
+    }
+
+    /// The locomotion built-ins resolve to the `LLKeyframeMotion` subclass the
+    /// reference viewer registers for them (P31.14), and everything else stays plain.
+    #[test]
+    fn motion_classes_match_the_reference_registrations() -> Result<(), TestError> {
+        let class = |name: &str| -> Result<KeyframeMotionClass, TestError> {
+            let animation = builtin_animation_by_name(name).ok_or("built-in present")?;
+            Ok(keyframe_motion_class(animation.id))
+        };
+        for name in ["walk", "run", "turnleft", "turnright", "crouchwalk"] {
+            assert_eq!(class(name)?, KeyframeMotionClass::Walk, "{name}");
+        }
+        for name in ["stand", "stand_3", "crouch"] {
+            assert_eq!(class(name)?, KeyframeMotionClass::Stand, "{name}");
+        }
+        assert_eq!(class("standup")?, KeyframeMotionClass::Fall);
+        // A gesture, a fly state and an uploaded animation carry no adjustment.
+        for name in ["hello", "fly", "hover"] {
+            assert_eq!(class(name)?, KeyframeMotionClass::Plain, "{name}");
+        }
+        assert_eq!(
+            keyframe_motion_class(uuid!("00000000-0000-0000-0000-000000000001")),
+            KeyframeMotionClass::Plain,
+        );
+        Ok(())
+    }
+
+    /// The walk-adjust trigger set is the reference's `AGENT_WALK_ANIMS`: the five
+    /// core locomotion states, *not* the `*_new` / `female_*` variants (which are
+    /// still speed-scalable [`KeyframeMotionClass::Walk`] motions — they simply never
+    /// see a published walk speed, so they play as authored).
+    #[test]
+    fn walk_adjust_triggers_are_the_reference_five() -> Result<(), TestError> {
+        let id = |name: &str| -> Result<Uuid, TestError> {
+            Ok(builtin_animation_by_name(name)
+                .ok_or("built-in present")?
+                .id)
+        };
+        for name in ["walk", "run", "crouchwalk", "turnleft", "turnright"] {
+            assert!(is_walk_adjust_trigger(id(name)?), "{name} triggers");
+        }
+        for name in ["walk_new", "female_walk", "run_new", "stand", "fly"] {
+            assert!(
+                !is_walk_adjust_trigger(id(name)?),
+                "{name} does not trigger"
+            );
+        }
+        Ok(())
     }
 }
