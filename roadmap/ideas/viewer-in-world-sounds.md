@@ -1,0 +1,46 @@
+---
+id: viewer-in-world-sounds
+title: In-world spatial sounds
+topic: viewer
+status: ideas
+origin: user request (2026-07)
+blocked_by: [viewer-audio-backend]
+---
+
+Context: [context/viewer.md](../context/viewer.md).
+
+3-D positional sound from the world: `llTriggerSound` one-shots, looped and
+attached object sounds, collision sounds — the layer that makes a region feel
+inhabited rather than silent.
+
+The **receive protocol is done** (`protocol-22`) and entirely unconsumed by the
+viewer: `Event::SoundTrigger` (sound, owner, object, parent, region handle,
+position, gain), `Event::AttachedSound` with `SoundFlags` (LOOP / SYNC_MASTER /
+SYNC_SLAVE / SYNC_PENDING / QUEUE / STOP), `Event::AttachedSoundGainChange`, and
+`Event::PreloadSound` — plus the per-object `sound` / `gain` / `sound_flags` /
+`sound_radius` fields that already ride along on every `Object`. The send side
+exists too (`Command::TriggerSound`), so gestures and scripted client sounds
+have a path out.
+
+Scope on top of [[viewer-audio-backend]]: spatialise each source against the
+listener, distance attenuation and rolloff (match the reference's curve — SL
+content is authored against it), attached sounds that follow their object as it
+moves and stop when it is removed, looped sounds with the sync master / slave
+and queue semantics the flags describe, `PreloadSound` prefetch so a triggered
+clip is not late, and collision sounds (the P31 `avian3d` contacts are already
+there to hang them on).
+
+Two policies worth deciding early: **parcel-local sound** — the `SOUND_LOCAL`
+bit in the parcel overlay grid that [[viewer-parcel-borders]] decodes, which
+clamps a parcel's audio to its boundary — and the source budget (SL scenes can
+easily ask for more simultaneous sounds than any device wants; the reference
+caps and evicts by priority and distance). Muting (per-object, per-owner, the
+mute list) belongs here too.
+
+Reference (Firestorm, read-only): `llaudio/llaudioengine_*`, `lldeferredsounds`,
+`LLViewerObject::setAttachedSound`.
+
+Builds on: `protocol-22` sound-receive, `sl-asset` fetch, and the P31 physics
+contacts.
+
+Deps: [[viewer-audio-backend]] (device, decode, listener, mixer).

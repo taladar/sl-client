@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 40 |
+| ideas | 53 |
 | ready | 29 |
 | blocked | 4 |
 | in-progress | 0 |
@@ -19,24 +19,39 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **543** |
+| **total** | **556** |
 
-## ideas (40)
+## ideas (53)
 
 ### viewer
 
+- [`viewer-ambient-occlusion`](ideas/viewer-ambient-occlusion.md) — Screen-space
+  ambient occlusion
+- [`viewer-audio-backend`](ideas/viewer-audio-backend.md) — Audio backend —
+  device, decode, listener & mixer
+- [`viewer-avatar-radar`](ideas/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list) (blocked by `viewer-minimap`)
 - [`viewer-beacons`](ideas/viewer-beacons.md) — Tracking beacons (map-position
   beams) & their dismiss arrows (blocked by `viewer-ui-framework`)
 - [`viewer-camera-system`](ideas/viewer-camera-system.md) — Camera system
   (blocked by `viewer-input-system`, `viewer-ui-framework`)
+- [`viewer-debug-render-beacons`](ideas/viewer-debug-render-beacons.md) — Debug
+  render beacons (physics / scripted / sound / particle markers) (blocked by
+  `viewer-ui-framework`)
 - [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
   (blocked by `viewer-ui-framework`, `viewer-social-panels`)
 - [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
-  trigger UI (blocked by `viewer-ui-framework`, `viewer-sound-effects`)
+  trigger UI (blocked by `viewer-ui-framework`, `viewer-ui-sound-effects`)
+- [`viewer-hover-height`](ideas/viewer-hover-height.md) — Avatar hover-height
+  setting (blocked by `viewer-ui-framework`)
+- [`viewer-hover-text`](ideas/viewer-hover-text.md) — Object hover text
+  (llSetText floating text) (blocked by `viewer-name-tags`)
 - [`viewer-i18n-localization`](ideas/viewer-i18n-localization.md) —
   Internationalisation & translation (blocked by `viewer-ui-framework`)
 - [`viewer-image-upload`](ideas/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-framework`)
+- [`viewer-in-world-sounds`](ideas/viewer-in-world-sounds.md) — In-world spatial
+  sounds (blocked by `viewer-audio-backend`)
 - [`viewer-input-system`](ideas/viewer-input-system.md) — Input system
   (rebindable keys + script capture) (blocked by `viewer-preferences-ui`,
   `viewer-ui-framework`)
@@ -50,17 +65,24 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-mesh-model-upload`](ideas/viewer-mesh-model-upload.md) — Mesh / model
   importer & upload (blocked by `viewer-ui-framework`,
   `viewer-prim-texture-editing`)
-- [`viewer-minimap-worldmap-ui`](ideas/viewer-minimap-worldmap-ui.md) — Minimap
-  / radar & world-map UI (blocked by `viewer-ui-framework`)
+- [`viewer-minimap`](ideas/viewer-minimap.md) — Minimap (net map) (blocked by
+  `viewer-ui-framework`)
+- [`viewer-minimap-parcel-overlay`](ideas/viewer-minimap-parcel-overlay.md) —
+  Parcel borders on the minimap (blocked by `viewer-minimap`,
+  `viewer-parcel-borders`)
 - [`viewer-money-economy-ui`](ideas/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-framework`,
   `viewer-media-prim-browser`)
+- [`viewer-name-tags`](ideas/viewer-name-tags.md) — Avatar name tags (the full
+  reference-viewer feature)
 - [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
   Notifications, toasts & dialogs (blocked by `viewer-ui-framework`)
 - [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-inventory-ui`, `viewer-object-selection`)
 - [`viewer-object-selection`](ideas/viewer-object-selection.md) — Object
   selection & edit-floater shell (blocked by `viewer-ui-framework`)
+- [`viewer-parcel-borders`](ideas/viewer-parcel-borders.md) — In-world parcel
+  borders (property lines)
 - [`viewer-parcel-join-split`](ideas/viewer-parcel-join-split.md) — Parcel join
   / split (blocked by `viewer-ui-framework`, `viewer-input-system`)
 - [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
@@ -80,6 +102,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-texture-editing`](ideas/viewer-prim-texture-editing.md) — Prim
   texture / material editing (blocked by `viewer-object-selection`,
   `viewer-ui-framework`)
+- [`viewer-quick-preferences`](ideas/viewer-quick-preferences.md) —
+  Quick-preferences panel (blocked by `viewer-ui-framework`,
+  `viewer-preferences-ui`)
 - [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
   option viewing & editing (blocked by `viewer-ui-framework`)
 - [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
@@ -92,16 +117,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tools (blocked by `viewer-ui-framework`, `viewer-image-upload`)
 - [`viewer-social-panels`](ideas/viewer-social-panels.md) — People / friends /
   groups / profiles / IM UI (blocked by `viewer-ui-framework`)
-- [`viewer-sound-effects`](ideas/viewer-sound-effects.md) — Spatial
-  sound-effects engine (blocked by `viewer-streaming-audio`)
 - [`viewer-space-navigator`](ideas/viewer-space-navigator.md) — 3Dconnexion
   SpaceNavigator / 6-DOF input (blocked by `viewer-input-system`,
   `viewer-camera-system`)
 - [`viewer-streaming-audio`](ideas/viewer-streaming-audio.md) — Parcel
-  streaming-audio / media-audio player
+  streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
 - [`viewer-teleport-flow`](ideas/viewer-teleport-flow.md) — Teleport flow —
   offers, acceptance & progress (blocked by `viewer-notifications-dialogs`,
-  `viewer-minimap-worldmap-ui`, `viewer-ui-framework`)
+  `viewer-world-map`, `viewer-ui-framework`)
 - [`viewer-terrain-editing`](ideas/viewer-terrain-editing.md) — Terrain editing
   (blocked by `viewer-ui-framework`, `viewer-input-system`,
   `viewer-region-options`)
@@ -112,10 +135,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-system`, `viewer-camera-system`)
 - [`viewer-ui-framework`](ideas/viewer-ui-framework.md) — In-viewer UI /
   floater-panel-menu framework
+- [`viewer-ui-sound-effects`](ideas/viewer-ui-sound-effects.md) — UI sound
+  effects (blocked by `viewer-audio-backend`, `viewer-ui-framework`)
 - [`viewer-url-linkification`](ideas/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-framework`)
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
-  (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
+  (WebRTC + Vivox) (blocked by `viewer-ui-framework`, `viewer-audio-backend`)
+- [`viewer-volume-panel`](ideas/viewer-volume-panel.md) — Volume panel (master +
+  per-category sliders) (blocked by `viewer-ui-framework`,
+  `viewer-audio-backend`)
+- [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
+  by `viewer-ui-framework`)
 
 ## ready (29)
 

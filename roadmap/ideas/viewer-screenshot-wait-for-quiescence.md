@@ -27,6 +27,6 @@ still produces a frame rather than hanging). Each manager already knows its own
 in-flight count, so the condition is a cheap sum; the harness only needs a
 `scene_is_quiet()` predicate to poll.
 
-This makes every future rendering A/B (and the R-item screenshot debugging the
-[[sl-client-viewer-debug-camera]] flow relies on) reproducible by construction,
-rather than by picking a delay long enough and hoping.
+This makes every future rendering A/B (and the R-item screenshot debugging that
+the headless debug-camera flow relies on) reproducible by construction, rather
+than by picking a delay long enough and hoping.
