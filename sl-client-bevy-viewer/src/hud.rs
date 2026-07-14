@@ -37,6 +37,8 @@ use std::collections::HashMap;
 
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{Hdr, ScalingMode};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use sl_client_bevy::AttachmentPoint;
 
@@ -87,10 +89,22 @@ pub(crate) struct HudScreen;
 /// One HUD attachment point (raw id `31`..=`38`): a child of the [`HudScreen`] at
 /// the point's fixed `avatar_lad.xml` offset, onto which an attachment worn on
 /// that point is parented — the screen-space mirror of a body attachment-point
-/// node (P16.2). Which point a node stands for is [`HudState::point_entity`]'s
-/// key; the marker is what makes the nodes queryable as a set.
+/// node (P16.2).
+///
+/// It carries its own **unscaled** offset because the live one is aspect-dependent:
+/// [`fit_hud_points`] re-derives the node's translation from it whenever the window
+/// aspect changes, so the corner points stay in the viewport's corners (P35.2).
 #[derive(Component, Debug)]
-pub(crate) struct HudPointNode;
+pub(crate) struct HudPointNode {
+    /// The point's fixed `avatar_lad.xml` offset from the screen (Second Life
+    /// Z-up: `+y` screen-left, `+z` screen-up), before the aspect anchoring.
+    offset: Vec3,
+}
+
+/// The HUD camera (P35.2): the orthographic, screen-relative view that draws the
+/// HUD layer — and only it — over the finished world frame.
+#[derive(Component, Debug)]
+pub(crate) struct HudCamera;
 
 /// The spawned HUD point nodes, keyed by raw attachment-point id, so an
 /// attachment can be routed to the node for its point.
@@ -153,8 +167,13 @@ pub(crate) fn setup_hud_screen(
     for (point_id, offset) in points {
         let node = commands
             .spawn((
-                HudPointNode,
+                HudPointNode {
+                    offset: Vec3::from_array(offset.position),
+                },
                 Transform {
+                    // The aspect anchoring is applied by `fit_hud_points` on the
+                    // first frame (it needs the window); the unscaled offset is the
+                    // right thing to start from.
                     translation: Vec3::from_array(offset.position),
                     rotation: sl_euler_deg_to_quat(offset.rotation_euler_deg),
                     scale: Vec3::ONE,
@@ -165,21 +184,179 @@ pub(crate) fn setup_hud_screen(
             .id();
         hud.points.insert(point_id, node);
     }
+    // The camera that draws them (P35.2): orthographic, looking down the HUD's
+    // depth axis, rendering the HUD layer over the finished world frame.
+    let camera = commands
+        .spawn((
+            HudCamera,
+            Camera3d::default(),
+            Camera {
+                // After the world camera (order 0), and without clearing what it
+                // drew: the HUD is composited over the finished frame, exactly where
+                // the reference viewer draws it — `render_hud_attachments` runs in
+                // `render_ui`, *after* `renderFinalize`'s tonemap and post effects.
+                order: 1,
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
+            // The reference's HUD projection (`get_hud_matrices`):
+            // `ortho(-0.5 * aspect, 0.5 * aspect, -0.5, 0.5, …)` — a fixed **1.0**
+            // vertical extent, the horizontal one widening with the aspect. So HUD
+            // space is `[-0.5, 0.5]` top-to-bottom whatever the window, and geometry
+            // keeps its proportions (a HUD metre is the same many pixels either way).
+            Projection::Orthographic(OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical {
+                    viewport_height: 1.0,
+                },
+                near: 0.0,
+                far: 2.0 * HUD_CAMERA_DEPTH,
+                ..OrthographicProjection::default_3d()
+            }),
+            // Down the HUD's depth axis: Second Life `+x` (into the screen) with
+            // `+z` up — the reference's `OGL_TO_CFR_ROTATION` HUD modelview, and the
+            // basis the screen's children are already expressed in. Under the
+            // screen's basis change that is Bevy `+x` forward, `+y` up. Standing
+            // `HUD_CAMERA_DEPTH` back of the screen origin (with `near = 0`) keeps
+            // content *behind* the screen plane visible too, the way the reference's
+            // bounding-box-fitted near plane does.
+            Transform::from_xyz(-HUD_CAMERA_DEPTH, 0.0, 0.0).looking_to(Vec3::X, Vec3::Y),
+            // The HUD layer, and nothing else: the world is invisible to this camera
+            // and this camera is the only one that sees the HUD.
+            RenderLayers::layer(HUD_RENDER_LAYER),
+            // Must match the world camera's sample count and HDR-ness — the two share
+            // the window's view-target chain, and this camera draws *into* the frame
+            // the world camera left there (`ClearColorConfig::None` above).
+            Msaa::Sample4,
+            Hdr,
+            // No tone mapping (the world's `SlTonemap` already ran over the frame this
+            // camera draws onto) and no underwater fog: the reference likewise skips
+            // atmospherics on HUDs (`sRenderingHUDs`).
+            Tonemapping::None,
+        ))
+        .id();
     info!(
-        "spawned HUD screen {root} with {} point node(s) on render layer {HUD_RENDER_LAYER}",
+        "spawned HUD screen {root} with {} point node(s) and HUD camera {camera} on render layer {HUD_RENDER_LAYER}",
         hud.points.len()
     );
 }
 
+/// How far back of the screen origin the HUD camera stands, in HUD metres (P35.2):
+/// the depth range it sees is `[-HUD_CAMERA_DEPTH, +HUD_CAMERA_DEPTH]` around the
+/// screen plane. Ample for any HUD (whose content sits within a metre or two of the
+/// screen) and, being orthographic, it costs nothing in apparent size — the
+/// reference instead fits the range to the HUD's bounding box each frame, purely so
+/// its near plane can sit at the content.
+const HUD_CAMERA_DEPTH: f32 = 64.0;
+
+/// Keep each HUD point node anchored to its corner of the viewport as the window's
+/// aspect ratio changes (P35.2).
+///
+/// The reference viewer scales the `mScreen` joint by `(1, aspect, 1)`, and a
+/// joint's scale multiplies its **children's position offsets** (`LLXformMatrix`'s
+/// `mScaleChildOffset`) — but never their geometry, which keeps its own scale. So a
+/// point at `y = ±0.5` lands at `±0.5 * aspect`, the edge of the
+/// `[-0.5 * aspect, 0.5 * aspect]` projection, while a HUD prim stays square.
+///
+/// A Bevy `Transform` scale *would* reach the geometry below, so the anchoring is
+/// applied to the node translations here instead — the same arithmetic, at the only
+/// place the reference actually applies it.
+pub(crate) fn fit_hud_points(
+    windows: Query<&Window>,
+    mut points: Query<(&HudPointNode, &mut Transform)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let height = window.height();
+    if height <= 0.0 {
+        return;
+    }
+    let aspect = window.width() / height;
+    for (point, mut transform) in &mut points {
+        let anchored = anchored_point_offset(point.offset, aspect);
+        if transform.translation != anchored {
+            transform.translation = anchored;
+        }
+    }
+}
+
+/// A HUD point's `avatar_lad.xml` `offset` anchored for the viewport's `aspect`
+/// ratio: its across-screen component (Second Life `y`) scaled by the aspect, so a
+/// point at `y = ±0.5` sits at the edge of the `[-0.5 * aspect, 0.5 * aspect]`
+/// projection whatever the window's shape. The reference viewer's `mScreen` scale of
+/// `(1, aspect, 1)`, which reaches exactly this — its children's offsets — and
+/// nothing else.
+fn anchored_point_offset(offset: Vec3, aspect: f32) -> Vec3 {
+    Vec3::new(offset.x, offset.y * aspect, offset.z)
+}
+
+/// The faces [`apply_hud_fullbright`] reconsiders: those whose material handle or
+/// render layer just changed — a freshly spawned face, a face the propagation just
+/// carried onto the HUD layer, and a face whose material a later render-material
+/// pipeline swapped.
+type RelitFaces<'world, 'state> = Query<
+    'world,
+    'state,
+    (
+        &'static MeshMaterial3d<StandardMaterial>,
+        &'static RenderLayers,
+    ),
+    Or<(
+        Changed<MeshMaterial3d<StandardMaterial>>,
+        Changed<RenderLayers>,
+    )>,
+>;
+
+/// Render every HUD face fullbright (P35.2).
+///
+/// The reference viewer forces `LLFace::FULLBRIGHT` on the faces of a HUD
+/// attachment (`LLVOVolume::setupFaces`) and skips atmospherics for them
+/// (`LLPipeline::sRenderingHUDs`): a HUD is a screen overlay, and it would be absurd
+/// for it to darken at dusk. The same holds here for a second reason — a Bevy light
+/// only lights the layers it is on, and the world's sun is on the world layer, so a
+/// lit HUD material would simply render black.
+///
+/// [`face_material`](crate::textures::face_material) builds a fresh, unshared
+/// `StandardMaterial` per face, so flipping `unlit` here cannot leak into world
+/// geometry. It runs on faces whose material or layer *changed*, which covers a face
+/// spawned under an already-routed attachment (its layer arrives a frame later, with
+/// the propagation) and one whose material is swapped later by the render-material
+/// pipelines.
+///
+/// Deviation, deliberately: the reference exempts a face with a **PBR** material
+/// (`isHUDAttachment() && !is_pbr`), leaving it lit. Here that would render it black,
+/// so every HUD face goes fullbright.
+pub(crate) fn apply_hud_fullbright(
+    faces: RelitFaces,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (face, layers) in &faces {
+        if !on_hud_layer(Some(layers)) {
+            continue;
+        }
+        if let Some(mut material) = materials.get_mut(&face.0)
+            && !material.unlit
+        {
+            material.unlit = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HUD_RENDER_LAYER, HudScreen, is_hud_point, on_hud_layer};
+    use super::{
+        HUD_CAMERA_DEPTH, HUD_RENDER_LAYER, HudScreen, anchored_point_offset, is_hud_point,
+        on_hud_layer,
+    };
     use crate::coords::sl_to_bevy_rotation;
     use bevy::app::{App, HierarchyPropagatePlugin, PostUpdate, Propagate};
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::hierarchy::ChildOf;
     use bevy::math::Vec3;
     use bevy::transform::components::Transform;
+
+    /// A 16:9 viewport, the shape the layout is most often seen in.
+    const WIDE_ASPECT: f32 = 16.0 / 9.0;
 
     /// Only the eight screen slots (31–38) are HUD points; the body points on
     /// either side of the range are not.
@@ -254,6 +431,57 @@ mod tests {
         assert!(!on_hud_layer(
             app.world().entity(world_entity).get::<RenderLayers>()
         ));
+    }
+
+    /// A corner point lands in the corner of the viewport, whatever its shape: the
+    /// projection is `1.0` tall and `aspect` wide, and the across-screen offset is
+    /// scaled to match (the reference's `mScreen` scale). The *up*-screen offset is
+    /// never touched — the vertical extent is fixed — and neither is depth.
+    #[test]
+    fn corner_points_anchor_to_the_viewport_corners() {
+        // "Top Left" (id 34), `position="0 0.5 0.5"`: half a screen up, and hard
+        // against the left edge — which is `0.5 * aspect` in a projection that spans
+        // `[-0.5 * aspect, 0.5 * aspect]` across.
+        let top_left = anchored_point_offset(Vec3::new(0.0, 0.5, 0.5), WIDE_ASPECT);
+        assert!(
+            (top_left.y - 0.5 * WIDE_ASPECT).abs() < 1e-6,
+            "{top_left:?}"
+        );
+        assert!((top_left.z - 0.5).abs() < 1e-6, "{top_left:?}");
+        // A square viewport is the one shape where the anchoring is a no-op.
+        let square = anchored_point_offset(Vec3::new(0.0, 0.5, 0.5), 1.0);
+        assert!(
+            (square - Vec3::new(0.0, 0.5, 0.5)).length() < 1e-6,
+            "{square:?}"
+        );
+        // "Center" (id 35) is the screen centre in every viewport.
+        let centre = anchored_point_offset(Vec3::ZERO, WIDE_ASPECT);
+        assert!(centre.length() < 1e-6, "{centre:?}");
+    }
+
+    /// The HUD camera looks down the HUD's depth axis with the screen the right way
+    /// up and the right way round: a point that is *up* in Second Life's HUD frame
+    /// (`+z`) is up in view space (`+y`), and one that is *screen-left* (`+y`) is
+    /// left of the view centre (`-x`). Getting this wrong mirrors every HUD.
+    #[test]
+    fn the_camera_frames_the_screen_upright_and_unmirrored() {
+        let camera = Transform::from_xyz(-HUD_CAMERA_DEPTH, 0.0, 0.0).looking_to(Vec3::X, Vec3::Y);
+        let view = camera.to_matrix().inverse();
+        let to_bevy = sl_to_bevy_rotation();
+        // "Top Left" in Second Life HUD space, carried into Bevy by the screen's
+        // basis change, then into the camera's view space.
+        let top_left = view.transform_point3(to_bevy * Vec3::new(0.0, 0.5, 0.5));
+        assert!(
+            top_left.y > 0.0,
+            "top-left is above the centre: {top_left:?}"
+        );
+        assert!(top_left.x < 0.0, "top-left is left of centre: {top_left:?}");
+        // The camera stands back of the screen plane, so the screen (and content
+        // behind it) is in front of it — a negative view-space z, Bevy's forward.
+        assert!(top_left.z < 0.0, "the screen is in front: {top_left:?}");
+        let bottom_right = view.transform_point3(to_bevy * Vec3::new(0.0, -0.5, -0.5));
+        assert!(bottom_right.y < 0.0, "{bottom_right:?}");
+        assert!(bottom_right.x > 0.0, "{bottom_right:?}");
     }
 
     /// The `avatar_lad.xml` HUD point offsets are in Second Life's Z-up frame

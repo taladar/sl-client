@@ -107,7 +107,7 @@ use crate::diagnostics::{
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
-use crate::hud::{HudState, setup_hud_screen};
+use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -783,6 +783,12 @@ fn run_session(
         (
             log_suspicious_objects,
             pick_object,
+            // The screen-space HUD (P35.2): keep each HUD point anchored to its
+            // corner of the viewport as the window's aspect changes, and render every
+            // HUD face fullbright (the reference forces `LLFace::FULLBRIGHT` on a HUD
+            // attachment; here a lit one would also render black, since the world's
+            // sun is not on the HUD layer).
+            (fit_hud_points, apply_hud_fullbright),
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
             // looks at loads first. Throttled internally. It also picks each plain
