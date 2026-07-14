@@ -402,7 +402,10 @@ impl VisualParams {
             .descendants()
             .filter(|node| node.is_element() && node.tag_name().name() == "param")
         {
-            let param = parse_param(node)?;
+            let mut param = parse_param(node)?;
+            if let Some(previous) = by_id_raw.remove(&param.id) {
+                merge_volume_morphs(&previous, &mut param);
+            }
             by_id_raw.insert(param.id, param);
         }
 
@@ -739,6 +742,35 @@ fn parse_bones(node: roxmltree::Node<'_, '_>) -> Result<Vec<BoneOffset>, ParamEr
         });
     }
     Ok(bones)
+}
+
+/// Carry the collision-volume displacements of an earlier declaration of the same
+/// param id over into the (winning) later one.
+///
+/// A morph param may be declared under **several** `<mesh>` parts — the head params
+/// are declared again, `shared="1"`, under the eyelash mesh — and the reference
+/// viewer builds one `LLPolyMorphTarget` per declaration, each carrying that
+/// declaration's own `<volume_morph>` list and each running the volume pass in
+/// `apply` (a shared param's instances are chained, and `apply` walks the chain).
+/// A param table keyed by id keeps only the last declaration, so its
+/// [`VolumeMorph`]s are prepended here rather than lost — otherwise
+/// `Squash_Stretch_Head` / `Elongate_Head`, whose volume morph is declared on the
+/// head mesh and whose *last* declaration is the volume-less eyelash one, would
+/// stop displacing the `HEAD` volume entirely.
+///
+/// Concatenating (rather than replacing) also reproduces the reference's
+/// multiplicity: a volume morph declared on two parts is applied twice.
+fn merge_volume_morphs(previous: &VisualParam, param: &mut VisualParam) {
+    let ParamEffect::Morph(earlier) = &previous.effect else {
+        return;
+    };
+    if earlier.is_empty() {
+        return;
+    }
+    let ParamEffect::Morph(volumes) = &mut param.effect else {
+        return;
+    };
+    volumes.splice(0..0, earlier.iter().cloned());
 }
 
 /// Parse the `<volume_morph>` children of a `<param_morph>` (usually none). A

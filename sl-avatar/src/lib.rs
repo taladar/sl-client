@@ -22,6 +22,9 @@
 //!   turning a partial appearance vector into every param's effective weight.
 //! - `skeletal` (P13.4) — resolve `param_skeleton` params into per-bone scale /
 //!   position deformations for the skeleton instance.
+//! - `volume` (P34.3) — resolve the morph params' `<volume_morph>` children into
+//!   per-collision-volume scale / position displacements, so a worn rigged mesh
+//!   body follows the avatar's shape sliders.
 //! - `masks` (P14.5) — parse the `<morph_masks>` table and sample per-vertex
 //!   clothing-morph mask weights from a region's decoded baked texture.
 //! - `skin` (P17.1) — the matrix-palette skinning math that deforms a rigged
@@ -43,6 +46,7 @@ pub mod resolve;
 pub mod skeletal;
 pub mod skeleton;
 pub mod skin;
+pub mod volume;
 pub mod wearable;
 
 pub use bakecolor::{combine_layer_color, global_color, global_color_params};
@@ -70,6 +74,7 @@ pub use skeleton::{
     SkeletonError,
 };
 pub use skin::SkinningPalette;
+pub use volume::{VolumeDeform, VolumeDeformations};
 pub use wearable::{WearableAsset, WearableError};
 
 pub use params::{ColorOp, ColorRamp};

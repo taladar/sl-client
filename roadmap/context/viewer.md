@@ -1596,3 +1596,68 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   fold; the procedural adjusters' resources (look-at, reach, locomotion, body
   physics, runtime morphs) are now bundled into one `AvatarAdjusters`
   `SystemParam`. Any further per-avatar fold should join that bundle.
+
+## P34.3 shape volume morphs — cross-cutting notes
+
+- **A param declared under several `<mesh>` parts is one table entry but several
+  morph targets.** `VisualParams::from_xml` keeps the *last* declaration of a
+  param id (the reference's `addVisualParam` map overwrite) — but the reference
+  also builds one `LLPolyMorphTarget` **per `<mesh>` declaration**, each with
+  that declaration's own `<volume_morph>` list, and `apply` walks the whole
+  chain. The head params (`Squash_Stretch_Head`, `Elongate_Head`, …) are
+  re-declared `shared="1"` under the **eyelash** mesh *without* volume morphs,
+  and that volume-less declaration is the later one — so a last-wins table
+  silently drops their `HEAD` displacement. `from_xml` now **concatenates** the
+  volume-morph lists across declarations of one id, which both fixes that and
+  reproduces the reference's multiplicity (a volume morph declared on two parts
+  applies twice). Every other field still follows last-wins.
+- **A volume morph is the *only* way a shape slider reaches a rigged mesh
+  body.** The system body is skinned to the `m*` bones and takes its shape from
+  the morph *targets*; a mesh body is rigged to the collision volumes, which no
+  morph target can touch. So the ~30 shape params carrying `<volume_morph>`
+  (`Big_Chest`, `Fat_Torso`, `Breast_Gravity`, `Bowed_Legs`, `Foot_Size`, …) are
+  what make a fitted-mesh body follow the chest / belly / butt / leg / head
+  sliders. `VolumeDeformations` (`sl-avatar::volume`) resolves them exactly like
+  `SkeletalDeformations` resolves `param_skeleton`, and the Bevy skeletal
+  recurrence adds them to the volume joint's rest scale / position. Bone names
+  (`mChest`) and volume names (`LEFT_PEC`) are disjoint, so one pass over the
+  joint list handles both.
+- **The physics `*_Driven` params are excluded from that resolver** — they carry
+  volume morphs too, but P34.2 applies theirs per frame as pose deltas, so
+  counting them again in the rest transform would double the bounce. Their rest
+  weight is zero anyway (the hidden controller params default to the middle of
+  their range), so nothing is lost. The two therefore compose: the volume
+  *rests* where the shape puts it and *bounces* around that.
+- **A live A/B of anything that shapes an avatar must happen inside ONE
+  session.** Two logins are never comparable: the sun has moved, the scene
+  streams differently, and on a live grid the other avatars in the region are
+  *different people*. Hence the `V` key (`VolumeMorphGain`, seeded from
+  `SL_VIEWER_VOLUME_MORPH_GAIN`; `0` = pre-P34.3 rest volumes, big =
+  exaggerated) — toggle the effect on one avatar and watch it change. Two
+  supporting knobs: `SL_VIEWER_TPOSE=1` freezes every avatar at its shaped rest
+  pose (an AO otherwise walks and turns it), and `SL_VIEWER_VOLUME_FOCUS` frames
+  the avatar whose shape displaces its volumes most (`=1`) or a pinned agent id.
+- **The agent's own shape is usually the WORST test subject.** A slim,
+  near-default shape displaces its volumes by *nothing* — the aditi test
+  avatar's `BELLY` takes a zero position delta — so amplifying the effect 8×
+  still shows nothing, and it looks like a bug. Pick the most extreme shape
+  *in the region* instead. Related trap: the per-volume debug dump prints one
+  block per avatar, and reading numbers out of it without filtering by agent id
+  attributes a stranger's chunky shape to your own (this cost several hours and
+  several aditi logins).
+- **`SL_VIEWER_TPOSE` is a poor tool for checking whether a mesh follows the
+  skeleton**: the bind pose *is* the T-pose, so a rigged mesh that has stopped
+  following its joints entirely looks identical to a correctly posed one.
+- A rig binding a collision volume means nothing if it puts no *weight* on it.
+  The bind-time diagnostic reports both
+  (`binds N collision volume(s) … X% of its skin weight rides them`); the aditi
+  agent's mesh body binds 26 volumes with 86% of its weight on them, i.e.
+  genuinely fitted, while much of its clothing is classic-rigged (0%) and cannot
+  follow the shape at all.
+- **Still missing: the collision volumes' scale *inheritance*.**
+  `LLPolySkeletalDistortion::setInfo` also scales a deformed bone's
+  collision-volume **children** by `cv_rest_scale ⊙ bone_scale_deformation`
+  (`inheritScale()` is true only for `LLAvatarJointCollisionVolume`), so a body
+  / torso / leg-thickness slider fattens the volumes as well as the bones. We
+  deliberately skipped that in P13.4 because the volumes were not rendered —
+  which P17.2 made false. See the `viewer-p34-4` task.

@@ -82,11 +82,12 @@ use crate::animesh::{
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, annotate_avatar_distances,
-    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
-    apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
-    apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
-    ingest_avatar_bakes, log_avatar_interest_census, position_name_tags, setup_avatar_body,
+    AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
+    annotate_avatar_distances, apply_avatar_appearance, apply_avatar_bake_textures,
+    apply_avatar_names, apply_avatar_part_visibility, apply_avatar_runtime_morphs,
+    apply_bom_face_materials, apply_own_local_bake, apply_own_shape_from_wearables,
+    assign_avatar_bake_materials, focus_camera_on_volume_shape, ingest_avatar_bakes,
+    log_avatar_interest_census, position_name_tags, setup_avatar_body, toggle_volume_morphs,
     update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
@@ -536,6 +537,9 @@ fn run_session(
     .insert_resource(camera_spin)
     .init_resource::<LoginOutcome>()
     .init_resource::<EnvironmentState>()
+    // The live A/B state of the shape's collision-volume displacement (P34.3), seeded
+    // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
+    .init_resource::<VolumeMorphGain>()
     .init_resource::<TerrainState>()
     .init_resource::<ObjectState>()
     // The water-render bookkeeping (P23.1) is created by `setup_water` at
@@ -793,6 +797,13 @@ fn run_session(
             focus_camera_on_particles
                 .after(drive_particles)
                 .after(fly_camera),
+            // Debug (env `SL_VIEWER_VOLUME_FOCUS`): aim the camera at the avatar whose
+            // shape displaces its collision volumes the most (P34.3), the only subject
+            // on which the effect is visible at all.
+            focus_camera_on_volume_shape.after(fly_camera),
+            // Debug (`V`): toggle the shape's collision-volume displacement live, so
+            // the effect can be A/B'd on one avatar in one session (P34.3).
+            toggle_volume_morphs,
             // Animated textures (P28.2): advance every prim's `llSetTextureAnim`
             // and fold the current frame's UV / flipbook placement into its faces,
             // then reset a face to its static placement when the animation stops.

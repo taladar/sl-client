@@ -36,7 +36,7 @@ use bevy::math::Affine3A;
 use bevy::prelude::*;
 use sl_client_bevy::{
     AnimationPose, AssetKey, JointOverrides, ObjectKey, SkeletalDeformations, SlEvent,
-    SlSessionEvent, Uuid,
+    SlSessionEvent, Uuid, VolumeDeformations,
 };
 
 use crate::animations::{
@@ -305,14 +305,18 @@ pub(crate) fn pose_control_avatars(
     let Some(library) = library else {
         return;
     };
+    // A control avatar (animesh) has no visual params, so both the skeletal and the
+    // collision-volume deformations are the rest ones.
     let rest = SkeletalDeformations::default();
+    let rest_volumes = VolumeDeformations::default();
     let empty = AnimationPose::default();
     for (&object, avatar) in &control.avatars {
         let pose = control.poses.get(&object).unwrap_or(&empty);
         let overrides = control.effective_overrides(object);
-        let world = library
-            .skeleton()
-            .deformed_world_matrices(&rest, &overrides, pose);
+        let world =
+            library
+                .skeleton()
+                .deformed_world_matrices(&rest, &rest_volumes, &overrides, pose);
         // The control-avatar-root global carries the object's Bevy world transform
         // (the SL → Bevy basis change + world placement); each joint's Bevy global
         // is that composed with its Second Life world matrix. Copied out so the

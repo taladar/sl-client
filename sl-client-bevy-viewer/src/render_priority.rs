@@ -48,6 +48,7 @@ use sl_client_bevy::{
     DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey, TreeLod,
 };
 
+use crate::camera::FlyCamera;
 use crate::meshes::MeshManager;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject, TreeLodTargets,
@@ -122,7 +123,10 @@ pub(crate) const SKY_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 3
 pub(crate) fn drive_render_priority(
     time: Res<Time>,
     mut since_last: Local<f32>,
-    camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
+    // Qualified by `FlyCamera`: the reflection probes (P33.2) spawn a `Camera3d` per
+    // probe-capture face, so a bare `With<Camera3d>` matches several and `single()`
+    // fails — which silently switched this whole re-prioritisation off.
+    camera: Query<(&GlobalTransform, &Projection), With<FlyCamera>>,
     windows: Query<&Window>,
     faces: Query<(&GlobalTransform, &FaceTextureDebug)>,
     objects: Query<(&GlobalTransform, &ObjectDebugInfo, &SceneObject)>,

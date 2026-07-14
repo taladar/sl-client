@@ -230,9 +230,9 @@ pub use sl_avatar::{
     Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights, MorphedMesh,
     PHYSICS_MORPH_PARAMS, ParamError, PartMorphMask, PhysicsDrivenParam, PhysicsMotion,
     PhysicsMotionConfig, PhysicsSettings, RUNTIME_MORPH_PARAMS, ResolvedParams,
-    SkeletalDeformations, Skeleton, SkeletonError, VisualParam, VisualParams, VolumeMorph,
-    WearableAsset, WearableError, combine_layer_color, global_color, global_color_params,
-    hand_pose_morph_param, is_runtime_morph_param,
+    SkeletalDeformations, Skeleton, SkeletonError, VisualParam, VisualParams, VolumeDeform,
+    VolumeDeformations, VolumeMorph, WearableAsset, WearableError, combine_layer_color,
+    global_color, global_color_params, hand_pose_morph_param, is_runtime_morph_param,
 };
 
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a

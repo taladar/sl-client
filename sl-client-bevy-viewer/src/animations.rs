@@ -47,7 +47,8 @@ use sl_anim::{
 };
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
-    BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid, sample_motion,
+    BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid,
+    VolumeDeformations, sample_motion,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -997,12 +998,27 @@ pub(crate) fn pose_avatar_skeletons(
         .retain(&|agent| rigged.contains(&agent));
     let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
     let reach_joints = ReachJoints::resolve(|name| body.joint_index(name));
+    // The fallback for an avatar whose shape displaces no collision volume (P34.3),
+    // hoisted so the per-frame loop borrows rather than allocates.
+    let no_volumes = VolumeDeformations::default();
+    // The debug T-pose switch: freeze every avatar at its shaped rest pose, so two
+    // runs of the viewer frame the same body from the same angle and can be compared
+    // pixel for pixel (an avatar's AO would otherwise walk and turn it).
+    let t_pose = t_pose_enabled();
     for agent in rigged {
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
-        // breathes and sways subtly even when no animation is playing.
-        let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
-        crate::procedural::apply_idle_adjustments(&mut pose, now, |name| body.joint_index(name));
+        // breathes and sways subtly even when no animation is playing. The T-pose
+        // switch takes neither: the shaped rest skeleton *is* the T-pose.
+        let mut pose = if t_pose {
+            AnimationPose::default()
+        } else {
+            let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
+            crate::procedural::apply_idle_adjustments(&mut pose, now, |name| {
+                body.joint_index(name)
+            });
+            pose
+        };
         let Some(root) = state.body_root_of(agent) else {
             continue;
         };
@@ -1012,6 +1028,9 @@ pub(crate) fn pose_avatar_skeletons(
         let Some(deform) = state.deformations(agent) else {
             continue;
         };
+        // The shape's collision-volume displacements (P34.3) ride the same
+        // recurrence; an avatar whose shape displaces none has no entry.
+        let volumes = state.volume_deformations(agent).unwrap_or(&no_volumes);
         let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
         // The avatar-root global carries the SL → Bevy axis change and the world
         // placement; each joint's Bevy global is that composed with its Second Life
@@ -1021,6 +1040,22 @@ pub(crate) fn pose_avatar_skeletons(
         };
         let root_global = *root_global;
         let skeleton = library.skeleton();
+        // The T-pose switch stops here: the shaped rest skeleton, with none of the
+        // procedural adjusters below folded in (they would tilt the head, plant the
+        // feet and bounce the body, all of which move between runs).
+        if t_pose {
+            let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
+            write_joint_globals(
+                &mut globals,
+                &parts,
+                &body,
+                agent,
+                &root_global,
+                joints,
+                &world,
+            );
+            continue;
+        }
         // Fold in the head & eye look-at adjusters (P31.12) before the final world
         // matrices. When the avatar has a look-at target the head aim needs its head
         // and eye joint world positions, so resolve them from an initial deformed
@@ -1038,7 +1073,7 @@ pub(crate) fn pose_avatar_skeletons(
         // which the procedural adjusters that need to know *where the avatar's joints
         // currently are* read from: the look-at's head / eye positions and the neck
         // parent's rotation, and the locomotion adjusters' whole leg geometry (P31.14).
-        let world0 = skeleton.deformed_world_matrices(deform, &overrides, &pose);
+        let world0 = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
         let joint_pos = |index: Option<usize>| {
             index
                 .and_then(|i| world0.get(i))
@@ -1163,7 +1198,7 @@ pub(crate) fn pose_avatar_skeletons(
             // The knee bend angles *after* the fold, recomputed from the final pose: the
             // number that says whether a jitter is the ground under the feet moving or
             // the solve itself flipping between two solutions.
-            let posed = skeleton.deformed_world_matrices(deform, &overrides, &pose);
+            let posed = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
             let bend = |leg: Option<(usize, usize, usize)>| -> f32 {
                 leg.map_or(0.0, |(hip, knee, ankle)| {
                     crate::locomotion_ik::knee_bend_degrees(&posed, hip, knee, ankle)
@@ -1214,29 +1249,68 @@ pub(crate) fn pose_avatar_skeletons(
                 );
             }
         }
-        let world = skeleton.deformed_world_matrices(deform, &overrides, &pose);
-        // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
-        // `arithmetic_side_effects` lint the glam operators trip.
-        let root_matrix = root_global.to_matrix();
-        for (entity, matrix) in joints.iter().zip(world.iter()) {
-            if let Ok(mut global) = globals.get_mut(*entity) {
-                *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-            }
-        }
-        // Re-place each rigid base part (eyeballs) from its eye joint's posed
-        // global, since transform propagation used the pre-overwrite joint global.
-        for (entity, part) in &parts {
-            if part.agent() != agent {
-                continue;
-            }
-            if let Some(index) = body.rigid_joint_index(part.part())
-                && let Some(matrix) = world.get(index)
-                && let Ok(mut global) = globals.get_mut(entity)
-            {
-                *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-            }
+        let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
+        write_joint_globals(
+            &mut globals,
+            &parts,
+            &body,
+            agent,
+            &root_global,
+            joints,
+            &world,
+        );
+    }
+}
+
+/// Write one avatar's posed joint **world** matrices into its joint entities'
+/// `GlobalTransform`s (and re-place its rigid base parts, the eyeballs, from the
+/// eye joints' posed globals — transform propagation used the pre-overwrite joint
+/// global).
+///
+/// `world` is in the avatar's own Second Life frame, so each matrix is composed
+/// with the avatar-root global that carries the SL → Bevy axis change and the
+/// world placement.
+fn write_joint_globals(
+    globals: &mut Query<&mut GlobalTransform>,
+    parts: &Query<(Entity, &AvatarBodyPart)>,
+    body: &AvatarBody,
+    agent: AgentKey,
+    root_global: &GlobalTransform,
+    joints: &[Entity],
+    world: &[Mat4],
+) {
+    // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
+    // `arithmetic_side_effects` lint the glam operators trip.
+    let root_matrix = root_global.to_matrix();
+    for (entity, matrix) in joints.iter().zip(world.iter()) {
+        if let Ok(mut global) = globals.get_mut(*entity) {
+            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
         }
     }
+    for (entity, part) in parts {
+        if part.agent() != agent {
+            continue;
+        }
+        if let Some(index) = body.rigid_joint_index(part.part())
+            && let Some(matrix) = world.get(index)
+            && let Ok(mut global) = globals.get_mut(entity)
+        {
+            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+        }
+    }
+}
+
+/// The debug T-pose switch (env `SL_VIEWER_TPOSE=1`): whether to freeze every
+/// avatar at its shaped **rest** skeleton — which in Second Life *is* the T-pose —
+/// with no keyframe animation, no procedural idle, and none of the look-at /
+/// locomotion / reach / body-physics adjusters folded in.
+///
+/// An avatar's AO walks, turns and fidgets it, so two runs of the viewer never
+/// frame the same body the same way. Freezing the pose makes an A/B of anything
+/// that shapes the body (a shape slider, a collision-volume displacement, a joint
+/// override) comparable between runs.
+fn t_pose_enabled() -> bool {
+    std::env::var("SL_VIEWER_TPOSE").as_deref() == Ok("1")
 }
 
 #[cfg(test)]

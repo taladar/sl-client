@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 39 |
+| ideas | 40 |
 | ready | 29 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 456 |
+| done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **540** |
+| **total** | **543** |
 
-## ideas (39)
+## ideas (40)
 
 ### viewer
 
@@ -82,6 +82,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-framework`)
 - [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
   option viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
+  — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand (blocked by
   `viewer-object-selection`, `viewer-camera-system`)
 - [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
@@ -119,8 +121,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-p34-3`](ready/viewer-p34-3-shape-volume-morphs-on-collision-volumes.md)
-  — Shape volume morphs on collision volumes
+- [`viewer-p34-4`](ready/viewer-p34-4-collision-volume-scale-inheritance.md) —
+  Collision-volume scale inheritance from the skeletal params
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
 
 ### test
@@ -219,7 +221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (456)
+## done (458)
 
 ### protocol
 
@@ -345,6 +347,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
+  — Avatar name tags (and render priority, and object pick) lost to the probe
+  cameras
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the
@@ -504,6 +509,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p34-1`](done/viewer-p34-1-ingest-the-physics-wearable.md) — Ingest
   the physics wearable
 - [`viewer-p34-2`](done/viewer-p34-2-drive-them.md) — Drive them
+- [`viewer-p34-3`](done/viewer-p34-3-shape-volume-morphs-on-collision-volumes.md)
+  — Shape volume morphs on collision volumes
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

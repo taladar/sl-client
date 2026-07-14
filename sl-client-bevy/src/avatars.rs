@@ -32,6 +32,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{
     BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh, SkeletalDeformations, Skeleton,
+    VolumeDeformations,
 };
 use sl_mesh::MeshSkin;
 
@@ -272,6 +273,12 @@ pub struct BevySkeleton {
     /// [`Extended`](JointSupport::Extended) for collision volumes, which never
     /// appear as a base joint's ancestor).
     support: Vec<JointSupport>,
+    /// Whether each joint is a **collision volume** (`LEFT_PEC`, `BELLY`, …) rather
+    /// than a bone, parallel to [`locals`](Self::locals). The volumes are the joints
+    /// the shape's `<volume_morph>` children displace (P34.3) and the ones a *fitted*
+    /// rigged mesh binds; a caller cannot tell them from the (also `Extended`) Bento
+    /// bones by [`support`](Self::support) alone.
+    is_volume: Vec<bool>,
     /// Joint canonical-name / alias → index (a canonical name wins over an
     /// alias, matching [`Skeleton`]'s own lookup).
     lookup: HashMap<String, usize>,
@@ -362,6 +369,7 @@ impl BevySkeleton {
         let mut parents = Vec::with_capacity(capacity);
         let mut names = Vec::with_capacity(capacity);
         let mut support = Vec::with_capacity(capacity);
+        let mut is_volume = Vec::with_capacity(capacity);
         let mut bind_globals: Vec<Mat4> = Vec::with_capacity(capacity);
         for joint in joints {
             let local = joint_transform(joint);
@@ -375,6 +383,7 @@ impl BevySkeleton {
             parents.push(joint.parent);
             names.push(joint.name.clone());
             support.push(joint.support);
+            is_volume.push(false);
             locals.push(local);
         }
 
@@ -396,6 +405,7 @@ impl BevySkeleton {
                 // A collision volume is never a base joint's ancestor, so its
                 // support only needs to be non-base to keep the walk honest.
                 support.push(JointSupport::Extended);
+                is_volume.push(true);
                 locals.push(local);
                 collision_volumes.push((volume.name.clone(), index));
             }
@@ -424,6 +434,7 @@ impl BevySkeleton {
             bind_globals,
             names,
             support,
+            is_volume,
             lookup,
         }
     }
@@ -479,7 +490,11 @@ impl BevySkeleton {
     /// the skin's deviation from its bind pose.
     #[must_use]
     pub fn deformed_local_transforms(&self, deform: &SkeletalDeformations) -> Vec<Transform> {
-        self.deformed_local_transforms_with(deform, &JointOverrides::default())
+        self.deformed_local_transforms_with(
+            deform,
+            &VolumeDeformations::default(),
+            &JointOverrides::default(),
+        )
     }
 
     /// Like [`deformed_local_transforms`](Self::deformed_local_transforms) but with
@@ -497,15 +512,20 @@ impl BevySkeleton {
     /// rig locks scale (`lock_scale_if_joint_position`), pins the joint to its
     /// default scale so the appearance scale does not stretch the fitted mesh.
     /// A joint with no override keeps its ordinary appearance-deformed transform.
+    ///
+    /// `volumes` displaces the **collision-volume** joints by the shape's volume
+    /// morphs (P34.3), the same way `deform` displaces the bones.
     #[must_use]
     pub fn deformed_local_transforms_with(
         &self,
         deform: &SkeletalDeformations,
+        volumes: &VolumeDeformations,
         overrides: &JointOverrides,
     ) -> Vec<Transform> {
         // The un-posed (rest) deformed world matrices, back-solved into the
         // relative-to-parent local transforms Bevy's hierarchy propagates.
-        let world = self.deformed_world_matrices(deform, overrides, &AnimationPose::default());
+        let world =
+            self.deformed_world_matrices(deform, volumes, overrides, &AnimationPose::default());
         let mut out = Vec::with_capacity(self.locals.len());
         for (index, own) in world.iter().enumerate() {
             let matrix = match self.parents.get(index).copied().flatten() {
@@ -540,10 +560,20 @@ impl BevySkeleton {
     /// with a position track such as `mPelvis`, its local offset) before that
     /// recurrence, so the animation composes with the deformation the same way the
     /// reference viewer's joint states do.
+    ///
+    /// `volumes` carries the shape's **collision-volume** displacements (P34.3):
+    /// the `<volume_morph>` children of the morph params add their
+    /// `weight * (scale, pos)` to the rest transform of the volume joint they name,
+    /// exactly as `deform` does to a bone's — which is how a worn rigged mesh body
+    /// rigged to `LEFT_PEC` / `BELLY` / … follows the avatar's shape sliders. The
+    /// body-physics bounce reaches the same joints through the `pose` instead
+    /// (P34.2), so the two compose: the volume rests where the shape puts it and
+    /// bounces around that.
     #[must_use]
     pub fn deformed_world_matrices(
         &self,
         deform: &SkeletalDeformations,
+        volumes: &VolumeDeformations,
         overrides: &JointOverrides,
         pose: &AnimationPose,
     ) -> Vec<Mat4> {
@@ -553,8 +583,13 @@ impl BevySkeleton {
         let mut world: Vec<Mat4> = Vec::with_capacity(self.locals.len());
         for (index, local) in self.locals.iter().enumerate() {
             let name = self.names.get(index).map_or("", String::as_str);
-            let deform_scale = deform.scale(name);
-            let deform_offset = deform.offset(name);
+            // A joint is either a bone (deformed by `param_skeleton`) or a collision
+            // volume (displaced by the morph params' `<volume_morph>` children); the
+            // two name spaces are disjoint (`mChest` vs `LEFT_PEC`), so summing both
+            // lookups is the same as choosing between them.
+            let volume = volumes.get(name).copied().unwrap_or_default();
+            let deform_scale = sum(deform.scale(name), volume.scale);
+            let deform_offset = sum(deform.offset(name), volume.position);
             let override_pos = overrides.position(index);
             // Component-wise so the workspace `arithmetic_side_effects` lint does
             // not trip on the glam `Vec3` operators. An overridden joint with a
@@ -665,6 +700,7 @@ impl BevySkeleton {
         // The synthetic root mirrors the reference viewer's `mRoot`, a base joint
         // that terminates the base-ancestor walk (it has no parent).
         self.support.push(JointSupport::Base);
+        self.is_volume.push(false);
         let _prev = self.lookup.insert(name.to_owned(), new_index);
     }
 
@@ -681,6 +717,14 @@ impl BevySkeleton {
     #[must_use]
     pub fn joint_name(&self, index: usize) -> Option<&str> {
         self.names.get(index).map(String::as_str)
+    }
+
+    /// Whether the joint at `index` is a **collision volume** (`LEFT_PEC`, `BELLY`,
+    /// …) rather than a bone — the joints the shape's volume morphs displace (P34.3)
+    /// and the ones a *fitted* rigged mesh binds. `false` for an out-of-range index.
+    #[must_use]
+    pub fn is_collision_volume(&self, index: usize) -> bool {
+        self.is_volume.get(index).copied().unwrap_or(false)
     }
 
     /// The joint canonical-name / alias → index lookup, so a caller can resolve a
@@ -923,6 +967,13 @@ pub fn joint_position_overrides(
     overrides
 }
 
+/// Component-wise sum of two Second Life vectors (kept off the glam operators the
+/// workspace `arithmetic_side_effects` lint watches).
+fn sum(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    let ([ax, ay, az], [bx, by, bz]) = (a, b);
+    [ax + bx, ay + by, az + bz]
+}
+
 /// Builds a joint's local rest [`Transform`] from its Second Life fields (Z-up
 /// metres, Euler XYZ degrees, unitless scale).
 fn joint_transform(joint: &Joint) -> Transform {
@@ -965,14 +1016,14 @@ fn euler_deg_to_quat(rot: [f32; 3]) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::{
-        BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
+        AnimationPose, BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
         to_bevy_runtime_morph_targets,
     };
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams};
+    use sl_avatar::{BaseMesh, SkeletalDeformations, Skeleton, VisualParams, VolumeDeformations};
     use sl_mesh::MeshSkin;
 
     /// A row-major, row-vector 4×4 matrix (the `sl_mesh` layout) whose only
@@ -1266,6 +1317,71 @@ mod tests {
         Ok(())
     }
 
+    /// A visual-param table with one transmitted morph param whose `<volume_morph>`
+    /// grows and lifts the `BELLY` collision volume (the mini skeleton hangs it off
+    /// `mTorso`) — an ordinary shape slider, the P34.3 case.
+    const BELLY_VOLUME_LAD: &str = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <mesh type="upperBodyMesh" lod="0" file_name="avatar_upper_body.llm">
+    <param id="104" group="0" name="Big_Belly_Torso" value_min="0" value_max="1" value_default="0">
+      <param_morph>
+        <volume_morph name="BELLY" scale="0.075 0.04 0.03" pos="0.07 0 -0.07"/>
+      </param_morph>
+    </param>
+  </mesh>
+</linden_avatar>"#;
+
+    #[test]
+    fn a_shape_volume_morph_displaces_the_collision_volume_joint() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let params = VisualParams::from_xml(BELLY_VOLUME_LAD)?;
+        let deform = SkeletalDeformations::default();
+        let volumes = VolumeDeformations::from_appearance(&params, &[255]);
+        let overrides = JointOverrides::default();
+        let pose = AnimationPose::default();
+
+        let belly = bevy.find("BELLY").ok_or("BELLY volume present")?;
+        let torso = bevy.find("mTorso").ok_or("mTorso present")?;
+        let rest = bevy.deformed_world_matrices(
+            &deform,
+            &VolumeDeformations::default(),
+            &overrides,
+            &pose,
+        );
+        let moved = bevy.deformed_world_matrices(&deform, &volumes, &overrides, &pose);
+
+        // The volume's own scale grows by the morph's delta (rest 0.09/0.13/0.15 in
+        // the fixture) — this is what scales a rigged mesh body bound to `BELLY`.
+        let (rest_scale, _, rest_pos) = rest
+            .get(belly)
+            .ok_or("belly rest")?
+            .to_scale_rotation_translation();
+        let (scale, _, position) = moved
+            .get(belly)
+            .ok_or("belly moved")?
+            .to_scale_rotation_translation();
+        assert!(
+            (scale - (rest_scale + Vec3::new(0.075, 0.04, 0.03))).length() < 1e-4,
+            "belly scale {scale} (rest {rest_scale})"
+        );
+        // …and it moves by the morph's position delta, carried into the world frame
+        // through its parent bone (which the fixture leaves unrotated and unscaled,
+        // so the world delta is the local one).
+        assert!(
+            (position - (rest_pos + Vec3::new(0.07, 0.0, -0.07))).length() < 1e-4,
+            "belly position {position} (rest {rest_pos})"
+        );
+        // The bone the volume hangs off is untouched: a volume morph moves the
+        // volume only, never the skeleton (so the system body does not budge).
+        assert!(
+            rest.get(torso)
+                .ok_or("torso rest")?
+                .abs_diff_eq(*moved.get(torso).ok_or("torso moved")?, 1e-5)
+        );
+        Ok(())
+    }
+
     #[test]
     fn bone_scale_stretches_child_position_but_not_child_scale() -> Result<(), TestError> {
         let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
@@ -1412,8 +1528,11 @@ mod tests {
         let rest_chest_local = rest.get(chest).ok_or("chest rest")?.translation;
         let mut overrides = JointOverrides::default();
         overrides.set_position(torso, Vec3::new(0.0, 0.1, 0.084));
-        let deformed =
-            bevy.deformed_local_transforms_with(&SkeletalDeformations::default(), &overrides);
+        let deformed = bevy.deformed_local_transforms_with(
+            &SkeletalDeformations::default(),
+            &VolumeDeformations::default(),
+            &overrides,
+        );
         // The overridden joint takes the new local position (within the float error
         // of the world-relative recompose).
         assert!(
@@ -1450,8 +1569,11 @@ mod tests {
         let overrides = joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
         assert!(overrides.lock_scale());
         let torso = bevy.find("mTorso").ok_or("mTorso present")?;
-        let deformed =
-            bevy.deformed_local_transforms_with(&SkeletalDeformations::default(), &overrides);
+        let deformed = bevy.deformed_local_transforms_with(
+            &SkeletalDeformations::default(),
+            &VolumeDeformations::default(),
+            &overrides,
+        );
         assert_eq!(deformed.get(torso).ok_or("torso")?.scale, Vec3::ONE);
         Ok(())
     }

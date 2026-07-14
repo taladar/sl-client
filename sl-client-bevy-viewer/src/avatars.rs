@@ -45,9 +45,9 @@ use sl_client_bevy::{
     BodyPhysics, CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES,
     MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
     ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture, composite_region,
-    decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image,
-    to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
+    SlSessionEvent, TextureEntry, TextureKey, Uuid, VolumeDeformations, avatar_texture,
+    composite_region, decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh,
+    to_bevy_image, to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -455,6 +455,11 @@ pub(crate) struct AvatarState {
     /// baked-scale rest transform would cause). Absent for a sphere-only
     /// (no `--viewer-assets`) avatar, or before its first appearance.
     deformations: HashMap<AgentKey, SkeletalDeformations>,
+    /// Each rigged avatar's resolved **collision-volume** displacements (P34.3):
+    /// the shape morphs' `<volume_morph>` children, which move the volumes a worn
+    /// rigged-mesh body is rigged to. Resolved and folded into the skeletal
+    /// recurrence alongside [`deformations`](Self::deformations).
+    volume_deformations: HashMap<AgentKey, VolumeDeformations>,
     /// The extra vertical plant height each avatar gains from its worn shoes'
     /// heel / platform height (R17), in Second Life Z-up metres: the reference
     /// viewer's `computeBodySize` folds the shoe's downward foot-bone offset into
@@ -517,6 +522,10 @@ pub(crate) struct AvatarBody {
     /// so a worn rigged mesh's own `joint_names` table can be resolved against a
     /// spawned avatar's skeleton-instance joint entities.
     joint_lookup: HashMap<String, usize>,
+    /// Whether each joint is a collision volume rather than a bone, parallel to
+    /// [`joint_locals`](Self::joint_locals) — so the rigged-mesh bind can report
+    /// whether a rig is *fitted* (binds the volumes the shape displaces, P34.3).
+    joint_is_volume: Vec<bool>,
 }
 
 impl AvatarBody {
@@ -525,6 +534,15 @@ impl AvatarBody {
     /// name the standard skeleton does not carry.
     pub(crate) fn joint_index(&self, name: &str) -> Option<usize> {
         self.joint_lookup.get(name).copied()
+    }
+
+    /// Whether the joint a rigged mesh's `name` binds to is a **collision volume**
+    /// (`LEFT_PEC`, `BELLY`, …) rather than a bone — i.e. whether binding it makes
+    /// the rig *fitted*, following the shape's volume morphs (P34.3). `false` for a
+    /// name the standard skeleton does not carry.
+    pub(crate) fn is_collision_volume(&self, name: &str) -> bool {
+        self.joint_index(name)
+            .is_some_and(|index| self.joint_is_volume.get(index).copied().unwrap_or(false))
     }
 
     /// The skeleton joint index a **rigid** base part (the eyeballs) is pinned to,
@@ -663,6 +681,9 @@ pub(crate) fn setup_avatar_body(
         joint_locals: skeleton.local_transforms().to_vec(),
         joint_parents: skeleton.parents().to_vec(),
         joint_lookup: skeleton.lookup().clone(),
+        joint_is_volume: (0..skeleton.len())
+            .map(|index| skeleton.is_collision_volume(index))
+            .collect(),
         pelvis_height: library.pelvis_height(),
         attachment_points: library
             .attachment_points()
@@ -713,6 +734,180 @@ fn body_root_transform(object: &Object, pelvis_height: f32, shoe_lift: f32) -> T
         rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
         scale: Vec3::ONE,
     }
+}
+
+/// A debug affordance (env `SL_VIEWER_VOLUME_FOCUS`): aim the fly-camera at the
+/// avatar whose shape displaces its **collision volumes** the most (P34.3), from a
+/// few metres back — the counterpart of
+/// [`focus_camera_on_particles`](crate::particles::focus_camera_on_particles).
+///
+/// The volume morphs move only a worn *fitted* rigged mesh, and only as far as the
+/// wearer's own shape sliders take them: a slim, near-default shape displaces its
+/// volumes by millimetres and shows nothing however hard the effect is amplified.
+/// So a live check needs the most extreme shape *present in the region*, which is
+/// rarely the agent's own — this finds it. `SL_VIEWER_CAMERA_DISTANCE` sets how far
+/// back to stand (default 3 m).
+///
+/// Runs after the fly-camera (so it overrides the login snap and the input pose).
+pub(crate) fn focus_camera_on_volume_shape(
+    state: Res<AvatarState>,
+    body: Option<Res<AvatarBody>>,
+    roots: Query<&GlobalTransform>,
+    mut camera: Query<&mut Transform, With<crate::camera::FlyCamera>>,
+    mut setting: Local<Option<String>>,
+    mut framed: Local<bool>,
+) {
+    // Frame the subject **once**, then leave the camera alone: re-aiming every frame
+    // would pin the fly-camera (no flying around the avatar to inspect it) and, worse,
+    // would jump to a different avatar the moment the `V` toggle zeroes every
+    // displacement and the "most displaced" pick changes.
+    if *framed {
+        return;
+    }
+    // `SL_VIEWER_VOLUME_FOCUS=1` frames whichever avatar is displaced most; set it to
+    // an **agent id** instead to pin the subject. An empty setting means the switch is
+    // off (the env is absent), which is the common case.
+    let setting = setting.get_or_insert_with(|| {
+        std::env::var("SL_VIEWER_VOLUME_FOCUS").unwrap_or_else(|_error| String::new())
+    });
+    if setting.is_empty() {
+        return;
+    }
+    let pinned = (setting.as_str() != "1").then_some(setting.as_str());
+    // The pinned avatar, else the one with the largest total displacement (summed
+    // over every volume, the scale deltas and the position deltas in metres alike —
+    // both move a mesh body).
+    let Some((agent, score)) = state
+        .volume_deformations
+        .iter()
+        .filter(|(agent, _)| pinned.is_none_or(|id| agent.uuid().to_string() == id))
+        .map(|(&agent, volumes)| (agent, volume_displacement_score(volumes)))
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+    else {
+        return;
+    };
+    // Aim at the avatar's **chest joint**, not its body-root anchor: the joint is
+    // where the posed skeleton (and therefore the rendered mesh body) actually is,
+    // and its world rotation gives the direction the avatar faces. The anchor's
+    // rotation is not a reliable basis for that.
+    let Some(chest) = body.as_ref().and_then(|body| {
+        let index = body.joint_index("mChest")?;
+        state.joint_entities_of(agent)?.get(index).copied()
+    }) else {
+        return;
+    };
+    let Ok(global) = roots.get(chest) else {
+        return;
+    };
+    let Ok(mut transform) = camera.single_mut() else {
+        return;
+    };
+    let distance = std::env::var("SL_VIEWER_CAMERA_DISTANCE")
+        .ok()
+        .and_then(|raw| raw.parse::<f32>().ok())
+        .unwrap_or(3.0);
+    // Stand off the avatar's own forward (its Second Life +X, carried into Bevy by
+    // the joint's world rotation) at chest height, looking back at the chest. A
+    // degenerate forward (a joint whose facing flattens to nothing) falls back to
+    // world +X, so the camera never ends up *inside* the avatar seeing nothing.
+    let target = global.translation();
+    let forward = global.rotation().mul_vec3(Vec3::X);
+    let flat = Vec3::new(forward.x, 0.0, forward.z)
+        .try_normalize()
+        .unwrap_or(Vec3::X);
+    let eye = Vec3::new(
+        target.x + flat.x * distance,
+        target.y + 0.2,
+        target.z + flat.z * distance,
+    );
+    info!(
+        "P34.3 volume focus: framing {agent} (displacement score {score:.4}) \
+         at chest {target:?} from {eye:?}; the camera is yours from here — press V to \
+         toggle the collision-volume displacement"
+    );
+    *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
+    *framed = true;
+}
+
+/// How much a resolved shape displaces an avatar's collision volumes in total — the
+/// ranking [`focus_camera_on_volume_shape`] picks its subject by. Sums the magnitude
+/// of every volume's scale and position delta.
+fn volume_displacement_score(volumes: &VolumeDeformations) -> f32 {
+    volumes
+        .iter()
+        .map(|(_name, deform)| {
+            Vec3::from_array(deform.scale).length() + Vec3::from_array(deform.position).length()
+        })
+        .sum()
+}
+
+/// The live A/B state of the shape's collision-volume displacement (P34.3): the
+/// gain every resolved [`VolumeDeformations`] is scaled by.
+///
+/// A resource rather than a plain env read so the effect can be toggled **during a
+/// session** ([`toggle_volume_morphs`], the `V` key). Two logins can never be
+/// compared honestly — the sun has moved, the scene has streamed differently, and
+/// (on a live grid) the other avatars in the region are different people — so the
+/// only sound A/B of an avatar-shaping effect is one taken on the same avatar, in
+/// the same frame sequence, with a switch flipped.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct VolumeMorphGain {
+    /// The multiplier on every volume displacement: `1` is faithful, `0` reproduces
+    /// the pre-P34.3 rest volumes, and a large value exaggerates a shape whose real
+    /// displacements are only centimetres.
+    pub(crate) gain: f32,
+}
+
+impl Default for VolumeMorphGain {
+    fn default() -> Self {
+        Self {
+            gain: volume_morph_gain(),
+        }
+    }
+}
+
+/// The `V` key: toggle the shape's collision-volume displacement between faithful
+/// (`1`) and off (`0`) and re-resolve every avatar's appearance, so the effect can
+/// be seen appearing and disappearing on one avatar, live (P34.3).
+///
+/// The volume morphs move only a worn *fitted* mesh body, so this is the one way to
+/// watch the effect land on a real avatar without trusting a cross-login screenshot
+/// pair.
+pub(crate) fn toggle_volume_morphs(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut gain: ResMut<VolumeMorphGain>,
+    mut state: ResMut<AvatarState>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyV) {
+        return;
+    }
+    gain.gain = if gain.gain > 0.5 { 0.0 } else { 1.0 };
+    info!(
+        "P34.3 collision-volume displacement {} (gain {})",
+        if gain.gain > 0.5 { "ON" } else { "OFF" },
+        gain.gain
+    );
+    // Re-resolve every avatar's shape with the new gain.
+    let agents: Vec<AgentKey> = state.appearances.keys().copied().collect();
+    state.appearance_dirty.extend(agents);
+}
+
+/// The debug A/B gain (env `SL_VIEWER_VOLUME_MORPH_GAIN`, default `1`) applied to
+/// the shape's collision-volume displacements (P34.3) — `0` leaves every volume at
+/// its `avatar_skeleton.xml` rest transform, reproducing the pre-P34.3 rigged-mesh
+/// body that ignores the shape sliders entirely; a large value exaggerates them.
+///
+/// The displacements are centimetres, and they move *only* a worn rigged mesh (the
+/// system body is not skinned to the collision volumes), so an exaggerated gain is
+/// the only way to *see* on a live avatar that the accumulation reaches a mesh body
+/// at all — the counterpart of the reference viewer's `physics_test` switch, ported
+/// as `SL_VIEWER_PHYSICS_TEST` for the same reason. A malformed value is ignored.
+fn volume_morph_gain() -> f32 {
+    std::env::var("SL_VIEWER_VOLUME_MORPH_GAIN")
+        .ok()
+        .and_then(|raw| raw.parse::<f32>().ok())
+        .filter(|gain| gain.is_finite())
+        .unwrap_or(1.0)
 }
 
 /// The extra vertical plant height (R17), in Second Life Z-up metres, a set of
@@ -1106,6 +1301,7 @@ impl AvatarState {
         let _dropped = self.joints.remove(&agent);
         let _dropped_nodes = self.attachment_nodes.remove(&agent);
         let _dropped_deform = self.deformations.remove(&agent);
+        let _dropped_volumes = self.volume_deformations.remove(&agent);
         let _dropped_physics = self.body_physics.remove(&agent);
         self.clear_joint_overrides(agent);
     }
@@ -1147,6 +1343,14 @@ impl AvatarState {
     /// body, or before its first appearance.
     pub(crate) fn deformations(&self, agent: AgentKey) -> Option<&SkeletalDeformations> {
         self.deformations.get(&agent)
+    }
+
+    /// The resolved collision-volume displacements (P34.3) the animation driver
+    /// folds into the same recurrence, as last shaped by
+    /// [`apply_avatar_appearance`]. An avatar whose shape displaces no volume has
+    /// no entry, which is the same as the (empty) default.
+    pub(crate) fn volume_deformations(&self, agent: AgentKey) -> Option<&VolumeDeformations> {
+        self.volume_deformations.get(&agent)
     }
 
     /// Every avatar with a spawned rigged-body skeleton instance (P18.3): the
@@ -2440,6 +2644,7 @@ pub(crate) fn apply_avatar_appearance(
     library: Option<Res<AvatarAssetLibrary>>,
     manager: Res<TextureManager>,
     mut state: ResMut<AvatarState>,
+    volume_gain: Res<VolumeMorphGain>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
@@ -2522,6 +2727,9 @@ pub(crate) fn apply_avatar_appearance(
     // zero unless a tuned physics wearable turns it on, so this is what makes the
     // bounce visible on an avatar that wears none.
     let force_physics = crate::body_physics::force_enabled();
+    // The debug A/B knob for the collision-volume displacement (P34.3), live-toggled
+    // by the `V` key.
+    let volume_gain = volume_gain.gain;
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     // The rest weights of the per-frame runtime morph params (P31.12a), kept
     // apart from the baked shape so a part's render-time morph targets start at
@@ -2529,6 +2737,8 @@ pub(crate) fn apply_avatar_appearance(
     let mut runtime_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
+    // The shape's collision-volume displacements per avatar (P34.3).
+    let mut volumes: HashMap<AgentKey, VolumeDeformations> = HashMap::new();
     // The ingested body-physics configuration per avatar (P34.1).
     let mut physics: HashMap<AgentKey, BodyPhysics> = HashMap::new();
     // The rest deformed joint **world** matrices per avatar, kept only for the
@@ -2557,6 +2767,14 @@ pub(crate) fn apply_avatar_appearance(
             }
             physics.insert(agent, body);
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
+            // The shape morphs' collision-volume displacements (P34.3): the volumes
+            // are bindable joints, so this is what makes a worn rigged-mesh body
+            // follow the chest / belly / butt / head shape sliders — the system
+            // body's morph targets cannot reach it.
+            let mut volume = VolumeDeformations::from_resolved(library.params(), &resolved);
+            if (volume_gain - 1.0).abs() > f32::EPSILON {
+                volume.amplify(volume_gain);
+            }
             // Fold in the worn rigged meshes' joint position overrides (R1) so a
             // fitted mesh body/head poses the skeleton to the positions its
             // inverse-bind matrices were baked against, rather than the plain shape.
@@ -2565,19 +2783,21 @@ pub(crate) fn apply_avatar_appearance(
                 agent,
                 library
                     .skeleton()
-                    .deformed_local_transforms_with(&deform, &overrides),
+                    .deformed_local_transforms_with(&deform, &volume, &overrides),
             );
             if log_geometry {
                 world_matrices.insert(
                     agent,
                     library.skeleton().deformed_world_matrices(
                         &deform,
+                        &volume,
                         &overrides,
                         &AnimationPose::default(),
                     ),
                 );
             }
             deformations.insert(agent, deform);
+            volumes.insert(agent, volume);
         }
     }
     // Record each avatar's resolved deformations so the animation driver (P18.3)
@@ -2596,6 +2816,27 @@ pub(crate) fn apply_avatar_appearance(
             transform.translation.y -= lift - previous;
         }
         let _prev = state.deformations.insert(agent, deform);
+    }
+    // …and its resolved collision-volume displacements, which the same per-frame
+    // recurrence folds into the volume joints a rigged mesh body rides (P34.3).
+    for (agent, volume) in volumes {
+        if !volume.is_empty() {
+            debug!(
+                "shape displaces {} collision volume(s) for {agent}",
+                volume.len()
+            );
+            if log_geometry {
+                for (name, deform) in volume.iter() {
+                    let [sx, sy, sz] = deform.scale;
+                    let [px, py, pz] = deform.position;
+                    debug!(
+                        "  volume {name}: scale ({sx:+.4},{sy:+.4},{sz:+.4}) \
+                         pos ({px:+.4},{py:+.4},{pz:+.4})"
+                    );
+                }
+            }
+        }
+        let _prev = state.volume_deformations.insert(agent, volume);
     }
     // Record each avatar's ingested body physics (P34.1) for the per-frame
     // simulation to drive (P34.2).
@@ -3198,8 +3439,13 @@ pub(crate) fn apply_bom_face_materials(
 /// UI `Val::Px` layout are both in logical pixels, but [`ComputedNode::size`] is
 /// physical, so the tag's own size is scaled by its
 /// [`inverse_scale_factor`](ComputedNode::inverse_scale_factor) before centring.
+///
+/// The camera query is qualified by [`FlyCamera`](crate::camera::FlyCamera): the
+/// world holds **more than one** camera since the reflection probes (P33.2) spawn
+/// one per probe capture, and an unqualified `single()` then fails — which silently
+/// hid every name tag until it was noticed.
 pub(crate) fn position_name_tags(
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::FlyCamera>>,
     anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
     mut tags: Query<(&NameTag, &ComputedNode, &mut Node, &mut Visibility)>,
 ) {

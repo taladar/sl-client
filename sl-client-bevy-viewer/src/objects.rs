@@ -58,6 +58,7 @@ use crate::animesh::ControlAvatarState;
 use crate::avatars::{
     AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
+use crate::camera::FlyCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::lights::{ObjectLight, light_from_object};
@@ -759,7 +760,9 @@ pub(crate) fn log_suspicious_objects(
 )]
 pub(crate) fn pick_object(
     keyboard: Res<ButtonInput<KeyCode>>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
+    // `FlyCamera`, not `Camera3d`: the probe-capture cameras (P33.2) also carry
+    // `Camera3d`, and `single()` fails once more than one matches.
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
     mut ray_cast: MeshRayCast,
     scene: Query<&SceneObject>,
     infos: Query<&ObjectDebugInfo>,
@@ -2653,6 +2656,65 @@ pub(crate) fn apply_rigged_attachments(
                 overrides.len(),
                 overrides.lock_scale()
             );
+        }
+        // Whether this rig is *fitted* (P34.3): how many of the joints it binds are
+        // collision volumes, and how many of those its own joint positions override
+        // — an overridden volume is pinned by the rig and ignores the shape's volume
+        // morphs (the reference does the same: `LLJoint::setPosition` yields to an
+        // active attachment override). A rig that binds no volume at all cannot
+        // follow the chest / belly / butt sliders however faithfully they resolve.
+        let volumes_bound = skin
+            .joint_names
+            .iter()
+            .filter(|name| body.is_collision_volume(name))
+            .count();
+        if volumes_bound > 0 {
+            let volumes_pinned = skin
+                .joint_names
+                .iter()
+                .filter(|name| {
+                    body.is_collision_volume(name)
+                        && body
+                            .joint_index(name)
+                            .is_some_and(|joint| overrides.position(joint).is_some())
+                })
+                .count();
+            // Binding a volume means nothing if the rig puts no *weight* on it, so
+            // report the share of the skin's total weight mass that rides the
+            // collision volumes: that — not the joint list — is what decides whether
+            // the shape's volume morphs move this mesh at all.
+            let is_volume_slot: Vec<bool> = skin
+                .joint_names
+                .iter()
+                .map(|name| body.is_collision_volume(name))
+                .collect();
+            let mut volume_mass = 0.0_f32;
+            let mut total_mass = 0.0_f32;
+            for submesh in &decoded.submeshes {
+                let Some(weights) = submesh.weights.as_ref() else {
+                    continue;
+                };
+                for vertex in weights {
+                    for &(slot, weight) in &vertex.influences {
+                        total_mass += weight;
+                        if is_volume_slot.get(usize::from(slot)).copied() == Some(true) {
+                            volume_mass += weight;
+                        }
+                    }
+                }
+            }
+            let share = if total_mass > 0.0 {
+                100.0 * volume_mass / total_mass
+            } else {
+                0.0
+            };
+            debug!(
+                "rigged mesh {key}: binds {volumes_bound} collision volume(s), \
+                 {volumes_pinned} pinned by its own joint overrides, \
+                 {share:.1}% of its skin weight rides them"
+            );
+        } else {
+            debug!("rigged mesh {key}: binds no collision volume (not a fitted rig)");
         }
         match (animesh, bind_agent) {
             (Some((object, _entity)), _) => control.record_overrides(object, key.uuid(), overrides),
