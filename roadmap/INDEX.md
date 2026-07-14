@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 53 |
+| ideas | 54 |
 | ready | 29 |
 | blocked | 4 |
 | in-progress | 0 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **556** |
+| **total** | **557** |
 
-## ideas (53)
+## ideas (54)
 
 ### viewer
 
@@ -61,7 +61,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   editor (blocked by `viewer-ui-framework`, `viewer-prim-inventory-editing`)
 - [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by `viewer-ui-framework`,
-  `viewer-streaming-audio`)
+  `viewer-audio-backend`)
 - [`viewer-mesh-model-upload`](ideas/viewer-mesh-model-upload.md) — Mesh / model
   importer & upload (blocked by `viewer-ui-framework`,
   `viewer-prim-texture-editing`)
@@ -139,6 +139,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   effects (blocked by `viewer-audio-backend`, `viewer-ui-framework`)
 - [`viewer-url-linkification`](ideas/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-framework`)
+- [`viewer-video-playback`](ideas/viewer-video-playback.md) — Video playback
+  backend (a second media engine, not the browser) (blocked by
+  `viewer-audio-backend`)
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`, `viewer-audio-backend`)
 - [`viewer-volume-panel`](ideas/viewer-volume-panel.md) — Volume panel (master +

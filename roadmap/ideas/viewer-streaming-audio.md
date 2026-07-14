@@ -14,13 +14,24 @@ audio, with a nearby-media control panel (play / stop / volume, autoplay
 policy, per-parcel switching on region/parcel change).
 
 The audio device, decode and mixer are **not** this task's problem — they belong
-to [[viewer-audio-backend]], which owns the backend choice. What is specific
-here is that a long-running network *stream* is a different demand from
-one-shot clip playback: Shoutcast / Icecast / HLS coverage, reconnect and
-buffering behaviour, and the awkward codecs may constrain that choice, so this
-task's needs must be on the table when the root picks a crate — and if the
-chosen backend cannot stream, this is where a second, stream-only library gets
-justified.
+to [[viewer-audio-backend]]. What is specific here is the *network stream*, and
+the 2026-07 research settles how to get one: **GStreamer**, which
+[[viewer-video-playback]] pulls in anyway. `souphttpsrc iradio-mode=true !
+icydemux` handles Shoutcast / Icecast **including ICY metadata** — that is the
+"now playing" title a viewer shows — and HLS comes free via `adaptivedemux2`.
+
+The pure-Rust audio crates genuinely have no story here: symphonia is a
+demuxer/decoder, not a network stack (no ICY, no HLS, no reconnect), and rodio's
+symphonia backend panics on non-seekable sources. Choosing them would mean
+writing an Icecast client, an ICY de-interleaver, an HLS manifest parser and a
+segment fetcher from scratch. Note the reference viewer does not hand-roll this
+either — it hands the URL to FMOD and lets FMOD own the network stack. We hand
+it to GStreamer instead.
+
+So: GStreamer **decodes**, and pushes PCM into [[viewer-audio-backend]]'s mixer
+through a resampling channel (the stream's clock is not the sound card's). Put
+it on the **music bus as stereo — not spatialised**: parcel audio is ambient
+music, not a positional source. Only media-on-a-prim audio is positional.
 
 The parcel media / audio **protocol** is already done (`protocol-24`); this is
 the playback + control surface on top: the parcel stream URL, per-parcel

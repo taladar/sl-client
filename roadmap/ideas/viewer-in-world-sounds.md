@@ -37,6 +37,26 @@ easily ask for more simultaneous sounds than any device wants; the reference
 caps and evicts by priority and distance). Muting (per-object, per-owner, the
 mute list) belongs here too.
 
+## Beyond the reference: occlusion
+
+Distance attenuation is the floor, not the ceiling. **Steam Audio is Apache-2.0
+with full source** and the `audionimbus` binding already supports Bevy 0.19,
+giving HRTF plus **occlusion and transmission against real geometry** — sound
+muffled by the prim wall between you and the emitter, which no SL viewer does.
+The reason it is tractable here: `audionimbus` exposes a **`CustomRayTracer`**,
+so it can query the **avian3d/parry BVH we already maintain** for the prim world
+rather than building and re-committing its own acoustic scene every time a prim
+moves — which is exactly what would otherwise kill the idea in SL, where
+geometry is rezzed and animated constantly.
+
+Treat it as **phase 2 behind a toggle**: phase 1 is pan + distance + a low-pass,
+phase 2 adds occlusion/transmission and binaural HRTF for the nearest few
+emitters, with reflections/reverb last (most expensive). Open questions worth
+knowing before committing: nobody has benchmarked ray queries at SL prim
+densities, and **SL carries no acoustic material metadata**, so the material
+model has to be synthesised (from the prim material enum, or just a default) —
+a design decision, not a lookup.
+
 Reference (Firestorm, read-only): `llaudio/llaudioengine_*`, `lldeferredsounds`,
 `LLViewerObject::setAttachedSound`.
 
