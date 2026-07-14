@@ -226,12 +226,13 @@ pub use sl_tree::{GRASS_MAX_BLADES, GrassMesh, GrassSpecies, grass_geometry, gra
 // re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
 pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BodyPhysics,
-    BoneDeform, CollisionVolume, ColorOp, ColorRamp, HAND_POSE_MORPH_PARAMS, Joint, MaskTexture,
-    MorphMask, MorphMasks, MorphWeights, MorphedMesh, PHYSICS_MORPH_PARAMS, ParamError,
-    PartMorphMask, PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings,
-    RUNTIME_MORPH_PARAMS, ResolvedParams, SkeletalDeformations, Skeleton, SkeletonError,
-    VisualParam, VisualParams, VolumeMorph, WearableAsset, WearableError, combine_layer_color,
-    global_color, global_color_params, hand_pose_morph_param, is_runtime_morph_param,
+    BodyPhysicsState, BoneDeform, CollisionVolume, ColorOp, ColorRamp, HAND_POSE_MORPH_PARAMS,
+    Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights, MorphedMesh,
+    PHYSICS_MORPH_PARAMS, ParamError, PartMorphMask, PhysicsDrivenParam, PhysicsMotion,
+    PhysicsMotionConfig, PhysicsSettings, RUNTIME_MORPH_PARAMS, ResolvedParams,
+    SkeletalDeformations, Skeleton, SkeletonError, VisualParam, VisualParams, VolumeMorph,
+    WearableAsset, WearableError, combine_layer_color, global_color, global_color_params,
+    hand_pose_morph_param, is_runtime_morph_param,
 };
 
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a

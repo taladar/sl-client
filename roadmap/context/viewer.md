@@ -1559,3 +1559,40 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
 - The breast settings are `sex="female"`, so the ordinary sex gate in
   `ResolvedParams::effective_weight` already switches the breast motions off for
   a male avatar — no special case needed.
+
+## P34.2 body-physics simulation — cross-cutting notes
+
+- **Nothing bounces by default, so the reference ships a test switch — and so do
+  we.** `Max_Effect` is zero on every axis unless a tuned physics wearable sets
+  it, and the OpenSim test avatar wears none. `SL_VIEWER_PHYSICS_TEST=1` is the
+  port of the reference's own `physics_test` bool (`behavior_maxeffect = 1.0f`):
+  it forces every motion on at ingest, which is the only way to *see* the
+  simulation without a wearable. `SL_VIEWER_LOG_BODY_PHYSICS=1` logs each
+  avatar's per-motion simulated position (`0.5` = the user's own shape).
+- **The bounce has two outputs, not one.** The `*_Driven` morph params move the
+  **system body** (through the P31.12a runtime-morph pipeline); the same params'
+  **volume morphs** move the `LEFT_PEC` / `RIGHT_PEC` / `BELLY` / `BUTT`
+  collision volumes, and *that* is what makes a worn rigged-mesh body bounce —
+  a system-body morph target cannot reach one. The volume displacements are
+  folded in as `AnimationPose::set_position` deltas on the volume joints (the
+  pose position track is already an offset from a joint's rest, which is exactly
+  what a volume morph is), so they cost nothing extra: the same final
+  `deformed_world_matrices` call picks them up.
+- **The joint sample must include the avatar's own travel.** The forcing term is
+  the *world* acceleration of `mChest` / `mPelvis` (the reference's
+  `LLJoint::getWorldPosition`), so the sample is taken in **Bevy world space** —
+  the avatar-local SL joint matrix composed through the avatar-root global.
+  Sampling avatar-local would miss walking, jumping and landing entirely, i.e.
+  everything that actually bounces. The SL → Bevy axis change is a proper
+  rotation, so the 1-D projection along the motion axis is the same number in
+  either frame; only world-up has to be named per frame (`+Y` in Bevy).
+- **Two deliberate deviations from `llphysicsmotion.cpp`**: the first frame only
+  seeds the joint trail (the reference's `mPosition_world` starts at the origin,
+  so its second frame differentiates a *region-sized* jump and kicks the springs
+  to their limits), and a degenerate mass makes a motion inert instead of
+  dividing by zero (`a = F/m`; the wearable's slider bottoms out at `0.1`, but a
+  table that omits the param need not).
+- `pose_avatar_skeletons` hit Bevy's **16-system-parameter limit** with this
+  fold; the procedural adjusters' resources (look-at, reach, locomotion, body
+  physics, runtime morphs) are now bundled into one `AvatarAdjusters`
+  `SystemParam`. Any further per-avatar fold should join that bundle.

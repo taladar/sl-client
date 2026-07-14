@@ -37,6 +37,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bevy::ecs::system::SystemParam;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
@@ -51,6 +52,7 @@ use sl_client_bevy::{
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs, AvatarState};
+use crate::body_physics::{BodyPhysicsInput, BodyPhysicsMotion};
 use crate::ground::AvatarGround;
 use crate::locomotion_ik::{AdjustInput, AdjusterAnims, LegJoints, LocomotionAdjust};
 use crate::look_at::{
@@ -906,6 +908,29 @@ pub(crate) fn drive_avatar_skeletons(
     playback.poses = poses;
 }
 
+/// The procedural adjusters' resources, bundled so [`pose_avatar_skeletons`] stays
+/// inside Bevy's system-parameter limit — each fold (look-at, reach & aim, locomotion,
+/// body physics) contributes its own target and state resource, and the runtime-morph
+/// overrides are the channel two of them write their morph params through.
+#[derive(SystemParam)]
+pub(crate) struct AvatarAdjusters<'w> {
+    /// Who each avatar is looking at (P31.12).
+    look_targets: Res<'w, LookAtTargets>,
+    /// The look-at / eye-blink motion state (P31.12, P31.12b).
+    look_motion: ResMut<'w, LookAtMotion>,
+    /// What each avatar has selected, which its left arm reaches for (P31.15).
+    point_at_targets: Res<'w, PointAtTargets>,
+    /// The reach & aim motion state (P31.15).
+    reach: ResMut<'w, ReachMotion>,
+    /// The locomotion adjusters' state — walk servo, foot IK, landing, fly bank (P31.14).
+    locomotion: ResMut<'w, LocomotionAdjust>,
+    /// The body-physics spring-damper state (P34.2).
+    body_physics: ResMut<'w, BodyPhysicsMotion>,
+    /// The per-frame runtime morph overrides the eye-blink (P31.12b) and body-physics
+    /// (P34.2) folds write their morph params into (P31.12a).
+    runtime_morphs: ResMut<'w, AvatarRuntimeMorphs>,
+}
+
 /// Write each posed avatar's animated joint world matrices straight into the
 /// skeleton-instance joints' `GlobalTransform`s (P18.3, the reference viewer's
 /// matrix-palette skinning), so a shaped avatar's limbs keep their length under
@@ -931,9 +956,9 @@ pub(crate) fn drive_avatar_skeletons(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries; the \
-              look-at fold (P31.12) adds the look-at target and motion resources, the \
-              locomotion adjusters (P31.14) the adjuster state, terrain and motions, and \
-              the reach & aim adjusters (P31.15) the point-at targets and their state"
+              procedural folds' own resources are already bundled into one \
+              `AvatarAdjusters`, and what is left is the animation pipeline, the avatar \
+              asset library and state, the ground, and the joint / part queries"
 )]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
@@ -943,12 +968,7 @@ pub(crate) fn pose_avatar_skeletons(
     body: Option<Res<AvatarBody>>,
     state: Res<AvatarState>,
     mut ground: ResMut<AvatarGround>,
-    look_targets: Res<LookAtTargets>,
-    mut look_motion: ResMut<LookAtMotion>,
-    point_at_targets: Res<PointAtTargets>,
-    mut reach_motion: ResMut<ReachMotion>,
-    mut adjust: ResMut<LocomotionAdjust>,
-    mut runtime_morphs: ResMut<AvatarRuntimeMorphs>,
+    mut adjusters: AvatarAdjusters,
     motions: Query<&AvatarMotion>,
     parts: Query<(Entity, &AvatarBodyPart)>,
     mut globals: Query<&mut GlobalTransform>,
@@ -961,10 +981,20 @@ pub(crate) fn pose_avatar_skeletons(
     let look_debug = crate::look_at::LookAtDebug::from_env();
     let log_ik = crate::locomotion_ik::log_enabled();
     let log_reach = crate::reach::log_enabled();
+    let log_physics = crate::body_physics::log_enabled();
     let rigged = state.rigged_agents();
-    // Forget the adjuster state of avatars that have despawned.
-    adjust.retain(&|agent| rigged.contains(&agent));
-    reach_motion.retain(&|agent| rigged.contains(&agent));
+    // Forget the adjuster state (and the runtime morph overrides) of avatars that
+    // have despawned.
+    adjusters
+        .locomotion
+        .retain(&|agent| rigged.contains(&agent));
+    adjusters.reach.retain(&|agent| rigged.contains(&agent));
+    adjusters
+        .body_physics
+        .retain(&|agent| rigged.contains(&agent));
+    adjusters
+        .runtime_morphs
+        .retain(&|agent| rigged.contains(&agent));
     let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
     let reach_joints = ReachJoints::resolve(|name| body.joint_index(name));
     for agent in rigged {
@@ -1016,28 +1046,29 @@ pub(crate) fn pose_avatar_skeletons(
         };
         // Only resolve the look-at inputs when the avatar actually has a target;
         // without one the eyes only jitter and the head relaxes to rest.
-        let (head_pos, eye_positions, neck_parent_world) = if look_targets.point(agent).is_some() {
-            let eyes = joint_pos(look_joints.eye_left).zip(joint_pos(look_joints.eye_right));
-            // The neck joint's parent world rotation (avatar-local Second Life frame),
-            // so the head is aimed against where the animated spine actually is.
-            let neck_parent = look_joints
-                .neck
-                .and_then(|neck| skeleton.parents().get(neck).copied().flatten())
-                .and_then(|parent| world0.get(parent))
-                .map_or(Quat::IDENTITY, |matrix| {
-                    matrix.to_scale_rotation_translation().1
-                });
-            (joint_pos(look_joints.head), eyes, neck_parent)
-        } else {
-            (None, None, Quat::IDENTITY)
-        };
+        let (head_pos, eye_positions, neck_parent_world) =
+            if adjusters.look_targets.point(agent).is_some() {
+                let eyes = joint_pos(look_joints.eye_left).zip(joint_pos(look_joints.eye_right));
+                // The neck joint's parent world rotation (avatar-local Second Life frame),
+                // so the head is aimed against where the animated spine actually is.
+                let neck_parent = look_joints
+                    .neck
+                    .and_then(|neck| skeleton.parents().get(neck).copied().flatten())
+                    .and_then(|parent| world0.get(parent))
+                    .map_or(Quat::IDENTITY, |matrix| {
+                        matrix.to_scale_rotation_translation().1
+                    });
+                (joint_pos(look_joints.head), eyes, neck_parent)
+            } else {
+                (None, None, Quat::IDENTITY)
+            };
         // The look-at fold also advances the eye-blink timer (P31.12b); drive the two
         // eyelid morph params through the per-frame runtime-morph pipeline (P31.12a).
         let blink = crate::look_at::apply(
             &mut pose,
             agent,
-            &look_targets,
-            &mut look_motion,
+            &adjusters.look_targets,
+            &mut adjusters.look_motion,
             &root_global,
             head_pos,
             eye_positions,
@@ -1046,22 +1077,26 @@ pub(crate) fn pose_avatar_skeletons(
             dt,
             look_debug,
         );
-        runtime_morphs.set(agent, BLINK_LEFT_PARAM, blink.left);
-        runtime_morphs.set(agent, BLINK_RIGHT_PARAM, blink.right);
+        adjusters
+            .runtime_morphs
+            .set(agent, BLINK_LEFT_PARAM, blink.left);
+        adjusters
+            .runtime_morphs
+            .set(agent, BLINK_RIGHT_PARAM, blink.right);
         // Fold in the activity-driven reach & aim adjusters (P31.15): the left-arm IK reach
         // toward whatever the avatar has selected (its point-at target) and the torso twist
         // that aims its right hand at its look-at target while a gun-aim animation plays.
         // Like the locomotion fold below, they read the current geometry out of `world0`.
         let reach_report = crate::reach::apply(
             &mut pose,
-            &mut reach_motion,
+            &mut adjusters.reach,
             &ReachInput {
                 agent,
                 world: &world0,
                 root: &root_global,
                 joints: reach_joints,
-                point_at: point_at_targets.point(agent),
-                look_at: look_targets.point(agent),
+                point_at: adjusters.point_at_targets.point(agent),
+                look_at: adjusters.look_targets.point(agent),
                 aiming: playback.is_aiming(agent),
                 dt,
             },
@@ -1080,7 +1115,7 @@ pub(crate) fn pose_avatar_skeletons(
                 reach_report.aim_dir.y,
                 reach_report.aim_dir.z,
                 playback.is_aiming(agent),
-                point_at_targets.point(agent).is_some(),
+                adjusters.point_at_targets.point(agent).is_some(),
             );
         }
         // Fold in the locomotion adjusters (P31.14): the walk-speed servo that keeps
@@ -1112,7 +1147,7 @@ pub(crate) fn pose_avatar_skeletons(
         let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
         let report = crate::locomotion_ik::apply(
             &mut pose,
-            &mut adjust,
+            &mut adjusters.locomotion,
             &AdjustInput {
                 agent,
                 world: &world0,
@@ -1151,6 +1186,33 @@ pub(crate) fn pose_avatar_skeletons(
                 bend(leg_joints.left),
                 bend(leg_joints.right),
             );
+        }
+        // Fold in the body physics (P34.2): the breast / belly / butt spring-dampers,
+        // stepped from where `world0` puts their joints, writing the system body's
+        // `*_Driven` morph weights through the runtime-morph pipeline and the rigged
+        // body's collision-volume displacements into the pose as position deltas —
+        // which is why this runs before the final world matrices below.
+        if let Some(physics) = state.body_physics(agent) {
+            let report = crate::body_physics::apply(
+                &mut pose,
+                &mut adjusters.body_physics,
+                &mut adjusters.runtime_morphs,
+                &BodyPhysicsInput {
+                    agent,
+                    physics,
+                    world: &world0,
+                    root: &root_global,
+                    dt,
+                },
+                |name| body.joint_index(name),
+            );
+            if log_physics {
+                info!(
+                    "P34.2 body-physics agent={agent} active={} breast_up_down={:.3} \
+                     belly_up_down={:.3} butt_up_down={:.3}",
+                    report.active, report.breast_up_down, report.belly_up_down, report.butt_up_down,
+                );
+            }
         }
         let world = skeleton.deformed_world_matrices(deform, &overrides, &pose);
         // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace

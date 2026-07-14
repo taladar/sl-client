@@ -60,7 +60,8 @@ pub use params::{
     ParamValue, VisualParam, VisualParams, VolumeMorph,
 };
 pub use physics::{
-    BodyPhysics, PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings,
+    BodyPhysics, BodyPhysicsState, JointSample, PhysicsDrivenParam, PhysicsMotion,
+    PhysicsMotionConfig, PhysicsSettings,
 };
 pub use resolve::ResolvedParams;
 pub use skeletal::{BoneDeform, SkeletalDeformations};

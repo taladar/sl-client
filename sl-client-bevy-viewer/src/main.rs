@@ -14,6 +14,7 @@ mod avatar_assets;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
+mod body_physics;
 mod bump;
 mod camera;
 mod chat;
@@ -552,6 +553,7 @@ fn run_session(
     .init_resource::<reach::PointAtTargets>()
     .init_resource::<reach::PointAtSelection>()
     .init_resource::<reach::ReachMotion>()
+    .init_resource::<body_physics::BodyPhysicsMotion>()
     .init_resource::<hand_pose::HandPoseMotion>()
     .init_resource::<locomotion_ik::LocomotionAdjust>()
     .init_resource::<ground::AvatarGround>()

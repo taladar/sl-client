@@ -1190,10 +1190,6 @@ impl AvatarState {
     /// (P34.1), or `None` before one arrived. Every motion it holds is ready to
     /// simulate: a motion whose `Max_Effect` is zero is present but
     /// [inactive](sl_client_bevy::PhysicsSettings::is_active).
-    #[expect(
-        dead_code,
-        reason = "read by the body-physics motion driver (P34.2), the next step"
-    )]
     pub(crate) fn body_physics(&self, agent: AgentKey) -> Option<&BodyPhysics> {
         self.body_physics.get(&agent)
     }
@@ -2522,6 +2518,10 @@ pub(crate) fn apply_avatar_appearance(
     // Resolve each dirty avatar's appearance once into its morph weights and the
     // deformed joint transforms (both share one `ResolvedParams`).
     let log_geometry = std::env::var_os("SL_VIEWER_LOG_AVATAR_GEOMETRY").is_some();
+    // The reference viewer's `physics_test` switch (P34.2): every `Max_Effect` is
+    // zero unless a tuned physics wearable turns it on, so this is what makes the
+    // bounce visible on an avatar that wears none.
+    let force_physics = crate::body_physics::force_enabled();
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     // The rest weights of the per-frame runtime morph params (P31.12a), kept
     // apart from the baked shape so a part's render-time morph targets start at
@@ -2551,10 +2551,11 @@ pub(crate) fn apply_avatar_appearance(
             // the spring-damper settings and driven morph params the body-physics
             // motions need. The morph targets they drive are among the runtime
             // params above, so the bounce needs no re-bake.
-            physics.insert(
-                agent,
-                BodyPhysics::from_resolved(library.params(), &resolved),
-            );
+            let mut body = BodyPhysics::from_resolved(library.params(), &resolved);
+            if force_physics {
+                body.force_max_effect(crate::body_physics::FORCED_MAX_EFFECT);
+            }
+            physics.insert(agent, body);
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
             // Fold in the worn rigged meshes' joint position overrides (R1) so a
             // fitted mesh body/head poses the skeleton to the positions its
@@ -2707,14 +2708,23 @@ impl AvatarRuntimeMorphs {
         }
     }
 
-    /// Drop every override for `agent` (e.g. when its body despawns), letting any
-    /// still-present parts fall back to their rest weights.
-    #[expect(
-        dead_code,
-        reason = "used by the body-physics runtime-morph driver (P34)"
-    )]
-    pub(crate) fn clear_agent(&mut self, agent: AgentKey) {
-        self.by_agent.remove(&agent);
+    /// Drop the override of one runtime morph `param` on `agent`, letting it fall
+    /// back to its appearance-resolved rest weight.
+    ///
+    /// The body-physics driver (P34.2) releases the params of a motion that is
+    /// switched off this way, rather than leaving them where the last bounce put
+    /// them.
+    pub(crate) fn clear(&mut self, agent: AgentKey, param: &str) {
+        if let Some(params) = self.by_agent.get_mut(&agent) {
+            let _dropped = params.remove(param);
+        }
+    }
+
+    /// Drop every override of every avatar not in `live` (they have despawned),
+    /// so a long session does not accumulate the drivers' state for avatars that
+    /// left.
+    pub(crate) fn retain(&mut self, live: &impl Fn(AgentKey) -> bool) {
+        self.by_agent.retain(|&agent, _params| live(agent));
     }
 
     /// The current override weight of `param` on `agent`, if a driver set one.
