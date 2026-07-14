@@ -1457,20 +1457,11 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   double-counting a flat ambient on the probe's diffuse IBL,
   `suppress_global_ambient` drops the sky-set `GlobalAmbientLight` in
   PostUpdate.
-  - **OPEN / why P33.3 exists — calibration is unresolved.** Objects use Bevy's
-    env IBL scaled by `light_probes.intensity_for_view`; custom materials
-    multiply their sample by `intensity_for_view * view.exposure` (they aren't
-    view-exposed themselves — default `Exposure` is BLENDER ev100 9.7). BUT a
-    red-brightness diagnostic (terrain ambient = `intensity_for_view/5000`,
-    forced red) showed
-    **no visible change between `SL_VIEWER_PROBE_INTENSITY=400` and `4000`** —
-    so `intensity_for_view` does NOT usefully track our
-    `GeneratedEnvironmentMapLight .intensity` (or its effect is swamped by the
-    direct sun). The single-intensity knob is therefore unreliable; P33.3 likely
-    needs a viewer-set probe-scale **uniform** on the custom materials instead
-    of Bevy's value. Committed at a provisional `PROBE_INTENSITY=1200`, scene
-    reads "a bit bright" — user chose to ship and calibrate later (with ambient
-    occlusion).
+  - **RESOLVED by P33.3** (this entry's "no visible change between
+    `SL_VIEWER_PROBE_INTENSITY=400` and `4000`" was a **bad measurement**, not a
+    Bevy bug — `intensity_for_view` does track
+    `GeneratedEnvironmentMapLight.intensity` exactly as documented; see the
+    P33.3 entry below).
   - **Screenshot mode now logs out cleanly** (net-new general fix):
     `capture_ screenshots` calls a shared `session::request_logout`
     (Command::Logout + quit deadline) instead of `AppExit` — an abrupt process
@@ -1480,3 +1471,40 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     fails (sandbox/GPU); background launches or the user's manual launch work. A
     leading `pkill` returning 1 (no match) aborts the whole compound command —
     use `pkill … || true`.
+
+- **Phase 33 P33.3 brightness calibration DONE** (what it *is* — the
+  exposure-derived unit gain, the HDR view, the reference tone mapper, why probe
+  **ambiance** is not expressible — is in the roadmap/ viewer topic P33.3; don't
+  restate). What is not in git/roadmap:
+  - **The two symptoms had one cause, and both were visible in a mirror-ball
+    capture**: the terrain read a *different colour* in the ball than in the
+    world (before: direct `(141,161,182)` blue-grey vs `(90,86,63)` in the ball;
+    after: `(82,88,72)` vs `(65,64,42)` — same family), and the scene read "a
+    bit bright". Cause: no `Hdr` on the main camera ⇒ Bevy's `TONEMAP_IN_SHADER`
+    path tonemapped `StandardMaterial` in the mesh shader while the custom
+    sky/terrain/water materials were merely clipped by the 8-bit target.
+    **The mirror ball is the calibration instrument** — a probe is calibrated
+    exactly when what it shows of a surface matches that surface beside it.
+    Reach for it first on any future lighting change.
+  - **Capture cameras must be lit by the probe too** (`light_capture_cameras`):
+    they are ordinary views, so Bevy gives them no IBL of their own, and with
+    the flat `GlobalAmbientLight` suppressed the whole captured world came out
+    ambient-less (black shadowed sides, terrain on its no-probe fill) — a cube
+    visibly darker than the world beside it. Share the main view's
+    *already-filtered* `EnvironmentMapLight` handles; adding a
+    `GeneratedEnvironmentMapLight` per capture camera instead would start a
+    filter chain running per camera. The resulting frame-to-frame feedback is
+    the point (bounced light) and converges on surface albedo.
+  - **The P33.1 "`intensity_for_view` doesn't respond" measurement was an
+    artifact of the headless run**, not a Bevy bug. Unfocused/occluded, the
+    viewer's window drops to ~1 FPS; `Time<Virtual>`'s 250 ms `max_delta` then
+    makes app-elapsed run ~4× slower than wall clock, and the *frame*-counted
+    `CAPTURE_PERIOD_FRAMES` (180) means the first cube refresh after login lands
+    minutes late — so a screenshot taken on a fixed delay catches a
+    **half-black, stale cube** and any A/B across it is meaningless. Check `FPS`
+    in the diagnostics overlay of a capture before trusting it: 60 = valid, 1 =
+    the cube is stale.
+  - Tone-mapper A/B knobs land as `SL_VIEWER_TONEMAP` (`aces`/`neutral`/`none` —
+    `none` reproduces the old clipped look), `SL_VIEWER_TONEMAP_MIX`,
+    `SL_VIEWER_EXPOSURE`; `SL_VIEWER_PROBE_INTENSITY` is **gone**, replaced by
+    the dimensionless `SL_VIEWER_PROBE_GAIN` (1 = calibrated).

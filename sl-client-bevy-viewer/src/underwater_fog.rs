@@ -22,7 +22,7 @@
 //!
 //! Bevy 0.19 replaced the render graph with a **system-based** renderer, so this is
 //! not a render-graph `ViewNode`: the pass is a system in the [`Core3d`] schedule
-//! (in [`Core3dSystems::PostProcess`], before tonemapping), modelled on
+//! (in [`Core3dSystems::PostProcess`], before the tone mapper), modelled on
 //! `bevy_core_pipeline::fullscreen_material` / `bevy_post_process::effect_stack`.
 //! The built-in `FullscreenMaterial` trait is not usable here because its bind
 //! group is fixed to *(source, sampler, uniform)* with no depth binding, and this
@@ -39,10 +39,11 @@
 //! ([`update_underwater_fog`] fills them from the region's EEP water settings, the
 //! sky sun direction, the camera pose, and the water level).
 //!
-//! Faithfulness note: the pass runs after the main pass (Bevy's post-process slot),
-//! so the fog is applied in the tonemapped image rather than the reference's linear
-//! deferred space — a pragmatic deviation; the distance falloff / per-fragment clip
-//! are the reference's.
+//! The pass runs after the main pass and **before** the tone mapper
+//! ([`tonemap`](crate::tonemap)), so — as in the reference — the fog is mixed into
+//! the *linear* scene and the fogged result is what gets tone-mapped. (Until P33.3
+//! gave the camera an HDR target and a tone mapper of its own, the viewer's main pass
+//! wrote an already-tonemapped, clipped 8-bit image, and this pass fogged that.)
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
@@ -219,6 +220,13 @@ pub(crate) fn update_underwater_fog(
     }
 }
 
+/// The system set the fog pass runs in, so a later post-process pass can order itself
+/// after it without reaching for the (private) system: the tone mapper
+/// ([`tonemap`](crate::tonemap)) must see the *fogged* linear scene, since the
+/// reference fogs before it tonemaps.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct UnderwaterFogPass;
+
 /// The plugin: registers extraction / uniform upload, loads the shader, and wires
 /// the render-world pipeline prep + the fog pass into the 3D render schedule.
 #[derive(Debug, Default)]
@@ -248,6 +256,7 @@ impl Plugin for UnderwaterFogPlugin {
                 Core3d,
                 underwater_fog_system
                     .in_set(Core3dSystems::PostProcess)
+                    .in_set(UnderwaterFogPass)
                     .before(tonemapping),
             );
     }

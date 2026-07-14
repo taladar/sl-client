@@ -142,10 +142,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             0.0,
         ).rgb;
 #endif
-        // Scale by the probe intensity and the view exposure, the same factors the
-        // PBR path applies to objects' image-based lighting, so one intensity knob
-        // drives the whole scene consistently. (This shader is not otherwise
-        // exposed — only the later tonemapper is — so the exposure is applied here.)
+        // Scale by the probe intensity *and* the view exposure — the two factors the
+        // PBR path applies to an object's image-based lighting — so this ambient is
+        // the same physical quantity the probe gives a prim standing on this ground.
+        // The viewer calibrates the probe intensity to `gain / exposure` (P33.3), so
+        // this product is the gain: at the calibrated gain of 1 the ambient is exactly
+        // the irradiance the captured surroundings cast, in the linear space this
+        // shader writes and the tone mapper later reads.
         ambient = ambient
             * view_bindings::light_probes.intensity_for_view
             * view_bindings::view.exposure;

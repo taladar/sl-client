@@ -191,9 +191,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let fb = water.water_fog_color;
     // The reflected environment: sample the reflection-probe specular map in the
     // mirror direction (P33) so the water reflects the real surroundings rather than
-    // a flat sky tint, falling back to that tint when no probe is bound. Sampled
-    // directly (no `intensity_for_view`), like the terrain ambient, since this
-    // shader's colour is exposed only later by the tonemapper.
+    // a flat sky tint, falling back to that tint when no probe is bound.
     var reflection = water.reflection_color;
 #ifdef ENVIRONMENT_MAP
     if (view_bindings::light_probes.view_cubemap_index >= 0) {
@@ -220,8 +218,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             level,
         ).rgb;
 #endif
-        // Scale by the probe intensity and view exposure (as the terrain ambient
-        // and the PBR objects do) so one intensity knob drives the whole scene.
+        // Scale by the probe intensity *and* the view exposure (as the terrain
+        // ambient and the PBR objects do): the viewer calibrates the intensity to
+        // `gain / exposure` (P33.3), so the product is the gain, and at the calibrated
+        // gain of 1 the water gives back exactly the radiance its surroundings have —
+        // a reflection, not a re-lit approximation of one.
         reflection = reflection
             * view_bindings::light_probes.intensity_for_view
             * view_bindings::view.exposure;

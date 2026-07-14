@@ -45,12 +45,15 @@ mod sky;
 mod terrain;
 mod texture_anim;
 mod textures;
+mod tonemap;
 mod typing;
 mod underwater_fog;
 mod water;
 
 use std::path::{Path, PathBuf};
 
+use bevy::camera::{Exposure, Hdr};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
@@ -137,6 +140,7 @@ use crate::textures::{
     PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
     update_texture_caps,
 };
+use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
@@ -359,6 +363,32 @@ fn setup_scene(mut commands: Commands, camera_start: Res<CameraStart>) {
         Transform::from_translation(translation),
         camera,
         Msaa::Sample4,
+        // P33.3: render the scene into a floating-point target and tonemap it once,
+        // at the end, with the reference viewer's own tone mapper (`tonemap`).
+        //
+        // Without `Hdr` the view target is 8-bit, which Bevy takes as the cue to
+        // tonemap `StandardMaterial` inside the mesh shader — leaving the viewer's
+        // custom sky / terrain / water materials (which never call Bevy's tonemapper)
+        // merely *clipped* at 1.0 instead, two different transfers in one frame. The
+        // reflection probes capture the scene linear and un-tonemapped, so that split
+        // also made a probe's cubemap disagree with what the eye saw of the very same
+        // surroundings — the miscalibration P33.3 exists to fix. One HDR target plus
+        // one tone mapper at the end puts every material in the one linear space the
+        // probes capture.
+        Hdr,
+        // Bevy's tonemapping is switched off: `SlTonemap` (the pass and its settings,
+        // mirroring the reference's `RenderTonemapType` / `RenderTonemapMix` /
+        // `RenderExposure`) is this viewer's tone mapper, and two would double up.
+        Tonemapping::None,
+        SlTonemap::default(),
+        // Bevy's *photometric* exposure: what turns the sun's illuminance (lux) and a
+        // prim light's lumens into the linear radiance the frame is composed in. It is
+        // a distinct thing from the reference's `RenderExposure` (a plain scale on the
+        // finished linear frame, carried by `SlTonemap`), and it is spelled out rather
+        // than left implicit because the reflection probes read it: their intensity is
+        // derived from it (`probes::probe_intensity`), so a probe reproduces the
+        // radiance it captured instead of re-scaling it.
+        Exposure::default(),
         // The `UnderwaterFog` component both carries the per-frame fog parameters
         // and selects this camera for the fog pass.
         UnderwaterFog::default(),
@@ -471,6 +501,11 @@ fn run_session(
     // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
     // fogs everything below the water surface (reference `getWaterFogView`).
     .add_plugins(UnderwaterFogPlugin)
+    // The reference viewer's tone mapper (P33.3): the one transfer from the linear
+    // HDR scene to displayable colour, over the whole composited frame (reference
+    // `postDeferredTonemap` — ACES / Khronos Neutral, blended by `RenderTonemapMix`).
+    // Runs after the fog, which the reference likewise applies in linear space.
+    .add_plugins(SlTonemapPlugin)
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34

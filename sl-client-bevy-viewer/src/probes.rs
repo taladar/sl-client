@@ -69,16 +69,40 @@
 //! themselves (terrain reads its diffuse irradiance for ambient; water reflects the
 //! specular cube). Sky stays the source and is not itself lit by the probe.
 //!
-//! The exact reflection / ambient brightness is left to a later calibration pass
-//! (alongside other lighting features such as ambient occlusion) — the intensity
-//! ([`PROBE_INTENSITY`] / `SL_VIEWER_PROBE_INTENSITY`) and the residual ambient
-//! ([`probe_ambient_scale`] / `SL_VIEWER_PROBE_AMBIENT_SCALE`) are exposed as tuning
-//! knobs, and `SL_VIEWER_PROBE_TEST_SPHERE=1` spawns a mirror ball to inspect the
-//! captured environment. A probe's **ambiance** — which in the reference scales only
-//! the irradiance half of its contribution — is part of that calibration and is not
-//! applied yet; its **dynamic** flag is implicitly always on (a rig re-renders the
-//! whole scene, avatars included); and its **mirror** flag (the reference's separate
-//! screen-space "hero" probe) is out of scope.
+//! **Brightness calibration (P33.3).** A probe is calibrated when it *reproduces* the
+//! surroundings it captured rather than re-scaling them: a mirror shows the world at
+//! the radiance the eye sees it, and a diffuse surface's ambient is the irradiance
+//! that world casts. That is one equation — [`probe_intensity`] — and it needs no
+//! tuning constant, only the view's `Exposure`; the reference viewer likewise never
+//! rescales a probe's radiance (`radscale` is 1). [`PROBE_GAIN`] /
+//! `SL_VIEWER_PROBE_GAIN` is therefore an A/B knob, not a look control, and
+//! `SL_VIEWER_PROBE_TEST_SPHERE=1` spawns a mirror ball to check the result against
+//! the scene behind it.
+//!
+//! What made this a task of its own is that the equation only *closes* if the eye and
+//! the capture see the same scene. They did not: the viewer's camera used to render to
+//! an 8-bit target, which is Bevy's cue to tonemap `StandardMaterial` in the mesh
+//! shader while the custom sky / terrain / water materials (which never call Bevy's
+//! tonemapper) were merely clipped at 1.0 — so the sky the eye saw was flattened to
+//! white where the probes' HDR capture cameras recorded its true radiance, and the
+//! probes lit the world several times too brightly. P33.3 gives the camera an HDR
+//! target and one tone mapper at the end ([`tonemap`](crate::tonemap), the reference
+//! viewer's own), which puts every material in the single linear space the probes
+//! capture. The other half of "the eye and the capture see the same scene" is
+//! [`light_capture_cameras`]: a capture camera is lit by the probe too, or it would
+//! render a world with no image-based lighting at all — darker than the one beside it.
+//! See also [`probe_ambient_scale`] / `SL_VIEWER_PROBE_AMBIENT_SCALE`.
+//!
+//! Deliberately not modelled: a probe's **ambiance**, which in the reference scales
+//! only the irradiance half of its contribution and blends the flat sky ambient back
+//! in below 1 (`tapIrradianceMap`). Bevy's probe has a *single* `intensity` over both
+//! halves, so the irradiance cannot be scaled without scaling the reflection with it —
+//! and the reflection must stay at unit gain. Every probe therefore runs at the
+//! reference's ambiance-1 point (its `RenderSkyAutoAdjustLegacy` default), where the
+//! probe's irradiance *is* the ambient and no flat fill is added — which is exactly
+//! what [`suppress_global_ambient`] arranges. A probe's **dynamic** flag is implicitly
+//! always on (a rig re-renders the whole scene, avatars included); its **mirror** flag
+//! (the reference's separate screen-space "hero" probe) is out of scope.
 //!
 //! [`apply_object`]: crate::objects
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
@@ -86,7 +110,7 @@
 use crate::camera::FlyCamera;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
-use bevy::camera::{Hdr, RenderTarget};
+use bevy::camera::{Exposure, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
@@ -282,12 +306,16 @@ const BOX_FALLOFF: f32 = 0.1;
 /// corners the cube adds contribute little.
 const SPHERE_FALLOFF: f32 = 0.5;
 
-/// The intensity (cd/m²) the captured environment contributes as image-based
-/// lighting. The capture cameras render **linear scene radiance** (HDR, no
-/// tonemapping), i.e. the same physical units the main view sees before its own
-/// tonemap, so a unit scale keeps a probe's reflections consistent with the direct
-/// view rather than over- or under-bright.
-const PROBE_INTENSITY: f32 = 1200.0;
+/// The **gain** on a probe's image-based lighting (P33.3): how bright its
+/// contribution is relative to the scene radiance it captured. `1.0` is the
+/// calibrated value — a mirror then reflects the surroundings at exactly the radiance
+/// the eye sees of them, and a diffuse surface's ambient is exactly the irradiance
+/// they cast — which is also what the reference viewer does (`radscale` is 1 in
+/// `LLReflectionMapManager::updateUniforms`, and a probe's radiance is never
+/// rescaled). Anything else is a lie about the environment, so this is not a
+/// look-tuning knob; `SL_VIEWER_PROBE_GAIN` exists only to make the miscalibration
+/// visible in an A/B capture.
+const PROBE_GAIN: f32 = 1.0;
 
 /// How much of the sky-driven [`GlobalAmbientLight`] to keep once the reflection
 /// probe is providing image-based ambient to both PBR objects and the terrain.
@@ -308,14 +336,116 @@ fn suppress_global_ambient(mut ambient: ResMut<GlobalAmbientLight>) {
     ambient.brightness *= probe_ambient_scale();
 }
 
-/// The environment intensity to use, overridable at runtime by
-/// `SL_VIEWER_PROBE_INTENSITY` (a diagnostic knob while the reflection strength is
-/// being calibrated). Falls back to [`PROBE_INTENSITY`].
-fn probe_intensity() -> f32 {
-    std::env::var("SL_VIEWER_PROBE_INTENSITY")
+/// The gain to apply to the probes' image-based lighting, overridable at runtime by
+/// `SL_VIEWER_PROBE_GAIN` (an A/B knob — the calibrated value is [`PROBE_GAIN`]).
+fn probe_gain() -> f32 {
+    std::env::var("SL_VIEWER_PROBE_GAIN")
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(PROBE_INTENSITY)
+        .unwrap_or(PROBE_GAIN)
+}
+
+/// The [`EnvironmentMapLight`] intensity that gives the probes a [`probe_gain`] gain
+/// under this view's `exposure` — the whole of P33.3's calibration, in one line.
+///
+/// Bevy's image-based lighting is *photometric*: a probe's sampled cubemap is scaled
+/// by `intensity` (nominally cd/m²) and the sum of a surface's light is then scaled by
+/// the view's `exposure` on its way to the framebuffer. But the cubemap here is not
+/// photometric — it is a **render of the scene** in whatever linear space the viewer's
+/// materials write, already through their own `exposure`. Undoing the exposure the
+/// image-based path re-applies is therefore what makes a probe reproduce, rather than
+/// re-scale, the radiance it captured: `intensity * exposure == gain`.
+///
+/// This is what ties the probes to the exposure model instead of to a magic number
+/// (P33.1 shipped a hand-tuned `1200`, which is `1 / exposure` for Bevy's default
+/// `Exposure::BLENDER` to within the eye's ability to tune it — the constant was
+/// *measuring* this, and now it is derived). It also means the custom terrain / water
+/// shaders, which sample the probe and scale by `intensity_for_view * view.exposure`
+/// (they are not themselves exposed), land on the same gain — one calibration for both
+/// material families.
+fn probe_intensity(exposure: &Exposure) -> f32 {
+    let scale = exposure.exposure();
+    // A zero/denormal exposure would blow the intensity up to infinity; fall back to
+    // Bevy's default rather than emit a NaN into the light probes.
+    if scale > f32::EPSILON {
+        probe_gain() / scale
+    } else {
+        probe_gain() / Exposure::default().exposure()
+    }
+}
+
+/// Light the capture cameras with the default probe's environment map, so a rig
+/// re-renders the scene as the eye *sees* it rather than as it would look with no
+/// image-based lighting at all (P33.3).
+///
+/// A capture camera is an ordinary view, and Bevy lights a view's surfaces from that
+/// view's own [`EnvironmentMapLight`] — which a capture camera has none of. Left
+/// alone, then, every rig renders a world with no ambient whatsoever: the sky-set
+/// `GlobalAmbientLight` is dropped ([`suppress_global_ambient`]) precisely because the
+/// probe replaces it, so a prim's shadowed side comes out black and the terrain shader
+/// falls back to its flat no-probe fill. That darker world is what the cubemap would
+/// then hold, and what a mirror would show — visibly *not* the world beside it.
+///
+/// Sharing the main view's already-filtered maps (rather than giving each capture
+/// camera a [`GeneratedEnvironmentMapLight`] of its own, which would set a whole
+/// filter chain running per camera) costs nothing and makes the capture see the same
+/// lighting the eye does. It is a feedback loop by construction — this frame's cube is
+/// lit by the last one's — which is exactly how the reference viewer accumulates
+/// bounced light across probe updates, and it converges rather than runs away because
+/// each bounce is attenuated by the surfaces' albedo.
+fn light_capture_cameras(
+    mut commands: Commands,
+    view: Query<&EnvironmentMapLight, With<FlyCamera>>,
+    cameras: Query<(Entity, Option<&EnvironmentMapLight>), With<ProbeCaptureCamera>>,
+) {
+    let Ok(environment) = view.single() else {
+        return;
+    };
+    for (entity, current) in &cameras {
+        // Only write when it would actually change — the handles are stable for the
+        // process's lifetime, so after the first frame this is a pure read.
+        let stale = current.is_none_or(|current| {
+            current.diffuse_map != environment.diffuse_map
+                || current.specular_map != environment.specular_map
+                || (current.intensity - environment.intensity).abs() > f32::EPSILON
+        });
+        if stale {
+            commands.entity(entity).insert(environment.clone());
+        }
+    }
+}
+
+/// Keep every probe's intensity at the value [`probe_intensity`] calibrates, whatever
+/// the view's exposure currently is.
+///
+/// Two reasons this is a system and not a one-off at insert time. Bevy's
+/// [`GeneratedEnvironmentMapLight`] filter derives an [`EnvironmentMapLight`] from the
+/// component **once** (its query is `Without<EnvironmentMapLight>`) and never refreshes
+/// the derived intensity, so a later exposure change would leave every probe stale; and
+/// the local probes' holders are spawned as probes enter the budget, long after startup.
+/// Only entities whose intensity actually differs are touched, so a settled scene does
+/// no change-detection churn.
+fn calibrate_probe_intensity(
+    camera: Query<&Exposure, With<FlyCamera>>,
+    mut probes: Query<(
+        &mut GeneratedEnvironmentMapLight,
+        Option<&mut EnvironmentMapLight>,
+    )>,
+) {
+    let Ok(exposure) = camera.single() else {
+        return;
+    };
+    let intensity = probe_intensity(exposure);
+    for (mut generated, filtered) in &mut probes {
+        if (generated.intensity - intensity).abs() > f32::EPSILON {
+            generated.intensity = intensity;
+        }
+        if let Some(mut filtered) = filtered
+            && (filtered.intensity - intensity).abs() > f32::EPSILON
+        {
+            filtered.intensity = intensity;
+        }
+    }
 }
 
 /// A component on each capture camera marking it as one face of one probe's cubemap
@@ -471,6 +601,8 @@ impl Plugin for ReflectionProbePlugin {
                 (
                     install_global_probe,
                     drive_local_probes,
+                    calibrate_probe_intensity,
+                    light_capture_cameras,
                     drive_probe_captures,
                     spawn_probe_test_sphere,
                 )
@@ -616,12 +748,12 @@ fn setup_probe_rigs(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 fn install_global_probe(
     mut commands: Commands,
     mut probes: ResMut<ProbeRigs>,
-    camera: Query<Entity, With<FlyCamera>>,
+    camera: Query<(Entity, &Exposure), With<FlyCamera>>,
 ) {
     if probes.installed {
         return;
     }
-    let Ok(view) = camera.single() else {
+    let Ok((view, exposure)) = camera.single() else {
         return;
     };
     let Some(global) = probes.rigs.first() else {
@@ -629,7 +761,7 @@ fn install_global_probe(
     };
     commands.entity(view).insert(GeneratedEnvironmentMapLight {
         environment_map: global.cube.clone(),
-        intensity: probe_intensity(),
+        intensity: probe_intensity(exposure),
         // The cube is captured directly in Bevy world space, so it samples with no
         // extra reorientation.
         rotation: Quat::IDENTITY,
@@ -672,6 +804,7 @@ fn spawn_probe_holder(
     object: Entity,
     cube: Handle<Image>,
     probe: &ObjectReflectionProbe,
+    intensity: f32,
 ) -> Entity {
     commands
         .spawn((
@@ -680,7 +813,7 @@ fn spawn_probe_holder(
             },
             GeneratedEnvironmentMapLight {
                 environment_map: cube,
-                intensity: probe_intensity(),
+                intensity,
                 rotation: Quat::IDENTITY,
                 affects_lightmapped_mesh_diffuse: true,
             },
@@ -707,11 +840,11 @@ fn drive_local_probes(
     mut rigs: ResMut<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
     mut copies: ResMut<ProbeCubeCopies>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<(&GlobalTransform, &Exposure), With<FlyCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
 ) {
-    let Ok(view) = camera.single() else {
+    let Ok((view, exposure)) = camera.single() else {
         return;
     };
     let candidates = probes.iter().len();
@@ -761,7 +894,13 @@ fn drive_local_probes(
                 let Some(cube) = rigs.rigs.get(index).map(|rig| rig.cube.clone()) else {
                     continue;
                 };
-                let holder = spawn_probe_holder(&mut commands, object, cube, probe);
+                let holder = spawn_probe_holder(
+                    &mut commands,
+                    object,
+                    cube,
+                    probe,
+                    probe_intensity(exposure),
+                );
                 if let Some(slot) = rigs.bindings.get_mut(index) {
                     *slot = Some(LocalBinding {
                         object,
@@ -1062,8 +1201,9 @@ fn copy_probe_faces(
 mod tests {
     use super::{
         BOX_FALLOFF, CAPTURE_PERIOD_FRAMES, FACE_COUNT, MIN_NEAR_CLIP, ObjectReflectionProbe,
-        SPHERE_FALLOFF, idle_frames, reflection_probe_from_object,
+        PROBE_GAIN, SPHERE_FALLOFF, idle_frames, probe_intensity, reflection_probe_from_object,
     };
+    use bevy::camera::Exposure;
     use bevy::prelude::Vec3;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags, Vector};
@@ -1225,6 +1365,40 @@ mod tests {
         let mut far_clip = zero_clip;
         far_clip.data.clip_distance = 2.5;
         assert!((far_clip.near_clip() - 2.5).abs() < EPS);
+    }
+
+    /// The calibration itself (P33.3): whatever the view's exposure, a probe's
+    /// intensity is the value that cancels it, so the image-based lighting comes out at
+    /// the gain — `intensity * exposure == gain` — and the captured surroundings are
+    /// reproduced rather than re-scaled. This is also the product the custom terrain /
+    /// water shaders form when they sample the probe.
+    #[test]
+    fn intensity_cancels_the_view_exposure() {
+        for ev100 in [
+            Exposure::EV100_INDOOR,
+            Exposure::EV100_OVERCAST,
+            Exposure::EV100_SUNLIGHT,
+            Exposure::default().ev100,
+        ] {
+            let exposure = Exposure { ev100 };
+            let gain = probe_intensity(&exposure) * exposure.exposure();
+            assert!(
+                (gain - PROBE_GAIN).abs() < 1.0e-3,
+                "ev100={ev100} gain={gain}"
+            );
+        }
+    }
+
+    /// A degenerate exposure (a zero or denormal scale — nothing sets one, but the
+    /// component is public and a division by it would send every probe to infinity)
+    /// falls back to Bevy's default rather than poisoning the light probes with a NaN.
+    #[test]
+    fn a_degenerate_exposure_falls_back() {
+        // `exposure()` is `exp2(-ev100) / 1.2`, so a huge ev100 underflows it to zero.
+        let degenerate = Exposure { ev100: 1000.0 };
+        let intensity = probe_intensity(&degenerate);
+        assert!(intensity.is_finite());
+        assert!((intensity - probe_intensity(&Exposure::default())).abs() < 1.0e-3);
     }
 
     /// However many probes are live, each one's rig comes round again once per
