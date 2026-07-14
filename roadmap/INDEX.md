@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 40 |
-| ready | 28 |
+| ready | 29 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 459 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **543** |
+| **total** | **544** |
 
 ## ideas (40)
 
@@ -117,11 +117,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (28)
+## ready (29)
 
 ### viewer
 
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
+- [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
+  Verify the shoe lift live on a shod avatar
 
 ### test
 
