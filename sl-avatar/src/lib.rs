@@ -26,6 +26,8 @@
 //!   clothing-morph mask weights from a region's decoded baked texture.
 //! - `skin` (P17.1) — the matrix-palette skinning math that deforms a rigged
 //!   `sl-mesh` body/clothing with an avatar's posed skeleton instance.
+//! - `physics` (P34.1) — ingest the `WT_PHYSICS` wearable: the breast / belly /
+//!   butt spring-damper settings and the morph params each motion drives.
 //!
 //! P12.2 lands the [`skeleton`] module, P12.3 the [`basemesh`] module, P12.4 the
 //! [`params`] module, P13.3 the [`morph`] module, P13.4 the [`resolve`] and
@@ -36,6 +38,7 @@ pub mod basemesh;
 pub mod masks;
 pub mod morph;
 pub mod params;
+pub mod physics;
 pub mod resolve;
 pub mod skeletal;
 pub mod skeleton;
@@ -49,12 +52,15 @@ pub use basemesh::{
 };
 pub use masks::{MaskTexture, MorphMask, MorphMasks, PartMorphMask};
 pub use morph::{
-    HAND_POSE_MORPH_PARAMS, MorphWeights, MorphedMesh, NORMAL_SOFTEN_FACTOR, RUNTIME_MORPH_PARAMS,
-    hand_pose_morph_param, is_runtime_morph_param,
+    HAND_POSE_MORPH_PARAMS, MorphWeights, MorphedMesh, NORMAL_SOFTEN_FACTOR, PHYSICS_MORPH_PARAMS,
+    RUNTIME_MORPH_PARAMS, hand_pose_morph_param, is_runtime_morph_param,
 };
 pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
-    ParamValue, VisualParam, VisualParams,
+    ParamValue, VisualParam, VisualParams, VolumeMorph,
+};
+pub use physics::{
+    BodyPhysics, PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings,
 };
 pub use resolve::ResolvedParams;
 pub use skeletal::{BoneDeform, SkeletalDeformations};

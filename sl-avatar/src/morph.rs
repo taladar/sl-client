@@ -45,16 +45,13 @@ pub const NORMAL_SOFTEN_FACTOR: f32 = 0.65;
 /// vertices ([`MorphWeights::from_resolved_static`] →
 /// [`MorphWeights::apply`]) and hands the deformed mesh to the GPU as a static
 /// asset. A handful of params instead need animating every frame — the eye
-/// **blink** ([`Blink_Left`](Self)/`Blink_Right`), and later the physics
-/// wearable's breast/belly/butt bounce — which a once-per-appearance bake
-/// cannot do. Those params are named here so the static bake **excludes** them
-/// and the render-time pipeline drives them instead (via Bevy native
-/// morph-target weights), leaving the body baked once and only these few weights
-/// re-uploaded per frame.
-///
-/// The body-physics (`WT_PHYSICS`) `*_Driven` params join this set when that
-/// wearable is ingested (roadmap `viewer-p34-1`); for now it is the two eye-blink
-/// params plus every hand-pose morph ([`HAND_POSE_MORPH_PARAMS`], P31.13).
+/// **blink** (`Blink_Left`/`Blink_Right`), the hand poses an animation selects
+/// ([`HAND_POSE_MORPH_PARAMS`], P31.13), and the physics wearable's
+/// breast/belly/butt bounce ([`PHYSICS_MORPH_PARAMS`], P34) — which a
+/// once-per-appearance bake cannot do. Those params are named here so the static
+/// bake **excludes** them and the render-time pipeline drives them instead (via
+/// Bevy native morph-target weights), leaving the body baked once and only these
+/// few weights re-uploaded per frame.
 pub const RUNTIME_MORPH_PARAMS: &[&str] = &[
     "Blink_Left",
     "Blink_Right",
@@ -71,6 +68,34 @@ pub const RUNTIME_MORPH_PARAMS: &[&str] = &[
     "Hands_Typing",
     "Hands_Peace_R",
     "Hands_Spread_R",
+    "Breast_Physics_UpDown_Driven",
+    "Breast_Physics_InOut_Driven",
+    "Breast_Physics_LeftRight_Driven",
+    "Belly_Physics_Torso_UpDown_Driven",
+    "Belly_Physics_Legs_UpDown_Driven",
+    "Belly_Physics_Skirt_UpDown_Driven",
+    "Butt_Physics_UpDown_Driven",
+    "Butt_Physics_LeftRight_Driven",
+];
+
+/// The eight body-physics (`WT_PHYSICS`) `*_Driven` morph params (P34.1), the
+/// subset of [`RUNTIME_MORPH_PARAMS`] the physics motions drive.
+///
+/// These are the params the six [physics motions](crate::physics::PhysicsMotion)
+/// write each frame: a motion's controller drives one or more of them (the belly
+/// controller drives all three belly morphs at once, one per body part), and each
+/// carries both a base-mesh morph target — synthesized at `.llm` load time, see
+/// [`BaseMesh::from_bytes`](crate::BaseMesh::from_bytes) — and a
+/// [`VolumeMorph`](crate::VolumeMorph) displacing the matching collision volume.
+pub const PHYSICS_MORPH_PARAMS: &[&str] = &[
+    "Breast_Physics_UpDown_Driven",
+    "Breast_Physics_InOut_Driven",
+    "Breast_Physics_LeftRight_Driven",
+    "Belly_Physics_Torso_UpDown_Driven",
+    "Belly_Physics_Legs_UpDown_Driven",
+    "Belly_Physics_Skirt_UpDown_Driven",
+    "Butt_Physics_UpDown_Driven",
+    "Butt_Physics_LeftRight_Driven",
 ];
 
 /// The upper-body morph each **hand pose** an animation selects is expressed as,
@@ -210,7 +235,7 @@ impl MorphWeights {
     ) -> Self {
         let mut by_name = HashMap::new();
         for param in params.all() {
-            if matches!(param.effect, ParamEffect::Morph) && keep(&param.name) {
+            if matches!(param.effect, ParamEffect::Morph(_)) && keep(&param.name) {
                 let weight = resolved.effective_weight(param);
                 if is_significant(weight) {
                     by_name.insert(param.name.clone(), weight);

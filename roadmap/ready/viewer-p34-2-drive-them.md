@@ -2,7 +2,7 @@
 id: viewer-p34-2
 title: Drive them
 topic: viewer
-status: blocked
+status: ready
 origin: VIEWER_ROADMAP.md — Phase 34 — Avatar cloth & body physics
 blocked_by: [viewer-p34-1]
 ---

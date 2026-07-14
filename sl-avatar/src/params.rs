@@ -10,7 +10,8 @@
 //!   morph-target delta in the base-body meshes; the target is resolved by the
 //!   param's [`name`](VisualParam::name) against each base part's morph table
 //!   (the morph data itself lives in the `.llm`, decoded by
-//!   [`crate::basemesh`]).
+//!   [`crate::basemesh`]). It may also displace collision volumes, via its
+//!   [`VolumeMorph`] children.
 //! - **skeletal** ([`ParamEffect::Skeleton`], `<param_skeleton>`) — scales and
 //!   optionally offsets skeleton bones (proportions: height, limb/head scale).
 //! - **driver** ([`ParamEffect::Driver`], `<param_driver>`) — drives a list of
@@ -166,14 +167,41 @@ pub struct DrivenParam {
     pub min2: f32,
 }
 
+/// A collision-volume displacement carried by a `<param_morph>`'s
+/// `<volume_morph>` child (the reference viewer's `LLPolyVolumeMorphInfo`).
+///
+/// A morph param does not only move mesh vertices: many also scale and shift one
+/// or more of the avatar's **collision volumes** (`LEFT_PEC`, `BELLY`, `BUTT`,
+/// `HEAD`, … — the uppercase volumes hung off the skeleton bones), by
+/// `weight * scale` and `weight * position` respectively
+/// (`LLPolyMorphTarget::apply`'s volume pass). Those volumes are bindable joints
+/// for rigged mesh, so this is how a shape slider — or the body-physics bounce
+/// ([`crate::physics`]) — moves a worn mesh body that the system morph targets
+/// cannot touch.
+///
+/// An absent `scale` / `pos` attribute is a zero vector, as in the reference.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VolumeMorph {
+    /// The collision volume's name (e.g. `LEFT_PEC`), matched against
+    /// [`CollisionVolume::name`](crate::CollisionVolume::name).
+    pub volume: String,
+    /// The per-axis scale delta at full weight (unitless), added to the volume's
+    /// rest scale.
+    pub scale: [f32; 3],
+    /// The position delta at full weight, in metres (Z-up), added to the
+    /// volume's rest position.
+    pub position: [f32; 3],
+}
+
 /// The typed effect a [`VisualParam`] has on the avatar, one per recognized
 /// child element of the `<param>`.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ParamEffect {
     /// `<param_morph>` — blends a base-mesh morph target resolved by the param's
-    /// [`name`](VisualParam::name).
-    Morph,
+    /// [`name`](VisualParam::name), and displaces the collision volumes its
+    /// `<volume_morph>` children list (usually none).
+    Morph(Vec<VolumeMorph>),
     /// `<param_skeleton>` — scales/offsets the listed skeleton bones.
     Skeleton(Vec<BoneOffset>),
     /// `<param_driver>` — drives the listed params.
@@ -336,6 +364,10 @@ pub struct VisualParams {
     transmitted: Vec<usize>,
     /// Lookup from a param id to its index in [`Self::params`].
     by_id: HashMap<i32, usize>,
+    /// Lookup from a param name to its index in [`Self::params`] (the reference
+    /// viewer's `getVisualParam(name)`, which several subsystems — body physics,
+    /// the sex gate — address params by).
+    by_name: HashMap<String, usize>,
 }
 
 impl VisualParams {
@@ -379,6 +411,7 @@ impl VisualParams {
         ids.sort_unstable();
         let mut params = Vec::with_capacity(ids.len());
         let mut by_id = HashMap::with_capacity(ids.len());
+        let mut by_name = HashMap::with_capacity(ids.len());
         let mut transmitted = Vec::new();
         for id in ids {
             if let Some(param) = by_id_raw.remove(&id) {
@@ -387,6 +420,7 @@ impl VisualParams {
                     transmitted.push(index);
                 }
                 by_id.insert(id, index);
+                by_name.insert(param.name.clone(), index);
                 params.push(param);
             }
         }
@@ -395,6 +429,7 @@ impl VisualParams {
             params,
             transmitted,
             by_id,
+            by_name,
         })
     }
 
@@ -421,6 +456,15 @@ impl VisualParams {
     pub fn get(&self, id: i32) -> Option<&VisualParam> {
         self.by_id
             .get(&id)
+            .and_then(|&index| self.params.get(index))
+    }
+
+    /// The param with the given (case-sensitive) name, if present — the
+    /// reference viewer's `LLCharacter::getVisualParam(name)`.
+    #[must_use]
+    pub fn by_name(&self, name: &str) -> Option<&VisualParam> {
+        self.by_name
+            .get(name)
             .and_then(|&index| self.params.get(index))
     }
 
@@ -656,7 +700,7 @@ fn parse_effect(
         match child.tag_name().name() {
             "param_skeleton" => return Ok(ParamEffect::Skeleton(parse_bones(child)?)),
             "param_driver" => return Ok(ParamEffect::Driver(parse_driven(child, min, max)?)),
-            "param_morph" => return Ok(ParamEffect::Morph),
+            "param_morph" => return Ok(ParamEffect::Morph(parse_volume_morphs(child)?)),
             "param_color" => {
                 return Ok(ParamEffect::Color(ColorRamp {
                     operation: ColorOp::from_operation(
@@ -695,6 +739,35 @@ fn parse_bones(node: roxmltree::Node<'_, '_>) -> Result<Vec<BoneOffset>, ParamEr
         });
     }
     Ok(bones)
+}
+
+/// Parse the `<volume_morph>` children of a `<param_morph>` (usually none). A
+/// volume morph missing its (required) name is skipped and an absent `scale` /
+/// `pos` is a zero vector, matching `LLPolyMorphTargetInfo::parseXml`.
+fn parse_volume_morphs(node: roxmltree::Node<'_, '_>) -> Result<Vec<VolumeMorph>, ParamError> {
+    let mut volumes = Vec::new();
+    for child in node
+        .children()
+        .filter(|node| node.is_element() && node.tag_name().name() == "volume_morph")
+    {
+        let Some(name) = child.attribute("name") else {
+            continue;
+        };
+        let scale = match child.attribute("scale") {
+            Some(raw) => parse_vec3(raw, "scale")?,
+            None => [0.0; 3],
+        };
+        let position = match child.attribute("pos") {
+            Some(raw) => parse_vec3(raw, "pos")?,
+            None => [0.0; 3],
+        };
+        volumes.push(VolumeMorph {
+            volume: name.to_owned(),
+            scale,
+            position,
+        });
+    }
+    Ok(volumes)
 }
 
 /// Parse the `<driven>` children of a `<param_driver>`. Absent thresholds
@@ -941,11 +1014,27 @@ mod tests {
         assert_eq!(head.bone, "mHead");
         assert!(head.offset.is_some_and(|off| approx(off[2], 0.05)));
 
-        // Morph carries no data; its target is resolved by name later.
+        // A plain morph carries no volume displacement; its mesh target is
+        // resolved by name later.
         assert_eq!(
             params.get(1).map(|param| &param.effect),
-            Some(&ParamEffect::Morph)
+            Some(&ParamEffect::Morph(Vec::new()))
         );
+
+        // A morph with `<volume_morph>` children also displaces collision
+        // volumes; an absent `scale` / `pos` attribute is a zero vector.
+        let ParamEffect::Morph(volumes) = &params.get(10).ok_or("10")?.effect else {
+            return Err("param 10 is a morph".into());
+        };
+        assert_eq!(volumes.len(), 2);
+        let pec = volumes.first().ok_or("volume 0")?;
+        assert_eq!(pec.volume, "LEFT_PEC");
+        assert!(pec.scale.iter().all(|axis| approx(*axis, 0.0)));
+        assert!(approx(pec.position[2], -0.01));
+        let butt = volumes.get(1).ok_or("volume 1")?;
+        assert_eq!(butt.volume, "BUTT");
+        assert!(butt.scale.iter().all(|axis| approx(*axis, 0.0)));
+        assert!(approx(butt.position[1], 0.05));
 
         // Colour ramp.
         let ParamEffect::Color(ramp) = &params.get(111).ok_or("111")?.effect else {

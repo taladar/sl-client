@@ -13,7 +13,10 @@
       <param_morph/>
     </param>
     <param id="10" group="1" wearable="shape" name="Animatable_One" value_min="0" value_max="1">
-      <param_morph/>
+      <param_morph>
+        <volume_morph name="LEFT_PEC" scale="0.0 0.0 0.0" pos="0.0 0.0 -0.01"/>
+        <volume_morph name="BUTT" pos="0.0 0.05 0.0"/>
+      </param_morph>
     </param>
   </mesh>
   <layer_set body_region="head">

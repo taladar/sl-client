@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 39 |
-| ready | 29 |
-| blocked | 5 |
+| ready | 30 |
+| blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 454 |
+| done | 455 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **539** |
+| **total** | **540** |
 
 ## ideas (39)
 
@@ -115,12 +115,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (29)
+## ready (30)
 
 ### viewer
 
-- [`viewer-p34-1`](ready/viewer-p34-1-ingest-the-physics-wearable.md) — Ingest
-  the physics wearable
+- [`viewer-p34-2`](ready/viewer-p34-2-drive-them.md) — Drive them (blocked by
+  `viewer-p34-1` (done))
+- [`viewer-p34-3`](ready/viewer-p34-3-shape-volume-morphs-on-collision-volumes.md)
+  — Shape volume morphs on collision volumes
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
 
 ### test
@@ -182,15 +184,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (5)
+## blocked (4)
 
 ### viewer
 
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
-- [`viewer-p34-2`](blocked/viewer-p34-2-drive-them.md) — Drive them (blocked by
-  `viewer-p34-1`)
 - [`viewer-p35-2`](blocked/viewer-p35-2-hud-rendering.md) — HUD rendering
   (blocked by `viewer-p35-1`)
 
@@ -221,7 +221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (454)
+## done (455)
 
 ### protocol
 
@@ -503,6 +503,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Per-object local reflection probes
 - [`viewer-p33-3`](done/viewer-p33-3-reflection-probe-brightness-calibration.md)
   — Reflection-probe brightness calibration
+- [`viewer-p34-1`](done/viewer-p34-1-ingest-the-physics-wearable.md) — Ingest
+  the physics wearable
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

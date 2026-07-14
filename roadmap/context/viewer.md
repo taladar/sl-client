@@ -1508,3 +1508,54 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     `none` reproduces the old clipped look), `SL_VIEWER_TONEMAP_MIX`,
     `SL_VIEWER_EXPOSURE`; `SL_VIEWER_PROBE_INTENSITY` is **gone**, replaced by
     the dimensionless `SL_VIEWER_PROBE_GAIN` (1 = calibrated).
+
+## P34.1 body-physics ingest — cross-cutting notes
+
+- **The physics `*_Driven` morph targets exist in NO `.llm` file.** The eight
+  driven params (`Breast_Physics_UpDown_Driven`, …) that `avatar_lad.xml` names
+  have no morph data in any base mesh — `strings avatar_upper_body.llm` finds
+  none. The reference viewer *manufactures* them while loading each part
+  (`LLPolyMeshSharedData::loadMesh`, `indra/llappearance/llpolymesh.cpp`), by
+  cloning a shape morph that already moves the right vertices:
+  - `Breast_Gravity` → `Breast_Physics_UpDown_Driven`
+    (`clone_morph_param_duplicate` — the source deltas verbatim);
+  - `Breast_Female_Cleavage` → `Breast_Physics_InOut_Driven` (duplicate) **and**
+    `Breast_Physics_LeftRight_Driven` (`clone_morph_param_cleavage`, scale 0.75
+    with the **Y sign mirrored** on the deltas that already point at −Y, so both
+    breasts sway the *same* way instead of towards each other);
+  - `Big_Belly_Torso` / `Big_Belly_Legs` / `skirt_belly` / `Small_Butt` → the
+    belly and butt targets (`clone_morph_param_direction`, which throws the
+    source deltas away and replaces every one with a single constant
+    displacement — the source morph only selects *which* vertices move, and
+    donates their UV shifts).
+  `BaseMesh::from_bytes` now does the same (`synthesize_physics_morphs`). Without
+  this the driven params are silently inert: `LLPolyMorphTarget::setInfo` looks
+  the morph data up by param name (stripping a `_Driven` suffix as a fallback),
+  and our own `MorphWeights::apply` simply finds no target of that name.
+
+- **A `<param_morph>` may also displace COLLISION VOLUMES.** Its
+  `<volume_morph name="LEFT_PEC" scale="…" pos="…">` children add
+  `weight * scale` / `weight * pos` to a volume's rest transform
+  (`LLPolyMorphTarget::apply`'s volume pass). Since P17.2 the collision volumes
+  *are* bindable joints, so this — not the mesh morph target — is how a worn
+  **rigged mesh** body bounces or follows a shape slider. `ParamEffect::Morph`
+  therefore carries `Vec<VolumeMorph>` now. Note the reference runs the volume
+  pass **only when the param's morph data exists on that part** (the
+  `!mMorphData` early return), so a volume morph applies once per part carrying
+  the morph, not once per param. The ~30 *shape* params that carry volume morphs
+  are parsed but still unapplied — see the P34.3 task.
+
+- **The physics wearable configures a simulation, it does not shape the body.**
+  Its transmitted params (ids 10000–10032) are pure spring-damper settings
+  (mass / gravity / drag / spring / gain / damping / max-effect), one set per
+  body part and axis; the six motions each write a **hidden controller** param
+  (group 1, never transmitted, so it always resolves to its default → the
+  bounce's rest position is the *middle* of the driven range), which drives the
+  `*_Driven` morphs. `Max_Effect` defaults to **0** on every axis, i.e. physics
+  is off unless the wearable turns it on — so `0 of 6 motion(s) active` is the
+  expected ingest log for an ordinary avatar, and a live check of the *bounce*
+  needs an avatar actually wearing a tuned physics wearable.
+
+- The breast settings are `sex="female"`, so the ordinary sex gate in
+  `ResolvedParams::effective_weight` already switches the breast motions off for
+  a male avatar — no special case needed.

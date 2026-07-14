@@ -49,6 +49,79 @@ const END_MORPHS: &str = "End Morphs";
 /// multi-gigabyte allocation; the real base parts top out near 6k vertices.
 const MAX_VERTICES: usize = 1 << 20;
 
+/// How a body-physics `*_Driven` morph target is derived from a source morph the
+/// `.llm` does carry (P34.1) — the three `clone_morph_param_*` recipes the
+/// reference loader applies in `LLPolyMeshSharedData::loadMesh`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PhysicsMorphRecipe {
+    /// `clone_morph_param_duplicate`: the source deltas verbatim, under a new
+    /// name.
+    Duplicate,
+    /// `clone_morph_param_direction`: every affected vertex is displaced by the
+    /// same constant direction (metres, Z-up) instead of the source's deltas,
+    /// which only select *which* vertices move (and how their UVs shift); the
+    /// normal / binormal deltas are dropped.
+    Direction([f32; 3]),
+    /// `clone_morph_param_cleavage`: the source deltas scaled by the factor,
+    /// with the Y (left-right) component negated on the vertices whose source
+    /// delta already points to −Y, so both breasts move *inward* rather than
+    /// both moving the same way.
+    Cleavage(f32),
+}
+
+/// The body-physics morph targets synthesized at load time (P34.1), as
+/// `(source morph, recipe, synthesized name)`.
+///
+/// The `WT_PHYSICS` wearable's `*_Driven` params name morph targets that exist in
+/// **no** `.llm` file: the reference viewer manufactures them while reading the
+/// mesh, by cloning a shape morph that already moves the right vertices (breast
+/// gravity / cleavage, big belly, small butt) into a new target under the driven
+/// param's name. A part only gains the entries whose source morph it carries, so
+/// e.g. the butt targets appear on the lower body and the belly ones on the
+/// upper body, lower body and skirt.
+const PHYSICS_MORPHS: &[(&str, PhysicsMorphRecipe, &str)] = &[
+    (
+        "Breast_Female_Cleavage",
+        PhysicsMorphRecipe::Cleavage(0.75),
+        "Breast_Physics_LeftRight_Driven",
+    ),
+    (
+        "Breast_Female_Cleavage",
+        PhysicsMorphRecipe::Duplicate,
+        "Breast_Physics_InOut_Driven",
+    ),
+    (
+        "Breast_Gravity",
+        PhysicsMorphRecipe::Duplicate,
+        "Breast_Physics_UpDown_Driven",
+    ),
+    (
+        "Big_Belly_Torso",
+        PhysicsMorphRecipe::Direction([0.0, 0.0, 0.05]),
+        "Belly_Physics_Torso_UpDown_Driven",
+    ),
+    (
+        "Big_Belly_Legs",
+        PhysicsMorphRecipe::Direction([0.0, 0.0, 0.05]),
+        "Belly_Physics_Legs_UpDown_Driven",
+    ),
+    (
+        "skirt_belly",
+        PhysicsMorphRecipe::Direction([0.0, 0.0, 0.05]),
+        "Belly_Physics_Skirt_UpDown_Driven",
+    ),
+    (
+        "Small_Butt",
+        PhysicsMorphRecipe::Direction([0.0, 0.0, 0.05]),
+        "Butt_Physics_UpDown_Driven",
+    ),
+    (
+        "Small_Butt",
+        PhysicsMorphRecipe::Direction([0.0, 0.03, 0.0]),
+        "Butt_Physics_LeftRight_Driven",
+    ),
+];
+
 /// An error returned while decoding a `.llm` base-mesh or LOD file.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -184,6 +257,14 @@ pub struct BaseMesh {
 impl BaseMesh {
     /// Decode a full base-body `.llm` mesh (the `lod="0"` file) from its bytes.
     ///
+    /// The decoded morph list is then extended with the body-physics `*_Driven`
+    /// morph targets the part's own morphs imply (P34.1) — targets no `.llm`
+    /// carries, which the reference viewer likewise manufactures while loading
+    /// the mesh, by cloning the shape morph that already moves the right
+    /// vertices (breast gravity / cleavage, big belly, small butt). They are the
+    /// morphs the physics motions drive, named by
+    /// [`PHYSICS_MORPH_PARAMS`](crate::morph::PHYSICS_MORPH_PARAMS).
+    ///
     /// # Errors
     ///
     /// Returns [`BaseMeshError`] if the magic is wrong, the stream is truncated,
@@ -226,7 +307,8 @@ impl BaseMesh {
 
         let weights = decode_weights(&raw_weights);
 
-        let morphs = cursor.read_morphs()?;
+        let mut morphs = cursor.read_morphs()?;
+        synthesize_physics_morphs(&mut morphs);
         let shared_verts = cursor.read_shared_verts()?;
 
         Ok(Self {
@@ -666,9 +748,75 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Append the body-physics `*_Driven` morph targets a part's own morphs imply
+/// (P34.1), mirroring the clone calls in `LLPolyMeshSharedData::loadMesh`.
+///
+/// The physics wearable's driven params name morph targets no `.llm` carries;
+/// the reference viewer synthesizes them at load time from the shape morphs that
+/// already move the same vertices, so the bounce displaces exactly the breast /
+/// belly / butt region. A part missing a source morph simply gains no target for
+/// it. See [`PHYSICS_MORPHS`] for the recipes.
+fn synthesize_physics_morphs(morphs: &mut Vec<MorphTarget>) {
+    let mut synthesized = Vec::new();
+    for &(source, recipe, name) in PHYSICS_MORPHS {
+        let Some(target) = morphs.iter().find(|morph| morph.name == source) else {
+            continue;
+        };
+        synthesized.push(MorphTarget {
+            name: name.to_owned(),
+            deltas: target
+                .deltas
+                .iter()
+                .map(|delta| clone_delta(delta, recipe))
+                .collect(),
+        });
+    }
+    morphs.append(&mut synthesized);
+}
+
+/// One source [`MorphDelta`] re-shaped by a [`PhysicsMorphRecipe`]: the affected
+/// vertex and its UV shift always carry over (the reference clones copy the whole
+/// morph and then overwrite only the position / normal / binormal arrays).
+fn clone_delta(delta: &MorphDelta, recipe: PhysicsMorphRecipe) -> MorphDelta {
+    match recipe {
+        PhysicsMorphRecipe::Duplicate => *delta,
+        PhysicsMorphRecipe::Direction(direction) => MorphDelta {
+            position: direction,
+            normal: [0.0; 3],
+            binormal: [0.0; 3],
+            ..*delta
+        },
+        PhysicsMorphRecipe::Cleavage(scale) => {
+            // `clone_morph_param_cleavage`: scale every component, but mirror the
+            // sign of Y where the source delta points at −Y.
+            let [_, position_y, _] = delta.position;
+            let signs = if position_y < 0.0 {
+                [scale, -scale, scale]
+            } else {
+                [scale, scale, scale]
+            };
+            MorphDelta {
+                position: scale_vec3(delta.position, signs),
+                normal: scale_vec3(delta.normal, signs),
+                binormal: scale_vec3(delta.binormal, signs),
+                ..*delta
+            }
+        }
+    }
+}
+
+/// Component-wise product of a delta vector and a per-axis scale.
+fn scale_vec3(value: [f32; 3], scale: [f32; 3]) -> [f32; 3] {
+    let [x, y, z] = value;
+    let [sx, sy, sz] = scale;
+    [x * sx, y * sy, z * sz]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BaseMesh, BaseMeshError, LodMesh};
+    use super::{
+        BaseMesh, BaseMeshError, LodMesh, MorphDelta, MorphTarget, synthesize_physics_morphs,
+    };
     use pretty_assertions::assert_eq;
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
@@ -750,6 +898,98 @@ mod tests {
         let remap = mesh.shared_verts().first().ok_or("remap 0")?;
         assert_eq!(remap.source, 2);
         assert_eq!(remap.destination, 0);
+        Ok(())
+    }
+
+    /// One source morph delta, distinct in every component so a recipe that
+    /// drops or wrongly scales one is caught.
+    fn source_delta(vertex_index: usize, position: [f32; 3]) -> MorphDelta {
+        MorphDelta {
+            vertex_index,
+            position,
+            normal: [0.0, 0.2, 0.4],
+            binormal: [0.5, 0.6, 0.7],
+            tex_coord: [0.01, 0.02],
+        }
+    }
+
+    #[test]
+    fn synthesizes_the_physics_morphs_from_their_source_morphs() -> Result<(), TestError> {
+        // The two breast sources (the upper body's) and one belly source, each
+        // with a left (−Y) and a right (+Y) delta.
+        let mut morphs = vec![
+            MorphTarget {
+                name: "Breast_Female_Cleavage".to_owned(),
+                deltas: vec![
+                    source_delta(7, [0.0, -0.026, 0.0]),
+                    source_delta(9, [0.0, 0.026, 0.0]),
+                ],
+            },
+            MorphTarget {
+                name: "Breast_Gravity".to_owned(),
+                deltas: vec![source_delta(7, [0.004, 0.0, -0.01])],
+            },
+            MorphTarget {
+                name: "Big_Belly_Torso".to_owned(),
+                deltas: vec![source_delta(3, [0.07, 0.0, -0.07])],
+            },
+        ];
+        synthesize_physics_morphs(&mut morphs);
+
+        // Only the three sources present are cloned (no butt / skirt / legs
+        // targets, which live on other parts).
+        let names: Vec<&str> = morphs
+            .iter()
+            .skip(3)
+            .map(|morph| morph.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Breast_Physics_LeftRight_Driven",
+                "Breast_Physics_InOut_Driven",
+                "Breast_Physics_UpDown_Driven",
+                "Belly_Physics_Torso_UpDown_Driven",
+            ]
+        );
+
+        // `Duplicate`: the source deltas verbatim.
+        let in_out = morphs
+            .iter()
+            .find(|morph| morph.name == "Breast_Physics_UpDown_Driven")
+            .ok_or("up-down driven")?;
+        let delta = in_out.deltas.first().ok_or("delta 0")?;
+        assert_eq!(delta.vertex_index, 7);
+        assert!(close(delta.position, [0.004, 0.0, -0.01]));
+        assert!(close(delta.normal, [0.0, 0.2, 0.4]));
+
+        // `Direction`: every affected vertex moves by the same constant, and the
+        // normal / binormal deltas are dropped — but the vertex and its UV shift
+        // carry over from the source.
+        let belly = morphs
+            .iter()
+            .find(|morph| morph.name == "Belly_Physics_Torso_UpDown_Driven")
+            .ok_or("belly driven")?;
+        let delta = belly.deltas.first().ok_or("delta 0")?;
+        assert_eq!(delta.vertex_index, 3);
+        assert!(close(delta.position, [0.0, 0.0, 0.05]));
+        assert!(close(delta.normal, [0.0, 0.0, 0.0]));
+        assert!(close(delta.binormal, [0.0, 0.0, 0.0]));
+        assert!(close(delta.tex_coord, [0.01, 0.02]));
+
+        // `Cleavage`: scaled by 0.75, with Y mirrored on the vertex whose source
+        // delta points at −Y, so both breasts sway the *same* way rather than
+        // towards each other.
+        let sway = morphs
+            .iter()
+            .find(|morph| morph.name == "Breast_Physics_LeftRight_Driven")
+            .ok_or("left-right driven")?;
+        let left = sway.deltas.first().ok_or("delta 0")?;
+        assert!(close(left.position, [0.0, 0.0195, 0.0]));
+        assert!(close(left.normal, [0.0, -0.15, 0.3]));
+        let right = sway.deltas.get(1).ok_or("delta 1")?;
+        assert!(close(right.position, [0.0, 0.0195, 0.0]));
+        assert!(close(right.normal, [0.0, 0.15, 0.3]));
         Ok(())
     }
 

@@ -42,8 +42,8 @@ use bevy::prelude::*;
 use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
-    CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES, MaskTexture,
-    MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
+    BodyPhysics, CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES,
+    MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
     ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture, composite_region,
     decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image,
@@ -407,6 +407,13 @@ pub(crate) struct AvatarState {
     /// latest appearance — the reference viewer's skirt-worn test. Absent means
     /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
     skirt_visible: HashMap<AgentKey, bool>,
+    /// Each avatar's ingested body-physics (`WT_PHYSICS`) configuration (P34.1),
+    /// resolved from its latest appearance: the six breast / belly / butt
+    /// spring-damper motions, their settings, and the runtime morph params each
+    /// one drives. The per-frame simulation (P34.2) reads it; an avatar whose
+    /// appearance switches physics off keeps an entry whose motions are all
+    /// inactive.
+    body_physics: HashMap<AgentKey, BodyPhysics>,
     /// The visible baked-texture id in each base-body region slot per avatar,
     /// from its latest appearance (P14.1): the published baked UUIDs the viewer
     /// fetches through the shared [`TextureManager`] and (from P14.2) drapes over
@@ -1099,6 +1106,7 @@ impl AvatarState {
         let _dropped = self.joints.remove(&agent);
         let _dropped_nodes = self.attachment_nodes.remove(&agent);
         let _dropped_deform = self.deformations.remove(&agent);
+        let _dropped_physics = self.body_physics.remove(&agent);
         self.clear_joint_overrides(agent);
     }
 
@@ -1176,6 +1184,18 @@ impl AvatarState {
             let _prev = per_mesh.insert(mesh, overrides);
         }
         self.appearance_dirty.insert(agent);
+    }
+
+    /// The body-physics configuration ingested from `agent`'s latest appearance
+    /// (P34.1), or `None` before one arrived. Every motion it holds is ready to
+    /// simulate: a motion whose `Max_Effect` is zero is present but
+    /// [inactive](sl_client_bevy::PhysicsSettings::is_active).
+    #[expect(
+        dead_code,
+        reason = "read by the body-physics motion driver (P34.2), the next step"
+    )]
+    pub(crate) fn body_physics(&self, agent: AgentKey) -> Option<&BodyPhysics> {
+        self.body_physics.get(&agent)
     }
 
     /// The effective joint position overrides for `agent` (R1): the per-joint winner
@@ -2509,6 +2529,8 @@ pub(crate) fn apply_avatar_appearance(
     let mut runtime_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
+    // The ingested body-physics configuration per avatar (P34.1).
+    let mut physics: HashMap<AgentKey, BodyPhysics> = HashMap::new();
     // The rest deformed joint **world** matrices per avatar, kept only for the
     // geometry diagnostic (R13) so it can reproduce the GPU skinning on the CPU.
     let mut world_matrices: HashMap<AgentKey, Vec<Mat4>> = HashMap::new();
@@ -2524,6 +2546,14 @@ pub(crate) fn apply_avatar_appearance(
             runtime_weights.insert(
                 agent,
                 MorphWeights::from_resolved_runtime(library.params(), &resolved),
+            );
+            // Ingest the physics wearable off the same resolved appearance (P34.1):
+            // the spring-damper settings and driven morph params the body-physics
+            // motions need. The morph targets they drive are among the runtime
+            // params above, so the bounce needs no re-bake.
+            physics.insert(
+                agent,
+                BodyPhysics::from_resolved(library.params(), &resolved),
             );
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
             // Fold in the worn rigged meshes' joint position overrides (R1) so a
@@ -2565,6 +2595,22 @@ pub(crate) fn apply_avatar_appearance(
             transform.translation.y -= lift - previous;
         }
         let _prev = state.deformations.insert(agent, deform);
+    }
+    // Record each avatar's ingested body physics (P34.1) for the per-frame
+    // simulation to drive (P34.2).
+    for (agent, body) in physics {
+        if !body.motions().is_empty() {
+            let active = body
+                .motions()
+                .iter()
+                .filter(|config| config.settings.is_active())
+                .count();
+            debug!(
+                "body physics for {agent}: {active} of {} motion(s) active",
+                body.motions().len()
+            );
+        }
+        let _prev = state.body_physics.insert(agent, body);
     }
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its
     // clothing morphs by the region's decoded bake where one is available (P14.5).
