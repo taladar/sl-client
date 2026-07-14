@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 54 |
-| ready | 29 |
+| ideas | 59 |
+| ready | 30 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **557** |
+| **total** | **563** |
 
-## ideas (54)
+## ideas (59)
 
 ### viewer
 
@@ -57,8 +57,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-framework`)
 - [`viewer-inventory-ui`](ideas/viewer-inventory-ui.md) — Inventory browser UI
   (blocked by `viewer-ui-framework`)
+- [`viewer-lsl-language-server`](ideas/viewer-lsl-language-server.md) — LSL
+  language server (LSP) — real tooling for external editors (blocked by
+  `protocol-lsl-syntax`)
+- [`viewer-lsl-parser`](ideas/viewer-lsl-parser.md) — LSL parser — a pure crate
+  (sl-lsl)
 - [`viewer-lsl-script-editor`](ideas/viewer-lsl-script-editor.md) — LSL script
-  editor (blocked by `viewer-ui-framework`, `viewer-prim-inventory-editing`)
+  editor (blocked by `viewer-ui-framework`, `viewer-prim-inventory-editing`,
+  `protocol-lsl-syntax`)
 - [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by `viewer-ui-framework`,
   `viewer-audio-backend`)
@@ -75,6 +81,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-media-prim-browser`)
 - [`viewer-name-tags`](ideas/viewer-name-tags.md) — Avatar name tags (the full
   reference-viewer feature)
+- [`viewer-notecard-editor`](ideas/viewer-notecard-editor.md) — Notecard viewer
+  & editor (rich text with embedded items) (blocked by `viewer-ui-framework`,
+  `viewer-inventory-ui`, `viewer-notecard-format`)
+- [`viewer-notecard-format`](ideas/viewer-notecard-format.md) — Notecard format
+  — a pure crate (sl-notecard)
 - [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
   Notifications, toasts & dialogs (blocked by `viewer-ui-framework`)
 - [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
@@ -109,6 +120,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   option viewing & editing (blocked by `viewer-ui-framework`)
 - [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
+- [`viewer-script-external-workflow`](ideas/viewer-script-external-workflow.md)
+  — Scripts on disk — external editors, git and a headless uploader
 - [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand (blocked by
   `viewer-object-selection`, `viewer-camera-system`)
 - [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
@@ -150,7 +163,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
   by `viewer-ui-framework`)
 
-## ready (29)
+## ready (30)
+
+### protocol
+
+- [`protocol-lsl-syntax`](ready/protocol-lsl-syntax.md) — LSLSyntax capability —
+  fetch, cache and decode the grid's language definition
 
 ### viewer
 
