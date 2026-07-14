@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 40 |
+| ideas | 44 |
 | ready | 30 |
 | blocked | 3 |
 | in-progress | 0 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 461 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **546** |
+| **total** | **550** |
 
-## ideas (40)
+## ideas (44)
 
 ### viewer
 
@@ -31,6 +31,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-input-system`, `viewer-ui-framework`)
 - [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
   (blocked by `viewer-ui-framework`, `viewer-social-panels`)
+- [`viewer-fs-bridge-lifecycle`](ideas/viewer-fs-bridge-lifecycle.md) —
+  Firestorm LSL bridge — create, attach, version and repair it
+- [`viewer-fs-bridge-protocol`](ideas/viewer-fs-bridge-protocol.md) — Firestorm
+  LSL bridge — the viewer↔script protocol and what it exposes (blocked by
+  `viewer-fs-bridge-lifecycle`)
 - [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
   trigger UI (blocked by `viewer-ui-framework`, `viewer-sound-effects`)
 - [`viewer-i18n-localization`](ideas/viewer-i18n-localization.md) —
@@ -82,6 +87,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-framework`)
 - [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
   option viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-rlva-enforcement`](ideas/viewer-rlva-enforcement.md) — RLVa — enforce
+  the restrictions (and answer the queries) (blocked by `viewer-rlva-parsing`)
+- [`viewer-rlva-parsing`](ideas/viewer-rlva-parsing.md) — RLVa — parse the
+  restriction protocol (the @-command language)
 - [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand (blocked by
