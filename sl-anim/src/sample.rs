@@ -106,6 +106,42 @@ impl Motion {
         residual * cubic_step(1.0 - fraction)
     }
 
+    /// The motion's **hand-pose arbitration priority**
+    /// (`LLJointMotionList::mMaxPriority`): the highest *explicit* joint priority
+    /// the file carries, i.e. ignoring joints that defer to the motion's base
+    /// priority with [`USE_MOTION`](JointPriority::USE_MOTION).
+    ///
+    /// The reference viewer uses this — and only this — to decide whose
+    /// [`hand_pose`](Motion::hand_pose) wins when several motions play at once
+    /// (`LLKeyframeMotion::applyKeyframes` publishes its hand pose only when its
+    /// `mMaxPriority` is at least the pose priority already published this frame),
+    /// which is why it is a motion-wide scalar rather than the per-joint
+    /// [`effective_priority`](JointMotion::effective_priority) the pose blend uses.
+    ///
+    /// Faithful to the reference's derivation: it starts at
+    /// [`LOW`](JointPriority::LOW) — the motion's base priority does **not** raise
+    /// it — and each joint with an explicit priority above it lifts it. The one
+    /// exception is a file whose raw base priority reached
+    /// [`ADDITIVE`](JointPriority::ADDITIVE), which the reference (and
+    /// [`Motion::from_bytes`]) clamps to
+    /// [`ADDITIVE_CLAMPED`](JointPriority::ADDITIVE_CLAMPED) and *does* seed
+    /// `mMaxPriority` from; that clamped value is above every named joint priority,
+    /// so it is recovered here by recognising it.
+    #[must_use]
+    pub fn max_priority(&self) -> JointPriority {
+        let mut max = if self.base_priority == JointPriority::ADDITIVE_CLAMPED {
+            self.base_priority
+        } else {
+            JointPriority::LOW
+        };
+        for joint in &self.joints {
+            if joint.priority != JointPriority::USE_MOTION && joint.priority > max {
+                max = joint.priority;
+            }
+        }
+        max
+    }
+
     /// Whether the motion has fully eased out at `elapsed` (its pose weight has
     /// reached 0 and will not recover), so the P18.4 driver can drop it. A
     /// looping motion that has not been stopped is never finished.
@@ -472,6 +508,64 @@ mod tests {
         let motion = easing_motion(true, 0.0, 2.0);
         assert!(!motion.is_finished(6.0, Some(5.0)));
         assert!(motion.is_finished(7.0, Some(5.0)));
+    }
+
+    /// A motion with the given base priority and explicit joint priorities, for the
+    /// [`Motion::max_priority`] tests.
+    fn priority_motion(base: JointPriority, joints: &[JointPriority]) -> Motion {
+        let mut motion = timing_motion(true, 4.0, 0.0, 4.0);
+        motion.base_priority = base;
+        motion.joints = joints
+            .iter()
+            .map(|priority| JointMotion {
+                name: "mPelvis".to_owned(),
+                priority: *priority,
+                rotation_keys: Vec::new(),
+                position_keys: Vec::new(),
+            })
+            .collect();
+        motion
+    }
+
+    #[test]
+    fn max_priority_is_the_highest_explicit_joint_priority() {
+        let motion = priority_motion(
+            JointPriority::LOW,
+            &[
+                JointPriority::LOW,
+                JointPriority::HIGH,
+                JointPriority::MEDIUM,
+            ],
+        );
+        assert_eq!(motion.max_priority(), JointPriority::HIGH);
+    }
+
+    #[test]
+    fn max_priority_ignores_the_base_priority_and_use_motion_joints() {
+        // The reference seeds `mMaxPriority` at LOW, *not* at the base priority, and
+        // a joint deferring to the motion (USE_MOTION) never raises it — so a
+        // HIGHEST-base motion whose joints all defer arbitrates hand poses at LOW.
+        let motion = priority_motion(
+            JointPriority::HIGHEST,
+            &[JointPriority::USE_MOTION, JointPriority::USE_MOTION],
+        );
+        assert_eq!(motion.max_priority(), JointPriority::LOW);
+        // With no joints at all it is still LOW.
+        assert_eq!(
+            priority_motion(JointPriority::HIGH, &[]).max_priority(),
+            JointPriority::LOW
+        );
+    }
+
+    #[test]
+    fn max_priority_of_an_additive_motion_is_its_clamped_base() {
+        // A raw base priority of ADDITIVE (7) decodes clamped to 6, and the reference
+        // seeds `mMaxPriority` from it in exactly that case — above every named joint
+        // priority, so an additive motion's hand pose outranks the others'.
+        let base = JointPriority::ADDITIVE_CLAMPED;
+        let motion = priority_motion(base, &[JointPriority::HIGHEST]);
+        assert_eq!(motion.max_priority(), base);
+        assert!(motion.max_priority() > JointPriority::HIGHEST);
     }
 
     /// A single-track joint used by the sampling tests.

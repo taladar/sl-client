@@ -40,7 +40,7 @@ use std::sync::Arc;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
-use sl_anim::{JointContribution, Motion, blend_joint, builtin_animation};
+use sl_anim::{HandPose, JointContribution, JointPriority, Motion, blend_joint, builtin_animation};
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
     BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid, sample_motion,
@@ -438,6 +438,49 @@ impl AnimationPlayback {
         let entry = self.client_typing.entry(agent).or_default();
         let pairs: Vec<(Uuid, i32)> = desired.map(|id| (id, 0)).into_iter().collect();
         reconcile_playing(entry, &mut self.next_order, &pairs, now);
+    }
+
+    /// The [`HandPose`] the motions currently playing on `agent` request (P31.13),
+    /// or [`None`] when none of them is decoded — the hand-pose morph driver then
+    /// relaxes the hands, as the reference does with no `"Hand Pose"` animation data.
+    ///
+    /// Mirrors `LLKeyframeMotion::applyKeyframes`, which publishes its motion's hand
+    /// pose only if the motion's [`max_priority`](Motion::max_priority) is **at
+    /// least** the pose priority already published this frame. Every active motion
+    /// takes part, including one easing out (the reference keeps updating a motion
+    /// until its ease-out tail has passed and it is deactivated) — this set is
+    /// pruned to exactly those by [`retain_active`].
+    ///
+    /// The `>=` in the reference means a *tie* on priority is won by whichever motion
+    /// its active list visits **last**, and it pushes each newly-activated motion to
+    /// the front — so among equal priorities the **oldest** activation wins, i.e. the
+    /// lowest [`PlayState::order`] stamp. (Note this is the opposite of the per-joint
+    /// pose blend, where the most recent activation wins a tie; both fall out of the
+    /// one active-list order, and both are reproduced faithfully.)
+    pub(crate) fn requested_hand_pose(
+        &self,
+        agent: AgentKey,
+        manager: &AnimationManager,
+    ) -> Option<HandPose> {
+        let merged = merge_playing(
+            self.playing.get(&agent),
+            self.client_locomotion.get(&agent),
+            self.client_typing.get(&agent),
+        );
+        let mut winner: Option<(JointPriority, u64, HandPose)> = None;
+        for (anim_id, play) in &merged {
+            let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
+                continue;
+            };
+            let priority = motion.max_priority();
+            let beats = winner.is_none_or(|(best_priority, best_order, _pose)| {
+                priority > best_priority || (priority == best_priority && play.order < best_order)
+            });
+            if beats {
+                winner = Some((priority, play.order, motion.hand_pose));
+            }
+        }
+        winner.map(|(_priority, _order, pose)| pose)
     }
 }
 

@@ -1268,6 +1268,56 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     (look dir ≈ `+X` → identity) — aim the camera to a side to see it; idle
     neighbours send no gaze, so `target=false` for them is correct, not a bug.
 
+- **Phase 31 P31.13 hand-pose morph DONE.** Full design is in the roadmap/
+  viewer topic P31.13 Done note; don't restate. Durable facts NOT in
+  git/roadmap:
+  - **The hands are a MORPH, not a pose.** This is the thing to internalise
+    before touching finger rendering: no `.anim` keyframe track ever drives the
+    finger joints. Each `.anim` header carries a hand-pose *index*, and the
+    viewer turns that into one of thirteen `Hands_*` visual-param morphs on the
+    **upper-body** mesh (all thirteen live in `avatar_upper_body.llm`, confirmed
+    by its morph names). So the hand shape rides the appearance/morph pipeline,
+    not the animation pose pipeline — which is exactly why it had to wait for
+    P31.12a.
+  - **`mMaxPriority` exists only for hand poses.** It looked like a general
+    motion priority; it is not. Grepping the reference,
+    `LLJointMotionList::mMaxPriority` is read in exactly one place —
+    `applyKeyframes`'s hand-pose publish. It is also NOT the motion's base
+    priority: it starts at `LOW` and only *explicit* joint priorities lift it,
+    so a `HIGHEST`-base animation whose joints all say `USE_MOTION` arbitrates
+    hand poses at `LOW`. Hence `Motion::max_priority()` in `sl-anim` rather than
+    reusing `base_priority` or the per-joint `effective_priority`.
+  - **The reference's hand-pose bounds check is off by one, and we keep the bug
+    on purpose.** `LLKeyframeMotion` rejects a header hand pose only when it is
+    **above** `NUM_HAND_POSES` (14), so an index of exactly 14 decodes fine —
+    and `LLHandMotion` then re-checks with `< NUM_HAND_POSES` and *ignores* the
+    request (leaving the hands heading wherever they were, which is NOT the same
+    as the "no request" branch that relaxes them). Our decoder already mirrored
+    the loose check, so `HandPose::is_known()` + the ignore branch reproduce the
+    other half.
+  - **Priority ties break the OPPOSITE way from the pose blend.** The
+    active-motion list is newest-first, and the hand-pose guard is `>=` (so the
+    last-visited, i.e. *oldest*, motion wins a tie) while joint blending is `>`
+    (so the first-visited, *newest*, wins). Both are faithful; don't "fix" the
+    asymmetry.
+  - **Cost note:** every part carrying a runtime morph gets *dense* Bevy morph
+    targets, so the upper body now uploads 13 targets × its vertex count per
+    avatar (the head has 2 for blink). Fine at current avatar counts, but this
+    is the thing that grows if more params join `RUNTIME_MORPH_PARAMS` (P34 body
+    physics is next).
+  - **Visible baseline change:** the resting pose is `HAND_POSE_RELAXED`, not
+    the base mesh's `HAND_POSE_SPREAD`, so every avatar's hands are now relaxed
+    rather than splayed even with no animation playing.
+  - Viewer-only (no runtime parity), like the other P31 adjusters.
+    **Live-verified on OpenSim**: `SL_VIEWER_HAND_POSE_TEST=<index>` forces a
+    pose on every avatar, `SL_VIEWER_LOG_HAND_POSE=1` traces the transitions.
+    Note the system-avatar hand morphs are geometrically WEAK — a forced
+    `Hands_Fist` reads as "curled fingers", not a tight fist. That is correct
+    (the base mesh's fingers are very low-poly and the reference looks the
+    same); do not chase it as a bug. The animation-driven path is easiest to
+    exercise with the P31.9 `T` typing toggle, whose `ANIM_AGENT_TYPE` header
+    requests `Hands_Typing`.
+
 - **Phase 32 P32.1 ingest flexible-object data DONE** (skipping the blocked
   P29.2 animesh + the rest of P31 per the user). Full design is in the roadmap/
   viewer topic P32.1 Done note; don't restate. Viewer-only (no runtime parity —

@@ -101,6 +101,13 @@ impl JointPriority {
     /// Additive priority — the animation is layered on top rather than blended
     /// (`ADDITIVE_PRIORITY`, `LL_CHARACTER_MAX_PRIORITY`).
     pub const ADDITIVE: Self = Self(7);
+    /// The value a *base* priority of [`ADDITIVE`](Self::ADDITIVE) or above decodes
+    /// to: the reference viewer clamps it to one below additive
+    /// (`(S32)LLJoint::ADDITIVE_PRIORITY - 1`), so a decoded
+    /// [`base_priority`](Motion::base_priority) never reaches additive. Above every
+    /// named joint priority, which is what makes such a motion's hand pose outrank
+    /// the others' ([`Motion::max_priority`]).
+    pub const ADDITIVE_CLAMPED: Self = Self(6);
 
     /// The raw signed priority value.
     #[must_use]
@@ -149,6 +156,29 @@ impl HandPose {
     #[must_use]
     pub const fn value(self) -> u32 {
         self.0
+    }
+
+    /// The pose with raw `index`, or [`None`] when it names none of the fourteen
+    /// poses the reference viewer defines (`index >= NUM_HAND_POSES`).
+    #[must_use]
+    pub const fn from_index(index: u32) -> Option<Self> {
+        if index < NUM_HAND_POSES {
+            Some(Self(index))
+        } else {
+            None
+        }
+    }
+
+    /// Whether this pose names one of the fourteen the reference viewer defines.
+    ///
+    /// Not every *decoded* pose does: the reference's own bounds check on the
+    /// `.anim` header rejects only an index **above** `NUM_HAND_POSES`, so an index
+    /// of exactly `NUM_HAND_POSES` decodes (and [`Motion::from_bytes`] accepts it
+    /// too, faithfully) — but `LLHandMotion` then re-checks and *ignores* the
+    /// request, leaving the hands in whatever pose they were heading for.
+    #[must_use]
+    pub const fn is_known(self) -> bool {
+        self.0 < NUM_HAND_POSES
     }
 }
 
@@ -363,9 +393,7 @@ const fn read_base_priority(raw: i32) -> Result<JointPriority, AnimDecodeError> 
         return Err(AnimDecodeError::BadBasePriority { priority: raw });
     }
     if raw >= JointPriority::ADDITIVE.value() {
-        return Ok(JointPriority(
-            JointPriority::ADDITIVE.value().saturating_sub(1),
-        ));
+        return Ok(JointPriority::ADDITIVE_CLAMPED);
     }
     Ok(JointPriority(raw))
 }

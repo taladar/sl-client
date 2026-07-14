@@ -53,9 +53,68 @@ pub const NORMAL_SOFTEN_FACTOR: f32 = 0.65;
 /// re-uploaded per frame.
 ///
 /// The body-physics (`WT_PHYSICS`) `*_Driven` params join this set when that
-/// wearable is ingested (roadmap `viewer-p34-1`); until then the set is just the
-/// two eye-blink params.
-pub const RUNTIME_MORPH_PARAMS: &[&str] = &["Blink_Left", "Blink_Right"];
+/// wearable is ingested (roadmap `viewer-p34-1`); for now it is the two eye-blink
+/// params plus every hand-pose morph ([`HAND_POSE_MORPH_PARAMS`], P31.13).
+pub const RUNTIME_MORPH_PARAMS: &[&str] = &[
+    "Blink_Left",
+    "Blink_Right",
+    "Hands_Relaxed",
+    "Hands_Point",
+    "Hands_Fist",
+    "Hands_Relaxed_L",
+    "Hands_Point_L",
+    "Hands_Fist_L",
+    "Hands_Relaxed_R",
+    "Hands_Point_R",
+    "Hands_Fist_R",
+    "Hands_Salute_R",
+    "Hands_Typing",
+    "Hands_Peace_R",
+    "Hands_Spread_R",
+];
+
+/// The upper-body morph each **hand pose** an animation selects is expressed as,
+/// indexed by the pose index a `.anim` header carries (the reference's
+/// `gHandPoseNames`, indexed by `LLHandMotion::eHandPose`) — P31.13.
+///
+/// Second Life does not pose the finger joints from a hand-pose animation track:
+/// it *morphs* the hands, driving one of these `avatar_lad.xml` "animatable morph"
+/// visual params on the upper-body mesh to 1 while the others sit at 0, and
+/// cross-fading when the playing animation asks for a different pose. They are all
+/// in [`RUNTIME_MORPH_PARAMS`], so the render-time pipeline can drive that
+/// cross-fade every frame without re-baking the body.
+///
+/// Index 0 (`HAND_POSE_SPREAD`) is [`None`]: the spread hand is the **base mesh
+/// shape** itself, so it has no morph — blending *to* it is just fading the
+/// outgoing pose's morph out. The reference records this the same way, as an
+/// empty name in `gHandPoseNames[0]`.
+///
+/// Note the last entry's deliberate asymmetry, faithful to the reference: pose
+/// index 13 is named `HAND_POSE_PALM_R` but its morph is `Hands_Spread_R`.
+pub const HAND_POSE_MORPH_PARAMS: [Option<&str>; 14] = [
+    None,
+    Some("Hands_Relaxed"),
+    Some("Hands_Point"),
+    Some("Hands_Fist"),
+    Some("Hands_Relaxed_L"),
+    Some("Hands_Point_L"),
+    Some("Hands_Fist_L"),
+    Some("Hands_Relaxed_R"),
+    Some("Hands_Point_R"),
+    Some("Hands_Fist_R"),
+    Some("Hands_Salute_R"),
+    Some("Hands_Typing"),
+    Some("Hands_Peace_R"),
+    Some("Hands_Spread_R"),
+];
+
+/// The visual-param morph the hand pose with index `pose` is expressed as, or
+/// [`None`] for the spread base-mesh pose (index 0) and for an out-of-range index
+/// — see [`HAND_POSE_MORPH_PARAMS`].
+#[must_use]
+pub fn hand_pose_morph_param(pose: usize) -> Option<&'static str> {
+    HAND_POSE_MORPH_PARAMS.get(pose).copied().flatten()
+}
 
 /// Whether a visual-param `name` is driven per frame at render time (P31.12a)
 /// rather than baked into the avatar geometry — i.e. whether it is in
@@ -510,6 +569,31 @@ mod tests {
     fn runtime_param_membership() {
         assert!(super::is_runtime_morph_param("Blink_Left"));
         assert!(super::is_runtime_morph_param("Blink_Right"));
+        assert!(super::is_runtime_morph_param("Hands_Typing"));
         assert!(!super::is_runtime_morph_param("Plain"));
+    }
+
+    #[test]
+    fn every_hand_pose_morph_is_a_runtime_param() {
+        // The hand-pose cross-fade (P31.13) drives these every frame, so each must
+        // be excluded from the static bake and built as a GPU morph target.
+        for name in super::HAND_POSE_MORPH_PARAMS.into_iter().flatten() {
+            assert!(
+                super::is_runtime_morph_param(name),
+                "hand-pose morph {name} missing from RUNTIME_MORPH_PARAMS"
+            );
+        }
+    }
+
+    #[test]
+    fn hand_pose_morph_param_lookup() {
+        // The spread pose is the base mesh shape, so it has no morph — as does an
+        // index past the table.
+        assert_eq!(super::hand_pose_morph_param(0), None);
+        assert_eq!(super::hand_pose_morph_param(1), Some("Hands_Relaxed"));
+        assert_eq!(super::hand_pose_morph_param(11), Some("Hands_Typing"));
+        // Pose 13 is `HAND_POSE_PALM_R` but its morph is named `Hands_Spread_R`.
+        assert_eq!(super::hand_pose_morph_param(13), Some("Hands_Spread_R"));
+        assert_eq!(super::hand_pose_morph_param(14), None);
     }
 }

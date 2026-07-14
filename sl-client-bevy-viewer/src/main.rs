@@ -21,6 +21,7 @@ mod coords;
 mod diagnostics;
 mod environment;
 mod flexi;
+mod hand_pose;
 mod legacy_materials;
 mod lights;
 mod locomotion;
@@ -509,6 +510,7 @@ fn run_session(
     .init_resource::<AvatarRuntimeMorphs>()
     .init_resource::<look_at::LookAtTargets>()
     .init_resource::<look_at::LookAtMotion>()
+    .init_resource::<hand_pose::HandPoseMotion>()
     .init_resource::<AvatarControls>()
     .init_resource::<TypingState>()
     .init_resource::<ControlAvatarState>()
@@ -818,6 +820,13 @@ fn run_session(
             // skeleton driver folds it into the frame's pose.
             drive_own_typing.before(drive_avatar_skeletons),
             drive_avatar_skeletons.after(apply_avatar_appearance),
+            // Hand-pose morph (P31.13): cross-fade each avatar's hands into the pose
+            // its highest-priority playing animation asks for. After the skeleton
+            // driver (whose playing set it reads) and before the runtime-morph fold,
+            // so the cross-faded weights reach the GPU in the same frame.
+            hand_pose::drive_hand_poses
+                .after(drive_avatar_skeletons)
+                .before(apply_avatar_runtime_morphs),
             repeat_debug_animation,
             report_camera_interest,
             report_agent_viewport,

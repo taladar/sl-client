@@ -2647,11 +2647,18 @@ pub(crate) struct AvatarRuntimeMorphs {
 impl AvatarRuntimeMorphs {
     /// Set the per-frame weight of one runtime morph `param` on `agent` (a
     /// driver calls this every frame it wants the param off its rest value).
+    ///
+    /// An already-known param is updated in place: the drivers push every param they
+    /// own each frame (the hand-pose cross-fade alone drives thirteen), so the naive
+    /// `insert(param.to_owned(), …)` would allocate a `String` per param per avatar
+    /// per frame just to overwrite the key it already has.
     pub(crate) fn set(&mut self, agent: AgentKey, param: &str, weight: f32) {
-        self.by_agent
-            .entry(agent)
-            .or_default()
-            .insert(param.to_owned(), weight);
+        let params = self.by_agent.entry(agent).or_default();
+        if let Some(slot) = params.get_mut(param) {
+            *slot = weight;
+        } else {
+            let _absent = params.insert(param.to_owned(), weight);
+        }
     }
 
     /// Drop every override for `agent` (e.g. when its body despawns), letting any

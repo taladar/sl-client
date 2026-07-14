@@ -49,7 +49,8 @@ pub use basemesh::{
 };
 pub use masks::{MaskTexture, MorphMask, MorphMasks, PartMorphMask};
 pub use morph::{
-    MorphWeights, MorphedMesh, NORMAL_SOFTEN_FACTOR, RUNTIME_MORPH_PARAMS, is_runtime_morph_param,
+    HAND_POSE_MORPH_PARAMS, MorphWeights, MorphedMesh, NORMAL_SOFTEN_FACTOR, RUNTIME_MORPH_PARAMS,
+    hand_pose_morph_param, is_runtime_morph_param,
 };
 pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
