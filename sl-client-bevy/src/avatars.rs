@@ -27,6 +27,7 @@ use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::math::{Mat4, Quat, Vec3};
+use bevy::mesh::morph::MorphAttributes;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{
@@ -61,6 +62,108 @@ pub fn to_bevy_base_mesh(base: &BaseMesh) -> Mesh {
 #[must_use]
 pub fn to_bevy_morphed_mesh(base: &BaseMesh, morphed: &MorphedMesh) -> Mesh {
     build_base_mesh(base, morphed.positions(), morphed.normals())
+}
+
+/// The Bevy native morph targets for one base part restricted to the named
+/// per-frame **runtime** visual params it carries (P31.12a).
+///
+/// The appearance pipeline bakes the shape morphs into a part's geometry once
+/// ([`to_bevy_morphed_mesh`]) but a few params — eye blink, body physics — must
+/// be animated every frame. Those are excluded from the static bake and instead
+/// layered on the GPU as Bevy morph targets, whose weight a per-frame driver
+/// sets. This builds the target data for the runtime params that actually appear
+/// among this part's [`BaseMesh::morphs`] deltas, in a stable order.
+///
+/// Bevy stores morph targets **dense and target-major**: one
+/// [`MorphAttributes`] (position / normal / tangent delta) per mesh vertex, per
+/// target, concatenated target after target. Each runtime morph's sparse deltas
+/// are scattered into a zero-filled per-vertex array at their vertex index; the
+/// normal delta is pre-scaled by [`sl_avatar::NORMAL_SOFTEN_FACTOR`] so GPU
+/// shading matches the softened, re-normalized normals the CPU bake produces.
+/// UV / binormal morph deltas do not move the silhouette and are left at rest,
+/// exactly as [`MorphWeights::apply`](sl_avatar::MorphWeights::apply) treats
+/// them.
+///
+/// Returns [`None`] when the part carries none of `runtime_params`, so the
+/// caller attaches no morph machinery to a part that has nothing to animate.
+#[must_use]
+pub fn to_bevy_runtime_morph_targets(
+    base: &BaseMesh,
+    runtime_params: &[&str],
+) -> Option<RuntimeMorphTargets> {
+    let vertex_count = base.positions().len();
+    let mut names = Vec::new();
+    let mut attributes: Vec<MorphAttributes> = Vec::new();
+    // Iterate the part's own morphs so target order is stable and only morphs
+    // that exist in this part's geometry are emitted.
+    for morph in base.morphs() {
+        if !runtime_params.contains(&morph.name.as_str()) {
+            continue;
+        }
+        let start = attributes.len();
+        attributes.resize(
+            start.saturating_add(vertex_count),
+            MorphAttributes::default(),
+        );
+        for delta in &morph.deltas {
+            if let Some(slot) = attributes.get_mut(start.saturating_add(delta.vertex_index)) {
+                slot.position = Vec3::from(delta.position);
+                slot.normal = soften_normal_delta(delta.normal);
+            }
+        }
+        names.push(morph.name.clone());
+    }
+    if names.is_empty() {
+        return None;
+    }
+    Some(RuntimeMorphTargets { names, attributes })
+}
+
+/// Scale a morph's raw per-vertex normal delta by
+/// [`sl_avatar::NORMAL_SOFTEN_FACTOR`], component-wise, so the GPU-layered
+/// runtime morph shades like the CPU bake's softened, re-normalized normals.
+fn soften_normal_delta([x, y, z]: [f32; 3]) -> Vec3 {
+    Vec3::new(
+        x * sl_avatar::NORMAL_SOFTEN_FACTOR,
+        y * sl_avatar::NORMAL_SOFTEN_FACTOR,
+        z * sl_avatar::NORMAL_SOFTEN_FACTOR,
+    )
+}
+
+/// The Bevy native morph-target data for one base part's per-frame runtime
+/// visual params, produced by [`to_bevy_runtime_morph_targets`].
+///
+/// It pairs a flat, target-major [`MorphAttributes`] displacement array (length
+/// `names.len() * vertex_count`, the values Bevy uploads) with the parallel
+/// target [`names`](Self::names), in the same order as the morph-target weights
+/// the renderer reads. Consume it with [`attach_to`](Self::attach_to), which
+/// hands the displacements to the mesh.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RuntimeMorphTargets {
+    /// Runtime morph-target names, in target order (parallel to the weights).
+    names: Vec<String>,
+    /// Flat, target-major morph displacements (`names.len() * vertex_count`).
+    attributes: Vec<MorphAttributes>,
+}
+
+impl RuntimeMorphTargets {
+    /// The runtime morph-target names, in the order their weights are indexed.
+    #[must_use]
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// Attach these morph targets (and their names) to a rebuilt part `mesh`,
+    /// consuming the target data.
+    ///
+    /// The `mesh` must be the same part's geometry so its vertex count matches
+    /// the per-target displacement stride; afterwards the mesh renders its
+    /// runtime morphs from a `MeshMorphWeights` component the caller drives per
+    /// frame.
+    pub fn attach_to(self, mesh: &mut Mesh) {
+        mesh.set_morph_target_names(self.names);
+        mesh.set_morph_targets(self.attributes);
+    }
 }
 
 /// Shared builder for [`to_bevy_base_mesh`] / [`to_bevy_morphed_mesh`]: builds the
@@ -861,7 +964,10 @@ fn euler_deg_to_quat(rot: [f32; 3]) -> Quat {
 
 #[cfg(test)]
 mod tests {
-    use super::{BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh};
+    use super::{
+        BevySkeleton, JointOverrides, joint_position_overrides, to_bevy_base_mesh,
+        to_bevy_runtime_morph_targets,
+    };
     use bevy::math::Vec3;
     use bevy::mesh::{Mesh, VertexAttributeValues};
     use bevy::transform::components::Transform;
@@ -1363,5 +1469,45 @@ mod tests {
         assert_eq!(base.position(2), Some(Vec3::new(0.0, 2.0, 0.0)));
         // The scale lock is sticky once any merged rig requests it.
         assert!(base.lock_scale());
+    }
+
+    #[test]
+    fn runtime_morph_targets_scatter_the_named_morph() -> Result<(), TestError> {
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        // The fixture's only morph is `Fatten`, with deltas on vertices 0 and 3.
+        let targets = to_bevy_runtime_morph_targets(&mesh, &["Fatten"]).ok_or("targets")?;
+        assert_eq!(targets.names(), &["Fatten".to_owned()]);
+        // Dense, target-major: one `MorphAttributes` per vertex, per target.
+        assert_eq!(targets.attributes.len(), mesh.positions().len());
+        // Vertex 0 carries the `Fatten` position delta (0.1, 0, 0); the softened
+        // normal delta is the raw delta times the shading-soften factor.
+        let v0 = targets.attributes.first().ok_or("v0")?;
+        assert!((v0.position.x - 0.1).abs() < 1.0e-4);
+        // A vertex the morph does not touch (vertex 1) stays a zero delta.
+        let v1 = targets.attributes.get(1).ok_or("v1")?;
+        assert_eq!(v1.position, Vec3::ZERO);
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_morph_targets_absent_when_no_named_morph_present() -> Result<(), TestError> {
+        let mesh = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        // The fixture has no `Blink_Left` morph, so no runtime targets are built.
+        assert!(to_bevy_runtime_morph_targets(&mesh, &["Blink_Left"]).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_morph_targets_attach_to_a_rebuilt_mesh() -> Result<(), TestError> {
+        let base = BaseMesh::from_bytes(MINI_BASEMESH)?;
+        let targets = to_bevy_runtime_morph_targets(&base, &["Fatten"]).ok_or("targets")?;
+        let mut mesh = to_bevy_base_mesh(&base);
+        targets.attach_to(&mut mesh);
+        assert!(mesh.has_morph_targets());
+        assert_eq!(
+            mesh.morph_target_names(),
+            Some(["Fatten".to_owned()].as_slice())
+        );
+        Ok(())
     }
 }

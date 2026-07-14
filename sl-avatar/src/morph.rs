@@ -32,7 +32,38 @@ use crate::resolve::ResolvedParams;
 /// The factor Firestorm scales each morph's normal delta by before
 /// re-normalizing (`LLPolyMorphTarget::apply`'s `NORMAL_SOFTEN_FACTOR`), so a
 /// morphed surface's shading eases rather than snapping to the raw delta normal.
-const NORMAL_SOFTEN_FACTOR: f32 = 0.65;
+///
+/// Exposed so the render-time morph pipeline (P31.12a), which layers a few
+/// morphs on the GPU rather than in [`MorphWeights::apply`], can pre-scale its
+/// normal deltas identically and keep shading consistent between the two paths.
+pub const NORMAL_SOFTEN_FACTOR: f32 = 0.65;
+
+/// Visual-param morph targets driven **per frame** at render time (P31.12a)
+/// rather than baked into the avatar's geometry once at appearance-change time.
+///
+/// The appearance pipeline bakes the shape/build morphs into the base-mesh
+/// vertices ([`MorphWeights::from_resolved_static`] →
+/// [`MorphWeights::apply`]) and hands the deformed mesh to the GPU as a static
+/// asset. A handful of params instead need animating every frame — the eye
+/// **blink** ([`Blink_Left`](Self)/`Blink_Right`), and later the physics
+/// wearable's breast/belly/butt bounce — which a once-per-appearance bake
+/// cannot do. Those params are named here so the static bake **excludes** them
+/// and the render-time pipeline drives them instead (via Bevy native
+/// morph-target weights), leaving the body baked once and only these few weights
+/// re-uploaded per frame.
+///
+/// The body-physics (`WT_PHYSICS`) `*_Driven` params join this set when that
+/// wearable is ingested (roadmap `viewer-p34-1`); until then the set is just the
+/// two eye-blink params.
+pub const RUNTIME_MORPH_PARAMS: &[&str] = &["Blink_Left", "Blink_Right"];
+
+/// Whether a visual-param `name` is driven per frame at render time (P31.12a)
+/// rather than baked into the avatar geometry — i.e. whether it is in
+/// [`RUNTIME_MORPH_PARAMS`].
+#[must_use]
+pub fn is_runtime_morph_param(name: &str) -> bool {
+    RUNTIME_MORPH_PARAMS.contains(&name)
+}
 
 /// A resolved set of morph-target weights, keyed by morph-target name — the
 /// appearance of one avatar reduced to just the values that move base geometry.
@@ -85,9 +116,42 @@ impl MorphWeights {
     /// (non-zero) effective weight are retained.
     #[must_use]
     pub fn from_resolved(params: &VisualParams, resolved: &ResolvedParams) -> Self {
+        Self::from_resolved_filtered(params, resolved, |_name| true)
+    }
+
+    /// Resolve the weights for the **static geometry bake** — every morph param
+    /// except the per-frame [runtime params](RUNTIME_MORPH_PARAMS) (P31.12a).
+    ///
+    /// The excluded params (eye blink, body physics) are baked into no geometry;
+    /// the render-time morph pipeline drives them each frame instead, so an
+    /// un-driven avatar looks identical to a fully-baked one while a driver can
+    /// still animate the excluded params without re-baking the body.
+    #[must_use]
+    pub fn from_resolved_static(params: &VisualParams, resolved: &ResolvedParams) -> Self {
+        Self::from_resolved_filtered(params, resolved, |name| !is_runtime_morph_param(name))
+    }
+
+    /// Resolve the weights for **just** the per-frame
+    /// [runtime params](RUNTIME_MORPH_PARAMS) (P31.12a): the rest weight each
+    /// render-time morph target starts at (its appearance-resolved value), so
+    /// the driver animates *around* the avatar's own shape rather than from
+    /// zero. A runtime param whose rest weight is insignificant is dropped, so
+    /// [`weight`](Self::weight) returns its `0.0` default.
+    #[must_use]
+    pub fn from_resolved_runtime(params: &VisualParams, resolved: &ResolvedParams) -> Self {
+        Self::from_resolved_filtered(params, resolved, is_runtime_morph_param)
+    }
+
+    /// The shared resolver: retain every [`ParamEffect::Morph`] param with a
+    /// significant effective weight for which `keep(name)` holds.
+    fn from_resolved_filtered(
+        params: &VisualParams,
+        resolved: &ResolvedParams,
+        keep: impl Fn(&str) -> bool,
+    ) -> Self {
         let mut by_name = HashMap::new();
         for param in params.all() {
-            if matches!(param.effect, ParamEffect::Morph) {
+            if matches!(param.effect, ParamEffect::Morph) && keep(&param.name) {
                 let weight = resolved.effective_weight(param);
                 if is_significant(weight) {
                     by_name.insert(param.name.clone(), weight);
@@ -390,5 +454,62 @@ mod tests {
         let resolved = MorphWeights::from_appearance(&params, &[0, 0, 255, 255, 255]);
         assert!(resolved.weight("Male_Skeleton").abs() < f32::EPSILON);
         Ok(())
+    }
+
+    /// A param table with one per-frame runtime morph (`Blink_Left`, id 58) and
+    /// one ordinary shape morph (`Plain`, id 1), both non-transmitted so
+    /// `from_appearance(&[])` resolves each to its `value_default` of 1.0.
+    const SPLIT_LAD: &str = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <mesh type="headMesh" lod="0" file_name="avatar_head.llm">
+    <param id="1" group="1" name="Plain" value_min="0" value_max="1" value_default="1">
+      <param_morph/>
+    </param>
+    <param id="58" group="1" name="Blink_Left" value_min="0" value_max="1" value_default="1">
+      <param_morph/>
+    </param>
+  </mesh>
+</linden_avatar>"#;
+
+    #[test]
+    fn static_bake_excludes_runtime_params() -> Result<(), TestError> {
+        let params = crate::params::VisualParams::from_xml(SPLIT_LAD)?;
+        let resolved = crate::resolve::ResolvedParams::from_appearance(&params, &[]);
+        let baked = MorphWeights::from_resolved_static(&params, &resolved);
+        // The ordinary shape morph is baked; the runtime blink morph is not.
+        assert!(baked.weight("Plain") > 0.5);
+        assert!(baked.weight("Blink_Left").abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_weights_keep_only_runtime_params() -> Result<(), TestError> {
+        let params = crate::params::VisualParams::from_xml(SPLIT_LAD)?;
+        let resolved = crate::resolve::ResolvedParams::from_appearance(&params, &[]);
+        let runtime = MorphWeights::from_resolved_runtime(&params, &resolved);
+        // Only the runtime blink morph is present; the shape morph is not.
+        assert!(runtime.weight("Blink_Left") > 0.5);
+        assert!(runtime.weight("Plain").abs() < f32::EPSILON);
+        Ok(())
+    }
+
+    #[test]
+    fn static_and_runtime_partition_the_full_bake() -> Result<(), TestError> {
+        let params = crate::params::VisualParams::from_xml(SPLIT_LAD)?;
+        let resolved = crate::resolve::ResolvedParams::from_appearance(&params, &[]);
+        let full = MorphWeights::from_resolved(&params, &resolved);
+        let baked = MorphWeights::from_resolved_static(&params, &resolved);
+        let runtime = MorphWeights::from_resolved_runtime(&params, &resolved);
+        // The static and runtime sets are disjoint and together cover the full
+        // set, so no morph is dropped or double-counted by the split.
+        assert_eq!(full.len(), baked.len() + runtime.len());
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_param_membership() {
+        assert!(super::is_runtime_morph_param("Blink_Left"));
+        assert!(super::is_runtime_morph_param("Blink_Right"));
+        assert!(!super::is_runtime_morph_param("Plain"));
     }
 }

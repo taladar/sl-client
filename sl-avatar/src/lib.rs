@@ -48,7 +48,9 @@ pub use basemesh::{
     VertexSkinWeight,
 };
 pub use masks::{MaskTexture, MorphMask, MorphMasks, PartMorphMask};
-pub use morph::{MorphWeights, MorphedMesh};
+pub use morph::{
+    MorphWeights, MorphedMesh, NORMAL_SOFTEN_FACTOR, RUNTIME_MORPH_PARAMS, is_runtime_morph_param,
+};
 pub use params::{
     AppearanceValues, BoneOffset, DrivenParam, ParamEffect, ParamError, ParamGroup, ParamSex,
     ParamValue, VisualParam, VisualParams,

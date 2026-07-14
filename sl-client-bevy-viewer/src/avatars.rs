@@ -36,16 +36,18 @@ use std::collections::{HashMap, HashSet};
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
+use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
     CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES, MaskTexture,
-    MeshSkin, MorphWeights, Object, PartMorphMask, RegionHandle, ResolvedParams, ScopedObjectId,
-    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
-    Uuid, avatar_texture, composite_region, decode_texture_entry, joint_position_overrides, pcode,
-    to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
+    MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
+    ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, TextureEntry, TextureKey, Uuid, avatar_texture, composite_region,
+    decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image,
+    to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -2423,8 +2425,9 @@ pub(crate) fn apply_avatar_appearance(
     manager: Res<TextureManager>,
     mut state: ResMut<AvatarState>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
-    mut parts: Query<(&AvatarBodyPart, &mut Mesh3d)>,
+    mut parts: Query<(Entity, &AvatarBodyPart, &mut Mesh3d)>,
     mut joints: Query<(&AvatarJoint, &mut Transform)>,
     // The rigged body roots, re-planted when their shoe lift changes (R17);
     // disjoint from `joints` (never an `AvatarJoint`) and from the sphere anchors.
@@ -2500,6 +2503,10 @@ pub(crate) fn apply_avatar_appearance(
     // deformed joint transforms (both share one `ResolvedParams`).
     let log_geometry = std::env::var_os("SL_VIEWER_LOG_AVATAR_GEOMETRY").is_some();
     let mut morph_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
+    // The rest weights of the per-frame runtime morph params (P31.12a), kept
+    // apart from the baked shape so a part's render-time morph targets start at
+    // the avatar's own resolved values rather than zero.
+    let mut runtime_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
     // The rest deformed joint **world** matrices per avatar, kept only for the
@@ -2508,9 +2515,15 @@ pub(crate) fn apply_avatar_appearance(
     for &agent in &state.appearance_dirty {
         if let Some(bytes) = state.appearances.get(&agent) {
             let resolved = ResolvedParams::from_appearance(library.params(), bytes);
+            // Bake every shape morph except the per-frame runtime params, which
+            // the render-time morph pipeline (P31.12a) drives instead.
             morph_weights.insert(
                 agent,
-                MorphWeights::from_resolved(library.params(), &resolved),
+                MorphWeights::from_resolved_static(library.params(), &resolved),
+            );
+            runtime_weights.insert(
+                agent,
+                MorphWeights::from_resolved_runtime(library.params(), &resolved),
             );
             let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
             // Fold in the worn rigged meshes' joint position overrides (R1) so a
@@ -2556,7 +2569,7 @@ pub(crate) fn apply_avatar_appearance(
     // Rebuild the mesh of every part belonging to a resolved avatar, masking its
     // clothing morphs by the region's decoded bake where one is available (P14.5).
     let mut morphed_parts = 0_usize;
-    for (part, mut mesh) in &mut parts {
+    for (entity, part, mut mesh) in &mut parts {
         if let Some(weights) = morph_weights.get(&part.agent)
             && let Some(loaded) = library.parts().get(part.part)
         {
@@ -2584,7 +2597,20 @@ pub(crate) fn apply_avatar_appearance(
                     library.skeleton(),
                 );
             }
-            *mesh = Mesh3d(meshes.add(to_bevy_morphed_mesh(&loaded.mesh, &morphed)));
+            let mut bevy_mesh = to_bevy_morphed_mesh(&loaded.mesh, &morphed);
+            // Layer the per-frame runtime morphs this part carries onto the baked
+            // geometry as Bevy native morph targets (P31.12a), and give the part
+            // a `MeshMorphWeights` seeded at each param's resolved rest weight so
+            // an un-driven avatar renders identically while a driver can still
+            // animate blink / physics without re-baking the body.
+            attach_runtime_morphs(
+                &mut commands,
+                entity,
+                &mut bevy_mesh,
+                &loaded.mesh,
+                runtime_weights.get(&part.agent),
+            );
+            *mesh = Mesh3d(meshes.add(bevy_mesh));
             morphed_parts = morphed_parts.saturating_add(1);
         }
     }
@@ -2605,6 +2631,121 @@ pub(crate) fn apply_avatar_appearance(
         );
     }
     state.appearance_dirty.clear();
+}
+
+/// Per-frame overrides for avatar runtime morph params (P31.12a): the eye-blink
+/// ([[viewer-p31-12b]]) and body-physics ([[viewer-p34-1]]) drivers write a named
+/// param's target weight here, keyed by avatar, and [`apply_avatar_runtime_morphs`]
+/// folds each into the affected parts' `MeshMorphWeights` every frame. A param
+/// with no entry stays at its appearance-resolved rest weight.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct AvatarRuntimeMorphs {
+    /// Per avatar, the current override weight of each runtime param it drives.
+    by_agent: HashMap<AgentKey, HashMap<String, f32>>,
+}
+
+impl AvatarRuntimeMorphs {
+    /// Set the per-frame weight of one runtime morph `param` on `agent` (a
+    /// driver calls this every frame it wants the param off its rest value).
+    #[expect(
+        dead_code,
+        reason = "used by the runtime-morph drivers (P31.12b / P34)"
+    )]
+    pub(crate) fn set(&mut self, agent: AgentKey, param: &str, weight: f32) {
+        self.by_agent
+            .entry(agent)
+            .or_default()
+            .insert(param.to_owned(), weight);
+    }
+
+    /// Drop every override for `agent` (e.g. when its body despawns), letting any
+    /// still-present parts fall back to their rest weights.
+    #[expect(
+        dead_code,
+        reason = "used by the runtime-morph drivers (P31.12b / P34)"
+    )]
+    pub(crate) fn clear_agent(&mut self, agent: AgentKey) {
+        self.by_agent.remove(&agent);
+    }
+
+    /// The current override weight of `param` on `agent`, if a driver set one.
+    fn weight(&self, agent: AgentKey, param: &str) -> Option<f32> {
+        self.by_agent.get(&agent)?.get(param).copied()
+    }
+}
+
+/// The per-frame runtime morph params attached to one avatar base part
+/// (P31.12a), parallel to the part mesh's Bevy morph targets and its
+/// `MeshMorphWeights` weight slots.
+///
+/// Recorded when [`apply_avatar_appearance`] rebuilds a part that carries any
+/// runtime morph, so [`apply_avatar_runtime_morphs`] can map an avatar's named
+/// override weights onto the right weight index without touching the mesh asset.
+#[derive(Component, Debug, Clone)]
+pub(crate) struct RuntimeMorphParams {
+    /// Runtime morph-target names, in the mesh's morph-target (weight) order.
+    names: Vec<String>,
+    /// Each param's rest (appearance-resolved) weight — the value the per-frame
+    /// driver falls back to when it is not overriding that param.
+    rest: Vec<f32>,
+}
+
+/// Attach the per-frame runtime morph targets a base part carries to its rebuilt
+/// `bevy_mesh`, and (re)seed the part entity's `MeshMorphWeights` +
+/// [`RuntimeMorphParams`] at the avatar's resolved rest weights (P31.12a).
+///
+/// A part with none of the [`RUNTIME_MORPH_PARAMS`] gets no morph machinery. The
+/// rest weight of a target comes from the avatar's runtime [`MorphWeights`]
+/// (`0.0` for an un-driven param such as an open-eye blink), so the seeded mesh
+/// renders identically to the fully-baked body until a driver moves a weight.
+fn attach_runtime_morphs(
+    commands: &mut Commands,
+    entity: Entity,
+    bevy_mesh: &mut Mesh,
+    base: &BaseMesh,
+    runtime_weights: Option<&MorphWeights>,
+) {
+    let Some(targets) = to_bevy_runtime_morph_targets(base, RUNTIME_MORPH_PARAMS) else {
+        return;
+    };
+    let rest: Vec<f32> = targets
+        .names()
+        .iter()
+        .map(|name| runtime_weights.map_or(0.0, |weights| weights.weight(name)))
+        .collect();
+    let names = targets.names().to_vec();
+    targets.attach_to(bevy_mesh);
+    commands.entity(entity).insert((
+        MeshMorphWeights::Value {
+            weights: rest.clone(),
+        },
+        RuntimeMorphParams { names, rest },
+    ));
+}
+
+/// Fold each avatar's per-frame runtime morph overrides ([`AvatarRuntimeMorphs`])
+/// into its parts' `MeshMorphWeights` every frame (P31.12a).
+///
+/// For each part with runtime morphs, every weight slot is set to its driver
+/// override if one is present, else to its appearance-resolved rest weight — so
+/// a driver need only push the params it is currently animating and everything
+/// else holds the avatar's own shape.
+pub(crate) fn apply_avatar_runtime_morphs(
+    morphs: Res<AvatarRuntimeMorphs>,
+    mut parts: Query<(&AvatarBodyPart, &RuntimeMorphParams, &mut MeshMorphWeights)>,
+) {
+    for (part, params, mut weights) in &mut parts {
+        let MeshMorphWeights::Value { weights } = &mut *weights else {
+            continue;
+        };
+        for (index, name) in params.names.iter().enumerate() {
+            let rest = params.rest.get(index).copied().unwrap_or(0.0);
+            let value = morphs.weight(part.agent, name).unwrap_or(rest);
+            if let Some(slot) = weights.get_mut(index) {
+                *slot = value;
+            }
+        }
+    }
 }
 
 /// Env-gated (`SL_VIEWER_LOG_AVATAR_GEOMETRY`) diagnostic for localising a

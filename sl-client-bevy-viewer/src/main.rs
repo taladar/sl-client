@@ -73,12 +73,12 @@ use crate::animesh::{
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{
-    AvatarBakeMaterials, AvatarState, OwnLocalBake, annotate_avatar_distances,
+    AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, annotate_avatar_distances,
     apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
-    apply_avatar_part_visibility, apply_bom_face_materials, apply_own_local_bake,
-    apply_own_shape_from_wearables, assign_avatar_bake_materials, ingest_avatar_bakes,
-    log_avatar_interest_census, position_name_tags, setup_avatar_body, update_avatar_objects,
-    update_coarse_avatars,
+    apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
+    apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
+    ingest_avatar_bakes, log_avatar_interest_census, position_name_tags, setup_avatar_body,
+    update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -506,6 +506,7 @@ fn run_session(
     .init_resource::<LocalLights>()
     .init_resource::<ParticleSim>()
     .init_resource::<AvatarState>()
+    .init_resource::<AvatarRuntimeMorphs>()
     .init_resource::<look_at::LookAtTargets>()
     .init_resource::<look_at::LookAtMotion>()
     .init_resource::<AvatarControls>()
@@ -664,6 +665,10 @@ fn run_session(
             // into one tuple to stay within Bevy's per-tuple system limit.
             (
                 apply_avatar_appearance,
+                // Drive the per-frame runtime morph params (eye blink, body
+                // physics) into each part's `MeshMorphWeights` (P31.12a), after
+                // the appearance rebuild has (re)seeded those components.
+                apply_avatar_runtime_morphs.after(apply_avatar_appearance),
                 // Render our own avatar from its worn shape, not the server's echo
                 // of our own last publish (R12); after `apply_avatar_appearance`
                 // so it overrides a just-stored server appearance.

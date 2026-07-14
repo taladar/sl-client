@@ -226,9 +226,9 @@ pub use sl_tree::{GRASS_MAX_BLADES, GrassMesh, GrassSpecies, grass_geometry, gra
 pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BoneDeform,
     CollisionVolume, ColorOp, ColorRamp, Joint, MaskTexture, MorphMask, MorphMasks, MorphWeights,
-    MorphedMesh, ParamError, PartMorphMask, ResolvedParams, SkeletalDeformations, Skeleton,
-    SkeletonError, VisualParam, VisualParams, WearableAsset, WearableError, combine_layer_color,
-    global_color, global_color_params,
+    MorphedMesh, ParamError, PartMorphMask, RUNTIME_MORPH_PARAMS, ResolvedParams,
+    SkeletalDeformations, Skeleton, SkeletonError, VisualParam, VisualParams, WearableAsset,
+    WearableError, combine_layer_color, global_color, global_color_params, is_runtime_morph_param,
 };
 
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
@@ -242,8 +242,9 @@ pub use sl_bake::{
 pub use crate::animations::{SampledJoint, sample_motion};
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::avatars::{
-    AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, joint_position_overrides,
-    to_bevy_base_mesh, to_bevy_morphed_mesh,
+    AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, RuntimeMorphTargets,
+    joint_position_overrides, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    to_bevy_runtime_morph_targets,
 };
 #[cfg(feature = "bevy_pbr")]
 pub use crate::clouds::{CloudMaterial, CloudMaterialPlugin, CloudParams};

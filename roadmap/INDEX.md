@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 38 |
 | ready | 35 |
-| blocked | 6 |
+| blocked | 5 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 447 |
+| done | 448 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **538** |
@@ -117,8 +117,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-p31-12a`](ready/viewer-p31-12a-per-frame-visual-param-morph-pipeline.md)
-  — Per-frame visual-param morph pipeline
+- [`viewer-p31-12b`](ready/viewer-p31-12b-eye-blink-morph.md) — Eye-blink morph
+  (LLEyeMotion blink) (blocked by `viewer-p31-12a` (done))
 - [`viewer-p31-13`](ready/viewer-p31-13-hand-pose-morph-llhandmotion.md) —
   Hand-pose morph (LLHandMotion)
 - [`viewer-p31-14`](ready/viewer-p31-14-locomotion-ik-adjustments.md) —
@@ -192,15 +192,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (6)
+## blocked (5)
 
 ### viewer
 
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
-- [`viewer-p31-12b`](blocked/viewer-p31-12b-eye-blink-morph.md) — Eye-blink
-  morph (LLEyeMotion blink) (blocked by `viewer-p31-12a`)
 - [`viewer-p34-2`](blocked/viewer-p34-2-drive-them.md) — Drive them (blocked by
   `viewer-p34-1`)
 - [`viewer-p35-2`](blocked/viewer-p35-2-hud-rendering.md) — HUD rendering
@@ -233,7 +231,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (447)
+## done (448)
 
 ### protocol
 
@@ -479,6 +477,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Auto-stop flying on landing
 - [`viewer-p31-12`](done/viewer-p31-12-head-eye-look-at-tracking-llheadrotmotion-lleyemotion.md)
   — Head & eye look-at tracking (LLHeadRotMotion / LLEyeMotion)
+- [`viewer-p31-12a`](done/viewer-p31-12a-per-frame-visual-param-morph-pipeline.md)
+  — Per-frame visual-param morph pipeline
 - [`viewer-p31-16`](done/viewer-p31-16-auto-take-off-flying-on-ascend.md) —
   Auto-take-off flying on ascend while standing
 - [`viewer-p31-2`](done/viewer-p31-2-physical-objects.md) — Physical objects
