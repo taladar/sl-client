@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 63 |
+| ideas | 72 |
 | ready | 31 |
 | blocked | 4 |
 | in-progress | 0 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **568** |
+| **total** | **577** |
 
-## ideas (63)
+## ideas (72)
 
 ### viewer
 
@@ -29,8 +29,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (equirectangular) snapshot (blocked by `viewer-snapshot-tools`)
 - [`viewer-ambient-occlusion`](ideas/viewer-ambient-occlusion.md) — Screen-space
   ambient occlusion
+- [`viewer-antialiasing`](ideas/viewer-antialiasing.md) — Antialiasing &
+  image-sharpness knobs (FXAA / SMAA, CAS, anisotropic)
 - [`viewer-audio-backend`](ideas/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-avatar-impostors`](ideas/viewer-avatar-impostors.md) — Avatar
+  impostors & complexity limiting
 - [`viewer-avatar-radar`](ideas/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list) (blocked by `viewer-minimap`)
 - [`viewer-beacons`](ideas/viewer-beacons.md) — Tracking beacons (map-position
@@ -40,10 +44,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-debug-render-beacons`](ideas/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers) (blocked by
   `viewer-ui-framework`)
+- [`viewer-depth-of-field`](ideas/viewer-depth-of-field.md) — Depth of field
 - [`viewer-emoji-input`](ideas/viewer-emoji-input.md) — Colon-based emoji input
   (blocked by `viewer-ui-framework`, `viewer-social-panels`)
 - [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
   trigger UI (blocked by `viewer-ui-framework`, `viewer-ui-sound-effects`)
+- [`viewer-glow-bloom`](ideas/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ideas/viewer-hover-height.md) — Avatar hover-height
   setting (blocked by `viewer-ui-framework`)
 - [`viewer-hover-text`](ideas/viewer-hover-text.md) — Object hover text
@@ -98,6 +104,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   / split (blocked by `viewer-ui-framework`, `viewer-input-system`)
 - [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
   viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-pbr-terrain`](ideas/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-photo-hosting-upload`](ideas/viewer-photo-hosting-upload.md) — Share
   snapshots to external photo/hosting services (blocked by
   `viewer-snapshot-tools`)
@@ -119,11 +126,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-texture-editing`](ideas/viewer-prim-texture-editing.md) — Prim
   texture / material editing (blocked by `viewer-object-selection`,
   `viewer-ui-framework`)
+- [`viewer-projector-lights`](ideas/viewer-projector-lights.md) — Projector
+  lights (textured spotlights / gobos)
 - [`viewer-quick-preferences`](ideas/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-ui-framework`,
   `viewer-preferences-ui`)
+- [`viewer-realtime-mirrors`](ideas/viewer-realtime-mirrors.md) — Real-time
+  mirrors (hero probes)
 - [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
   option viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-render-type-toggles`](ideas/viewer-render-type-toggles.md) —
+  Render-type & render-feature toggles (hide object classes, wireframe)
+- [`viewer-screen-space-reflections`](ideas/viewer-screen-space-reflections.md)
+  — Screen-space reflections (SSR)
 - [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-external-workflow`](ideas/viewer-script-external-workflow.md)
