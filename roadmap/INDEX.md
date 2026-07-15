@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 62 |
+| ready | 61 |
 | blocked | 134 |
 | in-progress | 0 |
 | bugs | 7 |
-| done | 468 |
+| done | 469 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **677** |
 
-## ready (62)
+## ready (61)
 
 ### viewer
 
@@ -51,9 +51,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-lsl-diagnostics`](ready/viewer-lsl-diagnostics.md) — LSL diagnostics
-  — rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
-  (done))
 - [`viewer-lsl-differential-testing`](ready/viewer-lsl-differential-testing.md)
   — LSL differential testing — a tailslide diagnostics oracle (blocked by
   `viewer-lsl-semantic-pass` (done))
@@ -550,7 +547,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (468)
+## done (469)
 
 ### protocol
 
@@ -678,6 +675,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
+  rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
+  (done))
 - [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
   stream (sl-lsl)
 - [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —

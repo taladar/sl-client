@@ -39,16 +39,26 @@
 //!   `return` correctness, duplicate definitions, state reachability), held to a
 //!   deliberate no-false-positive bar so a save happens when the script is
 //!   right, not as a way of finding out.
+//! - [`render`] — **reader-facing diagnostic rendering** ([`render_diagnostic`],
+//!   [`render_grid_error`]): the semantic findings (and the grid's own compiler
+//!   errors) turned into `rustc`-grade output — a caret under the source line,
+//!   an edit-distance "did you mean…?" against the real library, and the grid's
+//!   own signature quoted back on a type error.
 
 pub mod ast;
 pub mod lexer;
 pub mod parser;
+pub mod render;
 pub mod semantics;
 pub mod syntax;
 pub mod token;
 
 pub use lexer::{SpannedToken, Tokens, lex, tokens};
 pub use parser::{Parse, ParseError, parse};
+pub use render::{
+    RenderStyle, closest, render_diagnostic, render_diagnostic_styled, render_diagnostics,
+    render_grid_error, render_parse_error,
+};
 pub use semantics::{Diagnostic, DiagnosticKind, Severity, analyze};
 pub use syntax::{
     LSL_SYNTAX_VERSION, LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax,

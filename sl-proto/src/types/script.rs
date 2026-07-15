@@ -716,6 +716,26 @@ impl ScriptCompileError {
             message: trimmed.to_owned(),
         }
     }
+
+    /// Renders this grid-side compiler error against the script `source` through
+    /// `sl-lsl`'s diagnostic machinery — the *same* renderer a locally-found
+    /// diagnostic uses — so a caret underlines the reported position over the
+    /// real source line instead of the bare `(line, col)` the simulator sent.
+    ///
+    /// When no position prefix was recognised ([`line`](Self::line) is `None`),
+    /// the caret points at the start of the source; the message still renders.
+    /// The result is a multi-line block suitable for a log or an editor's error
+    /// panel.
+    #[must_use]
+    pub fn render(&self, source: &str) -> String {
+        sl_lsl::render_grid_error(
+            source,
+            self.line.unwrap_or(1),
+            self.column,
+            sl_lsl::Severity::Error,
+            &self.message,
+        )
+    }
 }
 
 /// Parses a leading `(line, col)` position (e.g. `"(4, 20): message"`, as OpenSim
@@ -899,5 +919,25 @@ mod tests {
         assert_eq!(plain.column, None);
         assert_eq!(plain.message, "could not compile");
         assert_eq!(plain.raw, "  could not compile  ");
+    }
+
+    #[test]
+    fn script_compile_error_renders_against_source() {
+        // A grid error at line 3, column 5 renders through sl-lsl's renderer:
+        // the header, the `-->` locator, the real source line and a caret.
+        let source = "default\n{\n    bogus();\n}\n";
+        let error = ScriptCompileError::parse("(3, 5): ERROR: Syntax error");
+        let rendered = error.render(source);
+        assert!(rendered.contains("error: ERROR: Syntax error"));
+        assert!(rendered.contains("--> 3:5"));
+        assert!(rendered.contains("    bogus();"));
+        assert!(rendered.contains('^'));
+
+        // With no recognised position the message still renders (caret at the
+        // source start).
+        let positionless = ScriptCompileError::parse("could not compile");
+        let rendered = positionless.render(source);
+        assert!(rendered.contains("error: could not compile"));
+        assert!(rendered.contains("--> 1:1"));
     }
 }

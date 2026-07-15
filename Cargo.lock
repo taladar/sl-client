@@ -6347,6 +6347,7 @@ version = "0.1.0"
 dependencies = [
  "md5",
  "pretty_assertions",
+ "sl-lsl",
  "sl-types",
  "sl-wire",
  "thiserror 2.0.18",

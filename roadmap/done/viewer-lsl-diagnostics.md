@@ -2,7 +2,7 @@
 id: viewer-lsl-diagnostics
 title: LSL diagnostics — rustc-grade spans and did-you-mean
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-lsl-parser
 blocked_by: [viewer-lsl-semantic-pass]
 ---

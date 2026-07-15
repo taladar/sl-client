@@ -135,6 +135,30 @@ fn main() {
 }
 ```
 
+## Rendering diagnostics
+
+`render_diagnostic(source, &diag, &syntax)` turns a `Diagnostic` into
+`rustc`-grade output — the source line with a caret underlining the offending
+bytes, a `--> line:col` locator, and, where the library table allows it, a
+**"did you mean…?"** suggestion (edit distance over the grid's real symbol
+names) or the grid's own signature quoted back on a type error:
+
+```text
+error: call to undefined function `llSy`
+ --> 5:9
+  |
+5 |         llSy(0, "hi");
+  |         ^^^^ did you mean `llSay`?
+```
+
+The *same* renderer serves grid-side errors: `render_grid_error` (and the
+`ScriptCompileError::render` convenience in `sl-proto`) resolves the simulator's
+bare `(line, col)` to a byte span and renders it through the identical caret
+plumbing, so a compile error only the grid can produce arrives with a caret and
+its source line — indistinguishable from a locally-found one. Colour is opt-in
+(`RenderStyle::color`) and off by default, so the output is safe to log and
+diff.
+
 ## Downstream
 
 This one token stream is shared by both the highlighter
