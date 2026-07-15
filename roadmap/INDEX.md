@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 61 |
-| blocked | 136 |
+| ready | 62 |
+| blocked | 134 |
 | in-progress | 0 |
 | bugs | 7 |
-| done | 467 |
+| done | 468 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **677** |
 
-## ready (61)
+## ready (62)
 
 ### viewer
 
@@ -51,11 +51,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-lsl-diagnostics`](ready/viewer-lsl-diagnostics.md) — LSL diagnostics
+  — rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
+  (done))
+- [`viewer-lsl-differential-testing`](ready/viewer-lsl-differential-testing.md)
+  — LSL differential testing — a tailslide diagnostics oracle (blocked by
+  `viewer-lsl-semantic-pass` (done))
 - [`viewer-lsl-lsp-server`](ready/viewer-lsl-lsp-server.md) — LSL language
   server — lsp-server, document sync, symbols (blocked by
-  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
-- [`viewer-lsl-semantic-pass`](ready/viewer-lsl-semantic-pass.md) — LSL semantic
-  pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
@@ -152,7 +155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (136)
+## blocked (134)
 
 ### viewer
 
@@ -278,12 +281,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory search / filter (blocked by `viewer-inventory-folder-tree`)
 - [`viewer-login-screen`](blocked/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-lsl-diagnostics`](blocked/viewer-lsl-diagnostics.md) — LSL
-  diagnostics — rustc-grade spans and did-you-mean (blocked by
-  `viewer-lsl-semantic-pass`)
-- [`viewer-lsl-differential-testing`](blocked/viewer-lsl-differential-testing.md)
-  — LSL differential testing — a tailslide diagnostics oracle (blocked by
-  `viewer-lsl-semantic-pass`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -295,7 +292,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-text-foundation`, `viewer-ui-text-input-widget`)
 - [`viewer-lsl-lsp-diagnostics-nav`](blocked/viewer-lsl-lsp-diagnostics-nav.md)
   — LSL language server — diagnostics, navigation, completion (blocked by
-  `viewer-lsl-lsp-server`, `viewer-lsl-semantic-pass`)
+  `viewer-lsl-lsp-server`, `viewer-lsl-semantic-pass` (done))
 - [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by
   `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
@@ -553,7 +550,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (467)
+## done (468)
 
 ### protocol
 
@@ -686,6 +683,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —
   error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
   (done))
+- [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
+  pass — types, arity, undefined symbols, reachability (blocked by
+  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

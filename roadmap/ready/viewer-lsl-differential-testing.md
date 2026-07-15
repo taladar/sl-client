@@ -2,7 +2,7 @@
 id: viewer-lsl-differential-testing
 title: LSL differential testing — a tailslide diagnostics oracle
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-lsl-parser
 blocked_by: [viewer-lsl-semantic-pass]
 ---

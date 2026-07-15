@@ -2,7 +2,7 @@
 id: viewer-lsl-semantic-pass
 title: LSL semantic pass — types, arity, undefined symbols, reachability
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-lsl-parser
 blocked_by: [viewer-lsl-parser-tree, protocol-lsl-syntax]
 ---

@@ -1,9 +1,10 @@
 # sl-lsl
 
 Pure **Linden Scripting Language** (LSL) tooling for Second Life / OpenSim
-clients. Two pieces so far: a [`logos`](https://crates.io/crates/logos)
-**lexer** that turns LSL source into a token stream, and an **error-tolerant
-recursive-descent parser** that turns that stream into a syntax tree.
+clients. Three pieces so far: a [`logos`](https://crates.io/crates/logos)
+**lexer** that turns LSL source into a token stream, an **error-tolerant
+recursive-descent parser** that turns that stream into a syntax tree, and a
+**semantic pass** that checks the tree against the grid's library.
 
 Like its siblings `sl-prim` (prim tessellation), `sl-anim` (keyframe motion) and
 `sl-avatar` (skeleton / base body) the crate is deliberately **Bevy-free and
@@ -97,11 +98,49 @@ bound to.
 
 **Luau/SLua is a separate language** — this crate is scoped to LSL.
 
+## The semantic pass
+
+`analyze(&script, &syntax)` walks the parse tree against the grid library
+(`LslSyntax`, decoded from the `LSLSyntax` capability) and returns a list of
+`Diagnostic`s: **undefined symbols** (calls, variables, states, labels,
+events), **call arity and types** at each call site, **`return` correctness**
+(a value where none is wanted, a missing value, a function that can fall off its
+end), **duplicate definitions**, and **state reachability**.
+
+This earns its keep because **SL has no compile-without-save**: compilation
+happens as part of the upload, so every "did I typo that function name?" is a
+network round-trip that *mutates the world* (the in-world script is replaced and
+its state resets). Local checking is the only way to type-check without touching
+the grid.
+
+The bar is deliberately high — **a false error on code the grid would compile is
+worse than no error at all** — so the pass is conservative: symbol checks are
+gated on a non-empty library table (an unfetched table stays silent rather than
+flagging every `ll*` call), type inference returns "unknown" and *skips* the
+check whenever it cannot pin a type down, resolution is order-insensitive (so
+LSL's single-pass rule can only cause a missed error, never a false one), and
+fall-off-the-end is a warning, not an error. Meeting that bar is *proven* by the
+differential-testing oracle (`viewer-lsl-differential-testing`) that diffs this
+pass against `tailslide`.
+
+```rust
+use sl_lsl::syntax::LslSyntax;
+use sl_lsl::{analyze, parse};
+
+fn main() {
+    let script = parse("default { state_entry() { llSay(0, \"hi\"); } }").script;
+    // An empty table (grid data not yet fetched) suppresses symbol checks.
+    let diagnostics = analyze(&script, &LslSyntax::default());
+    assert!(diagnostics.is_empty());
+}
+```
+
 ## Downstream
 
 This one token stream is shared by both the highlighter
 (`viewer-lsl-editor-highlight`, which colours words by a lookup against the
 grid keyword table) and the parser (`viewer-lsl-parser-tree`). Do not grow a
-second lexer. The parse tree in turn feeds the semantic pass
-(`viewer-lsl-semantic-pass`) and the language server
-(`viewer-lsl-lsp-server`).
+second lexer. The parse tree feeds the semantic pass
+(`viewer-lsl-semantic-pass`), whose structured `Diagnostic`s in turn feed the
+reader-facing rendering (`viewer-lsl-diagnostics`) and the language server
+(`viewer-lsl-lsp-server`, `viewer-lsl-lsp-diagnostics-nav`).

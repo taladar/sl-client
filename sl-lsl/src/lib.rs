@@ -34,15 +34,22 @@
 //!   grid-served functions, constants, events and keywords the lexer refuses to
 //!   bake in, decoded (by `sl-wire`) from the `LSLSyntax` capability and read
 //!   here for highlighting, tooltips and the semantic pass.
+//! - [`semantics`] — the **semantic pass** ([`analyze`]): the checks LSL's type
+//!   rules make decidable locally (undefined symbols, call arity and types,
+//!   `return` correctness, duplicate definitions, state reachability), held to a
+//!   deliberate no-false-positive bar so a save happens when the script is
+//!   right, not as a way of finding out.
 
 pub mod ast;
 pub mod lexer;
 pub mod parser;
+pub mod semantics;
 pub mod syntax;
 pub mod token;
 
 pub use lexer::{SpannedToken, Tokens, lex, tokens};
 pub use parser::{Parse, ParseError, parse};
+pub use semantics::{Diagnostic, DiagnosticKind, Severity, analyze};
 pub use syntax::{
     LSL_SYNTAX_VERSION, LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax,
     SymbolKind,
