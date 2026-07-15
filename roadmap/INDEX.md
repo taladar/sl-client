@@ -11,8 +11,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 59 |
-| ready | 30 |
+| ideas | 58 |
+| ready | 31 |
 | blocked | 4 |
 | in-progress | 0 |
 | bugs | 6 |
@@ -21,7 +21,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | wont-do | 1 |
 | **total** | **563** |
 
-## ideas (59)
+## ideas (58)
 
 ### viewer
 
@@ -84,8 +84,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-notecard-editor`](ideas/viewer-notecard-editor.md) — Notecard viewer
   & editor (rich text with embedded items) (blocked by `viewer-ui-framework`,
   `viewer-inventory-ui`, `viewer-notecard-format`)
-- [`viewer-notecard-format`](ideas/viewer-notecard-format.md) — Notecard format
-  — a pure crate (sl-notecard)
 - [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
   Notifications, toasts & dialogs (blocked by `viewer-ui-framework`)
 - [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
@@ -163,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
   by `viewer-ui-framework`)
 
-## ready (30)
+## ready (31)
 
 ### protocol
 
@@ -172,6 +170,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-notecard-format`](ready/viewer-notecard-format.md) — Notecard format
+  — a pure crate (sl-notecard)
 - [`viewer-p34-4`](ready/viewer-p34-4-collision-volume-scale-inheritance.md) —
   Collision-volume scale inheritance from the skeletal params
 - [`viewer-p35-1`](ready/viewer-p35-1-detect-hud.md) — Detect HUD
