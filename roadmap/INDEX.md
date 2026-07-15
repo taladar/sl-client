@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 61 |
+| ready | 60 |
 | blocked | 138 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 465 |
+| done | 466 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **676** |
 
-## ready (61)
+## ready (60)
 
 ### protocol
 
@@ -56,9 +56,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-lsl-parser-tree`](ready/viewer-lsl-parser-tree.md) — LSL parser —
-  error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
-  (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -300,10 +297,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-lsp-server`, `viewer-lsl-semantic-pass`)
 - [`viewer-lsl-lsp-server`](blocked/viewer-lsl-lsp-server.md) — LSL language
   server — lsp-server, document sync, symbols (blocked by
-  `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
+  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax`)
 - [`viewer-lsl-semantic-pass`](blocked/viewer-lsl-semantic-pass.md) — LSL
   semantic pass — types, arity, undefined symbols, reachability (blocked by
-  `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
+  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax`)
 - [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by
   `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
@@ -555,7 +552,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (465)
+## done (466)
 
 ### protocol
 
@@ -683,6 +680,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
   stream (sl-lsl)
+- [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —
+  error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
+  (done))
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

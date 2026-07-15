@@ -1,8 +1,9 @@
 # sl-lsl
 
 Pure **Linden Scripting Language** (LSL) tooling for Second Life / OpenSim
-clients. The first piece is a [`logos`](https://crates.io/crates/logos)
-**lexer** that turns LSL source into a token stream.
+clients. Two pieces so far: a [`logos`](https://crates.io/crates/logos)
+**lexer** that turns LSL source into a token stream, and an **error-tolerant
+recursive-descent parser** that turns that stream into a syntax tree.
 
 Like its siblings `sl-prim` (prim tessellation), `sl-anim` (keyframe motion) and
 `sl-avatar` (skeleton / base body) the crate is deliberately **Bevy-free and
@@ -64,9 +65,43 @@ Each `SpannedToken` carries the token kind and its byte range in the source
 (`token.text(source)` slices out the matched text). Whitespace is dropped;
 comments are kept.
 
+## The parser
+
+`parse(source)` turns the token stream into an owned, fully-spanned syntax tree
+(`ast::Script`). It is a hand-written **recursive-descent** parser with a Pratt
+loop for expression precedence, and — like the lexer — it is **error-tolerant**:
+it never aborts, dropping `Expr::Error` / `Stmt::Error` placeholders where the
+input does not parse and returning the recovered errors alongside the tree, so a
+half-typed statement does not discard the rest of the file.
+
+```rust
+use sl_lsl::parse;
+
+fn main() {
+    let result = parse("default { state_entry() { llSay(0, \"hi\"); } }");
+    assert!(!result.has_errors());
+    assert_eq!(result.script.states.len(), 1);
+}
+```
+
+Like the lexer, the parser holds the small set of LSL **keywords** but *not* the
+LSL library — a called name, an event name or a constant stays a plain
+identifier for the semantic pass to resolve against the grid's symbol table
+(`protocol-lsl-syntax`, the `LSLSyntax` capability). LSL's operator precedence
+is transcribed from Linden Lab's own grammar, including the quirk that `&&` and
+`||` share one left-associative level, and the `<`/`>` ambiguity between the
+angle brackets of a vector/rotation constructor and the relational/shift
+operators. The reference for real LSL grammar is Linden Lab's MIT-licensed
+`secondlife/tailslide` (and the community `lslint` it descends from) — read, not
+bound to.
+
+**Luau/SLua is a separate language** — this crate is scoped to LSL.
+
 ## Downstream
 
 This one token stream is shared by both the highlighter
 (`viewer-lsl-editor-highlight`, which colours words by a lookup against the
 grid keyword table) and the parser (`viewer-lsl-parser-tree`). Do not grow a
-second lexer.
+second lexer. The parse tree in turn feeds the semantic pass
+(`viewer-lsl-semantic-pass`) and the language server
+(`viewer-lsl-lsp-server`).

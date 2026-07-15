@@ -26,9 +26,16 @@
 //! - [`lexer`] — the driver ([`lex`] / [`tokens`]) that pairs each token with
 //!   its byte span and folds lexing errors into [`Token::Error`], so callers
 //!   see one uniform, error-tolerant stream.
+//! - [`ast`] — the owned, fully-spanned syntax tree the parser builds.
+//! - [`parser`] — the error-tolerant recursive-descent [`parse`] that turns the
+//!   token stream into an [`ast::Script`], recording (never aborting on) syntax
+//!   errors so a half-typed statement does not discard the rest of the file.
 
+pub mod ast;
 pub mod lexer;
+pub mod parser;
 pub mod token;
 
 pub use lexer::{SpannedToken, Tokens, lex, tokens};
+pub use parser::{Parse, ParseError, parse};
 pub use token::Token;
