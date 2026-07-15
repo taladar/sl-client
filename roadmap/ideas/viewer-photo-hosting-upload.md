@@ -4,13 +4,13 @@ title: Share snapshots to external photo/hosting services
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-snapshot-tools]
+blocked_by: [viewer-snapshot-floater]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
 Share an in-world snapshot straight to the sites SL photographers use, from the
-snapshot floater ([[viewer-snapshot-tools]]). The image bytes are trivial
+snapshot floater ([[viewer-snapshot-floater]]). The image bytes are trivial
 (`reqwest` multipart over the viewer's existing async HTTP); **auth is the
 feature**, and it differs per service.
 
@@ -89,5 +89,6 @@ All the recommended crates are dual MIT/Apache (verify before relying).
 Reference (Firestorm, read-only): `llflickrconnect`, `lltwitterconnect` (dead,
 as a caution), `llfloatersocial` / the social share panel.
 
-Deps: [[viewer-snapshot-tools]] (the snapshot it shares, and the floater's share
+Deps: [[viewer-snapshot-floater]] (the snapshot it shares, and the floater's
+share
 panel).

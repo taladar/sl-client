@@ -58,4 +58,4 @@ where the probe's irradiance *is* the ambient and no flat fill is added — whic
 is what `suppress_global_ambient` already arranges. The reference's
 **automatic** exposure (its luminance-driven `exposureMap` scaling
 `RenderExposure`) is not ported — see
-[viewer-tonemap-auto-exposure](../ideas/viewer-tonemap-auto-exposure.md).
+[viewer-tonemap-auto-exposure](../ready/viewer-tonemap-auto-exposure.md).

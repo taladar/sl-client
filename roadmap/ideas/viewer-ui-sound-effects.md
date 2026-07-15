@@ -21,7 +21,7 @@ Two concrete hooks already waiting:
 - **The typing sound.** `typing.rs` says it in as many words: P31.9 shipped the
   typing *animation* and deliberately left the *sound* out because the viewer
   has no sound playback. This closes that gap.
-- **Gesture sound steps.** The gesture runtime in [[viewer-gestures-ui]]
+- **Gesture sound steps.** The gesture runtime in [[viewer-gesture-runtime]]
   sequences animation + sound + chat + wait steps; its sound steps play through
   this bus.
 

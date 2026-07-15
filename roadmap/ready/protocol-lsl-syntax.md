@@ -51,8 +51,8 @@ Scope:
   feature disabled): a shipped default list, or simply no identifier
   highlighting.
 
-Consumed by [[viewer-lsl-script-editor]] (highlighting, tooltips, the insert
-list) and [[viewer-lsl-language-server]] (completion and hover for external
+Consumed by [[viewer-lsl-editor-widget]] (highlighting, tooltips, the insert
+list) and [[viewer-lsl-lsp-server]] (completion and hover for external
 editors).
 
 Reference (Firestorm, read-only): `llsyntaxid.cpp` (the

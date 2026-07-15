@@ -31,7 +31,8 @@ clip is not late, and collision sounds (the P31 `avian3d` contacts are already
 there to hang them on).
 
 Two policies worth deciding early: **parcel-local sound** — the `SOUND_LOCAL`
-bit in the parcel overlay grid that [[viewer-parcel-borders]] decodes, which
+bit in the parcel overlay grid that [[viewer-parcel-overlay-decode]] decodes,
+which
 clamps a parcel's audio to its boundary — and the source budget (SL scenes can
 easily ask for more simultaneous sounds than any device wants; the reference
 caps and evicts by priority and distance). Muting (per-object, per-owner, the
