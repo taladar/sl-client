@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 12 |
 | ready | 60 |
-| blocked | 127 |
+| blocked | 126 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 464 |
+| done | 465 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **675** |
@@ -91,8 +91,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-lsl-lexer`](ready/viewer-lsl-lexer.md) — LSL lexer — the logos token
-  stream (sl-lsl)
+- [`viewer-lsl-parser-tree`](ready/viewer-lsl-parser-tree.md) — LSL parser —
+  error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
+  (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -188,7 +189,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (127)
+## blocked (126)
 
 ### viewer
 
@@ -315,7 +316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-semantic-pass`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
-  `viewer-lsl-editor-widget`, `viewer-lsl-lexer`)
+  `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
 - [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
   — LSL editor save — upload/compile round-trip and error list (blocked by
   `viewer-lsl-editor-widget`)
@@ -328,8 +329,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-lsp-server`](blocked/viewer-lsl-lsp-server.md) — LSL language
   server — lsp-server, document sync, symbols (blocked by
   `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
-- [`viewer-lsl-parser-tree`](blocked/viewer-lsl-parser-tree.md) — LSL parser —
-  error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`)
 - [`viewer-lsl-semantic-pass`](blocked/viewer-lsl-semantic-pass.md) — LSL
   semantic pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
@@ -559,7 +558,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (464)
+## done (465)
 
 ### protocol
 
@@ -685,6 +684,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
+  stream (sl-lsl)
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

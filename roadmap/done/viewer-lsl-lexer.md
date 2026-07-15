@@ -2,7 +2,7 @@
 id: viewer-lsl-lexer
 title: LSL lexer — the logos token stream (sl-lsl)
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-lsl-parser
 ---
 

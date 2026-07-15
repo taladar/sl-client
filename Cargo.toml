@@ -11,6 +11,7 @@ members = [
     "sl-conformance",
     "sl-j2c-encode",
     "sl-llsd",
+    "sl-lsl",
     "sl-material",
     "sl-mesh",
     "sl-msg-template",

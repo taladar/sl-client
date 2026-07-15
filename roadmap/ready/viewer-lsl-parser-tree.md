@@ -2,7 +2,7 @@
 id: viewer-lsl-parser-tree
 title: LSL parser — error-tolerant recursive-descent AST (sl-lsl)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-lsl-parser
 blocked_by: [viewer-lsl-lexer]
 ---
