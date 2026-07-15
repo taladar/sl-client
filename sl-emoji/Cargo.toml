@@ -1,0 +1,25 @@
+[package]
+name = "sl-emoji"
+description = "Emoji dataset and lookup for a Second Life / OpenSim viewer: short-code ↔ glyph lookup plus a grouped, searchable list, wrapping the gemoji / Unicode-CLDR data behind a small viewer-facing API"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "viewer", "emoji", "unicode"]
+categories = ["text-processing", "game-development"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+emojis = { version = "0.8.2" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

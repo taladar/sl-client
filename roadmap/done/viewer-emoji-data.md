@@ -2,7 +2,7 @@
 id: viewer-emoji-data
 title: Emoji dataset & lookup (adopt existing data)
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-emoji-input
 ---
 

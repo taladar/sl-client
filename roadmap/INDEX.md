@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 58 |
+| ready | 57 |
 | blocked | 133 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 474 |
+| done | 475 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **679** |
 
-## ready (58)
+## ready (57)
 
 ### viewer
 
@@ -44,8 +44,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
-- [`viewer-emoji-data`](ready/viewer-emoji-data.md) — Emoji dataset & lookup
-  (adopt existing data)
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
@@ -191,10 +189,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory / teleport offers + friendship / group invites (blocked by
   `viewer-ui-notification-host`)
 - [`viewer-emoji-colon-autocomplete`](blocked/viewer-emoji-colon-autocomplete.md)
-  — Colon-based emoji autocomplete (blocked by `viewer-emoji-data`,
+  — Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
   `viewer-ui-text-input-widget`, `viewer-chat-input-bar`)
 - [`viewer-emoji-picker-floater`](blocked/viewer-emoji-picker-floater.md) —
-  Emoji picker floater (blocked by `viewer-emoji-data`,
+  Emoji picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic`)
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
@@ -539,7 +537,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (474)
+## done (475)
 
 ### protocol
 
@@ -667,6 +665,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
+  (adopt existing data)
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))

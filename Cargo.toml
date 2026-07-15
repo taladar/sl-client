@@ -9,6 +9,7 @@ members = [
     "sl-client-bevy-viewer",
     "sl-client-tokio",
     "sl-conformance",
+    "sl-emoji",
     "sl-j2c-encode",
     "sl-llsd",
     "sl-lsl",
