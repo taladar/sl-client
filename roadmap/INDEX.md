@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 58 |
+| ideas | 63 |
 | ready | 31 |
 | blocked | 4 |
 | in-progress | 0 |
@@ -19,12 +19,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 458 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **563** |
+| **total** | **568** |
 
-## ideas (58)
+## ideas (63)
 
 ### viewer
 
+- [`viewer-360-snapshot`](ideas/viewer-360-snapshot.md) — 360-degree
+  (equirectangular) snapshot (blocked by `viewer-snapshot-tools`)
 - [`viewer-ambient-occlusion`](ideas/viewer-ambient-occlusion.md) — Screen-space
   ambient occlusion
 - [`viewer-audio-backend`](ideas/viewer-audio-backend.md) — Audio backend —
@@ -96,6 +98,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   / split (blocked by `viewer-ui-framework`, `viewer-input-system`)
 - [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
   viewing & editing (blocked by `viewer-ui-framework`)
+- [`viewer-photo-hosting-upload`](ideas/viewer-photo-hosting-upload.md) — Share
+  snapshots to external photo/hosting services (blocked by
+  `viewer-snapshot-tools`)
+- [`viewer-phototools`](ideas/viewer-phototools.md) — Phototools — a
+  photographer's environment & graphics control panel (blocked by
+  `viewer-ui-framework`, `viewer-preferences-ui`)
 - [`viewer-preferences-ui`](ideas/viewer-preferences-ui.md) — Preferences /
   settings UI (blocked by `viewer-ui-framework`)
 - [`viewer-prim-creation`](ideas/viewer-prim-creation.md) — Prim creation
@@ -124,6 +132,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-selection`, `viewer-camera-system`)
 - [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
   (blocked by `viewer-teleport-flow`, `viewer-ui-framework`)
+- [`viewer-snapshot-to-inventory`](ideas/viewer-snapshot-to-inventory.md) — Save
+  a snapshot to inventory (as a texture) (blocked by `viewer-snapshot-tools`,
+  `viewer-image-upload`)
 - [`viewer-snapshot-tools`](ideas/viewer-snapshot-tools.md) — Snapshot / photo
   tools (blocked by `viewer-ui-framework`, `viewer-image-upload`)
 - [`viewer-social-panels`](ideas/viewer-social-panels.md) — People / friends /
@@ -153,6 +164,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](ideas/viewer-video-playback.md) — Video playback
   backend (a second media engine, not the browser) (blocked by
   `viewer-audio-backend`)
+- [`viewer-video-recording`](ideas/viewer-video-recording.md) — In-viewer video
+  recording (machinima capture) (blocked by `viewer-ui-framework`,
+  `viewer-video-playback`)
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`, `viewer-audio-backend`)
 - [`viewer-volume-panel`](ideas/viewer-volume-panel.md) — Volume panel (master +
