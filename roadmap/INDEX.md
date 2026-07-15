@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 71 |
-| ready | 33 |
+| ready | 32 |
 | blocked | 41 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 463 |
+| done | 464 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **620** |
@@ -90,8 +90,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reference-viewer feature)
 - [`viewer-notecard-editor`](ideas/viewer-notecard-editor.md) — Notecard viewer
   & editor (rich text with embedded items) (blocked by
-  `viewer-ui-text-input-widget`, `viewer-inventory-ui`,
-  `viewer-notecard-format`)
+  `viewer-ui-text-input-widget`, `viewer-inventory-ui`, `viewer-notecard-format`
+  (done))
 - [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
   Notifications, toasts & dialogs (blocked by `viewer-ui-notification-host`)
 - [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
@@ -190,7 +190,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
   by `viewer-ui-widget-scaffold`)
 
-## ready (33)
+## ready (32)
 
 ### protocol
 
@@ -201,8 +201,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-emoji-data`](ready/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
-- [`viewer-notecard-format`](ready/viewer-notecard-format.md) — Notecard format
-  — a pure crate (sl-notecard)
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-ui-settings-store`](ready/viewer-ui-settings-store.md) — Typed
@@ -410,7 +408,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (463)
+## done (464)
 
 ### protocol
 
@@ -539,6 +537,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras
+- [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
+  a pure crate (sl-notecard)
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the

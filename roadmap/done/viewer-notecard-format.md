@@ -2,7 +2,7 @@
 id: viewer-notecard-format
 title: Notecard format — a pure crate (sl-notecard)
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07)
 ---
 

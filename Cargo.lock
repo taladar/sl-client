@@ -6272,6 +6272,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-notecard"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sl-types",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "sl-prim"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,27 @@
+[package]
+name = "sl-notecard"
+description = "Pure decoder/encoder for the Second Life / OpenSim Linden-text notecard asset (text plus embedded inventory items), mirroring the sl-prim / sl-sculpt format crates"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "notecard", "inventory", "asset"]
+categories = ["game-development", "parser-implementations", "encoding"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+thiserror = { version = "2.0.18" }
+uuid = { version = "1.18.1" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true
