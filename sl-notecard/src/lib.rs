@@ -149,7 +149,7 @@ mod tests {
     };
     use crate::types::{AssetType, InventoryType, PermissionMask, SaleType};
     use crate::{Notecard, NotecardVersion, embedded_char};
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_types::key::Key;
     use uuid::Uuid;
 
