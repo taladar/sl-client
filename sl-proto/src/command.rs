@@ -25,9 +25,9 @@ use crate::{
     ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
     RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
     ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
-    StartLocationSlot, TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId,
-    UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
+    TransactionId, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1227,6 +1227,9 @@ pub enum Command {
     TouchObject {
         /// The object's region-local id.
         local_id: ScopedObjectId,
+        /// Where on the object the touch landed (a renderer's pick), or `None`
+        /// when the caller only knows the object's id — see [`SurfaceInfo`].
+        surface: Option<SurfaceInfo>,
     },
     /// Begin grabbing an object (`ObjectGrab`).
     GrabObject {
@@ -1234,6 +1237,8 @@ pub enum Command {
         local_id: ScopedObjectId,
         /// The grab offset from the object's centre.
         grab_offset: Vector,
+        /// Where on the object the grab landed, or `None` — see [`SurfaceInfo`].
+        surface: Option<SurfaceInfo>,
     },
     /// Update an in-progress grab as the object is dragged (`ObjectGrabUpdate`).
     GrabObjectUpdate {
@@ -1245,11 +1250,17 @@ pub enum Command {
         grab_position: Vector,
         /// Milliseconds since the previous update.
         time_since_last: u32,
+        /// Where on the object the drag currently is, or `None` — see
+        /// [`SurfaceInfo`].
+        surface: Option<SurfaceInfo>,
     },
     /// Release a grab on an object (`ObjectDeGrab`).
     DegrabObject {
         /// The object's region-local id.
         local_id: ScopedObjectId,
+        /// Where on the object the release landed, or `None` — see
+        /// [`SurfaceInfo`].
+        surface: Option<SurfaceInfo>,
     },
     /// Rez (create) a new primitive (`ObjectAdd`).
     RezObject {

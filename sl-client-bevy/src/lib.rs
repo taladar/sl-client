@@ -94,7 +94,7 @@ pub use sl_proto::{
     ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
     ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, SetDisplayNameReply,
     SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    StartLocationParseError, SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
     TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey,
     Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
     UpdatableAssetType, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
@@ -1762,15 +1762,16 @@ fn advance_running(
             Command::DeselectObjects { local_ids } => {
                 session.deselect_objects(local_ids, now).ok();
             }
-            Command::TouchObject { local_id } => {
-                session.touch_object(*local_id, now).ok();
+            Command::TouchObject { local_id, surface } => {
+                session.touch_object(*local_id, surface.as_ref(), now).ok();
             }
             Command::GrabObject {
                 local_id,
                 grab_offset,
+                surface,
             } => {
                 session
-                    .grab_object(*local_id, grab_offset.clone(), now)
+                    .grab_object(*local_id, grab_offset.clone(), surface.as_ref(), now)
                     .ok();
             }
             Command::GrabObjectUpdate {
@@ -1778,6 +1779,7 @@ fn advance_running(
                 grab_offset_initial,
                 grab_position,
                 time_since_last,
+                surface,
             } => {
                 session
                     .grab_object_update(
@@ -1785,12 +1787,13 @@ fn advance_running(
                         grab_offset_initial.clone(),
                         grab_position.clone(),
                         *time_since_last,
+                        surface.as_ref(),
                         now,
                     )
                     .ok();
             }
-            Command::DegrabObject { local_id } => {
-                session.degrab_object(*local_id, now).ok();
+            Command::DegrabObject { local_id, surface } => {
+                session.degrab_object(*local_id, surface.as_ref(), now).ok();
             }
             Command::RezObject { shape, group_id } => {
                 session.rez_object(shape, *group_id, now).ok();

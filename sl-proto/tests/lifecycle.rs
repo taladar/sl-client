@@ -13292,9 +13292,9 @@ mod test {
 
         // A send with the right circuit succeeds; with a stale circuit it fails
         // with `UnknownCircuit` rather than acting on the wrong region.
-        session.touch_object(scoped, now)?;
+        session.touch_object(scoped, None, now)?;
         assert!(matches!(
-            session.touch_object(stale, now),
+            session.touch_object(stale, None, now),
             Err(sl_proto::Error::UnknownCircuit)
         ));
         Ok(())
@@ -15222,6 +15222,7 @@ mod test {
 
         session.touch_object(
             ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(55)),
+            None,
             now,
         )?;
         let sent = drain(&mut session)?;
@@ -15242,6 +15243,82 @@ mod test {
             })
             .ok_or("expected an ObjectDeGrab")?;
         assert_eq!(degrab.object_data.local_id, 55);
+        Ok(())
+    }
+
+    /// A touch made from a *pick* carries the surface the ray struck (the viewer's
+    /// path, P35.3): both the `ObjectGrab` and the `ObjectDeGrab` name the face,
+    /// its texture (`UV`) and surface (`ST`) coordinates, and the intersection's
+    /// position / normal / binormal — everything a script reads back through
+    /// `llDetectedTouchFace` / `llDetectedTouchST` / `llDetectedTouchUV` and
+    /// friends. The two-component coordinates go on the wire as vectors with a
+    /// zero `z`.
+    #[test]
+    fn touch_object_sends_the_picked_surface() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        let surface = sl_proto::SurfaceInfo {
+            uv: [0.25, 0.75],
+            st: [0.5, 0.5],
+            face_index: 3,
+            position: Vector {
+                x: 128.0,
+                y: 64.0,
+                z: 22.5,
+            },
+            normal: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            binormal: Vector {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        };
+        session.touch_object(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(55)),
+            Some(&surface),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let grab = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectGrab(grab) => Some(grab),
+                _ => None,
+            })
+            .ok_or("expected an ObjectGrab")?;
+        let info = grab
+            .surface_info
+            .first()
+            .ok_or("expected a SurfaceInfo block")?;
+        assert_eq!(info.face_index, 3);
+        assert!((info.uv_coord.x - 0.25).abs() < 1e-6);
+        assert!((info.uv_coord.y - 0.75).abs() < 1e-6);
+        assert!((info.uv_coord.z - 0.0).abs() < 1e-6);
+        assert!((info.st_coord.x - 0.5).abs() < 1e-6);
+        assert!((info.st_coord.z - 0.0).abs() < 1e-6);
+        assert!((info.position.z - 22.5).abs() < 1e-6);
+        assert!((info.normal.z - 1.0).abs() < 1e-6);
+        assert!((info.binormal.y - 1.0).abs() < 1e-6);
+        let degrab = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::ObjectDeGrab(degrab) => Some(degrab),
+                _ => None,
+            })
+            .ok_or("expected an ObjectDeGrab")?;
+        let released = degrab
+            .surface_info
+            .first()
+            .ok_or("expected a SurfaceInfo block on the degrab")?;
+        assert_eq!(released.face_index, 3);
+        assert!((released.uv_coord.y - 0.75).abs() < 1e-6);
         Ok(())
     }
 

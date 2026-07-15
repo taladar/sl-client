@@ -79,7 +79,7 @@ use crate::types::{
     RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
     ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
     ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryKey,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
     TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
     TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
     ViewerEffectData, ViewerEffectType, Wearable, WearableType,
@@ -10358,22 +10358,32 @@ impl Session {
     /// or pay). For a press-drag-release interaction use [`Session::grab_object`],
     /// [`Session::grab_object_update`], and [`Session::degrab_object`] instead.
     ///
+    /// `surface` says where on the object the touch landed — a renderer that
+    /// picked the object with a ray passes it so the script's `llDetectedTouch*`
+    /// functions have something to report; a caller that only knows the object's
+    /// id (a scripted touch, a test) passes [`None`].
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if a request fails to encode.
-    pub fn touch_object(&mut self, local_id: ScopedObjectId, now: Instant) -> Result<(), Error> {
+    pub fn touch_object(
+        &mut self,
+        local_id: ScopedObjectId,
+        surface: Option<&SurfaceInfo>,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_object_grab(local_id, ZERO_VECTOR, now)?;
-        circuit.send_object_degrab(local_id, now)?;
+        circuit.send_object_grab(local_id, ZERO_VECTOR, surface, now)?;
+        circuit.send_object_degrab(local_id, surface, now)?;
         Ok(())
     }
 
     /// Begins grabbing the object `local_id` (an `ObjectGrab`) with the given
     /// grab offset from the object's centre. Follow with
     /// [`Session::grab_object_update`] to drag and [`Session::degrab_object`] to
-    /// release.
+    /// release. `surface` is the picked point, as for [`Session::touch_object`].
     ///
     /// # Errors
     ///
@@ -10383,18 +10393,21 @@ impl Session {
         &mut self,
         local_id: ScopedObjectId,
         grab_offset: Vector,
+        surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_object_grab(local_id, grab_offset, now)?;
+        circuit.send_object_grab(local_id, grab_offset, surface, now)?;
         Ok(())
     }
 
     /// Updates an in-progress grab (an `ObjectGrabUpdate`) as the avatar drags
     /// the object identified by its persistent `object_id` (not its local id) to
     /// `grab_position`. `time_since_last` is milliseconds since the previous
-    /// update.
+    /// update, and `surface` is the *current* picked point — the reference viewer
+    /// re-picks it on every drag step, so a script watching `llDetectedTouchST`
+    /// during `touch` sees the cursor move across the surface.
     ///
     /// # Errors
     ///
@@ -10406,6 +10419,7 @@ impl Session {
         grab_offset_initial: Vector,
         grab_position: Vector,
         time_since_last: u32,
+        surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -10414,21 +10428,28 @@ impl Session {
             grab_offset_initial,
             grab_position,
             time_since_last,
+            surface,
             now,
         )?;
         Ok(())
     }
 
-    /// Releases a grab on the object `local_id` (an `ObjectDeGrab`).
+    /// Releases a grab on the object `local_id` (an `ObjectDeGrab`), reporting the
+    /// point the release landed on in `surface` (as for [`Session::touch_object`]).
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
-    pub fn degrab_object(&mut self, local_id: ScopedObjectId, now: Instant) -> Result<(), Error> {
+    pub fn degrab_object(
+        &mut self,
+        local_id: ScopedObjectId,
+        surface: Option<&SurfaceInfo>,
+        now: Instant,
+    ) -> Result<(), Error> {
         let circuit = self.circuit_for_scope(local_id.circuit)?;
         let local_id = local_id.id;
-        circuit.send_object_degrab(local_id, now)?;
+        circuit.send_object_degrab(local_id, surface, now)?;
         Ok(())
     }
 

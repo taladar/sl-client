@@ -25,6 +25,7 @@ mod flexi;
 mod ground;
 mod hand_pose;
 mod hud;
+mod hud_pick;
 mod ik;
 mod legacy_materials;
 mod lights;
@@ -108,6 +109,7 @@ use crate::diagnostics::{
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
+use crate::hud_pick::{HudCursorMode, pick_and_touch, toggle_hud_cursor};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -558,6 +560,9 @@ fn run_session(
     .init_resource::<ObjectState>()
     // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
     .init_resource::<HudState>()
+    // The free HUD cursor (P35.3): off until toggled with `H`, then a left
+    // click touches the HUD (or world) object under the pointer.
+    .init_resource::<HudCursorMode>()
     // The water-render bookkeeping (P23.1) is created by `setup_water` at
     // startup, so no `init_resource` is needed here; the surface level the
     // underwater-fog pass reads is a small resource published by `drive_water`.
@@ -789,6 +794,10 @@ fn run_session(
             // attachment; here a lit one would also render black, since the world's
             // sun is not on the HUD layer).
             (fit_hud_points, apply_hud_fullbright),
+            // HUD picking & clicking (P35.3): `H` toggles a free cursor, and a
+            // left click then touches the HUD (or, failing that, world) object
+            // under the pointer through an orthographic HUD-camera pick.
+            (toggle_hud_cursor, pick_and_touch),
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
             // looks at loads first. Throttled internally. It also picks each plain

@@ -1165,17 +1165,17 @@ impl Client {
                         Some(Command::DeselectObjects { local_ids }) => {
                             self.session.deselect_objects(&local_ids, Instant::now())?;
                         }
-                        Some(Command::TouchObject { local_id }) => {
-                            self.session.touch_object(local_id, Instant::now())?;
+                        Some(Command::TouchObject { local_id, surface }) => {
+                            self.session.touch_object(local_id, surface.as_ref(), Instant::now())?;
                         }
-                        Some(Command::GrabObject { local_id, grab_offset }) => {
-                            self.session.grab_object(local_id, grab_offset, Instant::now())?;
+                        Some(Command::GrabObject { local_id, grab_offset, surface }) => {
+                            self.session.grab_object(local_id, grab_offset, surface.as_ref(), Instant::now())?;
                         }
-                        Some(Command::GrabObjectUpdate { object_id, grab_offset_initial, grab_position, time_since_last }) => {
-                            self.session.grab_object_update(object_id, grab_offset_initial, grab_position, time_since_last, Instant::now())?;
+                        Some(Command::GrabObjectUpdate { object_id, grab_offset_initial, grab_position, time_since_last, surface }) => {
+                            self.session.grab_object_update(object_id, grab_offset_initial, grab_position, time_since_last, surface.as_ref(), Instant::now())?;
                         }
-                        Some(Command::DegrabObject { local_id }) => {
-                            self.session.degrab_object(local_id, Instant::now())?;
+                        Some(Command::DegrabObject { local_id, surface }) => {
+                            self.session.degrab_object(local_id, surface.as_ref(), Instant::now())?;
                         }
                         Some(Command::RezObject { shape, group_id }) => {
                             self.session.rez_object(&shape, group_id, Instant::now())?;

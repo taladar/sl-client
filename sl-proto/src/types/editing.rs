@@ -509,6 +509,42 @@ impl ObjectTransform {
     }
 }
 
+/// Where on an object a touch or grab landed — the `SurfaceInfo` block of
+/// `ObjectGrab` / `ObjectGrabUpdate` / `ObjectDeGrab`, and the only source of the
+/// surface data a script reads with `llDetectedTouchFace`, `llDetectedTouchST`,
+/// `llDetectedTouchUV`, `llDetectedTouchPos`, `llDetectedTouchNormal`, and
+/// `llDetectedTouchBinormal`.
+///
+/// A viewer computes it from the ray it picked the object with (the reference's
+/// `LLPickInfo::getSurfaceInfo`). Passing `None` instead sends no block at all,
+/// which is what a client with no pick to report (e.g. a scripted touch by local
+/// id) does — the simulator then leaves every `llDetectedTouch*` at its
+/// "no touch data" value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceInfo {
+    /// The **texture** coordinate of the touch on the picked face
+    /// (`llDetectedTouchUV`): the surface coordinate with the face's texture
+    /// placement (repeats / offset / rotation) applied, so it indexes the texture
+    /// as sampled. On the wire it is a vector whose `z` is zero.
+    pub uv: [f32; 2],
+    /// The **surface** coordinate of the touch on the picked face
+    /// (`llDetectedTouchST`): where the point sits in the face's own `[0, 1]`
+    /// parameterisation, before any texture placement. On the wire it is a vector
+    /// whose `z` is zero.
+    pub st: [f32; 2],
+    /// The index of the face that was touched (`llDetectedTouchFace`), or `-1`
+    /// when the touch has no face (the reference's "no intersection" value).
+    pub face_index: i32,
+    /// The intersection point, in the region-local metres a script sees from
+    /// `llDetectedTouchPos`.
+    pub position: Vector,
+    /// The surface normal at the intersection (`llDetectedTouchNormal`).
+    pub normal: Vector,
+    /// The surface binormal at the intersection (`llDetectedTouchBinormal`):
+    /// perpendicular to the normal, along the face's `t` (texture-`v`) direction.
+    pub binormal: Vector,
+}
+
 /// A region maturity / content rating, from the `SimAccess` byte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

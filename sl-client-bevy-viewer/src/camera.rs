@@ -17,6 +17,8 @@
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
+use crate::hud_pick::HudCursorMode;
+
 /// Base translation speed, in metres per second.
 const BASE_SPEED: f32 = 10.0;
 
@@ -120,8 +122,15 @@ pub(crate) fn fly_camera(
     mouse: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
     spin: Res<CameraSpin>,
+    hud_cursor: Res<HudCursorMode>,
     mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
 ) {
+    // While the free HUD cursor is engaged (P35.3) the pointer is released to
+    // aim at a HUD, so raw mouse motion must not also turn the head: hold the
+    // camera still until the cursor is re-grabbed.
+    if hud_cursor.active {
+        return;
+    }
     let delta = mouse.delta;
     let dt = time.delta_secs();
     for (mut transform, mut camera) in &mut cameras {

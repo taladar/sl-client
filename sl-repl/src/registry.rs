@@ -3757,6 +3757,10 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::TouchObject {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
+                    // The REPL touches an object by id, with no rendered surface to
+                    // pick a point on: no `SurfaceInfo` block, so the script's
+                    // `llDetectedTouch*` read their "no touch data" values.
+                    surface: None,
                 })
             },
         },
@@ -3767,6 +3771,7 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::GrabObject {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
                     grab_offset: args.req_vector(ctx, "grab_offset", 1)?,
+                    surface: None,
                 })
             },
         },
@@ -3779,6 +3784,7 @@ fn all_specs() -> Vec<CommandSpec> {
                     grab_offset_initial: args.req_vector(ctx, "grab_offset_initial", 1)?,
                     grab_position: args.req_vector(ctx, "grab_position", 2)?,
                     time_since_last: args.parse_or(ctx, "time_since_last", 3, "u32", 0)?,
+                    surface: None,
                 })
             },
         },
@@ -3788,6 +3794,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::DegrabObject {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
+                    surface: None,
                 })
             },
         },
@@ -5646,7 +5653,8 @@ mod tests {
                 local_id: ScopedObjectId {
                     circuit: TEST_CIRCUIT,
                     id: RegionLocalObjectId(42)
-                }
+                },
+                surface: None,
             })
         ));
     }

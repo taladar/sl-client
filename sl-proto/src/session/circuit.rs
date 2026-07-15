@@ -24,8 +24,8 @@ use crate::types::{
     ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
     ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams,
     ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    SaleType, ScriptPermissions, StartLocationSlot, TaskInventoryKey, TeleportFlags, TextureEntry,
-    Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
+    SaleType, ScriptPermissions, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TeleportFlags,
+    TextureEntry, Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -125,18 +125,19 @@ use sl_wire::messages::{
     ObjectAttachObjectDataBlock, ObjectCategory, ObjectCategoryAgentDataBlock,
     ObjectCategoryObjectDataBlock, ObjectClickAction, ObjectClickActionAgentDataBlock,
     ObjectClickActionObjectDataBlock, ObjectDeGrab, ObjectDeGrabAgentDataBlock,
-    ObjectDeGrabObjectDataBlock, ObjectDelete, ObjectDeleteAgentDataBlock,
-    ObjectDeleteObjectDataBlock, ObjectDelink, ObjectDelinkAgentDataBlock,
-    ObjectDelinkObjectDataBlock, ObjectDescription, ObjectDescriptionAgentDataBlock,
-    ObjectDescriptionObjectDataBlock, ObjectDeselect, ObjectDeselectAgentDataBlock,
-    ObjectDeselectObjectDataBlock, ObjectDetach, ObjectDetachAgentDataBlock,
-    ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock, ObjectDropObjectDataBlock,
-    ObjectDuplicate, ObjectDuplicateAgentDataBlock, ObjectDuplicateObjectDataBlock,
-    ObjectDuplicateSharedDataBlock, ObjectExtraParams as ObjectExtraParamsMessage,
-    ObjectExtraParamsAgentDataBlock, ObjectExtraParamsObjectDataBlock, ObjectFlagUpdate,
-    ObjectFlagUpdateAgentDataBlock, ObjectGrab, ObjectGrabAgentDataBlock,
-    ObjectGrabObjectDataBlock, ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock,
-    ObjectGrabUpdateObjectDataBlock, ObjectGroup, ObjectGroupAgentDataBlock,
+    ObjectDeGrabObjectDataBlock, ObjectDeGrabSurfaceInfoBlock, ObjectDelete,
+    ObjectDeleteAgentDataBlock, ObjectDeleteObjectDataBlock, ObjectDelink,
+    ObjectDelinkAgentDataBlock, ObjectDelinkObjectDataBlock, ObjectDescription,
+    ObjectDescriptionAgentDataBlock, ObjectDescriptionObjectDataBlock, ObjectDeselect,
+    ObjectDeselectAgentDataBlock, ObjectDeselectObjectDataBlock, ObjectDetach,
+    ObjectDetachAgentDataBlock, ObjectDetachObjectDataBlock, ObjectDrop, ObjectDropAgentDataBlock,
+    ObjectDropObjectDataBlock, ObjectDuplicate, ObjectDuplicateAgentDataBlock,
+    ObjectDuplicateObjectDataBlock, ObjectDuplicateSharedDataBlock,
+    ObjectExtraParams as ObjectExtraParamsMessage, ObjectExtraParamsAgentDataBlock,
+    ObjectExtraParamsObjectDataBlock, ObjectFlagUpdate, ObjectFlagUpdateAgentDataBlock, ObjectGrab,
+    ObjectGrabAgentDataBlock, ObjectGrabObjectDataBlock, ObjectGrabSurfaceInfoBlock,
+    ObjectGrabUpdate, ObjectGrabUpdateAgentDataBlock, ObjectGrabUpdateObjectDataBlock,
+    ObjectGrabUpdateSurfaceInfoBlock, ObjectGroup, ObjectGroupAgentDataBlock,
     ObjectGroupObjectDataBlock, ObjectImage, ObjectImageAgentDataBlock, ObjectImageObjectDataBlock,
     ObjectIncludeInSearch, ObjectIncludeInSearchAgentDataBlock,
     ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
@@ -311,6 +312,18 @@ use uuid::Uuid;
 )]
 const fn far_from_distance(distance: &Distance) -> f32 {
     distance.meters() as f32
+}
+
+/// A two-dimensional touch coordinate (a [`SurfaceInfo`] `uv` / `st`) as the
+/// three-component vector the `SurfaceInfo` wire block carries: the reference
+/// viewer packs its `LLVector2` texture coordinates into an `LLVector3` whose `z`
+/// is zero, and the simulator reads only `x` / `y` back out.
+const fn surface_coord(coord: [f32; 2]) -> Vector {
+    Vector {
+        x: coord[0],
+        y: coord[1],
+        z: 0.0,
+    }
 }
 
 impl Circuit {
@@ -4470,11 +4483,13 @@ impl Circuit {
     // Object interaction & editing (#17) -----------------------------------
 
     /// Queues an `ObjectGrab` reliably (the start of a touch/click) for `local_id`
-    /// with `grab_offset` and an empty surface-info list.
+    /// with `grab_offset` and, when the caller picked the object with a ray,
+    /// the [`SurfaceInfo`] block describing where on it the touch landed.
     pub(crate) fn send_object_grab(
         &mut self,
         local_id: RegionLocalObjectId,
         grab_offset: Vector,
+        surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGrab(ObjectGrab {
@@ -4486,19 +4501,32 @@ impl Circuit {
                 local_id: local_id.0,
                 grab_offset,
             },
-            surface_info: Vec::new(),
+            surface_info: surface
+                .map(|surface| ObjectGrabSurfaceInfoBlock {
+                    uv_coord: surface_coord(surface.uv),
+                    st_coord: surface_coord(surface.st),
+                    face_index: surface.face_index,
+                    position: surface.position.clone(),
+                    normal: surface.normal.clone(),
+                    binormal: surface.binormal.clone(),
+                })
+                .into_iter()
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
 
     /// Queues an `ObjectGrabUpdate` reliably (a drag while grabbing) for the
-    /// object `object_id`.
+    /// object `object_id`, with the touch's current [`SurfaceInfo`] when the
+    /// caller re-picked it (the reference re-runs the pick on every drag step, so
+    /// a script's `llDetectedTouch*` follows the cursor across the surface).
     pub(crate) fn send_object_grab_update(
         &mut self,
         object_id: ObjectKey,
         grab_offset_initial: Vector,
         grab_position: Vector,
         time_since_last: u32,
+        surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectGrabUpdate(ObjectGrabUpdate {
@@ -4512,15 +4540,27 @@ impl Circuit {
                 grab_position,
                 time_since_last,
             },
-            surface_info: Vec::new(),
+            surface_info: surface
+                .map(|surface| ObjectGrabUpdateSurfaceInfoBlock {
+                    uv_coord: surface_coord(surface.uv),
+                    st_coord: surface_coord(surface.st),
+                    face_index: surface.face_index,
+                    position: surface.position.clone(),
+                    normal: surface.normal.clone(),
+                    binormal: surface.binormal.clone(),
+                })
+                .into_iter()
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Queues an `ObjectDeGrab` reliably (the end of a touch/click) for `local_id`.
+    /// Queues an `ObjectDeGrab` reliably (the end of a touch/click) for `local_id`,
+    /// with the [`SurfaceInfo`] of the release point when the caller has one.
     pub(crate) fn send_object_degrab(
         &mut self,
         local_id: RegionLocalObjectId,
+        surface: Option<&SurfaceInfo>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectDeGrab(ObjectDeGrab {
@@ -4531,7 +4571,17 @@ impl Circuit {
             object_data: ObjectDeGrabObjectDataBlock {
                 local_id: local_id.0,
             },
-            surface_info: Vec::new(),
+            surface_info: surface
+                .map(|surface| ObjectDeGrabSurfaceInfoBlock {
+                    uv_coord: surface_coord(surface.uv),
+                    st_coord: surface_coord(surface.st),
+                    face_index: surface.face_index,
+                    position: surface.position.clone(),
+                    normal: surface.normal.clone(),
+                    binormal: surface.binormal.clone(),
+                })
+                .into_iter()
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }

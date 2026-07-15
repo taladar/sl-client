@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 44 |
-| ready | 30 |
+| ready | 29 |
 | blocked | 3 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 461 |
+| done | 462 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **550** |
@@ -126,12 +126,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
   (WebRTC + Vivox) (blocked by `viewer-ui-framework`)
 
-## ready (30)
+## ready (29)
 
 ### viewer
 
-- [`viewer-p35-3`](ready/viewer-p35-3-hud-picking-and-clicking.md) — HUD picking
-  and clicking
 - [`viewer-p35-4`](ready/viewer-p35-4-hud-particles.md) — HUD particles
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
@@ -230,7 +228,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (461)
+## done (462)
 
 ### protocol
 
@@ -525,6 +523,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p35-1`](done/viewer-p35-1-detect-hud.md) — Detect HUD
 - [`viewer-p35-2`](done/viewer-p35-2-hud-rendering.md) — HUD rendering (blocked
   by `viewer-p35-1` (done))
+- [`viewer-p35-3`](done/viewer-p35-3-hud-picking-and-clicking.md) — HUD picking
+  and clicking
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

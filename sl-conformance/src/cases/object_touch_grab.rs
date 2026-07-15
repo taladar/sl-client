@@ -161,7 +161,10 @@ impl GridTest for ObjectTouchGrab {
             // 1. Touch (left-click): an `ObjectGrab` immediately followed by an
             //    `ObjectDeGrab`, with no drag between them.
             session
-                .send(Command::TouchObject { local_id: scoped })
+                .send(Command::TouchObject {
+                    local_id: scoped,
+                    surface: None,
+                })
                 .await?;
 
             // 2. A full press-drag-release: grab at the centre, drag once, then
@@ -171,6 +174,7 @@ impl GridTest for ObjectTouchGrab {
                 .send(Command::GrabObject {
                     local_id: scoped,
                     grab_offset: CENTRE,
+                    surface: None,
                 })
                 .await?;
             session
@@ -179,10 +183,14 @@ impl GridTest for ObjectTouchGrab {
                     grab_offset_initial: CENTRE,
                     grab_position: dragged,
                     time_since_last: DRAG_MS,
+                    surface: None,
                 })
                 .await?;
             session
-                .send(Command::DegrabObject { local_id: scoped })
+                .send(Command::DegrabObject {
+                    local_id: scoped,
+                    surface: None,
+                })
                 .await?;
 
             // The touch and grab messages carry no application-level reply, so a
