@@ -331,8 +331,8 @@ use crate::voice::{run_voice_cap, run_voice_signaling};
 use crate::world::{SlRegionIndex, maintain_world};
 
 pub use crate::world::{
-    SlAgentParcel, SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlRegion, SlRegionIdentity,
-    SlRegionLimits,
+    SlAgentParcel, SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlParcelOverlay, SlRegion,
+    SlRegionIdentity, SlRegionLimits,
 };
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
@@ -389,6 +389,7 @@ impl Plugin for SlClientPlugin {
             })
             .init_resource::<SlIdentity>()
             .init_resource::<SlAgentParcel>()
+            .init_resource::<SlParcelOverlay>()
             .init_resource::<SlRegionIndex>()
             .add_systems(Startup, start_login)
             // `maintain_world` reads the events `drive` writes, so chain it after.

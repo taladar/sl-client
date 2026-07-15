@@ -11,17 +11,24 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 0 |
-| ready | 57 |
-| blocked | 132 |
+| ideas | 1 |
+| ready | 58 |
+| blocked | 131 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 476 |
+| done | 477 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **679** |
+| **total** | **681** |
 
-## ready (57)
+## ideas (1)
+
+### viewer
+
+- [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
+  Region-wide parcel ban-line / access display
+
+## ready (58)
 
 ### viewer
 
@@ -57,8 +64,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags — world-space billboard renderer
 - [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
   Name tags — wire GetDisplayNames caps into the tag
-- [`viewer-parcel-overlay-decode`](ready/viewer-parcel-overlay-decode.md) —
-  Decode ParcelOverlay into a 64×64 grid resource
+- [`viewer-parcel-borders-render`](ready/viewer-parcel-borders-render.md) —
+  In-world parcel borders (property lines) (blocked by
+  `viewer-parcel-overlay-decode` (done))
+- [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
+  Flood-fill the parcel-overlay grid into per-parcel footprints
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
@@ -143,7 +153,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (132)
+## blocked (131)
 
 ### viewer
 
@@ -298,7 +308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold`)
 - [`viewer-minimap-parcel-overlay`](blocked/viewer-minimap-parcel-overlay.md) —
   Parcel borders on the minimap (blocked by `viewer-minimap`,
-  `viewer-parcel-overlay-decode`)
+  `viewer-parcel-overlay-decode` (done))
 - [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold`,
   `viewer-media-prim-browser`)
@@ -329,12 +339,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
-- [`viewer-parcel-borders-render`](blocked/viewer-parcel-borders-render.md) —
-  In-world parcel borders (property lines) (blocked by
-  `viewer-parcel-overlay-decode`)
 - [`viewer-parcel-join-split`](blocked/viewer-parcel-join-split.md) — Parcel
   join / split (blocked by `viewer-input-action-map`,
-  `viewer-parcel-overlay-decode`)
+  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-options-access-media`](blocked/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general`)
@@ -536,7 +543,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (476)
+## done (477)
 
 ### protocol
 
@@ -872,6 +879,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p8-2`](done/viewer-p8-2-stitch-modes.md) — Stitch modes
 - [`viewer-p8-3`](done/viewer-p8-3-stitch-tests.md) — Stitch tests
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
+- [`viewer-parcel-overlay-decode`](done/viewer-parcel-overlay-decode.md) —
+  Decode ParcelOverlay into a 64×64 grid resource
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh

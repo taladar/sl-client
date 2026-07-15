@@ -2,7 +2,7 @@
 id: viewer-parcel-borders-render
 title: In-world parcel borders (property lines)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-parcel-borders
 blocked_by: [viewer-parcel-overlay-decode]
 ---

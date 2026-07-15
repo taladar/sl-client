@@ -403,6 +403,311 @@ pub struct ParcelOverlayInfo {
     pub data: Vec<u8>,
 }
 
+/// Side length, in metres, of one parcel-overlay grid square. The overlay
+/// divides the region into 4 m squares, one packed byte each
+/// (`PARCEL_GRID_STEP_METERS` in the reference viewer).
+pub const PARCEL_GRID_STEP_METRES: f32 = 4.0;
+
+/// The number of overlay grid squares along each edge of a standard 256 m
+/// region (`256 / 4`). Variable-sized regions scale this, but the viewer — like
+/// its terrain path — assumes the classic 256 m region.
+pub const DEFAULT_GRIDS_PER_EDGE: usize = 64;
+
+/// Bit layout of a packed overlay byte (mirrors the reference viewer's
+/// `llparcel.h` `PARCEL_*` constants).
+///
+/// The low three bits carry the ownership colour class; the high bits are
+/// independent flags.
+mod overlay_bits {
+    /// Mask selecting the ownership colour class (low three bits).
+    pub(super) const COLOUR_MASK: u8 = 0x07;
+    /// Avatars are hidden to onlookers outside this parcel (`PARCEL_HIDDENAVS`).
+    pub(super) const HIDDEN_AVATARS: u8 = 0x10;
+    /// Sounds made here are audible only within this parcel
+    /// (`PARCEL_SOUND_LOCAL`).
+    pub(super) const SOUND_LOCAL: u8 = 0x20;
+    /// A parcel boundary runs along this square's western edge
+    /// (`PARCEL_WEST_LINE`).
+    pub(super) const WEST_LINE: u8 = 0x40;
+    /// A parcel boundary runs along this square's southern edge
+    /// (`PARCEL_SOUTH_LINE`).
+    pub(super) const SOUTH_LINE: u8 = 0x80;
+}
+
+/// The ownership colour class of a parcel-overlay square — the low three bits of
+/// a packed overlay byte, which decide the colour the map and property overlay
+/// paint the square (mirrors the reference viewer's `PARCEL_PUBLIC` … constants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ParcelOwnership {
+    /// Unowned / public land (`PARCEL_PUBLIC`, `0`).
+    Public,
+    /// Owned by someone other than you or your active group
+    /// (`PARCEL_OWNED`, `1`).
+    Owned,
+    /// Owned by a group you are a member of (`PARCEL_GROUP`, `2`).
+    Group,
+    /// Owned by you (`PARCEL_SELF`, `3`).
+    SelfOwned,
+    /// Advertised for sale (`PARCEL_FOR_SALE`, `4`).
+    ForSale,
+    /// Up for auction (`PARCEL_AUCTION`, `5`).
+    Auction,
+    /// An unassigned colour index (`6` or `7`), preserved verbatim.
+    Reserved(u8),
+}
+
+impl ParcelOwnership {
+    /// Classifies the ownership colour index (already masked to the low three
+    /// bits).
+    #[must_use]
+    const fn from_index(index: u8) -> Self {
+        match index {
+            0 => Self::Public,
+            1 => Self::Owned,
+            2 => Self::Group,
+            3 => Self::SelfOwned,
+            4 => Self::ForSale,
+            5 => Self::Auction,
+            other => Self::Reserved(other),
+        }
+    }
+}
+
+/// One decoded parcel-overlay square: its ownership colour class plus the
+/// boundary and sound flags packed into a single overlay byte.
+///
+/// [`west_line`](Self::west_line) / [`south_line`](Self::south_line) mark the two
+/// edges the reference viewer draws property lines along (the other two edges of
+/// a parcel are the west/south lines of the neighbouring squares).
+/// [`sound_local`](Self::sound_local) is the bit that clamps in-world sound to
+/// the parcel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the packed overlay byte carries four independent boolean flags; modelling each as its own field mirrors the wire layout"
+)]
+pub struct ParcelOverlayCell {
+    /// The ownership colour class (low three bits).
+    pub ownership: ParcelOwnership,
+    /// Avatars here are hidden to onlookers outside the parcel.
+    pub hidden_avatars: bool,
+    /// Sound made here is audible only within the parcel.
+    pub sound_local: bool,
+    /// A parcel boundary runs along the square's western edge.
+    pub west_line: bool,
+    /// A parcel boundary runs along the square's southern edge.
+    pub south_line: bool,
+}
+
+impl ParcelOverlayCell {
+    /// Decodes a single packed overlay byte into its typed fields.
+    #[must_use]
+    pub const fn from_byte(byte: u8) -> Self {
+        Self {
+            ownership: ParcelOwnership::from_index(byte & overlay_bits::COLOUR_MASK),
+            hidden_avatars: byte & overlay_bits::HIDDEN_AVATARS != 0,
+            sound_local: byte & overlay_bits::SOUND_LOCAL != 0,
+            west_line: byte & overlay_bits::WEST_LINE != 0,
+            south_line: byte & overlay_bits::SOUTH_LINE != 0,
+        }
+    }
+}
+
+/// Why a [`ParcelOverlay`](crate::Event::ParcelOverlay) chunk could not be
+/// folded into a [`ParcelOverlayGrid`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+#[expect(
+    variant_size_differences,
+    reason = "the diagnostic fields on ChunkOutOfRange are worth more than shrinking a rarely-constructed error to match the tiny NegativeSequenceId variant"
+)]
+pub enum ParcelOverlayError {
+    /// The chunk's `sequence_id` was negative; overlay chunks are numbered from
+    /// zero.
+    #[error("parcel overlay chunk has a negative sequence id ({0})")]
+    NegativeSequenceId(i32),
+    /// The chunk, placed at `sequence_id × chunk_length`, would run past the end
+    /// of the grid — a mismatched region size or a corrupt chunk.
+    #[error(
+        "parcel overlay chunk {sequence_id} of {length} bytes does not fit a {edge}×{edge} grid"
+    )]
+    ChunkOutOfRange {
+        /// The offending chunk's sequence id.
+        sequence_id: i32,
+        /// The chunk's byte length.
+        length: usize,
+        /// The grid's edge length in squares.
+        edge: usize,
+    },
+}
+
+/// Maps a region-local metre coordinate to its 4 m overlay-square index, or
+/// `None` if the coordinate is negative or not finite (bounds against the grid
+/// edge are the caller's job).
+fn grid_square_index(coord: f32) -> Option<usize> {
+    if !coord.is_finite() || coord < 0.0 {
+        return None;
+    }
+    let square = (coord / PARCEL_GRID_STEP_METRES).floor();
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "square is a non-negative finite floored value, so the truncating conversion to usize is exact for any in-region coordinate"
+    )]
+    let square = square as usize;
+    Some(square)
+}
+
+/// A region's reassembled parcel-ownership overlay: a square grid of
+/// [`ParcelOverlayCell`]s built up from the four
+/// [`ParcelOverlay`](crate::Event::ParcelOverlay) chunks the simulator pushes on
+/// region entry (and re-pushes when parcels are split, joined, or sold).
+///
+/// Each chunk is a run of packed bytes covering a contiguous band of southern
+/// rows (chunk 0 is the southernmost); [`ingest_chunk`](Self::ingest_chunk)
+/// copies each into place, so a grid becomes [`complete`](Self::is_complete)
+/// once every chunk has arrived. Squares are addressed by `row` (south→north,
+/// zero-based) and `col` (west→east), matching the reference viewer's
+/// `mOwnership[row * grids_per_edge + col]` layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParcelOverlayGrid {
+    /// Number of squares along each edge (64 for a standard 256 m region).
+    grids_per_edge: usize,
+    /// The packed overlay bytes, row-major (`row * grids_per_edge + col`).
+    packed: Vec<u8>,
+    /// Which byte positions have been filled by a chunk, for completeness
+    /// tracking and idempotent re-ingestion.
+    filled: Vec<bool>,
+    /// How many byte positions in [`filled`](Self::filled) are set.
+    filled_count: usize,
+}
+
+impl ParcelOverlayGrid {
+    /// Creates an empty grid `grids_per_edge` squares on a side (every square
+    /// reads as [`ParcelOwnership::Public`] with no flags until a chunk fills
+    /// it).
+    #[must_use]
+    pub fn new(grids_per_edge: usize) -> Self {
+        let count = grids_per_edge.saturating_mul(grids_per_edge);
+        Self {
+            grids_per_edge,
+            packed: vec![0; count],
+            filled: vec![false; count],
+            filled_count: 0,
+        }
+    }
+
+    /// Creates an empty grid sized for a region `width_metres` metres on a side
+    /// (`width / 4`), or `None` if the width is not a positive, finite multiple
+    /// of the 4 m grid step.
+    #[must_use]
+    pub fn for_region_width_metres(width_metres: f32) -> Option<Self> {
+        if !width_metres.is_finite() || width_metres <= 0.0 {
+            return None;
+        }
+        let edge = width_metres / PARCEL_GRID_STEP_METRES;
+        if edge.fract() != 0.0 {
+            return None;
+        }
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "edge is a positive, finite, integral value (its fractional part is zero and it is > 0), so the truncating conversion to usize is exact"
+        )]
+        let edge = edge as usize;
+        Some(Self::new(edge))
+    }
+
+    /// The number of squares along each edge of the grid.
+    #[must_use]
+    pub const fn grids_per_edge(&self) -> usize {
+        self.grids_per_edge
+    }
+
+    /// Whether every square has been filled by a chunk — i.e. the full set of
+    /// overlay chunks has arrived.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.filled_count == self.packed.len()
+    }
+
+    /// Folds one overlay chunk into the grid, copying its bytes to the band of
+    /// squares starting at `sequence_id × chunk_length`.
+    ///
+    /// Re-ingesting a chunk simply overwrites it (the simulator re-pushes the
+    /// whole overlay after an edit), leaving [`is_complete`](Self::is_complete)
+    /// unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParcelOverlayError`] if the sequence id is negative or the
+    /// chunk would not fit the grid.
+    pub fn ingest_chunk(
+        &mut self,
+        sequence_id: i32,
+        data: &[u8],
+    ) -> Result<(), ParcelOverlayError> {
+        let chunk = usize::try_from(sequence_id)
+            .map_err(|_ignored| ParcelOverlayError::NegativeSequenceId(sequence_id))?;
+        let out_of_range = || ParcelOverlayError::ChunkOutOfRange {
+            sequence_id,
+            length: data.len(),
+            edge: self.grids_per_edge,
+        };
+        let offset = chunk.checked_mul(data.len()).ok_or_else(out_of_range)?;
+        let end = offset.checked_add(data.len()).ok_or_else(out_of_range)?;
+        let destination = self.packed.get_mut(offset..end).ok_or_else(out_of_range)?;
+        destination.copy_from_slice(data);
+        if let Some(flags) = self.filled.get_mut(offset..end) {
+            for flag in flags {
+                if !*flag {
+                    *flag = true;
+                    self.filled_count = self.filled_count.saturating_add(1);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The decoded square at `row` (south→north) and `col` (west→east), or
+    /// `None` if either coordinate is off the grid.
+    ///
+    /// A square that no chunk has filled yet decodes as the zero byte
+    /// ([`ParcelOwnership::Public`], no flags).
+    #[must_use]
+    pub fn cell(&self, row: usize, col: usize) -> Option<ParcelOverlayCell> {
+        if col >= self.grids_per_edge || row >= self.grids_per_edge {
+            return None;
+        }
+        let index = row.checked_mul(self.grids_per_edge)?.checked_add(col)?;
+        self.packed
+            .get(index)
+            .copied()
+            .map(ParcelOverlayCell::from_byte)
+    }
+
+    /// The decoded square covering the region-local point `(x, y)` in metres
+    /// (`x` east, `y` north), or `None` if the point lies outside the region.
+    #[must_use]
+    pub fn cell_at_region_local(&self, x: f32, y: f32) -> Option<ParcelOverlayCell> {
+        let col = grid_square_index(x)?;
+        let row = grid_square_index(y)?;
+        self.cell(row, col)
+    }
+
+    /// Iterates every square in row-major order (south→north, then west→east),
+    /// yielding `(row, col, cell)` — the map/minimap consumer's entry point.
+    pub fn cells(&self) -> impl Iterator<Item = (usize, usize, ParcelOverlayCell)> + '_ {
+        let edge = self.grids_per_edge;
+        (0..edge).flat_map(move |row| {
+            (0..edge).filter_map(move |col| self.cell(row, col).map(|cell| (row, col, cell)))
+        })
+    }
+}
+
 /// A scripted parcel-media control command, the `Command` of a
 /// [`Event::ParcelMediaCommand`](crate::Event::ParcelMediaCommand) (`ParcelMediaCommandMessage`). The values match
 /// the viewer's `PARCEL_MEDIA_COMMAND_*` constants and the LSL
@@ -829,6 +1134,13 @@ impl Default for ParcelDetails {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+
+    use pretty_assertions::assert_eq;
+
     use super::bitmap_contains_point;
 
     /// A 64×64-block (standard 256 m region) membership bitmap with a single block
@@ -901,5 +1213,135 @@ mod tests {
         // The same block coordinates read as a 64-edge region would land on a
         // different byte/bit, so this confirms the edge came from the length.
         assert!(!bitmap_contains_point(&bitmap, 41.0, 41.0));
+    }
+
+    use super::{ParcelOverlayError, ParcelOverlayGrid, ParcelOwnership};
+
+    /// Every overlay byte decodes into its colour class and the four independent
+    /// high-bit flags.
+    #[test]
+    fn a_packed_byte_decodes_into_class_and_flags() {
+        let mut grid = ParcelOverlayGrid::new(2);
+        // 0x03 = PARCEL_SELF, 0x20 = SOUND_LOCAL, 0x40 = WEST_LINE.
+        grid.ingest_chunk(0, &[0x03 | 0x20 | 0x40, 0x00, 0x00, 0x00])
+            .expect("a full-grid chunk fits");
+        let cell = grid.cell(0, 0).expect("(0, 0) is on the grid");
+        assert_eq!(cell.ownership, ParcelOwnership::SelfOwned);
+        assert!(cell.sound_local);
+        assert!(cell.west_line);
+        assert!(!cell.south_line);
+        assert!(!cell.hidden_avatars);
+        // The remaining squares are the zero byte: public, no flags.
+        let empty = grid.cell(1, 1).expect("(1, 1) is on the grid");
+        assert_eq!(empty.ownership, ParcelOwnership::Public);
+        assert!(!empty.sound_local);
+    }
+
+    /// The four southern-band chunks reassemble into a complete 64×64 grid, and
+    /// squares are addressed row-major with row 0 the southern edge.
+    #[test]
+    fn four_chunks_reassemble_a_complete_grid() {
+        let mut grid = ParcelOverlayGrid::new(64);
+        assert!(!grid.is_complete());
+        // Chunk c owns rows [16c, 16c+16); tag each chunk's squares with a
+        // distinct ownership class so the row→chunk mapping is observable.
+        let classes = [0x01_u8, 0x02, 0x03, 0x04];
+        for (sequence, &class) in classes.iter().enumerate() {
+            let seq = i32::try_from(sequence).expect("0..4 fits i32");
+            grid.ingest_chunk(seq, &vec![class; 1024])
+                .expect("each 1024-byte chunk is one southern band");
+            assert_eq!(grid.is_complete(), sequence == 3);
+        }
+        // Row 0 (south) came from chunk 0, row 63 (north) from chunk 3.
+        assert_eq!(
+            grid.cell(0, 0).expect("on grid").ownership,
+            ParcelOwnership::Owned
+        );
+        assert_eq!(
+            grid.cell(63, 63).expect("on grid").ownership,
+            ParcelOwnership::ForSale
+        );
+        // The boundary between chunk 1 (rows 16..32) and chunk 2 (rows 32..48).
+        assert_eq!(
+            grid.cell(31, 0).expect("on grid").ownership,
+            ParcelOwnership::Group
+        );
+        assert_eq!(
+            grid.cell(32, 0).expect("on grid").ownership,
+            ParcelOwnership::SelfOwned
+        );
+    }
+
+    /// `cell_at_region_local` floors metre coordinates onto the 4 m grid; off the
+    /// region it returns `None`.
+    #[test]
+    fn a_region_local_point_maps_to_its_4m_square() {
+        let mut grid = ParcelOverlayGrid::new(64);
+        // (x, y) = (10, 5) → col floor(10/4)=2, row floor(5/4)=1.
+        // Fill the whole southern band so (row 1, col 2) is observable.
+        let mut band = vec![0x00_u8; 1024];
+        if let Some(byte) = band.get_mut(64 + 2) {
+            *byte = 0x01; // PARCEL_OWNED at row 1, col 2.
+        }
+        grid.ingest_chunk(0, &band).expect("fits");
+        assert_eq!(
+            grid.cell_at_region_local(10.0, 5.0)
+                .expect("inside the region")
+                .ownership,
+            ParcelOwnership::Owned
+        );
+        // Off the region edge / negative / non-finite.
+        assert!(grid.cell_at_region_local(256.0, 0.0).is_none());
+        assert!(grid.cell_at_region_local(-1.0, 0.0).is_none());
+        assert!(grid.cell_at_region_local(0.0, f32::NAN).is_none());
+    }
+
+    /// A negative sequence id and a chunk that runs past the grid are both
+    /// rejected, leaving the grid untouched.
+    #[test]
+    fn malformed_chunks_are_rejected() {
+        let mut grid = ParcelOverlayGrid::new(2); // 4 squares total.
+        assert_eq!(
+            grid.ingest_chunk(-1, &[0]),
+            Err(ParcelOverlayError::NegativeSequenceId(-1))
+        );
+        // Chunk 2 of a 3-byte chunk starts at offset 6, past the 4-square grid.
+        assert!(matches!(
+            grid.ingest_chunk(2, &[0, 0, 0]),
+            Err(ParcelOverlayError::ChunkOutOfRange { .. })
+        ));
+        assert!(!grid.is_complete());
+    }
+
+    /// Re-ingesting the whole overlay (as the simulator does after a parcel
+    /// edit) overwrites in place without disturbing completeness.
+    #[test]
+    fn re_ingesting_overwrites_without_double_counting() {
+        let mut grid = ParcelOverlayGrid::new(2);
+        grid.ingest_chunk(0, &[0x01, 0x01, 0x01, 0x01])
+            .expect("fits");
+        assert!(grid.is_complete());
+        grid.ingest_chunk(0, &[0x03, 0x03, 0x03, 0x03])
+            .expect("fits");
+        assert!(grid.is_complete());
+        assert_eq!(
+            grid.cell(0, 0).expect("on grid").ownership,
+            ParcelOwnership::SelfOwned
+        );
+    }
+
+    /// A grid sized from a region width divides by the 4 m step; non-multiples
+    /// and degenerate widths are rejected.
+    #[test]
+    fn a_grid_sizes_from_region_width() {
+        assert_eq!(
+            ParcelOverlayGrid::for_region_width_metres(256.0)
+                .expect("256 is a multiple of 4")
+                .grids_per_edge(),
+            64
+        );
+        assert!(ParcelOverlayGrid::for_region_width_metres(250.0).is_none());
+        assert!(ParcelOverlayGrid::for_region_width_metres(0.0).is_none());
+        assert!(ParcelOverlayGrid::for_region_width_metres(f32::NAN).is_none());
     }
 }

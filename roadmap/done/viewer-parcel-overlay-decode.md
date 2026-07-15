@@ -2,7 +2,7 @@
 id: viewer-parcel-overlay-decode
 title: Decode ParcelOverlay into a 64×64 grid resource
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-parcel-borders
 ---
 
