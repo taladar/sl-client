@@ -23,7 +23,7 @@ groundwork proven in [[viewer-ui-text-foundation]]. Grapheme-correct editing
 (`backdelete()`) is inherited from parley.
 
 Out of scope here (its own task): the syntax-highlighted, per-range-styled,
-undo-capable editor for [[viewer-lsl-script-editor]] — `parley::PlainEditor` is
+undo-capable editor for [[viewer-lsl-editor-widget]] — `parley::PlainEditor` is
 *plain* (one whole-buffer style set), a gap in parley itself, so that editor
 builds on `RangedBuilder` + `editing::{Cursor,Selection}` separately.
 

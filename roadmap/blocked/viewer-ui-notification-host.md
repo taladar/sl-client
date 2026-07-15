@@ -14,7 +14,7 @@ and dismisses transient notifications, plus a notification list / history. This
 is the shared substrate the specific dialogs sit in — the script permission
 dialog ([[viewer-permission-request-dialog]]), the experience-acceptance prompt
 ([[viewer-experience-permission-dialog]]), and the remaining dialogs still
-tracked by the [[viewer-notifications-dialogs]] idea (inventory / teleport /
+tracked by [[viewer-dialog-offers-invites]] (inventory / teleport /
 friendship / group offers and notices).
 
 Model the reference's **declarative notification catalogue** (notification types

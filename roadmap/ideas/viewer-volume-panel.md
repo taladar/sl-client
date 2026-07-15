@@ -28,7 +28,7 @@ mixer's buses, master vs. per-category interaction, mute semantics (mute is not
 "volume 0" — it must restore the previous level), persistence through the
 settings store, and the mute-on-focus-loss / mute-on-minimise behaviour the
 reference viewer offers. The sliders also want a home in
-[[viewer-quick-preferences]] and the full [[viewer-preferences-ui]] audio tab —
+[[viewer-quick-preferences]] and the [[viewer-preferences-audio-tab]] —
 same store, three views.
 
 Reference (Firestorm, read-only): `llfloatervolumepulldown`,

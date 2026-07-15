@@ -11,170 +11,40 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 71 |
-| ready | 34 |
-| blocked | 41 |
+| ideas | 12 |
+| ready | 62 |
+| blocked | 127 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 462 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **620** |
+| **total** | **675** |
 
-## ideas (71)
+## ideas (12)
 
 ### viewer
 
-- [`viewer-360-snapshot`](ideas/viewer-360-snapshot.md) — 360-degree
-  (equirectangular) snapshot (blocked by `viewer-snapshot-tools`)
-- [`viewer-ambient-occlusion`](ideas/viewer-ambient-occlusion.md) — Screen-space
-  ambient occlusion
-- [`viewer-antialiasing`](ideas/viewer-antialiasing.md) — Antialiasing &
-  image-sharpness knobs (FXAA / SMAA, CAS, anisotropic)
 - [`viewer-audio-backend`](ideas/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
-- [`viewer-avatar-impostors`](ideas/viewer-avatar-impostors.md) — Avatar
-  impostors & complexity limiting
-- [`viewer-avatar-radar`](ideas/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list) (blocked by `viewer-minimap`)
-- [`viewer-beacons`](ideas/viewer-beacons.md) — Tracking beacons (map-position
-  beams) & their dismiss arrows (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-debug-render-beacons`](ideas/viewer-debug-render-beacons.md) — Debug
-  render beacons (physics / scripted / sound / particle markers) (blocked by
-  `viewer-ui-widget-scaffold`)
-- [`viewer-depth-of-field`](ideas/viewer-depth-of-field.md) — Depth of field
-- [`viewer-fs-bridge-lifecycle`](ideas/viewer-fs-bridge-lifecycle.md) —
-  Firestorm LSL bridge — create, attach, version and repair it
-- [`viewer-fs-bridge-protocol`](ideas/viewer-fs-bridge-protocol.md) — Firestorm
-  LSL bridge — the viewer↔script protocol and what it exposes (blocked by
-  `viewer-fs-bridge-lifecycle`)
-- [`viewer-gestures-ui`](ideas/viewer-gestures-ui.md) — Gesture management &
-  trigger UI (blocked by `viewer-ui-widget-scaffold`, `viewer-ui-sound-effects`)
-- [`viewer-glow-bloom`](ideas/viewer-glow-bloom.md) — Full-screen glow / bloom
-- [`viewer-hover-height`](ideas/viewer-hover-height.md) — Avatar hover-height
-  setting (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-hover-text`](ideas/viewer-hover-text.md) — Object hover text
-  (llSetText floating text) (blocked by `viewer-name-tags`)
 - [`viewer-i18n-chat-translation`](ideas/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`,
   `viewer-chat-history-panel`)
-- [`viewer-image-upload`](ideas/viewer-image-upload.md) — Image / texture (and
-  sound / animation) upload (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-in-world-sounds`](ideas/viewer-in-world-sounds.md) — In-world spatial
   sounds (blocked by `viewer-audio-backend`)
-- [`viewer-inventory-ui`](ideas/viewer-inventory-ui.md) — Inventory browser UI
-  (blocked by `viewer-ui-virtualized-list`)
-- [`viewer-lsl-language-server`](ideas/viewer-lsl-language-server.md) — LSL
-  language server (LSP) — real tooling for external editors (blocked by
-  `protocol-lsl-syntax`)
-- [`viewer-lsl-parser`](ideas/viewer-lsl-parser.md) — LSL parser — a pure crate
-  (sl-lsl)
-- [`viewer-lsl-script-editor`](ideas/viewer-lsl-script-editor.md) — LSL script
-  editor (blocked by `viewer-ui-text-input-widget`,
-  `viewer-prim-inventory-editing`, `protocol-lsl-syntax`)
 - [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by
   `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
-- [`viewer-mesh-model-upload`](ideas/viewer-mesh-model-upload.md) — Mesh / model
-  importer & upload (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-prim-texture-editing`)
-- [`viewer-minimap`](ideas/viewer-minimap.md) — Minimap (net map) (blocked by
-  `viewer-ui-widget-scaffold`)
-- [`viewer-minimap-parcel-overlay`](ideas/viewer-minimap-parcel-overlay.md) —
-  Parcel borders on the minimap (blocked by `viewer-minimap`,
-  `viewer-parcel-borders`)
 - [`viewer-money-economy-ui`](ideas/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold`,
   `viewer-media-prim-browser`)
-- [`viewer-name-tags`](ideas/viewer-name-tags.md) — Avatar name tags (the full
-  reference-viewer feature)
-- [`viewer-notecard-editor`](ideas/viewer-notecard-editor.md) — Notecard viewer
-  & editor (rich text with embedded items) (blocked by
-  `viewer-ui-text-input-widget`, `viewer-inventory-ui`,
-  `viewer-notecard-format`)
-- [`viewer-notifications-dialogs`](ideas/viewer-notifications-dialogs.md) —
-  Notifications, toasts & dialogs (blocked by `viewer-ui-notification-host`)
-- [`viewer-object-rezzing`](ideas/viewer-object-rezzing.md) — Object rezzing
-  from inventory (blocked by `viewer-inventory-ui`, `viewer-object-selection`)
-- [`viewer-object-selection`](ideas/viewer-object-selection.md) — Object
-  selection & edit-floater shell (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-parcel-borders`](ideas/viewer-parcel-borders.md) — In-world parcel
-  borders (property lines)
-- [`viewer-parcel-join-split`](ideas/viewer-parcel-join-split.md) — Parcel join
-  / split (blocked by `viewer-ui-widget-scaffold`, `viewer-input-action-map`)
-- [`viewer-parcel-options`](ideas/viewer-parcel-options.md) — Parcel option
-  viewing & editing (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-pbr-terrain`](ideas/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-photo-hosting-upload`](ideas/viewer-photo-hosting-upload.md) — Share
   snapshots to external photo/hosting services (blocked by
-  `viewer-snapshot-tools`)
-- [`viewer-phototools`](ideas/viewer-phototools.md) — Phototools — a
-  photographer's environment & graphics control panel (blocked by
-  `viewer-ui-widget-scaffold`, `viewer-preferences-ui`)
-- [`viewer-preferences-ui`](ideas/viewer-preferences-ui.md) — Preferences /
-  settings UI (blocked by `viewer-ui-settings-binding`)
-- [`viewer-prim-creation`](ideas/viewer-prim-creation.md) — Prim creation
-  (blocked by `viewer-object-selection`, `viewer-ui-widget-scaffold`)
-- [`viewer-prim-inventory-editing`](ideas/viewer-prim-inventory-editing.md) —
-  Prim inventory (contents) editing (blocked by `viewer-object-selection`,
-  `viewer-inventory-ui`)
-- [`viewer-prim-linking`](ideas/viewer-prim-linking.md) — Prim linking &
-  unlinking (blocked by `viewer-object-selection`)
-- [`viewer-prim-parameter-editing`](ideas/viewer-prim-parameter-editing.md) —
-  Prim parameter editing (blocked by `viewer-object-selection`,
-  `viewer-ui-widget-scaffold`)
-- [`viewer-prim-texture-editing`](ideas/viewer-prim-texture-editing.md) — Prim
-  texture / material editing (blocked by `viewer-object-selection`,
-  `viewer-ui-widget-scaffold`)
-- [`viewer-projector-lights`](ideas/viewer-projector-lights.md) — Projector
-  lights (textured spotlights / gobos)
-- [`viewer-quick-preferences`](ideas/viewer-quick-preferences.md) —
-  Quick-preferences panel (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-preferences-ui`)
-- [`viewer-realtime-mirrors`](ideas/viewer-realtime-mirrors.md) — Real-time
-  mirrors (hero probes)
-- [`viewer-region-options`](ideas/viewer-region-options.md) — Region / estate
-  option viewing & editing (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-render-type-toggles`](ideas/viewer-render-type-toggles.md) —
-  Render-type & render-feature toggles (hide object classes, wireframe)
-- [`viewer-rlva-enforcement`](ideas/viewer-rlva-enforcement.md) — RLVa — enforce
-  the restrictions (and answer the queries) (blocked by `viewer-rlva-parsing`)
-- [`viewer-rlva-parsing`](ideas/viewer-rlva-parsing.md) — RLVa — parse the
-  restriction protocol (the @-command language)
-- [`viewer-screen-space-reflections`](ideas/viewer-screen-space-reflections.md)
-  — Screen-space reflections (SSR)
-- [`viewer-screenshot-wait-for-quiescence`](ideas/viewer-screenshot-wait-for-quiescence.md)
-  — Screenshot mode should wait for the scene to load, not for a fixed delay
-- [`viewer-script-external-workflow`](ideas/viewer-script-external-workflow.md)
-  — Scripts on disk — external editors, git and a headless uploader
-- [`viewer-sit-stand`](ideas/viewer-sit-stand.md) — Sit / stand (blocked by
-  `viewer-object-selection`, `viewer-camera-third-person-orbit`)
-- [`viewer-slurl-handling`](ideas/viewer-slurl-handling.md) — SLURL handling
-  (blocked by `viewer-teleport-flow`, `viewer-ui-widget-scaffold`)
-- [`viewer-snapshot-to-inventory`](ideas/viewer-snapshot-to-inventory.md) — Save
-  a snapshot to inventory (as a texture) (blocked by `viewer-snapshot-tools`,
-  `viewer-image-upload`)
-- [`viewer-snapshot-tools`](ideas/viewer-snapshot-tools.md) — Snapshot / photo
-  tools (blocked by `viewer-ui-widget-scaffold`, `viewer-image-upload`)
-- [`viewer-social-panels`](ideas/viewer-social-panels.md) — People / friends /
-  groups / profiles / IM UI (blocked by `viewer-ui-widget-scaffold`)
+  `viewer-snapshot-floater`)
 - [`viewer-streaming-audio`](ideas/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
-- [`viewer-teleport-flow`](ideas/viewer-teleport-flow.md) — Teleport flow —
-  offers, acceptance & progress (blocked by `viewer-notifications-dialogs`,
-  `viewer-world-map`, `viewer-ui-widget-scaffold`)
-- [`viewer-terrain-editing`](ideas/viewer-terrain-editing.md) — Terrain editing
-  (blocked by `viewer-ui-widget-scaffold`, `viewer-input-action-map`,
-  `viewer-region-options`)
-- [`viewer-tonemap-auto-exposure`](ideas/viewer-tonemap-auto-exposure.md) —
-  Automatic (luminance-driven) exposure for the tone mapper
-- [`viewer-transform-gizmos`](ideas/viewer-transform-gizmos.md) — Position /
-  rotation / scale gizmos (blocked by `viewer-object-selection`,
-  `viewer-input-action-map`, `viewer-camera-third-person-orbit`)
 - [`viewer-ui-sound-effects`](ideas/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`)
-- [`viewer-url-linkification`](ideas/viewer-url-linkification.md) — URLs in chat
-  & other text contexts (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-video-playback`](ideas/viewer-video-playback.md) — Video playback
   backend (a second media engine, not the browser) (blocked by
   `viewer-audio-backend`)
@@ -187,10 +57,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-volume-panel`](ideas/viewer-volume-panel.md) — Volume panel (master +
   per-category sliders) (blocked by `viewer-ui-widget-scaffold`,
   `viewer-audio-backend`)
-- [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
-  by `viewer-ui-widget-scaffold`)
 
-## ready (34)
+## ready (62)
 
 ### protocol
 
@@ -199,13 +67,66 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
+  (equirectangular) snapshot
+- [`viewer-ambient-occlusion`](ready/viewer-ambient-occlusion.md) — Screen-space
+  ambient occlusion
+- [`viewer-antialiasing-post`](ready/viewer-antialiasing-post.md) — Post-process
+  antialiasing (FXAA / SMAA / TAA selection)
+- [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
+  — CAS sharpening + anisotropic texture sampling
+- [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
+  Avatar complexity limiting (jellydoll)
+- [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
+  — Billboard impostors for distant avatars
+- [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
+  beacon — beam + off-screen direction arrow
+- [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
+  render beacons (physics / scripted / sound / particle markers)
+- [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-emoji-data`](ready/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
+- [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
+  Firestorm LSL bridge — create, attach, version and repair it
+- [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
+- [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
+  setting
+- [`viewer-lsl-lexer`](ready/viewer-lsl-lexer.md) — LSL lexer — the logos token
+  stream (sl-lsl)
+- [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
+  (inverse of the sl-mesh decoder)
+- [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
+  into an intermediate SL model
+- [`viewer-name-tags-billboard-render`](ready/viewer-name-tags-billboard-render.md)
+  — Name tags — world-space billboard renderer
+- [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
+  Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-notecard-format`](ready/viewer-notecard-format.md) — Notecard format
   — a pure crate (sl-notecard)
 - [`viewer-p35-4`](ready/viewer-p35-4-hud-particles.md) — HUD particles
+- [`viewer-parcel-overlay-decode`](ready/viewer-parcel-overlay-decode.md) —
+  Decode ParcelOverlay into a 64×64 grid resource
+- [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
+  — Projector lights (textured spotlights / gobos)
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
+- [`viewer-realtime-mirrors`](ready/viewer-realtime-mirrors.md) — Real-time
+  mirrors (hero probes)
+- [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
+  Render-type & render-feature toggles (hide object classes, wireframe)
+- [`viewer-rlv-command-parser`](ready/viewer-rlv-command-parser.md) — RLV —
+  parse the @-command chat protocol
+- [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
+  — Screen-space reflections (SSR)
+- [`viewer-screenshot-wait-for-quiescence`](ready/viewer-screenshot-wait-for-quiescence.md)
+  — Screenshot mode should wait for the scene to load, not for a fixed delay
+- [`viewer-script-mirror-download`](ready/viewer-script-mirror-download.md) —
+  Scripts on disk — mirror grid scripts to a directory tree
+- [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
+  parsing & action dispatch
+- [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
+  Automatic (luminance-driven) exposure for the tone mapper
 - [`viewer-ui-settings-store`](ready/viewer-ui-settings-store.md) — Typed
   persistent settings store
 - [`viewer-ui-text-foundation`](ready/viewer-ui-text-foundation.md) — UI text &
@@ -270,10 +191,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (41)
+## blocked (127)
 
 ### viewer
 
+- [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list) (blocked by `viewer-ui-virtualized-list`,
+  `viewer-name-tags-display-names`)
+- [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
+  beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
+  `viewer-ui-widget-scaffold`)
 - [`viewer-camera-collision`](blocked/viewer-camera-collision.md) — Camera
   collision (blocked by `viewer-camera-third-person-orbit`)
 - [`viewer-camera-flycam`](blocked/viewer-camera-flycam.md) — Flycam mode
@@ -305,6 +232,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-input-bar`](blocked/viewer-chat-input-bar.md) — Chat input bar
   (local chat + focus) (blocked by `viewer-ui-text-input-widget`,
   `viewer-input-focus-contexts`, `viewer-ui-settings-store`)
+- [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
+  script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
+- [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
+  Inventory / teleport offers + friendship / group invites (blocked by
+  `viewer-ui-notification-host`)
 - [`viewer-emoji-colon-autocomplete`](blocked/viewer-emoji-colon-autocomplete.md)
   — Colon-based emoji autocomplete (blocked by `viewer-emoji-data`,
   `viewer-ui-text-input-widget`, `viewer-chat-input-bar`)
@@ -314,6 +246,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
+  Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
+  by `viewer-fs-bridge-lifecycle`)
+- [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
+  Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-gesture-runtime`)
+- [`viewer-gesture-runtime`](blocked/viewer-gesture-runtime.md) — Gesture
+  runtime — step sequencing + /-command triggers (blocked by
+  `viewer-chat-channel-and-commands`)
+- [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
+  (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -323,6 +266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-locale-selection`](blocked/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold`, `viewer-ui-settings-store`)
+- [`viewer-image-upload`](blocked/viewer-image-upload.md) — Image / texture (and
+  sound / animation) upload (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-input-action-map`](blocked/viewer-input-action-map.md) — Input action
   map & per-context binding profiles (blocked by `viewer-input-focus-contexts`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
@@ -333,7 +278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold`)
 - [`viewer-input-gesture-bindings`](blocked/viewer-input-gesture-bindings.md) —
   Gesture key bindings (input↔gesture bridge) (blocked by
-  `viewer-input-action-map`, `viewer-gestures-ui`)
+  `viewer-input-action-map`, `viewer-gesture-runtime`)
 - [`viewer-input-rebinding-persistence`](blocked/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map`, `viewer-ui-settings-store`)
@@ -353,15 +298,208 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-settings-ui`](blocked/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping`, `viewer-ui-settings-binding`)
+- [`viewer-inventory-context-actions`](blocked/viewer-inventory-context-actions.md)
+  — Inventory context actions + drag-and-drop (blocked by
+  `viewer-inventory-folder-tree`)
+- [`viewer-inventory-folder-tree`](blocked/viewer-inventory-folder-tree.md) —
+  Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`)
+- [`viewer-inventory-gallery`](blocked/viewer-inventory-gallery.md) — Inventory
+  gallery view (blocked by `viewer-inventory-folder-tree`)
+- [`viewer-inventory-outfit-tab`](blocked/viewer-inventory-outfit-tab.md) — Worn
+  / current-outfit tab + recent items (blocked by
+  `viewer-inventory-folder-tree`)
+- [`viewer-inventory-search-filter`](blocked/viewer-inventory-search-filter.md)
+  — Inventory search / filter (blocked by `viewer-inventory-folder-tree`)
+- [`viewer-lsl-diagnostics`](blocked/viewer-lsl-diagnostics.md) — LSL
+  diagnostics — rustc-grade spans and did-you-mean (blocked by
+  `viewer-lsl-semantic-pass`)
+- [`viewer-lsl-differential-testing`](blocked/viewer-lsl-differential-testing.md)
+  — LSL differential testing — a tailslide diagnostics oracle (blocked by
+  `viewer-lsl-semantic-pass`)
+- [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
+  editor highlighting — colour, folding, brace match, outline (blocked by
+  `viewer-lsl-editor-widget`, `viewer-lsl-lexer`)
+- [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
+  — LSL editor save — upload/compile round-trip and error list (blocked by
+  `viewer-lsl-editor-widget`)
+- [`viewer-lsl-editor-widget`](blocked/viewer-lsl-editor-widget.md) — LSL editor
+  widget — a parley PlainEditor fork with coloured ranges (blocked by
+  `viewer-ui-text-foundation`, `viewer-ui-text-input-widget`)
+- [`viewer-lsl-lsp-diagnostics-nav`](blocked/viewer-lsl-lsp-diagnostics-nav.md)
+  — LSL language server — diagnostics, navigation, completion (blocked by
+  `viewer-lsl-lsp-server`, `viewer-lsl-semantic-pass`)
+- [`viewer-lsl-lsp-server`](blocked/viewer-lsl-lsp-server.md) — LSL language
+  server — lsp-server, document sync, symbols (blocked by
+  `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
+- [`viewer-lsl-parser-tree`](blocked/viewer-lsl-parser-tree.md) — LSL parser —
+  error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`)
+- [`viewer-lsl-semantic-pass`](blocked/viewer-lsl-semantic-pass.md) — LSL
+  semantic pass — types, arity, undefined symbols, reachability (blocked by
+  `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
+- [`viewer-mesh-cost-estimate`](blocked/viewer-mesh-cost-estimate.md) —
+  Streaming cost / land-impact estimate (blocked by `viewer-mesh-encoder`)
+- [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
+  decimation via meshoptimizer (blocked by `viewer-mesh-gltf-import`)
+- [`viewer-mesh-physics-vhacd`](blocked/viewer-mesh-physics-vhacd.md) — Physics
+  "Analyze" via parry3d V-HACD (blocked by `viewer-mesh-gltf-import`)
+- [`viewer-mesh-preview-floater`](blocked/viewer-mesh-preview-floater.md) —
+  Model-preview floater (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-mesh-gltf-import`, `viewer-mesh-lod-decimation`,
+  `viewer-mesh-physics-vhacd`, `viewer-mesh-upload-sequence`,
+  `viewer-prim-texture-editing`)
+- [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
+  Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
+- [`viewer-minimap`](blocked/viewer-minimap.md) — Minimap (net map) (blocked by
+  `viewer-ui-widget-scaffold`)
+- [`viewer-minimap-parcel-overlay`](blocked/viewer-minimap-parcel-overlay.md) —
+  Parcel borders on the minimap (blocked by `viewer-minimap`,
+  `viewer-parcel-overlay-decode`)
+- [`viewer-name-tags-click-select`](blocked/viewer-name-tags-click-select.md) —
+  Name tags — click a tag to select the avatar (blocked by
+  `viewer-name-tags-billboard-render`, `viewer-object-selection-core`)
+- [`viewer-name-tags-decorations`](blocked/viewer-name-tags-decorations.md) —
+  Name tags — title / state / colouring decorations (blocked by
+  `viewer-name-tags-billboard-render`)
+- [`viewer-name-tags-preferences`](blocked/viewer-name-tags-preferences.md) —
+  Name tags — preference toggles (blocked by `viewer-preferences-floater`)
+- [`viewer-notecard-editor`](blocked/viewer-notecard-editor.md) — Notecard
+  viewer & editor (rich text with embedded items) (blocked by
+  `viewer-lsl-editor-widget`, `viewer-notecard-format`)
+- [`viewer-notification-history`](blocked/viewer-notification-history.md) —
+  Notification list / history panel (blocked by `viewer-ui-notification-host`)
+- [`viewer-object-context-menu`](blocked/viewer-object-context-menu.md) — Object
+  hover / context (pie) menu (blocked by `viewer-object-selection-core`)
+- [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
+  — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
+  `viewer-ui-floater-basic`)
+- [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
+  from inventory (blocked by `viewer-object-selection-core`,
+  `viewer-inventory-context-actions`)
+- [`viewer-object-selection-core`](blocked/viewer-object-selection-core.md) —
+  Object selection core (select set + protocol) (blocked by
+  `viewer-ui-widget-scaffold`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
+- [`viewer-parcel-borders-render`](blocked/viewer-parcel-borders-render.md) —
+  In-world parcel borders (property lines) (blocked by
+  `viewer-parcel-overlay-decode`)
+- [`viewer-parcel-join-split`](blocked/viewer-parcel-join-split.md) — Parcel
+  join / split (blocked by `viewer-input-action-map`,
+  `viewer-parcel-overlay-decode`)
+- [`viewer-parcel-options-access-media`](blocked/viewer-parcel-options-access-media.md)
+  — About Land floater — access / ban / media / sound (blocked by
+  `viewer-parcel-options-general`)
+- [`viewer-parcel-options-general`](blocked/viewer-parcel-options-general.md) —
+  About Land floater — general / covenant / objects (blocked by
+  `viewer-ui-widget-scaffold`)
 - [`viewer-permission-active-grants`](blocked/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog`)
 - [`viewer-permission-request-dialog`](blocked/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-phototools`](blocked/viewer-phototools.md) — Phototools — a
+  photographer's environment & graphics control panel (blocked by
+  `viewer-ui-widget-scaffold`)
+- [`viewer-preferences-audio-tab`](blocked/viewer-preferences-audio-tab.md) —
+  Preferences — audio tab (blocked by `viewer-preferences-floater`)
+- [`viewer-preferences-camera-move-tab`](blocked/viewer-preferences-camera-move-tab.md)
+  — Preferences — camera + move-and-view tab (blocked by
+  `viewer-preferences-floater`)
+- [`viewer-preferences-chat-privacy-tab`](blocked/viewer-preferences-chat-privacy-tab.md)
+  — Preferences — chat / IM + privacy tab (blocked by
+  `viewer-preferences-floater`)
+- [`viewer-preferences-debug-settings-editor`](blocked/viewer-preferences-debug-settings-editor.md)
+  — Raw debug-settings editor (blocked by `viewer-preferences-floater`)
+- [`viewer-preferences-floater`](blocked/viewer-preferences-floater.md) —
+  Preferences floater shell + settings store binding (blocked by
+  `viewer-ui-settings-binding`)
+- [`viewer-preferences-graphics-tab`](blocked/viewer-preferences-graphics-tab.md)
+  — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
+- [`viewer-prim-creation`](blocked/viewer-prim-creation.md) — Prim creation
+  (blocked by `viewer-object-edit-floater-shell`)
+- [`viewer-prim-inventory-editing`](blocked/viewer-prim-inventory-editing.md) —
+  Prim inventory (contents) editing (blocked by
+  `viewer-object-edit-floater-shell`, `viewer-ui-virtualized-list`)
+- [`viewer-prim-linking`](blocked/viewer-prim-linking.md) — Prim linking &
+  unlinking (blocked by `viewer-object-selection-core`,
+  `viewer-input-action-map`)
+- [`viewer-prim-parameter-editing`](blocked/viewer-prim-parameter-editing.md) —
+  Prim parameter editing (blocked by `viewer-object-edit-floater-shell`)
+- [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
+  texture / material editing (blocked by `viewer-object-edit-floater-shell`)
+- [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
+  — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
+- [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
+  Quick-preferences panel (blocked by `viewer-preferences-floater`)
+- [`viewer-region-options-debug`](blocked/viewer-region-options-debug.md) —
+  Region / Estate floater — region debug tab (blocked by
+  `viewer-ui-widget-scaffold`)
+- [`viewer-region-options-estate`](blocked/viewer-region-options-estate.md) —
+  Region / Estate floater — estate tab (blocked by
+  `viewer-region-options-debug`)
+- [`viewer-region-options-terrain`](blocked/viewer-region-options-terrain.md) —
+  Region / Estate floater — terrain tab (blocked by
+  `viewer-region-options-debug`)
+- [`viewer-rlv-enforce-camera`](blocked/viewer-rlv-enforce-camera.md) — RLV —
+  camera restrictions and vision overlay (blocked by
+  `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit`)
+- [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
+  — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
+  `viewer-rlv-restriction-state`, `viewer-sit-stand-actions`,
+  `viewer-inventory-folder-tree`)
+- [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
+  — RLV — information hiding / anonymisation layer (blocked by
+  `viewer-rlv-restriction-state`, `viewer-name-tags-decorations`,
+  `viewer-minimap`)
+- [`viewer-rlv-enforce-receive-side`](blocked/viewer-rlv-enforce-receive-side.md)
+  — RLV — receive-side chat/IM filters and redirect (blocked by
+  `viewer-rlv-restriction-state`)
+- [`viewer-rlv-enforce-send-side`](blocked/viewer-rlv-enforce-send-side.md) —
+  RLV — enforce send-side blocks at the Session boundary (blocked by
+  `viewer-rlv-restriction-state`)
+- [`viewer-rlv-notify`](blocked/viewer-rlv-notify.md) — RLV — @notify broadcast
+  on restriction changes (blocked by `viewer-rlv-restriction-state`)
+- [`viewer-rlv-queries`](blocked/viewer-rlv-queries.md) — RLV — answer @get*
+  queries via chat reply (blocked by `viewer-rlv-restriction-state`)
+- [`viewer-rlv-restriction-state`](blocked/viewer-rlv-restriction-state.md) —
+  RLV — the restriction state machine (blocked by `viewer-rlv-command-parser`)
+- [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
+  — Scripts on disk — file watch, headless upload, three-way sync (blocked by
+  `viewer-script-mirror-download`)
+- [`viewer-sit-stand-actions`](blocked/viewer-sit-stand-actions.md) — Sit /
+  stand actions (blocked by `viewer-object-selection-core`)
+- [`viewer-snapshot-floater`](blocked/viewer-snapshot-floater.md) — Snapshot
+  floater — preview, format, destinations (blocked by
+  `viewer-ui-widget-scaffold`)
+- [`viewer-snapshot-quick-key`](blocked/viewer-snapshot-quick-key.md) —
+  Quick-snapshot keybind → disk (blocked by `viewer-input-action-map`)
+- [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
+  Save a snapshot to inventory (as a texture) (blocked by
+  `viewer-snapshot-floater`, `viewer-image-upload`)
+- [`viewer-social-groups`](blocked/viewer-social-groups.md) — Groups list +
+  group profile / roles / notices (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-ui-virtualized-list`)
+- [`viewer-social-im-conversations`](blocked/viewer-social-im-conversations.md)
+  — IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-ui-text-input-widget`)
+- [`viewer-social-people-panel`](blocked/viewer-social-people-panel.md) — People
+  panel — friends / nearby / recent / blocked (blocked by
+  `viewer-ui-widget-scaffold`, `viewer-ui-virtualized-list`)
+- [`viewer-social-profiles`](blocked/viewer-social-profiles.md) — Avatar
+  profiles — picks / classifieds (blocked by `viewer-ui-widget-scaffold`)
+- [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
+  Teleport flow — progress screen & arrival (blocked by
+  `viewer-ui-notification-host`)
+- [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
+  — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
+- [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
+  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map`,
+  `viewer-region-options-debug`)
+- [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
+  rotation / scale gizmos (blocked by `viewer-object-selection-core`,
+  `viewer-input-action-map`)
 - [`viewer-ui-floater-basic`](blocked/viewer-ui-floater-basic.md) — Floater
   window manager (basic) (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-ui-floater-resize-dock`](blocked/viewer-ui-floater-resize-dock.md) —
@@ -383,6 +521,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-widget-scaffold`](blocked/viewer-ui-widget-scaffold.md) — UI
   widget scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation`)
+- [`viewer-url-linkification`](blocked/viewer-url-linkification.md) — URLs in
+  chat & other text contexts (blocked by `viewer-ui-text-foundation`)
+- [`viewer-world-map-floater`](blocked/viewer-world-map-floater.md) — World-map
+  floater — surface, zoom & region tiles (blocked by
+  `viewer-ui-widget-scaffold`)
+- [`viewer-world-map-markers`](blocked/viewer-world-map-markers.md) — World-map
+  floater — MapItem marker layers (blocked by `viewer-world-map-floater`)
+- [`viewer-world-map-search`](blocked/viewer-world-map-search.md) — World-map
+  floater — region-name search (blocked by `viewer-world-map-floater`)
+- [`viewer-world-map-tracking-teleport`](blocked/viewer-world-map-tracking-teleport.md)
+  — World-map floater — tracking & teleport hand-off (blocked by
+  `viewer-world-map-floater`, `viewer-beacons-beam-render`,
+  `viewer-teleport-flow-progress`)
 
 ### test
 

@@ -16,9 +16,9 @@ behind them: a checkbox/slider/combo declares which setting it edits, and the
 binding keeps widget and store in sync (read on build, write on change, react to
 external changes).
 
-This is what makes [[viewer-preferences-ui]], [[viewer-quick-preferences]] and
-the [[viewer-input-rebinding-ui]] mostly declarative rather than hand-wired. It
-depends on both the widget scaffold (the widgets) and the settings store (the
+This is what makes [[viewer-preferences-floater]], [[viewer-quick-preferences]]
+and the [[viewer-input-rebinding-ui]] mostly declarative rather than hand-wired.
+It depends on both the widget scaffold (the widgets) and the settings store (the
 values).
 
 Reference (Firestorm, read-only): `llui` `control_name` handling, `lluictrl`
