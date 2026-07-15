@@ -2,7 +2,7 @@
 id: viewer-volume-panel
 title: Volume panel (master + per-category sliders)
 topic: viewer
-status: ideas
+status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---

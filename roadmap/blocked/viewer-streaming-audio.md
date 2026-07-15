@@ -2,7 +2,7 @@
 id: viewer-streaming-audio
 title: Parcel streaming-audio / media-audio player
 topic: viewer
-status: ideas
+status: blocked
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-audio-backend]
 ---

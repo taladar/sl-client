@@ -2,7 +2,7 @@
 id: viewer-audio-backend
 title: Audio backend — device, decode, listener & mixer
 topic: viewer
-status: ideas
+status: ready
 origin: user request (2026-07)
 ---
 
