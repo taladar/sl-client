@@ -2,7 +2,7 @@
 id: viewer-in-world-sounds
 title: In-world spatial sounds
 topic: viewer
-status: ideas
+status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-audio-backend]
 ---

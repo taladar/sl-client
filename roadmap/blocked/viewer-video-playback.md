@@ -2,7 +2,7 @@
 id: viewer-video-playback
 title: Video playback backend (a second media engine, not the browser)
 topic: viewer
-status: ideas
+status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-audio-backend]
 ---

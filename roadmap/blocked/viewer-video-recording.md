@@ -2,7 +2,7 @@
 id: viewer-video-recording
 title: In-viewer video recording (machinima capture)
 topic: viewer
-status: ideas
+status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold, viewer-video-playback]
 ---

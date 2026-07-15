@@ -2,7 +2,7 @@
 id: viewer-media-prim-browser
 title: Media-on-a-prim & embedded web browser
 topic: viewer
-status: ideas
+status: blocked
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---

@@ -2,7 +2,7 @@
 id: viewer-ui-sound-effects
 title: UI sound effects
 topic: viewer
-status: ideas
+status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-audio-backend, viewer-ui-widget-scaffold]
 ---

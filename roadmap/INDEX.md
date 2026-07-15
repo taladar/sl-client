@@ -11,54 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 12 |
-| ready | 60 |
-| blocked | 126 |
+| ideas | 0 |
+| ready | 61 |
+| blocked | 138 |
 | in-progress | 0 |
 | bugs | 6 |
 | done | 465 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **675** |
+| **total** | **676** |
 
-## ideas (12)
-
-### viewer
-
-- [`viewer-audio-backend`](ideas/viewer-audio-backend.md) — Audio backend —
-  device, decode, listener & mixer
-- [`viewer-i18n-chat-translation`](ideas/viewer-i18n-chat-translation.md) —
-  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`,
-  `viewer-chat-history-panel`)
-- [`viewer-in-world-sounds`](ideas/viewer-in-world-sounds.md) — In-world spatial
-  sounds (blocked by `viewer-audio-backend`)
-- [`viewer-media-prim-browser`](ideas/viewer-media-prim-browser.md) —
-  Media-on-a-prim & embedded web browser (blocked by
-  `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
-- [`viewer-money-economy-ui`](ideas/viewer-money-economy-ui.md) — Money /
-  economy / L$ UI (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-media-prim-browser`)
-- [`viewer-photo-hosting-upload`](ideas/viewer-photo-hosting-upload.md) — Share
-  snapshots to external photo/hosting services (blocked by
-  `viewer-snapshot-floater`)
-- [`viewer-streaming-audio`](ideas/viewer-streaming-audio.md) — Parcel
-  streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
-- [`viewer-ui-sound-effects`](ideas/viewer-ui-sound-effects.md) — UI sound
-  effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`)
-- [`viewer-video-playback`](ideas/viewer-video-playback.md) — Video playback
-  backend (a second media engine, not the browser) (blocked by
-  `viewer-audio-backend`)
-- [`viewer-video-recording`](ideas/viewer-video-recording.md) — In-viewer video
-  recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-video-playback`)
-- [`viewer-voice-audio`](ideas/viewer-voice-audio.md) — Voice audio transport
-  (WebRTC + Vivox) (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-audio-backend`)
-- [`viewer-volume-panel`](ideas/viewer-volume-panel.md) — Volume panel (master +
-  per-category sliders) (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-audio-backend`)
-
-## ready (60)
+## ready (61)
 
 ### protocol
 
@@ -75,6 +38,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   antialiasing (FXAA / SMAA / TAA selection)
 - [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
   — CAS sharpening + anisotropic texture sampling
+- [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
+  device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
@@ -189,7 +154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (126)
+## blocked (138)
 
 ### viewer
 
@@ -258,6 +223,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
+- [`viewer-i18n-chat-translation`](blocked/viewer-i18n-chat-translation.md) —
+  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`,
+  `viewer-chat-history-panel`)
 - [`viewer-i18n-fluent-scaffold`](blocked/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold`)
@@ -266,6 +234,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-i18n-fluent-scaffold`, `viewer-ui-settings-store`)
 - [`viewer-image-upload`](blocked/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold`)
+- [`viewer-in-world-sounds`](blocked/viewer-in-world-sounds.md) — In-world
+  spatial sounds (blocked by `viewer-audio-backend`)
 - [`viewer-input-action-map`](blocked/viewer-input-action-map.md) — Input action
   map & per-context binding profiles (blocked by `viewer-input-focus-contexts`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
@@ -308,6 +278,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-inventory-folder-tree`)
 - [`viewer-inventory-search-filter`](blocked/viewer-inventory-search-filter.md)
   — Inventory search / filter (blocked by `viewer-inventory-folder-tree`)
+- [`viewer-login-screen`](blocked/viewer-login-screen.md) — Login screen — grid
+  select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-lsl-diagnostics`](blocked/viewer-lsl-diagnostics.md) — LSL
   diagnostics — rustc-grade spans and did-you-mean (blocked by
   `viewer-lsl-semantic-pass`)
@@ -332,6 +304,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-pass`](blocked/viewer-lsl-semantic-pass.md) — LSL
   semantic pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree`, `protocol-lsl-syntax`)
+- [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
+  Media-on-a-prim & embedded web browser (blocked by
+  `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
 - [`viewer-mesh-cost-estimate`](blocked/viewer-mesh-cost-estimate.md) —
   Streaming cost / land-impact estimate (blocked by `viewer-mesh-encoder`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
@@ -350,6 +325,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-parcel-overlay`](blocked/viewer-minimap-parcel-overlay.md) —
   Parcel borders on the minimap (blocked by `viewer-minimap`,
   `viewer-parcel-overlay-decode`)
+- [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
+  economy / L$ UI (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-media-prim-browser`)
 - [`viewer-name-tags-click-select`](blocked/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar (blocked by
   `viewer-name-tags-billboard-render`, `viewer-object-selection-core`)
@@ -395,6 +373,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-permission-request-dialog`](blocked/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-photo-hosting-upload`](blocked/viewer-photo-hosting-upload.md) —
+  Share snapshots to external photo/hosting services (blocked by
+  `viewer-snapshot-floater`)
 - [`viewer-phototools`](blocked/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold`)
@@ -485,6 +466,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold`, `viewer-ui-virtualized-list`)
 - [`viewer-social-profiles`](blocked/viewer-social-profiles.md) — Avatar
   profiles — picks / classifieds (blocked by `viewer-ui-widget-scaffold`)
+- [`viewer-streaming-audio`](blocked/viewer-streaming-audio.md) — Parcel
+  streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
 - [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host`)
@@ -509,6 +492,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store`)
 - [`viewer-ui-skin-tokens`](blocked/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold`)
+- [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
+  effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`)
 - [`viewer-ui-text-input-widget`](blocked/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold`)
@@ -519,6 +504,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-text-foundation`)
 - [`viewer-url-linkification`](blocked/viewer-url-linkification.md) — URLs in
   chat & other text contexts (blocked by `viewer-ui-text-foundation`)
+- [`viewer-video-playback`](blocked/viewer-video-playback.md) — Video playback
+  backend (a second media engine, not the browser) (blocked by
+  `viewer-audio-backend`)
+- [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
+  video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-video-playback`)
+- [`viewer-voice-audio`](blocked/viewer-voice-audio.md) — Voice audio transport
+  (WebRTC + Vivox) (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-audio-backend`)
+- [`viewer-volume-panel`](blocked/viewer-volume-panel.md) — Volume panel
+  (master + per-category sliders) (blocked by `viewer-ui-widget-scaffold`,
+  `viewer-audio-backend`)
 - [`viewer-world-map-floater`](blocked/viewer-world-map-floater.md) — World-map
   floater — surface, zoom & region tiles (blocked by
   `viewer-ui-widget-scaffold`)
