@@ -2,7 +2,7 @@
 id: viewer-lsl-lsp-diagnostics-nav
 title: LSL language server — diagnostics, navigation, completion
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-lsl-language-server
 blocked_by: [viewer-lsl-lsp-server, viewer-lsl-semantic-pass]
 ---

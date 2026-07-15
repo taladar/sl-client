@@ -28,13 +28,22 @@ use std::collections::HashMap;
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
+    PublishDiagnostics,
 };
-use lsp_types::request::{DocumentSymbolRequest, Request as _, WorkspaceSymbolRequest};
+use lsp_types::request::{
+    Completion, DocumentHighlightRequest, DocumentSymbolRequest, GotoDefinition, HoverRequest,
+    InlayHintRequest, References, Rename, Request as _, SignatureHelpRequest,
+    WorkspaceSymbolRequest,
+};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, InitializeParams, InitializeResult, OneOf,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlight,
+    DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+    InitializeResult, InlayHint, InlayHintParams, Location, OneOf, ReferenceParams, RenameParams,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceSymbolParams,
+    WorkspaceSymbolResponse,
 };
 use serde::de::DeserializeOwned;
 use sl_lsl::LslSyntax;
@@ -42,6 +51,7 @@ use sl_lsl::LslSyntax;
 use crate::document::Document;
 use crate::position::PositionEncoding;
 use crate::symbols::{document_symbols, workspace_symbols};
+use crate::{completion, diagnostics, hover, inlay, navigate, signature};
 
 /// The JSON-RPC error code for a request whose method the server does not
 /// implement (named as a constant to avoid an `as`-cast of `lsp_server`'s
@@ -51,6 +61,11 @@ const METHOD_NOT_FOUND: i32 = -32601;
 /// The JSON-RPC error code for a request whose parameters failed to
 /// deserialise.
 const INVALID_PARAMS: i32 = -32602;
+
+/// The LSP `RequestFailed` error code — a request the server understood but
+/// could not fulfil (a rename of a library symbol, an invalid new name), as
+/// distinct from a malformed request.
+const REQUEST_FAILED: i32 = -32803;
 
 /// Something that went wrong driving the LSP connection: a transport/protocol
 /// failure or a JSON (de)serialisation error.
@@ -217,9 +232,12 @@ pub fn run(connection: Connection, syntax: LslSyntax) -> Result<(), ServerError>
     main_loop(&mut server, &connection)
 }
 
-/// The [`ServerCapabilities`] to advertise: full-text document sync, a document
-/// symbol provider, a workspace symbol provider, and the negotiated position
-/// encoding.
+/// The [`ServerCapabilities`] to advertise: full-text document sync, the symbol
+/// providers, the whole language-intelligence surface (definition, references,
+/// document highlight, rename, hover, completion, signature help, inlay hints),
+/// and the negotiated position encoding. Diagnostics are *pushed*
+/// (`publishDiagnostics`) rather than declared as a provider, so they need no
+/// capability flag here.
 #[must_use]
 fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
     ServerCapabilities {
@@ -227,6 +245,20 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Left(true)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        completion_provider: Some(CompletionOptions::default()),
+        signature_help_provider: Some(SignatureHelpOptions {
+            // The parentheses opening a call and the comma between arguments both
+            // re-trigger the popup so it tracks the active parameter as typed.
+            trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
+            retrigger_characters: None,
+            work_done_progress_options: lsp_types::WorkDoneProgressOptions::default(),
+        }),
+        inlay_hint_provider: Some(OneOf::Left(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -250,7 +282,12 @@ fn main_loop(server: &mut Server, connection: &Connection) -> Result<(), ServerE
                 if notification.method == Exit::METHOD {
                     return Ok(());
                 }
-                server.handle_notification(notification);
+                for outgoing in server.handle_notification(notification) {
+                    connection
+                        .sender
+                        .send(outgoing)
+                        .map_err(|err| ServerError::Send(err.to_string()))?;
+                }
             }
             // Responses are to requests the server itself made; this server
             // makes none, so there is nothing to correlate.
@@ -283,6 +320,43 @@ impl Server {
                     Err(message) => Response::new_err(id, INVALID_PARAMS, message),
                 }
             }
+            GotoDefinition::METHOD => match parse_params::<GotoDefinitionParams>(request) {
+                Ok(params) => Response::new_ok(id, self.definition(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            References::METHOD => match parse_params::<ReferenceParams>(request) {
+                Ok(params) => Response::new_ok(id, self.references(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            DocumentHighlightRequest::METHOD => {
+                match parse_params::<DocumentHighlightParams>(request) {
+                    Ok(params) => Response::new_ok(id, self.document_highlight(&params)),
+                    Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+                }
+            }
+            HoverRequest::METHOD => match parse_params::<HoverParams>(request) {
+                Ok(params) => Response::new_ok(id, self.hover(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            Completion::METHOD => match parse_params::<CompletionParams>(request) {
+                Ok(params) => Response::new_ok(id, self.completion(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            SignatureHelpRequest::METHOD => match parse_params::<SignatureHelpParams>(request) {
+                Ok(params) => Response::new_ok(id, self.signature_help(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            InlayHintRequest::METHOD => match parse_params::<InlayHintParams>(request) {
+                Ok(params) => Response::new_ok(id, self.inlay_hints(&params)),
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
+            Rename::METHOD => match parse_params::<RenameParams>(request) {
+                Ok(params) => match self.rename(&params) {
+                    Ok(edit) => Response::new_ok(id, edit),
+                    Err(message) => Response::new_err(id, REQUEST_FAILED, message),
+                },
+                Err(message) => Response::new_err(id, INVALID_PARAMS, message),
+            },
             other => Response::new_err(
                 id,
                 METHOD_NOT_FOUND,
@@ -291,31 +365,169 @@ impl Server {
         }
     }
 
-    /// Dispatch one notification to its handler. An unrecognised notification is
-    /// ignored (the protocol requires notifications never be answered), as is a
-    /// malformed body — logged, not fatal.
-    fn handle_notification(&mut self, notification: Notification) {
+    /// Dispatch one notification to its handler and return the messages the
+    /// server should send in response — a `publishDiagnostics` after a document
+    /// changes, an empty diagnostics list after it closes. An unrecognised
+    /// notification is ignored (the protocol requires notifications never be
+    /// answered with an error), as is a malformed body — logged, not fatal.
+    fn handle_notification(&mut self, notification: Notification) -> Vec<Message> {
         match notification.method.as_str() {
             DidOpenTextDocument::METHOD => {
                 if let Some(params) = parse_notification::<DidOpenTextDocumentParams>(notification)
                 {
+                    let uri = params.text_document.uri.clone();
                     self.did_open(params);
+                    return self.diagnostics_for(&uri).into_iter().collect();
                 }
             }
             DidChangeTextDocument::METHOD => {
                 if let Some(params) =
                     parse_notification::<DidChangeTextDocumentParams>(notification)
                 {
+                    let uri = params.text_document.uri.clone();
                     self.did_change(params);
+                    return self.diagnostics_for(&uri).into_iter().collect();
                 }
             }
             DidCloseTextDocument::METHOD => {
                 if let Some(params) = parse_notification::<DidCloseTextDocumentParams>(notification)
                 {
+                    let uri = params.text_document.uri.clone();
                     self.did_close(params);
+                    return clear_message(&uri).into_iter().collect();
                 }
             }
             _other => {}
+        }
+        Vec::new()
+    }
+
+    /// The go-to-definition location of the symbol at the request position, or
+    /// [`None`] (serialised as JSON `null`) when the cursor is not on a user
+    /// symbol or the document is not open.
+    #[must_use]
+    fn definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
+        let position = &params.text_document_position_params;
+        let document = self.documents.get(&position.text_document.uri)?;
+        let location =
+            navigate::goto_definition(document, position.position, &self.syntax, self.encoding)?;
+        Some(GotoDefinitionResponse::Scalar(location))
+    }
+
+    /// Every reference to the symbol at the request position, honouring the
+    /// `includeDeclaration` flag. An empty list when the document is not open or
+    /// the cursor is not on a symbol.
+    #[must_use]
+    fn references(&self, params: &ReferenceParams) -> Vec<Location> {
+        let position = &params.text_document_position;
+        let Some(document) = self.documents.get(&position.text_document.uri) else {
+            return Vec::new();
+        };
+        navigate::references(
+            document,
+            position.position,
+            params.context.include_declaration,
+            &self.syntax,
+            self.encoding,
+        )
+    }
+
+    /// The document highlights for the symbol at the request position.
+    #[must_use]
+    fn document_highlight(&self, params: &DocumentHighlightParams) -> Vec<DocumentHighlight> {
+        let position = &params.text_document_position_params;
+        let Some(document) = self.documents.get(&position.text_document.uri) else {
+            return Vec::new();
+        };
+        navigate::document_highlights(document, position.position, &self.syntax, self.encoding)
+    }
+
+    /// The hover for the symbol at the request position, or [`None`].
+    #[must_use]
+    fn hover(&self, params: &HoverParams) -> Option<Hover> {
+        let position = &params.text_document_position_params;
+        let document = self.documents.get(&position.text_document.uri)?;
+        hover::hover(document, position.position, &self.syntax, self.encoding)
+    }
+
+    /// The completion items for the request position, as a flat array.
+    #[must_use]
+    fn completion(&self, params: &CompletionParams) -> CompletionResponse {
+        let position = &params.text_document_position;
+        let items = match self.documents.get(&position.text_document.uri) {
+            Some(document) => {
+                completion::completion(document, position.position, &self.syntax, self.encoding)
+            }
+            None => Vec::new(),
+        };
+        CompletionResponse::Array(items)
+    }
+
+    /// The signature help for the call at the request position, or [`None`].
+    #[must_use]
+    fn signature_help(&self, params: &SignatureHelpParams) -> Option<SignatureHelp> {
+        let position = &params.text_document_position_params;
+        let document = self.documents.get(&position.text_document.uri)?;
+        signature::signature_help(document, position.position, &self.syntax, self.encoding)
+    }
+
+    /// The inlay hints for the requested range of the document.
+    #[must_use]
+    fn inlay_hints(&self, params: &InlayHintParams) -> Vec<InlayHint> {
+        let Some(document) = self.documents.get(&params.text_document.uri) else {
+            return Vec::new();
+        };
+        inlay::inlay_hints(document, params.range, &self.syntax, self.encoding)
+    }
+
+    /// The workspace edit renaming the symbol at the request position, or a
+    /// human-readable refusal message.
+    fn rename(&self, params: &RenameParams) -> Result<lsp_types::WorkspaceEdit, String> {
+        let position = &params.text_document_position;
+        let document = self
+            .documents
+            .get(&position.text_document.uri)
+            .ok_or_else(|| "document is not open".to_owned())?;
+        navigate::rename(
+            document,
+            position.position,
+            &params.new_name,
+            &self.syntax,
+            self.encoding,
+        )
+        .map_err(|err| err.to_string())
+    }
+
+    /// The `publishDiagnostics` message for the (open) document `uri`, or
+    /// [`None`] if it is not open or its payload cannot be serialised.
+    #[must_use]
+    fn diagnostics_for(&self, uri: &Uri) -> Option<Message> {
+        let document = self.documents.get(uri)?;
+        let params = diagnostics::publish_params(document, &self.syntax, self.encoding);
+        publish_message(params)
+    }
+}
+
+/// The `publishDiagnostics` message that **clears** diagnostics for `uri` (an
+/// empty list), or [`None`] if the payload cannot be serialised.
+#[must_use]
+fn clear_message(uri: &Uri) -> Option<Message> {
+    publish_message(diagnostics::clear_params(uri))
+}
+
+/// Wrap a [`PublishDiagnosticsParams`](lsp_types::PublishDiagnosticsParams) as a
+/// `textDocument/publishDiagnostics` notification message, logging and dropping
+/// it if it cannot be serialised (a diagnostics push must never abort the loop).
+#[must_use]
+fn publish_message(params: lsp_types::PublishDiagnosticsParams) -> Option<Message> {
+    match serde_json::to_value(params) {
+        Ok(value) => Some(Message::Notification(Notification {
+            method: PublishDiagnostics::METHOD.to_owned(),
+            params: value,
+        })),
+        Err(err) => {
+            tracing::warn!(error = %err, "dropping publishDiagnostics: serialisation failed");
+            None
         }
     }
 }

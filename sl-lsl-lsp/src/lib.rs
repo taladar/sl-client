@@ -12,20 +12,31 @@
 //! ours takes its symbols from the *connected grid*, so it tracks Linden Lab's
 //! additions and sees OpenSim's OSSL a static list cannot.
 //!
-//! This crate is the **server foundation**: document synchronisation and
-//! symbols. The language-intelligence half — diagnostics, go-to-definition,
-//! find-references, rename, completion, hover and signature help — builds on it
-//! in the `viewer-lsl-lsp-diagnostics-nav` task.
+//! Beyond document synchronisation and the symbol outline, this crate answers
+//! the full **language-intelligence** surface: pushed **diagnostics** (parse and
+//! semantic errors plus deprecated/god-mode lints), **go-to-definition**,
+//! **find-references**, **document highlight**, **rename**, scope-aware
+//! **completion**, **hover** and **signature help** against the grid library,
+//! and **inlay hints** surfacing each call's sleep/energy cost.
 //!
 //! ## Layout
 //!
 //! - [`position`] — converting `sl-lsl`'s byte spans into LSP `(line, character)`
 //!   [`positions`](lsp_types::Position) under the negotiated position encoding
-//!   ([`PositionEncoding`]).
+//!   ([`PositionEncoding`]), and back.
 //! - [`document`] — the in-memory [`Document`] store: text, line index and parse
 //!   tree, kept in sync with the editor's `didOpen`/`didChange`/`didClose`.
 //! - [`symbols`] — turning a parse tree into the LSP `documentSymbol` outline and
 //!   `workspace/symbol` list.
+//! - [`navigation`] — the scope-aware symbol-resolution pass that backs
+//!   definition, references, highlight and rename, and feeds hover and the lints.
+//! - [`navigate`] — the LSP-facing navigation requests over that pass.
+//! - [`diagnostics`] — parse, semantic and library-lint findings as pushed LSP
+//!   diagnostics.
+//! - [`docs`] — rendering the grid's library symbols into hover Markdown and
+//!   signature labels.
+//! - [`hover`], [`completion`], [`signature`], [`inlay`] — the remaining
+//!   cursor-driven language-intelligence requests.
 //! - [`server`] — the [`run`] loop that negotiates `initialize`, drives the
 //!   message loop and dispatches to the handlers.
 //!
@@ -39,12 +50,22 @@
 //! ways — the reason `lsp-server` (synchronous, no forced async runtime, with an
 //! in-memory transport) was chosen over `tower-lsp` or `async-lsp`.
 
+pub mod completion;
+pub mod diagnostics;
+pub mod docs;
 pub mod document;
+pub mod hover;
+pub mod inlay;
+pub mod navigate;
+pub mod navigation;
 pub mod position;
 pub mod server;
+pub mod signature;
 pub mod symbols;
 
 pub use document::Document;
+pub use navigate::RenameError;
+pub use navigation::{Binding, Occurrence, SymbolClass, resolve};
 pub use position::{LineIndex, PositionEncoding};
 pub use server::{Server, ServerError, run};
 pub use symbols::{document_symbols, workspace_symbols};

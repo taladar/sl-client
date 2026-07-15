@@ -146,6 +146,46 @@ impl LineIndex {
             end: self.position(text, span.end, encoding),
         }
     }
+
+    /// The **byte offset** within `text` of an LSP [`Position`] under `encoding` —
+    /// the inverse of [`position`](Self::position), which every cursor-driven
+    /// request (hover, go-to-definition, completion) needs to turn the client's
+    /// `(line, character)` back into the byte offset the parse tree is spanned in.
+    ///
+    /// `text` must be the string the index was built from. A position past the
+    /// end of its line clamps to the line's end (excluding the trailing newline),
+    /// and a line past the end of the document clamps to `text.len()`, so an
+    /// out-of-range cursor never panics — it resolves to the nearest valid byte.
+    #[must_use]
+    pub fn offset_at(&self, text: &str, position: Position, encoding: PositionEncoding) -> usize {
+        let line = usize::try_from(position.line).unwrap_or(usize::MAX);
+        let Some(&line_start) = self.line_starts.get(line) else {
+            return text.len();
+        };
+        let line_end = match self.line_starts.get(line.saturating_add(1)) {
+            Some(&start) => start,
+            None => text.len(),
+        };
+        let line_text = text.get(line_start..line_end).unwrap_or("");
+        let target = usize::try_from(position.character).unwrap_or(usize::MAX);
+        let mut column = 0_usize;
+        for (byte_offset, ch) in line_text.char_indices() {
+            if column >= target {
+                return line_start.saturating_add(byte_offset);
+            }
+            // A newline is the line's terminator, not an addressable column; stop
+            // at it so a character past the line's text clamps to the line's end.
+            if ch == '\n' {
+                return line_start.saturating_add(byte_offset);
+            }
+            column = column.saturating_add(match encoding {
+                PositionEncoding::Utf8 => ch.len_utf8(),
+                PositionEncoding::Utf16 => ch.len_utf16(),
+                PositionEncoding::Utf32 => 1,
+            });
+        }
+        line_end
+    }
 }
 
 /// The column of the end of `prefix` (the text from a line's start up to the

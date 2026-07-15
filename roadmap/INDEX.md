@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 61 |
+| ready | 60 |
 | blocked | 133 |
 | in-progress | 0 |
 | bugs | 7 |
-| done | 470 |
+| done | 471 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **677** |
 
-## ready (61)
+## ready (60)
 
 ### viewer
 
@@ -54,9 +54,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-differential-testing`](ready/viewer-lsl-differential-testing.md)
   — LSL differential testing — a tailslide diagnostics oracle (blocked by
   `viewer-lsl-semantic-pass` (done))
-- [`viewer-lsl-lsp-diagnostics-nav`](ready/viewer-lsl-lsp-diagnostics-nav.md) —
-  LSL language server — diagnostics, navigation, completion (blocked by
-  `viewer-lsl-lsp-server` (done), `viewer-lsl-semantic-pass` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -544,7 +541,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (470)
+## done (471)
 
 ### protocol
 
@@ -677,6 +674,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
   stream (sl-lsl)
+- [`viewer-lsl-lsp-diagnostics-nav`](done/viewer-lsl-lsp-diagnostics-nav.md) —
+  LSL language server — diagnostics, navigation, completion (blocked by
+  `viewer-lsl-lsp-server` (done), `viewer-lsl-semantic-pass` (done))
 - [`viewer-lsl-lsp-server`](done/viewer-lsl-lsp-server.md) — LSL language server
   — lsp-server, document sync, symbols (blocked by `viewer-lsl-parser-tree`
   (done), `protocol-lsl-syntax` (done))

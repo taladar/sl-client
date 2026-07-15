@@ -116,6 +116,15 @@ impl Document {
     ) -> lsp_types::Range {
         self.line_index.range(&self.text, span, encoding)
     }
+
+    /// The byte offset in this document of an LSP `position` under `encoding` —
+    /// the inverse of [`range`](Self::range), pairing [`text`](Self::text) with
+    /// [`line_index`](Self::line_index) so a cursor-driven request cannot
+    /// mismatch them.
+    #[must_use]
+    pub fn offset(&self, position: lsp_types::Position, encoding: PositionEncoding) -> usize {
+        self.line_index.offset_at(&self.text, position, encoding)
+    }
 }
 
 #[cfg(test)]
