@@ -4,7 +4,7 @@ title: Sit / stand
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-object-selection, viewer-camera-system]
+blocked_by: [viewer-object-selection, viewer-camera-third-person-orbit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -26,4 +26,4 @@ reply.
 Builds on: `SitState` (`sl-proto`), the animation playback (`animations.rs`),
 and the camera system.
 
-Deps: [[viewer-object-selection]], [[viewer-camera-system]].
+Deps: [[viewer-object-selection]], [[viewer-camera-third-person-orbit]].

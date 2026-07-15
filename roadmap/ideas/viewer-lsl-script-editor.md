@@ -4,7 +4,7 @@ title: LSL script editor
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-prim-inventory-editing, protocol-lsl-syntax]
+blocked_by: [viewer-ui-text-input-widget, viewer-prim-inventory-editing, protocol-lsl-syntax]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -102,5 +102,6 @@ Reference (Firestorm, read-only): `llscripteditor`, `llpreviewscript`,
 `fslslpreproc`. Also `secondlife/tailslide` — Linden Lab's own MIT-licensed LSL
 parser/compiler, the best reference for real LSL semantics.
 
-Deps: [[viewer-ui-framework]], [[viewer-prim-inventory-editing]] (opening a
-script from a prim's contents), [[protocol-lsl-syntax]] (the keyword table).
+Deps: [[viewer-ui-text-input-widget]], [[viewer-prim-inventory-editing]]
+(opening a script from a prim's contents), [[protocol-lsl-syntax]] (the keyword
+table).

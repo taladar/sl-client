@@ -4,7 +4,7 @@ title: Minimap (net map)
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -34,4 +34,4 @@ Reference (Firestorm, read-only): `llnetmap`, `llfloatermap`.
 Builds on: `CoarseLocationUpdate` handling in `avatars.rs` (incl. the
 `viewer-r24` per-region fix) and the existing scene mirror.
 
-Deps: [[viewer-ui-framework]] (the panel / floater).
+Deps: [[viewer-ui-widget-scaffold]] (the panel / floater).

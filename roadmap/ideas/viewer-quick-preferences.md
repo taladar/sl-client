@@ -4,7 +4,7 @@ title: Quick-preferences panel
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework, viewer-preferences-ui]
+blocked_by: [viewer-ui-widget-scaffold, viewer-preferences-ui]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -32,5 +32,5 @@ tasks in their own right).
 Reference (Firestorm, read-only): `fsfloaterquickprefs` (`quick_preferences`
 XUI and its user-editable control list), `llfloaterpreference`.
 
-Deps: [[viewer-ui-framework]] (the floater),
+Deps: [[viewer-ui-widget-scaffold]] (the floater),
 [[viewer-preferences-ui]] (the settings store it is a view over).

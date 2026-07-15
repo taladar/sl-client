@@ -4,7 +4,7 @@ title: URLs in chat & other text contexts
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -24,6 +24,6 @@ then *does* for a SLURL is [[viewer-slurl-handling]]'s concern, not this one's.
 Reference (Firestorm, read-only): `llui/llurlregistry`, `llui/llurlentry`,
 `llui/llurlmatch`, `llui/llurlaction`.
 
-Deps: [[viewer-ui-framework]]. Independent of [[viewer-slurl-handling]] — that
-system wires SLURL actions to their UI targets from any source; this one only
-renders text as clickable links.
+Deps: [[viewer-ui-widget-scaffold]]. Independent of [[viewer-slurl-handling]] —
+that system wires SLURL actions to their UI targets from any source; this one
+only renders text as clickable links.

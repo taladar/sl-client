@@ -4,7 +4,7 @@ title: Avatar hover-height setting
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -43,5 +43,5 @@ plumbing, `LLVOAvatar::setHoverOffset`.
 Builds on: `api-g14` `AgentPreferences` caps and the decoded
 `AvatarAppearance.hover_height`.
 
-Deps: [[viewer-ui-framework]] (the slider has nowhere to live until the UI
+Deps: [[viewer-ui-widget-scaffold]] (the slider has nowhere to live until the UI
 exists).

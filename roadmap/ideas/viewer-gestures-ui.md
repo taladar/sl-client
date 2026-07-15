@@ -4,7 +4,7 @@ title: Gesture management & trigger UI
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-ui-sound-effects]
+blocked_by: [viewer-ui-widget-scaffold, viewer-ui-sound-effects]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -23,4 +23,4 @@ Reference (Firestorm, read-only): `llgesturemgr`, `llfloatergesture`,
 
 Builds on: `animations.rs` / `locomotion.rs` playback.
 
-Deps: [[viewer-ui-framework]], [[viewer-ui-sound-effects]] (sound steps).
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-ui-sound-effects]] (sound steps).

@@ -4,7 +4,7 @@ title: Volume panel (master + per-category sliders)
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework, viewer-audio-backend]
+blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -34,5 +34,5 @@ same store, three views.
 Reference (Firestorm, read-only): `llfloatervolumepulldown`,
 `llpanelvolumepulldown`, the `llui` audio settings group.
 
-Deps: [[viewer-ui-framework]] (the pulldown panel),
+Deps: [[viewer-ui-widget-scaffold]] (the pulldown panel),
 [[viewer-audio-backend]] (the mixer buses the sliders drive).

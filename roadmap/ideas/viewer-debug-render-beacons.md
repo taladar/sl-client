@@ -4,7 +4,7 @@ title: Debug render beacons (physics / scripted / sound / particle markers)
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -25,7 +25,7 @@ their persisted state.
 It is a debugging feature first: it should be usable to answer "why is this
 object heavy / noisy / scripted" while live-testing, so keep the markers cheap
 and make the toggles reachable without a mouse round-trip (a keybind, per
-[[viewer-input-system]]).
+[[viewer-input-action-map]]).
 
 Reference (Firestorm, read-only): `llfloaterbeacons`,
 `LLPipeline::renderDebugBeacons` and the `sBeacon*` flags.
@@ -33,4 +33,4 @@ Reference (Firestorm, read-only): `llfloaterbeacons`,
 Builds on: the existing object flags, `Object.sound`, and the P30 particle
 system.
 
-Deps: [[viewer-ui-framework]] (the floater and its toggles).
+Deps: [[viewer-ui-widget-scaffold]] (the floater and its toggles).

@@ -4,7 +4,7 @@ title: Inventory browser UI
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-virtualized-list]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -23,4 +23,4 @@ Reference (Firestorm, read-only): `llinventorypanel`, `llinventorybridge`,
 
 Builds on: the `inventory.rs` model and `protocol-5/30`.
 
-Deps: [[viewer-ui-framework]].
+Deps: [[viewer-ui-virtualized-list]].

@@ -4,7 +4,7 @@ title: Notecard viewer & editor (rich text with embedded items)
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework, viewer-inventory-ui, viewer-notecard-format]
+blocked_by: [viewer-ui-text-input-widget, viewer-inventory-ui, viewer-notecard-format]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -58,5 +58,5 @@ Reference (Firestorm, read-only): `llpreviewnotecard`, `llviewertexteditor`
 (the embedded-item machinery — items are represented as private-use characters
 in the text and resolved through an embedded-item table), `llfloaternotecard`.
 
-Deps: [[viewer-ui-framework]] (the floater and the text widget),
+Deps: [[viewer-ui-text-input-widget]] (the floater and the text widget),
 [[viewer-inventory-ui]] (drag-drop and opening an embedded item).

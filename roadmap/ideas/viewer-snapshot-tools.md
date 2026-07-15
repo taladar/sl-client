@@ -4,7 +4,7 @@ title: Snapshot / photo tools
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-image-upload]
+blocked_by: [viewer-ui-widget-scaffold, viewer-image-upload]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -19,7 +19,7 @@ photographer actually reaches for mid-shoot:
 - A **quick-snapshot key** that captures straight to disk with the current
   settings and no floater — the "just grab it" path. (`screenshot.rs` already
   captures to disk from a CLI flag; this is the interactive keybind, wired
-  through [[viewer-input-system]].)
+  through [[viewer-input-action-map]].)
 - **Log the saved file's path to chat history** on every disk save (floater or
   key), so the local-chat log is a running index of what you shot and where it
   went — the reference viewer does this and photographers rely on it.
@@ -37,4 +37,5 @@ Reference (Firestorm, read-only): `llsnapshotlivepreview`, `llfloatersnapshot`,
 
 Builds on: `screenshot.rs` and the asset-upload caps (`upload.rs`).
 
-Deps: [[viewer-ui-framework]], [[viewer-image-upload]] (shared upload path).
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-image-upload]] (shared upload
+path).

@@ -23,10 +23,10 @@ point is picked from the camera's focus target, with a follow-the-pointer option
 Scope: a circle-of-confusion computed from the depth buffer and the aperture
 model, a bokeh blur (gather or separable), the focus-transition easing so
 pulling focus is smooth, and the camera-parameter controls. Relates to
-[[viewer-camera-system]] for the focus target and [[viewer-phototools]] for the
-knobs. A cheap sibling VFX post the reference also has — **vignette**
-(`FSRenderVignette`: amount / power / multiplier, a shader with no stock UI) —
-is worth folding in here rather than its own task.
+[[viewer-camera-third-person-orbit]] for the focus target and
+[[viewer-phototools]] for the knobs. A cheap sibling VFX post the reference also
+has — **vignette** (`FSRenderVignette`: amount / power / multiplier, a shader
+with no stock UI) — is worth folding in here rather than its own task.
 
 Reference (Firestorm, read-only): the deferred DoF post pass,
 `RenderDepthOfField` and the `Camera*` settings.

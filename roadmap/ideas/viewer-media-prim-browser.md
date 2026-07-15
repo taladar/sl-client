@@ -4,7 +4,7 @@ title: Media-on-a-prim & embedded web browser
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-audio-backend]
+blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -153,5 +153,5 @@ Reference (Firestorm, read-only): `llplugin/`, `media_plugins/cef`,
 
 Builds on: `protocol-24` (`MediaEntry` / `ObjectMedia`, already decoded).
 
-Deps: [[viewer-ui-framework]] (the floaters), [[viewer-audio-backend]] (page
-audio must reach the mixer to be muted, bussed and spatialised).
+Deps: [[viewer-ui-widget-scaffold]] (the floaters), [[viewer-audio-backend]]
+(page audio must reach the mixer to be muted, bussed and spatialised).

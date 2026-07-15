@@ -4,7 +4,7 @@ title: Voice audio transport (WebRTC + Vivox)
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-audio-backend]
+blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -73,5 +73,5 @@ Reference (Firestorm, read-only): `llwebrtc/`, `llvoicewebrtc`, `llvoicevivox`,
 
 Builds on: `protocol-26` voice signalling + `sl-client-bevy/src/voice.rs`.
 
-Deps: [[viewer-ui-framework]], [[viewer-audio-backend]] (the shared device and
-mixer — and the mic capture that AEC depends on).
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-audio-backend]] (the shared device
+and mixer — and the mic capture that AEC depends on).

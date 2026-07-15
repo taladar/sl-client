@@ -4,7 +4,7 @@ title: Prim texture / material editing
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-object-selection, viewer-ui-framework]
+blocked_by: [viewer-object-selection, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,4 +18,4 @@ Reference (Firestorm, read-only): `llpanelface`, `lltoolface`; messages
 
 Builds on: `materials.rs`, `legacy_materials.rs`, `textures.rs`.
 
-Deps: [[viewer-object-selection]], [[viewer-ui-framework]].
+Deps: [[viewer-object-selection]], [[viewer-ui-widget-scaffold]].

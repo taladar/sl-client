@@ -4,7 +4,7 @@ title: Mesh / model importer & upload
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-prim-texture-editing]
+blocked_by: [viewer-ui-widget-scaffold, viewer-prim-texture-editing]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -149,5 +149,5 @@ Builds on: `sl-mesh` (encode = inverse of the existing decode), `sl-llsd`,
 `flate2`, `parry3d` (already in the physics stack), and the `protocol-23` upload
 caps.
 
-Deps: [[viewer-ui-framework]], [[viewer-prim-texture-editing]] (material /
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-prim-texture-editing]] (material /
 texture assignment overlap).

@@ -4,7 +4,7 @@ title: Image / texture (and sound / animation) upload
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -24,4 +24,4 @@ Reference (Firestorm, read-only): `llfloaterimagepreview`, `llfloaternamedesc`,
 Builds on: `sl-j2c-encode` + the `NewFileAgentInventory` upload path
 (`upload.rs`).
 
-Deps: [[viewer-ui-framework]].
+Deps: [[viewer-ui-widget-scaffold]].

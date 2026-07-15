@@ -4,7 +4,7 @@ title: UI sound effects
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-audio-backend, viewer-ui-framework]
+blocked_by: [viewer-audio-backend, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -37,4 +37,4 @@ Reference (Firestorm, read-only): the `llui` sound settings and
 Builds on: `typing.rs` (the recorded gap) and the notification / UI surfaces.
 
 Deps: [[viewer-audio-backend]] (device + mixer),
-[[viewer-ui-framework]] (the events that raise the sounds).
+[[viewer-ui-widget-scaffold]] (the events that raise the sounds).

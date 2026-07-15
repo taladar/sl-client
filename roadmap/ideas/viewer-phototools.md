@@ -4,7 +4,7 @@ title: Phototools — a photographer's environment & graphics control panel
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework, viewer-preferences-ui]
+blocked_by: [viewer-ui-widget-scaffold, viewer-preferences-ui]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -40,17 +40,18 @@ Two halves:
   [[viewer-ambient-occlusion]] and [[viewer-tonemap-auto-exposure]]. Phototools
   *surfaces* them; it does not block on them (it exposes whatever exists).
 
-This is deliberately a **sibling of [[viewer-quick-preferences]], not a
-duplicate**: quick-prefs is the general "settings I reach for often" panel;
-Phototools is the *photography preset* of that idea, plus the environment
-override, plus a layout tuned for composing a shot. Build it as a curated view
-over the typed settings store rather than a parallel pile of controls, so the
-two share plumbing. It pairs naturally with [[viewer-snapshot-tools]] — set the
-look here, capture there — and with [[viewer-camera-system]] for the framing.
+This is deliberately a
+**sibling of [[viewer-quick-preferences]], not a duplicate**: quick-prefs is the
+general "settings I reach for often" panel; Phototools is the
+*photography preset* of that idea, plus the environment override, plus a layout
+tuned for composing a shot. Build it as a curated view over the typed settings
+store rather than a parallel pile of controls, so the two share plumbing. It
+pairs naturally with [[viewer-snapshot-tools]] — set the look here, capture
+there — and with [[viewer-camera-third-person-orbit]] for the framing.
 
 Reference (Firestorm, read-only): `floater_phototools.xml` (the layout),
 `fsfloaterphototools`, and the environment / EEP panels
 (`llfloatereditextdaycycle`, `llpanelenvironment`).
 
-Deps: [[viewer-ui-framework]] (the floater), [[viewer-preferences-ui]] (the
-settings store it is a view over).
+Deps: [[viewer-ui-widget-scaffold]] (the floater), [[viewer-preferences-ui]]
+(the settings store it is a view over).

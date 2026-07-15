@@ -4,7 +4,7 @@ title: World-map floater
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -39,4 +39,4 @@ Reference (Firestorm, read-only): `llfloaterworldmap`, `llworldmap`,
 Builds on: `protocol-12` map data, `protocol-65` map-service pairing, and
 `sl-map-tools` for tiles.
 
-Deps: [[viewer-ui-framework]] (the floater).
+Deps: [[viewer-ui-widget-scaffold]] (the floater).

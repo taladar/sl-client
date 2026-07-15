@@ -4,7 +4,7 @@ title: In-viewer video recording (machinima capture)
 topic: viewer
 status: ideas
 origin: user request (2026-07)
-blocked_by: [viewer-ui-framework, viewer-video-playback]
+blocked_by: [viewer-ui-widget-scaffold, viewer-video-playback]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -37,7 +37,7 @@ Shape:
   fps — the offline-render trick that makes heavy scenes smooth), a chosen
   resolution independent of the window, and a clean start/stop with a recording
   indicator. Camera-path playback and depth-of-field belong to the camera system
-  ([[viewer-camera-system]]), not here.
+  ([[viewer-camera-third-person-orbit]]), not here.
 
 The honest scope question for the fleshing-out agent: how much of this to build
 vs. leaving serious machinima to OBS. A minimum viable recorder (fixed-fps
@@ -48,5 +48,5 @@ effects) is a project of its own and probably not worth it.
 Reference: no reference-viewer precedent — this is new. GStreamer `appsrc` +
 `vah264enc` / `x264enc` / `vp9enc` / `av1enc` + `qtmux`/`matroskamux`.
 
-Deps: [[viewer-ui-framework]] (the controls), [[viewer-video-playback]] (the
-shared GStreamer stack — this is its encode side).
+Deps: [[viewer-ui-widget-scaffold]] (the controls), [[viewer-video-playback]]
+(the shared GStreamer stack — this is its encode side).

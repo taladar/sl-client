@@ -4,7 +4,7 @@ title: People / friends / groups / profiles / IM UI
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -25,4 +25,4 @@ Reference (Firestorm, read-only): `llpanelpeople`, `llavatarlist`,
 Builds on: `protocol-2` IM and the `chat.rs` overlay. Supersedes the MVP "no
 chat input" non-goal.
 
-Deps: [[viewer-ui-framework]].
+Deps: [[viewer-ui-widget-scaffold]].

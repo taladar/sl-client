@@ -28,7 +28,7 @@ Two masks plus a couple of standalone toggles:
   **Hide Particles** (`hideparticles`) — the two most-reached-for.
 
 Scope: a render-type / feature bitmask the draw systems consult before emitting
-each class, the toggles wired to keybinds ([[viewer-input-system]]) and menu
+each class, the toggles wired to keybinds ([[viewer-input-action-map]]) and menu
 items, and persistence of the non-default ones. These are cheap individually —
 the value is having the whole set, because photographers compose with them.
 
