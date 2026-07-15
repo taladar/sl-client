@@ -2,7 +2,7 @@
 id: viewer-p35-4
 title: HUD particles
 topic: viewer
-status: ready
+status: done
 origin: found while doing viewer-p35-2 (the reference has a whole second particle partition for HUDs)
 refs: [viewer-p35-1, viewer-p35-2, viewer-p30-1, viewer-p30-2]
 ---

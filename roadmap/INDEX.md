@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 71 |
-| ready | 34 |
+| ready | 33 |
 | blocked | 41 |
 | in-progress | 0 |
 | bugs | 6 |
-| done | 462 |
+| done | 463 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **620** |
@@ -190,7 +190,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map`](ideas/viewer-world-map.md) — World-map floater (blocked
   by `viewer-ui-widget-scaffold`)
 
-## ready (34)
+## ready (33)
 
 ### protocol
 
@@ -203,7 +203,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (adopt existing data)
 - [`viewer-notecard-format`](ready/viewer-notecard-format.md) — Notecard format
   — a pure crate (sl-notecard)
-- [`viewer-p35-4`](ready/viewer-p35-4-hud-particles.md) — HUD particles
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-ui-settings-store`](ready/viewer-ui-settings-store.md) — Typed
@@ -411,7 +410,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (462)
+## done (463)
 
 ### protocol
 
@@ -708,6 +707,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-p35-1` (done))
 - [`viewer-p35-3`](done/viewer-p35-3-hud-picking-and-clicking.md) — HUD picking
   and clicking
+- [`viewer-p35-4`](done/viewer-p35-4-hud-particles.md) — HUD particles
 - [`viewer-p4-1`](done/viewer-p4-1-to-bevy-prim-mesh.md) — to_bevy_prim_mesh
 - [`viewer-p5-1`](done/viewer-p5-1-object-lifecycle.md) — Object lifecycle
 - [`viewer-p5-2`](done/viewer-p5-2-tessellated-prims.md) — Tessellated prims

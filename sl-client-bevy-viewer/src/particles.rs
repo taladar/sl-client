@@ -63,11 +63,32 @@
 //! global particle cap; and the `RIBBON` / `BEAM` connected-strip particle kinds
 //! render as ordinary billboards. A `TARGET_*` source whose target object is not
 //! resolved falls back to its own position (the reference's own fallback).
+//!
+//! **HUD particles (P35.4).** A particle source on a **HUD attachment** (P35.1)
+//! draws snow / rain / sparkles / a damage flash across the *screen*, not into the
+//! world. The reference viewer models it as a second particle partition end to end
+//! (`LL_PART_HUD` → `LLVOHUDPartGroup`, partition `PARTITION_HUD_PARTICLE`, render
+//! type `RENDER_TYPE_HUD_PARTICLES`, billboarded against the HUD view point rather
+//! than the eye, drawn unlit, and gated behind `RenderHUDParticles`).
+//!
+//! Here the HUD subtree already lives in a fixed patch of Bevy world space at the
+//! origin (the [`HudScreen`](crate::hud::HudScreen) carries the basis change and
+//! never moves), rendered *only* by the orthographic
+//! [`HudCamera`] on [`HUD_RENDER_LAYER`]. So a HUD source's
+//! `GlobalTransform` is already in that space and its particles integrate in world
+//! space like any other source — the whole HUD/world split reduces to two render
+//! decisions: put the cloud entity on [`HUD_RENDER_LAYER`] (so the HUD camera draws
+//! it and the fly camera does not — the exact bug P35.1 fixed for HUD *geometry*,
+//! one pipeline over), billboard its quads at the fixed HUD camera instead of the
+//! fly camera, and draw it unlit (no light is on the HUD layer, so a lit HUD
+//! material renders black). Mirroring the reference's `RenderHUDParticles` flag,
+//! `SL_VIEWER_DISABLE_HUD_PARTICLES` suppresses HUD emitters entirely (defaulted
+//! **on** for us — we have no settings UI and the point is to see it work).
 
 use std::collections::{HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -76,6 +97,7 @@ use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, t
 
 use crate::camera::FlyCamera;
 use crate::coords::sl_to_bevy_rotation;
+use crate::hud::{HUD_RENDER_LAYER, HudCamera, on_hud_layer};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 
@@ -590,6 +612,12 @@ struct Cloud {
     /// (zero-particle) cloud's mesh is left untouched rather than re-inserted empty
     /// every frame — which trips bevy's mesh allocator (R26).
     visible: bool,
+    /// Whether this source is a **HUD attachment** (P35.4): its cloud entity sits on
+    /// [`HUD_RENDER_LAYER`] (drawn by the HUD camera, not the fly camera), billboards
+    /// against the fixed HUD camera, and renders unlit. Tracked so a source whose HUD
+    /// classification arrives a frame late (the layer propagates in `PostUpdate`) is
+    /// re-layered when it flips.
+    is_hud: bool,
 }
 
 /// The scene-wide particle simulation state (P30.2): one [`Cloud`] per live
@@ -708,23 +736,31 @@ const fn alpha_mode_for(system: &ParticleSystem) -> AlphaMode {
     }
 }
 
-/// Whether a cloud renders unlit (fullbright): an `EMISSIVE` system, or one that
-/// blends additively (the glow / fire look reads wrong when lit). A whole system
-/// shares its particle-template flags, so the choice is system-wide.
-const fn is_unlit(system: &ParticleSystem) -> bool {
-    system.part_flags & part_flags::EMISSIVE != 0 || system.part_blend_func_dest == LL_PART_BF_ONE
+/// Whether a cloud renders unlit (fullbright): an `EMISSIVE` system, one that
+/// blends additively (the glow / fire look reads wrong when lit), or a **HUD**
+/// cloud (P35.4 — no light is on the HUD layer, so a lit HUD material renders
+/// black, and the reference forces `LLFace::FULLBRIGHT` on every HUD face). A whole
+/// system shares its particle-template flags, so the choice is system-wide.
+const fn is_unlit(system: &ParticleSystem, is_hud: bool) -> bool {
+    is_hud
+        || system.part_flags & part_flags::EMISSIVE != 0
+        || system.part_blend_func_dest == LL_PART_BF_ONE
 }
 
 /// Build the material for a cloud from its system's blend function, with the
-/// default sprite as its initial texture. Emissive / additive particles are drawn
-/// unlit (fullbright, as the reference draws most particles); the material is
-/// double-sided (the billboards face the camera either way).
-fn particle_material(system: &ParticleSystem, default_image: Handle<Image>) -> StandardMaterial {
+/// default sprite as its initial texture. Emissive / additive (and HUD) particles
+/// are drawn unlit (fullbright, as the reference draws most particles); the material
+/// is double-sided (the billboards face the camera either way).
+fn particle_material(
+    system: &ParticleSystem,
+    is_hud: bool,
+    default_image: Handle<Image>,
+) -> StandardMaterial {
     StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(default_image),
         alpha_mode: alpha_mode_for(system),
-        unlit: is_unlit(system),
+        unlit: is_unlit(system, is_hud),
         cull_mode: None,
         // Do not occlude other transparent geometry with particle depth.
         depth_bias: 0.0,
@@ -910,8 +946,14 @@ pub(crate) fn drive_particles(
     time: Res<Time>,
     mut commands: Commands,
     mut sim: ResMut<ParticleSim>,
-    sources: Query<(Entity, &ObjectParticleSystem, &GlobalTransform)>,
+    sources: Query<(
+        Entity,
+        &ObjectParticleSystem,
+        &GlobalTransform,
+        Option<&RenderLayers>,
+    )>,
     camera: Query<&GlobalTransform, With<FlyCamera>>,
+    hud_camera: Query<&GlobalTransform, (With<HudCamera>, Without<FlyCamera>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -919,26 +961,46 @@ pub(crate) fn drive_particles(
     default_image: Res<DefaultParticleImage>,
     // A throttle so the live-count diagnostic logs periodically, not every frame.
     mut log_timer: Local<f32>,
+    // `SL_VIEWER_DISABLE_HUD_PARTICLES` (P35.4): the reference's `RenderHUDParticles`
+    // flag, mirrored — read once and cached. Defaulted on (HUD particles emit).
+    mut hud_disabled: Local<Option<bool>>,
 ) {
     let Ok(camera) = camera.single() else {
         return;
     };
     let camera_pos = camera.translation();
+    // The fixed HUD camera stands well back of the origin-anchored HUD screen and
+    // looks along it; billboarding HUD particles at its position keeps them square to
+    // the (orthographic) HUD view. Absent a HUD camera (a run without avatar assets
+    // spawns no HUD screen), no source is a HUD source anyway, so the fallback is
+    // never used.
+    let hud_camera_pos = hud_camera
+        .single()
+        .map_or(camera_pos, GlobalTransform::translation);
+    let hud_disabled = *hud_disabled
+        .get_or_insert_with(|| std::env::var_os("SL_VIEWER_DISABLE_HUD_PARTICLES").is_some());
     let dt = time.delta_secs();
 
-    // Snapshot each source's world pose and system, releasing the query borrow
-    // before the resource is mutated. The Second Life-space source rotation is
-    // recovered from the Bevy world rotation by undoing the basis change.
+    // Snapshot each source's world pose, HUD classification, and system, releasing
+    // the query borrow before the resource is mutated. The Second Life-space source
+    // rotation is recovered from the Bevy world rotation by undoing the basis change.
+    // A HUD source is suppressed entirely when HUD particles are disabled — it is
+    // then dropped from the snapshot, so its cloud (if any) is retired below.
     let basis_inv = sl_to_bevy_rotation().inverse();
-    let sources_data: Vec<(Entity, Vec3, Quat, ParticleSystem)> = sources
+    let sources_data: Vec<(Entity, Vec3, Quat, ParticleSystem, bool)> = sources
         .iter()
-        .map(|(entity, ops, global)| {
-            (
+        .filter_map(|(entity, ops, global, layers)| {
+            let is_hud = on_hud_layer(layers);
+            if is_hud && hud_disabled {
+                return None;
+            }
+            Some((
                 entity,
                 global.translation(),
                 basis_inv.mul_quat(global.rotation()),
                 ops.system.clone(),
-            )
+                is_hud,
+            ))
         })
         .collect();
     let current: HashSet<Entity> = sources_data.iter().map(|(entity, ..)| *entity).collect();
@@ -957,34 +1019,40 @@ pub(crate) fn drive_particles(
     // respected as each source emits.
     let mut total: usize = 0;
 
-    for (entity, src, q_sl, system) in &sources_data {
-        // Ensure a cloud exists for this source, spawning its world-space render
-        // entity on first sight.
+    for (entity, src, q_sl, system, is_hud) in &sources_data {
+        let is_hud = *is_hud;
+        // Ensure a cloud exists for this source, spawning its render entity on first
+        // sight. A HUD source's entity goes on the HUD render layer, so the HUD camera
+        // draws it (and the fly camera does not); a world source's stays on the
+        // default layer.
         let cloud = sim.clouds.entry(*entity).or_insert_with(|| {
             let mesh = meshes.add(Mesh::new(
                 PrimitiveTopology::TriangleList,
                 RenderAssetUsages::default(),
             ));
-            let material = materials.add(particle_material(system, default_image.0.clone()));
-            let cloud_entity = commands
-                .spawn((
-                    Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material.clone()),
-                    Transform::IDENTITY,
-                    // Starts hidden: the mesh is empty until the first particles are
-                    // built into it, and an empty mesh must not be rendered / uploaded
-                    // (R26). Flipped to visible once it has geometry.
-                    Visibility::Hidden,
-                    NotShadowCaster,
-                    // The billboard mesh is rebuilt in place every frame, so its
-                    // `Aabb` (computed once when `Mesh3d` was added, from the then
-                    // empty mesh) never covers the live particles — leaving it
-                    // frustum-culled from every viewpoint. Particles are their own
-                    // dynamic geometry, so opt out of frustum culling entirely (the
-                    // way `objects.rs` does for its rebuilt meshes).
-                    NoFrustumCulling,
-                ))
-                .id();
+            let material =
+                materials.add(particle_material(system, is_hud, default_image.0.clone()));
+            let mut cloud_commands = commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                // Starts hidden: the mesh is empty until the first particles are
+                // built into it, and an empty mesh must not be rendered / uploaded
+                // (R26). Flipped to visible once it has geometry.
+                Visibility::Hidden,
+                NotShadowCaster,
+                // The billboard mesh is rebuilt in place every frame, so its
+                // `Aabb` (computed once when `Mesh3d` was added, from the then
+                // empty mesh) never covers the live particles — leaving it
+                // frustum-culled from every viewpoint. Particles are their own
+                // dynamic geometry, so opt out of frustum culling entirely (the
+                // way `objects.rs` does for its rebuilt meshes).
+                NoFrustumCulling,
+            ));
+            if is_hud {
+                cloud_commands.insert(RenderLayers::layer(HUD_RENDER_LAYER));
+            }
+            let cloud_entity = cloud_commands.id();
             Cloud {
                 emitter: Emitter::new(entity.to_bits()),
                 particles: Vec::new(),
@@ -994,8 +1062,26 @@ pub(crate) fn drive_particles(
                 system: system.clone(),
                 texture_applied: false,
                 visible: false,
+                is_hud,
             }
         });
+
+        // The HUD classification can arrive a frame after the cloud is spawned (the
+        // source's HUD layer propagates down in `PostUpdate`): move the cloud entity
+        // onto (or off) the HUD layer and re-light its material when it flips.
+        if cloud.is_hud != is_hud {
+            cloud.is_hud = is_hud;
+            if is_hud {
+                commands
+                    .entity(cloud.entity)
+                    .insert(RenderLayers::layer(HUD_RENDER_LAYER));
+            } else {
+                commands.entity(cloud.entity).remove::<RenderLayers>();
+            }
+            if let Some(mut material) = materials.get_mut(&cloud.material) {
+                material.unlit = is_unlit(system, is_hud);
+            }
+        }
 
         // A re-tuned source (a fresh `llParticleSystem`) restarts the emitter and
         // re-derives the material and texture.
@@ -1006,7 +1092,7 @@ pub(crate) fn drive_particles(
             cloud.texture_applied = false;
             if let Some(mut material) = materials.get_mut(&cloud.material) {
                 material.alpha_mode = alpha_mode_for(system);
-                material.unlit = is_unlit(system);
+                material.unlit = is_unlit(system, is_hud);
                 material.base_color_texture = Some(default_image.0.clone());
             }
         }
@@ -1047,7 +1133,10 @@ pub(crate) fn drive_particles(
         // untouched and hides the entity. Visibility is only rewritten on a change.
         let want_visible = !cloud.particles.is_empty();
         if want_visible {
-            let mesh = build_cloud_mesh(&cloud.particles, camera_pos);
+            // A HUD cloud faces the fixed HUD camera (so its quads stay square to the
+            // orthographic HUD view); a world cloud faces the fly camera.
+            let billboard_from = if is_hud { hud_camera_pos } else { camera_pos };
+            let mesh = build_cloud_mesh(&cloud.particles, billboard_from);
             let _replaced = meshes.insert(&cloud.mesh, mesh);
         }
         if cloud.visible != want_visible {
@@ -1560,10 +1649,19 @@ mod tests {
         let mut additive = live_system();
         additive.part_blend_func_dest = super::LL_PART_BF_ONE;
         assert_eq!(alpha_mode_for(&additive), AlphaMode::Add);
-        assert!(is_unlit(&additive));
+        assert!(is_unlit(&additive, false));
 
         let alpha = live_system(); // dest 9 (one-minus-src-alpha).
         assert_eq!(alpha_mode_for(&alpha), AlphaMode::Blend);
-        assert!(!is_unlit(&alpha));
+        assert!(!is_unlit(&alpha, false));
+    }
+
+    /// A HUD cloud is always drawn unlit — no light is on the HUD render layer, so a
+    /// lit HUD material would render black — regardless of its blend function.
+    #[test]
+    fn hud_clouds_are_always_unlit() {
+        let alpha = live_system(); // an ordinary alpha system: lit in the world…
+        assert!(!is_unlit(&alpha, false));
+        assert!(is_unlit(&alpha, true), "…but unlit on the HUD");
     }
 }
