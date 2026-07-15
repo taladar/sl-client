@@ -4,7 +4,7 @@ title: Preferences / settings UI
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-settings-binding]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,4 +18,4 @@ Reference (Firestorm, read-only): `llfloaterpreference*`, `llviewercontrol`
 (settings backend), `fspanelprefs`, `llfloatersettingsdebug` (raw debug
 settings editor).
 
-Deps: [[viewer-ui-framework]].
+Deps: [[viewer-ui-settings-binding]].

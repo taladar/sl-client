@@ -4,7 +4,7 @@ title: Prim parameter editing
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-object-selection, viewer-ui-framework]
+blocked_by: [viewer-object-selection, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -20,4 +20,4 @@ Reference (Firestorm, read-only): `llpanelobject`, `llpanelvolume`; messages
 Builds on: `PrimShapeParams` (`sl-proto`), and the existing feature renderers
 `flexi.rs`, `lights.rs`, `particles.rs`.
 
-Deps: [[viewer-object-selection]], [[viewer-ui-framework]].
+Deps: [[viewer-object-selection]], [[viewer-ui-widget-scaffold]].

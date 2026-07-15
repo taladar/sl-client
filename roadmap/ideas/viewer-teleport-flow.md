@@ -4,7 +4,7 @@ title: Teleport flow — offers, acceptance & progress
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-notifications-dialogs, viewer-minimap-worldmap-ui, viewer-ui-framework]
+blocked_by: [viewer-notifications-dialogs, viewer-world-map, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -25,5 +25,5 @@ Reference (Firestorm, read-only): `llagent` (teleport request / state),
 
 Builds on: the existing teleport protocol (Phase 12).
 
-Deps: [[viewer-notifications-dialogs]] (offer dialog),
-[[viewer-minimap-worldmap-ui]] (map teleport), [[viewer-ui-framework]].
+Deps: [[viewer-notifications-dialogs]] (offer dialog), [[viewer-world-map]] (map
+teleport), [[viewer-ui-widget-scaffold]].

@@ -4,7 +4,7 @@ title: Money / economy / L$ UI
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-media-prim-browser]
+blocked_by: [viewer-ui-widget-scaffold, viewer-media-prim-browser]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -17,5 +17,5 @@ Reference (Firestorm, read-only): `llfloaterpay`, `llfloaterbuycurrency(html)`,
 `llfloaterbuyland`, `llstatusbar` (balance), `fsmoneytracker`,
 `llmarketplacefunctions`.
 
-Deps: [[viewer-ui-framework]], [[viewer-media-prim-browser]] (HTML currency /
-marketplace flows).
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-media-prim-browser]] (HTML
+currency / marketplace flows).

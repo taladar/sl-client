@@ -4,7 +4,7 @@ title: Prim creation
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-object-selection, viewer-ui-framework]
+blocked_by: [viewer-object-selection, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,4 +18,4 @@ Reference (Firestorm, read-only): `lltoolplacer`, `lltoolcomp` (create); the
 
 Builds on: `objects.rs` lifecycle and `sl-prim` tessellation.
 
-Deps: [[viewer-object-selection]], [[viewer-ui-framework]].
+Deps: [[viewer-object-selection]], [[viewer-ui-widget-scaffold]].

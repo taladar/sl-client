@@ -4,31 +4,154 @@ title: Media-on-a-prim & embedded web browser
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-streaming-audio]
+blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
-Render web pages / video onto prim faces (media-on-a-prim) and provide a general
-in-viewer browser (help, marketplace, currency, profile feeds).
+Render web pages onto prim faces (media-on-a-prim) and provide a general
+in-viewer browser. Four distinct consumers, and the first one is easy to
+overlook: **the SL login page is itself HTML in a browser view**
+(`panel_login.xml` declares a `web_browser` named `login_html`), so a browser
+must be alive *before login*. Then: the in-viewer browser floater, search /
+profiles / marketplace / L$ purchase floaters, and MoaP surfaces in-world.
 
-**This is an integration task around an existing browser engine — we do not
-build a browser.** The decisive, and likely hardest, fleshing-out step is
-choosing the embedded-browser library and the "render to an offscreen surface →
-blit into a Bevy texture → route input back" bridge. Survey candidates
-(`wry` / system WebView, a CEF binding such as `cef` / `cef-ui`, Servo, or an
-out-of-process plugin like Firestorm's own CEF media plugin) on offscreen-
-rendering support, per-frame texture access, input injection, licensing, and
-binary size.
+The protocol is **already done** (`protocol-24`): `Event::ObjectMedia` delivers
+a `MediaEntry` per prim face over the `ObjectMedia` cap, with
+`RequestObjectMedia` / `SetObjectMedia` / `NavigateObjectMedia` commands, and
+`MediaEntry` carries the URL, MIME type, whitelist, `first_click_interact`,
+auto-play and auto-zoom flags. The runtimes ingest it (`sl-client-bevy/
+src/media.rs`) but **the viewer crate never reads it**. This task is the surface
+and the engine.
 
-Object media **metadata** is already ingested (`media.rs`) but never rendered;
-this stub is the actual surface + browser. Parcel media controls overlap with
-the streaming-audio nearby-media panel.
+## Engine choice (surveyed 2026-07)
 
-Reference (Firestorm, read-only): `llplugin/`,
-`media_plugins/cef|libvlc|gstreamer`, `llmediactrl`, `llviewermedia`,
-`llpanelprimmediacontrols`, `llmediadataclient`.
+**Prebuilt CEF via the `cef` crate (tauri-apps/cef-rs).** It is the only option
+that is simultaneously tri-platform, web-compatible enough for the real SL login
+/ marketplace / profile pages, offscreen-renderable, and consumable **as a
+prebuilt binary** — the crate downloads the Spotify CDN builds, so we never
+build Chromium. It is Apache-2.0 and actively maintained, and it already ships
+an **`osr_texture_import` layer that hands you a `wgpu::Texture`** (DMA-BUF on
+Linux, D3D11 shared handle on Windows, IOSurface on macOS) pinned to **wgpu 29 —
+exactly Bevy 0.19's wgpu**. `bevy_cef` (Bevy 0.19) exists as a reference
+integration, but its Linux path is CPU-only; take ideas from it and depend on
+`cef` directly.
 
-Builds on: `media.rs` metadata ingest.
+Use **`cef` directly, not Dullahan** (the wrapper Firestorm uses): Dullahan does
+not expose `CefAudioHandler`, which is precisely why Firestorm's browser audio
+bypasses the viewer entirely and can only be attenuated by a PulseAudio
+sink-input hack with `setPan()` left an empty stub. Going direct gets us
+`OnAudioStreamPacket` (non-interleaved f32 PCM + timestamps) → our mixer →
+**MoaP audio actually spatialised at the prim**, which no SL viewer does today.
 
-Deps: [[viewer-ui-framework]], [[viewer-streaming-audio]].
+**Dependency shape (deliberate).** Everything here is a *direct* dependency we
+can patch or vendor: `cef` speaks plain `wgpu`, and GStreamer knows nothing of
+wgpu or Bevy at all. Depending on `cef` rather than `bevy_cef` is what keeps us
+off the Bevy-wrapper upgrade treadmill — we are never waiting for a middle crate
+to adopt a new Bevy. Prefer that rule generally: take the engine-agnostic core
+and write the thin Bevy glue ourselves. The one alignment to watch is that `cef`
+and Bevy must agree on the **wgpu major version** (both on 29 today) — the same
+mismatch that disqualified other candidates, and the reason to track cef-rs's
+wgpu bumps when Bevy moves.
+
+Rejected: **WPE WebKit** (the elegant answer — offscreen by design, system
+GStreamer for media — but there is no credible Windows port, so it forecloses
+Win/macOS); **Servo** (embedding API is real now, but ~20 % of Baseline web
+features and Verso archived in 2025 — it cannot render the marketplace);
+**Ultralight** (proprietary, licence incompatible with an open-source viewer);
+**wry** (no offscreen rendering at all); **Blitz** (no JS by design);
+**CDP/screenshot streaming** (absurd for per-frame surfaces).
+
+## Codecs — and why in-page video is a known, accepted gap
+
+Stock prebuilt CEF is `ffmpeg_branding=Chromium`: **VP8 / VP9 / AV1 / Opus /
+Vorbis / FLAC, but no H.264, HEVC or AAC.** Linden Lab avoids this by *building
+their own* Chromium with `proprietary_codecs=true` — we will not: it means
+maintaining a Chromium build and funding the AVC/AAC patent pools.
+
+Consequences, stated plainly so nobody re-litigates them mid-implementation:
+
+- **YouTube works** — it negotiates VP9/AV1 + Opus via `isTypeSupported`.
+- **H.264/AAC *inside* a page does not** (Vimeo embeds, hand-rolled
+  `<video src=".mp4">`). This is unfixable at the embedder level: Chromium
+  decodes and composites `<video>` internally in the GPU process, there is **no
+  embedder-supplied-codec hook** (NPAPI/PPAPI are gone; the Widevine CDM is
+  decryption, not decoding; `CefMediaRouter` is Cast), and the JS-overlay trick
+  (hide the element, composite our own player behind it) breaks on z-order,
+  scroll, CSS transforms and cross-origin iframes. Accept the gap.
+- **Direct video URLs never reach CEF at all** — they dispatch by MIME type to
+  [[viewer-video-playback]], where the codec comes from the user's *system*
+  decoders. That is the bulk of MoaP video, and it is why the split exists.
+
+## The surface, and the traps
+
+Put both engines behind **one `MediaBackend` trait** — MIME/URL + size in;
+frames, input and PCM across the boundary — with CEF and GStreamer behind it on
+desktop and room for the Android system WebView later (CEF has **no Android
+support**; `android.webkit.WebView` offscreen via SurfaceTexture is a research
+problem, not a solved one — do not design for it, just do not foreclose it).
+
+Three things must not leak through that boundary:
+
+- **Input must be portable.** Firestorm tunnels *raw native key blobs* (Win32
+  `MSG`/wParam/lParam, SDL2 keysyms, NSEvent) to CEF — which is exactly why its
+  Linux keyboard support needed downstream patches, and it is meaningless on
+  Android. `CefKeyEvent` can be built portably from `windows_key_code` +
+  `character` + `unmodified_character` + modifiers, so pass **keycode + text**
+  and synthesise the event inside the backend. (Note `windows_key_code` is a
+  Windows VK code even on Linux/macOS — one ~100-line table.) For IME, feed the
+  *composed* text from Bevy's `Ime::Commit` as CHAR events; full in-browser IME
+  composition is a later problem.
+- **Zero-copy is an optimisation, never a requirement.** Ship the CPU path first
+  (`OnPaint` gives BGRA + dirty rects; 8 surfaces at 512² and 30 fps is ~240
+  MiB/s of `write_texture` — about 1 % of PCIe, and it is exactly what the
+  reference viewer has shipped for a decade: Dullahan is a CPU memcpy into
+  shared memory). The Linux DMA-BUF fast path is **not blocked upstream in
+  CEF** — CEF hands over the dmabuf fds, modifier and format perfectly well.
+  The gaps are Rust-side and ours to fix: cef-rs's import looks spec-incomplete
+  (it omits `VkExternalMemoryImageCreateInfo` and handles a single plane only),
+  and it needs `VK_EXT_image_drm_format_modifier`, which wgpu does not enable on
+  the device Bevy creates (escape hatch: build the device ourselves via
+  `RenderCreation::Manual`). CEF also wants `--use-angle=gl-egl`. So treat
+  zero-copy as **deferred headroom pending fixes we could contribute**, not a
+  dead end — and spike it before believing any of it.
+- **Process model.** CEF re-execs our own binary as its subprocesses, so
+  `cef_execute_process()` must run at the top of `main()`
+  **before Bevy exists**; macOS additionally needs four helper `.app` bundles
+  (cef-rs ships tooling for this). Use `external_message_pump` +
+  `do_message_loop_work()` from a Bevy system — CEF cannot own the event loop,
+  winit does.
+
+  Run CEF **in-process**, i.e. *not* behind an SLPlugin-style helper of our own.
+  Firestorm's helper process exists for crash isolation, but CEF is already
+  multi-process internally (a renderer crash does not take the browser process
+  with it), and that extra IPC hop is exactly what forces Firestorm onto the CPU
+  shared-memory path. In-process is what makes zero-copy reachable at all. The
+  trade is honest: a crash in the `libcef` browser process takes the viewer with
+  it — mitigate by bounding the surface count, not by adding a hop.
+
+Also: reuse Firestorm's **throttle**, which is what makes many media prims
+survivable at all — a hard instance cap (8), interest-sorted priorities, and a
+per-surface sleep time (100/50/25/**1** Hz) so an out-of-view browser runs at 1
+fps and beyond the cap is killed outright, with a heartbeat watchdog to reap a
+hung engine. And treat MoaP content as **hostile**: an isolated request context
+per surface (a griefer's prim must not read the marketplace's cookies), no
+JS-to-native bridge, no file access, and honour `MediaEntry`'s whitelist and
+`first_click_interact`.
+
+Costs to accept: the CEF payload is ~200–400 MB installed, and we inherit
+Chromium's ~monthly security-update treadmill — unavoidable for anything that
+renders attacker-supplied in-world URLs. Two further cautions for the spike:
+CEF's accelerated path reports **no damage rects** (whole-surface re-imports),
+and Linux OSR shared textures are **reported broken on NVIDIA** (GBM buffer
+usage) even with the right ANGLE flags — which is another reason the CPU path,
+not zero-copy, is the thing we promise.
+
+Reference (Firestorm, read-only): `llplugin/`, `media_plugins/cef`,
+`llmediactrl`, `llviewermedia`, `llpanelprimmediacontrols`, `llviewermediafocus`
+(UV→texel with wrap + power-of-2 padding correction), `mime_types.xml`.
+
+Builds on: `protocol-24` (`MediaEntry` / `ObjectMedia`, already decoded).
+
+Deps: [[viewer-ui-widget-scaffold]] (the floaters), [[viewer-audio-backend]]
+(page audio must reach the mixer to be muted, bussed and spatialised).

@@ -4,7 +4,7 @@ title: Parcel option viewing & editing
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework]
+blocked_by: [viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,4 +18,4 @@ Reference (Firestorm, read-only): `llfloaterland`, `llpanelland`,
 Builds on: `protocol-13` parcel — note the known reality that rich parcel /
 region data arrives over the CAPS event queue, not UDP.
 
-Deps: [[viewer-ui-framework]].
+Deps: [[viewer-ui-widget-scaffold]].

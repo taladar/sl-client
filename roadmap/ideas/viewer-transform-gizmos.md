@@ -4,7 +4,7 @@ title: Position / rotation / scale gizmos
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-object-selection, viewer-input-system, viewer-camera-system]
+blocked_by: [viewer-object-selection, viewer-input-action-map, viewer-camera-third-person-orbit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -17,5 +17,5 @@ local / world / reference frames. Edits are pushed to the sim via `ObjectUpdate`
 Reference (Firestorm, read-only): `llmaniptranslate`, `llmaniprotate`,
 `llmanipscale`, `llmanip`.
 
-Deps: [[viewer-object-selection]], [[viewer-input-system]],
-[[viewer-camera-system]].
+Deps: [[viewer-object-selection]], [[viewer-input-action-map]],
+[[viewer-camera-third-person-orbit]].

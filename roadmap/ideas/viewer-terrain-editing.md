@@ -4,7 +4,7 @@ title: Terrain editing
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-input-system, viewer-region-options]
+blocked_by: [viewer-ui-widget-scaffold, viewer-input-action-map, viewer-region-options]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,5 +18,5 @@ Reference (Firestorm, read-only): `lltoolbrushland` (`LLToolBrushLand`); the
 
 Builds on: `terrain.rs` and `sl-terrain`.
 
-Deps: [[viewer-ui-framework]], [[viewer-input-system]] (brush drag),
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-input-action-map]] (brush drag),
 [[viewer-region-options]] (terrain textures / heights overlap).

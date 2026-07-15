@@ -50,9 +50,10 @@ Shape of what landed:
   cursor. `H` toggles a mode that releases and shows the pointer and suppresses
   the fly camera's mouse-look (so moving the mouse aims the cursor, not the
   head). This is a workaround for our inverted-from-SL debug camera (SL frees
-  the cursor by default and makes *mouselook* the mode); the camera-system idea
-  ([[viewer-camera-system]]) carries a note to delete `HudCursorMode` once the
-  standard SL camera model exists and clicks pick the HUD directly.
+  the cursor by default and makes *mouselook* the mode); the camera-mode-machine
+  task ([[viewer-camera-third-person-orbit]]) carries a note to delete
+  `HudCursorMode` once the standard SL camera model exists and clicks pick the
+  HUD directly.
 
 Unit-tested: `hud_pick.rs` — the surface-info build (face index passthrough /
 `-1` default, the `ST` un-flip and identity-placement `UV == ST`, a texture

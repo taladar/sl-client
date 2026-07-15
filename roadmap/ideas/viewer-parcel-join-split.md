@@ -4,7 +4,7 @@ title: Parcel join / split
 topic: viewer
 status: ideas
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-framework, viewer-input-system]
+blocked_by: [viewer-ui-widget-scaffold, viewer-input-action-map]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -17,4 +17,5 @@ Reference (Firestorm, read-only): `llviewerparcelmgr`,
 
 Builds on: `protocol-13` parcel and the parcel-overlay data.
 
-Deps: [[viewer-ui-framework]], [[viewer-input-system]] (land drag-select).
+Deps: [[viewer-ui-widget-scaffold]], [[viewer-input-action-map]] (land
+drag-select).
