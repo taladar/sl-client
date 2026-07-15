@@ -2,7 +2,7 @@
 id: viewer-rlv-command-parser
 title: RLV — parse the @-command chat protocol
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-rlva-parsing
 refs: [viewer-rlv-restriction-state]
 ---

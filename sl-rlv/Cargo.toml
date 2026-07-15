@@ -1,0 +1,25 @@
+[package]
+name = "sl-rlv"
+description = "Pure decoder for the Second Life / OpenSim RLV / RLVa @-command chat protocol: turn an owner-say chat line into a typed stream of restriction / force / reply / clear commands, grid-agnostic and I/O-free like sl-prim / sl-anim"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "rlv", "rlva", "viewer"]
+categories = ["game-development", "parser-implementations"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+thiserror = { version = "2.0.18" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

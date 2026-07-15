@@ -2,7 +2,7 @@
 id: viewer-rlv-restriction-state
 title: RLV — the restriction state machine
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-rlva-parsing
 blocked_by: [viewer-rlv-command-parser]
 ---

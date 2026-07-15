@@ -23,6 +23,7 @@ members = [
     "sl-repl",
     "sl-repl-bevy",
     "sl-repl-tokio",
+    "sl-rlv",
     "sl-sculpt",
     "sl-settings",
     "sl-survey",

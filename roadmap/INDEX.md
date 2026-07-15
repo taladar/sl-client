@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 0 |
 | ready | 57 |
-| blocked | 133 |
+| blocked | 132 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 475 |
+| done | 476 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **679** |
@@ -68,8 +68,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mirrors (hero probes)
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
-- [`viewer-rlv-command-parser`](ready/viewer-rlv-command-parser.md) — RLV —
-  parse the @-command chat protocol
+- [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
+  — the restriction state machine (blocked by `viewer-rlv-command-parser`
+  (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
 - [`viewer-screenshot-wait-for-quiescence`](ready/viewer-screenshot-wait-for-quiescence.md)
@@ -142,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (133)
+## blocked (132)
 
 ### viewer
 
@@ -413,8 +414,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   on restriction changes (blocked by `viewer-rlv-restriction-state`)
 - [`viewer-rlv-queries`](blocked/viewer-rlv-queries.md) — RLV — answer @get*
   queries via chat reply (blocked by `viewer-rlv-restriction-state`)
-- [`viewer-rlv-restriction-state`](blocked/viewer-rlv-restriction-state.md) —
-  RLV — the restriction state machine (blocked by `viewer-rlv-command-parser`)
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
@@ -537,7 +536,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (475)
+## done (476)
 
 ### protocol
 
@@ -920,6 +919,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
+  the @-command chat protocol
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
 
