@@ -778,6 +778,7 @@ impl Survey {
             | Event::CameraConstraint { .. }
             | Event::ViewerFrozen { .. }
             | Event::SimulatorFeatures(_)
+            | Event::LslSyntax(_)
             | Event::AgentPreferences(_)
             | Event::ObjectCosts(_)
             | Event::SelectedResourceCost(_)

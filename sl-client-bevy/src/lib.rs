@@ -20,7 +20,7 @@ use sl_proto::{
     CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
@@ -286,6 +286,7 @@ pub mod grass;
 mod http;
 mod inventory;
 mod inventory_cache;
+mod lsl_syntax_cache;
 mod materials;
 mod media;
 pub mod meshes;
@@ -311,14 +312,15 @@ use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{emit_disconnect, run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    run_caps_oneway, run_chat_session_request, run_delete_caps_llsd, run_get_caps_llsd,
-    run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_caps_oneway, run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax,
+    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
     run_server_appearance_update,
 };
 use crate::inventory_cache::InventoryCache;
+use crate::lsl_syntax_cache::LslSyntaxCache;
 use crate::materials::{run_modify_material_params, run_render_materials_fetch};
 use crate::media::{run_object_media_fetch, run_object_media_post};
 use crate::upload::{
@@ -484,9 +486,25 @@ enum SlInner {
         chat_log: Box<ChatLog>,
         /// The inventory disk-cache reader/writer (a no-op when disabled).
         inventory_cache: Box<InventoryCache>,
+        /// The `LSLSyntax` fetch/cache state (boxed, like the caches above, to
+        /// keep this hot per-frame variant small).
+        lsl_syntax: Box<LslSyntaxState>,
     },
     /// The session is finished.
     Done,
+}
+
+/// The `LSLSyntax` state carried across frames: the by-id disk cache plus the
+/// last syntax id resolved, so an unchanged id costs nothing and a change
+/// triggers exactly one fetch. Persists across region changes (the language
+/// definition rarely differs between them). Boxed into
+/// [`SlInner::Running`](SlInner::Running) so it does not enlarge that variant.
+struct LslSyntaxState {
+    /// The `LSLSyntax` document disk-cache, keyed by syntax id (a no-op when
+    /// disabled).
+    cache: LslSyntaxCache,
+    /// The last `LSLSyntaxId` fetched or loaded, or `None` before the first.
+    last_id: Option<Uuid>,
 }
 
 /// The CAPS subsystem for one region: a background thread fetches the capability
@@ -599,6 +617,7 @@ fn drive(
             caps,
             chat_log,
             inventory_cache,
+            lsl_syntax,
         } => advance_running(
             session,
             socket,
@@ -606,6 +625,7 @@ fn drive(
             caps,
             chat_log,
             inventory_cache,
+            lsl_syntax,
             now,
             &mut events,
             &mut diagnostics,
@@ -675,6 +695,10 @@ fn advance_login(
                             session.agent_id(),
                             now,
                         ));
+                        let lsl_syntax = Box::new(LslSyntaxState {
+                            cache: LslSyntaxCache::new(directories.shared_cache_dir.clone()),
+                            last_id: None,
+                        });
                         SlInner::Running {
                             session,
                             socket,
@@ -682,6 +706,7 @@ fn advance_login(
                             caps,
                             chat_log,
                             inventory_cache,
+                            lsl_syntax,
                         }
                     }
                     Err(()) => {
@@ -745,6 +770,7 @@ fn advance_running(
     mut caps: Option<Caps>,
     mut chat_log: Box<ChatLog>,
     mut inventory_cache: Box<InventoryCache>,
+    mut lsl_syntax: Box<LslSyntaxState>,
     now: Instant,
     events: &mut MessageWriter<SlEvent>,
     diagnostics: &mut MessageWriter<SlDiagnostic>,
@@ -3407,6 +3433,41 @@ fn advance_running(
             SessionEvent::LibraryInventory(folders) => {
                 inventory_cache.load_library(&mut session, folders);
             }
+            // On a `SimulatorFeatures` reply carrying a not-yet-resolved syntax
+            // id, load the cached `LSLSyntax` document (forwarded over `events_tx`
+            // for the uniform `handle_caps_event` decode) or fetch it from the
+            // `LSLSyntax` cap on a worker thread. Unchanged / absent ids do
+            // nothing.
+            SessionEvent::SimulatorFeatures(features) => {
+                if let Some(id) = features.lsl_syntax_id
+                    && lsl_syntax.last_id != Some(id)
+                    && let Some(caps) = caps.as_ref()
+                {
+                    lsl_syntax.last_id = Some(id);
+                    if let Some(cached) = lsl_syntax.cache.load(id) {
+                        caps.events_tx
+                            .send((CAP_LSL_SYNTAX.to_owned(), cached))
+                            .ok();
+                    } else if let Some(url) = caps.map.get(CAP_LSL_SYNTAX).cloned() {
+                        let events_tx = caps.events_tx.clone();
+                        let cache = lsl_syntax.cache.clone();
+                        std::thread::spawn(move || {
+                            run_fetch_lsl_syntax(&url, id, &cache, &events_tx);
+                        });
+                    }
+                }
+            }
+            // The decoded grid LSL library arrived (fresh fetch or cache hit):
+            // log a one-line confirmation for live verification.
+            SessionEvent::LslSyntax(syntax) => {
+                tracing::info!(
+                    symbols = syntax.len(),
+                    functions = syntax.functions.len(),
+                    constants = syntax.constants.len(),
+                    events = syntax.events.len(),
+                    "loaded grid LSL syntax definition",
+                );
+            }
             _ => {}
         }
         // Tap the event for the local chat log (no-op when disabled) before
@@ -3437,6 +3498,7 @@ fn advance_running(
             caps,
             chat_log,
             inventory_cache,
+            lsl_syntax,
         }
     }
 }

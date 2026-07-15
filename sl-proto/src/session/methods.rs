@@ -33,7 +33,7 @@ use super::{
     CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView, ChatSession,
@@ -101,8 +101,8 @@ use sl_wire::{
     parse_experience_ids, parse_experience_infos, parse_experience_permissions,
     parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
     parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
-    parse_object_physics_properties, parse_region_experiences, parse_remote_parcel_reply,
-    parse_resource_cost_selected, parse_simulator_features, zero_decode,
+    parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
+    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
 use sl_wire::{Direction, GlobalCoordinates};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -592,6 +592,15 @@ impl Session {
                 Ok(features) => self
                     .events
                     .push_back(Event::SimulatorFeatures(Box::new(features))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to an `LSLSyntax` GET: the grid's LSL language definition
+            // (functions, constants, events and keywords). The runtime fetches it
+            // when a region advertises a changed `LSLSyntaxId`; a document of an
+            // unsupported schema version is a decode error, so the previous table
+            // (or none) stands rather than a wrongly-parsed one replacing it.
+            CAP_LSL_SYNTAX => match parse_lsl_syntax(body) {
+                Ok(syntax) => self.events.push_back(Event::LslSyntax(Box::new(syntax))),
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to an `AgentPreferences` POST: the agent's full stored

@@ -588,6 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::CameraConstraint { .. }
             | Event::ViewerFrozen { .. }
             | Event::SimulatorFeatures(_)
+            | Event::LslSyntax(_)
             | Event::AgentPreferences(_)
             | Event::ObjectCosts(_)
             | Event::SelectedResourceCost(_)

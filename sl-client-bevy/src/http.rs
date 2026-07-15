@@ -2,13 +2,14 @@
 
 use crate::EVENT_QUEUE_TIMEOUT;
 use crate::caps::report_caps_failure;
+use crate::lsl_syntax_cache::LslSyntaxCache;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
-    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, Uuid, build_land_resources_request,
-    parse_land_resources_reply, parse_llsd_xml,
+    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
+    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
 use std::collections::HashMap;
 
@@ -104,6 +105,53 @@ pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(
         }
         None => report_caps_failure(caps_tx, cap),
     }
+}
+
+/// GETs the `LSLSyntax` capability (blocking), caches the raw document under
+/// syntax `id`, and forwards its parsed LLSD to `caps_tx` tagged
+/// [`CAP_LSL_SYNTAX`] for the session to decode into
+/// [`SlSessionEvent::LslSyntax`](sl_proto::Event::LslSyntax). Mirrors the tokio
+/// `fetch_lsl_syntax`: the raw XML is cached only when it declares the supported
+/// schema version, while the LLSD is forwarded regardless (the session owns the
+/// version gate).
+pub(crate) fn run_fetch_lsl_syntax(
+    url: &str,
+    id: Uuid,
+    cache: &LslSyntaxCache,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        report_caps_failure(caps_tx, CAP_LSL_SYNTAX);
+        return;
+    };
+    let Ok(response) = http
+        .get(url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+    else {
+        report_caps_failure(caps_tx, CAP_LSL_SYNTAX);
+        return;
+    };
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, CAP_LSL_SYNTAX);
+        return;
+    };
+    let Ok(llsd) = parse_llsd_xml(&text) else {
+        report_caps_failure(caps_tx, CAP_LSL_SYNTAX);
+        return;
+    };
+    if llsd
+        .field_i32("llsd-lsl-syntax-version", "llsd-lsl-syntax-version")
+        .ok()
+        .flatten()
+        == Some(LSL_SYNTAX_VERSION)
+    {
+        cache.store(id, &text);
+    }
+    caps_tx.send((CAP_LSL_SYNTAX.to_owned(), llsd)).ok();
 }
 
 /// Drives the two-step `LandResources` flow (blocking): POSTs `{ parcel_id }` to

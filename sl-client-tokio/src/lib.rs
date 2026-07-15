@@ -18,13 +18,14 @@ use sl_proto::{
     CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
@@ -157,6 +158,7 @@ mod fetch;
 mod http;
 mod inventory;
 mod inventory_cache;
+mod lsl_syntax_cache;
 mod materials;
 mod media;
 pub mod meshes;
@@ -175,11 +177,12 @@ use crate::experiences::{
 };
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
-    delete_caps_llsd, fetch_land_resources, get_caps_llsd, patch_caps_llsd, post_caps_oneway,
-    post_chat_session_request, put_caps_llsd,
+    delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_caps_llsd, patch_caps_llsd,
+    post_caps_oneway, post_chat_session_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
+use crate::lsl_syntax_cache::LslSyntaxCache;
 use crate::materials::{fetch_render_materials, post_modify_material_params};
 use crate::media::{fetch_object_media, post_object_media};
 use crate::upload::{run_caps_upload, run_report_screenshot_upload, run_script_upload};
@@ -481,6 +484,13 @@ impl Client {
             Instant::now(),
         );
 
+        // The grid's `LSLSyntax` document, cached by syntax id under the shared
+        // (cross-account) cache directory. `last_lsl_syntax_id` tracks the id we
+        // have already fetched/loaded so a region change that keeps the same id
+        // costs nothing, and a change triggers exactly one fetch (or cache load).
+        let lsl_syntax_cache = LslSyntaxCache::new(self.directories.shared_cache_dir.clone());
+        let mut last_lsl_syntax_id: Option<Uuid> = None;
+
         loop {
             while let Some(transmit) = self.session.poll_transmit() {
                 self.socket
@@ -526,6 +536,40 @@ impl Client {
                     }
                     Event::LibraryInventory(folders) => {
                         inventory_cache.load_library(&mut self.session, folders);
+                    }
+                    // On a `SimulatorFeatures` reply carrying a syntax id we have
+                    // not yet resolved, load the cached document (uniform decode
+                    // via `handle_caps_event`) or fetch it from the `LSLSyntax`
+                    // cap. A grid that advertises no id, or the same id as before,
+                    // does nothing.
+                    Event::SimulatorFeatures(features) => {
+                        if let Some(id) = features.lsl_syntax_id
+                            && last_lsl_syntax_id != Some(id)
+                        {
+                            last_lsl_syntax_id = Some(id);
+                            if let Some(cached) = lsl_syntax_cache.load(id) {
+                                caps_tx.send((CAP_LSL_SYNTAX.to_owned(), cached)).await.ok();
+                            } else if let Some(url) = caps.get(CAP_LSL_SYNTAX).cloned() {
+                                tokio::spawn(fetch_lsl_syntax(
+                                    url,
+                                    id,
+                                    lsl_syntax_cache.clone(),
+                                    http.clone(),
+                                    caps_tx.clone(),
+                                ));
+                            }
+                        }
+                    }
+                    // The decoded grid LSL library arrived (fresh fetch or cache
+                    // hit): log a one-line confirmation for live verification.
+                    Event::LslSyntax(syntax) => {
+                        tracing::info!(
+                            symbols = syntax.len(),
+                            functions = syntax.functions.len(),
+                            constants = syntax.constants.len(),
+                            events = syntax.events.len(),
+                            "loaded grid LSL syntax definition",
+                        );
                     }
                     _other => {}
                 }

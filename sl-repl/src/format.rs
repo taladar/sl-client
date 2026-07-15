@@ -345,6 +345,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ParcelDetails(..) => "parcel_details",
         Event::RemoteParcelId(..) => "remote_parcel_id",
         Event::SimulatorFeatures(..) => "simulator_features",
+        Event::LslSyntax(..) => "lsl_syntax",
         Event::AgentPreferences(..) => "agent_preferences",
         Event::ObjectCosts(..) => "object_costs",
         Event::SelectedResourceCost(..) => "selected_resource_cost",

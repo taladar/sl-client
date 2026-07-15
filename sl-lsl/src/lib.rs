@@ -30,12 +30,21 @@
 //! - [`parser`] — the error-tolerant recursive-descent [`parse`] that turns the
 //!   token stream into an [`ast::Script`], recording (never aborting on) syntax
 //!   errors so a half-typed statement does not discard the rest of the file.
+//! - [`syntax`] — the owned **library symbol table** ([`LslSyntax`]): the
+//!   grid-served functions, constants, events and keywords the lexer refuses to
+//!   bake in, decoded (by `sl-wire`) from the `LSLSyntax` capability and read
+//!   here for highlighting, tooltips and the semantic pass.
 
 pub mod ast;
 pub mod lexer;
 pub mod parser;
+pub mod syntax;
 pub mod token;
 
 pub use lexer::{SpannedToken, Tokens, lex, tokens};
 pub use parser::{Parse, ParseError, parse};
+pub use syntax::{
+    LSL_SYNTAX_VERSION, LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax,
+    SymbolKind,
+};
 pub use token::Token;

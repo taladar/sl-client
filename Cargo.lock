@@ -6508,6 +6508,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "sl-llsd",
+ "sl-lsl",
  "sl-msg-template",
  "sl-types",
  "thiserror 2.0.18",

@@ -39,6 +39,7 @@ use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceInfo;
 use sl_wire::LandResourcesUrls;
+use sl_wire::LslSyntax;
 use sl_wire::MediaEntry;
 use sl_wire::ObjectCost;
 use sl_wire::ObjectPhysicsData;
@@ -218,6 +219,16 @@ pub enum Event {
     /// [`open_sim_extras`](sl_wire::SimulatorFeatures::open_sim_extras); Second
     /// Life leaves that [`None`].
     SimulatorFeatures(Box<SimulatorFeatures>),
+    /// The grid's LSL language definition, from an `LSLSyntax` capability GET —
+    /// the library functions (with signatures and costs), constants, events and
+    /// keywords the grid actually speaks, current for the region the agent is in.
+    /// The runtimes fetch it when a region advertises an
+    /// [`lsl_syntax_id`](sl_wire::SimulatorFeatures::lsl_syntax_id) that changed,
+    /// caching the decoded table by that id; a grid that serves no syntax (older
+    /// OpenSim, or the feature disabled) simply never emits this. Consumed by the
+    /// LSL editor / language-server tooling for highlighting, tooltips and the
+    /// semantic pass.
+    LslSyntax(Box<LslSyntax>),
     /// The agent's server-stored preferences (hover height, default object
     /// permission masks, maturity-access ceiling, UI language), from an
     /// `AgentPreferences` capability POST — the reply to

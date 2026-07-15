@@ -104,6 +104,20 @@ pub enum WireError {
         /// The offending value, rendered for diagnostics.
         value: String,
     },
+    /// An `LSLSyntax` document declared a `llsd-lsl-syntax-version` this decoder
+    /// does not implement. The version is bumped only when the document's
+    /// *schema* changes (not when the grid's function list changes), so an
+    /// unrecognised value means the layout may differ from what
+    /// [`parse_lsl_syntax`](crate::parse_lsl_syntax) expects — it is refused
+    /// rather than parsed wrongly. An absent version key is reported the same way
+    /// (rendered as `version: -1`), matching Firestorm's reject-on-missing stance.
+    #[error("unsupported LSLSyntax document version {version} (expected {expected})")]
+    UnsupportedLslSyntaxVersion {
+        /// The version the document declared, or `-1` if the key was absent.
+        version: i32,
+        /// The single version this decoder implements.
+        expected: i32,
+    },
     /// A fault decoding a [`Llsd`](sl_llsd::Llsd) body: a map field read by the
     /// typed `field_*` / `require_*` accessors was absent or of the wrong LLSD
     /// kind, or an LLSD-XML document failed to parse. This wraps the LLSD core's

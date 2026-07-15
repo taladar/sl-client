@@ -64,6 +64,22 @@ impl TypeName {
             _ => None,
         }
     }
+
+    /// The canonical type keyword this [`TypeName`] denotes — the inverse of
+    /// [`from_keyword`](Self::from_keyword). [`Rotation`](Self::Rotation) renders
+    /// as its modern spelling `rotation`, never the legacy `quaternion`.
+    #[must_use]
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Integer => "integer",
+            Self::Float => "float",
+            Self::String => "string",
+            Self::Key => "key",
+            Self::Vector => "vector",
+            Self::Rotation => "rotation",
+            Self::List => "list",
+        }
+    }
 }
 
 /// A use of a type keyword, with the byte span of the keyword itself.

@@ -2,7 +2,7 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, LAND_RESOURCE_DETAIL_TAG,
+    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, build_land_resources_request,
     parse_land_resources_reply, parse_llsd_xml,
 };
@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::caps::report_caps_failure;
+use crate::lsl_syntax_cache::LslSyntaxCache;
 
 /// POSTs `body` to a capability URL and ignores the reply — a fire-and-forget
 /// capability call where the simulator returns only an HTTP status (e.g. the
@@ -101,6 +102,55 @@ pub(crate) async fn get_caps_llsd(
         }
         None => report_caps_failure(&caps_tx, cap).await,
     }
+}
+
+/// GETs the `LSLSyntax` capability, caches the raw document under syntax `id`,
+/// and forwards its parsed LLSD to `caps_tx` tagged [`CAP_LSL_SYNTAX`] for
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event) to decode
+/// into [`Event::LslSyntax`](sl_proto::Event::LslSyntax).
+///
+/// The raw XML is cached only when it declares the schema version this client
+/// supports (`llsd-lsl-syntax-version == 2`), so a document of an unknown version
+/// — which the session will reject anyway — is never persisted. The parsed LLSD
+/// is forwarded regardless; the session owns the version gate and logs the
+/// rejection, keeping one decode path for both the fresh-fetch and cache-hit
+/// cases.
+pub(crate) async fn fetch_lsl_syntax(
+    url: String,
+    id: Uuid,
+    cache: LslSyntaxCache,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .get(&url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .await
+    else {
+        report_caps_failure(&caps_tx, CAP_LSL_SYNTAX).await;
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, CAP_LSL_SYNTAX).await;
+        return;
+    };
+    let Ok(llsd) = parse_llsd_xml(&text) else {
+        report_caps_failure(&caps_tx, CAP_LSL_SYNTAX).await;
+        return;
+    };
+    // Persist only a supported-version document (a cheap version-key check, not a
+    // full decode — the session does that): caching an unsupported one would just
+    // reproduce a reject on the next restart.
+    if llsd
+        .field_i32("llsd-lsl-syntax-version", "llsd-lsl-syntax-version")
+        .ok()
+        .flatten()
+        == Some(sl_proto::LSL_SYNTAX_VERSION)
+    {
+        cache.store(id, &text);
+    }
+    caps_tx.send((CAP_LSL_SYNTAX.to_owned(), llsd)).await.ok();
 }
 
 /// Drives the two-step `LandResources` flow: POSTs `{ parcel_id }` to the

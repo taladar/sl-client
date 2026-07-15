@@ -12,21 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 60 |
-| blocked | 138 |
+| ready | 61 |
+| blocked | 136 |
 | in-progress | 0 |
-| bugs | 6 |
-| done | 466 |
+| bugs | 7 |
+| done | 467 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **676** |
+| **total** | **677** |
 
-## ready (60)
-
-### protocol
-
-- [`protocol-lsl-syntax`](ready/protocol-lsl-syntax.md) — LSLSyntax capability —
-  fetch, cache and decode the grid's language definition
+## ready (61)
 
 ### viewer
 
@@ -56,6 +51,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-lsl-lsp-server`](ready/viewer-lsl-lsp-server.md) — LSL language
+  server — lsp-server, document sync, symbols (blocked by
+  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
+- [`viewer-lsl-semantic-pass`](ready/viewer-lsl-semantic-pass.md) — LSL semantic
+  pass — types, arity, undefined symbols, reachability (blocked by
+  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -151,7 +152,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (138)
+## blocked (136)
 
 ### viewer
 
@@ -295,12 +296,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-lsp-diagnostics-nav`](blocked/viewer-lsl-lsp-diagnostics-nav.md)
   — LSL language server — diagnostics, navigation, completion (blocked by
   `viewer-lsl-lsp-server`, `viewer-lsl-semantic-pass`)
-- [`viewer-lsl-lsp-server`](blocked/viewer-lsl-lsp-server.md) — LSL language
-  server — lsp-server, document sync, symbols (blocked by
-  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax`)
-- [`viewer-lsl-semantic-pass`](blocked/viewer-lsl-semantic-pass.md) — LSL
-  semantic pass — types, arity, undefined symbols, reachability (blocked by
-  `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax`)
 - [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by
   `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
@@ -532,7 +527,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## bugs (6)
+## bugs (7)
+
+### protocol
+
+- [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
+  SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
+  fetch never retries)
 
 ### viewer
 
@@ -552,7 +553,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (466)
+## done (467)
 
 ### protocol
 
@@ -675,6 +676,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-8`](done/protocol-8-script-dialogs-permissions.md) — Script dialogs
   & permissions
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
+- [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
+  fetch, cache and decode the grid's language definition
 
 ### viewer
 

@@ -381,6 +381,19 @@ pub const CAP_REMOTE_PARCEL_REQUEST: &str = "RemoteParcelRequest";
 /// [`Event::SimulatorFeatures`].
 pub const CAP_SIMULATOR_FEATURES: &str = "SimulatorFeatures";
 
+/// The HTTP capability for the grid's **LSL language definition** (`LSLSyntax`):
+/// a plain GET returning the `llsd-lsl-syntax-version: 2` document identified by
+/// the `LSLSyntaxId` a [`SimulatorFeatures`](sl_wire::SimulatorFeatures) reply
+/// advertises — the library functions, constants, events and keywords the grid
+/// actually speaks (on OpenSim this includes the `os*` OSSL calls). The runtimes
+/// GET it when a region advertises a syntax id that changed, cache the decoded
+/// table by that id, and surface it as [`Event::LslSyntax`]. Absent (an older
+/// OpenSim, or the feature disabled) the client falls back to no
+/// identifier-level highlighting. Cross-checked against Firestorm's
+/// `llsyntaxid.cpp` and OpenSim's `SimulatorFeaturesModule` (which registers the
+/// cap and serves `bin/ScriptSyntax.xml`).
+pub const CAP_LSL_SYNTAX: &str = "LSLSyntax";
+
 /// The HTTP capability for the agent's **server-stored preferences**
 /// (`AgentPreferences`): a POST of the fields to change (hover height, default
 /// object permission masks, maturity-access ceiling, UI language) returning the
@@ -519,6 +532,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_DISPLAY_NAMES,
     CAP_REMOTE_PARCEL_REQUEST,
     CAP_SIMULATOR_FEATURES,
+    CAP_LSL_SYNTAX,
     CAP_AGENT_PREFERENCES,
     CAP_GET_OBJECT_COST,
     CAP_RESOURCE_COST_SELECTED,

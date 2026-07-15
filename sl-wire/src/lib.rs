@@ -14,6 +14,7 @@ mod header;
 mod inventory;
 mod llsd;
 mod login;
+mod lsl_syntax;
 mod material;
 mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
@@ -98,6 +99,7 @@ pub use login::{
     build_login_request, build_login_response, parse_login_request, parse_login_response,
     password_hash,
 };
+pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
 pub use material::{
     GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
     RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
@@ -140,6 +142,12 @@ pub use sequence_number::SequenceNumber;
 pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
+};
+// Re-export the `sl-lsl` symbol-table types the `LSLSyntax` decoder produces, so
+// a consumer of `sl-wire` reaches them the same way it reaches `SimulatorFeatures`.
+pub use sl_lsl::{
+    LSL_SYNTAX_VERSION, LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax,
+    SymbolKind,
 };
 pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
 pub use voice::{

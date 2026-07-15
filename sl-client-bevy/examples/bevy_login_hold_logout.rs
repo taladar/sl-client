@@ -377,6 +377,7 @@ fn on_events(
             | SlSessionEvent::CameraConstraint { .. }
             | SlSessionEvent::ViewerFrozen { .. }
             | SlSessionEvent::SimulatorFeatures(_)
+            | SlSessionEvent::LslSyntax(_)
             | SlSessionEvent::AgentPreferences(_)
             | SlSessionEvent::ObjectCosts(_)
             | SlSessionEvent::SelectedResourceCost(_)

@@ -2,7 +2,7 @@
 id: protocol-lsl-syntax
 title: LSLSyntax capability — fetch, cache and decode the grid's language definition
 topic: protocol
-status: ready
+status: done
 origin: user request (2026-07)
 ---
 
