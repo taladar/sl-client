@@ -2,3 +2,10 @@
 # YAML documents; yamllint parses the whole file as YAML and errors on the prose
 # body. Skip the yaml check for them (rumdl still lints the markdown).
 roadmap/*/*.md skipchecks=yaml:::yamllint;;;markdown[[space]]front[[space]]matter[[space]]not[[space]]standalone[[space]]YAML
+
+# The LSL differential-testing corpus is deliberately invalid in places (the
+# error/ scripts each trigger a specific compile error): they are oracle input,
+# fed to tailslide and sl-lsl to be diffed, not code meant to pass a linter.
+# Their validity is judged by the differential oracle, so skip the pre-commit
+# LSL linter for the whole corpus tree.
+sl-lsl/tests/corpus/**/*.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]invalid[[space]]differential-oracle[[space]]fixtures

@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 60 |
+| ready | 59 |
 | blocked | 133 |
 | in-progress | 0 |
-| bugs | 7 |
-| done | 471 |
+| bugs | 8 |
+| done | 472 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **677** |
+| **total** | **678** |
 
-## ready (60)
+## ready (59)
 
 ### viewer
 
@@ -51,9 +51,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-lsl-differential-testing`](ready/viewer-lsl-differential-testing.md)
-  — LSL differential testing — a tailslide diagnostics oracle (blocked by
-  `viewer-lsl-semantic-pass` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -515,7 +512,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## bugs (7)
+## bugs (8)
 
 ### protocol
 
@@ -525,6 +522,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-lsl-parser-recursion-stack-overflow`](bugs/viewer-lsl-parser-recursion-stack-overflow.md)
+  — LSL parser overflows the native stack on deeply-nested input (no
+  recursion-depth guard)
 - [`viewer-r18`](bugs/viewer-r18-cloud-layer-horizon-plume-fixed-one-quadrant-clustering.md)
   — Cloud layer — horizon plume fixed, one-quadrant clustering still broken
 - [`viewer-r23`](bugs/viewer-r23-avatar-stands-too-low-feet-sink-into-the-ground.md)
@@ -541,7 +541,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (471)
+## done (472)
 
 ### protocol
 
@@ -672,6 +672,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))
+- [`viewer-lsl-differential-testing`](done/viewer-lsl-differential-testing.md) —
+  LSL differential testing — a tailslide diagnostics oracle (blocked by
+  `viewer-lsl-semantic-pass` (done))
 - [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
   stream (sl-lsl)
 - [`viewer-lsl-lsp-diagnostics-nav`](done/viewer-lsl-lsp-diagnostics-nav.md) —
