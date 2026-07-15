@@ -1,0 +1,32 @@
+[package]
+name = "sl-lsl-lsp"
+description = "Language Server Protocol server for Linden Scripting Language (LSL), built on sl-lsl — document sync and symbols over rust-analyzer's lsp-server, embeddable and standalone"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "lsl", "lsp", "language-server"]
+categories = ["development-tools", "game-development"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+lsp-server = { version = "0.9.0" }
+lsp-types = { version = "0.97.0" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.150" }
+sl-lsl = { version = "0.1.0", path = "../sl-lsl" }
+thiserror = { version = "2.0.18" }
+tracing = { version = "0.1.44" }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

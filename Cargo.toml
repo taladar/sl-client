@@ -12,6 +12,7 @@ members = [
     "sl-j2c-encode",
     "sl-llsd",
     "sl-lsl",
+    "sl-lsl-lsp",
     "sl-material",
     "sl-mesh",
     "sl-msg-template",

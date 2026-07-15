@@ -2,7 +2,7 @@
 id: viewer-lsl-lsp-server
 title: LSL language server — lsp-server, document sync, symbols
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-lsl-language-server
 blocked_by: [viewer-lsl-parser-tree, protocol-lsl-syntax]
 refs: [viewer-script-mirror-download]
