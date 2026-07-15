@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 133 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 472 |
+| done | 473 |
 | deferred | 5 |
 | wont-do | 1 |
-| **total** | **678** |
+| **total** | **679** |
 
 ## ready (59)
 
@@ -522,9 +522,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-lsl-parser-recursion-stack-overflow`](bugs/viewer-lsl-parser-recursion-stack-overflow.md)
-  — LSL parser overflows the native stack on deeply-nested input (no
-  recursion-depth guard)
+- [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
+  — LSL semantic pass false-positives on legal scripts (found by the tailslide
+  oracle at scale)
 - [`viewer-r18`](bugs/viewer-r18-cloud-layer-horizon-plume-fixed-one-quadrant-clustering.md)
   — Cloud layer — horizon plume fixed, one-quadrant clustering still broken
 - [`viewer-r23`](bugs/viewer-r23-avatar-stands-too-low-feet-sink-into-the-ground.md)
@@ -541,7 +541,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (472)
+## done (473)
 
 ### protocol
 
@@ -683,6 +683,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-lsp-server`](done/viewer-lsl-lsp-server.md) — LSL language server
   — lsp-server, document sync, symbols (blocked by `viewer-lsl-parser-tree`
   (done), `protocol-lsl-syntax` (done))
+- [`viewer-lsl-parser-recursion-stack-overflow`](done/viewer-lsl-parser-recursion-stack-overflow.md)
+  — LSL parser overflows the native stack on deeply-nested input (no
+  recursion-depth guard)
 - [`viewer-lsl-parser-tree`](done/viewer-lsl-parser-tree.md) — LSL parser —
   error-tolerant recursive-descent AST (sl-lsl) (blocked by `viewer-lsl-lexer`
   (done))

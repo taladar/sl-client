@@ -555,4 +555,56 @@ default
             assert_eq!(result.script.span, 0..src.len());
         }
     }
+
+    #[test]
+    fn deeply_nested_input_terminates_without_stack_overflow() {
+        // Each input nests far past the parser's depth limit. Before the guard
+        // these recursed until the native thread stack overflowed and aborted
+        // the process (found via tailslide's `parserstackdepth*.lsl`); now they
+        // must record a recovered error and return. Reaching the assertions at
+        // all proves there was no overflow.
+        let deep_parens = format!("integer x = {}1{};", "(".repeat(5000), ")".repeat(5000));
+        let deep_blocks = format!(
+            "default{{timer(){{{}{}}}}}",
+            "{".repeat(5000),
+            "}".repeat(5000)
+        );
+        let deep_assign = format!("default{{timer(){{integer a;a{};}}}}", "=a".repeat(5000));
+        let deep_casts = format!("integer x = {}1;", "(integer)".repeat(5000));
+        let deep_unary = format!("integer x = {}1;", "!".repeat(5000));
+
+        for src in [
+            deep_parens,
+            deep_blocks,
+            deep_assign,
+            deep_casts,
+            deep_unary,
+        ] {
+            let result = parse(&src);
+            assert!(
+                result.has_errors(),
+                "a too-deeply-nested input must be reported, not silently accepted"
+            );
+            // The diagnostic list is capped so a pathological input cannot
+            // produce an error per token.
+            assert!(
+                result.errors.len() <= 200,
+                "error list must stay bounded, got {}",
+                result.errors.len()
+            );
+        }
+    }
+
+    #[test]
+    fn nesting_within_the_depth_limit_parses_cleanly() {
+        // Nesting a real script never reaches (LSL runs in 64 KiB) must not be
+        // flagged: the depth guard is a crash backstop, not a style rule.
+        let src = format!("integer x = {}1{};", "(".repeat(30), ")".repeat(30));
+        let result = parse(&src);
+        assert_eq!(
+            result.errors,
+            vec![],
+            "moderate nesting must parse without a false positive"
+        );
+    }
 }

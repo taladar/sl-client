@@ -20,6 +20,10 @@ Delink = "Delink"
 # `Xsiz`/… fields), used by the `sl-proto::j2c` header parser; not a typo.
 SIZ = "SIZ"
 siz = "siz"
+# "LSO" is Linden Script Object — the legacy LSL bytecode format (see the
+# `lso2` compile target below and tailslide's `passes/lso`); not a typo of "also".
+LSO = "LSO"
+lso = "lso"
 
 [default.extend-identifiers]
 # `flate2` is the gzip crate (used for the inventory disk cache); not a typo

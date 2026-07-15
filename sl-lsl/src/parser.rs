@@ -106,6 +106,9 @@ struct Parser<'src> {
     tokens: Vec<SpannedToken>,
     /// The index of the current token in `tokens`.
     pos: usize,
+    /// The current nesting depth of the two recursion spines (expressions and
+    /// statements), used to bound recursion — see [`Parser::MAX_DEPTH`].
+    depth: usize,
     /// The recovered syntax errors, in source order.
     errors: Vec<ParseError>,
 }
@@ -122,9 +125,30 @@ impl<'src> Parser<'src> {
             source,
             tokens,
             pos: 0,
+            depth: 0,
             errors: Vec::new(),
         }
     }
+
+    /// The maximum expression/statement nesting the parser descends into before
+    /// it stops recursing, records a recovered "nests too deeply" error and
+    /// returns an error node instead. This exists purely to keep a pathological
+    /// input (e.g. thousands of nested `(` — a real one is in tailslide's
+    /// `parserstackdepth*.lsl`) from overflowing the native thread stack, which
+    /// would abort the process rather than surface a recovered error.
+    ///
+    /// It is deliberately far above any nesting a real LSL script reaches (LSL
+    /// runs in 64 KiB, so hand- or machine-written scripts nest a handful of
+    /// levels, not hundreds) and far below where any realistic stack overflows
+    /// (a debug build on a 1 MiB stack survives ~340 levels; a release build,
+    /// with much smaller frames, far more), so it never rejects legal code and
+    /// never crashes. The grid's own front-end has a comparable guard.
+    const MAX_DEPTH: usize = 128;
+
+    /// The maximum number of recovered errors recorded. Parsing always runs to
+    /// completion; this only caps the diagnostic list so a pathological input
+    /// (thousands of unbalanced brackets) cannot produce an error per token.
+    const MAX_ERRORS: usize = 200;
 
     // -- cursor / span helpers --------------------------------------------
 
@@ -216,12 +240,16 @@ impl<'src> Parser<'src> {
     /// Record an error at the current position with the given message.
     fn error_here(&mut self, message: String) {
         let span = self.cur_span();
-        self.errors.push(ParseError { message, span });
+        self.error_at(span, message);
     }
 
-    /// Record an error at an explicit span.
+    /// Record an error at an explicit span, up to [`Parser::MAX_ERRORS`] — a
+    /// pathological input keeps parsing (to guarantee termination) but stops
+    /// growing the diagnostic list once the cap is reached.
     fn error_at(&mut self, span: Range<usize>, message: String) {
-        self.errors.push(ParseError { message, span });
+        if self.errors.len() < Self::MAX_ERRORS {
+            self.errors.push(ParseError { message, span });
+        }
     }
 
     /// Whether the current token is an identifier whose text equals `keyword`.
@@ -439,8 +467,31 @@ impl<'src> Parser<'src> {
         Block { statements, span }
     }
 
-    /// Parse a single statement, dispatching on the leading token.
+    /// Parse a single statement, bounding recursion depth: past
+    /// [`Parser::MAX_DEPTH`] nested statements it records a recovered error and
+    /// returns [`Stmt::Error`] rather than descending further (which would risk
+    /// a native stack overflow).
     fn parse_statement(&mut self) -> Stmt {
+        if self.depth >= Self::MAX_DEPTH {
+            return self.too_deep_stmt();
+        }
+        self.depth = self.depth.saturating_add(1);
+        let stmt = self.parse_statement_inner();
+        self.depth = self.depth.saturating_sub(1);
+        stmt
+    }
+
+    /// Record a "statement nests too deeply" error and consume one token, so the
+    /// enclosing block loop makes forward progress and the parse terminates.
+    fn too_deep_stmt(&mut self) -> Stmt {
+        let span = self.cur_span();
+        self.error_at(span.clone(), "statement nests too deeply".to_owned());
+        self.bump();
+        Stmt::Error(span)
+    }
+
+    /// Parse a single statement, dispatching on the leading token.
+    fn parse_statement_inner(&mut self) -> Stmt {
         match self.peek_kind() {
             Some(Token::LBrace) => Stmt::Block(self.parse_block()),
             Some(Token::Semicolon) => {
@@ -650,6 +701,20 @@ impl<'src> Parser<'src> {
     /// be taken here. `in_angle` suppresses the `<`/`>`-spelled operators so a
     /// vector/rotation constructor's closing `>` wins over a comparison.
     fn parse_expr_bp(&mut self, min_bp: u8, in_angle: bool) -> Expr {
+        if self.depth >= Self::MAX_DEPTH {
+            return self.too_deep_expr();
+        }
+        self.depth = self.depth.saturating_add(1);
+        let expr = self.parse_expr_bp_inner(min_bp, in_angle);
+        self.depth = self.depth.saturating_sub(1);
+        expr
+    }
+
+    /// The body of [`Parser::parse_expr_bp`], run inside the depth guard. Its
+    /// right-associative recursion (an operator's right operand) is why the
+    /// guard lives here and not only in [`Parser::parse_prefix`]: a long
+    /// `a = b = c = … = z` chain recurses through this method, not that one.
+    fn parse_expr_bp_inner(&mut self, min_bp: u8, in_angle: bool) -> Expr {
         let mut lhs = self.parse_prefix(in_angle);
         while let Some(tok) = self.peek_kind() {
             if in_angle && is_angle_conflict(tok) {
@@ -683,8 +748,34 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a prefix-unary chain, a cast, or a primary followed by any postfix
-    /// `++`/`--`.
+    /// `++`/`--`, bounding recursion depth: past [`Parser::MAX_DEPTH`] nested
+    /// sub-expressions it records a recovered error and returns [`Expr::Error`]
+    /// rather than descending further (which would risk a native stack
+    /// overflow). Every expression-nesting form — parentheses, casts, unary
+    /// chains, list/vector elements, call arguments — passes through here, so
+    /// this one guard bounds the whole expression grammar.
     fn parse_prefix(&mut self, in_angle: bool) -> Expr {
+        if self.depth >= Self::MAX_DEPTH {
+            return self.too_deep_expr();
+        }
+        self.depth = self.depth.saturating_add(1);
+        let expr = self.parse_prefix_inner(in_angle);
+        self.depth = self.depth.saturating_sub(1);
+        expr
+    }
+
+    /// Record an "expression nests too deeply" error and return an error node.
+    /// It does not consume a token: the enclosing delimiter loops
+    /// ([`Parser::parse_arg_list`], [`Parser::parse_list`], the block loop) all
+    /// guarantee their own forward progress, so the parse still terminates.
+    fn too_deep_expr(&mut self) -> Expr {
+        let span = self.cur_span();
+        self.error_at(span.clone(), "expression nests too deeply".to_owned());
+        Expr::Error(span)
+    }
+
+    /// The body of [`Parser::parse_prefix`], run inside the depth guard.
+    fn parse_prefix_inner(&mut self, in_angle: bool) -> Expr {
         let start = self.cur_start();
         if let Some(op) = self.peek_kind().and_then(prefix_op) {
             self.bump();
