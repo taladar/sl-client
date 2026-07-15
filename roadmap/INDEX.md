@@ -12,16 +12,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 0 |
-| ready | 59 |
+| ready | 58 |
 | blocked | 133 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 473 |
+| done | 474 |
 | deferred | 5 |
 | wont-do | 1 |
 | **total** | **679** |
 
-## ready (59)
+## ready (58)
 
 ### viewer
 
@@ -82,8 +82,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   parsing & action dispatch
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
   Automatic (luminance-driven) exposure for the tone mapper
-- [`viewer-ui-settings-store`](ready/viewer-ui-settings-store.md) — Typed
-  persistent settings store
 - [`viewer-ui-text-foundation`](ready/viewer-ui-text-foundation.md) — UI text &
   font foundation (bevy_ui + parley bring-up)
 
@@ -170,7 +168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-focus-contexts`)
 - [`viewer-camera-presets`](blocked/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit`,
-  `viewer-ui-settings-store`)
+  `viewer-ui-settings-store` (done))
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit`, `viewer-permission-request-dialog`)
@@ -186,7 +184,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic`)
 - [`viewer-chat-input-bar`](blocked/viewer-chat-input-bar.md) — Chat input bar
   (local chat + focus) (blocked by `viewer-ui-text-input-widget`,
-  `viewer-input-focus-contexts`, `viewer-ui-settings-store`)
+  `viewer-input-focus-contexts`, `viewer-ui-settings-store` (done))
 - [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
   script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
@@ -223,7 +221,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold`)
 - [`viewer-i18n-locale-selection`](blocked/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
-  `viewer-i18n-fluent-scaffold`, `viewer-ui-settings-store`)
+  `viewer-i18n-fluent-scaffold`, `viewer-ui-settings-store` (done))
 - [`viewer-image-upload`](blocked/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-in-world-sounds`](blocked/viewer-in-world-sounds.md) — In-world
@@ -241,7 +239,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map`, `viewer-gesture-runtime`)
 - [`viewer-input-rebinding-persistence`](blocked/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
-  `viewer-input-action-map`, `viewer-ui-settings-store`)
+  `viewer-input-action-map`, `viewer-ui-settings-store` (done))
 - [`viewer-input-rebinding-ui`](blocked/viewer-input-rebinding-ui.md) —
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget`,
@@ -252,7 +250,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-camera-mapping`](blocked/viewer-input-spacenav-camera-mapping.md)
   — SpaceNavigator → camera/flycam mapping (blocked by
   `viewer-input-spacenav-device`, `viewer-camera-flycam`,
-  `viewer-ui-settings-store`)
+  `viewer-ui-settings-store` (done))
 - [`viewer-input-spacenav-device`](blocked/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`)
 - [`viewer-input-spacenav-settings-ui`](blocked/viewer-input-spacenav-settings-ui.md)
@@ -466,7 +464,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-skin-tokens`)
 - [`viewer-ui-settings-binding`](blocked/viewer-ui-settings-binding.md) —
   Two-way widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold`,
-  `viewer-ui-settings-store`)
+  `viewer-ui-settings-store` (done))
 - [`viewer-ui-skin-tokens`](blocked/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold`)
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
@@ -541,7 +539,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (473)
+## done (474)
 
 ### protocol
 
@@ -922,6 +920,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
+  persistent settings store
 
 ### idiomatic
 

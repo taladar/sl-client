@@ -6486,6 +6486,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-settings"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sl-survey"
 version = "0.1.0"
 dependencies = [
