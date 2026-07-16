@@ -2,7 +2,7 @@
 id: viewer-ui-skin-tokens
 title: Skin system — design tokens (bevy_flair CSS)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-widget-scaffold]
 ---

@@ -2,7 +2,7 @@
 id: viewer-minimap
 title: Minimap (net map)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-beacons-control, viewer-minimap-parcel-overlay, viewer-avatar-radar]

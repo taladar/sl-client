@@ -27,6 +27,7 @@ mod hand_pose;
 mod hud;
 mod hud_pick;
 mod ik;
+mod input_context;
 mod legacy_materials;
 mod lights;
 mod locomotion;
@@ -50,6 +51,7 @@ mod texture_anim;
 mod textures;
 mod tonemap;
 mod typing;
+mod ui;
 mod ui_font;
 mod ui_text;
 mod underwater_fog;
@@ -112,6 +114,7 @@ use crate::environment::{EnvironmentState, ingest_environment, request_environme
 use crate::flexi::simulate_flexi;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::{HudCursorMode, pick_and_touch, toggle_hud_cursor};
+use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -152,7 +155,7 @@ use crate::textures::{
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
-use crate::ui_font::register_ui_fonts;
+use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
@@ -499,6 +502,17 @@ fn run_session(
         inventory_cache_config: InventoryCacheConfig::default(),
         background_inventory_fetch: false,
     })
+    // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
+    // `bevy_ui_widgets` + `bevy_input_focus` bring-up, the one `UiRoot` every
+    // panel parents itself to, tab navigation, the bundled font stack, and the
+    // direction-neutral / content-driven layout conventions the whole UI cluster
+    // inherits.
+    .add_plugins(ViewerUiPlugin)
+    // Input focus / modal context (viewer-input-focus-contexts): derives who owns
+    // the keyboard and the cursor from `bevy_input_focus`. Gates every world key
+    // binding below via `world_has_keyboard`, so typing into a focused text field
+    // no longer also walks the avatar.
+    .add_plugins(InputContextPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
@@ -555,6 +569,9 @@ fn run_session(
     // The debug camera override (`--camera-position` / `--camera-look-at` /
     // `--camera-spin`): `setup_scene` reads the start pose, `fly_camera` reads
     // the spin, and `drive_session` skips its login-snap when a pose is fixed.
+    // The world context may grab the cursor unless this is an unattended
+    // screenshot run, whose whole point is to leave the desktop's pointer alone.
+    .insert_resource(CursorGrabAllowed(screenshot_dir.is_none()))
     .insert_resource(camera_start)
     .insert_resource(camera_spin)
     .init_resource::<LoginOutcome>()
@@ -625,10 +642,6 @@ fn run_session(
     .add_systems(
         Startup,
         (
-            // The UI font stack (viewer-ui-text-font-family-selection): register
-            // the bundled faces under their private families and re-point the
-            // generics, before any text is shaped in `PostUpdate`.
-            register_ui_fonts,
             setup_scene,
             setup_sky,
             setup_sun_moon_discs,
@@ -638,8 +651,9 @@ fn run_session(
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
-            // The UI text & font foundation demo panel (viewer-ui-text-foundation).
-            setup_text_demo,
+            // The UI text & font foundation demo panel (viewer-ui-text-foundation),
+            // which parents itself to the scaffold's `UiRoot` and so must see it.
+            setup_text_demo.after(UiScaffoldSystems::SpawnRoot),
             setup_avatar_body,
             // P35.1: the screen-space HUD screen + its attachment-point nodes, which
             // a worn HUD is routed onto instead of a body joint.
@@ -786,12 +800,20 @@ fn run_session(
             update_chat_overlay,
             // Quit handling: request a clean logout on the quit key, then force the
             // exit once the grace period lapses. Nested into one tuple to stay
-            // within Bevy's per-tuple system limit.
-            (handle_quit_input, enforce_quit_deadline),
+            // within Bevy's per-tuple system limit. Only the key half is gated on
+            // the input context — `Q` is a character a text field wants, and
+            // `Escape` there means "give the keyboard back" (see
+            // `input_context`) — while the deadline must still fire once a quit is
+            // under way, whatever has focus.
+            (
+                handle_quit_input.run_if(world_has_keyboard),
+                enforce_quit_deadline,
+            ),
             // The fly-camera, plus walking / turning / flying the own avatar from
             // the arrow keys (independent of the camera): the simulator moves the
-            // avatar and the P31.4 dead-reckoner smooths the returned motion.
-            (fly_camera, drive_avatar_controls),
+            // avatar and the P31.4 dead-reckoner smooths the returned motion. Both
+            // are gated: `WASD` are characters, and the arrows move a caret.
+            (fly_camera, drive_avatar_controls).run_if(world_has_keyboard),
         ),
     )
     // Opt-in diagnostic (SL_VIEWER_LOG_OBJECTS): flag region-sized / sky objects
@@ -803,7 +825,7 @@ fn run_session(
         Update,
         (
             log_suspicious_objects,
-            pick_object,
+            pick_object.run_if(world_has_keyboard),
             // The screen-space HUD (P35.2): keep each HUD point anchored to its
             // corner of the viewport as the window's aspect changes, and render every
             // HUD face fullbright (the reference forces `LLFace::FULLBRIGHT` on a HUD
@@ -812,8 +834,11 @@ fn run_session(
             (fit_hud_points, apply_hud_fullbright),
             // HUD picking & clicking (P35.3): `H` toggles a free cursor, and a
             // left click then touches the HUD (or, failing that, world) object
-            // under the pointer through an orthographic HUD-camera pick.
-            (toggle_hud_cursor, pick_and_touch),
+            // under the pointer through an orthographic HUD-camera pick. The
+            // toggle is gated (`H` is a character); the pick is not, because it
+            // is a mouse click, and the cursor is only free to make it in the
+            // first place when the context or this toggle says so.
+            (toggle_hud_cursor.run_if(world_has_keyboard), pick_and_touch),
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
             // looks at loads first. Throttled internally. It also picks each plain
@@ -860,7 +885,7 @@ fn run_session(
             focus_camera_on_volume_shape.after(fly_camera),
             // Debug (`V`): toggle the shape's collision-volume displacement live, so
             // the effect can be A/B'd on one avatar in one session (P34.3).
-            toggle_volume_morphs,
+            toggle_volume_morphs.run_if(world_has_keyboard),
             // Animated textures (P28.2): advance every prim's `llSetTextureAnim`
             // and fold the current frame's UV / flipbook placement into its faces,
             // then reset a face to its static placement when the animation stops.
@@ -926,13 +951,16 @@ fn run_session(
             // the same frame's pose).
             drive_own_locomotion
                 .after(drive_avatar_controls)
-                .before(drive_avatar_skeletons),
+                .before(drive_avatar_skeletons)
+                .run_if(world_has_keyboard),
             // Typing state animation for the own avatar (P31.9): toggle the typing
             // state (the T key stands in for a chat-entry box), play `ANIM_AGENT_TYPE`
             // locally, and broadcast a `StartTyping` / `StopTyping` `ChatFromViewer`.
             // Like locomotion it must reconcile its client-driven set before the
             // skeleton driver folds it into the frame's pose.
-            drive_own_typing.before(drive_avatar_skeletons),
+            drive_own_typing
+                .before(drive_avatar_skeletons)
+                .run_if(world_has_keyboard),
             drive_avatar_skeletons.after(apply_avatar_appearance),
             // Hand-pose morph (P31.13): cross-fade each avatar's hands into the pose
             // its highest-priority playing animation asks for. After the skeleton
@@ -955,10 +983,10 @@ fn run_session(
             // so the targeting motion engages the way a scripted weapon would drive it.
             // The pose pass (PostUpdate) reads the resulting targets.
             (
-                reach::select_object_under_crosshair,
+                reach::select_object_under_crosshair.run_if(world_has_keyboard),
                 reach::drive_own_point_at.after(reach::select_object_under_crosshair),
                 reach::receive_point_at_effects,
-                reach::drive_aim_animation,
+                reach::drive_aim_animation.run_if(world_has_keyboard),
             ),
             // Avatar ground probe (P31.14): raycast what is under each avatar's root
             // and ankles, for the foot IK and the landing recovery. It reads the joint

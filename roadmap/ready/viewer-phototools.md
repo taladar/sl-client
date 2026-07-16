@@ -2,7 +2,7 @@
 id: viewer-phototools
 title: Phototools — a photographer's environment & graphics control panel
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-preferences-floater, viewer-quick-preferences, viewer-snapshot-floater, viewer-camera-third-person-orbit, viewer-depth-of-field, viewer-glow-bloom, viewer-screen-space-reflections, viewer-realtime-mirrors, viewer-projector-lights-textured, viewer-pbr-terrain, viewer-antialiasing-post, viewer-avatar-impostors-billboard, viewer-ambient-occlusion, viewer-tonemap-auto-exposure]

@@ -2,7 +2,7 @@
 id: viewer-object-selection-core
 title: Object selection core (select set + protocol)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-object-selection
 blocked_by: [viewer-ui-widget-scaffold]
 ---

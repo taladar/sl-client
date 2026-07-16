@@ -2,7 +2,7 @@
 id: viewer-input-action-map
 title: Input action map & per-context binding profiles
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-input-system
 blocked_by: [viewer-input-focus-contexts]
 ---

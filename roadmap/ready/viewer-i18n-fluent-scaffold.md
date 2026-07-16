@@ -2,7 +2,7 @@
 id: viewer-i18n-fluent-scaffold
 title: i18n scaffold (Project Fluent via bevy_fluent)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-i18n-localization
 blocked_by: [viewer-ui-widget-scaffold]
 ---

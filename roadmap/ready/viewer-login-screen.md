@@ -2,7 +2,7 @@
 id: viewer-login-screen
 title: Login screen — grid select, saved credentials, MFA
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 ---

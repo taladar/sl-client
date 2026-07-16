@@ -2,7 +2,7 @@
 id: viewer-region-options-debug
 title: Region / Estate floater — region debug tab
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-region-options
 blocked_by: [viewer-ui-widget-scaffold]
 ---

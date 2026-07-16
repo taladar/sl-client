@@ -2,7 +2,7 @@
 id: viewer-snapshot-floater
 title: Snapshot floater — preview, format, destinations
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-snapshot-tools
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-snapshot-quick-key, viewer-snapshot-to-inventory, viewer-360-snapshot, viewer-photo-hosting-upload]

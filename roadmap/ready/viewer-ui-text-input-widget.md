@@ -2,7 +2,7 @@
 id: viewer-ui-text-input-widget
 title: Reusable text-input widget (EditableText + IME preedit)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-widget-scaffold]
 ---

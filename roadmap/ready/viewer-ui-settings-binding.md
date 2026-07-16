@@ -2,7 +2,7 @@
 id: viewer-ui-settings-binding
 title: Two-way widget↔settings binding layer
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-widget-scaffold, viewer-ui-settings-store]
 ---

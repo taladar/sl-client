@@ -2,7 +2,7 @@
 id: viewer-image-upload
 title: Image / texture (and sound / animation) upload
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 ---

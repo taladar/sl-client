@@ -2,7 +2,7 @@
 id: viewer-ui-virtualized-list
 title: Virtualized (windowed-recycling) list
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-widget-scaffold]
 ---

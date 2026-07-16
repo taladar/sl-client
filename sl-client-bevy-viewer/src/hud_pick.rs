@@ -36,7 +36,6 @@ use std::collections::HashSet;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions};
 use sl_client_bevy::{
     Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
 };
@@ -63,30 +62,23 @@ pub(crate) struct HudCursorMode {
     pub(crate) active: bool,
 }
 
-/// Toggle the free HUD cursor with [`HUD_CURSOR_KEY`], and drive the window's
-/// cursor grab / visibility to match.
+/// Toggle the free HUD cursor with [`HUD_CURSOR_KEY`].
 ///
 /// Freeing the cursor is what makes the HUD clickable; re-grabbing it restores
-/// mouse-look. The grab state is written only on the toggle frame, so this does
-/// not fight the screenshot-mode cursor set up at startup.
+/// mouse-look. This only flips the request: the window's grab is owned by
+/// [`crate::input_context`]'s cursor-grab system, which folds this together with
+/// the input context (a focused UI frees the cursor too) and with whether
+/// grabbing is allowed at all (it is not in an unattended screenshot run — which
+/// is what this system used to have to tiptoe around by writing the grab only on
+/// the toggle frame).
 pub(crate) fn toggle_hud_cursor(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<HudCursorMode>,
-    mut cursors: Query<&mut CursorOptions>,
 ) {
     if !keyboard.just_pressed(HUD_CURSOR_KEY) {
         return;
     }
     mode.active = !mode.active;
-    for mut cursor in &mut cursors {
-        if mode.active {
-            cursor.grab_mode = CursorGrabMode::None;
-            cursor.visible = true;
-        } else {
-            cursor.grab_mode = CursorGrabMode::Locked;
-            cursor.visible = false;
-        }
-    }
     info!(
         "P35.3 HUD cursor {} (press {HUD_CURSOR_KEY:?} to toggle; left-click a HUD to touch it)",
         if mode.active { "on" } else { "off" }

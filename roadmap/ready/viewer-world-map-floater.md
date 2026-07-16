@@ -2,7 +2,7 @@
 id: viewer-world-map-floater
 title: World-map floater — surface, zoom & region tiles
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-world-map
 blocked_by: [viewer-ui-widget-scaffold]
 ---
