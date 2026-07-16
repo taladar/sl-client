@@ -2,7 +2,7 @@
 id: viewer-ui-widget-scaffold
 title: UI widget scaffold (bevy_ui plugin + conventions anchor)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-text-foundation, viewer-ui-text-grapheme-backdelete]
 ---

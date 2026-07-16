@@ -2,7 +2,7 @@
 id: viewer-ui-text-emoji-presentation
 title: Honour emoji-presentation (VS16) over a text font's own glyph
 topic: viewer
-status: ready
+status: done
 origin: gap surfaced by viewer-ui-text-foundation (2026-07)
 refs: [viewer-ui-text-foundation, viewer-ui-text-font-family-selection, viewer-ui-text-grapheme-backdelete]
 ---
@@ -95,3 +95,26 @@ The reference viewer, for comparison, sidesteps all of this by looking glyphs up
 **per character** rather than per cluster (`llfontfreetype.cpp`'s `addGlyph`),
 so its `FE0F` simply finds no glyph and is skipped; it renders a colour heart
 whenever the base font and the monochrome fallbacks lack `U+2764`.
+
+## Outcome (2026-07-16)
+
+`❤️` renders in colour. Confirmed live in the F4 demo panel and guarded by
+`emoji_presentation_selector_beats_the_text_font` in
+`sl-client-bevy-viewer/src/ui_font.rs`.
+
+Both blockers were in parley, and both are now in the fork we `[patch]` with
+(`taladar/parley`, branch `sl-client/0.9-patch`, pinned by rev in the workspace
+`Cargo.toml`):
+
+1. the `cmap`/VS16 rejection — **already fixed upstream** in 0.10.0
+   (linebender/parley#685); backported here because `bevy_text` 0.19 pins parley
+   `0.9.0` and a `[patch]` must stay semver-compatible;
+2. the selection *ordering* — written by us, and **not** fixed upstream.
+   Verified on parley `main` first that (1) alone still yields a monochrome
+   heart.
+
+Submitting (2) upstream is [[viewer-ui-text-parley-pr-vs16]]; dropping the patch
+once `bevy_text` moves to parley >= 0.10 and it lands is tracked there too.
+
+The third gap this task speculated about — "ordering may need to change for VS16
+clusters specifically" — turned out to be the *actual* fix, not a footnote.

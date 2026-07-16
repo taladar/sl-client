@@ -585,6 +585,53 @@ mod tests {
         );
     }
 
+    /// **A guard against building on an unpatched `parley`.** A codepoint carrying
+    /// the emoji-presentation selector (`U+FE0F`, VS16) must render in colour,
+    /// per UTS #51 — even though `Inter` covers `U+2764` with a monochrome
+    /// dingbat and is the primary family.
+    ///
+    /// Two `parley` defects had to be fixed for this to hold, both absent from
+    /// the `0.9.0` that `bevy_text` 0.19 pins, so this fails loudly if the
+    /// `[patch.crates-io]` in the workspace `Cargo.toml` is dropped before
+    /// `bevy_text` moves to a parley that has them:
+    ///
+    /// 1. a variation selector was required to be in the font's `cmap` for the
+    ///    font to count as a complete match — no emoji font maps `U+FE0F`, so the
+    ///    emoji font was rejected outright (fixed upstream in 0.10.0);
+    /// 2. the emoji family was appended *after* the requested families, so a text
+    ///    font covering `U+2764` won regardless (submitted upstream —
+    ///    `roadmap/deferred/viewer-ui-text-parley-pr-vs16.md`).
+    ///
+    /// The `❤` and `5` cases are the other half of the contract: without a
+    /// selector nothing is requested, so the text font must still win. They would
+    /// catch a "fix" that simply put the emoji family first — which would render
+    /// digits as emoji, since `is_emoji` is the raw `Emoji` property.
+    #[test]
+    fn emoji_presentation_selector_beats_the_text_font() {
+        let mut font_cx = ui_font_cx();
+        for (name, text, want_emoji) in [
+            ("heart + VS16 must be colour", "\u{2764}\u{FE0F}", true),
+            (
+                "victory hand + VS16 must be colour",
+                "\u{270C}\u{FE0F}",
+                true,
+            ),
+            ("bare heart stays text", "\u{2764}", false),
+            ("bare digit stays text", "5", false),
+        ] {
+            let lengths = resolved_run_lengths(&mut font_cx, SANS_FAMILY, text);
+            let got_emoji = lengths.contains(&EMOJI_FONT.len());
+            assert_eq!(
+                got_emoji,
+                want_emoji,
+                "{name}: resolved to runs of {lengths:?} bytes (bundled emoji font is {} B, \
+                 Inter is {} B). If this fails, check the parley `[patch.crates-io]`.",
+                EMOJI_FONT.len(),
+                SANS_UPRIGHT.len()
+            );
+        }
+    }
+
     /// The private family names must be names no real font carries, since the
     /// whole point is that a host font cannot merge into them.
     #[test]

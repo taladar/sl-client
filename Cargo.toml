@@ -248,3 +248,28 @@ broken_intra_doc_links = "deny"
 missing_crate_level_docs = "warn"
 private_intra_doc_links = "deny"
 unescaped_backticks = "deny"
+
+# Temporarily build against a fork of parley, pinned by revision.
+#
+# `bevy_text` 0.19 pins `parley 0.9.0`, and three fixes we need are not in it. A
+# `[patch]` must resolve to a semver-compatible version, so upstream `main`
+# (0.11) cannot be used here; `sl-client/0.9-patch` is `v0.9.0` plus:
+#
+# 1. upstream 0.10.0's fix (linebender/parley#685) for a non-printing variation
+#    selector being required in the font's `cmap` — no emoji font maps `U+FE0F`,
+#    so `❤️` rejected the emoji font outright;
+# 2. honouring the emoji presentation selector (VS16) in font selection, so `❤️`
+#    is not stolen by a text font that has a dingbat for `U+2764`;
+# 3. deleting one grapheme cluster in `backdelete`/`delete` rather than one
+#    codepoint, so a ZWJ family no longer takes seven backspaces.
+#
+# 2 and 3 are submitted upstream (see roadmap/deferred/viewer-ui-text-parley-pr-*).
+# **Drop this patch** and return to a plain crates.io parley once `bevy_text`
+# moves to parley >= 0.10 and those two land in a release.
+#
+# Pinned to a rev rather than a branch so the build is reproducible; `fontique`
+# comes from the same workspace and must be patched alongside parley, or the two
+# would resolve to different builds and their `FamilyId`s would not match.
+[patch.crates-io]
+fontique = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }
+parley = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }

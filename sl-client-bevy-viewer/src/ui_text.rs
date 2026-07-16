@@ -66,15 +66,25 @@ const DEMO_WIDTH: f32 = 620.0;
 const PANEL_INSET: f32 = 90.0;
 
 /// The one-line instruction shown above the demo editor.
-const DEMO_TITLE: &str = "Text foundation demo (F4) - click to focus, then type / use your IME; \
-     test caret & backspace over the bidi and emoji runs.";
+const DEMO_TITLE: &str = "Text foundation demo (F4) - click to focus, then type / use your IME. \
+     Each emoji/grapheme cluster should take ONE backspace; the VS16 heart should be colour, \
+     the VS15 one monochrome.";
 
 /// The multilingual + colour-emoji sample prefilled into the demo editor. It is
 /// written with explicit `\u{..}` escapes so this source file stays ASCII, and
 /// it exercises all four hard requirements at once: a bidi line mixing Latin
-/// with right-to-left Hebrew and Arabic, a CJK line (no-tofu), and an emoji line
+/// with right-to-left Hebrew and Arabic, a CJK line (no-tofu), an emoji line
 /// carrying a zero-width-joiner family and a regional-indicator flag (both
-/// single graphemes made of several codepoints).
+/// single graphemes made of several codepoints), and a grapheme line whose
+/// clusters are *not* emoji.
+///
+/// Every cluster on the last two lines should take exactly **one** backspace,
+/// and `\u{2764}\u{FE0F}` should render in **colour** — both behaviours come
+/// from the patched `parley` (see the workspace `Cargo.toml`), so this panel is
+/// the by-hand counterpart to
+/// `ui_font`'s `emoji_presentation_selector_beats_the_text_font` and this
+/// module's `backspace_deletes_exactly_one_grapheme` (not linked: `rustdoc` does
+/// not see `#[cfg(test)]` items).
 const DEMO_TEXT: &str = concat!(
     // Bidi: Latin + Hebrew "shalom" + Arabic "marhaba" + Latin.
     "Bidi: Hello ",
@@ -92,7 +102,19 @@ const DEMO_TEXT: &str = concat!(
     "Emoji: ",
     "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466} ",
     "\u{1F1EF}\u{1F1F5} ",
-    "\u{1F389}\u{2764}\u{FE0F}\u{1F525}",
+    "\u{1F389}\u{2764}\u{FE0F}\u{1F525} ",
+    // A waving hand plus a skin-tone modifier: one grapheme, two codepoints.
+    "\u{1F44B}\u{1F3FD}\n",
+    // Graphemes that are *not* emoji, and were equally broken before the parley
+    // fix: `e` + a combining acute, a Hangul syllable built from three jamo, and
+    // a Devanagari consonant + vowel sign.
+    "Graphemes: ",
+    "e\u{301} ",
+    "\u{1100}\u{1161}\u{11A8} ",
+    "\u{915}\u{93F}\n",
+    // A heart with the *text* presentation selector (VS15), next to the emoji
+    // one: these two request opposite presentations and must not look alike.
+    "VS15/VS16: \u{2764}\u{FE0E} vs \u{2764}\u{FE0F}",
 );
 
 /// Whether the text-foundation demo panel is currently shown. Toggled by
@@ -237,14 +259,18 @@ mod tests {
         assert!(DEMO_TEXT.contains('\u{1F389}'), "missing a colour emoji");
     }
 
-    /// A sanity check that the demo text is the expected three labelled lines.
+    /// A sanity check that the demo text is the expected labelled lines.
     #[test]
-    fn demo_text_has_three_lines() {
-        assert_eq!(DEMO_TEXT.lines().count(), 3);
+    fn demo_text_has_five_lines() {
+        assert_eq!(DEMO_TEXT.lines().count(), 5);
     }
 
     /// How many `backdelete()` presses it takes to clear `text`, driving the real
     /// `parley` editor that [`EditableText`] wraps.
+    ///
+    /// Deliberately a bare [`FontCx`]: the counts are the editor's own logic and
+    /// do not depend on the font stack — verified by measuring identical counts
+    /// with the viewer's full bundled stack registered.
     fn backspaces_to_clear(text: &str) -> usize {
         let mut font_cx = FontCx::default();
         let mut layout_cx = LayoutCx::default();
@@ -271,34 +297,50 @@ mod tests {
         presses
     }
 
-    /// Requirement 2 (grapheme editing) — a **tripwire recording a known gap**,
-    /// not the behaviour we want.
+    /// Requirement 2 (grapheme editing): one backspace deletes exactly one
+    /// **grapheme cluster** — the unit a reader perceives as a character.
     ///
-    /// The requirement is that one backspace deletes exactly one *grapheme
-    /// cluster*, so every case below should take **1** press. `parley` 0.9's
-    /// `backdelete` instead deletes the whole cluster only for a hard line break
-    /// or a single emoji cluster, and otherwise deletes one **codepoint** — so a
-    /// ZWJ family peels apart one member at a time, and even `e` + a combining
-    /// acute takes two presses. Measured with the viewer's own font setup; it is
-    /// not a font/ligature artifact.
+    /// This was the text foundation's one failing hard requirement. `parley` 0.9
+    /// deleted one *codepoint* except for a hard line break or a single emoji
+    /// cluster, so a ZWJ family took seven presses and even `e` + a combining
+    /// acute took two. Fixed in `parley` itself rather than worked around here
+    /// (`viewer-ui-text-grapheme-backdelete`); we build against a patched fork
+    /// until the fix lands upstream and `bevy_text` moves to it — see the
+    /// `[patch.crates-io]` block in the workspace `Cargo.toml`.
     ///
-    /// This test asserts what parley *currently does*, so it fails loudly if
-    /// parley becomes grapheme-correct — at which point delete it and close the
-    /// follow-up (`roadmap/ready/viewer-ui-text-grapheme-backdelete.md`).
+    /// The last three cases are deliberately not emoji: they were equally broken,
+    /// which is why the fix is grapheme segmentation rather than a better emoji
+    /// check. This test therefore also guards against the patch silently
+    /// vanishing.
     #[test]
-    fn backdelete_is_not_grapheme_correct_yet() {
-        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
-        // Wanted: 1 (one grapheme). Actual: one press per codepoint.
-        assert_eq!(backspaces_to_clear(family), 7, "ZWJ family");
-        // Wanted: 1. Actual: one press per regional indicator.
-        assert_eq!(backspaces_to_clear("\u{1F1EF}\u{1F1F5}"), 2, "flag");
-        // Wanted: 1. Actual: the VS16 selector deletes separately.
-        assert_eq!(backspaces_to_clear("\u{2764}\u{FE0F}"), 2, "heart + VS16");
-        // Wanted: 1. Actual: the combining mark deletes separately.
-        assert_eq!(backspaces_to_clear("e\u{301}"), 2, "e + combining acute");
-        // These two are already correct.
-        assert_eq!(backspaces_to_clear("\u{1F389}"), 1, "standalone emoji");
-        assert_eq!(backspaces_to_clear("ab"), 2, "two ASCII characters");
+    fn backspace_deletes_exactly_one_grapheme() {
+        for (name, text) in [
+            (
+                "ZWJ family",
+                "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
+            ),
+            ("regional-indicator flag", "\u{1F1EF}\u{1F1F5}"),
+            ("heart + VS16", "\u{2764}\u{FE0F}"),
+            ("standalone emoji", "\u{1F389}"),
+            ("waving hand + skin tone", "\u{1F44B}\u{1F3FD}"),
+            ("e + combining acute", "e\u{301}"),
+            ("Hangul jamo syllable", "\u{1100}\u{1161}\u{11A8}"),
+        ] {
+            assert_eq!(
+                backspaces_to_clear(text),
+                1,
+                "{name}: backspace deleted less than one grapheme. If this fails, check the \
+                 parley `[patch.crates-io]` in the workspace `Cargo.toml` — unpatched parley \
+                 0.9 deletes one codepoint, so this case takes several presses."
+            );
+        }
+        // Separate graphemes must still take one press each, or the fix would be
+        // over-deleting rather than correct.
+        assert_eq!(
+            backspaces_to_clear("ab"),
+            2,
+            "two ASCII characters: backspace over-deleted, taking more than one grapheme"
+        );
     }
 
     /// Requirement 1 (bidi), headless: in a Latin+Hebrew line the caret must move

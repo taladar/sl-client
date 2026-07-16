@@ -65,6 +65,14 @@ Results against the four checks — **two pass, one fails, one unverified**:
    breaks and single emoji clusters. Follow-up:
    [[viewer-ui-text-grapheme-backdelete]] (tripwire test records the measured
    counts).
+
+   Update (2026-07-16): this requirement was **under-scoped**, and checking only
+   `backdelete` hid half of it. Deleting is now grapheme-correct (fixed in
+   parley itself). **Caret motion is not** — `move_left`/`move_right` still step
+   one codepoint, because a parley layout cluster is one `char` by construction.
+   Only found by driving the F4 panel by hand; every headless test passed
+   throughout. See [[viewer-ui-text-caret-grapheme-motion]]. Treat requirement 2
+   as met only when both hold.
 3. **IME** — **unverified**: the dev machine has no input method configured.
    Deferred to [[viewer-ui-text-ime-verification]].
 4. **No tofu / colour emoji** — passes, confirmed live. CJK renders via system
