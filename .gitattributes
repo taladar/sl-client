@@ -3,6 +3,11 @@
 # body. Skip the yaml check for them (rumdl still lints the markdown).
 roadmap/*/*.md skipchecks=yaml:::yamllint;;;markdown[[space]]front[[space]]matter[[space]]not[[space]]standalone[[space]]YAML
 
+# The bundled Noto Color Emoji font is a binary asset (embedded into the viewer
+# via include_bytes!); treat it as binary so git does not attempt text diffs or
+# line-ending normalisation on it.
+sl-client-bevy-viewer/assets/fonts/*.ttf binary
+
 # The LSL differential-testing corpus is deliberately invalid in places (the
 # error/ scripts each trigger a specific compile error): they are oracle input,
 # fed to tailslide and sl-lsl to be diffed, not code meant to pass a linter.

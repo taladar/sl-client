@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 58 |
-| blocked | 131 |
+| ready | 62 |
+| blocked | 129 |
 | in-progress | 0 |
 | bugs | 8 |
-| done | 477 |
-| deferred | 5 |
+| done | 478 |
+| deferred | 6 |
 | wont-do | 1 |
-| **total** | **681** |
+| **total** | **685** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (58)
+## ready (62)
 
 ### viewer
 
@@ -91,8 +91,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   parsing & action dispatch
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
   Automatic (luminance-driven) exposure for the tone mapper
-- [`viewer-ui-text-foundation`](ready/viewer-ui-text-foundation.md) — UI text &
-  font foundation (bevy_ui + parley bring-up)
+- [`viewer-ui-text-emoji-presentation`](ready/viewer-ui-text-emoji-presentation.md)
+  — Honour emoji-presentation (VS16) over a text font's own glyph
+- [`viewer-ui-text-font-family-selection`](ready/viewer-ui-text-font-family-selection.md)
+  — Deliberate UI font selection (generic families shadow colour emoji)
+- [`viewer-ui-text-grapheme-backdelete`](ready/viewer-ui-text-grapheme-backdelete.md)
+  — Grapheme-correct backspace (parley backdelete deletes codepoints)
+- [`viewer-ui-widget-scaffold`](ready/viewer-ui-widget-scaffold.md) — UI widget
+  scaffold (bevy_ui plugin + conventions anchor) (blocked by
+  `viewer-ui-text-foundation` (done))
+- [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
+  & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 
 ### test
 
@@ -153,7 +162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (131)
+## blocked (129)
 
 ### viewer
 
@@ -287,7 +296,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-editor-widget`)
 - [`viewer-lsl-editor-widget`](blocked/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
-  `viewer-ui-text-foundation`, `viewer-ui-text-input-widget`)
+  `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget`)
 - [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by
   `viewer-ui-widget-scaffold`, `viewer-audio-backend`)
@@ -478,11 +487,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold`)
 - [`viewer-ui-virtualized-list`](blocked/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`)
-- [`viewer-ui-widget-scaffold`](blocked/viewer-ui-widget-scaffold.md) — UI
-  widget scaffold (bevy_ui plugin + conventions anchor) (blocked by
-  `viewer-ui-text-foundation`)
-- [`viewer-url-linkification`](blocked/viewer-url-linkification.md) — URLs in
-  chat & other text contexts (blocked by `viewer-ui-text-foundation`)
 - [`viewer-video-playback`](blocked/viewer-video-playback.md) — Video playback
   backend (a second media engine, not the browser) (blocked by
   `viewer-audio-backend`)
@@ -543,7 +547,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (477)
+## done (478)
 
 ### protocol
 
@@ -932,6 +936,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the @-command chat protocol
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-text-foundation`](done/viewer-ui-text-foundation.md) — UI text &
+  font foundation (bevy_ui + parley bring-up)
 
 ### idiomatic
 
@@ -1462,7 +1468,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (5)
+## deferred (6)
 
 ### protocol
 
@@ -1475,6 +1481,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Non-goals (deferred; candidate follow-up roadmaps)
 - [`viewer-p29-2`](deferred/viewer-p29-2-drive-its-animations.md) — Drive its
   animations
+- [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
+  — Verify IME preedit & candidate placement on an IME-capable host
 
 ### idiomatic
 

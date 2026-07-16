@@ -50,6 +50,7 @@ mod texture_anim;
 mod textures;
 mod tonemap;
 mod typing;
+mod ui_text;
 mod underwater_fog;
 mod water;
 
@@ -150,6 +151,10 @@ use crate::textures::{
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
+use crate::ui_text::{
+    TextDemoVisible, apply_text_demo_visibility, bind_emoji_family, setup_text_demo,
+    toggle_text_demo,
+};
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
 
@@ -601,6 +606,10 @@ fn run_session(
     .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
     .init_resource::<AnimationPlayback>()
     .insert_resource(PipelineOverlayVisible::from_env())
+    // The UI text & font foundation demo (viewer-ui-text-foundation): a
+    // toggleable `EditableText` panel, seeded shown/hidden from
+    // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
+    .insert_resource(TextDemoVisible::from_env())
     .insert_resource(PlayOnLogin {
         animations: play_animation
             .iter()
@@ -624,6 +633,8 @@ fn run_session(
             setup_chat_overlay,
             setup_diagnostics_overlay,
             setup_pipeline_overlay,
+            // The UI text & font foundation demo panel (viewer-ui-text-foundation).
+            setup_text_demo,
             setup_avatar_body,
             // P35.1: the screen-space HUD screen + its attachment-point nodes, which
             // a worn HUD is routed onto instead of a body joint.
@@ -814,6 +825,15 @@ fn run_session(
             // (while shown) its text from the live store snapshots.
             toggle_pipeline_overlay,
             update_pipeline_overlay.after(toggle_pipeline_overlay),
+            // UI text & font foundation (viewer-ui-text-foundation): bind the
+            // bundled colour-emoji font once its family registers, and toggle /
+            // apply the demo panel's visibility (the F4 key). Nested into one
+            // tuple to stay within Bevy's per-tuple system limit.
+            (
+                bind_emoji_family,
+                toggle_text_demo,
+                apply_text_demo_visibility.after(toggle_text_demo),
+            ),
             // Local lights (P25.2): render the nearest / brightest light-flagged
             // prims as Bevy point / spot lights, after the fly-camera so the
             // distance-based budget selection uses the current viewpoint.

@@ -17,7 +17,12 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
 avian3d = { version = "0.7.0" }
-bevy = { version = "0.19.0" }
+# `system_font_discovery` turns on parley/fontique OS font enumeration and
+# fallback, so CJK / Cyrillic / Arabic / emoji text resolves to the host's fonts
+# instead of rendering as tofu (viewer-ui-text-foundation). The colour-emoji
+# fallback is bundled separately (see `assets/fonts/`), because the system emoji
+# font is usually COLRv1, which swash cannot rasterise.
+bevy = { version = "0.19.0", features = ["system_font_discovery"] }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
 fs-err = { version = "3.3.0" }
