@@ -27,6 +27,13 @@ bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
 fs-err = { version = "3.3.0" }
 image = { version = "0.25.10", default-features = false, features = ["tga"] }
+# A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
+# the bundled faces under private family names: `bevy_text` wraps parley but does
+# not re-export it, so `Blob` / `FontInfoOverride` / `GenericFamily` are only
+# reachable from parley itself. Kept at `bevy_text`'s own spec so the two unify
+# on one parley build (a second copy would mean a second, unrelated font
+# collection).
+parley = { version = "0.9.0", default-features = false, features = ["std"] }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",

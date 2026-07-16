@@ -35,6 +35,7 @@ use sl_client_bevy::{GateStats, StoreStats};
 
 use crate::meshes::MeshManager;
 use crate::textures::TextureManager;
+use crate::ui_font::UiFont;
 
 /// The overlay font size, in logical pixels.
 const DIAG_FONT_SIZE: f32 = 15.0;
@@ -58,10 +59,9 @@ pub(crate) struct DiagnosticsOverlayText;
 pub(crate) fn setup_diagnostics_overlay(mut commands: Commands) {
     commands.spawn((
         Text::new(String::new()),
-        TextFont {
-            font_size: FontSize::Px(DIAG_FONT_SIZE),
-            ..default()
-        },
+        // Monospace: the block is a column of live numbers, so a fixed advance
+        // keeps them from jittering sideways as the digits change.
+        UiFont::Mono.at(DIAG_FONT_SIZE),
         TextColor(Color::WHITE),
         TextLayout::default().with_justify(Justify::Right),
         Node {
@@ -149,10 +149,9 @@ pub(crate) struct PipelineStatusText;
 pub(crate) fn setup_pipeline_overlay(mut commands: Commands) {
     commands.spawn((
         Text::new(String::new()),
-        TextFont {
-            font_size: FontSize::Px(DIAG_FONT_SIZE),
-            ..default()
-        },
+        // Monospace, as for the frame overlay above: the panel is tabular
+        // per-pipeline counters.
+        UiFont::Mono.at(DIAG_FONT_SIZE),
         TextColor(Color::WHITE),
         Node {
             position_type: PositionType::Absolute,

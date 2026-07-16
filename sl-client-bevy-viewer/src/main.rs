@@ -50,6 +50,7 @@ mod texture_anim;
 mod textures;
 mod tonemap;
 mod typing;
+mod ui_font;
 mod ui_text;
 mod underwater_fog;
 mod water;
@@ -151,9 +152,9 @@ use crate::textures::{
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
+use crate::ui_font::register_ui_fonts;
 use crate::ui_text::{
-    TextDemoVisible, apply_text_demo_visibility, bind_emoji_family, setup_text_demo,
-    toggle_text_demo,
+    TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
@@ -624,6 +625,10 @@ fn run_session(
     .add_systems(
         Startup,
         (
+            // The UI font stack (viewer-ui-text-font-family-selection): register
+            // the bundled faces under their private families and re-point the
+            // generics, before any text is shaped in `PostUpdate`.
+            register_ui_fonts,
             setup_scene,
             setup_sky,
             setup_sun_moon_discs,
@@ -825,12 +830,10 @@ fn run_session(
             // (while shown) its text from the live store snapshots.
             toggle_pipeline_overlay,
             update_pipeline_overlay.after(toggle_pipeline_overlay),
-            // UI text & font foundation (viewer-ui-text-foundation): bind the
-            // bundled colour-emoji font once its family registers, and toggle /
+            // UI text & font foundation (viewer-ui-text-foundation): toggle /
             // apply the demo panel's visibility (the F4 key). Nested into one
             // tuple to stay within Bevy's per-tuple system limit.
             (
-                bind_emoji_family,
                 toggle_text_demo,
                 apply_text_demo_visibility.after(toggle_text_demo),
             ),

@@ -20,6 +20,8 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use sl_client_bevy::{ChatMessage, ChatType, SlEvent, SlSessionEvent};
 
+use crate::ui_font::UiFont;
+
 /// How many chat lines to keep in the overlay (older lines scroll off the top).
 const CHAT_HISTORY_LINES: usize = 12;
 
@@ -97,10 +99,7 @@ const fn is_displayable(message: &ChatMessage) -> bool {
 pub(crate) fn setup_chat_overlay(mut commands: Commands) {
     commands.spawn((
         Text::new(String::new()),
-        TextFont {
-            font_size: FontSize::Px(CHAT_FONT_SIZE),
-            ..default()
-        },
+        UiFont::Sans.at(CHAT_FONT_SIZE),
         TextColor(Color::WHITE),
         // Anchored at the bottom-left; the node grows upward as lines are added,
         // so the newest line stays at the bottom.

@@ -3,10 +3,19 @@
 # body. Skip the yaml check for them (rumdl still lints the markdown).
 roadmap/*/*.md skipchecks=yaml:::yamllint;;;markdown[[space]]front[[space]]matter[[space]]not[[space]]standalone[[space]]YAML
 
-# The bundled Noto Color Emoji font is a binary asset (embedded into the viewer
-# via include_bytes!); treat it as binary so git does not attempt text diffs or
-# line-ending normalisation on it.
+# The bundled UI fonts (Inter, DejaVu, Noto Color Emoji) are binary assets
+# (embedded into the viewer via include_bytes!); treat them as binary so git does
+# not attempt text diffs or line-ending normalisation on them.
 sl-client-bevy-viewer/assets/fonts/*.ttf binary
+
+# The bundled fonts' licence texts are redistributed **verbatim** — that is the
+# condition under which we may ship the fonts at all. They are upstream files, not
+# ours to reformat, so their trailing whitespace (the DejaVu one has some) is not
+# a defect to fix. Unset git's own `whitespace` attribute rather than modify them:
+# the pre-commit whitespace check is `git diff-index --check`, which runs over all
+# staged files at once — a per-file `skipchecks=` never reaches it, but this does.
+sl-client-bevy-viewer/assets/fonts/*LICENSE*.txt -whitespace
+sl-client-bevy-viewer/assets/fonts/OFL.txt -whitespace
 
 # The LSL differential-testing corpus is deliberately invalid in places (the
 # error/ scripts each trigger a specific compile error): they are oracle input,

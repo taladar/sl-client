@@ -4,7 +4,7 @@ title: Grapheme-correct backspace (parley backdelete deletes codepoints)
 topic: viewer
 status: ready
 origin: gap surfaced by viewer-ui-text-foundation (2026-07)
-refs: [viewer-ui-text-foundation, viewer-ui-text-input-widget]
+refs: [viewer-ui-text-foundation, viewer-ui-text-input-widget, viewer-ui-text-emoji-presentation]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -43,3 +43,22 @@ needs the same treatment — check it too.
 A tripwire test (`backdelete_is_not_grapheme_correct_yet` in
 `sl-client-bevy-viewer/src/ui_text.rs`) asserts the current *wrong* counts, so
 it fails loudly once this is fixed; delete it as part of this task.
+
+## Shares its fix with the emoji-presentation task (2026-07-16)
+
+[[viewer-ui-text-emoji-presentation]] turns out to be the **same** area of
+`parley`, and the two should probably be worked together:
+
+- `backdelete` (`editing/editor.rs`) deletes a whole cluster only when
+  `cluster.is_emoji()`; `select_font` (`shape/mod.rs`) appends the `Emoji`
+  generic only when `cluster.is_emoji` — the **same flag**, and it is not UTS
+  #51 aware (it is the raw `Emoji`/`Extended_Pictographic` property, true even
+  for `5`, `#` and `▶`). Making it correct improves both.
+- The `❤️` row in the table above and the emoji task's monochrome heart are two
+  faces of the same VS16 mishandling.
+
+Both fixes are in `parley` alone (**not** swash). The agreed approach is to fork
+`linebender/parley`, point the workspace at the fork with `[patch.crates-io]` —
+which transparently redirects `bevy_text`'s parley too — fix and test locally,
+then submit upstream and drop the `[patch]` once released. See
+[[viewer-ui-text-emoji-presentation]] for the full root-cause analysis.

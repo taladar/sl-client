@@ -6285,6 +6285,7 @@ dependencies = [
  "clap",
  "fs-err",
  "image",
+ "parley",
  "pretty_assertions",
  "sl-anim",
  "sl-client-bevy",

@@ -57,6 +57,7 @@ use crate::coords::{
 };
 use crate::physics::AvatarMotion;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
+use crate::ui_font::UiFont;
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -1095,10 +1096,7 @@ impl AvatarState {
         commands
             .spawn((
                 Text::new(self.label_text(agent)),
-                TextFont {
-                    font_size: FontSize::Px(NAME_TAG_FONT_SIZE),
-                    ..default()
-                },
+                UiFont::Sans.at(NAME_TAG_FONT_SIZE),
                 TextColor(Color::WHITE),
                 // Positioned each frame by `position_name_tags`; hidden until the
                 // first projection so it never flashes at the origin.
