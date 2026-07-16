@@ -2,7 +2,7 @@
 id: viewer-ui-text-caret-grapheme-motion
 title: Upstream issue — parley caret motion steps one codepoint, not one grapheme
 topic: viewer
-status: deferred
+status: in-progress
 origin: found by hand-testing the F4 demo after the grapheme-delete fix (2026-07)
 refs: [viewer-ui-text-grapheme-backdelete, viewer-ui-text-parley-pr-backdelete, viewer-ui-text-foundation, viewer-ui-text-renderability-axis]
 ---
@@ -23,8 +23,9 @@ as
 [[viewer-ui-text-renderability-axis]]: propose, let them choose, then offer to
 implement.
 
-Deferred, not blocked: nothing of ours waits on it, and it is pre-existing
-behaviour rather than a regression.
+**In progress**: filed as <https://github.com/linebender/parley/issues/694>,
+awaiting a design decision from upstream. Nothing of ours waits on it, and it is
+pre-existing behaviour rather than a regression.
 
 ## Measured
 
@@ -112,3 +113,45 @@ Worth remembering that the headless tests all passed while this was broken:
 `sl-client-bevy-viewer/src/ui_text.rs` steps `text.chars().count()` times over
 text whose graphemes *are* all single codepoints, so it could never have caught
 it.
+
+## Submitted (2026-07-16)
+
+Issue: <https://github.com/linebender/parley/issues/694>.
+
+Relevant to the reply on <https://github.com/linebender/parley/pull/693>:
+[@raphlinus] points at [xilem#303](https://github.com/linebender/xilem/pull/303)
+(the Android/druid/xi-editor backspace state machine) as the reference for
+*deletion* granularity — deliberately **finer** than grapheme clusters, because
+Korean jamo and combining marks are expected to come off individually. Caret
+motion may well want the same treatment rather than the "one grapheme" model
+this task assumes, so **do not** implement grapheme-granular caret motion
+without checking that first; the two should probably agree.
+
+That also strengthens this issue's root-cause point from a third direction:
+`main`'s `is_emoji` deletion special case is ineffective *because* a
+`ClusterData` is one `char` — the same defect this issue reports.
+
+[@raphlinus]: https://github.com/raphlinus
+
+## How to submit (2026-07-16)
+
+Read the **`linebender-parley` skill** first — it captures the contribution
+rules so they need not be rediscovered. The two that decide this task:
+
+- **Linebender's [LLM contribution
+  policy](https://linebender.org/wiki/llm_policy/)**:
+  *"we do not allow ... AI-generated PR descriptions"*, and *"In discussion
+  spaces like Github comments and the Zulip server, please avoid posting
+  AI-generated analyses, even if you vetted them."* So
+  **this task's prose is not issue text** — it is internal notes. The issue must
+  be written by hand, from the facts here, with **LLM use disclosed up front**
+  in it.
+- Their
+  [contributor guidelines](https://linebender.org/contributor-guidelines/): *"To
+  propose a nontrivial change, it is better to file an issue first rather than
+  sending a PR."* This is a design question, so it is issue-only by nature —
+  propose, let them choose the representation, then offer to implement.
+
+A working copy of these facts also sits **uncommitted** in the parley clone at
+`~/devel/3rdparty/parley/sl-client-notes/` (excluded via `.git/info/exclude`,
+since they *"will not merge agentic markdown files"*).

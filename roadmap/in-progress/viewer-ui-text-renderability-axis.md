@@ -2,7 +2,7 @@
 id: viewer-ui-text-renderability-axis
 title: Upstream issue — font selection cannot see glyph-format renderability
 topic: viewer
-status: deferred
+status: in-progress
 origin: found while working viewer-ui-text-font-family-selection (2026-07)
 refs: [viewer-ui-text-font-family-selection, viewer-ui-text-emoji-presentation]
 ---
@@ -13,8 +13,9 @@ File an **issue** (not a PR) against `linebender/parley` proposing that font
 selection be able to account for whether the consumer's rasteriser can actually
 paint the glyph format a candidate font uses.
 
-Deferred rather than blocked: nothing of ours waits on it — we already sidestep
-the problem by bundling a `CBDT` emoji font (see
+**In progress**: filed as <https://github.com/linebender/parley/issues/695>,
+awaiting a design decision from upstream. Nothing of ours waits on it — we
+already sidestep the problem by bundling a `CBDT` emoji font (see
 [[viewer-ui-text-font-family-selection]]). It is filed because it is the honest
 **root cause** of a whole class of silent-blank bugs, it affects every
 swash-based consumer (including `bevy_text`, i.e. every Bevy app), and it is a
@@ -103,3 +104,30 @@ choice.
 <https://github.com/linebender/parley/issues> (fontique lives in the same repo).
 Our fork with the two related fixes is `taladar/parley`; link the VS16 PR from
 [[viewer-ui-text-emoji-presentation]] as related context if it is open by then.
+
+## Submitted (2026-07-16)
+
+Issue: <https://github.com/linebender/parley/issues/695>. No feedback yet.
+
+## How to submit (2026-07-16)
+
+Read the **`linebender-parley` skill** first — it captures the contribution
+rules so they need not be rediscovered. The two that decide this task:
+
+- **Linebender's [LLM contribution
+  policy](https://linebender.org/wiki/llm_policy/)**:
+  *"we do not allow ... AI-generated PR descriptions"*, and *"In discussion
+  spaces like Github comments and the Zulip server, please avoid posting
+  AI-generated analyses, even if you vetted them."* So
+  **this task's prose is not issue text** — it is internal notes. The issue must
+  be written by hand, from the facts here, with **LLM use disclosed up front**
+  in it.
+- Their
+  [contributor guidelines](https://linebender.org/contributor-guidelines/): *"To
+  propose a nontrivial change, it is better to file an issue first rather than
+  sending a PR."* This is a design question, so it is issue-only by nature —
+  propose, let them choose the representation, then offer to implement.
+
+A working copy of these facts also sits **uncommitted** in the parley clone at
+`~/devel/3rdparty/parley/sl-client-notes/` (excluded via `.git/info/exclude`,
+since they *"will not merge agentic markdown files"*).

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 62 |
+| ready | 59 |
 | blocked | 129 |
-| in-progress | 0 |
+| in-progress | 4 |
 | bugs | 8 |
-| done | 478 |
+| done | 481 |
 | deferred | 6 |
 | wont-do | 1 |
-| **total** | **685** |
+| **total** | **689** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (62)
+## ready (59)
 
 ### viewer
 
@@ -91,15 +91,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   parsing & action dispatch
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
   Automatic (luminance-driven) exposure for the tone mapper
-- [`viewer-ui-text-emoji-presentation`](ready/viewer-ui-text-emoji-presentation.md)
-  — Honour emoji-presentation (VS16) over a text font's own glyph
-- [`viewer-ui-text-font-family-selection`](ready/viewer-ui-text-font-family-selection.md)
-  — Deliberate UI font selection (generic families shadow colour emoji)
-- [`viewer-ui-text-grapheme-backdelete`](ready/viewer-ui-text-grapheme-backdelete.md)
-  — Grapheme-correct backspace (parley backdelete deletes codepoints)
 - [`viewer-ui-widget-scaffold`](ready/viewer-ui-widget-scaffold.md) — UI widget
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
-  `viewer-ui-text-foundation` (done))
+  `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
+  (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 
@@ -518,6 +513,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
+## in-progress (4)
+
+### viewer
+
+- [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
+  — Upstream issue — parley caret motion steps one codepoint, not one grapheme
+- [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
+  — Upstream PR — parley: grapheme-correct backdelete / delete
+- [`viewer-ui-text-parley-pr-vs16`](in-progress/viewer-ui-text-parley-pr-vs16.md)
+  — Upstream PR — parley: honour the emoji presentation selector (VS16)
+- [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
+  — Upstream issue — font selection cannot see glyph-format renderability
+
 ## bugs (8)
 
 ### protocol
@@ -547,7 +555,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (478)
+## done (481)
 
 ### protocol
 
@@ -936,8 +944,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the @-command chat protocol
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-text-emoji-presentation`](done/viewer-ui-text-emoji-presentation.md)
+  — Honour emoji-presentation (VS16) over a text font's own glyph
+- [`viewer-ui-text-font-family-selection`](done/viewer-ui-text-font-family-selection.md)
+  — Deliberate UI font selection (generic families shadow colour emoji)
 - [`viewer-ui-text-foundation`](done/viewer-ui-text-foundation.md) — UI text &
   font foundation (bevy_ui + parley bring-up)
+- [`viewer-ui-text-grapheme-backdelete`](done/viewer-ui-text-grapheme-backdelete.md)
+  — Grapheme-correct backspace (parley backdelete deletes codepoints)
 
 ### idiomatic
 
