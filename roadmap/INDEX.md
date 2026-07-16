@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 78 |
+| ready | 79 |
 | blocked | 111 |
 | in-progress | 4 |
 | bugs | 9 |
-| done | 483 |
+| done | 484 |
 | deferred | 6 |
 | wont-do | 1 |
-| **total** | **693** |
+| **total** | **695** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (78)
+## ready (79)
 
 ### viewer
 
@@ -100,6 +100,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-debug`](ready/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-render-test-harness`](ready/viewer-render-test-harness.md) — 3D
+  render test harness — render one object without a grid, assert automatically,
+  catch regressions
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
@@ -120,6 +123,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
   Automatic (luminance-driven) exposure for the tone mapper
+- [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
+  UI regression baselines — recorded geometry that may not drift by accident
+  (blocked by `viewer-ui-test-harness` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](ready/viewer-ui-floater-basic.md) — Floater window
@@ -131,9 +137,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-ui-skin-tokens`](ready/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-test-harness`](ready/viewer-ui-test-harness.md) — UI test harness
-  — headless layout assertions + an isolated gallery (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -562,7 +565,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (483)
+## done (484)
 
 ### protocol
 
@@ -954,6 +957,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the @-command chat protocol
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —
+  headless layout assertions + an isolated gallery (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-text-emoji-presentation`](done/viewer-ui-text-emoji-presentation.md)
   — Honour emoji-presentation (VS16) over a text font's own glyph
 - [`viewer-ui-text-font-family-selection`](done/viewer-ui-text-font-family-selection.md)

@@ -76,6 +76,30 @@
 //! The rule is about **containers of text**, which must never be pinned to a
 //! measurement taken in one language at one font size.
 //!
+//! # Convention 3 — constructible without its wiring
+//!
+//! **A UI element must be spawnable with no session, no grid and no world, and
+//! its actions must be injectable.** Established by `viewer-ui-test-harness`;
+//! the mechanism and the full argument live in [`crate::ui_element`].
+//!
+//! In short: an element never calls into a live `Session`. It emits a
+//! `UiAction`, and who listens decides what that means — the viewer routes it to
+//! a real handler, the gallery routes it nowhere (so a click is inert *by
+//! construction* rather than by stubbing the dangerous parts out), and a test
+//! reads the queue to assert what a click meant.
+//!
+//! This is not overhead, it is the thing that makes a panel testable at all. A
+//! button wired straight to a `Session` cannot be exercised without a grid and a
+//! human; a button that emits a `UiAction` is exercised by reading a queue. A
+//! panel that can only be spawned by reaching for a live session is a panel that
+//! can never be tested, and retrofitting the separation later is exactly the kind
+//! of rework this scaffold exists to prevent.
+//!
+//! The obligation on a new panel or widget is one line: **register it in
+//! [`crate::ui_element::ELEMENTS`]**. That buys it every check in
+//! [`crate::ui_test`] — across every script, direction, UI scale, font size and
+//! translation length — including the checks that do not exist yet.
+//!
 //! Reference (Firestorm, read-only): `indra/llui/` (`llpanel`,
 //! `lluictrlfactory`), and the XUI layouts under `newview/skins/` — a feature
 //! checklist, **not** something to import: their pixel coordinates *are* the
@@ -256,7 +280,7 @@ fn clear_initial_window_focus(mut focus: ResMut<InputFocus>) {
 }
 
 /// Startup system: spawn the one [`UiRoot`] node and publish its entity.
-fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>) {
+pub(crate) fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>) {
     let root = commands
         .spawn((
             Node {
@@ -393,7 +417,7 @@ pub(crate) struct LogicalBorder(pub(crate) LogicalRect);
 /// keeps that system to a single `&mut Node` query: several `Query<&mut Node>`
 /// in one system are a conflicting access and would need a `ParamSet` to
 /// untangle.
-fn invalidate_logical_boxes(
+pub(crate) fn invalidate_logical_boxes(
     direction: Res<UiDirection>,
     mut margins: Query<&mut LogicalMargin>,
     mut paddings: Query<&mut LogicalPadding>,
@@ -439,7 +463,7 @@ type ChangedLogicalBoxes<'world, 'state> = Query<
 /// the direction flips — see [`invalidate_logical_boxes`]), and writes through
 /// `Node`'s change detection only on a real difference, so an unchanged UI does
 /// not re-trigger layout every frame.
-fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalBoxes) {
+pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalBoxes) {
     for (mut node, margin, padding, border) in &mut nodes {
         if let Some(LogicalMargin(rect)) = margin {
             let resolved = rect.resolve(*direction);
@@ -476,7 +500,7 @@ fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalB
 /// conflicting access — and `bevy_ui` already walks every node each frame
 /// anyway. The write is guarded, so an unchanged node does not re-trigger
 /// layout.
-fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Node>) {
+pub(crate) fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Node>) {
     let target = direction.inline();
     for mut node in &mut nodes {
         if node.direction != target {
@@ -509,11 +533,11 @@ pub(crate) struct UiPanelShown(pub(crate) bool);
 /// [`apply_panel_visibility`] can give each node back the index it had rather
 /// than a guessed one.
 #[derive(Component, Debug, Clone, Copy)]
-struct ParkedTabIndex(TabIndex);
+pub(crate) struct ParkedTabIndex(TabIndex);
 
 /// Apply a panel's [`UiPanelShown`] to its whole subtree: flow, tab reachability
 /// and focus. See [`UiPanelShown`] for why each of the three is needed.
-fn apply_panel_visibility(
+pub(crate) fn apply_panel_visibility(
     mut commands: Commands,
     panels: Query<(Entity, &UiPanelShown), Changed<UiPanelShown>>,
     mut nodes: Query<&mut Node>,
