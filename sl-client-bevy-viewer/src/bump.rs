@@ -337,7 +337,7 @@ pub(crate) fn apply_bump_normals(
 /// sampler) tilts each surface normal. `invert` negates the height (the darkness
 /// bump code — dark pixels read as raised). The map is linear (`Rgba8Unorm`) and
 /// tiles with the same repeating sampler as the diffuse.
-fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -> Image {
+pub(crate) fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -> Image {
     let width = decoded.width.max(1);
     let height = decoded.height.max(1);
     let w = usize::try_from(width).unwrap_or(1).max(1);

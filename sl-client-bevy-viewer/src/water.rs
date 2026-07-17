@@ -48,8 +48,8 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Color as SlColor, RegionHandle, SlEvent, SlIdentity, SlSessionEvent, TextureKey, Uuid,
-    WaterMaterial, WaterParams, WaterSettings, to_bevy_image,
+    Color as SlColor, DecodedTexture, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
+    TextureKey, Uuid, WaterMaterial, WaterParams, WaterSettings,
 };
 
 use crate::camera::FlyCamera;
@@ -71,7 +71,7 @@ const OCEAN_HALF_EXTENT: f32 = 20_000.0;
 /// The default water height, in metres, used for the endless ocean until the agent
 /// region's handshake supplies the real one (the standard Second Life sea level;
 /// see `map.rs`).
-const DEFAULT_WATER_HEIGHT: f32 = 20.0;
+pub(crate) const DEFAULT_WATER_HEIGHT: f32 = 20.0;
 
 /// How far below the agent-region water height the endless ocean sits, in metres,
 /// so a same-height per-region plane (and the agent region's own sea) is never
@@ -416,18 +416,7 @@ pub(crate) fn apply_water_textures(
             // (still a fresnel-tinted flat sea).
             continue;
         };
-        // The wave shader tiles the normal map: the wave texcoords scroll well
-        // outside `[0, 1]`, so the texture must wrap (the reference samples with
-        // `GL_REPEAT`). Bevy's default sampler is clamp-to-edge, so give the normal
-        // map a repeating sampler.
-        let mut image = to_bevy_image(decoded);
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            address_mode_w: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::linear()
-        });
-        let handle = images.add(image);
+        let handle = images.add(water_normal_image(decoded));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both normal-map slots share the id until the day cycle drives a
             // separate next-frame normal map and the blend factor between them.
@@ -440,7 +429,7 @@ pub(crate) fn apply_water_textures(
 /// Build the water-shader uniform block from a water frame plus the per-frame sun
 /// direction, camera position, sky-reflection tint, sunlight colour, and
 /// wave-scroll time.
-const fn water_params(
+pub(crate) const fn water_params(
     water: &WaterSettings,
     light_dir: Vec3,
     camera_position: Vec3,
@@ -472,7 +461,7 @@ const fn water_params(
 
 /// The water uniforms for the built-in legacy default water, used to seed the
 /// material before an environment is selected.
-fn default_water_params() -> WaterParams {
+pub(crate) fn default_water_params() -> WaterParams {
     let water = WaterSettings::legacy_default("Default");
     water_params(
         &water,
@@ -509,10 +498,54 @@ const fn metres_to_f32(metres: u32) -> f32 {
     value
 }
 
+/// Upload a decoded water normal map: **linear**, and tiling.
+///
+/// Both halves are load-bearing and one of them was wrong. This used to be
+/// `to_bevy_image`, which builds `Rgba8UnormSrgb` — and a normal map is not a
+/// colour. Read back through the sRGB transfer a flat `(0.5, 0.5, 1.0)` texel
+/// decodes to about `(0.21, 0.21, 1.0)`, which unpacks to a normal tilted well off
+/// the surface rather than along it; every wavelet in the sea was skewed the same
+/// way, and the flatter the water the more wrong it was.
+///
+/// Every other normal map in this viewer is already careful about exactly this —
+/// [`crate::legacy_materials`]'s `build_linear_image` ("the linear colour space a
+/// normal map needs"), [`crate::materials`]'s `build_pbr_image`, [`crate::bump`]'s
+/// generator — and so is this module's own [`flat_normal_image`], which is
+/// `Rgba8Unorm`. So the water was the one path out of step with its neighbours *and*
+/// with its own placeholder: the sea changed colour space the moment its texture
+/// arrived.
+///
+/// The sampler must repeat because the wave shader scrolls its texcoords well
+/// outside `[0, 1]` (the reference samples with `GL_REPEAT`) and Bevy's default is
+/// clamp-to-edge — the R22h class.
+///
+/// Found by [`crate::render_scene`]'s `water-surface` scene, which had to build one
+/// of these without a grid to have any waves at all.
+pub(crate) fn water_normal_image(decoded: &DecodedTexture) -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width: decoded.width,
+            height: decoded.height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        decoded.pixels.to_vec(),
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
 /// A 1×1 flat-normal placeholder [`Image`] (RGB `(128, 128, 255)` = the unit +Z
 /// tangent-space normal), used for the wave normal map until the real one decodes,
 /// so the surface starts perfectly flat.
-fn flat_normal_image() -> Image {
+pub(crate) fn flat_normal_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,

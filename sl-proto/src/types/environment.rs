@@ -584,7 +584,16 @@ fn pick_at_half<T: Clone>(lower: &T, upper: &T, factor: f32) -> T {
 /// Reproduces the reference `convert_azimuth_and_altitude_to_quat`
 /// (`indra/llinventory/llsettingssky.cpp`): the rotation taking the local `+X`
 /// axis to the sky direction at the given spherical angles, in radians.
-fn azimuth_altitude_to_rotation(azimuth: f32, altitude: f32) -> Rotation {
+///
+/// Public because it is the only way to *place* a sky's sun or moon, and
+/// [`SkySettings::sun_rotation`] is otherwise a quaternion with no way to build a
+/// meaningful one. The reference's own named presets (Sunrise / Midday / Sunset /
+/// Midnight) are grid assets rather than code, so anything offline that wants a
+/// sky at a given time of day — an environment editor, a render scene — has to
+/// put the sun somewhere itself, and this is where the reference's convention for
+/// that lives.
+#[must_use]
+pub fn azimuth_altitude_to_rotation(azimuth: f32, altitude: f32) -> Rotation {
     // The unit direction the angles point at (SL's `+x` right, `+y` at, `+z` up).
     let dir_x = azimuth.cos() * altitude.cos();
     let dir_y = azimuth.sin() * altitude.cos();

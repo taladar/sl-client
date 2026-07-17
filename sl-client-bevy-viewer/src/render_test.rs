@@ -70,6 +70,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bevy::image::{ImageAddressMode, ImageSampler};
+use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, MeshVertexAttribute, VertexAttributeValues};
 use bevy::prelude::*;
@@ -81,12 +82,10 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry;
 
 use crate::camera::FlyCamera;
-use crate::particles::{ParticleSim, drive_particles, setup_particles};
 use crate::render_scene::{
-    DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SymmetricAbout,
-    SymmetryAxis, UvsInUnitSquare, scene_root,
+    DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
+    SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
 };
-use crate::textures::TextureManager;
 
 /// A boxed error, so a test can use `?` rather than the workspace-denied
 /// `unwrap` / `expect`.
@@ -118,13 +117,20 @@ const NORMAL_EPSILON: f32 = 1.0e-3;
 /// `to_bevy_rigged_mesh` renormalizes with.
 const WEIGHT_EPSILON: f32 = 1.0e-4;
 
-/// The largest coordinate any fixture's geometry may reach, in metres.
+/// The largest coordinate a scene's geometry may reach, in metres, unless it
+/// declares otherwise.
 ///
-/// Every scene here is a few metres across and a Second Life region is 256 m, so
-/// nothing legitimate comes near this. It is the catch-all for the failure with
-/// no other signature: a vertex transformed by a garbage matrix and flung
+/// A Second Life region is 256 m and most scenes here are a few metres across, so
+/// nothing an *object* does comes near this. It is the catch-all for the failure
+/// with no other signature: a vertex transformed by a garbage matrix and flung
 /// somewhere absurd, which is otherwise a perfectly finite number that no other
 /// check objects to.
+///
+/// It is a default rather than a law, and finding that out is what the sky scenes
+/// cost. The viewer draws the atmosphere as a 3 km dome, the clouds as a 15 km one
+/// and the ocean as a 40 km plane — all correct, none of them an object in a
+/// region. Those declare a [`WorldScaleGeometry`] bound and are held to that
+/// instead.
 const MAX_COORDINATE: f32 = 1_000.0;
 
 /// How far an atlas-sampling UV may leave `[0, 1]` before it counts.
@@ -184,15 +190,11 @@ fn headless_app() -> App {
     // The deterministic clock. See `TIMESTEP`.
     app.insert_resource(TimeUpdateStrategy::ManualDuration(TIMESTEP));
 
-    // The viewer's own time-varying systems, so a dynamic scene is driven by
-    // the real thing rather than a test double. `TextureManager` is added at
-    // its `Default` — no capability URL, so it never fetches, which is the
-    // state the real viewer is in before seed caps arrive
-    // (`sl-client-viewer-fetch-defer-until-cap`).
-    app.init_resource::<ParticleSim>()
-        .init_resource::<TextureManager>()
-        .add_systems(Startup, setup_particles)
-        .add_systems(Update, drive_particles);
+    // The viewer's own time-varying systems and the asset collections a scene
+    // builds into, so a dynamic scene is driven by the real thing rather than a
+    // test double — and so this app and the gallery cannot disagree about which
+    // drivers a scene gets. See `SceneRuntimePlugin`.
+    app.add_plugins(SceneRuntimePlugin);
 
     // `drive_particles` billboards each particle at the camera, so a scene
     // with an emitter needs one to exist. Not a *rendering* camera — there is
@@ -329,18 +331,8 @@ pub(crate) fn spawn_scene(cx: SceneCx, scene: &RenderScene) -> App {
     // spawn takes, before any frame has run.
     app.add_systems(
         Startup,
-        move |mut commands: Commands,
-              mut meshes: ResMut<Assets<Mesh>>,
-              mut materials: ResMut<Assets<StandardMaterial>>,
-              mut images: ResMut<Assets<Image>>,
-              mut inverse_bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>| {
+        move |mut commands: Commands, mut assets: SceneAssets| {
             let root = commands.spawn(scene_root()).id();
-            let mut assets = SceneAssets {
-                meshes: &mut meshes,
-                materials: &mut materials,
-                images: &mut images,
-                inverse_bindposes: &mut inverse_bindposes,
-            };
             spawn(cx, root, &mut commands, &mut assets);
         },
     );
@@ -402,8 +394,29 @@ pub(crate) struct Geometry {
     /// render list a [`joint_indices`](Self::joint_indices) slot must fall
     /// inside.
     pub(crate) joint_count: Option<usize>,
+    /// Where this renderable sits in the world, as its `GlobalTransform`'s matrix.
+    ///
+    /// Not read by any *violation* — the invariants are all properties of the mesh,
+    /// in the mesh's own space, and deliberately so. It is here for
+    /// [`digest`](tests::digest): a scene can change over its timeline without a
+    /// single vertex moving, and the sun disc and the star field are exactly that.
+    /// See [`uv_transform`](Self::uv_transform).
+    pub(crate) world: Mat4,
+    /// The UV transform its material samples through, if it has a
+    /// `StandardMaterial`.
+    ///
+    /// Here for the same reason as [`world`](Self::world), and it is the sharper
+    /// case. `crate::texture_anim`'s driver animates a face by rewriting **only**
+    /// this: the geometry it pages a texture across never moves, so a "did anything
+    /// happen" check that reads vertices alone reports a working flipbook as a dead
+    /// one. The timeline tier's question is whether the *picture* changed, and the
+    /// picture is not only the vertex buffer.
+    pub(crate) uv_transform: Option<Affine2>,
     /// The size this geometry declared it would be, if it declared one.
     pub(crate) declared_bounds: Option<DeclaredBounds>,
+    /// How far this geometry declared it legitimately reaches, if it is drawn at a
+    /// scale no region has. See [`WorldScaleGeometry`].
+    pub(crate) max_extent: Option<f32>,
     /// The symmetry this geometry declared, if it declared one.
     pub(crate) symmetry: Option<SymmetricAbout>,
     /// Whether the geometry declared that it samples an atlas, so its UVs must
@@ -490,8 +503,12 @@ struct Gathered {
     mesh: Handle<Mesh>,
     /// Its material, if it has one.
     material: Option<Handle<StandardMaterial>>,
+    /// Where it sits in the world.
+    world: Mat4,
     /// Its declared size.
     declared_bounds: Option<DeclaredBounds>,
+    /// Its declared sky-scale reach, if any.
+    max_extent: Option<f32>,
     /// Its declared symmetry.
     symmetry: Option<SymmetricAbout>,
     /// Whether it declared it samples an atlas.
@@ -515,9 +532,11 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
     let mut query = app.world_mut().query::<(
         Entity,
         &Mesh3d,
+        &GlobalTransform,
         Option<&MeshMaterial3d<StandardMaterial>>,
         Option<&ChildOf>,
         Option<&DeclaredBounds>,
+        Option<&WorldScaleGeometry>,
         Option<&SymmetricAbout>,
         Option<&UvsInUnitSquare>,
         Option<&SamplerMayClamp>,
@@ -526,7 +545,19 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
     let gathered: Vec<Gathered> = query
         .iter(app.world())
         .map(
-            |(entity, mesh, material, parent, bounds, symmetry, atlas, clamp, skin)| {
+            |(
+                entity,
+                mesh,
+                global,
+                material,
+                parent,
+                bounds,
+                world_scale,
+                symmetry,
+                atlas,
+                clamp,
+                skin,
+            )| {
                 let name = named
                     .get(&entity)
                     .cloned()
@@ -543,7 +574,9 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                     group,
                     mesh: mesh.0.clone(),
                     material: material.map(|material| material.0.clone()),
+                    world: global.to_matrix(),
                     declared_bounds: bounds.copied(),
+                    max_extent: world_scale.map(|scale| scale.max_extent),
                     symmetry: symmetry.copied(),
                     uvs_in_unit_square: atlas.is_some(),
                     sampler_may_clamp: clamp.is_some(),
@@ -579,11 +612,13 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 Some(VertexAttributeValues::Float32x4(values)) => values.clone(),
                 _other => Vec::new(),
             };
-            let textures = entry
+            let material = entry
                 .material
                 .as_ref()
-                .and_then(|material| materials.get(material))
-                .map_or_else(Vec::new, |material| texture_slots(material, images));
+                .and_then(|material| materials.get(material));
+            let textures =
+                material.map_or_else(Vec::new, |material| texture_slots(material, images));
+            let uv_transform = material.map(|material| material.uv_transform);
             Some(Geometry {
                 name: entry.name,
                 group: entry.group,
@@ -594,7 +629,10 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 joint_indices,
                 joint_weights,
                 joint_count: entry.joint_count,
+                world: entry.world,
+                uv_transform,
                 declared_bounds: entry.declared_bounds,
+                max_extent: entry.max_extent,
                 symmetry: entry.symmetry,
                 uvs_in_unit_square: entry.uvs_in_unit_square,
                 textures,
@@ -654,7 +692,10 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
             continue;
         }
 
-        // Finite, and within a plausible world. See `MAX_COORDINATE`.
+        // Finite, and within a plausible world. See `MAX_COORDINATE` — and
+        // `WorldScaleGeometry`, which is what a sky dome legitimately declares
+        // instead of it.
+        let limit = object.max_extent.unwrap_or(MAX_COORDINATE);
         for (index, position) in object.positions.iter().enumerate() {
             if !position.is_finite() {
                 violations.push(format!(
@@ -663,10 +704,10 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
                 ));
                 break;
             }
-            if position.abs().max_element() > MAX_COORDINATE {
+            if position.abs().max_element() > limit {
                 violations.push(format!(
-                    "{name}: vertex {index} at {position:?} is beyond {MAX_COORDINATE} m from \
-                     the object origin"
+                    "{name}: vertex {index} at {position:?} is beyond {limit} m from the object \
+                     origin"
                 ));
                 break;
             }
@@ -1059,7 +1100,7 @@ mod tests {
     };
     use crate::render_scene::{SCENES, SceneCx, rigged_strip};
     use bevy::prelude::*;
-    use pretty_assertions::assert_ne;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::PrimLod;
 
     // -----------------------------------------------------------------------
@@ -1080,7 +1121,10 @@ mod tests {
             joint_indices: Vec::new(),
             joint_weights: Vec::new(),
             joint_count: None,
+            world: Mat4::IDENTITY,
+            uv_transform: None,
             declared_bounds: None,
+            max_extent: None,
             symmetry: None,
             uvs_in_unit_square: false,
             textures: Vec::new(),
@@ -1264,6 +1308,159 @@ mod tests {
         );
     }
 
+    /// **The world-scale check has teeth.** A vertex beyond a geometry's declared
+    /// reach is still reported.
+    ///
+    /// The half that keeps [`WorldScaleGeometry`](super::WorldScaleGeometry) from
+    /// being an off switch. Declaring "I am drawn at 15 km" must not mean "stop
+    /// checking me" — a cloud dome whose vertex lands 400 km out is as broken as a
+    /// prim's would be, and for the same reason.
+    #[test]
+    fn a_vertex_beyond_a_declared_world_scale_is_reported() {
+        assert!(
+            !broken(|object| {
+                object.max_extent = Some(3_000.0);
+                object.positions = vec![Vec3::new(400_000.0, 0.0, 0.0), Vec3::X, Vec3::Y];
+            })
+            .is_empty(),
+            "a vertex 400 km out must be reported even by geometry that declared a 3 km reach — \
+             a declaration raises the bound, it does not remove it"
+        );
+    }
+
+    /// A sky-scale vertex **inside** its declaration is clean — the other half of
+    /// the pair.
+    ///
+    /// Without this, the check above would be satisfied by a rule that fires on
+    /// everything, and the sky dome could not exist.
+    #[test]
+    fn a_sky_scale_vertex_within_its_declaration_is_clean() {
+        assert!(
+            broken(|object| {
+                object.max_extent = Some(3_000.0);
+                object.positions = vec![Vec3::new(2_900.0, 0.0, 0.0), Vec3::X, Vec3::Y];
+            })
+            .is_empty(),
+            "a vertex 2.9 km out on geometry that declared a 3 km reach is the star dome, and \
+             must not be reported"
+        );
+    }
+
+    /// **The texture-animation fixture really animates, and it animates the way the
+    /// harness could not previously see.**
+    ///
+    /// Two assertions, and the pair is the point. `texture-anim-flipbook` passes
+    /// `every_dynamic_scene_actually_changes_over_its_timeline` — but it would pass
+    /// that check just as happily if [`digest`] had gone on reading only vertices,
+    /// because then *no* scene of this shape could ever fail it. So this pins the
+    /// two halves of why the scene is honest: its material moves, and its geometry
+    /// does not.
+    ///
+    /// Measured, not assumed: reverting `digest` to the vertex-only summary it had
+    /// before this scene existed makes the dynamic check report a perfectly working
+    /// flipbook as frozen.
+    #[test]
+    fn the_texture_animation_fixture_moves_its_material_and_not_its_vertices()
+    -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "texture-anim-flipbook")
+            .ok_or("the texture-anim-flipbook scene is not registered")?;
+        let mut app = spawn_scene(SceneCx::new(), scene);
+        advance_to(&mut app, 0.0);
+        let before = scene_geometry(&mut app);
+        advance_to(&mut app, 1.9);
+        let after = scene_geometry(&mut app);
+
+        let uvs = |geometry: &[Geometry]| -> Vec<String> {
+            geometry
+                .iter()
+                .map(|object| format!("{:?}", object.uv_transform))
+                .collect()
+        };
+        let vertices = |geometry: &[Geometry]| -> Vec<Vec<Vec3>> {
+            geometry
+                .iter()
+                .map(|object| object.positions.clone())
+                .collect()
+        };
+        assert_ne!(
+            uvs(&before),
+            uvs(&after),
+            "the flipbook's UV transform must move — that is the only thing a texture animation \
+             changes, so if it does not, the driver did not run"
+        );
+        assert_eq!(
+            vertices(&before),
+            vertices(&after),
+            "the flipbook's vertices must NOT move: this scene exists to be the case a \
+             vertex-only notion of `did anything happen` is blind to, and if its geometry moved \
+             it would stop being that case"
+        );
+        Ok(())
+    }
+
+    /// **The shaped-avatar fixture really shapes.**
+    ///
+    /// `avatar-morphed-body` passes the suite either way, so nothing else here can
+    /// tell a resolved appearance from an unresolved one — and an appearance vector
+    /// that quietly resolves to no weights at all would leave the scene rendering
+    /// the *rest* body while looking exactly as green. This is the R12 shape
+    /// (`shaped_appearance` documents it): a wrong resolve is not a crash, it is a
+    /// body that is subtly the wrong size, and the only thing that catches it is
+    /// asking whether the shape moved.
+    ///
+    /// Measured: against the real Linden body the two scenes agree on the vertex
+    /// count (5467 — a morph moves vertices, it does not add them) and differ in
+    /// where those vertices are.
+    #[test]
+    fn the_morphed_avatar_fixture_actually_shapes_the_body() -> Result<(), TestError> {
+        // Without the Linden assets there is no visual-param table, so
+        // `avatar-morphed-body` *is* `avatar-base-part` (it falls back), and the
+        // comparison below could not fail. Returning is the honest thing — see
+        // `crate::render_scene`'s `avatar_base_part` for why that trade is made for
+        // this one renderable and nothing else.
+        if std::env::var_os("SL_VIEWER_ASSETS").is_none() {
+            return Ok(());
+        }
+        let base = SCENES
+            .iter()
+            .find(|scene| scene.id == "avatar-base-part")
+            .ok_or("the avatar-base-part scene is not registered")?;
+        let morphed = SCENES
+            .iter()
+            .find(|scene| scene.id == "avatar-morphed-body")
+            .ok_or("the avatar-morphed-body scene is not registered")?;
+        let mut base_app = spawn_scene(SceneCx::new(), base);
+        let mut morphed_app = spawn_scene(SceneCx::new(), morphed);
+        let rest = scene_geometry(&mut base_app);
+        let shaped = scene_geometry(&mut morphed_app);
+
+        let vertices = |geometry: &[Geometry]| -> usize {
+            geometry.iter().map(|object| object.positions.len()).sum()
+        };
+        assert_eq!(
+            vertices(&rest),
+            vertices(&shaped),
+            "a morph blends the base mesh's own vertices — it must not add or drop any, so a \
+             differing count means the two scenes are not looking at the same body"
+        );
+        let positions = |geometry: &[Geometry]| -> Vec<Vec3> {
+            geometry
+                .iter()
+                .flat_map(|object| object.positions.iter().copied())
+                .collect()
+        };
+        assert_ne!(
+            positions(&rest),
+            positions(&shaped),
+            "the shaped body is identical to the rest body: the appearance resolved to no morph \
+             weights at all, so this scene is rendering an unshaped avatar and covering none of \
+             the resolve it exists for"
+        );
+        Ok(())
+    }
+
     /// The rigged fixture really is malformed the way the wire is.
     ///
     /// The other half of the R1 story, and what keeps the matrix honest.
@@ -1422,11 +1619,21 @@ mod tests {
         Ok(())
     }
 
-    /// A coarse summary of a scene's geometry, for "did anything change".
+    /// A coarse summary of a scene's **picture**, for "did anything change".
     ///
-    /// Deliberately not a hash of the vertex data: the question is whether the
-    /// scene *moved*, and a summary a reader can eyeball in a failure message
-    /// answers it better than a hex digest nobody can interpret.
+    /// Deliberately not a hash: the question is whether the scene moved, and a
+    /// summary a reader can eyeball in a failure message answers it better than a
+    /// hex digest nobody can interpret.
+    ///
+    /// It reads more than the vertices, and that is not thoroughness for its own
+    /// sake — it is the fix for a check that was quietly lying. "Did anything
+    /// happen" was a function of the vertex buffer alone, which is true of a
+    /// particle cloud and a flexi chain and of nothing else the viewer animates. A
+    /// texture animation pages a flipbook by rewriting its faces' `uv_transform`
+    /// and never touches a vertex; the sun disc and the star field move by
+    /// `Transform`. Every one of those would have registered as *frozen* — so a
+    /// dead one and a working one would both have passed, which is the exact
+    /// failure the timeline tier exists to catch.
     fn digest(geometry: &[Geometry]) -> Vec<String> {
         let mut lines: Vec<String> = geometry
             .iter()
@@ -1434,11 +1641,16 @@ mod tests {
                 let centroid = object.positions.iter().fold(Vec3::ZERO, |sum, position| {
                     Vec3::new(sum.x + position.x, sum.y + position.y, sum.z + position.z)
                 });
+                let uv = object.uv_transform.map_or_else(
+                    || "-".to_owned(),
+                    |uv| format!("{:.4?}/{:.4?}", uv.matrix2, uv.translation),
+                );
                 format!(
-                    "{}: {} verts, {} tris, centroid {centroid:.3?}",
+                    "{}: {} verts, {} tris, centroid {centroid:.3?}, at {:.3?}, uv {uv}",
                     object.name,
                     object.positions.len(),
                     object.indices.len() / 3,
+                    object.world.to_scale_rotation_translation(),
                 )
             })
             .collect();

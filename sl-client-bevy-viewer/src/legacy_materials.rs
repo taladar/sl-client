@@ -126,7 +126,7 @@ impl LegacyMaterialManager {
 /// Build a Bevy [`Image`] for a legacy normal map from decoded RGBA8 pixels, in
 /// the linear colour space a normal map needs (`Rgba8Unorm`) and with the
 /// repeating sampler object faces tile their textures with.
-fn build_linear_image(decoded: &Arc<DecodedTexture>) -> Image {
+pub(crate) fn build_linear_image(decoded: &Arc<DecodedTexture>) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: decoded.width,
@@ -290,6 +290,25 @@ pub(crate) fn apply_legacy_materials(
     }
 }
 
+/// Write one legacy material's scalar fields onto a face [`StandardMaterial`].
+///
+/// The pure half of [`apply_legacy_to_face`], split out so it is reachable without
+/// a fetch behind it: everything here is a function of the decoded material, while
+/// the normal map is a grid asset the caller has to go and get. That is what lets
+/// [`crate::render_scene`]'s legacy-material scene exercise the real mapping with
+/// no capability, no `TextureManager` and no grid — the registry's rule that
+/// construction is separable from transport, applied to this module.
+pub(crate) fn apply_legacy_scalars(standard: &mut StandardMaterial, material: &LegacyMaterial) {
+    standard.reflectance = reflectance_from_environment(material.environment_intensity);
+    standard.perceptual_roughness = roughness_from_glossiness(material.specular_exponent);
+    standard.alpha_mode =
+        legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
+    // A material that carries no normal map clears any it had previously.
+    if material.normal_map.uuid().is_nil() {
+        standard.normal_map_texture = None;
+    }
+}
+
 /// Write one legacy material's scalar fields onto a face [`StandardMaterial`] and
 /// queue its normal map for fetch. The normal-map texture is dropped into the
 /// material's normal slot later by [`apply_legacy_normal_maps`].
@@ -301,14 +320,7 @@ fn apply_legacy_to_face(
     material: &LegacyMaterial,
 ) {
     if let Some(mut standard) = materials.get_mut(handle) {
-        standard.reflectance = reflectance_from_environment(material.environment_intensity);
-        standard.perceptual_roughness = roughness_from_glossiness(material.specular_exponent);
-        standard.alpha_mode =
-            legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
-        // A material that carries no normal map clears any it had previously.
-        if material.normal_map.uuid().is_nil() {
-            standard.normal_map_texture = None;
-        }
+        apply_legacy_scalars(&mut standard, material);
     }
     let normal = material.normal_map;
     if !normal.uuid().is_nil() {

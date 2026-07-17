@@ -55,7 +55,14 @@ use bevy::winit::WinitPlugin;
 
 use crate::camera::FlyCamera;
 use crate::probes::ReflectionProbePlugin;
-use crate::render_scene::{RenderScene, SceneAssets, SceneCx, scene_root, scene_root_transform};
+use sl_client_bevy::{
+    CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
+    TerrainMaterialPlugin, WaterMaterialPlugin,
+};
+
+use crate::render_scene::{
+    RenderScene, SceneAssets, SceneCx, SceneRuntimePlugin, scene_root, scene_root_transform,
+};
 
 /// The rendered frame's size, in pixels.
 ///
@@ -173,6 +180,20 @@ pub(crate) fn capture(
     // The viewer's real reflection probes, as the gallery runs them — without
     // these a mirror reflects nothing at all and the check is vacuous.
     app.add_plugins(ReflectionProbePlugin)
+        // The viewer's real custom-material pipelines and its own drivers, as the
+        // gallery runs them: this is the **third** app that spawns a registered
+        // scene, so it is the third that renders nothing at all for a scene whose
+        // shader or driver it forgot. See `SceneRuntimePlugin` — the material
+        // plugins go first, and it fills in whatever they did not register.
+        .add_plugins((
+            TerrainMaterialPlugin,
+            SkyMaterialPlugin,
+            SunDiscMaterialPlugin,
+            CloudMaterialPlugin,
+            StarMaterialPlugin,
+            WaterMaterialPlugin,
+        ))
+        .add_plugins(SceneRuntimePlugin)
         .insert_resource(DirectionalLightShadowMap::default())
         .init_resource::<Captured>();
 
@@ -192,20 +213,8 @@ pub(crate) fn capture(
     let readback_target = target.clone();
     app.add_systems(
         Startup,
-        move |mut commands: Commands,
-              mut meshes: ResMut<Assets<Mesh>>,
-              mut materials: ResMut<Assets<StandardMaterial>>,
-              mut images: ResMut<Assets<Image>>,
-              mut inverse_bindposes: ResMut<
-            Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
-        >| {
+        move |mut commands: Commands, mut assets: SceneAssets| {
             let root = commands.spawn(scene_root()).id();
-            let mut assets = SceneAssets {
-                meshes: &mut meshes,
-                materials: &mut materials,
-                images: &mut images,
-                inverse_bindposes: &mut inverse_bindposes,
-            };
             spawn(cx, root, &mut commands, &mut assets);
 
             // The scene's declared camera pose, converted from Second Life

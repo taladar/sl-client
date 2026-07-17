@@ -76,7 +76,7 @@ const TERRAIN_PLACEHOLDER_COLOR: [u8; 4] = [92, 112, 71, 255];
 const DEFAULT_WEIGHTS: [f32; DETAIL_COUNT] = [1.0, 0.0, 0.0, 0.0];
 
 /// A patch's key: its region plus grid position within that region.
-type PatchKey = (RegionHandle, u32, u32);
+pub(crate) type PatchKey = (RegionHandle, u32, u32);
 
 /// Per-region terrain-compositing state: the elevation bands, the shared splat
 /// material, and the detail-texture keys requested for it.
@@ -555,7 +555,11 @@ fn patch_transform(
 
 /// A 1×1 olive placeholder [`Image`], used for every detail slot until the real
 /// textures decode.
-fn placeholder_image() -> Image {
+///
+/// `pub(crate)` for [`crate::render_scene`]: a terrain scene has no grid to fetch
+/// a region's detail textures from, so it stands at exactly the state a real
+/// region's terrain is in before they arrive.
+pub(crate) fn placeholder_image() -> Image {
     Image::new(
         Extent3d {
             width: 1,
@@ -581,7 +585,11 @@ fn placeholder_image() -> Image {
 /// Each vertex carries computed normals, tiled detail UVs, and a four-component
 /// blend weight (from `composition`, or a flat default while it is unknown); the
 /// grid is two triangles per cell quad.
-fn build_patch_mesh(
+///
+/// `pub(crate)` for [`crate::render_scene`]: this is already a pure
+/// `(patches, composition) -> Option<Mesh>`, so the terrain scenes call the real
+/// builder rather than a copy of it.
+pub(crate) fn build_patch_mesh(
     raw: &HashMap<PatchKey, TerrainPatch>,
     composition: Option<&TerrainComposition>,
     key: PatchKey,

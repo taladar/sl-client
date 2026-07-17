@@ -99,9 +99,9 @@ pub use sl_proto::{
     Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
     UpdatableAssetType, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
     VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};

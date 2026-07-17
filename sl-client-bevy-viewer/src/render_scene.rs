@@ -84,9 +84,13 @@
 //! fixture whose intent is readable — `sculpt_sphere_map` says it is a sphere in
 //! the code, where a committed `.tga` would say it in a comment nobody can check.
 
+use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
+use std::sync::Arc;
 
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::ecs::system::SystemParam;
+use bevy::light::NotShadowCaster;
 use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
@@ -96,19 +100,40 @@ use sl_client_bevy::{
     Vector, VertexWeights,
 };
 use sl_client_bevy::{
-    DecodedMesh, DecodedTexture, DiscardLevel, HoleType, MeshLod, MeshSkin, PathCurve, PrimLod,
-    PrimShapeFloat, ProfileCurve, Submesh, TreeLod, grass_geometry, grass_species,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, to_bevy_base_mesh, to_bevy_grass_mesh,
-    to_bevy_image, to_bevy_mesh, to_bevy_prim_meshes, to_bevy_rigged_mesh, to_bevy_tree_mesh,
-    tree_geometry, tree_species,
+    CloudMaterial, DecodedMesh, DecodedTexture, DiscardLevel, FlexiChain, FlexibleData, HoleType,
+    JointOverrides, LegacyMaterial, MeshLod, MeshSkin, MorphWeights, PathCurve, PrimFaceId,
+    PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams, SkeletalDeformations,
+    SkyMaterial, SkySettings, StarMaterial, StarParams, Submesh, SunDiscMaterial, SunDiscParams,
+    TerrainLayerType, TerrainMaterial, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
+    TreeLod, Uuid, VolumeDeformations, WaterMaterial, WaterSettings, azimuth_altitude_to_rotation,
+    grass_geometry, grass_species, rigged_inverse_bindposes, tessellate, tessellate_sculpt,
+    tessellate_with_path, texture_anim_mode, to_bevy_base_mesh, to_bevy_grass_mesh, to_bevy_image,
+    to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes, to_bevy_rigged_mesh,
+    to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
 };
+use sl_terrain::TerrainComposition;
 
 use std::path::Path;
 
 use crate::avatar_assets::AvatarAssetLibrary;
+use crate::bump::{apply_surface_flags, generate_normal_map};
 use crate::coords::sl_to_bevy_rotation;
-use crate::particles::{ObjectParticleSystem, float_to_u8};
+use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
+use crate::legacy_materials::{apply_legacy_scalars, build_linear_image};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity};
+use crate::particles::{ObjectParticleSystem, ParticleSim, drive_particles, float_to_u8};
 use crate::probes::ObjectReflectionProbe;
+use crate::sky::{
+    MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
+    build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
+    placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
+};
+use crate::terrain::{
+    PatchKey, TerrainSurface, build_patch_mesh, placeholder_image as terrain_placeholder_image,
+};
+use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
+use crate::textures::TextureManager;
+use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params};
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -272,18 +297,95 @@ impl SceneCamera {
 
 /// The asset collections a scene's fixture spawns into.
 ///
-/// Bundled rather than passed as four arguments so a fixture's signature stays
-/// readable, and so adding a collection later does not touch every scene.
-pub(crate) struct SceneAssets<'assets> {
+/// Bundled rather than passed one argument per collection so a fixture's signature
+/// stays readable, and so adding a collection does not touch every scene.
+///
+/// A [`SystemParam`] rather than a hand-built struct of borrows, which is what it
+/// was while there were four collections. The viewer does not render everything out
+/// of `StandardMaterial`: terrain splats, the sky, the sun disc, the clouds, the
+/// stars and the water each have their own `AsBindGroup` material and their own
+/// `Assets` collection, and a scene for each ([`terrain_patch`], [`sky_dome`], …)
+/// needs to reach it. Threading ten `ResMut`s through both the harness and the
+/// gallery by hand would have put the gallery's key handler past Bevy's
+/// system-parameter limit; this way each app names one parameter and the list lives
+/// here.
+#[derive(SystemParam)]
+pub(crate) struct SceneAssets<'w> {
     /// The mesh collection the fixture's geometry is added to.
-    pub(crate) meshes: &'assets mut Assets<Mesh>,
+    pub(crate) meshes: ResMut<'w, Assets<Mesh>>,
     /// The material collection.
-    pub(crate) materials: &'assets mut Assets<StandardMaterial>,
+    pub(crate) materials: ResMut<'w, Assets<StandardMaterial>>,
     /// The image collection, for a fixture that needs a texture.
-    pub(crate) images: &'assets mut Assets<Image>,
+    pub(crate) images: ResMut<'w, Assets<Image>>,
     /// The inverse-bindpose collection a rigged fixture's `SkinnedMesh` binds
     /// against.
-    pub(crate) inverse_bindposes: &'assets mut Assets<SkinnedMeshInverseBindposes>,
+    pub(crate) inverse_bindposes: ResMut<'w, Assets<SkinnedMeshInverseBindposes>>,
+    /// The terrain splat-material collection ([`terrain_patch`]).
+    pub(crate) terrain_materials: ResMut<'w, Assets<TerrainMaterial>>,
+    /// The atmosphere-material collection ([`sky_dome`]).
+    pub(crate) sky_materials: ResMut<'w, Assets<SkyMaterial>>,
+    /// The sun / moon billboard-material collection ([`sky_dome`]).
+    pub(crate) sun_disc_materials: ResMut<'w, Assets<SunDiscMaterial>>,
+    /// The cloud-material collection ([`cloud_dome`]).
+    pub(crate) cloud_materials: ResMut<'w, Assets<CloudMaterial>>,
+    /// The star-material collection ([`star_field`]).
+    pub(crate) star_materials: ResMut<'w, Assets<StarMaterial>>,
+    /// The water-material collection ([`water_surface`]).
+    pub(crate) water_materials: ResMut<'w, Assets<WaterMaterial>>,
+}
+
+/// Everything a registered scene needs to be **driven** — the viewer's own
+/// time-varying systems and the resources they read — added by the harness
+/// ([`crate::render_test`]) and the gallery ([`crate::render_gallery`]) alike.
+///
+/// One plugin rather than two lists, and the reason is a failure both apps have
+/// already had. A dynamic scene's renderable does not exist until its driver has
+/// run: the particle fountain's cloud is built by [`drive_particles`], not by its
+/// fixture. So a driver missing from an app is not a compile error and not a
+/// failing check — it is a scene that quietly renders **nothing**, which the
+/// harness reports as a valid empty world and the gallery shows as an empty screen.
+/// That happened to the gallery with the one dynamic scene there was; with flexi
+/// and texture animation added there are three drivers to forget instead of one,
+/// and the two lists were already only kept in step by a comment.
+///
+/// The custom material collections are registered here for the same reason and with
+/// one wrinkle: `init_asset` is **not** idempotent (it inserts a fresh, empty
+/// `Assets<M>`), and the gallery separately adds each `MaterialPlugin` for the
+/// render side, which registers the same collection. So each is registered only if
+/// nothing has registered it already — otherwise plugin order would decide whether
+/// the gallery's materials survived.
+pub(crate) struct SceneRuntimePlugin;
+
+impl Plugin for SceneRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        init_scene_asset::<TerrainMaterial>(app);
+        init_scene_asset::<SkyMaterial>(app);
+        init_scene_asset::<SunDiscMaterial>(app);
+        init_scene_asset::<CloudMaterial>(app);
+        init_scene_asset::<StarMaterial>(app);
+        init_scene_asset::<WaterMaterial>(app);
+        // `TextureManager` sits at its `Default`: no capability URL, so it never
+        // fetches — the state the real viewer is in before its seed caps arrive
+        // (`sl-client-viewer-fetch-defer-until-cap`).
+        app.init_resource::<ParticleSim>()
+            .init_resource::<TextureManager>()
+            .add_systems(Startup, crate::particles::setup_particles)
+            .add_systems(
+                Update,
+                (drive_particles, simulate_flexi, drive_texture_animations),
+            );
+    }
+}
+
+/// Register an asset collection a scene builds into, unless something already has.
+///
+/// See [`SceneRuntimePlugin`]: `init_asset` overwrites rather than skips, so an
+/// unconditional call would empty a collection a `MaterialPlugin` had already set
+/// up — and which of the two won would depend on the order the app added them.
+fn init_scene_asset<M: Asset>(app: &mut App) {
+    if !app.world().contains_resource::<Assets<M>>() {
+        app.init_asset::<M>();
+    }
 }
 
 /// One registered scene.
@@ -393,6 +495,154 @@ pub(crate) const SCENES: &[RenderScene] = &[
         spawn: avatar_base_part,
     },
     RenderScene {
+        id: "avatar-morphed-body",
+        what: "the whole system body, shaped by a resolved appearance: the morph bake, the \
+               deformed skeleton and the collision volumes together — the R11 / R12 / R13 / R22 \
+               cluster, none of which lives in the skin path `avatar-base-part` covers. Falls \
+               back to the mini fixture without SL_VIEWER_ASSETS",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera::framing_front_at(3.4, 0.95),
+        spawn: avatar_morphed_body,
+    },
+    RenderScene {
+        id: "terrain-patch",
+        what: "one composited land patch: the heightfield, its computed normals and its \
+               four-way splat weights. NOTE: the detail textures are the olive placeholder a \
+               real region wears until they decode — there is no grid to fetch them from, so \
+               the shape is the subject",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera {
+            position: Vec3::new(8.0, -24.0, 32.0),
+            look_at: Vec3::new(8.0, 8.0, 21.0),
+        },
+        spawn: terrain_patch,
+    },
+    RenderScene {
+        id: "terrain-patch-seam",
+        what: "a 2x2 block of neighbouring patches off one continuous surface: each patch's far \
+               edge is sampled from its neighbour so the meshes meet exactly, and the block's \
+               own outer edge — where the neighbour is another region — keeps the flat strip \
+               instead. The seam and the region edge, which the terrain unit tests do not reach",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera {
+            position: Vec3::new(16.0, -30.0, 44.0),
+            look_at: Vec3::new(16.0, 16.0, 21.0),
+        },
+        spawn: terrain_patch_seam,
+    },
+    RenderScene {
+        id: "flexi-streamer",
+        what: "a flexible prim's chain simulation: geometry that is a function of solver state \
+               rather than of parameters, so a single frame cannot tell a chain that swings \
+               from one that was seeded and never stepped",
+        // Seeded straight, then pulled by gravity and a steady user force: by 0.4 s
+        // it is bending, by 2.0 s it has swung and is settling, so the samples
+        // straddle a real change rather than a warm-up.
+        timeline: Timeline::at(&[0.0, 0.4, 2.0]),
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera {
+            position: Vec3::new(1.2, -4.5, -0.8),
+            look_at: Vec3::new(0.0, 0.0, -1.2),
+        },
+        spawn: flexi_streamer,
+    },
+    RenderScene {
+        id: "texture-anim-flipbook",
+        what: "a prim paging through a 4x4 texture atlas: the first scene whose change over time \
+               is in the material rather than the vertices — its UV transform is rewritten every \
+               frame while its geometry never moves",
+        // A frame every 1/8 s over a 16-frame grid: by 0.5 s it has paged four
+        // frames, and 1.9 s is most of the way through the grid, so the samples
+        // straddle several steps without wrapping back to where they started.
+        timeline: Timeline::at(&[0.0, 0.5, 1.9]),
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera::framing(3.0),
+        spawn: texture_anim_flipbook,
+    },
+    RenderScene {
+        id: "bump-face",
+        what: "the four surface flags — bump, shiny, glow, fullbright — one prim each. The bump \
+               prim generates a normal map from its own diffuse, which is the fifth \
+               sampler-setting texture path and the one the R22h check had never seen",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera::framing(7.0),
+        spawn: bump_face,
+    },
+    RenderScene {
+        id: "legacy-material-face",
+        what: "the pre-PBR normal/specular materials, at both ends of the glossiness ramp: what \
+               `legacy_materials` maps onto roughness and reflectance, plus its own (linear, \
+               repeating) normal-map upload",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera::framing(5.0),
+        spawn: legacy_material_face,
+    },
+    RenderScene {
+        id: "sky-sunrise",
+        what: "the whole sky at sunrise — dome, clouds, stars, both discs — plus a box on the ground for \
+               the low sun to throw a long shadow of. Sunrise and sunset are mirror images here: \
+               the reference's named presets are grid assets, so what varies is where the sun is, \
+               not an authored haze palette",
+        timeline: Timeline::STATIC,
+        // The sky is the light. A stage rig would flatten the very shadow this
+        // scene exists to show, and wash the low sun's colour out of it.
+        lighting: SceneLighting::Own,
+        camera: SKY_CAMERA,
+        spawn: sky_sunrise,
+    },
+    RenderScene {
+        id: "sky-midday",
+        what: "the same sky with the sun 80 degrees up: the short shadow and the near-white light the \
+               atmosphere yields when its path through the air is shortest",
+        timeline: Timeline::STATIC,
+        // The sky is the light. A stage rig would flatten the very shadow this
+        // scene exists to show, and wash the low sun's colour out of it.
+        lighting: SceneLighting::Own,
+        camera: SKY_CAMERA,
+        spawn: sky_midday,
+    },
+    RenderScene {
+        id: "sky-sunset",
+        what: "the sun low on the far side. Same camera as `sky-sunrise`, so the pair is the \
+               check that the light and the shadow follow the sun's azimuth — 180 degrees apart \
+               — rather than being baked",
+        timeline: Timeline::STATIC,
+        // The sky is the light. A stage rig would flatten the very shadow this
+        // scene exists to show, and wash the low sun's colour out of it.
+        lighting: SceneLighting::Own,
+        camera: SKY_CAMERA,
+        spawn: sky_sunset,
+    },
+    RenderScene {
+        id: "sky-midnight",
+        what: "the only time the night half of the stack runs: the sun below the horizon, the moon lit \
+               and up, the stars faded in by the sky's own star_brightness, and the shadow thrown \
+               by moonlight rather than sun",
+        timeline: Timeline::STATIC,
+        // The sky is the light. A stage rig would flatten the very shadow this
+        // scene exists to show, and wash the low sun's colour out of it.
+        lighting: SceneLighting::Own,
+        camera: SKY_CAMERA,
+        spawn: sky_midnight,
+    },
+    RenderScene {
+        id: "water-surface",
+        what: "the endless ocean and a region's own water plane at the same height: the depth \
+               bias that decides which one wins is only meaningful with both of them there",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: WATER_CAMERA,
+            look_at: Vec3::new(0.0, 40.0, 20.0),
+        },
+        spawn: water_surface,
+    },
+    RenderScene {
         id: "tree",
         what: "generated Linden tree geometry, from the species table rather than any asset. \
                NOTE: untextured — a species' bark/leaf texture is a grid asset UUID, so there is \
@@ -411,6 +661,16 @@ pub(crate) const SCENES: &[RenderScene] = &[
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_at(3.0, 0.5),
         spawn: grass,
+    },
+    RenderScene {
+        id: "tree-billboard",
+        what: "the far-distance tree impostor — two crossed alpha quads the reference viewer \
+               swaps in below the coarsest branch LOD. A different generator from `tree`, and \
+               the geometry most of a region's trees are actually made of",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Stage,
+        camera: SceneCamera::framing_at(62.0, 17.0),
+        spawn: tree_billboard,
     },
     RenderScene {
         id: "projector-light-on-wall",
@@ -566,6 +826,33 @@ pub(crate) enum SymmetryAxis {
 pub(crate) struct UvsInUnitSquare {
     /// Which atlas this geometry samples, and hence why leaving the unit square
     /// is wrong rather than merely unusual.
+    pub(crate) reason: &'static str,
+}
+
+/// **Declared exception.** This geometry legitimately reaches far beyond a
+/// region, so the universal distance rule is raised to `max_extent` for it.
+///
+/// The second rule this registry has found to be *backwards*, and it was found the
+/// same way the first was — by writing the scenes for a path that had none. The
+/// universal check rejects a vertex more than `MAX_COORDINATE` (1 km) from its
+/// object origin, on the reasoning that "every scene here is a few metres across
+/// and a Second Life region is 256 m, so nothing legitimate comes near this". That
+/// reasoning was true of the fourteen scenes that existed and is not true of the
+/// viewer: the atmosphere is drawn as a **3 km sky dome**, the clouds as a **15 km
+/// one**, the stars at 2.9 km, the sun and moon 2 km out, and the endless ocean
+/// spans 40 km. Every one of those is correct and every one trips the rule.
+///
+/// So, as with [`UvsInUnitSquare`], the rule is not deleted — deleting it would
+/// lose the failure it exists for, a vertex flung somewhere absurd by a garbage
+/// matrix, which is otherwise a perfectly finite number no other check objects to.
+/// It is *declared*: the geometry that is genuinely sky-scale says how far it
+/// reaches and why, and is still held to that bound.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct WorldScaleGeometry {
+    /// The furthest any vertex may sit from the object origin, in metres.
+    pub(crate) max_extent: f32,
+    /// Why this geometry is drawn at a scale no region has — so a reader can weigh
+    /// the claim rather than take it on faith.
     pub(crate) reason: &'static str,
 }
 
@@ -1419,6 +1706,184 @@ fn avatar_base_part(
     );
 }
 
+/// The appearance the [`avatar_morphed_body`] scene shapes its body to.
+///
+/// A real `AvatarAppearance.visual_params` vector is what the *server* echoes back
+/// for an avatar, and it is just bytes — no session required to make one, which is
+/// the whole reason this scene can exist. Each byte is one param's weight over its
+/// own `[min, max]` range.
+///
+/// **Not `128`, and this is the one number in this file with a bug behind it.** The
+/// midpoint looks like the neutral choice and is not: an asymmetric body morph's
+/// default is `0`, not its range midpoint, so a `128` vector half-applies *every*
+/// one of them — the bloated body and spiked head of R12, which shipped precisely
+/// because a placeholder appearance was published as all-`128`, the sim stored it,
+/// and the viewer rendered back what it had sent. So the fixture varies the params
+/// deliberately instead: a spread that is not the default, not the midpoint, and
+/// different per param, so a morph that is silently not applied and a morph that is
+/// applied to everything look different from each other and from this.
+fn shaped_appearance() -> Vec<u8> {
+    // The wire vector is positional — param `i` of the ordered visual-param table
+    // — so the length is what decides which params are addressed. 218 is the
+    // standard `AvatarAppearance` count; a short vector leaves the rest at default.
+    (0..218_u16)
+        .map(|index| {
+            // A deterministic spread over the byte range, coprime-strided so
+            // neighbouring params (which tend to be related sliders) do not all
+            // land on the same weight.
+            u8::try_from(index.saturating_mul(37) % 251).unwrap_or(0)
+        })
+        .collect()
+}
+
+/// [`SCENES`] `avatar-morphed-body`: the whole system body, shaped.
+///
+/// The scene [`avatar_base_part`] is not. That one puts a decoded part on a
+/// skeleton and stops, which covers the skin path and nothing else — and the
+/// avatar bugs that have actually cost time do not live in the skin path alone:
+///
+/// - **R12** — the body rendered from a *resolved appearance*, where a wrong
+///   resolve bloats it. Reached here, and nowhere else in the registry, by
+///   [`ResolvedParams`] and [`MorphWeights::from_resolved_static`].
+/// - **R13 / R11** — a base-mesh vertex weighted onto a joint outside the render
+///   list. `avatar-base-part` reaches this too, but only on whichever parts happen
+///   to be loaded; the bug was in the *upper body* and it was invisible at rest
+///   except in one armpit.
+/// - **R22** — the multi-part body, where the parts have to agree with each other.
+///
+/// And the shape is not only morphs: the same resolved params drive the
+/// **skeleton** ([`SkeletalDeformations`]) and the **collision volumes**
+/// ([`VolumeDeformations`]), and the body is only correct if the three agree.
+/// A morph that shortens the legs against a skeleton that did not is exactly the
+/// class of bug a login shows as "slightly wrong" and nothing catches.
+///
+/// **Needs `SL_VIEWER_ASSETS`**, and falls back rather than skipping — see
+/// [`avatar_base_part`], which makes the same trade for the same reason. Without
+/// the Linden `character/` directory there is no `avatar_lad.xml`, so there is no
+/// visual-param table, no morph targets and nothing to resolve; the fallback is the
+/// unshaped mini fixture, so `cargo test` still sweeps the scene everywhere.
+fn avatar_morphed_body(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let Some(dir) = std::env::var_os(VIEWER_ASSETS_ENV) else {
+        avatar_base_part(_cx, root, commands, assets);
+        return;
+    };
+    let Ok(library) = AvatarAssetLibrary::load(Path::new(&dir)) else {
+        avatar_base_part(_cx, root, commands, assets);
+        return;
+    };
+
+    // The resolve, exactly as `crate::avatars`' `shape_avatars` does it: one
+    // `ResolvedParams` feeding the morph weights, the skeletal deformations and the
+    // collision-volume displacements, so the three cannot disagree by construction.
+    let resolved = ResolvedParams::from_appearance(library.params(), &shaped_appearance());
+    let weights = MorphWeights::from_resolved_static(library.params(), &resolved);
+    let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
+    let volumes = VolumeDeformations::from_resolved_with_skeleton(
+        library.params(),
+        &resolved,
+        library.character_skeleton(),
+    );
+
+    let skeleton = library.skeleton();
+    // The **deformed** skeleton, not the rest one: the joints the shaped body's
+    // weights are actually skinned against. Spawning the rest skeleton under a
+    // morphed body is a real bug shape — the body is the right size and stands in
+    // the wrong pose — and it is what a fixture that skipped this would test.
+    let locals =
+        skeleton.deformed_local_transforms_with(&deform, &volumes, &JointOverrides::default());
+    let joints = spawn_deformed_skeleton("avatar-morphed-body", skeleton, &locals, root, commands);
+
+    for (index, part) in library.parts().iter().enumerate() {
+        // The morph bake: the part's rest geometry blended by the resolved weights.
+        // Unmasked — the clothing-morph mask is keyed off the region's *decoded
+        // bake*, which is a grid texture, so a no-grid scene resolves the body's own
+        // shape and leaves the garment masking to a login.
+        let morphed = weights.apply(&part.mesh);
+        let mesh = assets
+            .meshes
+            .add(to_bevy_morphed_mesh(&part.mesh, &morphed));
+        let material = assets.materials.add(matte(Color::srgb(0.85, 0.7, 0.6)));
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                Name::new(format!("avatar-morphed-body/part-{index}")),
+                ChildOf(root),
+                UvsInUnitSquare {
+                    reason: "an avatar body part samples its region's baked atlas (head / upper \
+                             / lower), so a UV outside the unit square samples a different body \
+                             region rather than tiling — and a morph must not move a UV at all",
+                },
+            ))
+            .id();
+
+        // The same pipeline-agreement rule `spawn_base_part` documents: skin
+        // attributes and a `SkinnedMesh` are both present or both absent, or wgpu
+        // rejects the draw and takes the process with it.
+        if part.mesh.weights().is_empty() {
+            continue;
+        }
+        let Some(skin) = skeleton.base_mesh_skin(&part.mesh) else {
+            continue;
+        };
+        let render_joints: Vec<Entity> = skin
+            .joints
+            .iter()
+            .filter_map(|&index| joints.get(index).copied())
+            .collect();
+        let inverse_bindposes = assets
+            .inverse_bindposes
+            .add(SkinnedMeshInverseBindposes::from(skin.inverse_bindposes));
+        commands.entity(entity).insert((
+            SkinnedMesh {
+                inverse_bindposes,
+                joints: render_joints,
+            },
+            NoFrustumCulling,
+        ));
+    }
+}
+
+/// Spawn a skeleton's joints at `locals` — the shaped-body counterpart of
+/// [`spawn_skeleton`], which stands them at their rest transforms.
+fn spawn_deformed_skeleton(
+    label: &str,
+    skeleton: &BevySkeleton,
+    locals: &[Transform],
+    root: Entity,
+    commands: &mut Commands,
+) -> Vec<Entity> {
+    let joints: Vec<Entity> = locals
+        .iter()
+        .enumerate()
+        .map(|(index, transform)| {
+            commands
+                .spawn((
+                    *transform,
+                    Visibility::default(),
+                    Name::new(format!("{label}/joint-{index}")),
+                ))
+                .id()
+        })
+        .collect();
+    for (index, parent) in skeleton.parents().iter().enumerate() {
+        let Some(&joint) = joints.get(index) else {
+            continue;
+        };
+        let parent = parent
+            .and_then(|parent| joints.get(parent).copied())
+            .unwrap_or(root);
+        commands.entity(joint).insert(ChildOf(parent));
+    }
+    joints
+}
+
 /// [`SCENES`] `tree`: generated Linden tree geometry.
 fn tree(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
     let Some(species) = tree_species(0) else {
@@ -1704,6 +2169,346 @@ const fn fountain_system() -> ParticleSystem {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Terrain.
+// ---------------------------------------------------------------------------
+
+/// The edge length, in samples and in metres, of a land patch: a Second Life
+/// region is 16×16 patches of 16×16 one-metre cells.
+const TERRAIN_PATCH_SIZE: u32 = 16;
+
+/// The region the terrain fixtures' patches belong to.
+///
+/// The local test grid's own `Default Region` corner (grid 1000, 1000 → 256 000 m),
+/// rather than a nominal zero, because the composition's Perlin transition band is
+/// sampled at the region's **global** origin — so at zero the fixture would be
+/// looking at a corner of the noise field no real region ever sits on.
+fn terrain_region() -> RegionHandle {
+    RegionHandle::from_global(256_000, 256_000)
+}
+
+/// The elevation bands the terrain fixtures composite against: the four detail
+/// textures spread over the height range the fixture's ground actually spans, so
+/// every patch has several of them blending across it rather than one flat weight.
+const fn terrain_composition() -> TerrainComposition {
+    TerrainComposition::new(
+        [16.0, 18.0, 16.0, 18.0],
+        [12.0, 10.0, 10.0, 12.0],
+        256.0,
+        [256_000.0, 256_000.0],
+    )
+}
+
+/// A small region cell / metre count as an `f32`; there is no `From<u32>` for
+/// `f32`, and every value here is far under `u16::MAX` so the conversion is exact.
+fn terrain_coord(value: u32) -> f32 {
+    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
+}
+
+/// The fixture's ground: a smooth hill, as a function of **region-local** metres.
+///
+/// One continuous function of the region coordinate rather than a per-patch shape,
+/// and that is the whole point of the seam scene: adjacent patches sample the same
+/// surface, so where their meshes meet is decided by [`build_patch_mesh`]'s shared
+/// far edge and nothing else. A per-patch shape would meet at the seam by
+/// construction and prove nothing.
+fn terrain_height(x: f32, y: f32) -> f32 {
+    let hill = (x / 40.0).sin() * (y / 34.0).cos();
+    // A base near the default water height, so the scene reads as ground rather
+    // than as an abstract surface, and a few metres of relief.
+    21.0 + 5.0 * hill
+}
+
+/// One land patch at grid position (`patch_x`, `patch_y`) of [`terrain_region`],
+/// sampled from [`terrain_height`].
+fn land_patch(patch_x: u32, patch_y: u32) -> TerrainPatch {
+    let size = TERRAIN_PATCH_SIZE;
+    let origin_x = patch_x.saturating_mul(size);
+    let origin_y = patch_y.saturating_mul(size);
+    let mut values: Vec<f32> = Vec::new();
+    for y in 0..size {
+        for x in 0..size {
+            values.push(terrain_height(
+                terrain_coord(origin_x.saturating_add(x)),
+                terrain_coord(origin_y.saturating_add(y)),
+            ));
+        }
+    }
+    TerrainPatch {
+        region_handle: terrain_region(),
+        layer: TerrainLayerType::Land,
+        patch_x,
+        patch_y,
+        size,
+        values,
+    }
+}
+
+/// Build and spawn the land patches at `grid`, through the viewer's real
+/// [`build_patch_mesh`] and its real [`TerrainMaterial`].
+///
+/// The patches are placed in plain Second Life metres under the scene root, which
+/// is *not* what the viewer does: `crate::terrain`'s `patch_transform` carries the
+/// Second Life → Bevy basis change on each patch entity, because the viewer spawns
+/// its patches at the world root with no basis-changed ancestor. Here the scene
+/// root already carries it (once, for every scene), so applying it again would
+/// rotate the ground on its side. The region-offset half of `patch_transform` has
+/// its own test; what has none, and what this builds, is the mesh.
+///
+/// The detail textures are the flat olive placeholder every region's terrain wears
+/// until its four ground textures decode — there is no grid here to fetch them
+/// from. So the splat weights are real and only their palette is not, which is why
+/// the `what` line says the shape is the subject.
+fn spawn_terrain(
+    label: &str,
+    grid: &[(u32, u32)],
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let mut patches: HashMap<PatchKey, TerrainPatch> = HashMap::new();
+    for &(patch_x, patch_y) in grid {
+        let _replaced = patches.insert(
+            (terrain_region(), patch_x, patch_y),
+            land_patch(patch_x, patch_y),
+        );
+    }
+    let composition = terrain_composition();
+    let placeholder = assets.images.add(terrain_placeholder_image());
+    let material = assets.terrain_materials.add(TerrainMaterial {
+        detail0: placeholder.clone(),
+        detail1: placeholder.clone(),
+        detail2: placeholder.clone(),
+        detail3: placeholder,
+    });
+    // Iterated over `grid` rather than the map, so the entities spawn in a stable
+    // order whatever the hash seed — a failure that named a different patch on
+    // every run would be a failure nobody could act on.
+    for &(patch_x, patch_y) in grid {
+        let key = (terrain_region(), patch_x, patch_y);
+        let Some(mesh) = build_patch_mesh(&patches, Some(&composition), key) else {
+            continue;
+        };
+        let mesh = assets.meshes.add(mesh);
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(
+                terrain_coord(patch_x.saturating_mul(TERRAIN_PATCH_SIZE)),
+                terrain_coord(patch_y.saturating_mul(TERRAIN_PATCH_SIZE)),
+                0.0,
+            ),
+            Name::new(format!("{label}/patch-{patch_x}-{patch_y}")),
+            ChildOf(root),
+            // As the viewer marks a land patch, so the ground probe would accept
+            // it: the component costs nothing and keeps the fixture the same
+            // entity the viewer builds.
+            TerrainSurface,
+        ));
+    }
+}
+
+/// [`SCENES`] `terrain-patch`: one land patch of a composited region.
+fn terrain_patch(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    spawn_terrain("terrain-patch", &[(0, 0)], root, commands, assets);
+}
+
+/// [`SCENES`] `terrain-patch-seam`: a 2×2 block of neighbouring patches.
+fn terrain_patch_seam(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    spawn_terrain(
+        "terrain-patch-seam",
+        &[(0, 0), (1, 0), (0, 1), (1, 1)],
+        root,
+        commands,
+        assets,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Flexi.
+// ---------------------------------------------------------------------------
+
+/// [`SCENES`] `flexi-streamer`: a flexible prim hanging from the origin.
+///
+/// **Dynamic, and the second scene that has to be.** A flexi prim's geometry is not
+/// a function of its parameters — it is a function of a chain simulation's *state*,
+/// which [`simulate_flexi`] steps every frame. A single capture cannot tell a chain
+/// that hangs and swings from one that was seeded and never stepped, because both
+/// look like a prim, and the seeded rest chain is a perfectly plausible one.
+///
+/// The chain is seeded at the object entity's own pose (the origin, since the
+/// entity is at identity under the scene root) rather than somewhere else, because
+/// [`simulate_flexi`] re-anchors it from the live world transform on the first step
+/// — so seeding it elsewhere would show as a one-frame jump that means nothing.
+fn flexi_streamer(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    // A round streamer: a circular profile swept along a straight path, which is
+    // what a flexi prim almost always is in-world.
+    let shape = PrimShapeFloat {
+        profile_curve: ProfileCurve::Circle,
+        ..base_shape()
+    };
+    let data = FlexibleData {
+        // Softness 2 → `1 << 2` chain sections: enough that the chain visibly
+        // curves rather than hinging once.
+        softness: 2,
+        tension: 1.0,
+        air_friction: 2.0,
+        gravity: 0.3,
+        // No wind: the viewer's wind is a region field this scene has no grid to
+        // get, and a zero keeps the motion a function of the fixture alone.
+        wind_sensitivity: 0.0,
+        // A steady sideways push, so the chain settles into a *bend* rather than
+        // hanging straight down — a straight hang is exactly the picture a chain
+        // that never ran also produces.
+        user_force: Vector {
+            x: 0.35,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+    // Long and thin, as a flexi prim is: the chain's length is its Z scale.
+    let scale = [0.16, 0.16, 2.5];
+    let attributes = flexi_attributes(&data);
+    let base_position = [0.0, 0.0, 0.0];
+    let base_rotation = [0.0, 0.0, 0.0, 1.0];
+    let chain = FlexiChain::new(&shape, &attributes, scale, base_position, base_rotation);
+    let path = chain.path(base_position, base_rotation, scale);
+    let prim = tessellate_with_path(&shape, FLEXI_LOD, &path);
+
+    let object = commands
+        .spawn((
+            // Identity, and it has to be: a flexi prim's geometry is baked in
+            // absolute metres by the chain, so the viewer gives it no geometry
+            // holder scale either (`crate::objects`' `holder_transform`). A scale
+            // here would shear the bent cross-section.
+            Transform::IDENTITY,
+            Visibility::default(),
+            Name::new("flexi-streamer"),
+            ChildOf(root),
+            ObjectFlexi {
+                data: data.clone(),
+                scale,
+            },
+        ))
+        .id();
+    let face_entities: Vec<Entity> = to_bevy_prim_meshes(&prim)
+        .into_iter()
+        .enumerate()
+        .map(|(index, mesh)| {
+            let face = spawn_geometry(
+                format!("flexi-streamer/face-{index}"),
+                mesh,
+                matte(Color::srgb(0.75, 0.7, 0.55)),
+                Transform::IDENTITY,
+                object,
+                commands,
+                assets,
+            );
+            // The bent geometry leaves the spawn-time AABB, so Bevy's frustum cull
+            // (which reads it) can drop the prim wrongly — the viewer opts a flexi
+            // face out for the same reason.
+            commands.entity(face).insert(NoFrustumCulling);
+            face
+        })
+        .collect();
+    commands.entity(object).insert(FlexiSimState {
+        chain,
+        shape,
+        softness: data.softness,
+        face_entities,
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Texture animation.
+// ---------------------------------------------------------------------------
+
+/// [`SCENES`] `texture-anim-flipbook`: a prim paging through a texture atlas.
+///
+/// **Dynamic, and dynamic in a way no earlier scene was.** Nothing about this prim's
+/// *geometry* changes: [`drive_texture_animations`] rewrites each face material's
+/// `uv_transform`, and the vertex buffer it samples through is the same one at
+/// every sample. That is why `crate::render_test`'s notion of "did anything happen"
+/// reads the material and the world transform as well as the vertices — a
+/// vertex-only digest reports this scene as frozen while it plays perfectly.
+///
+/// The animation is a 4×4 flipbook at 8 frames a second: the reference viewer's
+/// `llSetTextureAnim(ANIM_ON | LOOP, ALL_SIDES, 4, 4, 0.0, 0.0, 8.0)`, the form
+/// nearly every animated texture in-world takes. `length` of zero means "every
+/// frame in the grid", so the sixteenth frame wraps back to the first — which is
+/// the case a scene would catch animating off the end of its atlas.
+fn texture_anim_flipbook(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let anim = TextureAnimation {
+        mode: texture_anim_mode::ON | texture_anim_mode::LOOP,
+        // Every face, as `ALL_SIDES` does.
+        face: -1,
+        size_x: 4,
+        size_y: 4,
+        start: 0.0,
+        // Zero: the whole `size_x * size_y` grid.
+        length: 0.0,
+        rate: 8.0,
+    };
+    let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
+    let object = commands
+        .spawn((
+            Transform::IDENTITY,
+            Visibility::default(),
+            Name::new("texture-anim-flipbook"),
+            ChildOf(root),
+            ObjectTextureAnimation { anim },
+        ))
+        .id();
+    let prim = tessellate(&base_shape(), cx.lod);
+    for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+        let mesh = assets.meshes.add(mesh);
+        // One material per face, unshared — as the viewer's `face_material` builds
+        // them, and as this scene needs: the driver writes each face's own
+        // `uv_transform`, so a shared material would have the faces fight over it.
+        let material = assets.materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(image.clone()),
+            perceptual_roughness: 0.9,
+            ..default()
+        });
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+            Name::new(format!("texture-anim-flipbook/face-{index}")),
+            ChildOf(object),
+            // The two components the driver joins a face to its animation by: the
+            // Linden face index it addresses (`ALL_SIDES` or one of them) and the
+            // static texture entry it falls back to for every component the
+            // animation does not drive.
+            PrimFaceEntity {
+                face_id: PrimFaceId::new(u16::try_from(index).unwrap_or(0)),
+            },
+            FaceTextureDebug(TextureFace::new(TextureKey::from(Uuid::nil()))),
+        ));
+    }
+}
+
 /// [`SCENES`] `particles-fountain`: a live particle source.
 fn particles_fountain(
     _cx: SceneCx,
@@ -1723,4 +2528,803 @@ fn particles_fountain(
         Name::new("particles-fountain/emitter"),
         ChildOf(root),
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Surface flags: bump, shiny, glow, fullbright — and legacy materials.
+// ---------------------------------------------------------------------------
+
+/// The bump-code the [`bump_face`] scene embosses with: `BE_BRIGHTNESS`, which
+/// derives its normal map from the face's **own diffuse luminance**.
+///
+/// Deliberately not one of the fifteen standard emboss codes (woodgrain, gravel,
+/// siding, …). Those are correct and they are also a **fetch**: the code names a
+/// fixed Linden texture UUID the viewer pulls over the asset capability, which is
+/// exactly the grid this registry does not have. Brightness is the one bump source
+/// that is a pure function of a texture already in hand, so it is the one a scene
+/// can drive — the same reasoning that keeps [`tree`] untextured.
+const BUMP_BRIGHTNESS: u8 = 1;
+
+/// A [`TextureFace`] with the packed bump / shiny / fullbright byte and glow set.
+///
+/// The packing is the reference's `LLTextureEntry`: bump in the low 5 bits, shiny
+/// in bits 6–7, fullbright in bit 8. Written here rather than reached for through
+/// a setter because the fixture's intent *is* the packed byte — this is the value
+/// the wire carries, and `crate::bump`'s `apply_surface_flags` is what has to read
+/// it back out correctly.
+fn flagged_face(bump: u8, shiny: u8, fullbright: bool, glow: f32) -> TextureFace {
+    let packed = (bump & 0x1F) | ((shiny & 0x03) << 5) | if fullbright { 0x80 } else { 0x00 };
+    TextureFace {
+        bump_shiny_fullbright: packed,
+        glow,
+        ..TextureFace::new(TextureKey::from(Uuid::nil()))
+    }
+}
+
+/// [`SCENES`] `bump-face`: a row of prims carrying the four surface flags.
+///
+/// Four prims rather than one, because the four flags are not independent pictures
+/// of the same thing and a single prim carrying all of them would be a picture of
+/// none of them: a fullbright face is unlit, so a shiny highlight on it is
+/// invisible, and a glow ramp on top of that is unreadable.
+///
+/// The bump prim is the one with a check behind it. `crate::bump` generates its
+/// normal map from the diffuse's luminance and uploads it — and a normal map is a
+/// **texture**, so it is R22h's shape all over again: a map that clamps where the
+/// face repeats smears its edge texel across the surface. That is the fifth
+/// sampler-setting path `sampler_violations` was written for, and until this scene
+/// existed the check had never seen it.
+fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    let decoded = Arc::new(uv_reference_texture());
+    let diffuse = assets.images.add(to_bevy_image(&decoded));
+    // Through the real generator, which is where the sampler is set — building the
+    // normal map by hand here would be testing the fixture.
+    let normal = assets
+        .images
+        .add(generate_normal_map(&decoded, /* invert */ false));
+
+    for (offset, name, face, bumped) in [
+        (
+            -2.4_f32,
+            "bump",
+            flagged_face(BUMP_BRIGHTNESS, 0, false, 0.0),
+            true,
+        ),
+        // Shiny 3 = the reference's `SHINY_HIGH`.
+        (-0.8, "shiny", flagged_face(0, 3, false, 0.0), false),
+        (0.8, "glow", flagged_face(0, 0, false, 0.6), false),
+        (2.4, "fullbright", flagged_face(0, 0, true, 0.0), false),
+    ] {
+        let mut material = StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(diffuse.clone()),
+            perceptual_roughness: 0.9,
+            ..default()
+        };
+        // The single chokepoint every face path in the viewer funnels through
+        // (`crate::textures`' `face_material`), so this is the real mapping and not
+        // a re-statement of it.
+        apply_surface_flags(&mut material, &face);
+        if bumped {
+            material.normal_map_texture = Some(normal.clone());
+        }
+        let material = assets.materials.add(material);
+        let object = commands
+            .spawn((
+                Transform::from_xyz(offset, 0.0, 0.0),
+                Visibility::default(),
+                Name::new(format!("bump-face/{name}")),
+                ChildOf(root),
+            ))
+            .id();
+        let prim = tessellate(&base_shape(), cx.lod);
+        for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+            let mesh = assets.meshes.add(mesh);
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                Name::new(format!("bump-face/{name}/face-{index}")),
+                ChildOf(object),
+                FaceTextureDebug(face),
+            ));
+        }
+    }
+}
+
+/// [`SCENES`] `legacy-material-face`: a prim wearing a legacy (normal / specular)
+/// material.
+///
+/// The pre-PBR materials system, and still most of what is actually built in
+/// Second Life. Two prims, at the two ends of the glossiness ramp, because what
+/// `crate::legacy_materials` does with a legacy material is *map* it — glossiness
+/// onto `perceptual_roughness`, environment intensity onto `reflectance` — and a
+/// single sample cannot show a mapping.
+///
+/// The normal map is generated rather than fetched: the material's `normal_map` is
+/// a grid asset UUID and there is nothing here to fetch it from, so the scene
+/// supplies the decoded pixels and runs the real upload
+/// ([`build_linear_image`] — linear, not sRGB, as a normal map must be) that
+/// `apply_legacy_normal_maps` would have run. The scalars go through the real
+/// [`apply_legacy_scalars`].
+fn legacy_material_face(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let decoded = Arc::new(uv_reference_texture());
+    let diffuse = assets.images.add(to_bevy_image(&decoded));
+    let normal = assets.images.add(build_linear_image(&Arc::new(
+        // A normal map is not a colour image; the fixture's is the generated one,
+        // so the scene shows a plausible surface rather than a colour ramp read as
+        // normals.
+        normal_map_texture(&decoded),
+    )));
+
+    for (offset, name, glossiness, environment) in
+        [(-1.2_f32, "matte", 20_u8, 10_u8), (1.2, "glossy", 240, 200)]
+    {
+        let material = LegacyMaterial {
+            // Nil: there is no grid, so the fetch half is not what this exercises.
+            // `apply_legacy_scalars` reads it, and a nil id is also the in-world
+            // case of a material with only a specular set.
+            normal_map: TextureKey::from(Uuid::nil()),
+            normal_offset: (0.0, 0.0),
+            normal_repeat: (1.0, 1.0),
+            normal_rotation: 0.0,
+            specular_map: TextureKey::from(Uuid::nil()),
+            specular_offset: (0.0, 0.0),
+            specular_repeat: (1.0, 1.0),
+            specular_rotation: 0.0,
+            specular_color: [255; 4],
+            specular_exponent: glossiness,
+            environment_intensity: environment,
+            // `DIFFUSE_ALPHA_MODE_NONE`: an opaque face. Not the `0 = blend` the
+            // wire type's doc used to claim — the reference's enum is
+            // none / blend / mask / emissive.
+            diffuse_alpha_mode: 0,
+            alpha_mask_cutoff: 0,
+        };
+        let mut standard = StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(diffuse.clone()),
+            ..default()
+        };
+        apply_legacy_scalars(&mut standard, &material);
+        // What `apply_legacy_normal_maps` drops in once the fetch lands.
+        standard.normal_map_texture = Some(normal.clone());
+        let standard = assets.materials.add(standard);
+        let object = commands
+            .spawn((
+                Transform::from_xyz(offset, 0.0, 0.0),
+                Visibility::default(),
+                Name::new(format!("legacy-material-face/{name}")),
+                ChildOf(root),
+            ))
+            .id();
+        let prim = tessellate(&base_shape(), cx.lod);
+        for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+            let mesh = assets.meshes.add(mesh);
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(standard.clone()),
+                Transform::IDENTITY,
+                Name::new(format!("legacy-material-face/{name}/face-{index}")),
+                ChildOf(object),
+            ));
+        }
+    }
+}
+
+/// The [`uv_reference_texture`] as a tangent-space normal map: the same generator
+/// `crate::bump` runs, re-read as a [`DecodedTexture`] so it can go back through
+/// the legacy path's own upload.
+///
+/// A round trip on purpose. `crate::bump` owns "luminance → normals" and
+/// `crate::legacy_materials` owns "decoded normal map → linear `Image`"; in-world
+/// the second half's input is a fetched asset, which is what this stands in for.
+fn normal_map_texture(source: &Arc<DecodedTexture>) -> DecodedTexture {
+    let generated = generate_normal_map(source, false);
+    DecodedTexture {
+        width: generated.width(),
+        height: generated.height(),
+        components: 4,
+        discard_level: DiscardLevel::FULL,
+        pixels: Bytes::from(generated.data.unwrap_or_default()),
+        aux: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The tree impostor.
+// ---------------------------------------------------------------------------
+
+/// [`SCENES`] `tree-billboard`: the far-distance tree impostor.
+///
+/// The level of detail below [`TreeLod::COARSEST`]: at range the reference viewer
+/// stops drawing a tree's branches at all and draws two crossed alpha quads. The
+/// [`tree`] scene never reaches it — `tree_geometry` and `billboard_geometry` are
+/// different functions, and the LOD axis this harness sweeps is the *prim*
+/// tessellation level, not the tree one. So this is the only thing that renders
+/// the geometry every distant tree in a region is actually made of.
+fn tree_billboard(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let Some(species) = tree_species(0) else {
+        return;
+    };
+    let mesh = to_bevy_tree_mesh(&tree_billboard_geometry(species));
+    spawn_geometry(
+        "tree-billboard/impostor",
+        mesh,
+        matte(Color::srgb(0.35, 0.5, 0.3)),
+        Transform::IDENTITY,
+        root,
+        commands,
+        assets,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The atmosphere: four times of day, each with something to cast a shadow.
+// ---------------------------------------------------------------------------
+
+/// The transform that **undoes** the scene root's basis change, for the two viewer
+/// modules that build their geometry in **Bevy space** rather than Second Life's.
+///
+/// Every other fixture here writes plain Second Life metres and lets the scene root
+/// convert them once, because that is what the viewer does with everything a region
+/// sends it. `crate::sky` and `crate::water` are the exception, and in neither place
+/// is it an oversight: the atmosphere is not *in* the region. Both spawn at the
+/// **world root** with an identity transform and build directly in Bevy's frame —
+/// `build_star_mesh` picks "a random direction on the upper hemisphere (Bevy Y up)",
+/// the cloud dome's stacks are "Bevy Y-up: y0 is up", and the ocean is a `Plane3d`
+/// (XZ, `+Y` normal) placed at its height on Bevy **y**.
+///
+/// Under the scene root that geometry is rotated a **second** time, and the first
+/// version of these scenes was: the cloud cap ended up on the horizon and the star
+/// hemisphere on its side, both invisible from a camera looking up — while the sky
+/// dome and the water plane rendered anyway, *because a sphere and a plane are
+/// symmetric about the very rotation that was wrong*. Two scenes blank and two
+/// silently correct for the wrong reason is precisely the failure this registry
+/// exists to stop, so the asymmetry is written down here once rather than papered
+/// over in four fixtures.
+fn bevy_space() -> Transform {
+    Transform::from_rotation(sl_to_bevy_rotation().inverse())
+}
+
+/// One of the four times of day the sky scenes render.
+///
+/// **Sun and moon positions, not authored palettes**, and the difference matters
+/// enough to state. The reference viewer's Environment menu offers Sunrise / Midday
+/// / Sunset / Midnight as four *named settings assets* — `LLEnvironment`'s
+/// `KNOWN_SKY_SUNRISE` and friends are grid UUIDs — so their haze and cloud colours
+/// are content, fetched over a capability, and there is no grid here to fetch them
+/// from.
+///
+/// What is reachable is the thing those presets mostly *are*: where the sun is.
+/// Every scene here takes the legacy WindLight default frame — the sky the viewer
+/// renders on a region that advertises no environment capability — and moves its
+/// two bodies, which is what a day cycle does. The atmosphere shader and
+/// `calculate_light_settings` derive the sky colour and the light colour from the
+/// sun's elevation (a low sun's light travels further through the atmosphere, so it
+/// arrives redder), so the four look genuinely different despite sharing one
+/// palette.
+///
+/// The honest limit: **sunrise and sunset are mirror images** here, differing only
+/// in azimuth, where the reference's two differ in their authored haze as well.
+/// Closing that needs the legacy WindLight preset XML Firestorm ships in
+/// `app_settings/windlight/skies/` and a decoder for it, which is a task rather
+/// than a fixture.
+#[derive(Clone, Copy)]
+struct SkyTime {
+    /// How this time names its entities.
+    label: &'static str,
+    /// The sun's `(azimuth, altitude)`, in degrees.
+    sun: (f32, f32),
+    /// The moon's `(azimuth, altitude)`, in degrees.
+    moon: (f32, f32),
+}
+
+/// Where every sky scene's camera stands — **the same pose for all four**, and
+/// that is the whole point of them being four.
+///
+/// The first version gave sunrise and sunset mirrored cameras, on the reasoning
+/// that each should look toward its own sun. That is exactly wrong: mirroring the
+/// viewpoint along with the sun cancels the thing being compared, so the two scenes
+/// rendered *the same picture* — and, because the two poses sit 90° apart around the
+/// origin, the shadow appeared to swing by 90° between them rather than the 180° the
+/// sun actually moved. A fixed camera makes the four a comparison: the same box, the
+/// same ground, and only the light changing.
+const SKY_CAMERA: SceneCamera = SceneCamera {
+    position: Vec3::new(-10.0, -11.0, 5.0),
+    look_at: Vec3::new(0.0, 0.0, 1.5),
+};
+
+/// Sunrise: the sun a few degrees up, the setting moon opposite it.
+const SUNRISE: SkyTime = SkyTime {
+    label: "sky-sunrise",
+    sun: (0.0, 3.0),
+    moon: (180.0, 22.0),
+};
+
+/// Midday: the legacy WindLight default's own bodies — the sun 80° up, the moon
+/// offset from it so the two do not sit at opposite poles.
+const MIDDAY: SkyTime = SkyTime {
+    label: "sky-midday",
+    sun: (0.0, 80.0),
+    moon: (22.5, 102.5),
+};
+
+/// Sunset: the sun a few degrees up on the far side, the rising moon opposite.
+const SUNSET: SkyTime = SkyTime {
+    label: "sky-sunset",
+    sun: (180.0, 3.0),
+    moon: (0.0, 22.0),
+};
+
+/// Midnight: the sun well below the horizon, the moon high — the only time the
+/// night half of the sky stack runs at all.
+const MIDNIGHT: SkyTime = SkyTime {
+    label: "sky-midnight",
+    sun: (180.0, -40.0),
+    moon: (0.0, 65.0),
+};
+
+/// The legacy WindLight default sky with its two bodies moved to `time`.
+fn sky_settings_at(time: SkyTime) -> SkySettings {
+    let (sun_azimuth, sun_altitude) = time.sun;
+    let (moon_azimuth, moon_altitude) = time.moon;
+    SkySettings {
+        // The reference's own spherical-angle convention
+        // (`convert_azimuth_and_altitude_to_quat`), so a body lands where the
+        // reference would put it.
+        sun_rotation: azimuth_altitude_to_rotation(
+            sun_azimuth.to_radians(),
+            sun_altitude.to_radians(),
+        ),
+        moon_rotation: azimuth_altitude_to_rotation(
+            moon_azimuth.to_radians(),
+            moon_altitude.to_radians(),
+        ),
+        ..SkySettings::legacy_windlight_default("Default")
+    }
+}
+
+/// The sky scenes' shared placeholder texture.
+///
+/// Every material in the atmosphere stack samples a grid texture — the sky's
+/// rainbow and halo, the sun and moon discs, the cloud noise, the star bloom — and
+/// every one is a UUID this registry has no capability to fetch. So the scenes stand
+/// exactly where a real login's sky stands between `setup_sky` and the first
+/// `apply_sky_textures`: real geometry, real uniforms, and the placeholder the
+/// viewer seeds them with.
+fn sky_placeholder(assets: &mut SceneAssets<'_>) -> Handle<Image> {
+    assets.images.add(sky_placeholder_image())
+}
+
+/// Spawn one complete sky at `time`: the atmosphere, the clouds, the stars, the two
+/// discs, the light the sky yields — and a lit box on the ground for that light to
+/// throw a shadow of.
+///
+/// **One scene rather than four modules' worth**, because the sky is the registry's
+/// own argument for scenes over objects taken to its limit: a star field is
+/// meaningless at midday, a sun disc has nothing to be seen against without the dome
+/// behind it, and the whole point of a time of day is what it does to the light. The
+/// earlier split (`sky-dome`, `cloud-dome`, `star-field`) rendered each of those
+/// alone, where the only judgement available was "is a thing there".
+///
+/// The ground and the box are the half that makes the light checkable. Everything
+/// above the horizon is emissive — it renders whatever the light is doing — so a
+/// scene of nothing but sky cannot show that the sun is in the wrong place, that its
+/// colour is wrong, or that it casts no shadow at all. A box on a plane shows all
+/// three, and shows them differently at each of the four times.
+fn spawn_sky_at(
+    time: SkyTime,
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let sky = sky_settings_at(time);
+    // The viewer's real derivation, shared with `drive_sky` — see `ResolvedSky`.
+    let resolved = resolve_sky(&sky);
+    let label = time.label;
+    let placeholder = sky_placeholder(assets);
+
+    // The Bevy-space subtree. See `bevy_space`: everything the atmosphere builds is
+    // already in Bevy's frame, so it hangs here rather than under the scene root's
+    // Second Life one.
+    let space = commands
+        .spawn((
+            bevy_space(),
+            Visibility::default(),
+            Name::new(format!("{label}/atmosphere")),
+            ChildOf(root),
+        ))
+        .id();
+
+    // The atmosphere dome.
+    let sky_material = assets.sky_materials.add(SkyMaterial {
+        params: resolved.params,
+        rainbow: placeholder.clone(),
+        halo: placeholder.clone(),
+    });
+    commands.spawn((
+        Mesh3d(assets.meshes.add(Mesh::from(Sphere::new(SKY_DOME_RADIUS)))),
+        MeshMaterial3d(sky_material),
+        Transform::IDENTITY,
+        Name::new(format!("{label}/dome")),
+        ChildOf(space),
+        NotShadowCaster,
+        WorldScaleGeometry {
+            max_extent: SKY_DOME_RADIUS * 1.01,
+            reason: "the atmosphere is drawn as a 3 km dome around the viewpoint, not as an \
+                     object in the region",
+        },
+    ));
+
+    // The cloud layer, on its own far larger dome.
+    let cloud_material = assets.cloud_materials.add(CloudMaterial {
+        params: cloud_params(
+            &sky,
+            resolved.lightnorm,
+            resolved.sun_up_factor,
+            resolved.glow_factor,
+            // No scroll: `drive_clouds` accumulates it from the frame clock, and a
+            // scene that declared a still sky must not quietly drift.
+            Vec2::ZERO,
+        ),
+        cloud_noise: placeholder.clone(),
+        cloud_noise_next: placeholder.clone(),
+    });
+    commands.spawn((
+        Mesh3d(assets.meshes.add(build_cloud_dome_mesh())),
+        MeshMaterial3d(cloud_material),
+        Transform::IDENTITY,
+        Name::new(format!("{label}/clouds")),
+        ChildOf(space),
+        NotShadowCaster,
+        WorldScaleGeometry {
+            // The dome's `[0, π/8]` cap, whose rim reaches ~5.7 km horizontally —
+            // not the 15 km radius it is struck at, because the cap is shallow and
+            // its centre is lowered by the baked camera height.
+            max_extent: 6_000.0,
+            reason: "the cloud layer is a shallow cap of a 15 km dome around the viewpoint, so \
+                     its rim reaches far past any region even though it is only ~600 m overhead",
+        },
+    ));
+
+    // The stars. Present at every time of day, as they are in the viewer — the
+    // shader fades them out by the sky's `star_brightness`, so what makes them a
+    // night-only sight is the sky frame and not their absence.
+    let star_material = assets.star_materials.add(StarMaterial {
+        params: StarParams {
+            // The reference's `star_brightness / 500`, clamped: the same value
+            // `drive_stars` folds in, so the field fades with the time of day
+            // rather than being pinned visible.
+            custom_alpha: (sky.star_brightness / 500.0).min(1.0),
+            time: 0.0,
+            reserved: Vec2::ZERO,
+        },
+        diffuse: placeholder.clone(),
+    });
+    commands.spawn((
+        Mesh3d(assets.meshes.add(build_star_mesh())),
+        MeshMaterial3d(star_material),
+        Transform::IDENTITY,
+        Name::new(format!("{label}/stars")),
+        ChildOf(space),
+        NotShadowCaster,
+        WorldScaleGeometry {
+            max_extent: STAR_DOME_RADIUS * 1.01,
+            reason: "the stars are drawn on a 2.9 km dome around the viewpoint, just inside the \
+                     sky's",
+        },
+    ));
+
+    // The two discs, each shown only when its body is above the horizon — the
+    // reference's `getIsSunUp` / `getIsMoonUp`, which `drive_sun_moon_discs` applies
+    // every frame.
+    for (name, direction, up, moon_mode, scale, radius) in [
+        (
+            "sun-disc",
+            resolved.sun_dir,
+            resolved.sun_up,
+            0.0_f32,
+            sky.sun_scale,
+            SUN_DISK_RADIUS,
+        ),
+        (
+            "moon-disc",
+            resolved.moon_dir,
+            resolved.moon_up,
+            1.0,
+            sky.moon_scale,
+            MOON_DISK_RADIUS,
+        ),
+    ] {
+        let material = assets.sun_disc_materials.add(SunDiscMaterial {
+            params: SunDiscParams {
+                brightness: sky.moon_brightness,
+                blend_factor: 0.0,
+                moon_mode,
+                // The reference fades the moon near the horizon by its up
+                // component; the sun ignores it.
+                up_component: direction.y,
+            },
+            diffuse: placeholder.clone(),
+            alt_diffuse: placeholder.clone(),
+        });
+        commands.spawn((
+            Mesh3d(assets.meshes.add(Mesh::from(Rectangle::new(1.0, 1.0)))),
+            MeshMaterial3d(material),
+            // Through the viewer's real billboard placement. It centres the disc on
+            // the *camera* every frame; here the camera is a fixed pose a few metres
+            // from the origin and the disc is 2 km out, so standing it off the origin
+            // instead is a parallax error of a fraction of a percent — and a scene
+            // must not move with a camera a human is about to orbit.
+            disc_transform(Vec3::ZERO, direction, scale, radius),
+            Name::new(format!("{label}/{name}")),
+            ChildOf(space),
+            NotShadowCaster,
+            if up {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
+        ));
+    }
+
+    // The light the sky yields, with the viewer's own cascade configuration — this
+    // is what the ground and the box below are here to show.
+    commands.spawn((
+        DirectionalLight {
+            illuminance: SCENE_LIGHT_ILLUMINANCE,
+            shadow_maps_enabled: true,
+            color: Color::linear_rgb(
+                resolved.diffuse[0].clamp(0.0, 1.0),
+                resolved.diffuse[1].clamp(0.0, 1.0),
+                resolved.diffuse[2].clamp(0.0, 1.0),
+            ),
+            ..default()
+        },
+        shadow_cascades(),
+        // The light travels *away* from its body, so its forward is the negated
+        // light direction — as `drive_sky` aims it. A safe up when the body is near
+        // the zenith, where `looking_to`'s up degenerates.
+        Transform::default().looking_to(
+            Vec3::new(
+                -resolved.light_dir.x,
+                -resolved.light_dir.y,
+                -resolved.light_dir.z,
+            ),
+            if resolved.light_dir.y.abs() > 0.99 {
+                Vec3::Z
+            } else {
+                Vec3::Y
+            },
+        ),
+        Name::new(format!("{label}/light")),
+        ChildOf(space),
+    ));
+
+    // The ground, and something floating over it. Ordinary Second Life prims through
+    // the real tessellator, under the scene root's own basis — the sky is the
+    // exception here, not the region.
+    //
+    // The two sizes are set by the geometry of a shadow, and neither is arbitrary.
+    //
+    // The box **floats** rather than resting on the ground, because a resting box is
+    // exactly the case where the shadow cannot be seen: at midday the sun is 80° up,
+    // so the shadow lands directly beneath the box — which is where the box is. The
+    // same is true of the 65° moon. A metre of air under it puts the shadow on
+    // ground the camera can see.
+    //
+    // The ground is then **60 m** rather than a few, because floating the box is what
+    // makes a low sun's shadow long: the displacement is `height / tan(elevation)`,
+    // so the 3° sun of sunrise and sunset throws this box's shadow about **19 m** —
+    // clean off a 28 m plane, which is what the first version of this had. Sized to
+    // hold the longest shadow the four times of day actually cast.
+    spawn_prim(
+        &format!("{label}/ground"),
+        &base_shape(),
+        cx.lod,
+        Color::srgb(0.62, 0.60, 0.55),
+        Transform::from_xyz(0.0, 0.0, -0.15).with_scale(Vec3::new(60.0, 60.0, 0.3)),
+        root,
+        commands,
+        assets,
+    );
+    spawn_prim(
+        &format!("{label}/caster"),
+        &base_shape(),
+        cx.lod,
+        Color::srgb(0.80, 0.78, 0.74),
+        // A 2 m box centred 2 m up: its underside sits a metre clear of the ground.
+        Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(2.0)),
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `sky-sunrise`.
+fn sky_sunrise(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    spawn_sky_at(SUNRISE, cx, root, commands, assets);
+}
+
+/// [`SCENES`] `sky-midday`.
+fn sky_midday(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    spawn_sky_at(MIDDAY, cx, root, commands, assets);
+}
+
+/// [`SCENES`] `sky-sunset`.
+fn sky_sunset(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    spawn_sky_at(SUNSET, cx, root, commands, assets);
+}
+
+/// [`SCENES`] `sky-midnight`.
+fn sky_midnight(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
+    spawn_sky_at(MIDNIGHT, cx, root, commands, assets);
+}
+
+/// A tiling wave normal map: the wavelets a sea's surface *is*.
+///
+/// The scene needs this because the alternative is a scene of nothing. The viewer
+/// fetches its wave normal map from the grid (`DEFAULT_WATER_NORMAL`) and, until it
+/// arrives, wears [`flat_normal_image`](crate::water::flat_normal_image) — a **1×1**
+/// perfectly flat normal, whose own doc admits it renders "a fresnel-tinted flat
+/// sea". With no grid that placeholder is forever, and a flat normal gives the
+/// shader no slope anywhere: no fresnel variation, no specular, no wave. Which is
+/// exactly what the first version of this scene showed — a sheet of dark blue fog
+/// with no surface on it.
+///
+/// So the fixture generates one, per this registry's convention that fixtures are
+/// procedural. It is a **sum of three sine waves at integer wave numbers**, which is
+/// what makes it tile: an integer number of periods across the image means the left
+/// edge meets the right exactly, and the wave shader scrolls these texcoords far
+/// outside `[0, 1]`, so a seam would be visible over and over.
+///
+/// The normals are computed **analytically** — the derivative of a sum of sines is a
+/// sum of cosines — rather than by finite differences over a rendered height field.
+/// A generated map has an exact gradient available and no reason to approximate its
+/// own.
+fn water_wavelet_texture() -> DecodedTexture {
+    const SIZE: u32 = 128;
+    /// Each wave as `(u wave number, v wave number, amplitude)`. Integer wave
+    /// numbers so the field tiles; three of them at different angles so the surface
+    /// reads as water rather than as corduroy.
+    const WAVES: [(f32, f32, f32); 3] = [(3.0, 1.0, 0.030), (-2.0, 5.0, 0.016), (7.0, -4.0, 0.008)];
+
+    let extent = f32::from(u16::try_from(SIZE).unwrap_or(1));
+    let mut pixels: Vec<u8> = Vec::new();
+    for y in 0..SIZE {
+        let v = f32::from(u16::try_from(y).unwrap_or(0)) / extent;
+        for x in 0..SIZE {
+            let u = f32::from(u16::try_from(x).unwrap_or(0)) / extent;
+            // The height field's slope, summed per wave:
+            //   h(u,v) = Σ a·sin(τ(fu·u + fv·v))
+            //   ∂h/∂u  = Σ a·τ·fu·cos(τ(fu·u + fv·v))
+            let (mut slope_u, mut slope_v) = (0.0_f32, 0.0_f32);
+            for (wave_u, wave_v, amplitude) in WAVES {
+                let phase = TAU * (wave_u * u + wave_v * v);
+                let derivative = amplitude * TAU * phase.cos();
+                slope_u += derivative * wave_u;
+                slope_v += derivative * wave_v;
+            }
+            // The surface `z = h(u, v)` has tangent-space normal `(-∂h/∂u, -∂h/∂v, 1)`.
+            let length = (slope_u * slope_u + slope_v * slope_v + 1.0).sqrt();
+            for component in [-slope_u / length, -slope_v / length, 1.0 / length] {
+                // A tangent-space normal is stored biased into `[0, 1]`.
+                pixels.push(float_to_u8(((component * 0.5 + 0.5) * 255.0).round()));
+            }
+            pixels.push(255);
+        }
+    }
+    DecodedTexture {
+        width: SIZE,
+        height: SIZE,
+        components: 4,
+        discard_level: DiscardLevel::FULL,
+        pixels: Bytes::from(pixels),
+        aux: None,
+    }
+}
+
+/// Where the [`water_surface`] scene's camera stands, in Second Life metres.
+///
+/// A constant rather than a literal in two places: the water shader needs the
+/// camera position in its uniforms, and the registry needs it as the scene's pose.
+/// If the two drifted apart the sea would be lit for a viewpoint nobody is at —
+/// which is a wrong picture with no other symptom, since it still renders.
+const WATER_CAMERA: Vec3 = Vec3::new(0.0, -40.0, 26.0);
+
+/// [`SCENES`] `water-surface`: the endless ocean and a region's water plane.
+///
+/// Both, because they are two surfaces the viewer draws at almost the same height
+/// and the interesting question is what happens where they meet: the ocean is one
+/// 40 km plane kept under the camera, and each region gets its own 256 m plane at
+/// *its* water height, biased a hair above so it wins the depth test. A scene with
+/// only one of them could not show the bias mattering.
+///
+/// The camera position is **passed into the uniforms**, and it is not a detail:
+/// the water shader derives its fresnel and its wave normals from the view vector,
+/// so `default_water_params`' placeholder origin renders the sea as a flat sheet of
+/// fog colour — which is exactly what the first version of this scene showed. The
+/// viewer re-sets it every frame from the live camera (`drive_water`); a scene has
+/// a declared pose instead, so it uses that.
+fn water_surface(
+    _cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    // The real upload the fetched map goes through — linear, and repeating. See
+    // `water_wavelet_texture` for why the scene generates a map at all rather than
+    // wearing the viewer's flat placeholder.
+    let normal = assets
+        .images
+        .add(water_normal_image(&water_wavelet_texture()));
+    // Midday's sun, so the sea is lit from where the sky scenes put it.
+    let resolved = resolve_sky(&sky_settings_at(MIDDAY));
+    // The scene's own declared camera pose, in Bevy space — the water's frame.
+    let camera = sl_to_bevy_rotation().mul_vec3(WATER_CAMERA);
+    let material = assets.water_materials.add(WaterMaterial {
+        params: water_params(
+            &WaterSettings::legacy_default("Default"),
+            resolved.light_dir,
+            camera,
+            // The sky's own horizon colour would need the atmosphere resolved per
+            // pixel; `drive_water` uses a sampled reflection tint, and this is its
+            // pre-environment seed.
+            Vec3::new(0.5, 0.6, 0.8),
+            Vec3::from_array(resolved.diffuse),
+            0.0,
+        ),
+        // Both slots share the map, as `apply_water_textures` does until a day
+        // cycle drives a separate next frame and a blend between them.
+        normal_map: normal.clone(),
+        normal_map_next: normal,
+    });
+    // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
+    let space = commands
+        .spawn((
+            bevy_space(),
+            Visibility::default(),
+            Name::new("water-surface/sea"),
+            ChildOf(root),
+        ))
+        .id();
+    for (name, extent, height) in [
+        ("ocean", 20_000.0_f32, DEFAULT_WATER_HEIGHT),
+        // The region plane, a hair above the ocean — `crate::water`'s
+        // `OCEAN_DEPTH_BIAS`, the thing that stops the two z-fighting.
+        ("region-plane", 128.0, DEFAULT_WATER_HEIGHT + 0.02),
+    ] {
+        let mesh = assets.meshes.add(
+            Plane3d::default()
+                .mesh()
+                .size(2.0 * extent, 2.0 * extent)
+                .build(),
+        );
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(0.0, height, 0.0),
+            Name::new(format!("water-surface/{name}")),
+            ChildOf(space),
+            // The water never casts shadows, as the viewer has it.
+            NotShadowCaster,
+            WorldScaleGeometry {
+                max_extent: 21_000.0,
+                reason: "the endless ocean is one 40 km plane kept centred under the camera, \
+                         rather than a surface per region",
+            },
+        ));
+    }
 }

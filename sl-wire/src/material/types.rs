@@ -51,8 +51,9 @@ pub struct LegacyMaterial {
     pub specular_exponent: u8,
     /// The environment-reflection intensity.
     pub environment_intensity: u8,
-    /// The diffuse alpha-blending mode (`0` blend, `1` none, `2` emissive mask,
-    /// `3` alpha mask).
+    /// The diffuse alpha-blending mode: `0` none, `1` blend, `2` mask, `3`
+    /// emissive — the reference's `LLMaterial::eDiffuseAlphaMode`
+    /// (`indra/llprimitive/llmaterial.h`).
     pub diffuse_alpha_mode: u8,
     /// The alpha-mask cutoff (used when [`diffuse_alpha_mode`](Self::diffuse_alpha_mode)
     /// is the alpha-mask mode).

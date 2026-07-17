@@ -417,7 +417,7 @@ pub use editing::{
 };
 pub use environment::{
     CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentSettings, Glow, Scale,
-    SkySettings, WaterSettings,
+    SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
 pub use event::Event;
 pub use generic::{GenericMessage, GenericStreamingMessage};

@@ -59,22 +59,23 @@
 use bevy::camera::{Exposure, Hdr};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
-use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
 use bevy::window::PresentMode;
 use clap::Parser;
 
-use sl_client_bevy::PrimLod;
+use sl_client_bevy::{
+    CloudMaterialPlugin, PrimLod, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
+    TerrainMaterialPlugin, WaterMaterialPlugin,
+};
 use tracing::{error, info};
 
 use crate::camera::FlyCamera;
-use crate::particles::{ParticleSim, drive_particles, setup_particles};
 use crate::probes::ReflectionProbePlugin;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SCENES, SamplerMayClamp, SceneAssets, SceneCx, SceneLighting,
-    SymmetricAbout, UvsInUnitSquare, scene_root, scene_root_transform,
+    SceneRuntimePlugin, SymmetricAbout, UvsInUnitSquare, WorldScaleGeometry, scene_root,
+    scene_root_transform,
 };
-use crate::textures::TextureManager;
 
 /// The command-line options for the render gallery.
 ///
@@ -318,6 +319,7 @@ type DeclaredData = (
     Option<&'static SymmetricAbout>,
     Option<&'static UvsInUnitSquare>,
     Option<&'static SamplerMayClamp>,
+    Option<&'static WorldScaleGeometry>,
 );
 
 /// The filter that keeps [`report_declarations`] to entities that declare
@@ -327,6 +329,7 @@ type HasDeclaration = Or<(
     With<SymmetricAbout>,
     With<UvsInUnitSquare>,
     With<SamplerMayClamp>,
+    With<WorldScaleGeometry>,
 )>;
 
 /// Run the gallery: a window, the viewer's real converters, and every registered
@@ -382,15 +385,28 @@ pub fn run() {
         })
         .insert_resource(ClearColor(BACKGROUND))
         .insert_resource(DirectionalLightShadowMap::default())
-        // The viewer's own time-varying systems, exactly as `crate::render_test`
-        // installs them. Without these a dynamic scene renders **nothing**: its
-        // emitter spawns and no cloud is ever built, which is what the particle
-        // fountain showed the first time it was looked at — an empty screen that
-        // no check could complain about, because the scene was fine and the
-        // gallery was not running it. `TextureManager` sits at its `Default`: no
-        // capability URL, so it never fetches.
-        .init_resource::<ParticleSim>()
-        .init_resource::<TextureManager>()
+        // The viewer's real custom-material pipelines: terrain splats, the
+        // atmosphere, the sun disc, the clouds, the stars and the water each render
+        // through their own shader, so without these the scenes for them draw
+        // nothing at all. Added **before** `SceneRuntimePlugin`, though it is
+        // written not to care: each registers its own `Assets` collection, and the
+        // runtime plugin only fills in the ones nothing has.
+        .add_plugins((
+            TerrainMaterialPlugin,
+            SkyMaterialPlugin,
+            SunDiscMaterialPlugin,
+            CloudMaterialPlugin,
+            StarMaterialPlugin,
+            WaterMaterialPlugin,
+        ))
+        // The viewer's own time-varying systems and scene asset collections, the
+        // same ones `crate::render_test` gets. Without a scene's driver the scene
+        // renders **nothing**: its emitter spawns and no cloud is ever built, which
+        // is what the particle fountain showed the first time it was looked at — an
+        // empty screen that no check could complain about, because the scene was
+        // fine and the gallery was not running it. That is why the list is a plugin
+        // now rather than a copy here.
+        .add_plugins(SceneRuntimePlugin)
         // The viewer's real reflection probes (P33): a capture rig that renders
         // the scene into a cubemap and binds it to the view as the default probe,
         // plus the per-object local probes. Entirely session-free — it captures
@@ -399,7 +415,7 @@ pub fn run() {
         // `metallic-sphere-among-prims` reflects its neighbours for real.
         .add_plugins(ReflectionProbePlugin)
         .init_resource::<Orbit>()
-        .add_systems(Startup, (setup_stage, setup_chrome, setup_particles))
+        .add_systems(Startup, (setup_stage, setup_chrome))
         .add_systems(
             Update,
             (
@@ -408,7 +424,6 @@ pub fn run() {
                 // this frame's arrows move rather than the previous scene's.
                 drive_orbit.after(drive_keys),
                 hold_stage_ambient,
-                drive_particles,
                 report_declarations,
                 quit_on_escape,
             ),
@@ -528,7 +543,7 @@ fn report_declarations(
 ) {
     let mut claims: Vec<String> = scenes
         .iter()
-        .map(|(name, bounds, symmetry, atlas, clamp)| {
+        .map(|(name, bounds, symmetry, atlas, clamp, world_scale)| {
             let mut parts: Vec<String> = Vec::new();
             if let Some(bounds) = bounds {
                 parts.push(format!(
@@ -547,6 +562,9 @@ fn report_declarations(
             }
             if let Some(clamp) = clamp {
                 parts.push(format!("sampler may clamp ({})", clamp.reason));
+            }
+            if let Some(scale) = world_scale {
+                parts.push(format!("reaches {} m ({})", scale.max_extent, scale.reason));
             }
             format!("{name}: {}", parts.join(", "))
         })
@@ -644,10 +662,7 @@ fn drive_keys(
     mut stage: Query<&mut Visibility, With<StageLight>>,
     mut orbit: ResMut<Orbit>,
     mut time: ResMut<Time<Virtual>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut inverse_bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
+    mut assets: SceneAssets,
     mut started: Local<bool>,
 ) {
     if keys.just_pressed(PAUSE_KEY) {
@@ -682,12 +697,6 @@ fn drive_keys(
     if !changed {
         return;
     }
-    let mut assets = SceneAssets {
-        meshes: &mut meshes,
-        materials: &mut materials,
-        images: &mut images,
-        inverse_bindposes: &mut inverse_bindposes,
-    };
     rebuild(
         *cell,
         &mut commands,

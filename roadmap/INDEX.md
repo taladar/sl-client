@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 82 |
 | blocked | 112 |
 | in-progress | 4 |
-| bugs | 9 |
-| done | 486 |
+| bugs | 10 |
+| done | 487 |
 | deferred | 6 |
 | wont-do | 1 |
-| **total** | **701** |
+| **total** | **703** |
 
 ## ideas (1)
 
@@ -100,6 +100,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-debug`](ready/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-render-animation-coverage`](ready/viewer-render-animation-coverage.md)
+  — Render-scene coverage — the animated avatar paths, which need their decode
+  split from their transport (blocked by `viewer-render-scene-coverage` (done))
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
@@ -109,9 +112,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
   readback tier — assert on the pixels, headlessly (blocked by
   `viewer-render-test-harness` (done))
-- [`viewer-render-scene-coverage`](ready/viewer-render-scene-coverage.md) —
-  Render-scene coverage — a scene per render path the viewer already has
-  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
@@ -546,7 +546,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (9)
+## bugs (10)
 
 ### protocol
 
@@ -565,6 +565,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar stands too low — feet sink into the ground
 - [`viewer-r25`](bugs/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
   — Prims that should be transparent render opaque
+- [`viewer-r27`](bugs/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
+  Midnight is almost as bright as midday — the moon is a half-strength sun
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -578,7 +580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (486)
+## done (487)
 
 ### protocol
 
@@ -968,6 +970,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
+  Render-scene coverage — a scene per render path the viewer already has
+  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
   test harness — render one object without a grid, assert automatically, catch
   regressions

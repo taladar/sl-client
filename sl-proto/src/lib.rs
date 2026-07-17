@@ -128,9 +128,9 @@ pub use types::{
     TeleportFlags, TerraformArea, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
     TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError, TransferStatus, Transmit,
     UpdatableAssetType, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, WaterSettings, Wearable, WearableType, avatar_texture, global_to_handle,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    texture_anim_mode,
+    ViewerEffectType, WaterSettings, Wearable, WearableType, avatar_texture,
+    azimuth_altitude_to_rotation, global_to_handle, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, particle_pattern, pcode, texture_anim_mode,
 };
 
 // Re-export `Uuid`: it appears in public types (chat/IM ids) and command APIs,
