@@ -41,6 +41,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, SlIdentity};
 
 use crate::avatars::AvatarState;
+use crate::camera::{CameraAim, CameraMode};
+use crate::input_action::Action;
 use crate::physics::AvatarMotion;
 use crate::terrain::TerrainState;
 
@@ -139,27 +141,59 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
     }
 }
 
-/// Read the movement keys each frame and advertise the avatar's intent to the
-/// simulator: the [`ControlFlags`] for the held walk / fly keys (emitted only when
-/// they change) and, while turning, the body rotation the walk direction follows
-/// (throttled). The simulator moves the avatar and streams it back for the P31.4
-/// dead-reckoner to extrapolate.
+/// Read the movement **actions** ([`crate::input_action`]) each frame and advertise
+/// the avatar's intent to the simulator: the [`ControlFlags`] for the held walk /
+/// fly actions (emitted only when they change) and, while turning, the body
+/// rotation the walk direction follows (throttled). The simulator moves the avatar
+/// and streams it back for the P31.4 dead-reckoner to extrapolate.
+///
+/// The actions mean different things by camera mode, deliberately close to the
+/// reference so scripted vehicles behave:
+///
+/// - **Flycam** — the actions drive the *camera* not the avatar, so this stops the
+///   body (once) and bows out.
+/// - **Seated on a vehicle** — left / right send the **yaw** control bits that
+///   *steer the vehicle*, never turning the avatar body. Crucially this holds
+///   through a region / corner crossing: our session keeps the seat across the
+///   border (unlike the reference, whose transient unseat there is what flips the
+///   keys back to avatar-turn and orbits the camera), so [`SlAgentParcel::seated_on`]
+///   stays set and the steering never reverts mid-crossing.
+/// - **Mouselook** — the mouse turns the body (its heading follows
+///   [`CameraAim`]), so left / right *strafe* instead.
+/// - **Third person** — left / right turn the avatar heading, the classic default.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system reading time, keyboard, identity, avatars, terrain, the fly permission, and the avatar motions plus the controls state and command writer"
+    reason = "a Bevy system reading time, the actions, the camera mode / aim, identity, avatars, \
+              terrain, the fly permission + seat, and the avatar motions plus the controls state \
+              and command writer"
 )]
 pub(crate) fn drive_avatar_controls(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    actions: Res<ButtonInput<Action>>,
+    mode: Res<CameraMode>,
+    camera_aim: Res<CameraAim>,
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     terrain: Res<TerrainState>,
-    fly_rights: Res<SlAgentParcel>,
+    agent: Res<SlAgentParcel>,
     motions: Query<&AvatarMotion>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
     let dt = time.delta_secs();
+
+    // In flycam the movement actions drive the camera (`crate::camera::drive_flycam`),
+    // not the avatar. Stop the body once on entering flycam, then leave it alone.
+    if *mode == CameraMode::Flycam {
+        if controls.last_controls != ControlFlags::empty() {
+            writer.write(SlCommand(Command::SetControls(ControlFlags::empty())));
+            controls.last_controls = ControlFlags::empty();
+        }
+        return;
+    }
+
+    let seated = agent.seated_on.is_some();
+    let mouselook = *mode == CameraMode::Mouselook;
 
     // The own avatar's authoritative motion (facing, vertical speed, ground floor),
     // used to seed the walk heading and to auto-stop flying on landing.
@@ -177,88 +211,119 @@ pub(crate) fn drive_avatar_controls(
         controls.seeded = true;
     }
 
-    // F toggles flying.
-    if keyboard.just_pressed(KeyCode::KeyF) {
-        controls.flying = !controls.flying;
-    }
+    let ascend = actions.pressed(Action::MoveUp);
+    let descend = actions.pressed(Action::MoveDown);
 
-    // Auto-take-off (P31.16): holding the ascend key while standing engages flight
-    // once held past the threshold, if flying is permitted here (region + parcel,
-    // resolved by the session). A quick tap does not take off (that is a jump);
-    // holding the ascend key also keeps the P31.11 auto-land below from firing, so
-    // a take-off is not immediately undone. The manual F toggle still works.
-    if !controls.flying && keyboard.pressed(KeyCode::PageUp) {
-        controls.ascend_hold_secs += dt;
-    } else {
-        controls.ascend_hold_secs = 0.0;
-    }
-    let grounded =
-        own_motion.is_none_or(|motion| motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M));
-    if should_take_off(
-        controls.flying,
-        grounded,
-        controls.ascend_hold_secs,
-        fly_rights.can_fly,
-    ) {
-        controls.flying = true;
-        controls.ascend_hold_secs = 0.0;
-    }
+    // Flight is an avatar concern, not a vehicle one: skip the whole fly toggle /
+    // take-off / auto-land machinery while seated (the vehicle owns vertical motion
+    // via the up/down control bits below).
+    if !seated {
+        // The fly action toggles flying.
+        if actions.just_pressed(Action::ToggleFly) {
+            controls.flying = !controls.flying;
+        }
 
-    // Auto-stop flying on landing (P31.11): descending onto (or already at) the
-    // ground with no ascend key held drops the fly intent — clearing it here means
-    // `FLY` is left out of the flag set assembled below, so the resulting
-    // `SetControls` advertises the landed intent and the P31.6 locomotion fallback
-    // leaves the fly / hover states. The manual F toggle still takes off again.
-    if let Some(motion) = own_motion
-        && should_auto_stop_flying(
+        // Auto-take-off (P31.16): holding ascend while standing engages flight once
+        // held past the threshold, if flying is permitted here. A quick tap does not
+        // (that is a jump); the hold also keeps the P31.11 auto-land from firing.
+        if !controls.flying && ascend {
+            controls.ascend_hold_secs += dt;
+        } else {
+            controls.ascend_hold_secs = 0.0;
+        }
+        let grounded = own_motion
+            .is_none_or(|motion| motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M));
+        if should_take_off(
             controls.flying,
-            keyboard.pressed(KeyCode::PageUp),
-            keyboard.pressed(KeyCode::PageDown),
-            motion.vertical_speed(),
-            motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M),
-        )
-    {
+            grounded,
+            controls.ascend_hold_secs,
+            agent.can_fly,
+        ) {
+            controls.flying = true;
+            controls.ascend_hold_secs = 0.0;
+        }
+
+        // Auto-stop flying on landing (P31.11): descending onto the ground with no
+        // ascend held drops the fly intent so the avatar stands rather than hovering.
+        if let Some(motion) = own_motion
+            && should_auto_stop_flying(
+                controls.flying,
+                ascend,
+                descend,
+                motion.vertical_speed(),
+                motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M),
+            )
+        {
+            controls.flying = false;
+        }
+    } else {
+        // A seated avatar is never flying; keep the state tidy so standing up later
+        // starts from a clean slate.
         controls.flying = false;
+        controls.ascend_hold_secs = 0.0;
     }
 
-    // Assemble the control-flag set from the currently-held keys (releasing a key
-    // simply drops its flag — no explicit stop).
+    // Assemble the control-flag set from the currently-held actions (releasing an
+    // action simply drops its flag — no explicit stop).
     let mut flags = ControlFlags::empty();
     if controls.flying {
         flags = flags.union(ControlFlags::FLY);
     }
-    let forward = keyboard.pressed(KeyCode::ArrowUp);
-    let backward = keyboard.pressed(KeyCode::ArrowDown);
+    let forward = actions.pressed(Action::MoveForward);
+    let backward = actions.pressed(Action::MoveBackward);
     if forward {
         flags = flags.union(ControlFlags::AT_POS);
     }
     if backward {
         flags = flags.union(ControlFlags::AT_NEG);
     }
-    let running = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
-    if running && (forward || backward) {
+    if actions.pressed(Action::Run) && (forward || backward) {
         flags = flags.union(ControlFlags::FAST_AT);
     }
-    if keyboard.pressed(KeyCode::PageUp) {
+    if ascend {
         flags = flags.union(ControlFlags::UP_POS);
     }
-    if keyboard.pressed(KeyCode::PageDown) {
+    if descend {
         flags = flags.union(ControlFlags::UP_NEG);
     }
 
-    // Turn the heading with the ← / → keys.
+    // Left / right: steer a vehicle, strafe in mouselook, or turn the avatar in
+    // third person. `turning` marks that a body rotation should be advertised.
+    let left = actions.pressed(Action::MoveLeft);
+    let right = actions.pressed(Action::MoveRight);
     let mut turning = false;
-    if keyboard.pressed(KeyCode::ArrowLeft) {
-        controls.yaw += TURN_RATE_RAD_PER_SEC * dt;
+    if seated {
+        // Steer the vehicle with the yaw bits; never turn the avatar body (which is
+        // what the reference bug does after a laggy crossing).
+        if left {
+            flags = flags.union(ControlFlags::YAW_POS);
+        }
+        if right {
+            flags = flags.union(ControlFlags::YAW_NEG);
+        }
+    } else if mouselook {
+        // The mouse turns the body (heading follows the camera aim); left / right
+        // strafe.
+        if left {
+            flags = flags.union(ControlFlags::LEFT_POS);
+        }
+        if right {
+            flags = flags.union(ControlFlags::LEFT_NEG);
+        }
+        controls.yaw = camera_aim.sl_yaw;
         turning = true;
-    }
-    if keyboard.pressed(KeyCode::ArrowRight) {
-        controls.yaw -= TURN_RATE_RAD_PER_SEC * dt;
-        turning = true;
+    } else {
+        if left {
+            controls.yaw += TURN_RATE_RAD_PER_SEC * dt;
+            turning = true;
+        }
+        if right {
+            controls.yaw -= TURN_RATE_RAD_PER_SEC * dt;
+            turning = true;
+        }
     }
     if turning {
-        // Keep the heading in a bounded range so a long session cannot accumulate a
-        // huge angle (the quaternion is unaffected, but this keeps `yaw` tidy).
+        // Keep the heading bounded so a long session cannot accumulate a huge angle.
         controls.yaw = wrap_angle(controls.yaw);
     }
 
@@ -270,23 +335,26 @@ pub(crate) fn drive_avatar_controls(
         controls.last_controls = flags;
     }
 
-    // Advertise the body facing: once to seed it, when a walk starts (so it moves in
-    // the current heading), and throttled while turning.
-    controls.rotation_send_accum += dt;
-    let starting_walk = controls_changed
-        && (flags.contains(ControlFlags::AT_POS) || flags.contains(ControlFlags::AT_NEG));
-    let send_rotation = controls.seeded
-        && (!controls.sent_initial_rotation
-            || starting_walk
-            || (turning && controls.rotation_send_accum >= ROTATION_SEND_INTERVAL_SECS));
-    if send_rotation {
-        let body = rotation_from_yaw(controls.yaw);
-        writer.write(SlCommand(Command::SetRotation {
-            body: body.clone(),
-            head: body,
-        }));
-        controls.sent_initial_rotation = true;
-        controls.rotation_send_accum = 0.0;
+    // Advertise the body facing — but never while seated: the vehicle owns the
+    // avatar's orientation, and sending a body rotation would fight it (the other
+    // half of the reference's arrow-key-orbits-the-vehicle bug).
+    if !seated {
+        controls.rotation_send_accum += dt;
+        let starting_walk = controls_changed
+            && (flags.contains(ControlFlags::AT_POS) || flags.contains(ControlFlags::AT_NEG));
+        let send_rotation = controls.seeded
+            && (!controls.sent_initial_rotation
+                || starting_walk
+                || (turning && controls.rotation_send_accum >= ROTATION_SEND_INTERVAL_SECS));
+        if send_rotation {
+            let body = rotation_from_yaw(controls.yaw);
+            writer.write(SlCommand(Command::SetRotation {
+                body: body.clone(),
+                head: body,
+            }));
+            controls.sent_initial_rotation = true;
+            controls.rotation_send_accum = 0.0;
+        }
     }
 }
 

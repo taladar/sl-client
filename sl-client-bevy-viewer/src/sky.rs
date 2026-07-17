@@ -60,7 +60,7 @@ use sl_client_bevy::{
     to_bevy_image,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::render_priority::SKY_BOOST_PRIORITY;
@@ -510,7 +510,7 @@ pub(crate) fn setup_sky(
     reason = "a Bevy query filter selecting both dome markers so they follow the camera together"
 )]
 pub(crate) fn center_sky_on_camera(
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut domes: Query<&mut Transform, Or<(With<SkyDome>, With<CloudDome>)>>,
 ) {
     let Ok(camera) = camera.single() else {
@@ -526,7 +526,7 @@ pub(crate) fn center_sky_on_camera(
 /// directional light, and the ambient light, and (re)request the sky's rainbow /
 /// halo overlay textures boosted.
 pub(crate) fn drive_sky(
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
     mut materials: ResMut<Assets<SkyMaterial>>,
@@ -707,7 +707,7 @@ pub(crate) fn setup_sun_moon_discs(
     reason = "two Bevy queries whose disjointness filters keep the sun / moon discs distinct"
 )]
 pub(crate) fn drive_sun_moon_discs(
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<DiscState>,
     mut materials: ResMut<Assets<SunDiscMaterial>>,
@@ -845,7 +845,7 @@ pub(crate) fn setup_clouds(
 /// boosted.
 pub(crate) fn drive_clouds(
     time: Res<Time>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<CloudState>,
     mut materials: ResMut<Assets<CloudMaterial>>,
@@ -1011,7 +1011,7 @@ pub(crate) fn setup_stars(
 /// the field, and (re)request the sky's bloom texture boosted.
 pub(crate) fn drive_stars(
     time: Res<Time>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<StarState>,
     mut materials: ResMut<Assets<StarMaterial>>,

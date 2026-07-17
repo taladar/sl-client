@@ -51,7 +51,7 @@ use sl_client_bevy::{
 };
 use sl_terrain::TerrainComposition;
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::textures::{TextureDecoded, TextureManager};
 
@@ -170,12 +170,20 @@ impl TerrainState {
 
 /// Keep the scene origin on the root region: when a border crossing promotes a
 /// neighbour to root, re-centre every terrain patch on the new region and shift
-/// the fly-camera by the same delta, so coordinates stay small while the world
-/// stays visually continuous.
+/// the camera by the same delta, so coordinates stay small while the world stays
+/// visually continuous.
+///
+/// The flycam holds an absolute position, so it is *translated* by the shift (and
+/// only translated — never rotated — so a crossing cannot yaw the view). The
+/// third-person / mouselook camera recomputes its position from the avatar each
+/// frame, so shifting its transform would be undone immediately; instead its
+/// smoothing is **resnapped** ([`CameraRig::resnap`](crate::camera::CameraRig)) so
+/// the eased pose does not glide across the 256 m rebase (the reference's
+/// sideways-after-crossing glitch).
 pub(crate) fn recenter_terrain(
     identity: Res<SlIdentity>,
     mut state: ResMut<TerrainState>,
-    mut cameras: Query<&mut Transform, With<FlyCamera>>,
+    mut cameras: Query<(&mut Transform, &mut crate::camera::CameraRig), With<ViewerCamera>>,
     mut commands: Commands,
 ) {
     let Some(root) = identity.region_handle else {
@@ -194,12 +202,15 @@ pub(crate) fn recenter_terrain(
                 z: 0.0,
             };
             let shift = sl_to_bevy_vec(&delta);
-            for mut transform in &mut cameras {
+            for (mut transform, mut rig) in &mut cameras {
                 // Per-component (not the `glam` vector operator) to stay clear
                 // of the workspace `arithmetic_side_effects` lint.
                 transform.translation.x -= shift.x;
                 transform.translation.y -= shift.y;
                 transform.translation.z -= shift.z;
+                // Snap the smoothing so the avatar-derived pose does not glide
+                // across the shift next frame.
+                rig.resnap();
             }
             state.origin = Some(root);
             replace_all_transforms(&state, &mut commands);

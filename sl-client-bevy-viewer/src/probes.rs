@@ -107,7 +107,7 @@
 //! [`apply_object`]: crate::objects
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
@@ -395,7 +395,7 @@ fn probe_intensity(exposure: &Exposure) -> f32 {
 /// each bounce is attenuated by the surfaces' albedo.
 fn light_capture_cameras(
     mut commands: Commands,
-    view: Query<&EnvironmentMapLight, With<FlyCamera>>,
+    view: Query<&EnvironmentMapLight, With<ViewerCamera>>,
     cameras: Query<(Entity, Option<&EnvironmentMapLight>), With<ProbeCaptureCamera>>,
 ) {
     let Ok(environment) = view.single() else {
@@ -426,7 +426,7 @@ fn light_capture_cameras(
 /// Only entities whose intensity actually differs are touched, so a settled scene does
 /// no change-detection churn.
 fn calibrate_probe_intensity(
-    camera: Query<&Exposure, With<FlyCamera>>,
+    camera: Query<&Exposure, With<ViewerCamera>>,
     mut probes: Query<(
         &mut GeneratedEnvironmentMapLight,
         Option<&mut EnvironmentMapLight>,
@@ -752,7 +752,7 @@ fn setup_probe_rigs(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 fn install_global_probe(
     mut commands: Commands,
     mut probes: ResMut<ProbeRigs>,
-    camera: Query<(Entity, &Exposure), With<FlyCamera>>,
+    camera: Query<(Entity, &Exposure), With<ViewerCamera>>,
 ) {
     if probes.installed {
         return;
@@ -885,7 +885,7 @@ fn drive_local_probes(
     mut rigs: ResMut<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
     mut copies: ResMut<ProbeCubeCopies>,
-    camera: Query<(&GlobalTransform, &Exposure), With<FlyCamera>>,
+    camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
 ) {
@@ -1054,7 +1054,7 @@ fn rig_capture_pose(
 fn drive_probe_captures(
     rigs: Res<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut cameras: Query<(
         &ProbeCaptureCamera,
@@ -1174,7 +1174,7 @@ struct ProbeTestSphere {
 fn spawn_probe_test_sphere(
     mut commands: Commands,
     mut state: ResMut<ProbeTestSphere>,
-    camera: Query<Entity, With<FlyCamera>>,
+    camera: Query<Entity, With<ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

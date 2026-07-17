@@ -80,7 +80,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::window::{CursorGrabMode, CursorOptions};
 
-use crate::hud_pick::HudCursorMode;
+use crate::camera::CameraMode;
 
 /// The key that hands the keyboard back to the world from a focused UI.
 const RELEASE_FOCUS_KEY: KeyCode = KeyCode::Escape;
@@ -152,7 +152,7 @@ impl InputContext {
 /// [`TextEntry`]: InputContext::TextEntry
 /// [`UiWidget`]: InputContext::UiWidget
 /// [`World`]: InputContext::World
-fn compute_input_context(
+pub(crate) fn compute_input_context(
     focus: Res<InputFocus>,
     ui_nodes: Query<Has<EditableText>, With<Node>>,
     mut context: ResMut<InputContext>,
@@ -193,23 +193,32 @@ fn release_ui_focus_on_escape(
     }
 }
 
-/// Drive the window's cursor grab from the context: the world takes the cursor,
-/// the UI releases it.
+/// Drive the window's cursor grab from the camera mode: Second Life captures the
+/// pointer in **mouselook and nowhere else**, so the grab keys off
+/// [`CameraMode::Mouselook`], not the input context.
 ///
-/// Two things override "the world takes it": the free-cursor toggle
-/// (`crate::hud_pick`'s `H`), which is a deliberate request for a pointer while
-/// still in the world, and [`CursorGrabAllowed`], which is false for an
-/// unattended screenshot run.
+/// In third person and flycam the pointer is free — you click the world (and the
+/// HUD) with it, exactly as `crate::hud_pick` now expects — which is why the old
+/// `H` free-cursor toggle is gone: it only existed to escape a grab that no longer
+/// happens outside mouselook. The grab still requires the world to own input (a
+/// focused UI frees it even in mouselook) and [`CursorGrabAllowed`] (false for an
+/// unattended screenshot run).
 fn drive_cursor_grab(
     context: Res<InputContext>,
-    hud_cursor: Res<HudCursorMode>,
+    mode: Res<CameraMode>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     allowed: Res<CursorGrabAllowed>,
     mut cursors: Query<&mut CursorOptions>,
 ) {
-    if !context.is_changed() && !hud_cursor.is_changed() && !allowed.is_changed() {
-        return;
-    }
-    let grab = allowed.0 && context.is_world() && !hud_cursor.active;
+    let world = context.is_world();
+    // The reference hides / captures the cursor while an Alt-held left-drag orbits
+    // the third-person camera, so the drag is not bounded by the screen edge and
+    // the pointer does not slide across the scene.
+    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    let alt_dragging =
+        world && *mode == CameraMode::ThirdPerson && alt && mouse.pressed(MouseButton::Left);
+    let grab = allowed.0 && world && (*mode == CameraMode::Mouselook || alt_dragging);
     let (grab_mode, visible) = if grab {
         (CursorGrabMode::Locked, false)
     } else {
@@ -231,7 +240,7 @@ mod tests {
         CursorGrabAllowed, InputContext, InputContextPlugin, compute_input_context,
         drive_cursor_grab, release_ui_focus_on_escape, world_has_keyboard,
     };
-    use crate::hud_pick::HudCursorMode;
+    use crate::camera::CameraMode;
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use bevy::text::EditableText;
@@ -365,24 +374,82 @@ mod tests {
         Ok(())
     }
 
-    /// The grab follows the context — and yields to both of its overrides. The
-    /// screenshot case is the one with teeth: a re-grab there hijacks the
-    /// desktop pointer of an unattended run.
+    /// The grab keys off **mouselook** (Second Life captures the pointer there and
+    /// nowhere else) plus a third-person **Alt-drag** (the camera orbit hides the
+    /// cursor while the button is held) — and still yields to a focused UI and to
+    /// the screenshot override. Third person and flycam otherwise leave the pointer
+    /// free to click with.
     #[test]
-    fn the_cursor_grab_follows_the_context_and_its_overrides() -> Result<(), TestError> {
-        for (context, hud_cursor, allowed, want) in [
-            (InputContext::World, false, true, CursorGrabMode::Locked),
-            (InputContext::UiWidget, false, true, CursorGrabMode::None),
-            (InputContext::TextEntry, false, true, CursorGrabMode::None),
-            // The free-cursor toggle: still the world, but the user asked for a
-            // pointer.
-            (InputContext::World, true, true, CursorGrabMode::None),
-            // Screenshot mode: never grab, whatever the context says.
-            (InputContext::World, false, false, CursorGrabMode::None),
+    fn the_cursor_grab_follows_the_camera_mode() -> Result<(), TestError> {
+        // (context, mode, alt+left held, allowed, expected grab)
+        for (context, mode, alt_drag, allowed, want) in [
+            // Mouselook + world + allowed → grab.
+            (
+                InputContext::World,
+                CameraMode::Mouselook,
+                false,
+                true,
+                CursorGrabMode::Locked,
+            ),
+            // Third person / flycam: the pointer is free by default.
+            (
+                InputContext::World,
+                CameraMode::ThirdPerson,
+                false,
+                true,
+                CursorGrabMode::None,
+            ),
+            (
+                InputContext::World,
+                CameraMode::Flycam,
+                false,
+                true,
+                CursorGrabMode::None,
+            ),
+            // Third-person Alt-drag captures the cursor while held.
+            (
+                InputContext::World,
+                CameraMode::ThirdPerson,
+                true,
+                true,
+                CursorGrabMode::Locked,
+            ),
+            // An Alt-drag in flycam does not (orbit is third-person only).
+            (
+                InputContext::World,
+                CameraMode::Flycam,
+                true,
+                true,
+                CursorGrabMode::None,
+            ),
+            // A focused UI frees the pointer even in mouselook.
+            (
+                InputContext::TextEntry,
+                CameraMode::Mouselook,
+                false,
+                true,
+                CursorGrabMode::None,
+            ),
+            // Screenshot mode: never grab, whatever the mode says.
+            (
+                InputContext::World,
+                CameraMode::Mouselook,
+                false,
+                false,
+                CursorGrabMode::None,
+            ),
         ] {
             let mut app = App::new();
+            let mut keys = ButtonInput::<KeyCode>::default();
+            let mut mouse = ButtonInput::<MouseButton>::default();
+            if alt_drag {
+                keys.press(KeyCode::AltLeft);
+                mouse.press(MouseButton::Left);
+            }
             app.insert_resource(context)
-                .insert_resource(HudCursorMode { active: hud_cursor })
+                .insert_resource(mode)
+                .insert_resource(keys)
+                .insert_resource(mouse)
                 .insert_resource(CursorGrabAllowed(allowed))
                 .add_systems(Update, drive_cursor_grab);
             let window = app.world_mut().spawn(CursorOptions::default()).id();
@@ -394,7 +461,7 @@ mod tests {
                 .ok_or("the window lost its `CursorOptions`")?;
             assert_eq!(
                 cursor.grab_mode, want,
-                "{context:?} / hud cursor {hud_cursor} / grab allowed {allowed}"
+                "{context:?} / mode {mode:?} / alt-drag {alt_drag} / grab allowed {allowed}"
             );
             assert_eq!(
                 cursor.visible,

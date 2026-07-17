@@ -58,7 +58,7 @@ use crate::animesh::ControlAvatarState;
 use crate::avatars::{
     AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::hud::{HudState, is_hud_point};
@@ -801,9 +801,9 @@ pub(crate) fn log_suspicious_objects(
 )]
 pub(crate) fn pick_object(
     keyboard: Res<ButtonInput<KeyCode>>,
-    // `FlyCamera`, not `Camera3d`: the probe-capture cameras (P33.2) also carry
+    // `ViewerCamera`, not `Camera3d`: the probe-capture cameras (P33.2) also carry
     // `Camera3d`, and `single()` fails once more than one matches.
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut ray_cast: MeshRayCast,
     scene: Query<&SceneObject>,
     infos: Query<&ObjectDebugInfo>,

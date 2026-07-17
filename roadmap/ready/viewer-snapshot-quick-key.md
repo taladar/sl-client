@@ -2,7 +2,7 @@
 id: viewer-snapshot-quick-key
 title: Quick-snapshot keybind → disk
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-snapshot-tools
 blocked_by: [viewer-input-action-map]
 ---

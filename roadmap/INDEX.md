@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 81 |
-| blocked | 112 |
+| ready | 87 |
+| blocked | 100 |
 | in-progress | 4 |
-| bugs | 9 |
-| done | 488 |
-| deferred | 6 |
+| bugs | 10 |
+| done | 497 |
+| deferred | 7 |
 | wont-do | 3 |
-| **total** | **704** |
+| **total** | **709** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (81)
+## ready (87)
 
 ### viewer
 
@@ -48,6 +48,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Billboard impostors for distant avatars
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
+- [`viewer-camera-controls-window`](ready/viewer-camera-controls-window.md) —
+  Camera controls window (llfloatercamera) (blocked by
+  `viewer-camera-third-person-orbit` (done), `viewer-ui-widget-scaffold` (done))
+- [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
+  presets (blocked by `viewer-camera-third-person-orbit` (done),
+  `viewer-ui-settings-store` (done))
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -61,11 +67,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-image-upload`](ready/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-input-action-map`](ready/viewer-input-action-map.md) — Input action
-  map & per-context binding profiles (blocked by `viewer-input-focus-contexts`
-  (done))
+- [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
+  — Persist per-context key-binding overrides (blocked by
+  `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
+  (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -84,6 +92,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
   Flood-fill the parcel-overlay grid into per-parcel footprints
+- [`viewer-parcel-join-split`](ready/viewer-parcel-join-split.md) — Parcel join
+  / split (blocked by `viewer-input-action-map` (done),
+  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-options-general`](ready/viewer-parcel-options-general.md) —
   About Land floater — general / covenant / objects (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -123,11 +134,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-mirror-download`](ready/viewer-script-mirror-download.md) —
   Scripts on disk — mirror grid scripts to a directory tree
+- [`viewer-settings-toml-format`](ready/viewer-settings-toml-format.md) — TOML
+  settings file with comments and nested sections (blocked by
+  `viewer-ui-settings-store` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-floater`](ready/viewer-snapshot-floater.md) — Snapshot
   floater — preview, format, destinations (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-snapshot-quick-key`](ready/viewer-snapshot-quick-key.md) —
+  Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
 - [`viewer-social-profiles`](ready/viewer-social-profiles.md) — Avatar profiles
   — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
@@ -215,7 +231,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (112)
+## blocked (100)
 
 ### viewer
 
@@ -225,29 +241,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-camera-collision`](blocked/viewer-camera-collision.md) — Camera
-  collision (blocked by `viewer-camera-third-person-orbit`)
-- [`viewer-camera-flycam`](blocked/viewer-camera-flycam.md) — Flycam mode
-  (first-class free camera) (blocked by `viewer-camera-third-person-orbit`)
 - [`viewer-camera-flycam-floater`](blocked/viewer-camera-flycam-floater.md) —
-  Flycam control floater (blocked by `viewer-camera-flycam`,
+  Flycam control floater (blocked by `viewer-camera-flycam` (done),
   `viewer-ui-floater-basic`)
-- [`viewer-camera-focus-on-object`](blocked/viewer-camera-focus-on-object.md) —
-  Focus / alt-zoom on object (blocked by `viewer-camera-third-person-orbit`)
-- [`viewer-camera-mouselook`](blocked/viewer-camera-mouselook.md) — Mouselook
-  (first-person) camera (blocked by `viewer-camera-third-person-orbit`,
-  `viewer-input-focus-contexts` (done))
-- [`viewer-camera-presets`](blocked/viewer-camera-presets.md) — Saveable camera
-  presets (blocked by `viewer-camera-third-person-orbit`,
-  `viewer-ui-settings-store` (done))
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
-  `viewer-camera-third-person-orbit`, `viewer-permission-request-dialog`)
-- [`viewer-camera-third-person-orbit`](blocked/viewer-camera-third-person-orbit.md)
-  — Camera mode machine + third-person orbit (blocked by
-  `viewer-input-action-map`)
-- [`viewer-camera-transitions`](blocked/viewer-camera-transitions.md) — Smooth
-  camera-mode transitions (blocked by `viewer-camera-mouselook`)
+  `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
 - [`viewer-chat-channel-and-commands`](blocked/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-chat-input-bar`)
 - [`viewer-chat-history-panel`](blocked/viewer-chat-history-panel.md) — Chat
@@ -297,26 +296,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-rebinding-persistence`)
 - [`viewer-input-gesture-bindings`](blocked/viewer-input-gesture-bindings.md) —
   Gesture key bindings (input↔gesture bridge) (blocked by
-  `viewer-input-action-map`, `viewer-gesture-runtime`)
-- [`viewer-input-rebinding-persistence`](blocked/viewer-input-rebinding-persistence.md)
-  — Persist per-context key-binding overrides (blocked by
-  `viewer-input-action-map`, `viewer-ui-settings-store` (done))
+  `viewer-input-action-map` (done), `viewer-gesture-runtime`)
 - [`viewer-input-rebinding-ui`](blocked/viewer-input-rebinding-ui.md) —
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget`,
   `viewer-ui-settings-binding`)
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
-  `viewer-input-action-map`, `viewer-permission-request-dialog`)
-- [`viewer-input-spacenav-camera-mapping`](blocked/viewer-input-spacenav-camera-mapping.md)
-  — SpaceNavigator → camera/flycam mapping (blocked by
-  `viewer-input-spacenav-device`, `viewer-camera-flycam`,
-  `viewer-ui-settings-store` (done))
-- [`viewer-input-spacenav-device`](blocked/viewer-input-spacenav-device.md) —
-  SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`)
+  `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
 - [`viewer-input-spacenav-settings-ui`](blocked/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
-  `viewer-input-spacenav-camera-mapping`, `viewer-ui-settings-binding`)
+  `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`)
 - [`viewer-inventory-context-actions`](blocked/viewer-inventory-context-actions.md)
   — Inventory context actions + drag-and-drop (blocked by
   `viewer-inventory-folder-tree`)
@@ -385,9 +375,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
-- [`viewer-parcel-join-split`](blocked/viewer-parcel-join-split.md) — Parcel
-  join / split (blocked by `viewer-input-action-map`,
-  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-options-access-media`](blocked/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general`)
@@ -422,7 +409,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-object-edit-floater-shell`, `viewer-ui-virtualized-list`)
 - [`viewer-prim-linking`](blocked/viewer-prim-linking.md) — Prim linking &
   unlinking (blocked by `viewer-object-selection-core`,
-  `viewer-input-action-map`)
+  `viewer-input-action-map` (done))
 - [`viewer-prim-parameter-editing`](blocked/viewer-prim-parameter-editing.md) —
   Prim parameter editing (blocked by `viewer-object-edit-floater-shell`)
 - [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
@@ -443,7 +430,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-baseline-regressions`)
 - [`viewer-rlv-enforce-camera`](blocked/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
-  `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit`)
+  `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit` (done))
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state`, `viewer-sit-stand-actions`,
@@ -467,8 +454,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-sit-stand-actions`](blocked/viewer-sit-stand-actions.md) — Sit /
   stand actions (blocked by `viewer-object-selection-core`)
-- [`viewer-snapshot-quick-key`](blocked/viewer-snapshot-quick-key.md) —
-  Quick-snapshot keybind → disk (blocked by `viewer-input-action-map`)
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
@@ -489,11 +474,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
   — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
 - [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
-  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map`,
+  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug`)
 - [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core`,
-  `viewer-input-action-map`)
+  `viewer-input-action-map` (done))
 - [`viewer-ui-floater-resize-dock`](blocked/viewer-ui-floater-resize-dock.md) —
   Floater window manager (resize / minimize / dock / tear-off) (blocked by
   `viewer-ui-floater-basic`)
@@ -544,7 +529,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (9)
+## bugs (10)
 
 ### protocol
 
@@ -554,6 +539,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-avatar-motion-render-smoothing`](bugs/viewer-avatar-motion-render-smoothing.md)
+  — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -576,7 +563,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (488)
+## done (497)
 
 ### protocol
 
@@ -704,10 +691,36 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
+  collision (blocked by `viewer-camera-third-person-orbit` (done))
+- [`viewer-camera-flycam`](done/viewer-camera-flycam.md) — Flycam mode
+  (first-class free camera) (blocked by `viewer-camera-third-person-orbit`
+  (done))
+- [`viewer-camera-focus-on-object`](done/viewer-camera-focus-on-object.md) —
+  Focus / alt-zoom on object (blocked by `viewer-camera-third-person-orbit`
+  (done))
+- [`viewer-camera-mouselook`](done/viewer-camera-mouselook.md) — Mouselook
+  (first-person) camera (blocked by `viewer-camera-third-person-orbit` (done),
+  `viewer-input-focus-contexts` (done))
+- [`viewer-camera-third-person-orbit`](done/viewer-camera-third-person-orbit.md)
+  — Camera mode machine + third-person orbit (blocked by
+  `viewer-input-action-map` (done))
+- [`viewer-camera-transitions`](done/viewer-camera-transitions.md) — Smooth
+  camera-mode transitions (blocked by `viewer-camera-mouselook` (done))
 - [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
+- [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action
+  map & per-context binding profiles (blocked by `viewer-input-focus-contexts`
+  (done))
 - [`viewer-input-focus-contexts`](done/viewer-input-focus-contexts.md) — Input
   focus / modal context state machine (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-input-spacenav-camera-mapping`](done/viewer-input-spacenav-camera-mapping.md)
+  — SpaceNavigator → camera/flycam mapping (blocked by
+  `viewer-input-spacenav-device` (done), `viewer-camera-flycam` (done),
+  `viewer-ui-settings-store` (done))
+- [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
+  SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
@@ -1523,7 +1536,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (6)
+## deferred (7)
 
 ### protocol
 
@@ -1532,6 +1545,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-input-spacenav-crossplatform`](deferred/viewer-input-spacenav-crossplatform.md)
+  — SpaceNavigator support on Windows / macOS (blocked by
+  `viewer-input-spacenav-device` (done))
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
   — Non-goals (deferred; candidate follow-up roadmaps)
 - [`viewer-p29-2`](deferred/viewer-p29-2-drive-its-animations.md) — Drive its

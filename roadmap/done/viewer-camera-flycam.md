@@ -2,7 +2,7 @@
 id: viewer-camera-flycam
 title: Flycam mode (first-class free camera)
 topic: viewer
-status: blocked
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-camera-system
 blocked_by: [viewer-camera-third-person-orbit]
 ---
@@ -26,3 +26,16 @@ Reference (Firestorm, read-only): `llviewerjoystick` flycam, `llagentcamera`
 free camera.
 
 Builds on: the existing `camera.rs` fly-camera.
+
+## Done
+
+`src/camera.rs` `drive_flycam` + `src/flycam_ui.rs`. Flycam is a first-class
+`CameraMode`: a free 6-DOF spectator camera whose eye is the entity transform.
+Orientation composes **local-frame** quaternion deltas (gimbal-free, roll works)
+with the reference's **AutoLeveling** easing the horizon level each frame
+(levels the right axis, so it is stable and can loop over the top). Entering
+flycam keeps the current pose; leaving it **warps** (does not glide) to third
+person, matching the reference. A "**Stop flycam**" button shows in flycam and
+leaves it (the requested wording). Region-crossing rebase is handled by
+`recenter_terrain` translating the flycam transform (never rotating it) and
+resnapping the rig, so a crossing cannot yaw the view.

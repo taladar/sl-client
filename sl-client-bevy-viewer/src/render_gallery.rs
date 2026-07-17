@@ -69,7 +69,7 @@ use sl_client_bevy::{
 };
 use tracing::{error, info};
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SCENES, SamplerMayClamp, SceneAssets, SceneCx, SceneLighting,
@@ -454,7 +454,7 @@ fn setup_stage(mut commands: Commands) {
         // `drive_particles` billboards each particle at the fly camera and reads
         // its pose to do it; without the marker no cloud is ever built. It is also
         // what `install_global_probe` hangs the default reflection probe on.
-        FlyCamera::default(),
+        ViewerCamera,
         GalleryCamera,
         Name::new("gallery-camera"),
     ));

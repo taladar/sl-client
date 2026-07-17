@@ -18,8 +18,8 @@ use std::net::SocketAddr;
 use bevy::prelude::*;
 
 use sl_proto::{
-    AgentKey, CircuitCode, CircuitId, DEFAULT_GRIDS_PER_EDGE, Event as SessionEvent, ParcelInfo,
-    ParcelOverlayGrid, ParcelOverlayInfo, RegionHandle, RegionIdentity, RegionLimits,
+    AgentKey, CircuitCode, CircuitId, DEFAULT_GRIDS_PER_EDGE, Event as SessionEvent, ObjectKey,
+    ParcelInfo, ParcelOverlayGrid, ParcelOverlayInfo, RegionHandle, RegionIdentity, RegionLimits,
     RegionLocalParcelId, Session, Uuid,
 };
 
@@ -80,15 +80,28 @@ pub struct SlAgentParcel {
     pub current: Option<ParcelInfo>,
     /// Whether the agent may start flying where it currently stands.
     pub can_fly: bool,
+    /// The object the agent is currently seated on, or `None` if it is not seated
+    /// on an object (standing, ground-sitting, or a sit request still pending).
+    ///
+    /// Mirrored from [`Session::seat`], which **keeps the seat across a plain
+    /// region crossing** (a vehicle carries the agent over the border), so a
+    /// consumer can trust this signal through a crossing without debouncing — it
+    /// only clears on a real stand / teleport. The viewer routes a seated agent's
+    /// steering keys to the vehicle rather than turning the avatar, and follows
+    /// the seat with the camera. A temporary lodger here (the "agent state
+    /// mirrored each frame" resource); the sit/stand task may move it to its own
+    /// resource.
+    pub seated_on: Option<ObjectKey>,
 }
 
 impl SlAgentParcel {
-    /// Refreshes the mirror from the driven session: the fly permission is read
-    /// every frame (cheap), while the current parcel is re-cloned only when it
-    /// actually changes (a structural compare avoids cloning its ~½ KiB bitmap
-    /// and strings on every unchanged frame).
+    /// Refreshes the mirror from the driven session: the fly permission and seat
+    /// are read every frame (cheap), while the current parcel is re-cloned only
+    /// when it actually changes (a structural compare avoids cloning its ~½ KiB
+    /// bitmap and strings on every unchanged frame).
     pub(crate) fn refresh_from(&mut self, session: &Session) {
         self.can_fly = session.can_fly();
+        self.seated_on = session.seat();
         let current = session.current_parcel();
         if self.current.as_ref() != current {
             self.current = current.cloned();

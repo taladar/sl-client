@@ -27,3 +27,7 @@ flamegraph.svg
 # Python bytecode cache (roadmap/index.py is imported by ad-hoc tooling)
 __pycache__/
 *.pyc
+
+# Runtime-generated viewer settings (persisted per user, not committed)
+viewer-settings.json
+viewer-settings.toml

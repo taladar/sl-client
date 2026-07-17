@@ -2,7 +2,7 @@
 id: viewer-input-action-map
 title: Input action map & per-context binding profiles
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-input-system
 blocked_by: [viewer-input-focus-contexts]
 ---
@@ -35,3 +35,18 @@ Reference (Firestorm, read-only): `llviewerinput.cpp/h` (the keybinding table,
 `keys.xml`), `indra/llwindow/llkeyboard`.
 
 Builds on: `movement.rs` / `camera.rs` (currently fixed keys).
+
+## Done
+
+`src/input_action.rs`. Named [`Action`] set + per-[`InputMode`]
+`BindingProfile`s in an `InputBindings` resource (reference-faithful default
+keys), resolved each frame into a `ButtonInput<Action>` so `movement.rs` /
+`camera.rs` read actions with the same `pressed` / `just_pressed` interface they
+read keys with. The focus-gate lives once in the resolver (a focused UI zeroes
+every action), replacing the per-system `world_has_keyboard` run-conditions on
+movement / camera. Many-to-one bindings fall out of the `key -> target` map; the
+dynamic target model is `BindingTarget` (an open enum whose `Gesture` arm the
+gesture-binding task fills). The keys.xml **mode** axis this introduces
+(`InputMode`, derived from the camera mode) is the second value
+`viewer-input-focus-contexts` deferred until mouselook / flycam existed. The
+rebinding editor / persistence / gesture targets stay their own tasks.

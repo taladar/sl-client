@@ -2,7 +2,7 @@
 id: viewer-camera-third-person-orbit
 title: Camera mode machine + third-person orbit
 topic: viewer
-status: blocked
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-camera-system
 blocked_by: [viewer-input-action-map]
 ---
@@ -34,3 +34,19 @@ cursor is free by default and mouselook is the special mode — so once
 third-person / mouselook exist the toggle is redundant: remove `HudCursorMode`
 (and its `fly_camera` gate) and let clicks pick the HUD directly,
 HUD-before-world, whenever the cursor is free.
+
+## Done
+
+`src/camera.rs`. The whole camera cluster landed together as **one**
+`ViewerCamera` entity driven by a `CameraMode` state machine (the old
+`FlyCamera` marker, which ~20 files used as "the main camera", became
+`ViewerCamera`). Third person orbits the avatar's **head** (`mHead` joint, so
+zoom converges on the back of the head, not the root), with the reference
+rear-view geometry (`CameraOffsetRearView` `(-3,0,0.75)`). Orbit is
+**Alt + left-drag** — left/right azimuth, up/down zoom; **Ctrl+Alt + left-drag**
+makes up/down elevation instead — matching Second Life (a plain click is a
+touch); the cursor hides while dragging and shows the zoom / grab icon on the
+modifiers. The camera follows the live avatar via `AvatarMotion::yaw` (stable
+heading, not the swaying chest joint). The old `H` HUD-cursor toggle was
+deleted; the cursor is free outside mouselook, so clicks pick the HUD then world
+directly.

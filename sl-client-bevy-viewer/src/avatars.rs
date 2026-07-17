@@ -757,7 +757,11 @@ pub(crate) fn focus_camera_on_volume_shape(
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
     roots: Query<&GlobalTransform>,
-    mut camera: Query<&mut Transform, With<crate::camera::FlyCamera>>,
+    mut mode: ResMut<crate::camera::CameraMode>,
+    mut camera: Query<
+        (&mut Transform, &mut crate::camera::CameraRig),
+        With<crate::camera::ViewerCamera>,
+    >,
     mut setting: Local<Option<String>>,
     mut framed: Local<bool>,
 ) {
@@ -803,7 +807,7 @@ pub(crate) fn focus_camera_on_volume_shape(
     let Ok(global) = roots.get(chest) else {
         return;
     };
-    let Ok(mut transform) = camera.single_mut() else {
+    let Ok((mut transform, mut rig)) = camera.single_mut() else {
         return;
     };
     let distance = std::env::var("SL_VIEWER_CAMERA_DISTANCE")
@@ -829,6 +833,11 @@ pub(crate) fn focus_camera_on_volume_shape(
          at chest {target:?} from {eye:?}; the camera is yours from here — press V to \
          toggle the collision-volume displacement (P34.3 / P34.4)"
     );
+    // Switch to flycam (the only mode whose pose a system may write; the others
+    // recompute it) and seed the rig aim so the flycam driver reproduces the look.
+    *mode = crate::camera::CameraMode::Flycam;
+    let look = Vec3::new(target.x - eye.x, target.y - eye.y, target.z - eye.z);
+    rig.aim_along(look);
     *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
     *framed = true;
 }
@@ -3460,12 +3469,12 @@ pub(crate) fn apply_bom_face_materials(
 /// physical, so the tag's own size is scaled by its
 /// [`inverse_scale_factor`](ComputedNode::inverse_scale_factor) before centring.
 ///
-/// The camera query is qualified by [`FlyCamera`](crate::camera::FlyCamera): the
+/// The camera query is qualified by [`ViewerCamera`](crate::camera::ViewerCamera): the
 /// world holds **more than one** camera since the reflection probes (P33.2) spawn
 /// one per probe capture, and an unqualified `single()` then fails — which silently
 /// hid every name tag until it was noticed.
 pub(crate) fn position_name_tags(
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::FlyCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
     anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
     mut tags: Query<(&NameTag, &ComputedNode, &mut Node, &mut Visibility)>,
 ) {

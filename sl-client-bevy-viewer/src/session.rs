@@ -23,8 +23,9 @@ use sl_client_bevy::{
     Throttle,
 };
 
-use crate::camera::{CameraStart, FlyCamera};
-use crate::coords::{bevy_to_sl_vec, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::camera::ViewerCamera;
+use crate::coords::bevy_to_sl_vec;
+use crate::settings::ViewerSettings;
 
 /// The draw distance requested once the region handshake completes, in metres.
 ///
@@ -41,15 +42,9 @@ const QUIT_GRACE_SECS: f32 = 3.0;
 /// Viewer-side session bookkeeping not already tracked by the plugin.
 #[derive(Resource, Default)]
 pub(crate) struct ViewerSession {
-    /// Whether the camera has been snapped to the agent's login position yet.
-    camera_positioned: bool,
     /// Whether the agent's own avatar object has arrived, i.e. the agent is
-    /// in-world with a live circuit to carry an `AgentUpdate`. Set independently
-    /// of [`camera_positioned`](Self::camera_positioned): a fixed `--camera-position`
-    /// suppresses the login camera-snap (so `camera_positioned` stays false), but
-    /// the agent is still in-world and its interest camera must still be reported —
-    /// otherwise a screenshot / fixed-camera run never streams content toward the
-    /// framed viewpoint (R22b).
+    /// in-world with a live circuit to carry an `AgentUpdate`. Once set, the
+    /// interest camera is reported so content streams toward the viewpoint (R22b).
     agent_in_world: bool,
     /// Whether the `--play-animation` debug animation has been triggered yet, so
     /// it fires once on the first region handshake rather than on every one.
@@ -136,7 +131,7 @@ pub(crate) fn report_camera_interest(
     time: Res<Time>,
     mut since_last: Local<f32>,
     session: Res<ViewerSession>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     // Only once the agent is in-world (its avatar object has arrived, so a circuit
@@ -198,7 +193,7 @@ const DEFAULT_VERTICAL_FOV: f32 = core::f32::consts::FRAC_PI_4;
 pub(crate) fn report_agent_viewport(
     session: Res<ViewerSession>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<&Projection, With<FlyCamera>>,
+    cameras: Query<&Projection, With<ViewerCamera>>,
     mut last: Local<Option<(u16, u16, u32)>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -230,9 +225,12 @@ pub(crate) fn report_agent_viewport(
     }));
 }
 
-/// Request a clean logout on the quit key (`Esc` / `Q`).
+/// Request a clean logout on the quit chord (`Ctrl+Q`, matching the reference).
 ///
-/// The logout command is queued once; the actual `AppExit` is driven by
+/// `Escape` is deliberately *not* the quit key: in the world it resets the camera
+/// ([`crate::camera::reset_camera_view`]) and in a focused UI it releases focus
+/// ([`crate::input_context`]), both of which a quit-on-`Escape` would pre-empt. The
+/// logout command is queued once; the actual `AppExit` is driven by
 /// [`drive_session`] (on `LoggedOut` / `Disconnected`) or by
 /// [`enforce_quit_deadline`] as a fallback.
 pub(crate) fn handle_quit_input(
@@ -244,7 +242,8 @@ pub(crate) fn handle_quit_input(
     if session.quit_deadline.is_some() {
         return;
     }
-    if keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::KeyQ) {
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    if ctrl && keyboard.just_pressed(KeyCode::KeyQ) {
         info!("quit requested; logging out");
         request_logout(&mut session, &mut commands, time.elapsed_secs());
     }
@@ -268,6 +267,24 @@ pub(crate) fn request_logout(
     session.quit_deadline = Some(now + QUIT_GRACE_SECS);
 }
 
+/// Persist the settings store once, when a logout is first requested, so a tuned
+/// value (e.g. a SpaceNavigator sensitivity) survives to the next session.
+///
+/// Keyed off the quit deadline being armed rather than the `LoggedOut` event, so
+/// the save happens even if the grid never acknowledges the logout and
+/// [`enforce_quit_deadline`] forces the exit.
+pub(crate) fn save_settings_on_logout(
+    session: Res<ViewerSession>,
+    settings: Res<ViewerSettings>,
+    mut saved: Local<bool>,
+) {
+    if *saved || session.quit_deadline.is_none() {
+        return;
+    }
+    *saved = true;
+    settings.save();
+}
+
 /// Force the app to exit once the post-quit grace period has elapsed, in case a
 /// `LoggedOut` never arrives.
 pub(crate) fn enforce_quit_deadline(
@@ -284,22 +301,19 @@ pub(crate) fn enforce_quit_deadline(
 }
 
 /// Fold the session event stream into viewer actions: draw distance on
-/// handshake, camera placement on the agent's first appearance, and a clean
+/// handshake, marking the agent in-world on its first appearance, and a clean
 /// exit on logout/disconnect.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS resources and queries; \
-              placing / snapping the camera needs the event stream, identity, session \
-              bookkeeping, play-on-login and camera-override config, the camera query, \
-              and the command / exit writers together"
-)]
+///
+/// The camera is no longer placed here: third-person
+/// ([`crate::camera::position_camera`]) follows the avatar the moment it arrives,
+/// so there is nothing to snap. The `SL_VIEWER_CAMERA_*` framing knobs the old
+/// snap read now seed the third-person orbit
+/// ([`CameraRig::seed_orbit_from_env`](crate::camera::CameraRig)).
 pub(crate) fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut session: ResMut<ViewerSession>,
     play_on_login: Res<PlayOnLogin>,
-    camera_start: Res<CameraStart>,
-    mut cameras: Query<(&mut Transform, &mut FlyCamera)>,
     mut commands: MessageWriter<SlCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -338,74 +352,10 @@ pub(crate) fn drive_session(
                     .is_some_and(|agent| agent.uuid() == object.full_id.uuid());
                 // The agent is in-world the moment its own avatar object arrives —
                 // a live circuit now exists to carry the interest-camera
-                // `AgentUpdate`. Tracked separately from the login camera-snap so a
-                // fixed `--camera-position` (which suppresses the snap) still reports
-                // its viewpoint (R22b).
+                // `AgentUpdate` (R22b). The camera then follows the avatar of its
+                // own accord (`position_camera`), so there is nothing to snap here.
                 if is_own_avatar {
                     session.agent_in_world = true;
-                }
-                if camera_start.position.is_none() && !session.camera_positioned && is_own_avatar {
-                    let position = sl_to_bevy_vec(&object.motion.position);
-                    // Seat the fly-camera a few metres in front of the agent (along
-                    // the way it faces), slightly above pelvis height, looking back
-                    // at it — so the avatar is fully framed head-on on login rather
-                    // than the camera sitting inside it (first person) or off to the
-                    // side. A Second Life avatar faces its local +X, so its forward
-                    // in Bevy world is that rotation applied to `X`. WASD/mouse-look
-                    // take over from here. Per-component `f32` maths keeps clear of
-                    // the workspace `arithmetic_side_effects` lint (it does not apply
-                    // to plain floating-point), which `Vec3`'s operators trip.
-                    let forward = sl_to_bevy_object_rotation(&object.motion.rotation)
-                        .mul_vec3(Vec3::X)
-                        .normalize_or_zero();
-                    // Debug affordances for rendering diagnosis (default: the
-                    // head-on framing above). `SL_VIEWER_CAMERA_ORBIT_DEG` orbits
-                    // the camera around the avatar's vertical axis (90 = a side
-                    // view), `_ELEV_DEG` raises/lowers it (positive looks down),
-                    // `_DISTANCE` sets the metres back (a smaller value zooms in),
-                    // and `_TARGET_Z` lifts the look-at point above the pelvis (so
-                    // a close-up can be aimed at the shoulders / head). Together
-                    // they let the offline screenshot harness capture a spot the
-                    // fixed head-on pose hides — needed to localise geometry
-                    // artifacts like the shoulder spike (R13).
-                    let env_f32 = |key: &str, default: f32| {
-                        std::env::var(key)
-                            .ok()
-                            .and_then(|value| value.parse().ok())
-                            .unwrap_or(default)
-                    };
-                    let orbit = env_f32("SL_VIEWER_CAMERA_ORBIT_DEG", 0.0).to_radians();
-                    let elevation = env_f32("SL_VIEWER_CAMERA_ELEV_DEG", 0.0).to_radians();
-                    let distance = env_f32("SL_VIEWER_CAMERA_DISTANCE", 4.0);
-                    let target_up = env_f32("SL_VIEWER_CAMERA_TARGET_Z", 0.0);
-                    // Orbit the (flattened) forward around Bevy up, then tilt it by
-                    // the elevation, so the camera sits on a sphere around the
-                    // avatar aimed inward.
-                    let flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-                    let orbited = Quat::from_rotation_y(orbit).mul_vec3(flat);
-                    let dir = Vec3::new(
-                        orbited.x * elevation.cos(),
-                        elevation.sin(),
-                        orbited.z * elevation.cos(),
-                    )
-                    .normalize_or_zero();
-                    let camera_pos = Vec3::new(
-                        position.x + dir.x * distance,
-                        position.y + dir.y * distance + 0.3 + target_up,
-                        position.z + dir.z * distance,
-                    );
-                    let target = Vec3::new(position.x, position.y + target_up, position.z);
-                    let look = Vec3::new(
-                        target.x - camera_pos.x,
-                        target.y - camera_pos.y,
-                        target.z - camera_pos.z,
-                    );
-                    for (mut transform, mut camera) in &mut cameras {
-                        transform.translation = camera_pos;
-                        camera.aim_along(look);
-                    }
-                    session.camera_positioned = true;
-                    info!("placed camera facing agent at {camera_pos:?}");
                 }
             }
             SlSessionEvent::LoggedOut => {

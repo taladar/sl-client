@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{LightData, Object, TextureKey};
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 
 /// The maximum number of local prim lights rendered at once (P25.2). Second
 /// Life's legacy fixed-function path capped hardware lights at
@@ -286,7 +286,7 @@ fn update_local_light(commands: &mut Commands, child: Entity, light: &ObjectLigh
 pub(crate) fn drive_local_lights(
     mut commands: Commands,
     mut assigned: ResMut<LocalLights>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     lights: Query<(Entity, &ObjectLight, &GlobalTransform)>,
     // The count rendered last frame, so a change (a light coming into / out of
     // the budget) logs once instead of every frame.

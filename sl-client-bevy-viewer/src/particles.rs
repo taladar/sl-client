@@ -96,7 +96,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, to_bevy_image};
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_rotation;
 use crate::hud::{HUD_RENDER_LAYER, HudCamera, on_hud_layer};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
@@ -651,13 +651,16 @@ impl ParticleSim {
 }
 
 /// A debug affordance (env `SL_VIEWER_PARTICLE_FOCUS`): once any source has live
-/// particles, snap the fly-camera to look at the busiest particle cloud from a few
-/// metres back, so an unattended screenshot run frames a real emitter without
-/// hand-aiming. Runs after [`drive_particles`] (so this frame's particles are in)
-/// and after the fly-camera (so it overrides the login-snap / input pose).
+/// particles, put the camera in **flycam** looking at the busiest particle cloud
+/// from a few metres back, so an unattended screenshot run frames a real emitter
+/// without hand-aiming. Runs after [`drive_particles`] (so this frame's particles
+/// are in) and after [`position_camera`](crate::camera::position_camera) (so it
+/// overrides the follow pose). Flycam is the only mode whose pose a system may
+/// write directly (the others recompute it), so it switches there.
 pub(crate) fn focus_camera_on_particles(
     sim: Res<ParticleSim>,
-    mut camera: Query<&mut Transform, With<FlyCamera>>,
+    mut mode: ResMut<crate::camera::CameraMode>,
+    mut camera: Query<(&mut Transform, &mut crate::camera::CameraRig), With<ViewerCamera>>,
     mut enabled: Local<Option<bool>>,
 ) {
     let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some());
@@ -667,11 +670,15 @@ pub(crate) fn focus_camera_on_particles(
     let Some((centroid, _count)) = sim.busiest_centroid() else {
         return;
     };
-    let Ok(mut transform) = camera.single_mut() else {
+    let Ok((mut transform, mut rig)) = camera.single_mut() else {
         return;
     };
-    // Stand back along +X/+Y from the cloud and look at it.
+    // Stand back along +X/+Y from the cloud and look at it, in flycam so the pose
+    // sticks (and the rig aim is seeded so the flycam driver reproduces it).
+    *mode = crate::camera::CameraMode::Flycam;
     let eye = v_add(centroid, Vec3::new(6.0, 3.0, 6.0));
+    let look = Vec3::new(centroid.x - eye.x, centroid.y - eye.y, centroid.z - eye.z);
+    rig.aim_along(look);
     *transform = Transform::from_translation(eye).looking_at(centroid, Vec3::Y);
 }
 
@@ -973,8 +980,8 @@ pub(crate) fn drive_particles(
         &GlobalTransform,
         Option<&RenderLayers>,
     )>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
-    hud_camera: Query<&GlobalTransform, (With<HudCamera>, Without<FlyCamera>)>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    hud_camera: Query<&GlobalTransform, (With<HudCamera>, Without<ViewerCamera>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,

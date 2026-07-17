@@ -81,7 +81,7 @@ use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry;
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
     SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
@@ -199,8 +199,7 @@ fn headless_app() -> App {
     // `drive_particles` billboards each particle at the camera, so a scene
     // with an emitter needs one to exist. Not a *rendering* camera — there is
     // no renderer — only the pose the billboarding reads.
-    app.world_mut()
-        .spawn((FlyCamera::default(), Transform::IDENTITY));
+    app.world_mut().spawn((ViewerCamera, Transform::IDENTITY));
     app
 }
 

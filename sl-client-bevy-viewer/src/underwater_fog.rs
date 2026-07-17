@@ -73,7 +73,7 @@ use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::sky::day_position;
@@ -140,7 +140,7 @@ impl ExtractComponent for UnderwaterFog {
 pub(crate) fn update_underwater_fog(
     environment: Res<EnvironmentState>,
     level: Res<WaterLevel>,
-    mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<FlyCamera>>,
+    mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
 ) {
     // A debug affordance: `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the fog off
     // (zero density is a shader no-op) so a capture can A/B the underwater-fog pass

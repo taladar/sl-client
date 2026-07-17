@@ -2,7 +2,7 @@
 id: viewer-parcel-join-split
 title: Parcel join / split
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-input-action-map, viewer-parcel-overlay-decode]
 ---

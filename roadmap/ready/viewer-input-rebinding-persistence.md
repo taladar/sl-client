@@ -2,7 +2,7 @@
 id: viewer-input-rebinding-persistence
 title: Persist per-context key-binding overrides
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-input-system
 blocked_by: [viewer-input-action-map, viewer-ui-settings-store]
 ---

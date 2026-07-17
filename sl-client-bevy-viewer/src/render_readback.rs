@@ -53,7 +53,7 @@ use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::winit::WinitPlugin;
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::probes::ReflectionProbePlugin;
 use sl_client_bevy::{
     CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
@@ -234,7 +234,7 @@ pub(crate) fn capture(
                 // `install_global_probe` binds the default probe to the entity
                 // carrying this marker, and `drive_local_probes` poses its capture
                 // rigs from it.
-                FlyCamera::default(),
+                ViewerCamera,
                 Name::new("readback-camera"),
             ));
             commands.spawn(Readback::texture(readback_target.clone()));
@@ -267,7 +267,7 @@ pub(crate) fn capture(
     // re-deriving its projection by hand.
     let mut cameras = app
         .world_mut()
-        .query_filtered::<(&Camera, &GlobalTransform), With<FlyCamera>>();
+        .query_filtered::<(&Camera, &GlobalTransform), With<ViewerCamera>>();
     let projected = cameras
         .single(app.world())
         .map(|(camera, transform)| {

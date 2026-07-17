@@ -52,7 +52,7 @@ use sl_client_bevy::{
     TextureKey, Uuid, WaterMaterial, WaterParams, WaterSettings,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::render_priority::SKY_BOOST_PRIORITY;
@@ -224,7 +224,7 @@ pub(crate) fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut
 pub(crate) fn drive_water(
     time: Res<Time>,
     identity: Res<SlIdentity>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<WaterState>,
     mut level: ResMut<WaterLevel>,

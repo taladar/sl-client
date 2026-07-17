@@ -43,12 +43,14 @@ mod coords;
 mod diagnostics;
 mod environment;
 mod flexi;
+mod flycam_ui;
 pub mod gallery;
 mod ground;
 mod hand_pose;
 mod hud;
 mod hud_pick;
 mod ik;
+mod input_action;
 mod input_context;
 mod legacy_materials;
 mod lights;
@@ -74,7 +76,9 @@ mod render_scene;
 mod render_test;
 mod screenshot;
 mod session;
+mod settings;
 mod sky;
+mod spacenav;
 mod terrain;
 mod texture_anim;
 mod textures;
@@ -137,7 +141,10 @@ use crate::bake_inputs::{
 };
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
-use crate::camera::{CameraSpin, CameraStart, FlyCamera, SpinAxis, fly_camera};
+use crate::camera::{
+    CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
+    position_camera,
+};
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::diagnostics::{
     PipelineOverlayVisible, setup_diagnostics_overlay, setup_pipeline_overlay,
@@ -145,8 +152,10 @@ use crate::diagnostics::{
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
+use crate::flycam_ui::FlycamButtonPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
-use crate::hud_pick::{HudCursorMode, pick_and_touch, toggle_hud_cursor};
+use crate::hud_pick::pick_and_touch;
+use crate::input_action::InputActionPlugin;
 use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
@@ -174,13 +183,15 @@ use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
-    repeat_debug_animation, report_agent_viewport, report_camera_interest,
+    repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
 };
+use crate::settings::ViewerSettings;
 use crate::sky::{
     apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
     center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
     setup_sky, setup_stars, setup_sun_moon_discs,
 };
+use crate::spacenav::SpacenavPlugin;
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
@@ -190,6 +201,7 @@ use crate::textures::{
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
+use crate::ui_element::UiAction;
 use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
@@ -375,22 +387,35 @@ struct LoginOutcome {
     rejected: Option<LoginFailure>,
 }
 
-/// Startup system: spawn the fly-camera. The scene's directional light (the
-/// sun / moon) is spawned by [`crate::sky::setup_sky`], which also drives it from
-/// the region's environment.
-fn setup_scene(mut commands: Commands, camera_start: Res<CameraStart>) {
-    // A provisional camera pose near a region centre (256 m region, ~30 m up);
-    // `drive_session` snaps it to the agent's real login position once the
-    // agent's avatar object arrives — unless `--camera-position` fixed an
-    // absolute pose, in which case place it there and aim it (and `drive_session`
-    // leaves it alone).
-    let mut camera = FlyCamera::default();
+/// Startup system: spawn the one [`ViewerCamera`]. The scene's directional light
+/// (the sun / moon) is spawned by [`crate::sky::setup_sky`], which also drives it
+/// from the region's environment.
+///
+/// The camera starts in third-person, which follows the avatar as soon as it
+/// arrives ([`position_camera`]), so no login camera-snap is needed. A fixed
+/// `--camera-position` instead starts it in **flycam** at that absolute pose (and
+/// aims it), which is what the unattended screenshot harness frames from; the
+/// `SL_VIEWER_CAMERA_*` envs seed the third-person orbit so the harness can also
+/// frame the avatar from a chosen angle.
+fn setup_scene(
+    mut commands: Commands,
+    camera_start: Res<CameraStart>,
+    mut mode: ResMut<CameraMode>,
+) {
+    let mut rig = CameraRig::default();
+    // Seed the third-person orbit from the debug framing envs (a no-op when unset):
+    // orbit → azimuth, elevation → elevation, distance → distance.
+    rig.seed_orbit_from_env();
     let translation = if let Some(position) = camera_start.position {
+        // A fixed pose is a flycam pose: place and aim it, and leave it alone.
         if let Some(look) = camera_start.look {
-            camera.aim_along(look);
+            rig.aim_along(look);
         }
+        *mode = CameraMode::Flycam;
         position
     } else {
+        // A provisional pose near a region centre; `position_camera` moves it to
+        // frame the avatar the moment one arrives.
         Vec3::new(128.0, 30.0, -128.0)
     };
     commands.spawn((
@@ -413,7 +438,8 @@ fn setup_scene(mut commands: Commands, camera_start: Res<CameraStart>) {
             ..default()
         }),
         Transform::from_translation(translation),
-        camera,
+        ViewerCamera,
+        rig,
         Msaa::Sample4,
         // P33.3: render the scene into a floating-point target and tonemap it once,
         // at the end, with the reference viewer's own tone mapper (`tonemap`).
@@ -494,21 +520,15 @@ fn run_session(
     camera_start: CameraStart,
     camera_spin: CameraSpin,
 ) -> LoginOutcome {
-    // In screenshot mode leave the cursor free (visible, un-grabbed) so an
-    // unattended capture run does not hijack the desktop's pointer.
-    let cursor_options = if screenshot_dir.is_some() {
-        CursorOptions {
-            grab_mode: CursorGrabMode::None,
-            visible: true,
-            ..default()
-        }
-    } else {
-        // Capture and hide the cursor so raw mouse motion drives mouse-look.
-        CursorOptions {
-            grab_mode: CursorGrabMode::Locked,
-            visible: false,
-            ..default()
-        }
+    // Start the cursor free (visible, un-grabbed): the viewer opens in
+    // third-person, whose pointer is free to click the world / UI.
+    // `crate::input_context::drive_cursor_grab` captures it only when the camera
+    // enters mouselook. (In screenshot mode it stays free regardless, so an
+    // unattended capture run never hijacks the desktop's pointer.)
+    let cursor_options = CursorOptions {
+        grab_mode: CursorGrabMode::None,
+        visible: true,
+        ..default()
     };
     let mut app = App::new();
     app.add_plugins(
@@ -548,6 +568,19 @@ fn run_session(
     // binding below via `world_has_keyboard`, so typing into a focused text field
     // no longer also walks the avatar.
     .add_plugins(InputContextPlugin)
+    // The input action map (viewer-input-action-map): named actions + per-mode
+    // binding profiles that replace the hardcoded keys in `movement` / `camera`.
+    // Camera + movement read `ButtonInput<Action>`, gated once here on focus.
+    .add_plugins(InputActionPlugin)
+    // The camera system (viewer-camera-*): one `ViewerCamera` entity driven by a
+    // `CameraMode` state machine (mouselook / third-person / flycam), replacing the
+    // debug fly-camera. Every `.after(position_camera)` consumer reads its pose.
+    .add_plugins(CameraPlugin)
+    // SpaceNavigator / 6-DOF device input (viewer-input-spacenav-*): publishes the
+    // device state (Linux, behind the `spacenav` feature) for the flycam to consume.
+    .add_plugins(SpacenavPlugin)
+    // The on-screen "Stop flycam" button (shown only in flycam mode).
+    .add_plugins(FlycamButtonPlugin)
     // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
     // which entries a given pie holds is per-domain and belongs with the domain
     // (viewer-object-context-menu), so nothing here opens one yet. The widget is
@@ -606,10 +639,14 @@ fn run_session(
     // world unit to shadow an avatar crisply across a whole region.
     .insert_resource(DirectionalLightShadowMap { size: 4096 })
     .init_resource::<ViewerSession>()
+    // The viewer settings store (viewer-ui-settings-store), the reference's
+    // `gSavedSettings`: registers each feature's settings and loads any persisted
+    // overrides (e.g. SpaceNavigator sensitivities).
+    .init_resource::<ViewerSettings>()
     // The debug camera override (`--camera-position` / `--camera-look-at` /
-    // `--camera-spin`): `setup_scene` reads the start pose, `fly_camera` reads
-    // the spin, and `drive_session` skips its login-snap when a pose is fixed.
-    // The world context may grab the cursor unless this is an unattended
+    // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
+    // the spin, and third-person auto-follows when no pose is fixed. The world
+    // context may grab the cursor (only in mouselook) unless this is an unattended
     // screenshot run, whose whole point is to leave the desktop's pointer alone.
     .insert_resource(CursorGrabAllowed(screenshot_dir.is_none()))
     .insert_resource(camera_start)
@@ -623,9 +660,6 @@ fn run_session(
     .init_resource::<ObjectState>()
     // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
     .init_resource::<HudState>()
-    // The free HUD cursor (P35.3): off until toggled with `H`, then a left
-    // click touches the HUD (or world) object under the pointer.
-    .init_resource::<HudCursorMode>()
     // The water-render bookkeeping (P23.1) is created by `setup_water` at
     // startup, so no `init_resource` is needed here; the surface level the
     // underwater-fog pass reads is a small resource published by `drive_water`.
@@ -679,6 +713,11 @@ fn run_session(
     .add_message::<TextureDecoded>()
     .add_message::<MeshDecoded>()
     .add_message::<WearableAssetFetched>()
+    // The pie-menu widget's `commit_pie_selection` runs every frame and writes a
+    // `UiAction`, so the message must be registered here too — it was previously
+    // only registered in the gallery / test apps, where the pie menu had been
+    // exercised, so the live viewer panicked on the unregistered writer.
+    .add_message::<UiAction>()
     .add_systems(
         Startup,
         (
@@ -848,12 +887,15 @@ fn run_session(
             (
                 handle_quit_input.run_if(world_has_keyboard),
                 enforce_quit_deadline,
+                // Persist the settings store when a logout is requested.
+                save_settings_on_logout,
             ),
-            // The fly-camera, plus walking / turning / flying the own avatar from
-            // the arrow keys (independent of the camera): the simulator moves the
-            // avatar and the P31.4 dead-reckoner smooths the returned motion. Both
-            // are gated: `WASD` are characters, and the arrows move a caret.
-            (fly_camera, drive_avatar_controls).run_if(world_has_keyboard),
+            // Walk / turn / fly the own avatar from the movement actions
+            // (viewer-input-action-map): the simulator moves the avatar and the
+            // P31.4 dead-reckoner smooths the returned motion. The camera itself is
+            // driven by `CameraPlugin`. Actions are already gated on focus by the
+            // action map, so no `run_if` is needed here.
+            drive_avatar_controls,
         ),
     )
     // Opt-in diagnostic (SL_VIEWER_LOG_OBJECTS): flag region-sized / sky objects
@@ -872,13 +914,13 @@ fn run_session(
             // attachment; here a lit one would also render black, since the world's
             // sun is not on the HUD layer).
             (fit_hud_points, apply_hud_fullbright),
-            // HUD picking & clicking (P35.3): `H` toggles a free cursor, and a
-            // left click then touches the HUD (or, failing that, world) object
-            // under the pointer through an orthographic HUD-camera pick. The
-            // toggle is gated (`H` is a character); the pick is not, because it
-            // is a mouse click, and the cursor is only free to make it in the
-            // first place when the context or this toggle says so.
-            (toggle_hud_cursor.run_if(world_has_keyboard), pick_and_touch),
+            // HUD picking & clicking (P35.3): a left click touches the HUD (or,
+            // failing that, world) object under the pointer through an orthographic
+            // HUD-camera pick, HUD before world. The cursor is free to click with
+            // in every camera mode except mouselook (which grabs it), so no
+            // free-cursor toggle is needed any more — the reference's model, where
+            // third-person clicks the world directly.
+            pick_and_touch,
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
             // looks at loads first. Throttled internally. It also picks each plain
@@ -905,11 +947,11 @@ fn run_session(
             // Local lights (P25.2): render the nearest / brightest light-flagged
             // prims as Bevy point / spot lights, after the fly-camera so the
             // distance-based budget selection uses the current viewpoint.
-            drive_local_lights.after(fly_camera),
+            drive_local_lights.after(position_camera),
             // Particles (P30.2): advance each source's CPU particle simulation and
             // rebuild its camera-facing billboard mesh, after the fly-camera so the
             // billboards face the current viewpoint.
-            drive_particles.after(fly_camera),
+            drive_particles.after(position_camera),
             // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
             // and rewrite its deformed geometry in place, after `update_objects` so
             // this frame's spawns / rebuilds have seeded their chain state.
@@ -918,11 +960,11 @@ fn run_session(
             // particle cloud so an unattended screenshot frames a real emitter.
             focus_camera_on_particles
                 .after(drive_particles)
-                .after(fly_camera),
+                .after(position_camera),
             // Debug (env `SL_VIEWER_VOLUME_FOCUS`): aim the camera at the avatar whose
             // shape displaces its collision volumes the most (P34.3), the only subject
             // on which the effect is visible at all.
-            focus_camera_on_volume_shape.after(fly_camera),
+            focus_camera_on_volume_shape.after(position_camera),
             // Debug (`V`): toggle the shape's collision-volume displacement live, so
             // the effect can be A/B'd on one avatar in one session (P34.3).
             toggle_volume_morphs.run_if(world_has_keyboard),
@@ -941,22 +983,22 @@ fn run_session(
     .add_systems(
         Update,
         (
-            center_sky_on_camera.after(fly_camera),
-            drive_sky.after(fly_camera),
+            center_sky_on_camera.after(position_camera),
+            drive_sky.after(position_camera),
             apply_sky_textures,
             // Sun / moon discs (P22.3): aim and colour the billboards from the same
             // active sky frame (after the fly-camera, so they track the viewpoint),
             // then swap each decoded disc texture into its material.
-            drive_sun_moon_discs.after(fly_camera),
+            drive_sun_moon_discs.after(position_camera),
             apply_disc_textures,
             // Cloud layer (P22.4): fold the same active sky frame into the cloud
             // material, accumulate the scroll, and swap in the decoded cloud noise.
-            drive_clouds.after(fly_camera),
+            drive_clouds.after(position_camera),
             apply_cloud_textures,
             // Star field (P22.5): centre / rotate the field on the camera, fade it
             // in with the active sky frame's `star_brightness`, and swap in the
             // decoded bloom texture.
-            drive_stars.after(fly_camera),
+            drive_stars.after(position_camera),
             apply_star_textures,
             // Water surface (P23.1): learn each region's water height, then centre
             // the endless ocean on the camera and place a per-region plane where a
@@ -964,12 +1006,14 @@ fn run_session(
             // shared material (after the fly-camera, so the ocean tracks the
             // viewpoint), and swap in the decoded wave normal map.
             update_water,
-            drive_water.after(fly_camera),
+            drive_water.after(position_camera),
             apply_water_textures,
             // Underwater fog (P23.1): refresh the camera's fog parameters (water
             // level, EEP fog colour/density, reconstruction matrix) each frame,
             // after the fly-camera so the matrix matches the current viewpoint.
-            update_underwater_fog.after(fly_camera).after(drive_water),
+            update_underwater_fog
+                .after(position_camera)
+                .after(drive_water),
         ),
     )
     // Animations: keep the animation store's `ViewerAsset` cap current, request a

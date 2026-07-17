@@ -15,6 +15,14 @@ categories = ["game-development", "rendering", "visualization"]
 
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
+[features]
+# Read a 3Dconnexion SpaceNavigator / SpaceMouse 6-DOF device to drive the flycam
+# (viewer-input-spacenav-device / -camera-mapping). Linux-only for now (evdev);
+# Windows / macOS support is a separate task. Off by default so a build without
+# the device library still compiles and the `SpacenavInput` stub keeps consumers
+# `cfg`-free.
+spacenav = ["dep:evdev"]
+
 [dependencies]
 avian3d = { version = "0.7.0" }
 # `system_font_discovery` turns on parley/fontique OS font enumeration and
@@ -25,6 +33,9 @@ avian3d = { version = "0.7.0" }
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
+# The SpaceNavigator / 6-DOF device read (the `spacenav` feature, Linux-only for
+# now — see the `viewer-input-spacenav-crossplatform` roadmap task).
+evdev = { version = "0.13.2", optional = true }
 fs-err = { version = "3.3.0" }
 image = { version = "0.25.10", default-features = false, features = ["tga"] }
 # A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
@@ -39,6 +50,7 @@ sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",
 ] }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
+sl-settings = { version = "0.1.0", path = "../sl-settings" }
 sl-terrain = { version = "0.1.0", path = "../sl-terrain" }
 sl-texture = { version = "0.1.0", path = "../sl-texture", features = [
     "encode",

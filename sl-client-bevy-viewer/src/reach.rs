@@ -62,7 +62,7 @@ use sl_client_bevy::{
     ViewerEffectData, ViewerEffectType,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_vec};
 use crate::ik::{Chain, JointSolver};
 use crate::locomotion_ik::clamp_rescale;
@@ -768,7 +768,7 @@ pub(crate) fn log_enabled() -> bool {
 )]
 pub(crate) fn select_object_under_crosshair(
     keyboard: Res<ButtonInput<KeyCode>>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut ray_cast: MeshRayCast,
     parents: Query<&ChildOf>,
     scene: Query<&SceneObject>,

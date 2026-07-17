@@ -8,12 +8,12 @@
 //! the world so a HUD covering half the screen never leaks a click to the ground
 //! behind it.
 //!
-//! - **A free cursor.** The fly camera grabs the pointer for mouse-look
-//!   ([`crate::camera`]), so there is no cursor to click with. [`HudCursorMode`]
-//!   (toggled with [`HUD_CURSOR_KEY`]) releases and shows the pointer and, while
-//!   it is on, suppresses the fly camera's mouse-look (see
-//!   [`fly_camera`](crate::camera::fly_camera)) so moving the mouse aims the
-//!   cursor instead of the head.
+//! - **A free cursor, by default.** Outside mouselook the pointer is free
+//!   ([`crate::camera`] only captures it in mouselook), so a left click has a
+//!   cursor to pick with directly — the reference's model, where third person
+//!   clicks the world. In mouselook the cursor is centred, so the pick falls back
+//!   to the screen centre (the crosshair). The old `H` free-cursor toggle is gone:
+//!   it only existed to escape the debug fly-camera's permanent grab.
 //! - **A HUD pick, HUD before world.** On a left click ([`pick_and_touch`]) an
 //!   orthographic ray is cast through the [`HudCamera`] at
 //!   the cursor, restricted to the HUD render layer. If it hits, that HUD face is
@@ -40,76 +40,40 @@ use sl_client_bevy::{
     Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::ViewerCamera;
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
-/// The key that toggles the free HUD cursor on and off ([`HudCursorMode`]).
-const HUD_CURSOR_KEY: KeyCode = KeyCode::KeyH;
-
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
-
-/// Whether the free HUD cursor is active.
-///
-/// While it is, the pointer is released and shown (so it can be aimed at a HUD),
-/// the fly camera's mouse-look is suppressed (so moving the mouse does not also
-/// turn the head), and a left click touches whatever HUD — or, failing that,
-/// world — object is under the cursor.
-#[derive(Resource, Default)]
-pub(crate) struct HudCursorMode {
-    /// `true` while the free cursor is engaged.
-    pub(crate) active: bool,
-}
-
-/// Toggle the free HUD cursor with [`HUD_CURSOR_KEY`].
-///
-/// Freeing the cursor is what makes the HUD clickable; re-grabbing it restores
-/// mouse-look. This only flips the request: the window's grab is owned by
-/// [`crate::input_context`]'s cursor-grab system, which folds this together with
-/// the input context (a focused UI frees the cursor too) and with whether
-/// grabbing is allowed at all (it is not in an unattended screenshot run — which
-/// is what this system used to have to tiptoe around by writing the grab only on
-/// the toggle frame).
-pub(crate) fn toggle_hud_cursor(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut mode: ResMut<HudCursorMode>,
-) {
-    if !keyboard.just_pressed(HUD_CURSOR_KEY) {
-        return;
-    }
-    mode.active = !mode.active;
-    info!(
-        "P35.3 HUD cursor {} (press {HUD_CURSOR_KEY:?} to toggle; left-click a HUD to touch it)",
-        if mode.active { "on" } else { "off" }
-    );
-}
 
 /// Everything the pick needs to identify and touch the object under a hit face.
 type FaceQuery<'world, 'state> =
     Query<'world, 'state, (&'static PrimFaceEntity, &'static FaceTextureDebug)>;
 
-/// On a left click while the HUD cursor is active, touch the HUD face under the
-/// cursor — or, if none, the world object under it (the reference's HUD-first
-/// pick order).
+/// On a left click, touch the HUD face under the cursor — or, if none, the world
+/// object under it (the reference's HUD-first pick order).
 ///
-/// The HUD ray is orthographic (through the HUD camera) and restricted to the HUD
-/// render layer; the world ray is the ordinary perspective ray from the fly
-/// camera through the cursor, restricted to everything *not* on the HUD layer, so
-/// the two passes never poach each other's geometry.
+/// The cursor is free in every camera mode except mouselook, so the click has a
+/// pointer position to use directly; in mouselook (a centred, captured cursor) the
+/// pick falls back to the screen centre (the crosshair). The HUD ray is
+/// orthographic (through the HUD camera) and restricted to the HUD render layer;
+/// the world ray is the ordinary perspective ray from the world camera through the
+/// pick point, restricted to everything *not* on the HUD layer, so the two passes
+/// never poach each other's geometry.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the mode, the \
-              mouse button, the window for the cursor, the two cameras to cast from, the ray \
-              caster, the render-layer / face / object components a hit is resolved through, and \
-              the command channel the touch is sent on"
+    reason = "a Bevy system's parameters are its injected resources / queries: the \
+              mouse button, the Alt modifier, the window for the cursor, the two cameras to cast \
+              from, the ray caster, the render-layer / face / object components a hit is resolved \
+              through, and the command channel the touch is sent on"
 )]
 pub(crate) fn pick_and_touch(
-    mode: Res<HudCursorMode>,
     buttons: Res<ButtonInput<MouseButton>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    fly_camera: Query<(&Camera, &GlobalTransform), With<FlyCamera>>,
+    fly_camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
     mut ray_cast: MeshRayCast,
     faces: FaceQuery,
@@ -118,16 +82,20 @@ pub(crate) fn pick_and_touch(
     parents: Query<&ChildOf>,
     mut writer: MessageWriter<SlCommand>,
 ) {
-    if !mode.active || !buttons.just_pressed(TOUCH_BUTTON) {
+    // A plain left-click touches; an `Alt`-held left-click is the camera focus /
+    // orbit gesture (`crate::camera::focus_on_object`), not a touch, so ignore it.
+    let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
+    if !buttons.just_pressed(TOUCH_BUTTON) || alt {
         return;
     }
     let Ok(window) = windows.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
-        // The pointer is outside the window; nothing to pick.
-        return;
-    };
+    // The free cursor's position, or the screen centre when it is captured
+    // (mouselook) — the crosshair the first-person view aims with.
+    let cursor = window
+        .cursor_position()
+        .unwrap_or_else(|| Vec2::new(window.width() * 0.5, window.height() * 0.5));
 
     // The HUD entities the orthographic pass may hit — the whole routed HUD
     // subtree carries the HUD render layer (propagated from the screen), and

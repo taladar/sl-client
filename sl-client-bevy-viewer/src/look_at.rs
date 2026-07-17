@@ -55,7 +55,7 @@ use sl_client_bevy::{
     ViewerEffectData,
 };
 
-use crate::camera::FlyCamera;
+use crate::camera::{CameraMode, ViewerCamera};
 use crate::coords::{metres_to_f32, sl_to_bevy_vec};
 
 /// Neck rotation factor — the fraction of the head's look-at rotation the neck
@@ -818,17 +818,34 @@ pub(crate) fn apply(
     blink
 }
 
-/// Derive the own avatar's look-at target from the debug fly-camera: the camera's
-/// own position, refreshed every frame, so the own avatar tracks (makes eye
-/// contact with) the viewer's camera. The reference derives the own look-at from
-/// the mouselook / cursor-focus point, which the free-fly debug camera has no
-/// analog for; looking *at the camera* is the clearest, most recognisable stand-in
-/// (as you orbit, the head and eyes follow you) and matches the "camera awareness"
-/// glance idle viewers show. Does nothing until the agent id is known.
+/// The distance (metres) ahead of the camera the own avatar's look-at target is
+/// placed. Far enough that a small jitter in the camera position barely moves the
+/// look direction — which is what keeps the head-focused camera and the head's
+/// look-at from feeding back into a vibration.
+const LOOK_AHEAD_METRES: f32 = 10.0;
+
+/// Derive the own avatar's look-at target from the camera — replacing the earlier
+/// debug-camera stand-in that had the avatar stare *at* the camera, which both
+/// misread the reference (your avatar should face where you look, not at your
+/// viewpoint) and formed a tight feedback loop with the head-focused camera that
+/// vibrated the view at frame rate.
+///
+/// This is the minimal, safe behaviour that kills that feedback:
+///
+/// - **Mouselook** — a point far along the camera's forward, so the avatar looks
+///   **where** you look (the reference's `LOOKAT_TARGET_MOUSELOOK`).
+/// - **Third person / flycam** — no camera-driven gaze; the own target is cleared.
+///
+/// The reference's richer look-at (`LOOKAT_TARGET_FOCUS` on an alt-clicked object
+/// with its offset math and own-avatar handling, `SELECT` / `CONVERSATION`, the
+/// enabling settings and animation-priority interactions, and the debug gizmos that
+/// draw every avatar's look-at) is a faithful `LLHUDEffectLookAt` reimplementation —
+/// its own task ([[viewer-lookat-faithful]]), deliberately not half-built here.
 pub(crate) fn update_own_look_at_target(
     time: Res<Time>,
     identity: Res<SlIdentity>,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    mode: Res<CameraMode>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut targets: ResMut<LookAtTargets>,
 ) {
     let Some(own) = identity.agent_id else {
@@ -837,7 +854,23 @@ pub(crate) fn update_own_look_at_target(
     let Ok(transform) = camera.single() else {
         return;
     };
-    targets.set(own, transform.translation(), time.elapsed_secs());
+    let target = if *mode == CameraMode::Mouselook {
+        let eye = transform.translation();
+        let forward = transform.forward().as_vec3();
+        // A point far ahead along the camera forward (per-component to stay clear of
+        // the `arithmetic_side_effects` lint the `Vec3` operators trip).
+        Some(Vec3::new(
+            eye.x + forward.x * LOOK_AHEAD_METRES,
+            eye.y + forward.y * LOOK_AHEAD_METRES,
+            eye.z + forward.z * LOOK_AHEAD_METRES,
+        ))
+    } else {
+        None
+    };
+    match target {
+        Some(point) => targets.set(own, point, time.elapsed_secs()),
+        None => targets.clear(own),
+    }
 }
 
 /// Ingest `ViewerEffect` look-at effects from nearby avatars into [`LookAtTargets`]
