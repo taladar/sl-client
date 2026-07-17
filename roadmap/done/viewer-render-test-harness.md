@@ -2,9 +2,9 @@
 id: viewer-render-test-harness
 title: 3D render test harness — render one object without a grid, assert automatically, catch regressions
 topic: viewer
-status: ready
+status: done
 origin: asked for alongside viewer-ui-test-harness (2026-07), as the 3D counterpart of the same mechanism
-refs: [viewer-ui-test-harness, viewer-screenshot-wait-for-quiescence, viewer-ui-radial-menu]
+refs: [viewer-ui-test-harness, viewer-screenshot-wait-for-quiescence, viewer-ui-radial-menu, viewer-render-scene-coverage, viewer-render-readback-tier, viewer-render-baselines, viewer-render-closedness-check, viewer-render-cpu-skinning-crosscheck]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -124,3 +124,109 @@ against no grid at all.
 - **Pixel assertions are brittle** across drivers. Assert on decidable
   properties (coverage, symmetry, absence of NaN), not on golden images — or the
   suite becomes a driver-version detector.
+
+## Outcome (2026-07)
+
+Built as **a registry of scenes × three tiers of check × a matrix**, following
+[[viewer-ui-test-harness]]'s shape. `cargo test -p sl-client-bevy-viewer --lib
+render_test` runs 16 tests in ~2 s: no window, no GPU, no login, no region, no
+OAR, no UUID lookup.
+
+- `src/render_scene.rs` — the registry (14 scenes), declared intent as
+  components, procedural fixtures.
+- `src/render_test.rs` — the headless app, the checks, the matrix.
+- `src/render_gallery.rs` + `src/bin/sl-client-bevy-viewer-scenes.rs` — the
+  gallery, the human-eyeball half.
+
+### Two ways the task's framing was too narrow
+
+Both surfaced in review, and both changed the core rather than the fixtures:
+
+- **"Render one object" is the common case, not the general one.** A whole class
+  of rendering is about the interaction *between* things and has no
+  single-object form: a projector light is correct according to what it falls
+  **on**, a reflective surface only against what it **reflects**. So the
+  registry's unit is a **scene** — geometry, lights and a camera. Most scenes
+  hold one object; `projector-light-on-wall` and `metallic-sphere-among-prims`
+  cannot.
+- **A frame is not enough either.** Particles, flexi, texture animation, avatar
+  animation and body physics are not functions of one frame — a single capture
+  cannot tell an emitter that works from one that emits nothing. So every scene
+  carries a **`Timeline`**, driven by `TimeUpdateStrategy::ManualDuration`
+  (never the wall clock, or the results depend on how fast the machine ran
+  them). Declaring more than one sample *is* the declaration that something
+  happens, and the harness holds the scene to it: identical geometry at the
+  first and last sample fails.
+
+### The tiers
+
+| Tier | Question | Who decides |
+| --- | --- | --- |
+| Universal | is this broken? | the harness, every scene, no opt-in |
+| Declared | does it match its stated intent? | the scene (`DeclaredBounds`, `SymmetricAbout`, `UvsInUnitSquare`, `SamplerMayClamp`) |
+| Timeline | did anything actually happen? | the scene's `Timeline` |
+
+Every universal check is one a past bug would have tripped: `skin_violations`
+(R1's weight sum, R13's joint outside the render list), `sampler_violations`
+(R22h), `LogCapture` (R26), plus NaN / non-unit normal / out-of-range index.
+Each has a paired "teeth" test proving it fires on the known-bad case *and*
+stays silent on the good one.
+
+### It found a real viewer bug, which is the point
+
+[[viewer-r22i]]: **every local reflection probe reflected the world rotated 90°
+about X.** Bevy builds a probe's sampling frame from the probe entity's
+*world transform*, and every object entity carries the Second Life → Bevy basis
+change — so an identity `rotation` on a holder parented to a prim (which is what
+`spawn_probe_holder` had) samples the world-space cube through that basis. A
+neighbour below the mirror appeared to one side; one behind it appeared below.
+
+Nothing was broken: no invariant, no log line, no crash. The probe captured, the
+volume bound, the mirror was shiny, and the reflection was plausible from any
+angle nobody had thought about. It needed a mirror with
+**distinctly identifiable things around it** and a person asking "is the yellow
+one where the yellow one should be" — which is exactly what
+`metallic-sphere-among-prims` is, and it fell out within minutes of that scene
+first rendering. It is now also a *pixel* check that catches it unaided.
+
+### What the first honest run found
+
+- **A fifth texture path that never set its sampler.** `default_particle_image`
+  left Bevy's default (clamp-to-edge) in place. Latent rather than live — a
+  billboard quad's UVs span exactly `[0, 1]` — but it is R22h's exact shape
+  waiting for a caller whose UVs leave the unit square. Fixed.
+- **The UV rule was backwards, and the run said so.** "UVs inside `[0, 1]`"
+  looked like an invariant and is not: the viewer samples with `Repeat` because
+  Second Life faces *tile*, so a prim UV of 1.025 is correct. The rule inverted
+  into a **declared** one — `UvsInUnitSquare`, carried only by geometry that
+  samples a packed atlas (the avatar's baked regions), where leaving the square
+  samples a different body part rather than tiling.
+- **Closedness had to be pulled.** Written, and it reported correct prims as
+  broken. Two causes fixed (group per object not per face; match by position not
+  index) and one not: SL tessellation emits **coincident** vertices (measured:
+  closest distinct pair `0.000000 m` on a twisted torus at every LOD), which a
+  position-quantized edge map cannot tell from a fold. Removed rather than
+  shipped noisy — a noisy check gets ignored and then deleted. Written up as
+  [[viewer-render-closedness-check]].
+
+### Split out rather than skipped
+
+The task's other halves are each their own file, because each is substantial and
+none blocks the mechanism:
+
+- [[viewer-render-scene-coverage]] — **the big one.** Unlike the UI, the viewer
+  already renders nearly everything, and 14 scenes is a fraction of it. Terrain,
+  water, sky, flexi, texture animation, bump, HUD, the real avatar: every check
+  here runs against only what is registered.
+- [[viewer-render-readback-tier]] — §2's "render-target readback". Its
+  **mechanism landed here after all** (`src/render_readback.rs`): a headless
+  capture that renders a scene to a texture, reads the frame back, and projects
+  world points onto it through the camera that drew them — plus the first real
+  check, which catches [[viewer-r22i]] unaided. Every *other* pixel question
+  (sky, water, the projector's cone, coverage, symmetry) is still open, as is
+  wiring `LogCapture` into it — which is where that check finally bites, since
+  R26 was logged by the mesh allocator in the *render* app.
+- [[viewer-render-baselines]] — §3, blocked on
+  [[viewer-ui-baseline-regressions]] so the two share one format.
+- [[viewer-render-cpu-skinning-crosscheck]] — §2's "cross-checks between paths".
+- [[viewer-render-closedness-check]] — above.

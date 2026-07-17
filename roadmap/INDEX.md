@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 79 |
-| blocked | 111 |
+| ready | 82 |
+| blocked | 112 |
 | in-progress | 4 |
 | bugs | 9 |
-| done | 484 |
+| done | 486 |
 | deferred | 6 |
 | wont-do | 1 |
-| **total** | **695** |
+| **total** | **701** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (79)
+## ready (82)
 
 ### viewer
 
@@ -100,9 +100,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-debug`](ready/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))
-- [`viewer-render-test-harness`](ready/viewer-render-test-harness.md) — 3D
-  render test harness — render one object without a grid, assert automatically,
-  catch regressions
+- [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
+  Closedness check — an object's faces must enclose a volume (blocked by
+  `viewer-render-test-harness` (done))
+- [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
+  — CPU-skinning cross-check — make the R13 debug affordance a standing test
+  (blocked by `viewer-render-test-harness` (done))
+- [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
+  readback tier — assert on the pixels, headlessly (blocked by
+  `viewer-render-test-harness` (done))
+- [`viewer-render-scene-coverage`](ready/viewer-render-scene-coverage.md) —
+  Render-scene coverage — a scene per render path the viewer already has
+  (blocked by `viewer-render-test-harness` (done))
 - [`viewer-render-type-toggles`](ready/viewer-render-type-toggles.md) —
   Render-type & render-feature toggles (hide object classes, wireframe)
 - [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
@@ -208,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (111)
+## blocked (112)
 
 ### viewer
 
@@ -430,6 +439,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-terrain`](blocked/viewer-region-options-terrain.md) —
   Region / Estate floater — terrain tab (blocked by
   `viewer-region-options-debug`)
+- [`viewer-render-baselines`](blocked/viewer-render-baselines.md) — Render
+  regression baselines — recorded geometry that may not drift by accident
+  (blocked by `viewer-render-test-harness` (done),
+  `viewer-ui-baseline-regressions`)
 - [`viewer-rlv-enforce-camera`](blocked/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit`)
@@ -565,7 +578,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (484)
+## done (486)
 
 ### protocol
 
@@ -934,6 +947,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Directional shadows oscillate along one axis
 - [`viewer-r21`](done/viewer-r21-large-flat-dark-blue-plane-across-the-scene-water-water-fog.md)
   — Large flat dark-blue plane across the scene (water / water fog?)
+- [`viewer-r22i`](done/viewer-r22i-local-probe-reflection-rotated.md) — Local
+  reflection probes reflect the world rotated 90° about X
 - [`viewer-r24`](done/viewer-r24-neighbour-region-avatars-get-no-coarse-dot-child-circuit-coa.md)
   — Neighbour-region avatars get no coarse dot — child-circuit
   CoarseLocationUpdate was dropped
@@ -953,6 +968,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-render-test-harness`](done/viewer-render-test-harness.md) — 3D render
+  test harness — render one object without a grid, assert automatically, catch
+  regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed

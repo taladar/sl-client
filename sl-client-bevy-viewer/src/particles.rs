@@ -89,6 +89,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -689,6 +690,14 @@ pub(crate) fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<
 
 /// Build the procedural default particle sprite: a small white square whose alpha
 /// falls off smoothly to zero at the edges (a round soft blob).
+///
+/// Sampled with a **repeating** address mode, like every other texture this
+/// viewer builds. It makes no visual difference here — a billboard quad's UVs
+/// span exactly `[0, 1]`, so nothing ever samples off the end — but Bevy's
+/// default is clamp-to-edge, and a texture path that leaves the default in place
+/// is the R22h shape waiting for a caller whose UVs *do* leave the unit square.
+/// `crate::render_test`'s sampler check holds every path to this, and it found
+/// this one.
 fn default_particle_image() -> Image {
     const SIZE: u32 = 32;
     let mut data: Vec<u8> = Vec::new();
@@ -710,7 +719,7 @@ fn default_particle_image() -> Image {
             data.push(float_to_u8(alpha * 255.0));
         }
     }
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width: SIZE,
             height: SIZE,
@@ -721,7 +730,15 @@ fn default_particle_image() -> Image {
         // sRGB so the white blob reads the same brightness as fetched sprites.
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
-    )
+    );
+    // See the doc comment: repeat, like every other texture path here.
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
 }
 
 /// The alpha mode a particle system's blend function implies: an additive
@@ -823,13 +840,17 @@ fn lerp_color(start: [u8; 4], end: [u8; 4], t: f32) -> [f32; 4] {
 
 /// Truncate a non-negative `f32` into a `u8`, saturating at the range ends — for
 /// packing an alpha value into the procedural sprite.
+///
+/// `pub(crate)` because `crate::render_scene` packs its procedurally computed
+/// sculpt map with it: the conversion is the same one, and a second copy would
+/// be a second place to get the clamp wrong.
 #[expect(
     clippy::as_conversions,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "value pre-clamped to 0..=255; truncate-toward-zero for a colour byte"
 )]
-const fn float_to_u8(value: f32) -> u8 {
+pub(crate) const fn float_to_u8(value: f32) -> u8 {
     value.clamp(0.0, 255.0) as u8
 }
 
@@ -1048,6 +1069,12 @@ pub(crate) fn drive_particles(
                 // dynamic geometry, so opt out of frustum culling entirely (the
                 // way `objects.rs` does for its rebuilt meshes).
                 NoFrustumCulling,
+                // Named so a diagnostic — or `crate::render_test`'s checks —
+                // can say "the particle cloud" rather than an entity id the
+                // reader has no way to resolve. The cloud is spawned here rather
+                // than by whatever created the source, so this is the only place
+                // that knows what it is.
+                Name::new("particle-cloud"),
             ));
             if is_hud {
                 cloud_commands.insert(RenderLayers::layer(HUD_RENDER_LAYER));

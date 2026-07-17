@@ -495,6 +495,10 @@ struct LocalBinding {
     /// The probe parameters last applied to the holder, so an unchanged probe costs
     /// no per-frame component churn (the same trick the P25.2 light budget plays).
     applied: ObjectReflectionProbe,
+    /// The prim's world rotation the holder's [`sample_rotation`] correction was
+    /// last derived from, so a prim at rest likewise costs no churn — and a prim
+    /// that turns has the correction re-derived.
+    sample_rotation: Quat,
 }
 
 /// Every capture rig in the scene: the default (global) probe's, plus the pool of
@@ -799,12 +803,16 @@ fn rank_local_probes(
 /// [`ObjectReflectionProbe::volume_scale`]) and binds the rig's captured cube as an
 /// [`EnvironmentMapLight`] over it. Parenting to the prim is what makes the volume
 /// track the prim's position and rotation for free.
+///
+/// `world_rotation` is the **prim's** world rotation, and it is passed in to be
+/// **undone** — see [`sample_rotation`].
 fn spawn_probe_holder(
     commands: &mut Commands,
     object: Entity,
     cube: Handle<Image>,
     probe: &ObjectReflectionProbe,
     intensity: f32,
+    world_rotation: Quat,
 ) -> Entity {
     commands
         .spawn((
@@ -814,13 +822,50 @@ fn spawn_probe_holder(
             GeneratedEnvironmentMapLight {
                 environment_map: cube,
                 intensity,
-                rotation: Quat::IDENTITY,
+                rotation: sample_rotation(world_rotation),
                 affects_lightmapped_mesh_diffuse: true,
             },
             Transform::from_scale(probe.volume_scale()),
             ChildOf(object),
         ))
         .id()
+}
+
+/// The [`GeneratedEnvironmentMapLight::rotation`] that makes a **local** probe
+/// sample its cube in the space the cube was captured in — the inverse of the
+/// holder's world rotation (R22i).
+///
+/// The subtlety, which cost a visibly wrong reflection: Bevy builds a probe's
+/// sampling frame from the probe entity's **world transform**, not from its
+/// `rotation` field alone —
+///
+/// ```text
+/// // bevy_pbr/src/light_probe/environment_map.rs
+/// fn get_world_from_light_matrix(&self, original_transform: &Affine3A) -> Affine3A {
+///     *original_transform * Affine3A::from_quat(self.rotation)
+/// }
+/// ```
+///
+/// — and the shader transforms the reflection direction *into* that frame
+/// (`light_from_world`) before sampling. But [`copy_probe_faces`] captures the cube
+/// in **Bevy world space**. So any rotation the holder inherits rotates the
+/// reflection.
+///
+/// It always inherits one. The holder is a child of the prim's object entity, and
+/// every root object entity carries the Second Life → Bevy basis change in its world
+/// rotation (`sl_to_bevy_object_rotation` = `sl_to_bevy_rotation() * the prim's own
+/// rotation`). So with an identity `rotation` — as this was first written — every
+/// local probe reflected the world turned 90° about X: a neighbour below the prim
+/// appeared to one side, one behind appeared below. Undoing the holder's world
+/// rotation here cancels the sampling frame back to world space while leaving the
+/// [`Transform`] — and therefore the **influence volume** — still tracking the prim,
+/// which is the whole reason the holder is parented to it.
+///
+/// The **default** probe needs no such thing: it hangs off the view, and Bevy takes
+/// only the `rotation` field for a view environment map (`view_rotation`), never the
+/// camera's transform.
+fn sample_rotation(world_rotation: Quat) -> Quat {
+    world_rotation.inverse()
 }
 
 /// Hand the nearest probe prims the pool of capture rigs (P33.2).
@@ -866,12 +911,15 @@ fn drive_local_probes(
     for object in selected {
         // The entity came straight from this frame's query, so the lookup cannot
         // miss; skip defensively rather than unwrap.
-        let Ok((_, probe, _)) = probes.get(object) else {
+        let Ok((_, probe, global)) = probes.get(object) else {
             continue;
         };
+        let world_rotation = global.rotation();
         match rigs.rig_of(object) {
             // Already bound: refresh the holder only when the probe actually changed
-            // (a resized prim, or one switched between a box and a sphere volume).
+            // (a resized prim, or one switched between a box and a sphere volume) —
+            // or when the prim **turned**, which re-aims the sampling frame the
+            // cube must be read through (`sample_rotation`).
             Some(index) => {
                 let Some(Some(bound)) = rigs.bindings.get_mut(index) else {
                     continue;
@@ -884,6 +932,18 @@ fn drive_local_probes(
                         Transform::from_scale(probe.volume_scale()),
                     ));
                     bound.applied = *probe;
+                }
+                // A rotating probe prim (a spinning mirror) turns its holder with
+                // it, so the correction is re-derived rather than set once at bind.
+                // `abs_diff_eq` so a prim at rest does no per-frame churn.
+                if !bound.sample_rotation.abs_diff_eq(world_rotation, 1.0e-5) {
+                    bound.sample_rotation = world_rotation;
+                    commands
+                        .entity(bound.holder)
+                        .entry::<GeneratedEnvironmentMapLight>()
+                        .and_modify(move |mut light| {
+                            light.rotation = sample_rotation(world_rotation);
+                        });
                 }
             }
             // A newcomer: bind it to a free rig, if the budget still has one.
@@ -900,12 +960,14 @@ fn drive_local_probes(
                     cube,
                     probe,
                     probe_intensity(exposure),
+                    world_rotation,
                 );
                 if let Some(slot) = rigs.bindings.get_mut(index) {
                     *slot = Some(LocalBinding {
                         object,
                         holder,
                         applied: *probe,
+                        sample_rotation: world_rotation,
                     });
                 }
                 // Its cube still holds the last probe's environment: re-capture now
@@ -1199,6 +1261,47 @@ fn copy_probe_faces(
 
 #[cfg(test)]
 mod tests {
+    use super::sample_rotation;
+    use crate::coords::sl_to_bevy_rotation;
+    use bevy::math::EulerRot;
+    use bevy::prelude::Quat;
+
+    /// A local probe must sample its cube in the space the cube was **captured**
+    /// in — world space — however its prim is turned (R22i).
+    ///
+    /// The failure this pins is not subtle once seen and was invisible until
+    /// someone looked at a mirror: Bevy builds the sampling frame from the probe
+    /// entity's *world transform*, and every object entity carries the Second Life
+    /// → Bevy basis change, so an identity `rotation` reflected the world rotated
+    /// 90° about X — a neighbour below the prim appeared to one side, one behind
+    /// appeared below.
+    ///
+    /// Asserting the composition Bevy actually performs
+    /// (`world_from_light = world_transform * rotation`) resolves to identity is
+    /// the whole claim, and it holds for any prim rotation rather than only the
+    /// basis change.
+    #[test]
+    fn a_local_probe_samples_its_cube_in_world_space() {
+        for world_rotation in [
+            // The basis change alone: an unrotated prim.
+            sl_to_bevy_rotation(),
+            // The basis change with a prim rotation on top, which is what a real
+            // probe prim carries (`sl_to_bevy_object_rotation`).
+            sl_to_bevy_rotation().mul_quat(Quat::from_rotation_z(0.7)),
+            // A prim turned every which way.
+            Quat::from_euler(EulerRot::XYZ, 0.3, -1.1, 2.4),
+            Quat::IDENTITY,
+        ] {
+            // Exactly Bevy's `get_world_from_light_matrix`.
+            let world_from_light = world_rotation.mul_quat(sample_rotation(world_rotation));
+            assert!(
+                world_from_light.abs_diff_eq(Quat::IDENTITY, 1.0e-5),
+                "a probe whose prim is rotated by {world_rotation:?} must still sample its \
+                 world-space cube unrotated, but the sampling frame came out \
+                 {world_from_light:?} — every reflection it casts is turned by that much"
+            );
+        }
+    }
     use super::{
         BOX_FALLOFF, CAPTURE_PERIOD_FRAMES, FACE_COUNT, MIN_NEAR_CLIP, ObjectReflectionProbe,
         PROBE_GAIN, SPHERE_FALLOFF, idle_frames, probe_intensity, reflection_probe_from_object,

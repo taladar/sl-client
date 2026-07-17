@@ -147,7 +147,7 @@ pub use sl_texture::{
 pub use sl_mesh::{
     CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshEntry, MeshError,
     MeshFetcher, MeshLod, MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin,
-    MeshStore, Submesh,
+    MeshStore, Submesh, VertexWeights,
 };
 
 // The generic-asset store (the opaque-blob counterpart of the texture/mesh

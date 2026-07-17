@@ -14,6 +14,9 @@
 //! - `sl-client-bevy-viewer-gallery` (`src/bin/`) — the UI gallery, a thin shell
 //!   over [`gallery::run`]: the same widgets and panels with **no login and no
 //!   world** (`viewer-ui-test-harness`).
+//! - `sl-client-bevy-viewer-scenes` (`src/bin/`) — the render gallery, a thin
+//!   shell over [`render_gallery::run`]: the same geometry, converters and
+//!   materials with **no login and no world** (`viewer-render-test-harness`).
 //!
 //! Both need the UI modules (`ui`, `ui_font`, `ui_text`, [`gallery`]), and
 //! two binaries cannot share a `pub(crate)` module tree — only a library can
@@ -61,7 +64,13 @@ mod physics;
 mod probes;
 mod procedural;
 mod reach;
+pub mod render_gallery;
 mod render_priority;
+#[cfg(test)]
+mod render_readback;
+mod render_scene;
+#[cfg(test)]
+mod render_test;
 mod screenshot;
 mod session;
 mod sky;
