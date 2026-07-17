@@ -2,7 +2,7 @@
 id: viewer-ui-radial-menu
 title: Radial (pie) menu widget
 topic: viewer
-status: ready
+status: done
 origin: noticed as a missing fundamental while reviewing viewer-ui-widget-scaffold (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-ui-context-menu, viewer-object-context-menu, viewer-ui-skin-tokens]
@@ -137,3 +137,72 @@ angle maths, `PIE_MAX_SLICES = 8`, `PIE_OUTER_SIZE = 96`), `newview/pieslice.*`,
 in `newview/app_settings/settings.xml`. Note the pie is a
 **Firestorm re-addition** — Linden Lab's viewer 2 dropped it — so upstream LL
 sources will not have it.
+
+## Done
+
+`sl-client-bevy-viewer/src/pie_menu.rs` + `pie_menu.wgsl`, wired into both the
+viewer (`ViewerUiPlugin`'s sibling `PieMenuPlugin`) and the UI gallery. The
+widget only — which entries any pie holds stays with
+[[viewer-object-context-menu]].
+
+- **Angular stability, as data and as tests.** An entry declares its compass
+  point (`PieEntry::at`); `resolve_slots` writes each into its slot, so an
+  absent entry leaves its slice empty and nothing rotates. `PieAddress`
+  /`addresses` compute an action's full path statically.
+  `every_action_keeps_its_declared_ address` pins the fixture's table, and
+  `no_condition_can_move_an_entry` sweeps the powerset of live conditions
+  proving no state moves an entry.
+  **Standing rule recorded (module docs + memory):** every *real* domain pie
+  must ship its own pinned address table, so an unaware reorder fails a test
+  rather than silently re-teaching muscle memory.
+- **Named sub-pies, autohide chains, disabled/empty slots** — no `More >` by
+  construction (a sub-pie is a `PieMenuDef` whose `label` is not optional). The
+  autohide chain resolves to at most one member at one declared point, which
+  fixes the reference's counter bug (`piemenu.cpp:474`).
+- **Eight slices drawn by one `UiMaterial` shader**; selection is by **angle**
+  from the ring centre, with a dead zone. Labels are placed **polar** on their
+  wedges *inside* the ring (`fit_pie_layout`), and the ring **grows** to keep
+  labels non-overlapping — with a **minimum** at the reference base size so
+  single-glyph (CJK) labels stay comfortable, and a `max_width` bound plus a
+  documented paragraph ceiling above. Colours match the reference
+  (`PieMenuBgColor`, `PieMenuLineColor`, and the `EmphasisColor_35` orange
+  highlight drawn as a radial gradient); a sub-pie slice gets a shader-drawn rim
+  chevron rather than a `>` in the label.
+- **Placement clamps inward** by the measured box so the whole menu clears every
+  edge; a corner clamps both axes. Two interaction modes (flick / pinned).
+  Dismiss on: dead-zone click, empty/disabled-slice click, click off the menu
+  (which opens a new one there), or window focus loss. The menu **blocks picking
+  and swallows presses** so on-menu clicks are the menu's alone and never bubble
+  to the world's open-observer.
+- **The pointer problem — deliberately resolved against the task's suggestion.**
+  The reference warps the cursor to the clamped centre; Wayland forbids that.
+  The task's fallback (pointer-lock + virtual cursor) was built, then
+  **measured and abandoned**: the compositor refused `CursorGrabMode::Locked`,
+  leaving two cursors disagreeing. Final decision: the
+  **real pointer is the only cursor, with no jump** — away from edges nothing is
+  lost; near an edge the opening highlight follows the reference's own
+  non-warping descent. Descending a sub-pie re-centres the menu *on the pointer*
+  (the inverse of the warp).
+
+### Scope deviations (accepted with the user during the build)
+
+- **Keyboard reachability dropped** — the task requires it ("the reference is
+  mouse-only; ours must not be"), but the user directed removing it: a pie opens
+  on an in-world object the pointer is over, and there is no keyboard way to
+  pick that object, so a keyboard way to pick *within* the menu would open onto
+  nothing. The pie is now mouse-only like the reference (no keypad compass, no
+  tab focus, no Enter/Escape). Labels are neither buttons nor focus targets.
+- **Concentric rings not built** — the task's "worth prototyping alongside"
+  option is filed as [[viewer-ui-radial-menu-concentric-rings]] (wont-do): an
+  additive input axis with its own cost, and nothing needs it while named
+  sub-pies suffice.
+
+### Test-harness additions (reusable by future radial widgets)
+
+The universal box checks cannot see a shader-drawn wheel, so two **declared**
+checks were added to `crate::ui_test`'s universal list, both verified to bite:
+`radial_violations` (a labelled node must lie within tolerance of its declared
+angle from a `RadialCentre`, or a pointer aimed at it selects a different slice)
+and `radial_overlap_violations` (no two labels overlap).
+`crate::ui::PhysicalAxes` was considered and then removed once the polar layout
+made compass placement direction-independent for free.

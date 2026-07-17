@@ -61,6 +61,7 @@ mod movement;
 mod objects;
 mod particles;
 mod physics;
+mod pie_menu;
 mod probes;
 mod procedural;
 mod reach;
@@ -167,6 +168,7 @@ use crate::objects::{
 };
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::physics::PhysicsPlugin;
+use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
@@ -546,6 +548,11 @@ fn run_session(
     // binding below via `world_has_keyboard`, so typing into a focused text field
     // no longer also walks the avatar.
     .add_plugins(InputContextPlugin)
+    // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
+    // which entries a given pie holds is per-domain and belongs with the domain
+    // (viewer-object-context-menu), so nothing here opens one yet. The widget is
+    // reachable in the gallery's `radial-menu-target` card meanwhile.
+    .add_plugins(PieMenuPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.

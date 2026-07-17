@@ -43,3 +43,13 @@ checklist — including which entry sits at which slice today.
 
 Builds on: the `objects.rs` lifecycle and the pick / selection set from
 [[viewer-object-selection-core]].
+
+**Required by [[viewer-ui-radial-menu]] — pin every entry's position.** Each pie
+built here (object / avatar / land / attachment) must ship a regression test
+that pins **every action's address** (its path of compass points from the root
+pie) against a committed table, in the shape of `pie_menu`'s
+`every_action_keeps_its_declared_address`. A pie is muscle memory — an entry's
+compass position must never move between commits. The test must fail if an entry
+moves, so that moving one is a *deliberate* edit to the committed table and not
+a silent side effect of a reorder by someone unaware of the angular-stability
+rule. No pie ships here without its address table pinned.

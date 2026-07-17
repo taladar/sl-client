@@ -52,6 +52,7 @@ use bevy::prelude::*;
 use bevy::window::PresentMode;
 use tracing::info;
 
+use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::ui::{
     LogicalMargin, LogicalRect, UiDirection, UiScaffoldSystems, apply_panel_visibility,
     apply_ui_direction, column, invalidate_logical_boxes, resolve_logical_boxes, spawn_ui_root,
@@ -197,6 +198,16 @@ pub fn run() {
         // not navigation, so without this `Tab` is inert — and a gallery in which
         // nothing can be focused cannot show that anything is focusable.
         .add_plugins(TabNavigationPlugin)
+        // The radial menu (`viewer-ui-radial-menu`), which brings its own ring
+        // material and the systems that drive a live pie. The gallery wants the
+        // whole widget rather than a picture of one: a pie is almost entirely
+        // gesture — the centre-jump near an edge, the dead zone, the two
+        // interaction modes, descending into a sub-pie — and none of that is
+        // visible on a menu that is only drawn. Right-click the `radial-menu-target`
+        // card. Safe here despite the pointer grab, because the widget saves and
+        // restores the cursor itself rather than relying on the viewer's input
+        // context, which this binary has not got.
+        .add_plugins(PieMenuPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())
@@ -248,14 +259,23 @@ fn spawn_gallery_camera(mut commands: Commands) {
 
 /// Spawn the chrome and the element list under the scaffold's root.
 fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res<GalleryCell>) {
+    // **The whole gallery is a right-click surface**, so a pie can be opened at any
+    // screen position — including hard against an edge or in a corner, which is the
+    // clamped-placement case worth being able to see by hand. This mirrors the real
+    // viewer, where a right-click anywhere in the world opens the pie; there is no
+    // persistent on-screen menu, so there is nothing to scroll to an edge. The
+    // observer sits on the scaffold root, which receives the press wherever no
+    // blocking widget is under the pointer — the margins and gaps, and every edge.
+    commands.entity(root.0).observe(open_gallery_pie);
     let page = commands
         .spawn((
             Node {
-                // The window, minus a margin, scrolling down the block axis: the
-                // element list is longer than the window at the larger font sizes,
-                // and a gallery that cannot reach its own last element is not one.
+                // The window, minus a margin, scrolling on **both** axes: the
+                // element list runs past the window at the larger font sizes, and a
+                // gallery that cannot reach its own last element is not one. Both
+                // axes so a wide element (or a wide translation) stays reachable too.
                 width: Val::Percent(100.0),
-                overflow: Overflow::scroll_y(),
+                overflow: Overflow::scroll(),
                 ..column(Val::Px(12.0))
             },
             LogicalMargin(LogicalRect::all(Val::Px(16.0))),
@@ -414,6 +434,24 @@ fn log_actions(mut actions: MessageReader<UiAction>) {
             "element action (inert in the gallery)"
         );
     }
+}
+
+/// Open the fixture pie where the gallery was right-clicked.
+///
+/// The **secondary** button, as a context menu is everywhere. It opens the pie at
+/// the pointer, so a right-click near a viewport edge exercises the inward clamp,
+/// and one in a corner exercises both edges at once — the placement cases the unit
+/// tests cover and this lets a person watch.
+fn open_gallery_pie(press: On<Pointer<Press>>, mut requests: MessageWriter<OpenPieMenu>) {
+    if press.button != PointerButton::Secondary {
+        return;
+    }
+    requests.write(OpenPieMenu {
+        menu: &FIXTURE_PIE,
+        at: press.pointer_location.position,
+        element: "radial-menu",
+        conditions: &[],
+    });
 }
 
 /// Quit on `Escape`.

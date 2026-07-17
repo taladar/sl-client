@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 82 |
+| ready | 81 |
 | blocked | 112 |
 | in-progress | 4 |
 | bugs | 9 |
-| done | 487 |
+| done | 488 |
 | deferred | 6 |
-| wont-do | 2 |
-| **total** | **703** |
+| wont-do | 3 |
+| **total** | **704** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (82)
+## ready (81)
 
 ### viewer
 
@@ -139,8 +139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](ready/viewer-ui-floater-basic.md) — Floater window
   manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-radial-menu`](ready/viewer-ui-radial-menu.md) — Radial (pie) menu
-  widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-binding`](ready/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))
@@ -377,7 +375,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Notification list / history panel (blocked by `viewer-ui-notification-host`)
 - [`viewer-object-context-menu`](blocked/viewer-object-context-menu.md) — Object
   hover / context menu entries (blocked by `viewer-object-selection-core`,
-  `viewer-ui-radial-menu`, `viewer-ui-context-menu`)
+  `viewer-ui-radial-menu` (done), `viewer-ui-context-menu`)
 - [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
   — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
   `viewer-ui-floater-basic`)
@@ -578,7 +576,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (487)
+## done (488)
 
 ### protocol
 
@@ -976,6 +974,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
+  widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —
@@ -1549,13 +1549,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (2)
+## wont-do (3)
 
 ### viewer
 
 - [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
   Midnight is almost as bright as midday — NOT a viewer bug; the scenes had no
   night in them
+- [`viewer-ui-radial-menu-concentric-rings`](wont-do/viewer-ui-radial-menu-concentric-rings.md)
+  — Concentric-ring pie menu (angle picks direction, distance picks ring)
 
 ### test
 

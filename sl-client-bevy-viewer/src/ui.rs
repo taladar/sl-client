@@ -500,6 +500,14 @@ pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: Chan
 /// conflicting access — and `bevy_ui` already walks every node each frame
 /// anyway. The write is guarded, so an unchanged node does not re-trigger
 /// layout.
+///
+/// A widget whose axes denote a **compass or world direction** rather than a
+/// reading order — the radial menu, and later the minimap and world map — must not
+/// mirror. It gets that not by exempting a node here but by not depending on this
+/// at all: `crate::pie_menu` positions its labels by absolute inset from a compass
+/// *angle* (`fit_pie_layout`), which this never touches, so the compass stays put
+/// while each label's own text still shapes bidi. If a future widget cannot avoid
+/// laying itself out through `direction`, a per-node opt-out belongs here.
 pub(crate) fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Node>) {
     let target = direction.inline();
     for mut node in &mut nodes {

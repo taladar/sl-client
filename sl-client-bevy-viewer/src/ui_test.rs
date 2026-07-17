@@ -66,7 +66,10 @@ use crate::ui::{
     UiDirection, UiRoot, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction,
     invalidate_logical_boxes, resolve_logical_boxes, spawn_ui_root,
 };
-use crate::ui_element::{AlignEdge, AlignmentGroup, ElementCx, TextMayClip, UiAction, UiElement};
+use crate::ui_element::{
+    AlignEdge, AlignmentGroup, ElementCx, RadialCentre, RadialPlacement, TextMayClip, UiAction,
+    UiElement,
+};
 use crate::ui_font::register_ui_fonts;
 
 /// A boxed error, so a test can use `?` rather than the workspace-denied
@@ -318,6 +321,20 @@ impl LayoutTest {
             )
                 .chain()
                 .before(UiSystems::Layout),
+        );
+
+        // A **widget layout system**: a registered element whose placement is not
+        // pure taffy needs its own system run, or the harness lays it out
+        // differently from the viewer and every check reasons about a widget that
+        // does not exist. The pie is the first — its labels are placed by polar
+        // coordinate (`fit_pie_layout`), which no flexbox can express — and it is
+        // filtered to its own component, so it is a no-op for every other element.
+        // Runs after layout, because it reads each label's *measured* size and
+        // writes next frame's placement, exactly as it does live; hence [`settle`]
+        // taking two frames matters here too.
+        app.add_systems(
+            PostUpdate,
+            crate::pie_menu::fit_pie_layout.after(UiSystems::Layout),
         );
 
         // The camera and its dummy render target: no window and no renderer, so
@@ -716,6 +733,142 @@ pub(crate) fn alignment_violations(app: &mut App, direction: UiDirection) -> Vec
     violations
 }
 
+/// **Declared.** Every node with a [`RadialPlacement`] must actually lie in the
+/// direction it names, from its group's [`RadialCentre`].
+///
+/// The tier that exists because the box vocabulary runs out. See
+/// [`RadialPlacement`] for the argument in full: a radial menu's slices are
+/// angular sectors drawn by a shader, so there is no node for a harness to
+/// measure, and every box in the widget can be legal while the thing lies about
+/// what it will do. The element states the direction it means and this holds it
+/// to it — in every script, at every scale, in both directions.
+///
+/// Measured to each node's **box centre**, because that is what a person aims
+/// at, and in the y-up frame the angles are declared in.
+pub(crate) fn radial_violations(app: &mut App) -> Vec<String> {
+    let world = app.world_mut();
+    let mut centres_query = world.query::<(&RadialCentre, &UiGlobalTransform)>();
+    let centres: Vec<(&'static str, Vec2)> = centres_query
+        .iter(world)
+        .map(|(centre, transform)| (centre.group, transform.translation))
+        .collect();
+    let mut placed = world.query::<(Entity, &RadialPlacement, &UiGlobalTransform, Option<&Name>)>();
+    let mut violations = Vec::new();
+    for (entity, placement, transform, name) in placed.iter(world) {
+        let Some((_, centre)) = centres.iter().find(|(group, _)| *group == placement.group) else {
+            violations.push(format!(
+                "{}: declares a radial placement in group `{}`, which has no `RadialCentre` — \
+                 the claim cannot be checked, so it is not a claim",
+                describe(name, entity),
+                placement.group,
+            ));
+            continue;
+        };
+        // The y-up frame the angles are declared in: `bevy_ui`'s y grows downward.
+        let offset = Vec2::new(
+            transform.translation.x - centre.x,
+            -(transform.translation.y - centre.y),
+        );
+        if offset.length() < f32::EPSILON {
+            continue;
+        }
+        let actual = offset.to_angle();
+        let strayed = angular_difference(actual, placement.angle);
+        if strayed > placement.tolerance {
+            violations.push(format!(
+                "{}: declared at {:.1}° from the centre of `{}` but laid out at {:.1}°, which \
+                 is {:.1}° away — more than the {:.1}° it is allowed. A pointer aimed at this \
+                 lands in a different slice than the one it names.",
+                describe(name, entity),
+                placement.angle.to_degrees(),
+                placement.group,
+                actual.to_degrees(),
+                strayed.to_degrees(),
+                placement.tolerance.to_degrees(),
+            ));
+        }
+    }
+    violations
+}
+
+/// **Declared.** No two nodes placed in a radial group may overlap **each
+/// other**.
+///
+/// The radial counterpart of [`clipping_violations`], and it is a *counterpart*
+/// rather than a duplicate — the harm is the same, the cause is not.
+///
+/// [`clipping_violations`] catches text made unreadable by a **clip**. A pie has
+/// no clip: its labels are bounded by `max_width`, which *wraps* text rather than
+/// hiding it, so no label ever gets a `CalculatedClip` and that check is silent
+/// here. Correctly silent — nothing is hidden.
+///
+/// A pie's labels are made unreadable a different way: by landing **on top of
+/// each other**. Two overlapping boxes are each individually legal — inside their
+/// parent, content inside themselves, nothing clipped — so every box check in this
+/// file passes while two labels are an unreadable pile. That is the same blind
+/// spot [`radial_violations`] covers for direction, on the other axis, and this is
+/// exactly what found the day the labels wrapped taller than the row they were in
+/// and dropped onto their neighbours.
+///
+/// It is **label against label only**, deliberately. The labels sit *inside* the
+/// ring — that is the whole point of the polar layout, they are drawn over the
+/// wedges they name — so a label's box overlapping the ring's box is not a defect,
+/// it is the design. The [`RadialCentre`] is the frame the directions are measured
+/// from ([`radial_violations`]); it is not a thing the labels must avoid.
+pub(crate) fn radial_overlap_violations(app: &mut App) -> Vec<String> {
+    let world = app.world_mut();
+    let mut members = world.query::<(
+        Entity,
+        &RadialPlacement,
+        &ComputedNode,
+        &UiGlobalTransform,
+        Option<&Name>,
+    )>();
+    let boxes: Vec<(&'static str, String, Rect)> = members
+        .iter(world)
+        .map(|(entity, placement, computed, transform, name)| {
+            (
+                placement.group,
+                describe(name, entity),
+                border_box(computed, transform),
+            )
+        })
+        .collect();
+
+    let mut violations = Vec::new();
+    for (index, (group, name, rect)) in boxes.iter().enumerate() {
+        for (other_group, other_name, other_rect) in boxes.iter().skip(index.saturating_add(1)) {
+            if group != other_group {
+                continue;
+            }
+            if rect.size().cmple(Vec2::ZERO).any() || other_rect.size().cmple(Vec2::ZERO).any() {
+                continue;
+            }
+            let shared = rect.intersect(*other_rect);
+            // A shared edge is not an overlap; a shared *area* is. The epsilon is
+            // the same tolerance every other check here uses.
+            if shared.size().x > OVERFLOW_EPSILON && shared.size().y > OVERFLOW_EPSILON {
+                violations.push(format!(
+                    "{name} and {other_name} overlap by {} px in radial group `{group}` — \
+                     they are drawn on top of each other, so at least one is unreadable",
+                    shared.size(),
+                ));
+            }
+        }
+    }
+    violations
+}
+
+/// The absolute angular difference between two angles, wrapped into `0..=PI`.
+fn angular_difference(left: f32, right: f32) -> f32 {
+    let raw = (left - right).rem_euclid(core::f32::consts::TAU);
+    if raw > core::f32::consts::PI {
+        core::f32::consts::TAU - raw
+    } else {
+        raw
+    }
+}
+
 /// Every check, over the whole tree, as one list.
 ///
 /// The shape every matrix cell uses: assert the result is empty and print it on
@@ -732,6 +885,8 @@ pub(crate) fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> 
     violations.extend(clipping_violations(app));
     violations.extend(viewport_violations(app, test.viewport()));
     violations.extend(alignment_violations(app, test.direction()));
+    violations.extend(radial_violations(app));
+    violations.extend(radial_overlap_violations(app));
     violations
 }
 
@@ -743,11 +898,21 @@ pub(crate) fn layout_violations(app: &mut App, test: LayoutTest) -> Vec<String> 
 ///
 /// The whole of a matrix cell's setup. Returns the app and the element's root
 /// entity, so a check can look at the tree and a behaviour test can click it.
-pub(crate) fn spawn_element(test: LayoutTest, element: &UiElement, cx: ElementCx) -> App {
-    let mut app = test.build();
+/// Wire up [`UiAction`] recording on `app`, so [`activate`] / [`drain_actions`]
+/// can read what an element's click meant.
+///
+/// Shared by [`spawn_element`] and any test that builds its own app rather than
+/// going through the registry (a widget checked directly, like the pie), so the
+/// action-recording machinery lives in one place.
+pub(crate) fn enable_action_recording(app: &mut App) {
     app.add_message::<UiAction>()
         .init_resource::<RecordedActions>()
         .add_systems(Update, record_actions);
+}
+
+pub(crate) fn spawn_element(test: LayoutTest, element: &UiElement, cx: ElementCx) -> App {
+    let mut app = test.build();
+    enable_action_recording(&mut app);
     // `Startup`, ordered after the root exists, because that is how a real panel
     // spawns — testing it any other way would be testing a different thing.
     let spawn = element.spawn;

@@ -302,6 +302,57 @@ pub(crate) struct TextMayClip {
     pub(crate) reason: &'static str,
 }
 
+/// A declared **radial** placement: this node must lie in the named direction
+/// from its group's [`RadialCentre`], to within [`tolerance`](Self::tolerance).
+///
+/// **Why the universal checks cannot cover this.** Every other check in
+/// [`crate::ui_test`] reasons about boxes — content inside its box, a box inside
+/// its parent, text not sliced. That vocabulary is exhausted by a layout made of
+/// rectangles, and a radial menu is not: its slices are *angular sectors drawn by
+/// a shader*, with no nodes of their own for a harness to measure. Every box in a
+/// pie can be perfectly legal while the widget is completely broken.
+///
+/// And it is a real failure, not a hypothetical one. `crate::pie_menu` picks the
+/// slice under the pointer from the **angle** to the ring's centre, and places its
+/// labels on wedges at a radius. Get the placement arithmetic wrong — or let a
+/// label grow enough that its box centre shifts — and the *angle* from the centre
+/// to the north-east label creeps toward due east, and pointing at a label that
+/// says one thing selects another. Nothing about the layout looks wrong. Every box
+/// is inside its parent. The menu simply lies, in one language, at one font size.
+///
+/// So the element declares the geometry it means, in the terms it actually means
+/// it — a direction and a tolerance, not a rectangle — and the harness holds it
+/// to that in every cell of the matrix, exactly as [`AlignmentGroup`] does for
+/// columns that must stay straight.
+///
+/// Like [`AlignmentGroup`] and [`TextMayClip`], this is **declared** by an element
+/// and read only by [`crate::ui_test`]. That is not a smell: a declaration exists
+/// to be checked, the checker is the harness, and the gallery deliberately does
+/// not check anything (see [`crate::gallery`] — it answers "does this look right",
+/// which is the question a machine cannot).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RadialPlacement {
+    /// The group's name, tying this node to its [`RadialCentre`].
+    pub(crate) group: &'static str,
+    /// The direction this node must lie in, in radians counter-clockwise from
+    /// due east, in a **y-up** frame (`crate::pie_menu::ui_offset` converts).
+    pub(crate) angle: f32,
+    /// How far the node's actual direction may stray, in radians.
+    ///
+    /// For a pie this is **half a slice**: the widget resolves a direction to the
+    /// slice whose centre is nearest, so a label further than that from its own
+    /// centre falls in a neighbour's sector and would select it. The tolerance is
+    /// not a fudge factor — it is the exact width of the claim.
+    pub(crate) tolerance: f32,
+}
+
+/// The node a [`RadialPlacement`] group's directions are measured from.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RadialCentre {
+    /// The group's name.
+    pub(crate) group: &'static str,
+}
+
 /// Which edge an [`AlignmentGroup`] holds in common.
 ///
 /// Named **logically** rather than as left / right, per the scaffold's
@@ -383,6 +434,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         summary: "A composite: a titled panel with prose and a button row, bounded but not \
                   sized.",
         spawn: spawn_panel,
+    },
+    UiElement {
+        id: "radial-menu-target",
+        summary: "Right-click to open a live pie menu under the pointer. The pie is opened, used \
+                  and dismissed one at a time — never a persistent card — so this is its \
+                  registered form; its layout is checked directly in `crate::pie_menu`'s tests.",
+        spawn: crate::pie_menu::spawn_radial_menu_target,
     },
 ];
 
