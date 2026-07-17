@@ -155,15 +155,21 @@ Two real viewer bugs, and **both needed the gallery** — the geometry tier was
 green throughout, because nothing about the geometry is wrong. That is the
 division of labour [[viewer-render-test-harness]] claims, doing its job.
 
-- **[[viewer-r27]] — midnight is almost as bright as midday.** Filed, not fixed.
-  The moon is a half-strength sun: `SCENE_LIGHT_ILLUMINANCE` is held constant on
-  the premise that "the light dims naturally as the colour darkens", which holds
-  for a *setting sun* (whose attenuation collapses as `lighty = 1/|light_up|`
-  grows) and not for a *high moon* (whose does not). Filed rather than fixed
-  because `calculate_light_settings` is a **faithful** port — the reference's
-  `getMoonlightColor()` really does `return getSunlightColor()` — so the fix is
-  downstream in our invented colour→lux mapping and needs a Firestorm
-  side-by-side to calibrate "how dark is a night".
+- **[[viewer-r27]] — midnight is almost as bright as midday. Filed, then
+  withdrawn: not a viewer bug.** Worth keeping in view because the wrong
+  diagnosis was the obvious one and it survived a careful reading. The reference
+  computes no night at all — the deferred renderer's `sunlit` is
+  `(sun_up_factor == 1) ? sunlight_color : moonlight_color` attenuated by
+  elevation, `moonlight_color` is literally `getSunlightColor()`, and
+  `moon_brightness` is not in that path (it reaches only the sun/moon *disc*;
+  `getLightDiffuse()` has no callers). Night is dark because the
+  **midnight sky frame's `sunlight_color` is authored dark** — content. Our
+  viewer already blends it correctly. The bright midnight was **the scenes'**:
+  they moved the sun across the legacy default, which is a
+  *single midday frame*, so there was no night in the data. Fixed by porting
+  Linden's own `A-6AM` / `A-12PM` / `A-6PM` / `A-12AM` presets; midnight is now
+  10% of midday and blue, and the stars switch themselves on from the frame's
+  `star_brightness`.
 - **The water's normal map was uploaded in the wrong colour space.** Fixed.
   `apply_water_textures` ran the fetched wave normals through `to_bevy_image`,
   which builds `Rgba8UnormSrgb` — and a normal map is not a colour: through the
@@ -234,16 +240,21 @@ fall into.
   centre their domes on the camera every frame and would fight a scene root;
   `EnvironmentState::default()` is the full legacy WindLight default and needs
   no session, so a *driven* sky scene is reachable if the parenting is solved.
-- **The four times of day are sun positions, not the reference's presets.**
-  `LLEnvironment::KNOWN_SKY_SUNRISE` and friends are **grid asset UUIDs**, so
-  their authored haze palettes cannot be fetched offline. Each scene instead
-  moves the legacy default's two bodies, which is what a day cycle does — and
-  the atmosphere shader and `calculate_light_settings` derive both the sky
-  colour and the light colour from the sun's elevation, so the four differ for
-  real. The honest limit: **sunrise and sunset are mirror images**, differing
-  only in azimuth. Closing that needs a decoder for the legacy WindLight preset
-  XML Firestorm ships in `app_settings/windlight/skies/` — a task, not a
-  fixture.
+- **The four times of day are Linden's own presets, ported — and they have to
+  be.** `LLEnvironment::KNOWN_SKY_SUNRISE` and friends are grid asset UUIDs, but
+  Firestorm ships the classic WindLight equivalents in
+  `app_settings/windlight/skies/` (`A-6AM`, `A-12PM`, `A-6PM`, `A-12AM`), and
+  `render_scene`'s `SkyPreset` ports their values through the reference's own
+  `translateLegacySettings` rules: scalars are the `[0]` of their legacy array,
+  `star_brightness` scales by 250, and the bodies come from
+  `azimuth = -east_angle` / `altitude = sun_angle` with the moon
+  **diametrically opposed**. Ported as constants, not read from disk — a scene
+  that needs an asset is a scene that skips. The earlier version instead moved
+  the sun across the legacy default and is why [[viewer-r27]] was filed against
+  innocent code:
+  **a sky frame is data, and the day/night difference lives entirely in it**, so
+  a fixture that authors its own is not testing the viewer's sky. Read that file
+  before touching this.
 - **Terrain patches are placed in plain Second Life metres here**, not through
   `patch_transform` — that carries the SL→Bevy basis change because the viewer
   spawns patches at the world root, and the scene root already carries it. The

@@ -15,10 +15,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 82 |
 | blocked | 112 |
 | in-progress | 4 |
-| bugs | 10 |
+| bugs | 9 |
 | done | 487 |
 | deferred | 6 |
-| wont-do | 1 |
+| wont-do | 2 |
 | **total** | **703** |
 
 ## ideas (1)
@@ -546,7 +546,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (10)
+## bugs (9)
 
 ### protocol
 
@@ -565,8 +565,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar stands too low — feet sink into the ground
 - [`viewer-r25`](bugs/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
   — Prims that should be transparent render opaque
-- [`viewer-r27`](bugs/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
-  Midnight is almost as bright as midday — the moon is a half-strength sun
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1551,7 +1549,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (1)
+## wont-do (2)
+
+### viewer
+
+- [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
+  Midnight is almost as bright as midday — NOT a viewer bug; the scenes had no
+  night in them
 
 ### test
 
