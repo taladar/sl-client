@@ -228,10 +228,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
 /// The viewer's on-disk generic-asset cache directory, or `None` when neither
 /// `XDG_CACHE_HOME` nor `HOME` is set (the store then runs in-memory only).
 fn asset_cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("sl-client-bevy-viewer").join("assetcache"))
+    crate::paths::asset_cache_dir("assetcache")
 }
 
 /// The `ViewerAsset` asset class for a wearable of `wearable_type`: body parts

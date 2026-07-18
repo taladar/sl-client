@@ -2,6 +2,7 @@
 
 use std::io::ErrorKind;
 use std::net::UdpSocket;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -338,6 +339,33 @@ pub use crate::world::{
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
 const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The chat-log transcripts subdirectory within a per-avatar account directory.
+const ACCOUNT_CHAT_SUBDIR: &str = "chat";
+/// The inventory disk-cache subdirectory within a per-avatar account directory.
+const ACCOUNT_INVENTORY_SUBDIR: &str = "inventorycache";
+
+/// Per-avatar directory derivation for the disk features, keyed by grid + avatar
+/// name with UUID-based rename discovery (see [`sl_account_dirs`]).
+///
+/// When set on [`SlClientPlugin`], the driver resolves the avatar's directory at
+/// login (once the login response yields the agent UUID, before any disk feature
+/// is touched) and points the chat-log and inventory-cache directories at
+/// `<accounts_base>/<grid>/<name>/{chat,inventorycache}` — overriding any
+/// explicit [`ClientDirectories::agent_chat_log_dir`] /
+/// [`ClientDirectories::agent_cache_dir`]. This is how the reconcile (and a paid
+/// name change) is handled inline at the synchronous login point, rather than the
+/// host pre-supplying a fixed per-account path before the UUID is known.
+#[derive(Debug, Clone)]
+pub struct AccountDirsConfig {
+    /// The accounts root the per-avatar `<grid>/<name>/` directories live under
+    /// (e.g. an XDG data dir's `accounts` subdirectory).
+    pub accounts_base: PathBuf,
+    /// The grid segment (from `sl_account_dirs::grid_dir_name`).
+    pub grid: String,
+    /// The readable avatar segment (from `sl_account_dirs::avatar_dir_name`).
+    pub avatar: String,
+}
+
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
 #[derive(Debug, Clone)]
 pub struct SlClientPlugin {
@@ -356,6 +384,13 @@ pub struct SlClientPlugin {
     /// all-`None`, disabling every disk feature; a `None` field disables that
     /// feature.
     pub directories: ClientDirectories,
+    /// Optional per-avatar directory derivation for the disk features. When set,
+    /// the chat-log and inventory-cache directories are resolved to the avatar's
+    /// `<accounts_base>/<grid>/<name>/` directory at login (with rename
+    /// discovery), overriding the corresponding fixed
+    /// [`directories`](Self::directories) fields. Default `None` (use the fixed
+    /// directories as-is).
+    pub account_dirs: Option<AccountDirsConfig>,
     /// The inventory disk-cache configuration (default off). Once enabled (and
     /// paired with [`ClientDirectories::agent_cache_dir`]), the driver loads the
     /// per-account `<agent-uuid>.inv.llsd.gz` cache at login, reconciles it
@@ -384,6 +419,7 @@ impl Plugin for SlClientPlugin {
                 diagnostics: self.diagnostics,
                 chat_log_config: self.chat_log_config.clone(),
                 directories: self.directories.clone(),
+                account_dirs: self.account_dirs.clone(),
                 inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
             })
@@ -450,6 +486,8 @@ struct SlConfig {
     chat_log_config: ChatLogConfig,
     /// The per-account filesystem directories the optional disk features use.
     directories: ClientDirectories,
+    /// Optional per-avatar directory derivation, resolved at login.
+    account_dirs: Option<AccountDirsConfig>,
     /// The inventory disk-cache configuration (default off).
     inventory_cache_config: InventoryCacheConfig,
     /// Whether the automatic background inventory crawl is enabled (default off).
@@ -604,6 +642,7 @@ fn drive(
             rx,
             &config.chat_log_config,
             &config.directories,
+            config.account_dirs.as_ref(),
             &config.inventory_cache_config,
             now,
             &mut events,
@@ -655,6 +694,7 @@ fn advance_login(
     rx: Receiver<Result<String, String>>,
     chat_log_config: &ChatLogConfig,
     directories: &ClientDirectories,
+    account_dirs: Option<&AccountDirsConfig>,
     inventory_cache_config: &InventoryCacheConfig,
     now: Instant,
     events: &mut MessageWriter<SlEvent>,
@@ -684,20 +724,30 @@ fn advance_login(
                             circuit_id: session.root_circuit_id(),
                         };
                         let caps = start_caps(&session);
+                        // Resolve the per-avatar directory now that the login
+                        // response has yielded the agent UUID — inline, before
+                        // any disk feature is built, so nothing races.
+                        let effective_directories = resolve_account_directories(
+                            directories,
+                            account_dirs,
+                            session.agent_id(),
+                        );
                         let chat_log = Box::new(ChatLog::new(
                             chat_log_config.clone(),
-                            directories.agent_chat_log_dir.clone(),
+                            effective_directories.agent_chat_log_dir.clone(),
                             session.agent_legacy_name(),
                             session.agent_id(),
                         ));
                         let inventory_cache = Box::new(InventoryCache::new(
                             *inventory_cache_config,
-                            directories.agent_cache_dir.clone(),
+                            effective_directories.agent_cache_dir.clone(),
                             session.agent_id(),
                             now,
                         ));
                         let lsl_syntax = Box::new(LslSyntaxState {
-                            cache: LslSyntaxCache::new(directories.shared_cache_dir.clone()),
+                            cache: LslSyntaxCache::new(
+                                effective_directories.shared_cache_dir.clone(),
+                            ),
                             last_id: None,
                         });
                         SlInner::Running {
@@ -747,6 +797,43 @@ fn advance_login(
             SlInner::Done
         }
         Err(TryRecvError::Empty) => SlInner::LoggingIn { session, rx },
+    }
+}
+
+/// Resolve the effective per-account directories at login.
+///
+/// With no [`AccountDirsConfig`] (or no agent id), the fixed `base` directories
+/// are used unchanged. Otherwise the avatar's `<accounts_base>/<grid>/<name>/`
+/// directory is reconciled (creating it, or renaming it if the agent UUID shows
+/// a name change) and the chat-log / inventory-cache directories are pointed at
+/// its `chat` / `inventorycache` subdirectories. A reconcile failure logs and
+/// falls back to `base`, so a disk-permission problem never blocks login.
+fn resolve_account_directories(
+    base: &ClientDirectories,
+    account_dirs: Option<&AccountDirsConfig>,
+    agent_id: Option<AgentKey>,
+) -> ClientDirectories {
+    let (Some(account), Some(agent)) = (account_dirs, agent_id) else {
+        return base.clone();
+    };
+    match sl_account_dirs::reconcile_account_dir(
+        &account.accounts_base,
+        &account.grid,
+        &account.avatar,
+        agent.uuid(),
+    ) {
+        Ok(dir) => ClientDirectories {
+            agent_chat_log_dir: Some(dir.join(ACCOUNT_CHAT_SUBDIR)),
+            agent_cache_dir: Some(dir.join(ACCOUNT_INVENTORY_SUBDIR)),
+            shared_cache_dir: base.shared_cache_dir.clone(),
+        },
+        Err(error) => {
+            tracing::warn!(
+                "could not resolve account directory under {}: {error}",
+                account.accounts_base.display()
+            );
+            base.clone()
+        }
     }
 }
 

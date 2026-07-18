@@ -564,10 +564,7 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
 /// texturecache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is
 /// set (the store then runs in-memory only).
 fn texture_cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("sl-client-bevy-viewer").join("texturecache"))
+    crate::paths::asset_cache_dir("texturecache")
 }
 
 /// Refresh the store fetcher's `GetTexture` capability URL each time the region's

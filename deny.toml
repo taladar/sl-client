@@ -152,6 +152,12 @@ exceptions = [
   # `arrayref` (BSD-2-Clause) is a transitive dependency of blake3 via bevy_asset
   # in sl-client-bevy's Bevy dependency tree.
   { allow = ["BSD-2-Clause"], crate = "arrayref" },
+  # `option-ext` (MPL-2.0) is a transitive dependency of the `directories` crate
+  # (via `dirs-sys`), which sl-client-bevy-viewer uses to resolve the platform
+  # config / cache / data directories. MPL-2.0 is file-level (weak) copyleft that
+  # only affects the crate's own files, so it is safe as a library dependency;
+  # allow it for that one crate rather than project-wide.
+  { allow = ["MPL-2.0"], crate = "option-ext" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,

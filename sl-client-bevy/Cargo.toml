@@ -41,6 +41,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
     "blocking",
     "rustls-tls",
 ] }
+sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
 sl-asset = { version = "0.1.0", path = "../sl-asset" }
 sl-avatar = { version = "0.1.0", path = "../sl-avatar" }

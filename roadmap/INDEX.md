@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 505 |
+| done | 506 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **721** |
+| **total** | **722** |
 
 ## ideas (1)
 
@@ -57,6 +57,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-chat-log-grid-key`](ready/viewer-chat-log-grid-key.md) — Key the REPL
+  binaries' chat logs by grid + avatar, not name alone
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -153,9 +155,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-mirror-download`](ready/viewer-script-mirror-download.md) —
   Scripts on disk — mirror grid scripts to a directory tree
-- [`viewer-settings-account-scope-persist`](ready/viewer-settings-account-scope-persist.md)
-  — Load and save both global and per-account settings in the viewer (blocked by
-  `viewer-ui-settings-store` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-floater`](ready/viewer-snapshot-floater.md) — Snapshot
@@ -570,7 +569,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (505)
+## done (506)
 
 ### protocol
 
@@ -1004,6 +1003,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
+  — Load and save both global and per-account settings in the viewer (blocked by
+  `viewer-ui-settings-store` (done))
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))

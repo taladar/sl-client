@@ -1,0 +1,27 @@
+[package]
+name = "sl-account-dirs"
+description = "Per-avatar on-disk directory layout for a Second Life / OpenSim client: a readable place for one avatar's settings, chat logs and caches, keyed by grid + avatar name with UUID-based rename discovery"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "viewer", "directories", "profile"]
+categories = ["filesystem", "game-development"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+fs-err = { version = "3.3.0" }
+url = { version = "2.5.8" }
+uuid = { version = "1.18.1" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

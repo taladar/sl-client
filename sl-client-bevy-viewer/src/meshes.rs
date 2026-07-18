@@ -407,10 +407,7 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
 /// meshcache`), from `XDG_CACHE_HOME` or `~/.cache`, or `None` when neither is set
 /// (the store then runs in-memory only).
 fn mesh_cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("sl-client-bevy-viewer").join("meshcache"))
+    crate::paths::asset_cache_dir("meshcache")
 }
 
 /// Refresh the store fetcher's mesh capability URL each time the region's

@@ -67,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics: false,
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
+            account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             background_inventory_fetch: false,
         })

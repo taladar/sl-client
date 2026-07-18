@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "sl-account-dirs",
     "sl-anim",
     "sl-asset",
     "sl-asset-sched",

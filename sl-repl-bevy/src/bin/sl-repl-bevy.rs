@@ -649,6 +649,7 @@ fn run_session(
             diagnostics: true,
             chat_log_config: chat_log_config.clone(),
             directories: directories.clone(),
+            account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             // The REPL exercises the full client, so crawl inventory in the
             // background (the tokio REPL does the same via

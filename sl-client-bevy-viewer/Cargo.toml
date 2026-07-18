@@ -33,6 +33,7 @@ avian3d = { version = "0.7.0" }
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
+directories = { version = "6.0.0" }
 # The SpaceNavigator / 6-DOF device read (the `spacenav` feature, Linux-only for
 # now — see the `viewer-input-spacenav-crossplatform` roadmap task).
 evdev = { version = "0.13.2", optional = true }
@@ -45,6 +46,7 @@ image = { version = "0.25.10", default-features = false, features = ["tga"] }
 # on one parley build (a second copy would mean a second, unrelated font
 # collection).
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
+sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",

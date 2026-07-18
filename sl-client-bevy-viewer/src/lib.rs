@@ -64,6 +64,7 @@ mod meshes;
 mod movement;
 mod objects;
 mod particles;
+mod paths;
 mod physics;
 mod pie_menu;
 mod probes;
@@ -97,6 +98,7 @@ mod underwater_fog;
 mod virtual_list;
 mod water;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
@@ -111,10 +113,10 @@ use bevy::render::render_resource::TextureUsages;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
 use sl_client_bevy::{
-    AnimationKey, ChatLogConfig, ClientDirectories, CloudMaterialPlugin, InventoryCacheConfig,
-    LoginFailure, LoginParams, LoginRequest, MfaChallenge, SkyMaterialPlugin, SlClientPlugin,
-    SlLoginRejected, SlMfaChallenge, StarMaterialPlugin, StartLocation, SunDiscMaterialPlugin,
-    TerrainMaterialPlugin, Uuid, WaterMaterialPlugin,
+    AccountDirsConfig, AnimationKey, ChatLogConfig, ClientDirectories, CloudMaterialPlugin,
+    InventoryCacheConfig, LoggedChatType, LoginFailure, LoginParams, LoginRequest, MfaChallenge,
+    SkyMaterialPlugin, SlClientPlugin, SlLoginRejected, SlMfaChallenge, StarMaterialPlugin,
+    StartLocation, SunDiscMaterialPlugin, TerrainMaterialPlugin, Uuid, WaterMaterialPlugin,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -190,7 +192,7 @@ use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
     repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
 };
-use crate::settings::ViewerSettings;
+use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::sky::{
     apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
     center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
@@ -536,6 +538,23 @@ fn run_session(
         visible: true,
         ..default()
     };
+    // Per-avatar on-disk directories, keyed by grid + avatar name (with UUID
+    // rename discovery): the account settings scope, chat-log transcripts and the
+    // inventory cache all live under `<data>/accounts/<grid>/<name>/`. Derived
+    // from the login parameters (grid from the login URI, name from the request)
+    // and resolved to the avatar's directory at login, once the UUID is known —
+    // by the plugin (`account_dirs`, for chat / inventory) and the settings
+    // account-scope loader (`AccountContext` + `load_account_settings`).
+    let grid = sl_account_dirs::grid_dir_name(&params.login_uri);
+    let avatar =
+        sl_account_dirs::avatar_dir_name(&params.request.first_name, &params.request.last_name);
+    let accounts_base = crate::paths::accounts_base();
+    let account_dirs = accounts_base.clone().map(|base| AccountDirsConfig {
+        accounts_base: base,
+        grid: grid.clone(),
+        avatar: avatar.clone(),
+    });
+
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -558,9 +577,23 @@ fn run_session(
     .add_plugins(SlClientPlugin {
         params: params.clone(),
         diagnostics: true,
-        chat_log_config: ChatLogConfig::default(),
+        // Log every text-chat type to the per-avatar chat directory.
+        chat_log_config: ChatLogConfig {
+            enabled: BTreeSet::from([
+                LoggedChatType::Nearby,
+                LoggedChatType::InstantMessage,
+                LoggedChatType::Group,
+                LoggedChatType::Conference,
+            ]),
+            ..ChatLogConfig::default()
+        },
         directories: ClientDirectories::default(),
-        inventory_cache_config: InventoryCacheConfig::default(),
+        account_dirs,
+        // Cache the inventory tree per avatar (agent tree + Library).
+        inventory_cache_config: InventoryCacheConfig {
+            enabled: true,
+            cache_library: true,
+        },
         background_inventory_fetch: false,
     })
     // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
@@ -659,9 +692,18 @@ fn run_session(
     // world unit to shadow an avatar crisply across a whole region.
     .insert_resource(DirectionalLightShadowMap { size: 4096 })
     .init_resource::<ViewerSession>()
+    // The per-avatar account identity (grid + name + accounts root), used by
+    // `load_account_settings` to locate the account-scope settings once the
+    // agent UUID is known at login.
+    .insert_resource(AccountContext {
+        accounts_base,
+        grid,
+        avatar,
+    })
     // The viewer settings store (viewer-ui-settings-store), the reference's
     // `gSavedSettings`: registers each feature's settings and loads any persisted
-    // overrides (e.g. SpaceNavigator sensitivities).
+    // global overrides (e.g. SpaceNavigator sensitivities). The per-avatar account
+    // scope loads at login via `load_account_settings`.
     .init_resource::<ViewerSettings>()
     // The debug camera override (`--camera-position` / `--camera-look-at` /
     // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
@@ -907,6 +949,9 @@ fn run_session(
             (
                 handle_quit_input.run_if(world_has_keyboard),
                 enforce_quit_deadline,
+                // Load the per-avatar account settings once the agent UUID is
+                // known at login (once; a no-op every frame thereafter).
+                load_account_settings,
                 // Persist the settings store when a logout is requested.
                 save_settings_on_logout,
             ),

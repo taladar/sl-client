@@ -344,10 +344,7 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
 /// (`<cache>/sl-client-bevy-viewer/materialcache`), from `XDG_CACHE_HOME` or
 /// `~/.cache`, or `None` when neither is set (the store then runs in-memory only).
 fn material_cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(base.join("sl-client-bevy-viewer").join("materialcache"))
+    crate::paths::asset_cache_dir("materialcache")
 }
 
 /// Build a Bevy [`Image`] for a PBR material texture map from decoded RGBA8
