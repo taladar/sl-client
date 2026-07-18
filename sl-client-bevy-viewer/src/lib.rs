@@ -43,6 +43,7 @@ mod coords;
 mod diagnostics;
 mod environment;
 mod flexi;
+mod floater;
 mod flycam_ui;
 pub mod gallery;
 mod ground;
@@ -154,6 +155,7 @@ use crate::diagnostics::{
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
+use crate::floater::FloaterPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
@@ -594,9 +596,15 @@ fn run_session(
     // a bounded row pool that recycles as the viewport scrolls, so a long panel
     // (inventory, radar, chat at scale) costs the viewport, not the item count.
     .add_plugins(VirtualListPlugin)
+    // The floater window manager (viewer-ui-floater-basic / -resize-dock): the
+    // draggable, raise-on-click, closable title-bar window — plus resize, minimize
+    // and dock / tear-off — every panel hangs off. Spawns a trailing-edge dock host.
+    // The inventory window (below) is its first live consumer.
+    .add_plugins(FloaterPlugin)
     // The inventory window (viewer-inventory-folder-tree / -outfit-tab /
     // -search-filter): the folder tree, the Everything / Recent / Worn tabs and the
-    // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`.
+    // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
+    // in a floater, so it drags / resizes / minimizes / docks.
     .add_plugins(InventoryPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP

@@ -2,7 +2,7 @@
 id: viewer-camera-flycam-floater
 title: Flycam control floater
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-camera-system
 blocked_by: [viewer-camera-flycam, viewer-ui-floater-basic]
 ---

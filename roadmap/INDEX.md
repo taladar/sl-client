@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 96 |
-| blocked | 96 |
+| ready | 98 |
+| blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 502 |
+| done | 504 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **719** |
+| **total** | **720** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (96)
+## ready (98)
 
 ### viewer
 
@@ -51,12 +51,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-controls-window`](ready/viewer-camera-controls-window.md) —
   Camera controls window (llfloatercamera) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-ui-widget-scaffold` (done))
+- [`viewer-camera-flycam-floater`](ready/viewer-camera-flycam-floater.md) —
+  Flycam control floater (blocked by `viewer-camera-flycam` (done),
+  `viewer-ui-floater-basic` (done))
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
+- [`viewer-emoji-picker-floater`](ready/viewer-emoji-picker-floater.md) — Emoji
+  picker floater (blocked by `viewer-emoji-data` (done),
+  `viewer-ui-floater-basic` (done))
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
@@ -174,8 +180,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-floater-basic`](ready/viewer-ui-floater-basic.md) — Floater window
-  manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-floater-persist-geometry`](ready/viewer-ui-floater-persist-geometry.md)
+  — Floaters remember their position and size per user (blocked by
+  `viewer-ui-floater-basic` (done), `viewer-ui-settings-store` (done))
 - [`viewer-ui-settings-binding`](ready/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))
@@ -251,7 +258,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (96)
+## blocked (93)
 
 ### viewer
 
@@ -264,9 +271,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-camera-flycam-floater`](blocked/viewer-camera-flycam-floater.md) —
-  Flycam control floater (blocked by `viewer-camera-flycam` (done),
-  `viewer-ui-floater-basic`)
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
@@ -274,7 +278,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Chat channels, whisper/shout & /me (blocked by `viewer-chat-input-bar`)
 - [`viewer-chat-history-panel`](blocked/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`,
-  `viewer-ui-floater-basic`)
+  `viewer-ui-floater-basic` (done))
 - [`viewer-chat-input-bar`](blocked/viewer-chat-input-bar.md) — Chat input bar
   (local chat + focus) (blocked by `viewer-ui-text-input-widget`,
   `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
@@ -286,9 +290,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-colon-autocomplete`](blocked/viewer-emoji-colon-autocomplete.md)
   — Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
   `viewer-ui-text-input-widget`, `viewer-chat-input-bar`)
-- [`viewer-emoji-picker-floater`](blocked/viewer-emoji-picker-floater.md) —
-  Emoji picker floater (blocked by `viewer-emoji-data` (done),
-  `viewer-ui-floater-basic`)
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
@@ -381,7 +382,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-radial-menu` (done), `viewer-ui-context-menu`)
 - [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
   — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
-  `viewer-ui-floater-basic`)
+  `viewer-ui-floater-basic` (done))
 - [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-object-selection-core`,
   `viewer-inventory-context-actions`)
@@ -486,9 +487,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core`,
   `viewer-input-action-map` (done))
-- [`viewer-ui-floater-resize-dock`](blocked/viewer-ui-floater-resize-dock.md) —
-  Floater window manager (resize / minimize / dock / tear-off) (blocked by
-  `viewer-ui-floater-basic`)
 - [`viewer-ui-menu-bar`](blocked/viewer-ui-menu-bar.md) — Top menu bar (blocked
   by `viewer-ui-context-menu`)
 - [`viewer-ui-notification-host`](blocked/viewer-ui-notification-host.md) —
@@ -572,7 +570,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (502)
+## done (504)
 
 ### protocol
 
@@ -1006,6 +1004,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
+  manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-floater-resize-dock`](done/viewer-ui-floater-resize-dock.md) —
+  Floater window manager (resize / minimize / dock / tear-off) (blocked by
+  `viewer-ui-floater-basic` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed

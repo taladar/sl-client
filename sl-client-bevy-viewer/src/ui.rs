@@ -343,6 +343,12 @@ impl LogicalRect {
     /// Every edge zero — the identity for margin / padding / border.
     pub(crate) const ZERO: Self = Self::all(Val::ZERO);
 
+    /// Every edge [`Val::Auto`] — the resting value for an **inset**, where
+    /// `Auto` means "wherever flow put me" rather than "pinned to the edge". The
+    /// base a [`LogicalInset`] overrides one or two edges of, so a floater that
+    /// remembers only its leading / top position leaves the other edges to flow.
+    pub(crate) const AUTO: Self = Self::all(Val::Auto);
+
     /// The same value on all four edges.
     pub(crate) const fn all(value: Val) -> Self {
         Self {
@@ -409,6 +415,25 @@ pub(crate) struct LogicalPadding(pub(crate) LogicalRect);
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LogicalBorder(pub(crate) LogicalRect);
 
+/// A node's **inset** — its `left` / `right` / `top` / `bottom` position — in
+/// logical terms. Resolved into those four `Node` fields by
+/// [`resolve_logical_boxes`].
+///
+/// The fourth physical box, and the last one to get a logical component, because
+/// nothing positioned itself by inset until a floater needed to remember where it
+/// was ([`viewer-ui-floater-basic`](crate::floater)). It differs from the other
+/// three in exactly one way, and it is the load-bearing one: its resting value is
+/// [`LogicalRect::AUTO`], not [`LogicalRect::ZERO`]. `Val::Auto` on an inset edge
+/// means "leave this edge to flow", whereas `Val::ZERO` would **pin** the edge to
+/// the container — a floater whose unset edges were zero would be stretched to
+/// every side of the window rather than sitting where it was placed.
+///
+/// A floater carries only the two edges it means (leading + top, say) over an
+/// `AUTO` base, so under [`UiDirection::Rtl`] its remembered leading offset
+/// mirrors to the right edge for free, exactly as an asymmetric margin does.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LogicalInset(pub(crate) LogicalRect);
+
 /// Mark every logical box dirty when [`UiDirection`] flips, so
 /// [`resolve_logical_boxes`] — which is otherwise driven by change detection on
 /// the components alone — re-resolves the whole tree against the new direction.
@@ -422,6 +447,7 @@ pub(crate) fn invalidate_logical_boxes(
     mut margins: Query<&mut LogicalMargin>,
     mut paddings: Query<&mut LogicalPadding>,
     mut borders: Query<&mut LogicalBorder>,
+    mut insets: Query<&mut LogicalInset>,
 ) {
     if !direction.is_changed() {
         return;
@@ -434,6 +460,9 @@ pub(crate) fn invalidate_logical_boxes(
     }
     for mut border in &mut borders {
         border.set_changed();
+    }
+    for mut inset in &mut insets {
+        inset.set_changed();
     }
 }
 
@@ -448,11 +477,13 @@ type ChangedLogicalBoxes<'world, 'state> = Query<
         Option<&'static LogicalMargin>,
         Option<&'static LogicalPadding>,
         Option<&'static LogicalBorder>,
+        Option<&'static LogicalInset>,
     ),
     Or<(
         Changed<LogicalMargin>,
         Changed<LogicalPadding>,
         Changed<LogicalBorder>,
+        Changed<LogicalInset>,
     )>,
 >;
 
@@ -464,7 +495,7 @@ type ChangedLogicalBoxes<'world, 'state> = Query<
 /// `Node`'s change detection only on a real difference, so an unchanged UI does
 /// not re-trigger layout every frame.
 pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalBoxes) {
-    for (mut node, margin, padding, border) in &mut nodes {
+    for (mut node, margin, padding, border, inset) in &mut nodes {
         if let Some(LogicalMargin(rect)) = margin {
             let resolved = rect.resolve(*direction);
             if node.margin != resolved {
@@ -481,6 +512,25 @@ pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: Chan
             let resolved = rect.resolve(*direction);
             if node.border != resolved {
                 node.border = resolved;
+            }
+        }
+        if let Some(LogicalInset(rect)) = inset {
+            // The inset is four separate `Val` fields on `Node` rather than a
+            // `UiRect`, but the mirroring is identical — the resolved `left` /
+            // `right` swap under RTL — so the same `LogicalRect::resolve` produces
+            // it and the four fields are written out individually.
+            let resolved = rect.resolve(*direction);
+            if node.left != resolved.left {
+                node.left = resolved.left;
+            }
+            if node.right != resolved.right {
+                node.right = resolved.right;
+            }
+            if node.top != resolved.top {
+                node.top = resolved.top;
+            }
+            if node.bottom != resolved.bottom {
+                node.bottom = resolved.bottom;
             }
         }
     }
@@ -1050,9 +1100,9 @@ fn apply_ui_demo_visibility(
 #[cfg(test)]
 mod tests {
     use super::{
-        LogicalBorder, LogicalMargin, LogicalPadding, LogicalRect, UiDemoButton, UiDemoLabelLong,
-        UiDemoRoot, UiDemoTextSize, UiDemoVisible, UiDirection, UiPanelShown, UiRoot, UiRootNode,
-        ViewerUiPlugin, apply_panel_visibility, apply_ui_direction, column,
+        LogicalBorder, LogicalInset, LogicalMargin, LogicalPadding, LogicalRect, UiDemoButton,
+        UiDemoLabelLong, UiDemoRoot, UiDemoTextSize, UiDemoVisible, UiDirection, UiPanelShown,
+        UiRoot, UiRootNode, ViewerUiPlugin, apply_panel_visibility, apply_ui_direction, column,
         invalidate_logical_boxes, resolve_logical_boxes, row, setup_ui_demo, spawn_ui_root,
     };
     use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
@@ -1161,6 +1211,52 @@ mod tests {
             assert_eq!(node.min_width, Val::Auto);
             assert_eq!(node.max_width, Val::Auto);
         }
+    }
+
+    /// A logical inset over an `AUTO` base — the floater case: a remembered
+    /// leading and top position, the trailing and bottom edges left to flow. The
+    /// leading edge must mirror under RTL while the two `Auto` edges stay `Auto`
+    /// (a resolved `Val::ZERO` there would pin the node to two sides of the
+    /// window rather than leaving it where it was placed).
+    #[test]
+    fn a_logical_inset_mirrors_its_placed_edges_and_leaves_auto_alone() -> Result<(), TestError> {
+        let placed = LogicalRect {
+            inline_start: Val::Px(40.0),
+            block_start: Val::Px(60.0),
+            ..LogicalRect::AUTO
+        };
+        for (direction, want_left, want_right) in [
+            (UiDirection::Ltr, Val::Px(40.0), Val::Auto),
+            (UiDirection::Rtl, Val::Auto, Val::Px(40.0)),
+        ] {
+            let mut app = scaffold_app(direction);
+            let node = app
+                .world_mut()
+                .spawn((Node::default(), LogicalInset(placed)))
+                .id();
+            app.update();
+
+            let node = app
+                .world()
+                .get::<Node>(node)
+                .ok_or("the spawned node lost its `Node`")?;
+            assert_eq!(node.left, want_left, "{direction:?}: leading inset -> left");
+            assert_eq!(
+                node.right, want_right,
+                "{direction:?}: leading inset -> right under RTL"
+            );
+            assert_eq!(
+                node.top,
+                Val::Px(60.0),
+                "{direction:?}: the top is not flipped"
+            );
+            assert_eq!(
+                node.bottom,
+                Val::Auto,
+                "{direction:?}: an unset (Auto) inset edge must stay Auto, never become zero"
+            );
+        }
+        Ok(())
     }
 
     /// A minimal app carrying just the scaffold's own state and systems — the

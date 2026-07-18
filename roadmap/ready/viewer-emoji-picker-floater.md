@@ -2,7 +2,7 @@
 id: viewer-emoji-picker-floater
 title: Emoji picker floater
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-emoji-input
 blocked_by: [viewer-emoji-data, viewer-ui-floater-basic]
 ---

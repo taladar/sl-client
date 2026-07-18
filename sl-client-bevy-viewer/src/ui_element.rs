@@ -449,6 +449,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   this row through the virtualized list; here it is static so its layout is swept.",
         spawn: crate::inventory::spawn_inventory_row_sample,
     },
+    UiElement {
+        id: "floater",
+        summary: "A floating window's chrome: a title bar with dock / minimize / close buttons, a \
+                  content slot, and a resize grip. The live manager (`crate::floater`) makes it \
+                  draggable and dockable; here it is static so its layout is swept.",
+        spawn: crate::floater::spawn_floater_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

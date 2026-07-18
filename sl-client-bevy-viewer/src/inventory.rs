@@ -50,9 +50,8 @@ use sl_client_bevy::{
     WearableType,
 };
 
-use crate::ui::{
-    LogicalPadding, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
-};
+use crate::floater::{FloaterCaps, FloaterClosed, FloaterSpec, spawn_floater};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
 
@@ -82,6 +81,15 @@ const PANEL_WIDTH: f32 = 340.0;
 /// convention carves out, the way a text editor bounds its `visible_lines`.
 const VIEWPORT_HEIGHT: f32 = 420.0;
 
+/// The narrowest the floater's content area may be resized to, in logical pixels
+/// — enough for the Everything / Recent / Worn tab row and the expand / collapse
+/// toolbar to sit without being clipped.
+const INVENTORY_MIN_WIDTH: f32 = 260.0;
+
+/// The shortest the floater's content area may be resized to, in logical pixels —
+/// enough for the tabs, toolbar and search plus a few list rows.
+const INVENTORY_MIN_HEIGHT: f32 = 200.0;
+
 /// The most recent-tab entries to keep. Firestorm's Recent tab is likewise a
 /// bounded running list of what arrived this session.
 const RECENT_LIMIT: usize = 200;
@@ -89,9 +97,6 @@ const RECENT_LIMIT: usize = 200;
 /// The default page size requested for a folder's contents — large enough that a
 /// normal folder arrives in one page (pagination past this is a follow-up).
 const FOLDER_PAGE_LIMIT: usize = 4096;
-
-/// The panel background.
-const PANEL_BACKGROUND: Color = Color::srgba(0.05, 0.06, 0.09, 0.94);
 
 /// The window title / toolbar text colour.
 const CHROME_COLOR: Color = Color::srgb(0.86, 0.89, 0.95);
@@ -142,6 +147,7 @@ impl Plugin for InventoryPlugin {
                 Update,
                 (
                     toggle_inventory,
+                    sync_inventory_close,
                     ingest_inventory,
                     apply_ui_actions,
                     read_search_field,
@@ -724,6 +730,10 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 // Toggle
 // ---------------------------------------------------------------------------
 
+/// The hosting floater's [`crate::floater::FloaterSpec::id`] — so the window can
+/// tell its own [`FloaterClosed`] apart from any other floater's.
+const INVENTORY_FLOATER_ID: &str = "inventory";
+
 /// `Ctrl+I` opens / closes the window, matching the reference viewer's shortcut.
 /// Ungated by the input-context (like the `F`-key overlay toggles) so it always
 /// works; the `Ctrl` modifier keeps it from firing while a bare `i` is typed.
@@ -753,6 +763,20 @@ fn toggle_inventory(
         commands.write(SlCommand(Command::QueryInventoryFolders));
         // The Worn tab wants the COF contents; harmless if already held.
         request_worn_source(&mut model, &mut commands);
+    }
+}
+
+/// Keep [`InventoryState::open`] in step when the window is closed by its floater
+/// chrome (the title-bar close button or `Ctrl+W`) rather than by `Ctrl+I` — so
+/// the next `Ctrl+I` re-opens it instead of toggling a stale `open` back to false.
+fn sync_inventory_close(
+    mut closed: MessageReader<FloaterClosed>,
+    mut state: ResMut<InventoryState>,
+) {
+    for event in closed.read() {
+        if event.id == INVENTORY_FLOATER_ID {
+            state.open = false;
+        }
     }
 }
 
@@ -1173,33 +1197,36 @@ fn depth_indent(depth: usize) -> f32 {
 // Spawn
 // ---------------------------------------------------------------------------
 
-/// Spawn the inventory window under the scaffold root: the panel, its title, the
-/// tab / expand / collapse toolbar, the search field, and the virtualized
-/// viewport. Starts hidden.
+/// Spawn the inventory window: a **floater** ([`crate::floater`]) whose content is
+/// the tab / expand / collapse toolbar, the search field, and the virtualized
+/// viewport. The floater supplies the title bar (drag), the close / minimize /
+/// dock chrome, and the resize grip; this fills its content slot. Starts hidden.
 fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
-    let panel = commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(20.0),
-                top: Val::Px(60.0),
-                width: Val::Px(PANEL_WIDTH),
-                ..column(Val::Px(6.0))
+    let handle = spawn_floater(
+        &mut commands,
+        root.0,
+        FloaterSpec {
+            id: INVENTORY_FLOATER_ID,
+            title: "Inventory".to_owned(),
+            position: Vec2::new(20.0, 60.0),
+            // A definite, resizable content area (the reference inventory has a
+            // default rect and `can_resize`): the grip grows *and* shrinks it, and
+            // the tabs / search / list below fill it.
+            default_size: Some(Vec2::new(PANEL_WIDTH, VIEWPORT_HEIGHT)),
+            // Don't let the grip shrink it below what the tabs, toolbar and search
+            // need plus a few list rows — smaller than this the chrome would be
+            // clipped by the window edge with nothing usable left.
+            min_size: Some(Vec2::new(INVENTORY_MIN_WIDTH, INVENTORY_MIN_HEIGHT)),
+            caps: FloaterCaps {
+                resizable: true,
+                minimizable: true,
+                closable: true,
+                dockable: true,
             },
-            LogicalPadding(LogicalRect::all(Val::Px(10.0))),
-            BackgroundColor(PANEL_BACKGROUND),
-            Pickable::default(),
-            UiPanelShown(false),
-            Name::new("inventory-panel"),
-            ChildOf(root.0),
-        ))
-        .id();
-    commands.spawn((
-        Text::new("Inventory"),
-        UiFont::Sans.at(CHROME_FONT_SIZE),
-        TextColor(CHROME_COLOR),
-        ChildOf(panel),
-    ));
+        },
+    );
+    let panel = handle.root;
+    let content = handle.content;
 
     // Tabs.
     let tab_row = commands
@@ -1207,7 +1234,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             Node {
                 ..row(Val::Px(4.0))
             },
-            ChildOf(panel),
+            ChildOf(content),
         ))
         .id();
     let tabs = [
@@ -1231,7 +1258,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             Node {
                 ..row(Val::Px(4.0))
             },
-            ChildOf(panel),
+            ChildOf(content),
         ))
         .id();
     let expand_all = spawn_toolbar_button(&mut commands, expand_row, "Expand all", 4);
@@ -1266,19 +1293,24 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             BorderColor::all(BUTTON_BORDER),
             BackgroundColor(Color::srgb(0.10, 0.12, 0.16)),
             Name::new("inventory-search"),
-            ChildOf(panel),
+            ChildOf(content),
         ))
         .observe(|press: On<Pointer<Press>>, mut focus: ResMut<InputFocus>| {
             focus.set(press.entity, FocusCause::Navigated);
         })
         .id();
 
-    // The virtualized viewport.
+    // The virtualized viewport **fills** the floater's resizable content area: its
+    // width comes from the content column's stretch and its height from
+    // `flex_grow` (it takes whatever the tabs / toolbar / search leave), down to
+    // nothing (`min_height: 0`). So dragging the floater's resize grip grows and
+    // shrinks the list with the window, and the windowing reads a real measured
+    // height either way.
     let viewport = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(VIEWPORT_HEIGHT),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
                 overflow: Overflow::clip(),
                 position_type: PositionType::Relative,
                 ..default()
@@ -1289,7 +1321,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             Pickable::default(),
             TabIndex(7),
             Name::new("inventory-viewport"),
-            ChildOf(panel),
+            ChildOf(content),
         ))
         .observe(
             |press: On<Pointer<Press>>, ui: Res<InventoryUi>, mut focus: ResMut<InputFocus>| {
