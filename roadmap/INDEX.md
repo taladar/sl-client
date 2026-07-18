@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 100 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 497 |
+| done | 498 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **709** |
+| **total** | **710** |
 
 ## ideas (1)
 
@@ -539,8 +539,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-avatar-motion-render-smoothing`](bugs/viewer-avatar-motion-render-smoothing.md)
-  — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -552,6 +550,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Prims that should be transparent render opaque
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
+- [`viewer-stand-foot-ik-knee-asymmetry`](bugs/viewer-stand-foot-ik-knee-asymmetry.md)
+  — Standing foot-IK bends the two knees by different amounts on flat ground
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -563,7 +563,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (497)
+## done (498)
 
 ### protocol
 
@@ -691,6 +691,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
+  — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
   collision (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-camera-flycam`](done/viewer-camera-flycam.md) — Flycam mode

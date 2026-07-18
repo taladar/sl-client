@@ -77,6 +77,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use avian3d::physics_transform::PhysicsTransformConfig;
 use avian3d::prelude::{Collider, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody};
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
@@ -147,6 +148,30 @@ impl Plugin for PhysicsPlugin {
         app.add_plugins(PhysicsPlugins::default())
             // Second Life gravity, bridged into Bevy's Y-up frame.
             .insert_resource(Gravity(sl_gravity()))
+            // Do NOT let avian re-run Bevy's *general* transform propagation before it
+            // steps physics. By default avian propagates every entity's `Transform` →
+            // `GlobalTransform` in its (45 Hz `FixedPostUpdate`) schedule so a body's
+            // world pose is current before the sim reads it. That extra pass runs inside
+            // `RunFixedMainLoop`, before `Update`, and recomputes the avatar joints'
+            // `GlobalTransform`s from their rest local transforms — clobbering the
+            // animated globals `pose_avatar_skeletons` writes directly (P18.3). Because
+            // that pass fires only on frames that run a fixed step (3 of every 4 at
+            // 45 Hz vs a 60 Hz display), anything reading a joint global in `Update` —
+            // the third-person camera focus and the foot-IK ground probe — saw the head
+            // flicker between the rest and animated pose, a whole-body vibration the
+            // head-following camera made obvious (`viewer-avatar-motion-render-smoothing`).
+            // We have no dynamic bodies (physical prims are kinematic movers we snap each
+            // frame; their colliders are inert until Phase 32/34 add real dynamics), so
+            // this pre-physics propagation is dead work for us — Bevy's own `PostUpdate`
+            // propagation still keeps every physics body's `GlobalTransform` current for
+            // rendering and for the next frame's sim. Turning it off removes the clobber
+            // at its source; the rendered avatar was always correct (its pose is written
+            // last in `PostUpdate`, after this pass), only the `Update` readers saw the
+            // transient.
+            .insert_resource(PhysicsTransformConfig {
+                propagate_before_physics: false,
+                ..Default::default()
+            })
             // Pin the fixed clock that drives avian's `FixedPostUpdate` schedule
             // to the Second Life simulator's target physics rate.
             .insert_resource(Time::<Fixed>::from_hz(SL_PHYSICS_HZ))
