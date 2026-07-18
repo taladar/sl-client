@@ -52,6 +52,7 @@ mod hud_pick;
 mod ik;
 mod input_action;
 mod input_context;
+mod inventory;
 mod legacy_materials;
 mod lights;
 mod locomotion;
@@ -92,6 +93,7 @@ mod ui_pseudoloc;
 mod ui_test;
 mod ui_text;
 mod underwater_fog;
+mod virtual_list;
 mod water;
 
 use std::path::{Path, PathBuf};
@@ -157,6 +159,7 @@ use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_scree
 use crate::hud_pick::pick_and_touch;
 use crate::input_action::InputActionPlugin;
 use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
+use crate::inventory::InventoryPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -206,6 +209,7 @@ use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
+use crate::virtual_list::VirtualListPlugin;
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
@@ -586,6 +590,14 @@ fn run_session(
     // (viewer-object-context-menu), so nothing here opens one yet. The widget is
     // reachable in the gallery's `radial-menu-target` card meanwhile.
     .add_plugins(PieMenuPlugin)
+    // The virtualized (windowed-recycling) list widget (viewer-ui-virtualized-list):
+    // a bounded row pool that recycles as the viewport scrolls, so a long panel
+    // (inventory, radar, chat at scale) costs the viewport, not the item count.
+    .add_plugins(VirtualListPlugin)
+    // The inventory window (viewer-inventory-folder-tree / -outfit-tab /
+    // -search-filter): the folder tree, the Everything / Recent / Worn tabs and the
+    // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`.
+    .add_plugins(InventoryPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.

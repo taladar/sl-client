@@ -2,7 +2,7 @@
 id: viewer-inventory-gallery
 title: Inventory gallery view
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-inventory-ui
 blocked_by: [viewer-inventory-folder-tree]
 ---

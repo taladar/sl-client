@@ -2,7 +2,7 @@
 id: viewer-inventory-outfit-tab
 title: Worn / current-outfit tab + recent items
 topic: viewer
-status: blocked
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-inventory-ui
 blocked_by: [viewer-inventory-folder-tree]
 ---
@@ -21,3 +21,16 @@ Reference (Firestorm, read-only): `llinventorypanel`,
 `llinventoryfunctions`.
 
 Builds on: [[viewer-inventory-folder-tree]] and the `inventory.rs` model.
+
+## Done (2026-07-18)
+
+The **Recent** and **Worn** tab *views* shipped in
+`sl-client-bevy-viewer/src/inventory.rs`. Recent = items received since login
+(`InventoryBulkUpdate` / `InventoryItemCreated`), newest-first, deduped,
+bounded. Worn = the Current Outfit Folder's contents (authoritative on SL),
+falling back to the legacy `AgentWearables` set (type labels) on a grid that
+does not populate the COF.
+
+The **detach / take-off actions** on a worn item are a mutation and were left
+out (no context menu / mutation actions exist yet) — follow-up
+[[viewer-inventory-worn-actions]].

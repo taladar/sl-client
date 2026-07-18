@@ -2,7 +2,7 @@
 id: viewer-social-groups
 title: Groups list + group profile / roles / notices
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-social-panels
 blocked_by: [viewer-ui-widget-scaffold, viewer-ui-virtualized-list]
 ---

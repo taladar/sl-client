@@ -2,7 +2,7 @@
 id: viewer-inventory-search-filter
 title: Inventory search / filter
 topic: viewer
-status: blocked
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-inventory-ui
 blocked_by: [viewer-inventory-folder-tree]
 ---
@@ -21,3 +21,14 @@ Reference (Firestorm, read-only): `llinventoryfilter`,
 `llinventoryfunctions`.
 
 Builds on: [[viewer-inventory-folder-tree]].
+
+## Done (2026-07-18)
+
+The **name search** shipped in `sl-client-bevy-viewer/src/inventory.rs`: the
+toolbar text field filters the shown rows, and on the Everything tab it keeps
+the folder **hierarchy** that leads to each match (ancestor folders retained and
+shown expanded), matching the reference viewer. Only loaded folders' items are
+searchable.
+
+The **type / date / worn-recent filters** were deliberately deferred — follow-up
+[[viewer-inventory-advanced-filters]].

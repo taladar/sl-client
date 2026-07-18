@@ -2,7 +2,7 @@
 id: viewer-ui-virtualized-list
 title: Virtualized (windowed-recycling) list
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-ui-framework
 blocked_by: [viewer-ui-widget-scaffold]
 ---
@@ -22,3 +22,13 @@ inventory, chat history at scale) consumes this.
 
 Reference (Firestorm, read-only): `llfolderview`, `llscrolllistctrl`
 (virtualized scrolling behaviour, not the layout model).
+
+## Done (2026-07-18)
+
+Implemented as `sl-client-bevy-viewer/src/virtual_list.rs`: a `VirtualList`
+component on a clipped viewport keeps a bounded, recycled pool of absolutely
+positioned row entities, driven by the pure `row_window` windowing math
+(unit-tested). Consumers own row content (populate on `Added<VirtualRow>`, bind
+on change). Scrolling is gated on the input context (the list must be focused),
+so the wheel never fights the camera zoom. First consumer:
+[[viewer-inventory-folder-tree]].

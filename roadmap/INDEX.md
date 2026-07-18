@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 87 |
-| blocked | 100 |
+| ready | 94 |
+| blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 498 |
+| done | 502 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **710** |
+| **total** | **714** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (87)
+## ready (94)
 
 ### viewer
 
@@ -70,6 +70,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
+- [`viewer-inventory-advanced-filters`](ready/viewer-inventory-advanced-filters.md)
+  — Inventory advanced filters (type / date / worn)
+- [`viewer-inventory-context-actions`](ready/viewer-inventory-context-actions.md)
+  — Inventory context actions + drag-and-drop (blocked by
+  `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-gallery`](ready/viewer-inventory-gallery.md) — Inventory
+  gallery view (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
+  — Inventory marketplace operations
+- [`viewer-inventory-row-decorations`](ready/viewer-inventory-row-decorations.md)
+  — Inventory row decorations (permissions, worn-bold)
+- [`viewer-inventory-worn-actions`](ready/viewer-inventory-worn-actions.md) —
+  Worn-item detach / take-off actions
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -144,6 +157,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-snapshot-quick-key`](ready/viewer-snapshot-quick-key.md) —
   Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
+- [`viewer-social-groups`](ready/viewer-social-groups.md) — Groups list + group
+  profile / roles / notices (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-ui-virtualized-list` (done))
+- [`viewer-social-people-panel`](ready/viewer-social-people-panel.md) — People
+  panel — friends / nearby / recent / blocked (blocked by
+  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](ready/viewer-social-profiles.md) — Avatar profiles
   — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
@@ -163,9 +182,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-virtualized-list`](ready/viewer-ui-virtualized-list.md) —
-  Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
-  (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
@@ -231,12 +247,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (100)
+## blocked (93)
 
 ### viewer
 
 - [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list) (blocked by `viewer-ui-virtualized-list`,
+  (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
   `viewer-name-tags-display-names`)
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
@@ -307,18 +323,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-settings-ui`](blocked/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`)
-- [`viewer-inventory-context-actions`](blocked/viewer-inventory-context-actions.md)
-  — Inventory context actions + drag-and-drop (blocked by
-  `viewer-inventory-folder-tree`)
-- [`viewer-inventory-folder-tree`](blocked/viewer-inventory-folder-tree.md) —
-  Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`)
-- [`viewer-inventory-gallery`](blocked/viewer-inventory-gallery.md) — Inventory
-  gallery view (blocked by `viewer-inventory-folder-tree`)
-- [`viewer-inventory-outfit-tab`](blocked/viewer-inventory-outfit-tab.md) — Worn
-  / current-outfit tab + recent items (blocked by
-  `viewer-inventory-folder-tree`)
-- [`viewer-inventory-search-filter`](blocked/viewer-inventory-search-filter.md)
-  — Inventory search / filter (blocked by `viewer-inventory-folder-tree`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -406,7 +410,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-object-edit-floater-shell`)
 - [`viewer-prim-inventory-editing`](blocked/viewer-prim-inventory-editing.md) —
   Prim inventory (contents) editing (blocked by
-  `viewer-object-edit-floater-shell`, `viewer-ui-virtualized-list`)
+  `viewer-object-edit-floater-shell`, `viewer-ui-virtualized-list` (done))
 - [`viewer-prim-linking`](blocked/viewer-prim-linking.md) — Prim linking &
   unlinking (blocked by `viewer-object-selection-core`,
   `viewer-input-action-map` (done))
@@ -434,7 +438,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-enforce-forced-actions`](blocked/viewer-rlv-enforce-forced-actions.md)
   — RLV — forced actions and the #RLV inventory sub-protocol (blocked by
   `viewer-rlv-restriction-state`, `viewer-sit-stand-actions`,
-  `viewer-inventory-folder-tree`)
+  `viewer-inventory-folder-tree` (done))
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
   `viewer-rlv-restriction-state`, `viewer-name-tags-decorations`,
@@ -457,15 +461,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
-- [`viewer-social-groups`](blocked/viewer-social-groups.md) — Groups list +
-  group profile / roles / notices (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-virtualized-list`)
 - [`viewer-social-im-conversations`](blocked/viewer-social-im-conversations.md)
   — IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-text-input-widget`)
-- [`viewer-social-people-panel`](blocked/viewer-social-people-panel.md) — People
-  panel — friends / nearby / recent / blocked (blocked by
-  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list`)
 - [`viewer-streaming-audio`](blocked/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
 - [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
@@ -563,7 +561,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (498)
+## done (502)
 
 ### protocol
 
@@ -724,6 +722,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
+- [`viewer-inventory-folder-tree`](done/viewer-inventory-folder-tree.md) —
+  Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`
+  (done))
+- [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
+  current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
+  (done))
+- [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
+  Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))
@@ -1004,6 +1010,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   font foundation (bevy_ui + parley bring-up)
 - [`viewer-ui-text-grapheme-backdelete`](done/viewer-ui-text-grapheme-backdelete.md)
   — Grapheme-correct backspace (parley backdelete deletes codepoints)
+- [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
+  Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
+  (done))
 - [`viewer-ui-widget-scaffold`](done/viewer-ui-widget-scaffold.md) — UI widget
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`

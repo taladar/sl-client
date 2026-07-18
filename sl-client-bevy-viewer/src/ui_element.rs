@@ -442,6 +442,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   registered form; its layout is checked directly in `crate::pie_menu`'s tests.",
         spawn: crate::pie_menu::spawn_radial_menu_target,
     },
+    UiElement {
+        id: "inventory-row",
+        summary: "An inventory tree row: indent, expand arrow, type icon and label — an expanded \
+                  folder over an indented item. The live window (`crate::inventory`) recycles \
+                  this row through the virtualized list; here it is static so its layout is swept.",
+        spawn: crate::inventory::spawn_inventory_row_sample,
+    },
 ];
 
 /// The accent colour on a label's leading edge.
