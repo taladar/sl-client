@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 94 |
-| blocked | 93 |
+| ready | 96 |
+| blocked | 96 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 502 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **714** |
+| **total** | **719** |
 
 ## ideas (1)
 
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (94)
+## ready (96)
 
 ### viewer
 
@@ -170,6 +170,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done))
+- [`viewer-ui-bottom-toolbar`](ready/viewer-ui-bottom-toolbar.md) — Bottom
+  toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](ready/viewer-ui-floater-basic.md) — Floater window
@@ -179,6 +181,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-ui-skin-tokens`](ready/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-tab-widget`](ready/viewer-ui-tab-widget.md) — Reusable tab widget
+  (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -247,10 +251,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (93)
+## blocked (96)
 
 ### viewer
 
+- [`viewer-avatar-context-menu`](blocked/viewer-avatar-context-menu.md) — Avatar
+  context / pie menu entries (self + others) (blocked by
+  `viewer-ui-context-menu`)
 - [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
   `viewer-name-tags-display-names`)
@@ -296,6 +303,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-channel-and-commands`)
 - [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
   (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
+- [`viewer-hud-context-menu`](blocked/viewer-hud-context-menu.md) — HUD context
+  / pie menu entries (blocked by `viewer-ui-context-menu`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -480,6 +489,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-floater-resize-dock`](blocked/viewer-ui-floater-resize-dock.md) —
   Floater window manager (resize / minimize / dock / tear-off) (blocked by
   `viewer-ui-floater-basic`)
+- [`viewer-ui-menu-bar`](blocked/viewer-ui-menu-bar.md) — Top menu bar (blocked
+  by `viewer-ui-context-menu`)
 - [`viewer-ui-notification-host`](blocked/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens`)

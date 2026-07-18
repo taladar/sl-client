@@ -45,3 +45,7 @@ wear/rez/give/rename/delete above): **create** (new folder / notecard / script /
 trash**. All are `Session` inventory mutations already on the wire; this task is
 the menu and the command wiring. Library rows stay read-only (see the note
 above).
+
+Give-by-drag targets a **specific avatar**: dropping an inventory item onto an
+avatar in-world, onto a radar / people-list row, or onto their **profile**
+([[viewer-social-profiles]]) gives it to them (the give wire path is done).
