@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 97 |
+| ready | 96 |
 | blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 507 |
+| done | 508 |
 | deferred | 7 |
 | wont-do | 3 |
 | **total** | **722** |
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (97)
+## ready (96)
 
 ### viewer
 
@@ -177,9 +177,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-floater-persist-geometry`](ready/viewer-ui-floater-persist-geometry.md)
-  — Floaters remember their position and size per user (blocked by
-  `viewer-ui-floater-basic` (done), `viewer-ui-settings-store` (done))
 - [`viewer-ui-settings-binding`](ready/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))
@@ -567,7 +564,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (507)
+## done (508)
 
 ### protocol
 
@@ -1011,6 +1008,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
   manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-floater-persist-geometry`](done/viewer-ui-floater-persist-geometry.md)
+  — Floaters remember their position and size per user (blocked by
+  `viewer-ui-floater-basic` (done), `viewer-ui-settings-store` (done))
 - [`viewer-ui-floater-resize-dock`](done/viewer-ui-floater-resize-dock.md) —
   Floater window manager (resize / minimize / dock / tear-off) (blocked by
   `viewer-ui-floater-basic` (done))

@@ -170,8 +170,7 @@ pub(crate) struct FloaterPlugin;
 
 impl Plugin for FloaterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<FloaterClosed>()
-            .add_message::<FloaterCommand>()
+        app.add_message::<FloaterCommand>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .init_resource::<DefaultDockHost>()
@@ -212,8 +211,9 @@ impl Plugin for FloaterPlugin {
 /// remembers that is not derivable from the tree.
 #[derive(Component, Debug, Clone)]
 pub(crate) struct Floater {
-    /// A stable id — names the floater in a [`FloaterClosed`] and lets a consumer
-    /// (the inventory window) tell its own floater apart from any other.
+    /// A stable id — lets a consumer (the inventory window) tell its own floater
+    /// apart from any other, and keys its remembered geometry in the settings
+    /// store ([`crate::floater_persist`]).
     pub(crate) id: &'static str,
     /// The remembered on-screen position while free-floating, in **logical**
     /// pixels: `x` is the inline-start offset, `y` the block-start (top) offset.
@@ -242,6 +242,48 @@ pub(crate) struct Floater {
     min_size: Vec2,
     /// Which chrome this floater offers.
     caps: FloaterCaps,
+}
+
+/// A floater's **persistable geometry** — everything the settings store
+/// remembers per user ([`crate::floater_persist`]): where it sits, how big its
+/// content area is, and the two boolean states. The live [`Floater`] holds more
+/// (its host entity, min-size, caps) that is either not user data or not stable
+/// across sessions; this is the slice that round-trips to disk.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FloaterGeometry {
+    /// The free-floating position, in logical pixels (see [`Floater::position`]).
+    pub(crate) position: Vec2,
+    /// The content-area size, or `None` for a content-driven floater (see
+    /// [`Floater::content_size`]).
+    pub(crate) content_size: Option<Vec2>,
+    /// Whether it is collapsed to its title bar.
+    pub(crate) minimized: bool,
+    /// Whether it is docked into a host.
+    pub(crate) docked: bool,
+}
+
+impl Floater {
+    /// The current geometry, snapshotted for persistence.
+    pub(crate) const fn geometry(&self) -> FloaterGeometry {
+        FloaterGeometry {
+            position: self.position,
+            content_size: self.content_size,
+            minimized: self.minimized,
+            docked: self.docked_in.is_some(),
+        }
+    }
+
+    /// Restore a saved **position / size / minimized** state at seed time.
+    ///
+    /// Docking is deliberately *not* applied here — reparenting into a host needs
+    /// the manager's command path ([`FloaterOp::ToggleDock`]), so
+    /// [`FloaterGeometry::docked`] is honoured by the seeding system separately —
+    /// and `docked_in` is left untouched.
+    pub(crate) const fn restore_geometry(&mut self, geometry: FloaterGeometry) {
+        self.position = geometry.position;
+        self.content_size = geometry.content_size;
+        self.minimized = geometry.minimized;
+    }
 }
 
 /// The chrome entities of a floater, held on its root so the systems find each
@@ -350,14 +392,6 @@ fn spawn_default_dock_host(
     host.0 = Some(entity);
 }
 
-/// Emitted when a floater closes — by its button or `Ctrl+W` — so a consumer can
-/// keep its own open/closed state in step (the inventory toggle reads this).
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct FloaterClosed {
-    /// The [`Floater::id`] of the floater that closed.
-    pub(crate) id: &'static str,
-}
-
 /// A chrome action to apply — written by a button's press observer and carried out
 /// by [`apply_floater_commands`].
 ///
@@ -367,16 +401,16 @@ pub(crate) struct FloaterClosed {
 /// lifting in a single, testable system. Drag and resize, which only mutate the
 /// floater's own [`Floater`], skip the message and edit it directly.
 #[derive(Message, Debug, Clone, Copy)]
-struct FloaterCommand {
+pub(crate) struct FloaterCommand {
     /// The floater root to act on.
-    floater: Entity,
+    pub(crate) floater: Entity,
     /// What to do to it.
-    op: FloaterOp,
+    pub(crate) op: FloaterOp,
 }
 
 /// The chrome operations routed through [`FloaterCommand`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FloaterOp {
+pub(crate) enum FloaterOp {
     /// Raise to the front and make active (any press).
     BringToFront,
     /// Close (hide) the floater.
@@ -928,7 +962,6 @@ fn apply_floater_commands(
     mut z_top: ResMut<FloaterZTop>,
     mut active: ResMut<ActiveFloater>,
     mut panels: Query<&mut UiPanelShown>,
-    mut closed: MessageWriter<FloaterClosed>,
     dock_host: Res<DefaultDockHost>,
     root: Res<UiRoot>,
 ) {
@@ -954,7 +987,9 @@ fn apply_floater_commands(
                 if active.0 == Some(command.floater) {
                     active.0 = None;
                 }
-                closed.write(FloaterClosed { id: floater.id });
+                // A consumer that tracks its own open state observes the
+                // `UiPanelShown` change above (the inventory window does), so no
+                // separate close event is needed.
             }
             FloaterOp::ToggleMinimize => {
                 if floater.caps.minimizable {
@@ -1322,8 +1357,8 @@ pub(crate) fn spawn_floater_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveFloater, DefaultDockHost, FloaterCaps, FloaterClosed, FloaterCommand, FloaterOp,
-        FloaterParts, FloaterSpec, FloaterZTop, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands,
+        ActiveFloater, DefaultDockHost, FloaterCaps, FloaterCommand, FloaterOp, FloaterParts,
+        FloaterSpec, FloaterZTop, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands,
         apply_floater_content, apply_floater_glyphs, apply_floater_inset, clamp_position,
         drag_position, highlight_active_floater, resize_size, spawn_floater,
     };
@@ -1341,8 +1376,7 @@ mod tests {
     /// writing [`FloaterCommand`]s directly instead).
     fn floater_app() -> (App, Entity, Entity) {
         let mut app = App::new();
-        app.add_message::<FloaterClosed>()
-            .add_message::<FloaterCommand>()
+        app.add_message::<FloaterCommand>()
             .init_resource::<FloaterZTop>()
             .init_resource::<ActiveFloater>()
             .insert_resource(UiDirection::Ltr)
@@ -1493,11 +1527,10 @@ mod tests {
         );
     }
 
-    /// Closing a floater hides it, clears it as active, and announces the close by
-    /// its id — the hook a consumer (the inventory window) keeps its own state in
-    /// step with.
+    /// Closing a floater hides it (via its `UiPanelShown`, the flag a consumer
+    /// keeps its own open state in step with) and clears it as active.
     #[test]
-    fn closing_hides_announces_and_clears_active() -> Result<(), TestError> {
+    fn closing_hides_and_clears_active() -> Result<(), TestError> {
         let (mut app, root, _host) = floater_app();
         let floater = spawn_one(&mut app, root);
         command(&mut app, floater, FloaterOp::BringToFront);
@@ -1517,17 +1550,6 @@ mod tests {
             app.world().resource::<ActiveFloater>().0,
             None,
             "closing the active floater clears it"
-        );
-        let announced: Vec<&'static str> = app
-            .world_mut()
-            .resource_mut::<Messages<FloaterClosed>>()
-            .drain()
-            .map(|event| event.id)
-            .collect();
-        assert_eq!(
-            announced,
-            vec!["test"],
-            "closing must announce the floater's id"
         );
         Ok(())
     }

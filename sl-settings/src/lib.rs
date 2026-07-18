@@ -138,6 +138,31 @@ mod tests {
         Ok(())
     }
 
+    /// `is_overridden` tells a stored value apart from the bare default: false
+    /// while a setting resolves to its default, true once any scope sets it, and
+    /// false again once every override is reset.
+    #[test]
+    fn is_overridden_tracks_stored_values() -> Result<(), TestError> {
+        let mut store = populated()?;
+        assert!(
+            !store.is_overridden("Count"),
+            "a default is not an override"
+        );
+
+        store.set(Scope::Global, "Count", SettingValue::I32(10))?;
+        assert!(store.is_overridden("Count"), "a global set is an override");
+
+        store.set(Scope::Account, "Count", SettingValue::I32(20))?;
+        assert!(store.is_overridden("Count"));
+
+        // Only when *both* layers are cleared is it back to the default.
+        assert!(store.reset(Scope::Account, "Count"));
+        assert!(store.is_overridden("Count"), "still overridden by global");
+        assert!(store.reset(Scope::Global, "Count"));
+        assert!(!store.is_overridden("Count"), "back to the default");
+        Ok(())
+    }
+
     /// Clearing the account scope drops every account override at once.
     #[test]
     fn clearing_account_scope_drops_all_overrides() -> Result<(), TestError> {

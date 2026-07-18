@@ -215,6 +215,19 @@ impl SettingsStore {
             .or_else(|| self.decls.get(name).map(SettingDecl::default))
     }
 
+    /// Whether any scope currently overrides `name` — an account or global
+    /// value is set — as opposed to the setting resolving to its declared
+    /// default.
+    ///
+    /// A caller that must tell "the user saved this" apart from "this is just
+    /// the default" (a floater seeding its remembered geometry only when one
+    /// was stored) checks this rather than [`get`](SettingsStore::get), which
+    /// can never distinguish the two.
+    #[must_use]
+    pub fn is_overridden(&self, name: &str) -> bool {
+        self.account.contains_key(name) || self.global.contains_key(name)
+    }
+
     /// Write a value to a scope's override layer.
     ///
     /// The value's type must match the setting's declared type.

@@ -44,6 +44,7 @@ mod diagnostics;
 mod environment;
 mod flexi;
 mod floater;
+mod floater_persist;
 mod flycam_ui;
 pub mod gallery;
 mod ground;
@@ -158,6 +159,7 @@ use crate::diagnostics::{
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
+use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
@@ -641,6 +643,10 @@ fn run_session(
     // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
     // in a floater, so it drags / resizes / minimizes / docks.
     .add_plugins(InventoryPlugin)
+    // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
+    // each floater's position, size, minimized / docked state and open / closed
+    // state across sessions, in the per-avatar account settings.
+    .add_plugins(FloaterPersistPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.

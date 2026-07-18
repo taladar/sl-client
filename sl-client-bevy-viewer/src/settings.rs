@@ -85,6 +85,25 @@ impl ViewerSettings {
         self.declare(section, name, value, comment);
     }
 
+    /// Write a value to the per-avatar [`Account`](Scope::Account) scope,
+    /// logging and swallowing a (wrong-type or unregistered) error so a bad write
+    /// can never abort a frame. The floater-geometry persistence
+    /// ([`crate::floater_persist`]) writes each floater's remembered rect /
+    /// visibility here as it changes.
+    pub(crate) fn set_account(&mut self, name: &str, value: SettingValue) {
+        if let Err(error) = self.store.set(Scope::Account, name, value) {
+            warn!("settings: could not set {name}: {error}");
+        }
+    }
+
+    /// Whether the per-avatar account scope has been resolved and loaded (post
+    /// login). Consumers that seed themselves from a saved *account* value wait
+    /// for this, since the account overrides are not in the store until then.
+    #[must_use]
+    pub(crate) const fn account_loaded(&self) -> bool {
+        self.account_path.is_some()
+    }
+
     /// Load the persisted global overrides, if the file exists — a missing file is
     /// the common first-run case and not an error.
     fn load_global(&mut self) {

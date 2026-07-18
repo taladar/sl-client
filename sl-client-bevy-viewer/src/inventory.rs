@@ -50,7 +50,7 @@ use sl_client_bevy::{
     WearableType,
 };
 
-use crate::floater::{FloaterCaps, FloaterClosed, FloaterSpec, spawn_floater};
+use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
@@ -147,7 +147,7 @@ impl Plugin for InventoryPlugin {
                 Update,
                 (
                     toggle_inventory,
-                    sync_inventory_close,
+                    refresh_inventory_on_show,
                     ingest_inventory,
                     apply_ui_actions,
                     read_search_field,
@@ -550,16 +550,18 @@ pub(crate) enum InventoryTab {
     Worn,
 }
 
-/// The window's transient UI state: which tab, the search query, and whether the
-/// window is open.
+/// The window's transient UI state: which tab and the search query.
+///
+/// Open / closed is **not** tracked here — the floater's
+/// [`UiPanelShown`] is the single source of truth, so restoring the window open
+/// from saved settings ([`crate::floater_persist`]) and toggling it with `Ctrl+I`
+/// go through the same flag and can never drift apart.
 #[derive(Resource, Default)]
 struct InventoryState {
     /// The active tab.
     tab: InventoryTab,
     /// The current search query.
     query: String,
-    /// Whether the window is open.
-    open: bool,
 }
 
 /// The flattened rows the window is currently drawing — recomputed from the
@@ -730,8 +732,9 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 // Toggle
 // ---------------------------------------------------------------------------
 
-/// The hosting floater's [`crate::floater::FloaterSpec::id`] — so the window can
-/// tell its own [`FloaterClosed`] apart from any other floater's.
+/// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
+/// window's remembered geometry in the settings store
+/// ([`crate::floater_persist`]).
 const INVENTORY_FLOATER_ID: &str = "inventory";
 
 /// `Ctrl+I` opens / closes the window, matching the reference viewer's shortcut.
@@ -740,10 +743,7 @@ const INVENTORY_FLOATER_ID: &str = "inventory";
 fn toggle_inventory(
     keyboard: Res<ButtonInput<KeyCode>>,
     ui: Option<Res<InventoryUi>>,
-    mut state: ResMut<InventoryState>,
     mut panels: Query<&mut UiPanelShown>,
-    mut model: ResMut<InventoryModel>,
-    mut commands: MessageWriter<SlCommand>,
 ) {
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
     if !(ctrl && keyboard.just_pressed(KeyCode::KeyI)) {
@@ -752,31 +752,38 @@ fn toggle_inventory(
     let Some(ui) = ui else {
         return;
     };
-    state.open = !state.open;
+    // Flip the floater's own shown flag; the refresh below (and any geometry
+    // persistence) reacts to the change, so there is no separate open-state to
+    // keep in step.
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
-        shown.0 = state.open;
-    }
-    if state.open {
-        // Refresh the folder structure every open (a cheap local snapshot): the
-        // login skeleton may have arrived after the first open, and folders can
-        // be created during the session.
-        commands.write(SlCommand(Command::QueryInventoryFolders));
-        // The Worn tab wants the COF contents; harmless if already held.
-        request_worn_source(&mut model, &mut commands);
+        shown.0 = !shown.0;
     }
 }
 
-/// Keep [`InventoryState::open`] in step when the window is closed by its floater
-/// chrome (the title-bar close button or `Ctrl+W`) rather than by `Ctrl+I` — so
-/// the next `Ctrl+I` re-opens it instead of toggling a stale `open` back to false.
-fn sync_inventory_close(
-    mut closed: MessageReader<FloaterClosed>,
-    mut state: ResMut<InventoryState>,
+/// Refresh the inventory whenever the window becomes visible — whether opened by
+/// `Ctrl+I` or **restored open** from saved settings ([`crate::floater_persist`]),
+/// since both just flip the floater's [`UiPanelShown`].
+///
+/// A cheap local snapshot each time: the login skeleton may have arrived after a
+/// previous open, and folders can be created during the session.
+fn refresh_inventory_on_show(
+    ui: Option<Res<InventoryUi>>,
+    shown: Query<&UiPanelShown, Changed<UiPanelShown>>,
+    mut model: ResMut<InventoryModel>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
-    for event in closed.read() {
-        if event.id == INVENTORY_FLOATER_ID {
-            state.open = false;
-        }
+    let Some(ui) = ui else {
+        return;
+    };
+    // `get` on a `Changed` query yields the panel only on the frame its
+    // visibility flips; ignore the close transition.
+    let Ok(shown) = shown.get(ui.panel) else {
+        return;
+    };
+    if shown.0 {
+        commands.write(SlCommand(Command::QueryInventoryFolders));
+        // The Worn tab wants the COF contents; harmless if already held.
+        request_worn_source(&mut model, &mut commands);
     }
 }
 
