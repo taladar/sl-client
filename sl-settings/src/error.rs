@@ -32,7 +32,7 @@ pub enum SettingError {
     /// Reading or writing a persistence file failed.
     #[error("settings file I/O failed: {0}")]
     Io(#[from] std::io::Error),
-    /// A persistence file's contents were not the expected JSON.
-    #[error("settings file did not parse as JSON: {0}")]
-    Json(#[from] serde_json::Error),
+    /// A persistence file's contents were not the expected TOML.
+    #[error("settings file did not parse as TOML: {0}")]
+    Toml(#[from] toml_edit::TomlError),
 }

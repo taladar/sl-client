@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 504 |
+| done | 505 |
 | deferred | 7 |
 | wont-do | 3 |
-| **total** | **720** |
+| **total** | **721** |
 
 ## ideas (1)
 
@@ -153,8 +153,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-mirror-download`](ready/viewer-script-mirror-download.md) —
   Scripts on disk — mirror grid scripts to a directory tree
-- [`viewer-settings-toml-format`](ready/viewer-settings-toml-format.md) — TOML
-  settings file with comments and nested sections (blocked by
+- [`viewer-settings-account-scope-persist`](ready/viewer-settings-account-scope-persist.md)
+  — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
@@ -570,7 +570,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (504)
+## done (505)
 
 ### protocol
 
@@ -1004,6 +1004,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
+  settings file with comments and nested sections (blocked by
+  `viewer-ui-settings-store` (done))
 - [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
   manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-resize-dock`](done/viewer-ui-floater-resize-dock.md) —

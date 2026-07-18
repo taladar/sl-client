@@ -110,28 +110,36 @@ const AUTO_LEVELING_SETTING: &str = "AutoLeveling";
 /// a user's Firestorm values port straight over.
 pub(crate) fn register_settings(settings: &mut ViewerSettings) {
     for (index, &scale) in DEFAULT_SCALE.iter().enumerate() {
-        settings.register(
+        settings.register_in(
+            FLYCAM_SECTION,
             &scale_setting(index),
             SettingValue::F32(scale),
             "Flycam axis scaler",
         );
-        settings.register(
+        settings.register_in(
+            FLYCAM_SECTION,
             &dead_zone_setting(index),
             SettingValue::F32(DEFAULT_DEAD_ZONE),
             "Flycam axis dead zone",
         );
     }
-    settings.register(
+    settings.register_in(
+        FLYCAM_SECTION,
         FEATHERING_SETTING,
         SettingValue::F32(DEFAULT_FEATHERING),
         "Flycam feathering (less is softer)",
     );
-    settings.register(
+    settings.register_in(
+        FLYCAM_SECTION,
         AUTO_LEVELING_SETTING,
         SettingValue::Bool(DEFAULT_AUTO_LEVELING),
         "Ease the flycam horizon back to level",
     );
 }
+
+/// The persisted-file section the flycam / SpaceNavigator settings are grouped
+/// under (`[spacenav.flycam]`).
+const FLYCAM_SECTION: &[&str] = &["spacenav", "flycam"];
 
 /// Refresh [`FlycamAxisSettings`] from the store each frame (cheap reads), so a
 /// value changed in the (future) settings UI takes effect live.

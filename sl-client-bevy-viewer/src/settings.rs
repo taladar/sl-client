@@ -6,8 +6,11 @@
 //! their features land. The store loads its [`Global`](sl_settings::Scope::Global)
 //! overrides from a `viewer-settings.toml` at startup and saves them on a clean
 //! logout, so a tuned value (e.g. a SpaceNavigator sensitivity) survives a
-//! restart. The account layer and the two-way widget binding
-//! (`viewer-input-spacenav-settings-ui`) build on top of this.
+//! restart. The file is TOML: each override is a commented `name = value` line
+//! grouped into a `[section]` table. The account layer (a separate per-avatar
+//! file, still unwired — see `viewer-settings-account-scope-persist`) and the
+//! two-way widget binding (`viewer-input-spacenav-settings-ui`) build on top of
+//! this.
 
 use std::path::{Path, PathBuf};
 
@@ -17,8 +20,8 @@ use tracing::{info, warn};
 
 /// The file the [`Global`](Scope::Global) settings scope is loaded from and saved
 /// to, relative to the working directory (the same place the credentials file
-/// lives by default). JSON, per the store's serialisation.
-const SETTINGS_FILE: &str = "viewer-settings.json";
+/// lives by default). TOML, per the store's serialisation.
+const SETTINGS_FILE: &str = "viewer-settings.toml";
 
 /// The viewer's settings store, a Bevy resource.
 #[derive(Resource)]
@@ -36,19 +39,27 @@ impl ViewerSettings {
         &self.store
     }
 
-    /// Register a setting's declared default (name → value + comment), logging and
-    /// swallowing the (only-on-duplicate) error so a double registration can never
-    /// abort startup.
-    fn declare(&mut self, name: &str, value: SettingValue, comment: &str) {
-        if let Err(error) = self.store.register(name, value, comment) {
+    /// Register a setting's declared default (name → value + comment) under a
+    /// section, logging and swallowing the (only-on-duplicate) error so a double
+    /// registration can never abort startup.
+    fn declare(&mut self, section: &[&str], name: &str, value: SettingValue, comment: &str) {
+        if let Err(error) = self.store.register_in(section, name, value, comment) {
             warn!("settings: could not register {name}: {error}");
         }
     }
 
-    /// Register a setting on the store (the pub(crate) entry the feature modules
-    /// call from [`FromWorld`]).
-    pub(crate) fn register(&mut self, name: &str, value: SettingValue, comment: &str) {
-        self.declare(name, value, comment);
+    /// Register a setting grouped under a `[section]` of the persisted file
+    /// (e.g. `["spacenav", "flycam"]` → `[spacenav.flycam]`), the pub(crate)
+    /// entry a feature module calls from [`FromWorld`]. Pass an empty section to
+    /// place the setting at the document root.
+    pub(crate) fn register_in(
+        &mut self,
+        section: &[&str],
+        name: &str,
+        value: SettingValue,
+        comment: &str,
+    ) {
+        self.declare(section, name, value, comment);
     }
 
     /// Load the persisted global overrides, if the file exists — a missing file is

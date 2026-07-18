@@ -36,6 +36,7 @@
 
 pub mod error;
 pub mod store;
+mod toml_format;
 pub mod value;
 
 pub use error::SettingError;
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn save_and_reload_round_trips_overrides() -> Result<(), TestError> {
         let dir = tempdir()?;
-        let path = dir.join("global.json");
+        let path = dir.join("global.toml");
 
         let mut store = populated()?;
         store.set(Scope::Global, "Clip", SettingValue::F32(256.0))?;
@@ -248,7 +249,7 @@ mod tests {
     #[test]
     fn transient_settings_are_not_persisted() -> Result<(), TestError> {
         let dir = tempdir()?;
-        let path = dir.join("global.json");
+        let path = dir.join("global.toml");
 
         let mut store = SettingsStore::new();
         store.register("Kept", SettingValue::I32(1), "persisted")?;
@@ -277,42 +278,42 @@ mod tests {
         Ok(())
     }
 
-    /// On load, an entry whose type no longer matches its declaration is
-    /// dropped, while an entry for a not-yet-registered setting is kept and
-    /// round-trips on the next save.
+    /// On load, an entry whose value no longer fits its declaration is dropped,
+    /// while an entry for a not-yet-registered setting is kept and round-trips
+    /// on the next save.
     #[test]
     fn load_drops_type_mismatches_keeps_unknowns() -> Result<(), TestError> {
         let dir = tempdir()?;
-        let path = dir.join("global.json");
+        let path = dir.join("global.toml");
 
         // A file written by a hypothetical other version: "Count" is now a bool
-        // (type changed) and "FutureSetting" is not registered here yet.
-        let json = r#"{
-            "Count": { "type": "bool", "value": true },
-            "FutureSetting": { "type": "i32", "value": 42 }
-        }"#;
-        fs_err::write(&path, json)?;
+        // (type changed, no longer fits the declared i32) and "FutureSetting" is
+        // not registered here yet.
+        let toml = "Count = true\nFutureSetting = 42\n";
+        fs_err::write(&path, toml)?;
 
         let mut store = populated()?;
         assert!(store.load_scope(Scope::Global, &path)?);
         // The type-changed entry was dropped, so "Count" keeps its default.
         assert_eq!(store.get_i32("Count")?, -3);
-        // The unknown entry was kept and is readable generically.
+        // The unknown entry was kept and is readable generically (an integer
+        // literal is inferred as an i32).
         assert_eq!(store.get("FutureSetting"), Some(&SettingValue::I32(42)));
 
         // It also survives a re-save (not silently discarded).
-        let out = dir.join("out.json");
+        let out = dir.join("out.toml");
         store.save_scope(Scope::Global, &out)?;
         let text = fs_err::read_to_string(&out)?;
         assert!(text.contains("FutureSetting"));
         Ok(())
     }
 
-    /// The JSON on disk is the adjacently-tagged form, keyed by setting name.
+    /// The TOML on disk carries each setting's declared comment above a bare
+    /// `name = value` line (no type tag).
     #[test]
-    fn saved_json_shape_is_stable() -> Result<(), TestError> {
+    fn saved_toml_shape_is_stable() -> Result<(), TestError> {
         let dir = tempdir()?;
-        let path = dir.join("global.json");
+        let path = dir.join("global.toml");
 
         let mut store = SettingsStore::new();
         store.register("Flag", SettingValue::Bool(false), "a toggle")?;
@@ -320,17 +321,121 @@ mod tests {
         store.save_scope(Scope::Global, &path)?;
 
         let text = fs_err::read_to_string(&path)?;
-        let parsed: serde_json::Value = serde_json::from_str(&text)?;
-        let tag = parsed
-            .get("Flag")
-            .and_then(|entry| entry.get("type"))
-            .and_then(serde_json::Value::as_str);
-        assert_eq!(tag, Some("bool"));
-        let value = parsed
-            .get("Flag")
-            .and_then(|entry| entry.get("value"))
-            .and_then(serde_json::Value::as_bool);
-        assert_eq!(value, Some(true));
+        assert!(text.contains("# a toggle"), "comment missing from {text:?}");
+        assert!(
+            text.contains("Flag = true"),
+            "value line missing from {text:?}"
+        );
+        Ok(())
+    }
+
+    /// Related settings are grouped under a nested `[section.subsection]` table,
+    /// with each setting's declared comment above it, and round-trip cleanly.
+    #[test]
+    fn sections_group_and_round_trip() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let path = dir.join("global.toml");
+
+        let register = |store: &mut SettingsStore| -> Result<(), SettingError> {
+            store.register_in(
+                &["spacenav", "flycam"],
+                "FlycamAxisScale0",
+                SettingValue::F32(1.0),
+                "Flycam axis scaler",
+            )?;
+            store.register_in(
+                &["spacenav", "flycam"],
+                "FlycamFeathering",
+                SettingValue::F32(3.0),
+                "Flycam feathering",
+            )
+        };
+
+        let mut store = SettingsStore::new();
+        register(&mut store)?;
+        store.set(Scope::Global, "FlycamAxisScale0", SettingValue::F32(1.5))?;
+        store.set(Scope::Global, "FlycamFeathering", SettingValue::F32(0.5))?;
+        store.save_scope(Scope::Global, &path)?;
+
+        let text = fs_err::read_to_string(&path)?;
+        assert!(
+            text.contains("[spacenav.flycam]"),
+            "section header missing from {text:?}"
+        );
+        assert!(
+            text.contains("# Flycam axis scaler"),
+            "comment missing from {text:?}"
+        );
+        // f32 values keep their short representation, not a widened f64.
+        assert!(
+            text.contains("FlycamAxisScale0 = 1.5"),
+            "value line missing from {text:?}"
+        );
+
+        let mut reloaded = SettingsStore::new();
+        register(&mut reloaded)?;
+        assert!(reloaded.load_scope(Scope::Global, &path)?);
+        approx(reloaded.get_f32("FlycamAxisScale0")?, 1.5);
+        approx(reloaded.get_f32("FlycamFeathering")?, 0.5);
+        Ok(())
+    }
+
+    /// Every value type survives a save/reload round-trip through TOML, read
+    /// back through its declaration.
+    #[test]
+    fn all_value_types_round_trip_through_toml() -> Result<(), TestError> {
+        let dir = tempdir()?;
+        let path = dir.join("global.toml");
+
+        let mut store = populated()?;
+        store.set(Scope::Global, "Flag", SettingValue::Bool(false))?;
+        store.set(Scope::Global, "Count", SettingValue::I32(-42))?;
+        store.set(Scope::Global, "Size", SettingValue::U32(4242))?;
+        // 0.1 is not exactly representable — a good precision probe.
+        store.set(Scope::Global, "Clip", SettingValue::F32(0.1))?;
+        store.set(
+            Scope::Global,
+            "Name",
+            SettingValue::String("hi there".to_owned()),
+        )?;
+        store.set(Scope::Global, "Tint", SettingValue::Color3([0.1, 0.2, 0.3]))?;
+        store.set(
+            Scope::Global,
+            "Glow",
+            SettingValue::Color4([0.1, 0.2, 0.3, 0.4]),
+        )?;
+        store.set(Scope::Global, "Offset", SettingValue::Vec3([1.5, 2.5, 3.5]))?;
+        store.set(
+            Scope::Global,
+            "Region",
+            SettingValue::Vec3d([4.0, 5.0, 6.0]),
+        )?;
+        store.set(
+            Scope::Global,
+            "Window",
+            SettingValue::Rect([0, 100, 200, 0]),
+        )?;
+        store.save_scope(Scope::Global, &path)?;
+
+        // The precision probe writes the short f32 form, not a widened f64.
+        let text = fs_err::read_to_string(&path)?;
+        assert!(
+            text.contains("Clip = 0.1"),
+            "f32 not short-formatted in {text:?}"
+        );
+
+        let mut reloaded = populated()?;
+        assert!(reloaded.load_scope(Scope::Global, &path)?);
+        assert!(!reloaded.get_bool("Flag")?);
+        assert_eq!(reloaded.get_i32("Count")?, -42);
+        assert_eq!(reloaded.get_u32("Size")?, 4242);
+        approx(reloaded.get_f32("Clip")?, 0.1);
+        assert_eq!(reloaded.get_str("Name")?, "hi there");
+        approx_slice(&reloaded.get_color3("Tint")?, &[0.1, 0.2, 0.3]);
+        approx_slice(&reloaded.get_color4("Glow")?, &[0.1, 0.2, 0.3, 0.4]);
+        approx_slice(&reloaded.get_vec3("Offset")?, &[1.5, 2.5, 3.5]);
+        approx_slice_f64(&reloaded.get_vec3d("Region")?, &[4.0, 5.0, 6.0]);
+        assert_eq!(reloaded.get_rect("Window")?, [0, 100, 200, 0]);
         Ok(())
     }
 

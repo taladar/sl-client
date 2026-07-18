@@ -1,10 +1,11 @@
 //! The settings store itself: declarations, the layered override scopes, typed
-//! access, and JSON persistence.
+//! access, and TOML persistence.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::error::SettingError;
+use crate::toml_format::{self, Entry};
 use crate::value::{SettingKind, SettingValue};
 
 /// Which override layer a value is read from or written to.
@@ -32,8 +33,13 @@ pub struct SettingDecl {
     /// The default value, returned when no override is present. Its
     /// [`SettingValue::kind`] fixes the setting's type.
     default: SettingValue,
-    /// A short human-readable description, shown by a raw settings editor.
+    /// A short human-readable description, shown by a raw settings editor and
+    /// written as the comment above the setting in the persisted TOML.
     comment: String,
+    /// The section path the setting is grouped under in the persisted TOML
+    /// (e.g. `["spacenav", "flycam"]` → `[spacenav.flycam]`). Empty places the
+    /// setting at the document root.
+    section: Vec<String>,
     /// Whether overrides of this setting are persisted to disk. A transient
     /// (runtime-only) setting sets this `false`.
     persist: bool,
@@ -58,6 +64,12 @@ impl SettingDecl {
         &self.comment
     }
 
+    /// The section path this setting is grouped under in the persisted file.
+    #[must_use]
+    pub fn section(&self) -> &[String] {
+        &self.section
+    }
+
     /// Whether overrides of this setting are written to disk.
     #[must_use]
     pub const fn persist(&self) -> bool {
@@ -70,7 +82,7 @@ impl SettingDecl {
 /// Settings are [`register`](SettingsStore::register)ed once with a typed
 /// default, then read and written by name. Reads resolve through the
 /// [`Scope`] layers (account → global → default); writes target one scope. Each
-/// scope's overrides load from and save to a JSON file independently, so the
+/// scope's overrides load from and save to a TOML file independently, so the
 /// global file is shared while a per-account file is swapped on login.
 #[expect(
     clippy::module_name_repetitions,
@@ -94,11 +106,14 @@ impl SettingsStore {
         Self::default()
     }
 
-    /// Register a persisted setting with a typed default and a description.
+    /// Register a persisted setting with a typed default and a description, at
+    /// the document root of the persisted file.
     ///
     /// The `default`'s type fixes the setting's type: later writes of a
     /// different type are rejected. Registering a name twice is an error, since
-    /// declaration is a one-time startup action.
+    /// declaration is a one-time startup action. Use
+    /// [`register_in`](SettingsStore::register_in) to group the setting under a
+    /// section.
     ///
     /// # Errors
     ///
@@ -109,13 +124,38 @@ impl SettingsStore {
         default: SettingValue,
         comment: impl Into<String>,
     ) -> Result<(), SettingError> {
-        self.declare(name.into(), default, comment.into(), true)
+        self.declare(name.into(), default, comment.into(), Vec::new(), true)
+    }
+
+    /// Register a persisted setting grouped under a section of the persisted
+    /// file (e.g. `["spacenav", "flycam"]` → `[spacenav.flycam]`).
+    ///
+    /// Otherwise identical to [`register`](SettingsStore::register).
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::AlreadyRegistered`] if `name` is already registered.
+    pub fn register_in(
+        &mut self,
+        section: &[&str],
+        name: impl Into<String>,
+        default: SettingValue,
+        comment: impl Into<String>,
+    ) -> Result<(), SettingError> {
+        self.declare(
+            name.into(),
+            default,
+            comment.into(),
+            section_path(section),
+            true,
+        )
     }
 
     /// Register a transient (runtime-only, never persisted) setting.
     ///
     /// Behaves like [`register`](SettingsStore::register) but its overrides are
-    /// skipped by [`save_scope`](SettingsStore::save_scope).
+    /// skipped by [`save_scope`](SettingsStore::save_scope), so its section is
+    /// irrelevant.
     ///
     /// # Errors
     ///
@@ -126,15 +166,16 @@ impl SettingsStore {
         default: SettingValue,
         comment: impl Into<String>,
     ) -> Result<(), SettingError> {
-        self.declare(name.into(), default, comment.into(), false)
+        self.declare(name.into(), default, comment.into(), Vec::new(), false)
     }
 
-    /// Shared body of the two `register*` methods.
+    /// Shared body of the `register*` methods.
     fn declare(
         &mut self,
         name: String,
         default: SettingValue,
         comment: String,
+        section: Vec<String>,
         persist: bool,
     ) -> Result<(), SettingError> {
         if self.decls.contains_key(&name) {
@@ -143,6 +184,7 @@ impl SettingsStore {
         let decl = SettingDecl {
             default,
             comment,
+            section,
             persist,
         };
         let _prev = self.decls.insert(name, decl);
@@ -230,65 +272,71 @@ impl SettingsStore {
         }
     }
 
-    /// Write a scope's persistable overrides to a JSON file, creating or
+    /// Write a scope's persistable overrides to a TOML file, creating or
     /// truncating it.
     ///
+    /// Each override is written as a commented `name = value` line, grouped into
+    /// its declared section (see [`register_in`](SettingsStore::register_in));
+    /// the value's type is not written, since it is fixed by the declaration.
     /// Overrides of transient settings (and only those) are skipped; overrides
-    /// of not-yet-registered settings are kept, so a value from a newer version
-    /// is not lost on round-trip.
+    /// of not-yet-registered settings are kept at the document root, so a value
+    /// from a newer version is not lost on round-trip.
     ///
     /// # Errors
     ///
-    /// [`SettingError::Io`] if the file cannot be written, or
-    /// [`SettingError::Json`] if serialization fails.
+    /// [`SettingError::Io`] if the file cannot be written.
     pub fn save_scope(&self, scope: Scope, path: impl AsRef<Path>) -> Result<(), SettingError> {
-        let mut out: BTreeMap<&str, &SettingValue> = BTreeMap::new();
+        let mut entries: Vec<Entry<'_>> = Vec::new();
         for (name, value) in self.scope_map(scope) {
-            let persist = self.decls.get(name).is_none_or(SettingDecl::persist);
-            if persist {
-                let _prev = out.insert(name, value);
+            match self.decls.get(name) {
+                Some(decl) if decl.persist() => entries.push(Entry {
+                    name,
+                    value,
+                    section: decl.section(),
+                    comment: decl.comment(),
+                }),
+                // A transient setting is never persisted.
+                Some(_decl) => {}
+                // An override of a setting this build does not declare is kept
+                // (forward compatibility), at the document root with no comment.
+                None => entries.push(Entry {
+                    name,
+                    value,
+                    section: &[],
+                    comment: "",
+                }),
             }
         }
-        let json = serde_json::to_string_pretty(&out)?;
-        fs_err::write(path, json)?;
+        let text = toml_format::to_toml(&entries);
+        fs_err::write(path, text)?;
         Ok(())
     }
 
-    /// Load a scope's overrides from a JSON file, replacing that scope's current
+    /// Load a scope's overrides from a TOML file, replacing that scope's current
     /// overrides.
     ///
     /// A missing file is not an error: the scope is left untouched and `false`
-    /// is returned. Register the settings before loading — an entry whose type
-    /// no longer matches a registered setting (a type changed across versions)
-    /// is dropped, while an entry for a not-yet-registered setting is kept for
-    /// forward compatibility.
+    /// is returned. Register the settings before loading — an entry whose value
+    /// no longer fits a registered setting's declared type (a type changed
+    /// across versions) is dropped, while an entry for a not-yet-registered
+    /// setting is kept for forward compatibility.
     ///
     /// # Errors
     ///
     /// [`SettingError::Io`] for an I/O error other than the file being absent,
-    /// or [`SettingError::Json`] if the file is not the expected JSON.
+    /// or [`SettingError::Toml`] if the file is not valid TOML.
     pub fn load_scope(
         &mut self,
         scope: Scope,
         path: impl AsRef<Path>,
     ) -> Result<bool, SettingError> {
-        let bytes = match fs_err::read(path.as_ref()) {
-            Ok(bytes) => bytes,
+        let text = match fs_err::read_to_string(path.as_ref()) {
+            Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error.into()),
         };
-        let loaded: BTreeMap<String, SettingValue> = serde_json::from_slice(&bytes)?;
-        let mut map = BTreeMap::new();
-        for (name, value) in loaded {
-            let type_changed = self
-                .decls
-                .get(&name)
-                .is_some_and(|decl| decl.kind() != value.kind());
-            if type_changed {
-                continue;
-            }
-            let _prev = map.insert(name, value);
-        }
+        let map =
+            toml_format::from_toml(&text, &|name| self.decls.get(name).map(SettingDecl::kind))?;
         *self.scope_map_mut(scope) = map;
         Ok(true)
     }
@@ -428,6 +476,15 @@ impl SettingsStore {
         self.get(name)
             .ok_or_else(|| SettingError::UnknownSetting(name.to_owned()))
     }
+}
+
+/// Turn a borrowed section path into the owned form stored in a
+/// [`SettingDecl`].
+fn section_path(section: &[&str]) -> Vec<String> {
+    section
+        .iter()
+        .map(|segment| (*segment).to_owned())
+        .collect()
 }
 
 /// Build the [`SettingError::TypeMismatch`] for a typed getter whose

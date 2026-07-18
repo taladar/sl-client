@@ -18,8 +18,8 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 [dependencies]
 fs-err = { version = "3.3.0" }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.145" }
 thiserror = { version = "2.0.18" }
+toml_edit = { version = "0.25.12" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }

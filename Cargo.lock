@@ -6615,8 +6615,8 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
+ "toml_edit",
 ]
 
 [[package]]
@@ -7222,6 +7222,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
