@@ -21,6 +21,7 @@ clap_complete = "4.6.2"
 clap_mangen = "0.3.0"
 crossbeam-channel = "0.5.15"
 rustyline = "17.0.2"
+sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }

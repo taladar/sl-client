@@ -339,31 +339,34 @@ pub use crate::world::{
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
 const EVENT_QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The chat-log transcripts subdirectory within a per-avatar account directory.
-const ACCOUNT_CHAT_SUBDIR: &str = "chat";
-/// The inventory disk-cache subdirectory within a per-avatar account directory.
-const ACCOUNT_INVENTORY_SUBDIR: &str = "inventorycache";
-
 /// Per-avatar directory derivation for the disk features, keyed by grid + avatar
 /// name with UUID-based rename discovery (see [`sl_account_dirs`]).
 ///
 /// When set on [`SlClientPlugin`], the driver resolves the avatar's directory at
 /// login (once the login response yields the agent UUID, before any disk feature
 /// is touched) and points the chat-log and inventory-cache directories at
-/// `<accounts_base>/<grid>/<name>/{chat,inventorycache}` — overriding any
-/// explicit [`ClientDirectories::agent_chat_log_dir`] /
-/// [`ClientDirectories::agent_cache_dir`]. This is how the reconcile (and a paid
-/// name change) is handled inline at the synchronous login point, rather than the
-/// host pre-supplying a fixed per-account path before the UUID is known.
+/// `<base>/<grid>/<name>/` under each feature's own accounts root — overriding
+/// any explicit [`ClientDirectories::agent_chat_log_dir`] /
+/// [`ClientDirectories::agent_cache_dir`]. The two roots are kept separate so
+/// each feature honours its XDG category (chat logs under a state root, the
+/// regenerable inventory cache under a cache root). This is how the reconcile
+/// (and a paid name change) is handled inline at the synchronous login point,
+/// rather than the host pre-supplying a fixed per-account path before the UUID is
+/// known.
 #[derive(Debug, Clone)]
 pub struct AccountDirsConfig {
-    /// The accounts root the per-avatar `<grid>/<name>/` directories live under
-    /// (e.g. an XDG data dir's `accounts` subdirectory).
-    pub accounts_base: PathBuf,
     /// The grid segment (from `sl_account_dirs::grid_dir_name`).
     pub grid: String,
     /// The readable avatar segment (from `sl_account_dirs::avatar_dir_name`).
     pub avatar: String,
+    /// The accounts root the per-avatar chat-log directory lives under (e.g. an
+    /// XDG state dir's `accounts` subdirectory), or `None` to leave chat logging
+    /// to the fixed [`ClientDirectories::agent_chat_log_dir`].
+    pub chat_log_base: Option<PathBuf>,
+    /// The accounts root the per-avatar inventory-cache directory lives under
+    /// (e.g. an XDG cache dir's `accounts` subdirectory), or `None` to leave the
+    /// cache to the fixed [`ClientDirectories::agent_cache_dir`].
+    pub inventory_cache_base: Option<PathBuf>,
 }
 
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
@@ -816,24 +819,32 @@ fn resolve_account_directories(
     let (Some(account), Some(agent)) = (account_dirs, agent_id) else {
         return base.clone();
     };
-    match sl_account_dirs::reconcile_account_dir(
-        &account.accounts_base,
-        &account.grid,
-        &account.avatar,
-        agent.uuid(),
-    ) {
-        Ok(dir) => ClientDirectories {
-            agent_chat_log_dir: Some(dir.join(ACCOUNT_CHAT_SUBDIR)),
-            agent_cache_dir: Some(dir.join(ACCOUNT_INVENTORY_SUBDIR)),
-            shared_cache_dir: base.shared_cache_dir.clone(),
-        },
-        Err(error) => {
-            tracing::warn!(
-                "could not resolve account directory under {}: {error}",
-                account.accounts_base.display()
-            );
-            base.clone()
+    let uuid = agent.uuid();
+    // Reconcile one feature's accounts root to this avatar's directory, falling
+    // back to the root as-is on a filesystem error so the feature still works
+    // (un-keyed) rather than being silently disabled.
+    let resolve = |accounts_base: &Option<PathBuf>| -> Option<PathBuf> {
+        let accounts_base = accounts_base.as_ref()?;
+        match sl_account_dirs::reconcile_account_dir(
+            accounts_base,
+            &account.grid,
+            &account.avatar,
+            uuid,
+        ) {
+            Ok(dir) => Some(dir),
+            Err(error) => {
+                tracing::warn!(
+                    "could not resolve account directory under {}: {error}",
+                    accounts_base.display()
+                );
+                Some(accounts_base.clone())
+            }
         }
+    };
+    ClientDirectories {
+        agent_chat_log_dir: resolve(&account.chat_log_base),
+        agent_cache_dir: resolve(&account.inventory_cache_base),
+        shared_cache_dir: base.shared_cache_dir.clone(),
     }
 }
 

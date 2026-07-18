@@ -603,8 +603,32 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     tracing::info!("login succeeded");
     client.set_diagnostics(true);
     client.set_chat_log_config(args.chat_log.to_config());
+    // Key the chat-log directory by grid + avatar name (with UUID rename
+    // discovery), so transcripts from the same avatar name on different grids do
+    // not collide — `--chat-log-dir` is treated as the accounts base. The agent
+    // UUID is known now (post-login) and no cache has been touched yet.
+    let agent_chat_log_dir = match (
+        args.chat_log.chat_log_dir(),
+        client.agent_id().map(|agent| agent.uuid()),
+        login_uri.parse::<url::Url>(),
+    ) {
+        (Some(base), Some(uuid), Ok(url)) => {
+            let grid = sl_account_dirs::grid_dir_name(&url);
+            let name = sl_account_dirs::avatar_dir_name(avatar.first(), avatar.last());
+            match sl_account_dirs::reconcile_account_dir(&base, &grid, &name, uuid) {
+                Ok(dir) => Some(dir),
+                Err(error) => {
+                    tracing::warn!("chat-log: could not resolve account directory: {error}");
+                    Some(base)
+                }
+            }
+        }
+        // No base configured (chat logging off), no agent id, or an unparsable
+        // login URI: fall back to the base as given (old behaviour).
+        (base, _agent, _url) => base,
+    };
     client.set_directories(ClientDirectories {
-        agent_chat_log_dir: args.chat_log.chat_log_dir(),
+        agent_chat_log_dir,
         ..ClientDirectories::default()
     });
     // The REPL exercises the full client, so crawl inventory in the background.

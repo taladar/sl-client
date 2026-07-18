@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 98 |
+| ready | 97 |
 | blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 506 |
+| done | 507 |
 | deferred | 7 |
 | wont-do | 3 |
 | **total** | **722** |
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (98)
+## ready (97)
 
 ### viewer
 
@@ -57,8 +57,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
-- [`viewer-chat-log-grid-key`](ready/viewer-chat-log-grid-key.md) — Key the REPL
-  binaries' chat logs by grid + avatar, not name alone
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -569,7 +567,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (506)
+## done (507)
 
 ### protocol
 
@@ -715,6 +713,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-camera-transitions`](done/viewer-camera-transitions.md) — Smooth
   camera-mode transitions (blocked by `viewer-camera-mouselook` (done))
+- [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
+  binaries' chat logs by grid + avatar, not name alone
 - [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action

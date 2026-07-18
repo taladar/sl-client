@@ -539,21 +539,23 @@ fn run_session(
         ..default()
     };
     // Per-avatar on-disk directories, keyed by grid + avatar name (with UUID
-    // rename discovery): the account settings scope, chat-log transcripts and the
-    // inventory cache all live under `<data>/accounts/<grid>/<name>/`. Derived
-    // from the login parameters (grid from the login URI, name from the request)
-    // and resolved to the avatar's directory at login, once the UUID is known —
-    // by the plugin (`account_dirs`, for chat / inventory) and the settings
-    // account-scope loader (`AccountContext` + `load_account_settings`).
+    // rename discovery). Each kind lands under the XDG root that fits it: chat
+    // transcripts under state, the inventory cache under cache, account settings
+    // under config — a separate `accounts/<grid>/<name>/` tree under each.
+    // Derived from the login parameters (grid from the login URI, name from the
+    // request) and resolved to the avatar's directory at login, once the UUID is
+    // known — by the plugin (`account_dirs`, for chat / inventory) and the
+    // settings account-scope loader (`AccountContext` + `load_account_settings`).
     let grid = sl_account_dirs::grid_dir_name(&params.login_uri);
     let avatar =
         sl_account_dirs::avatar_dir_name(&params.request.first_name, &params.request.last_name);
-    let accounts_base = crate::paths::accounts_base();
-    let account_dirs = accounts_base.clone().map(|base| AccountDirsConfig {
-        accounts_base: base,
+    let account_dirs = Some(AccountDirsConfig {
         grid: grid.clone(),
         avatar: avatar.clone(),
+        chat_log_base: crate::paths::state_accounts_base(),
+        inventory_cache_base: crate::paths::cache_accounts_base(),
     });
+    let config_accounts_base = crate::paths::config_accounts_base();
 
     let mut app = App::new();
     app.add_plugins(
@@ -696,7 +698,7 @@ fn run_session(
     // `load_account_settings` to locate the account-scope settings once the
     // agent UUID is known at login.
     .insert_resource(AccountContext {
-        accounts_base,
+        accounts_base: config_accounts_base,
         grid,
         avatar,
     })

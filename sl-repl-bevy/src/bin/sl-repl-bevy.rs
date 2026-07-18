@@ -12,9 +12,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, ExternalPrinter};
 use sl_client_bevy::{
-    AgentKey, ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig, LoginFailure,
-    LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin, SlCommand,
-    SlDiagnostic, SlEvent, SlIdentity, SlLoginRejected, SlMfaChallenge, SlSessionEvent,
+    AccountDirsConfig, AgentKey, ChatLogConfig, ClientDirectories, Command, InventoryCacheConfig,
+    LoginFailure, LoginParams, LoginRequest, MfaChallenge, SlCapabilities, SlClientPlugin,
+    SlCommand, SlDiagnostic, SlEvent, SlIdentity, SlLoginRejected, SlMfaChallenge, SlSessionEvent,
     StartLocation, Uuid,
 };
 use sl_repl::{
@@ -642,6 +642,23 @@ fn run_session(
     line_rx: &Receiver<String>,
     recorder: Option<ScriptRecorder>,
 ) -> SessionOutcome {
+    // Key the chat-log directory by grid + avatar name (with UUID rename
+    // discovery) so transcripts from the same avatar name on different grids do
+    // not collide — `--chat-log-dir` becomes the chat accounts base, resolved to
+    // the avatar's directory inline at login by the plugin.
+    let account_dirs =
+        directories
+            .agent_chat_log_dir
+            .clone()
+            .map(|chat_log_base| AccountDirsConfig {
+                grid: sl_account_dirs::grid_dir_name(&params.login_uri),
+                avatar: sl_account_dirs::avatar_dir_name(
+                    &params.request.first_name,
+                    &params.request.last_name,
+                ),
+                chat_log_base: Some(chat_log_base),
+                inventory_cache_base: None,
+            });
     let mut app = App::new();
     app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(TICK_INTERVAL)))
         .add_plugins(SlClientPlugin {
@@ -649,7 +666,7 @@ fn run_session(
             diagnostics: true,
             chat_log_config: chat_log_config.clone(),
             directories: directories.clone(),
-            account_dirs: None,
+            account_dirs,
             inventory_cache_config: InventoryCacheConfig::default(),
             // The REPL exercises the full client, so crawl inventory in the
             // background (the tokio REPL does the same via

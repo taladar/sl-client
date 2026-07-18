@@ -68,21 +68,25 @@ touched. The reconcile runs inline at that point.
 
 **Wiring:**
 
-- New viewer `paths.rs` resolves config / cache / data roots via `directories`
-  (`ProjectDirs::from("net","taladar","sl-client-bevy-viewer")`). The five asset
-  caches (texture/mesh/material/animation/bake) moved onto the cache root — same
-  paths as before, so no cache invalidation. Global settings moved from the CWD
-  to `<config>/viewer-settings.toml`.
+- New viewer `paths.rs` resolves config / state / cache roots via `directories`
+  (`ProjectDirs::from("net","taladar","sl-client-bevy-viewer")`). Each kind of
+  persistence lands under the XDG root that fits it, so a separate per-avatar
+  `accounts/<grid>/<name>/` tree exists under **config** (account settings),
+  **state** (chat transcripts) and **cache** (inventory cache), each reconciled
+  independently. The five asset caches (texture/mesh/material/animation/bake)
+  moved onto the cache root — same paths as before, so no cache invalidation.
+  Global settings moved from the CWD to `<config>/viewer-settings.toml`.
 - `sl-client-bevy` `SlClientPlugin` gained an optional `AccountDirsConfig`
-  (accounts base + grid + name). At login (`advance_login`, once the UUID is
-  known, before the shells are built) it reconciles the directory and points the
-  chat-log / inventory-cache dirs at `<dir>/chat` / `<dir>/inventorycache`.
+  (grid + name + a chat-log accounts root + an inventory-cache accounts root).
+  At login (`advance_login`, once the UUID is known, before the shells are
+  built) it reconciles each root to the avatar's `<grid>/<name>/` directory.
 - The viewer enables **chat logging** (all four `LoggedChatType`s) and the
   **inventory disk cache**, both now landing in the per-avatar directory.
 - Account settings: `ViewerSettings` loads the `Global` scope at startup and the
-  `Account` scope (`<dir>/settings.toml`) via `load_account_settings` once the
-  agent UUID appears in `SlIdentity`; both scopes save on logout. The account
-  reconcile is a second idempotent call, so it agrees with the plugin's.
+  `Account` scope (`<config>/accounts/<grid>/<name>/settings.toml`) via
+  `load_account_settings` once the agent UUID appears in `SlIdentity`; both
+  scopes save on logout. The settings loader reconciles its own (config) tree,
+  independent of the plugin's state/cache trees.
 
 No setting is *account-only* yet — the mechanism is wired and specific
 per-account settings can now join. The two-avatar layering direction (which

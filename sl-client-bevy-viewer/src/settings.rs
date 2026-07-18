@@ -34,8 +34,8 @@ const ACCOUNT_SETTINGS_FILE: &str = "settings.toml";
 /// account settings directory once the agent UUID is known at login.
 #[derive(Resource, Clone)]
 pub(crate) struct AccountContext {
-    /// The accounts root (`<data>/accounts`), or `None` when the platform has no
-    /// data directory (per-avatar persistence is then disabled).
+    /// The accounts root for settings (`<config>/accounts`), or `None` when the
+    /// platform has no config directory (per-avatar settings are then disabled).
     pub accounts_base: Option<PathBuf>,
     /// The grid segment (from `sl_account_dirs::grid_dir_name`).
     pub grid: String,

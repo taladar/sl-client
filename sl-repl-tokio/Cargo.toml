@@ -19,6 +19,7 @@ clap = { version = "4.6.1", features = ["derive", "cargo", "env"] }
 clap_complete = "4.6.2"
 clap_mangen = "0.3.0"
 rustyline = "17.0.2"
+sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-client-tokio = { version = "0.1.0", path = "../sl-client-tokio" }
 sl-proto = { version = "0.1.0", path = "../sl-proto" }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
