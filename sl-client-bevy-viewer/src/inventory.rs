@@ -53,6 +53,7 @@ use sl_client_bevy::{
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
 
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
@@ -108,11 +109,8 @@ const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 /// structure reads at a glance.
 const FOLDER_LABEL_COLOR: Color = Color::srgb(0.98, 0.86, 0.55);
 
-/// An inactive tab / toolbar button background.
+/// An inactive toolbar button background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
-
-/// The active tab's background, brighter so the selected tab reads.
-const ACTIVE_TAB_BACKGROUND: Color = Color::srgb(0.24, 0.30, 0.42);
 
 /// A button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
@@ -149,10 +147,10 @@ impl Plugin for InventoryPlugin {
                     toggle_inventory,
                     refresh_inventory_on_show,
                     ingest_inventory,
+                    bridge_tab_selection,
                     apply_ui_actions,
                     read_search_field,
                     rebuild_view,
-                    highlight_tabs,
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -550,6 +548,17 @@ pub(crate) enum InventoryTab {
     Worn,
 }
 
+impl InventoryTab {
+    /// This tab's button label.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Everything => "Everything",
+            Self::Recent => "Recent",
+            Self::Worn => "Worn",
+        }
+    }
+}
+
 /// The window's transient UI state: which tab and the search query.
 ///
 /// Open / closed is **not** tracked here — the floater's
@@ -582,9 +591,20 @@ struct InventoryUi {
     viewport: Entity,
     /// The search text field.
     search: Entity,
-    /// The three tab buttons, paired with the tab each selects.
-    tabs: [(InventoryTab, Entity); 3],
+    /// The reusable tab strip ([`crate::ui_tab`]) whose active index selects the
+    /// list — mapped through [`TAB_ORDER`] by [`bridge_tab_selection`].
+    tab_strip: Entity,
 }
+
+/// The inventory list each tab of the strip selects, in the strip's button
+/// order. The one place the widget's index and the domain enum are tied
+/// together — [`bridge_tab_selection`] reads it, and the labels below are spawned
+/// in the same order.
+const TAB_ORDER: [InventoryTab; 3] = [
+    InventoryTab::Everything,
+    InventoryTab::Recent,
+    InventoryTab::Worn,
+];
 
 /// One row of the flattened inventory view, fully resolved for drawing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -994,29 +1014,29 @@ fn rebuild_view(
     }
 }
 
-/// Keep the active tab's button highlighted.
-fn highlight_tabs(
-    state: Res<InventoryState>,
+/// Bridge the reusable tab strip's selection to the window: when the strip's
+/// active tab changes ([`TabStrip::active`]), turn it into a
+/// [`InventoryUiAction::SelectTab`] on the list it names via [`TAB_ORDER`].
+///
+/// The strip owns "exactly one active", the highlight and the keyboard, so this
+/// is the whole of the wiring — the widget is not coupled to the inventory, it
+/// just exposes its selection and we react. Runs on the strip's own change
+/// detection (the query is filtered `Changed<TabStrip>`), so an unchanged tab
+/// costs nothing; the first frame it fires with the default tab, which
+/// [`apply_ui_actions`] treats as the no-op it is.
+fn bridge_tab_selection(
     ui: Option<Res<InventoryUi>>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    strips: Query<&TabStrip, Changed<TabStrip>>,
+    mut actions: MessageWriter<InventoryUiAction>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     let Some(ui) = ui else {
         return;
     };
-    for &(tab, entity) in &ui.tabs {
-        let wanted = if tab == state.tab {
-            ACTIVE_TAB_BACKGROUND
-        } else {
-            BUTTON_BACKGROUND
-        };
-        if let Ok(mut background) = backgrounds.get_mut(entity)
-            && background.0 != wanted
-        {
-            background.0 = wanted;
-        }
+    let Ok(strip) = strips.get(ui.tab_strip) else {
+        return;
+    };
+    if let Some(tab) = TAB_ORDER.get(strip.active) {
+        actions.write(InventoryUiAction::SelectTab(*tab));
     }
 }
 
@@ -1235,29 +1255,25 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
     let panel = handle.root;
     let content = handle.content;
 
-    // Tabs.
-    let tab_row = commands
-        .spawn((
-            Node {
-                ..row(Val::Px(4.0))
-            },
-            ChildOf(content),
-        ))
-        .id();
-    let tabs = [
-        (InventoryTab::Everything, "Everything", 1),
-        (InventoryTab::Recent, "Recent", 2),
-        (InventoryTab::Worn, "Worn", 3),
-    ]
-    .map(|(tab, label, tab_index)| {
-        let entity = spawn_toolbar_button(&mut commands, tab_row, label, tab_index);
-        commands.entity(entity).observe(
-            move |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
-                actions.write(InventoryUiAction::SelectTab(tab));
-            },
-        );
-        (tab, entity)
-    });
+    // Tabs — the reusable strip widget ([`crate::ui_tab`]) in its horizontal
+    // (top-edge) placement. One focus stop; the arrow keys move between the
+    // Everything / Recent / Worn tabs, and the active one drives the shared list
+    // via [`bridge_tab_selection`]. The labels are spawned in [`TAB_ORDER`].
+    let tab_labels = TAB_ORDER.map(|tab| tab.label().to_owned());
+    let tab_strip = spawn_tab_strip(
+        &mut commands,
+        content,
+        &TabSpec {
+            element: "inventory-tabs",
+            placement: TabPlacement::BlockStart,
+            labels: &tab_labels,
+            active: 0,
+            tab_index: 1,
+            font_size: CHROME_FONT_SIZE,
+            strip_width: None,
+            ellipsis: DEFAULT_ELLIPSIS,
+        },
+    );
 
     // Expand / collapse all.
     let expand_row = commands
@@ -1268,13 +1284,13 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let expand_all = spawn_toolbar_button(&mut commands, expand_row, "Expand all", 4);
+    let expand_all = spawn_toolbar_button(&mut commands, expand_row, "Expand all", 2);
     commands.entity(expand_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::ExpandAll);
         },
     );
-    let collapse_all = spawn_toolbar_button(&mut commands, expand_row, "Collapse all", 5);
+    let collapse_all = spawn_toolbar_button(&mut commands, expand_row, "Collapse all", 3);
     commands.entity(collapse_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::CollapseAll);
@@ -1291,7 +1307,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             UiFont::Sans.at(CHROME_FONT_SIZE),
             TextColor(LABEL_COLOR),
             bevy::text::TextCursorStyle::default(),
-            TabIndex(6),
+            TabIndex(4),
             Node {
                 border: UiRect::all(Val::Px(2.0)),
                 padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
@@ -1343,7 +1359,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
         panel,
         viewport,
         search,
-        tabs,
+        tab_strip,
     });
 }
 

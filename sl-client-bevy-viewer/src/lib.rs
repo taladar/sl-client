@@ -92,6 +92,7 @@ mod ui;
 mod ui_element;
 mod ui_font;
 mod ui_pseudoloc;
+mod ui_tab;
 #[cfg(test)]
 mod ui_test;
 mod ui_text;
@@ -211,6 +212,7 @@ use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
+use crate::ui_tab::TabWidgetPlugin;
 use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
@@ -606,6 +608,9 @@ fn run_session(
     // direction-neutral / content-driven layout conventions the whole UI cluster
     // inherits.
     .add_plugins(ViewerUiPlugin)
+    // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
+    // resizable strip's persisted / dragged width onto its node.
+    .add_plugins(TabWidgetPlugin)
     // Input focus / modal context (viewer-input-focus-contexts): derives who owns
     // the keyboard and the cursor from `bevy_input_focus`. Gates every world key
     // binding below via `world_has_keyboard`, so typing into a focused text field

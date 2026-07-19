@@ -27,6 +27,16 @@ also carries the locale's **LTR/RTL direction**, to drive the layout and skin
 languages, wrong for Polish — which ships); Fluent's plural rules are per-locale
 and correct.
 
+The bundle must also carry the **locale's typographic conventions**, not just
+prose — punctuation the UI inserts itself, which differs by language and is a
+translator's call, not a hardcoded literal. The first concrete case already
+exists: the **truncation ellipsis** the tab widget appends to a clipped label
+([[viewer-ui-tab-widget]] `TabSpec::ellipsis`, defaulting to Latin `…`) —
+Chinese and Japanese conventionally use a centred six-dot `……` instead. So
+expose it as a translatable key (e.g. `ui-ellipsis`) that widgets read from the
+bundle rather than a per-call literal, and audit for the same shape as more
+chrome lands (quotation marks, list separators, the `:` after a field label).
+
 Locale detection/override is [[viewer-i18n-locale-selection]]; sending the
 language to the grid is [[viewer-i18n-agent-language]]; chat MT is
 [[viewer-i18n-chat-translation]].

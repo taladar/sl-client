@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 1 |
-| ready | 96 |
+| ready | 95 |
 | blocked | 93 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 508 |
+| done | 509 |
 | deferred | 7 |
 | wont-do | 3 |
 | **total** | **722** |
@@ -28,7 +28,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (96)
+## ready (95)
 
 ### viewer
 
@@ -182,8 +182,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-ui-skin-tokens`](ready/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-tab-widget`](ready/viewer-ui-tab-widget.md) — Reusable tab widget
-  (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -564,7 +562,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (508)
+## done (509)
 
 ### protocol
 
@@ -1018,6 +1016,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-tab-widget`](done/viewer-ui-tab-widget.md) — Reusable tab widget
+  (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —
   headless layout assertions + an isolated gallery (blocked by
   `viewer-ui-widget-scaffold` (done))

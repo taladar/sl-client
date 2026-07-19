@@ -45,6 +45,7 @@
 //! cells — the harness does that — but so a person can look at the cell a failing
 //! check just named.
 
+use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::log::LogPlugin;
@@ -54,8 +55,8 @@ use tracing::info;
 
 use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::ui::{
-    LogicalMargin, LogicalRect, UiDirection, UiScaffoldSystems, apply_panel_visibility,
-    apply_ui_direction, column, invalidate_logical_boxes, resolve_logical_boxes, spawn_ui_root,
+    UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
+    invalidate_logical_boxes, resolve_logical_boxes, row, spawn_ui_root,
 };
 use crate::ui_element::{ELEMENTS, ElementCx, SCRIPTS, SampleText, UiAction};
 use crate::ui_font::{UiFont, register_ui_fonts};
@@ -89,6 +90,10 @@ const CHROME_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
 
 /// The colour of the header line.
 const HEADER_COLOR: Color = Color::srgb(0.95, 0.85, 0.45);
+
+/// The sticky header bar's background — a touch lighter than the page, so the
+/// fixed legend reads as a bar above the scrolling list.
+const HEADER_BAR_BACKGROUND: Color = Color::srgb(0.14, 0.16, 0.20);
 
 /// Which cell of the matrix the gallery is currently showing.
 ///
@@ -155,6 +160,15 @@ impl GalleryCell {
     }
 }
 
+/// A marker on the scrolling page node, so [`scroll_gallery`] knows which
+/// `ScrollPosition` the wheel drives.
+#[derive(Component, Debug, Clone, Copy)]
+struct GalleryPage;
+
+/// Logical pixels scrolled per wheel notch reported in [`MouseScrollUnit::Line`],
+/// matching [`crate::virtual_list`] so the two surfaces scroll at one speed.
+const LINE_SCROLL_PIXELS: f32 = 48.0;
+
 /// A marker on the node holding the element cards, so a cell change can clear
 /// and respawn them without touching the chrome.
 #[derive(Component, Debug, Clone, Copy)]
@@ -208,6 +222,9 @@ pub fn run() {
         // restores the cursor itself rather than relying on the viewer's input
         // context, which this binary has not got.
         .add_plugins(PieMenuPlugin)
+        // The tab widget's runtime half: a resizable strip's width reaching layout
+        // (the divider demo) and each tab's corners tracking the direction.
+        .add_plugins(crate::ui_tab::TabWidgetPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())
@@ -233,6 +250,7 @@ pub fn run() {
                 respawn_elements_on_cell_change.after(drive_gallery_keys),
                 update_gallery_header,
                 drive_focus_ring,
+                scroll_gallery,
                 log_actions,
                 quit_on_escape,
             ),
@@ -257,6 +275,28 @@ fn spawn_gallery_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
+/// Scroll the gallery page with the mouse wheel.
+///
+/// `bevy_ui` clips an `Overflow::scroll` node but does not itself move it — the
+/// app owns the wheel. Mirrors [`crate::virtual_list::scroll_virtual_lists`]:
+/// same per-notch step, same `Line` / `Pixel` unit handling. The offset floors at
+/// zero; `bevy_ui` clamps the far end to the scrollable range at layout time.
+fn scroll_gallery(
+    wheel: Res<AccumulatedMouseScroll>,
+    mut pages: Query<&mut ScrollPosition, With<GalleryPage>>,
+) {
+    if wheel.delta.y.abs() < f32::EPSILON {
+        return;
+    }
+    let delta = match wheel.unit {
+        MouseScrollUnit::Line => wheel.delta.y * LINE_SCROLL_PIXELS,
+        MouseScrollUnit::Pixel => wheel.delta.y,
+    };
+    for mut position in &mut pages {
+        position.0.y = (position.0.y - delta).max(0.0);
+    }
+}
+
 /// Spawn the chrome and the element list under the scaffold's root.
 fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res<GalleryCell>) {
     // **The whole gallery is a right-click surface**, so a pie can be opened at any
@@ -267,28 +307,53 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
     // observer sits on the scaffold root, which receives the press wherever no
     // blocking widget is under the pointer — the margins and gaps, and every edge.
     commands.entity(root.0).observe(open_gallery_pie);
+    // A **sticky header bar** outside the scroll area, so the key legend and the
+    // live-cell readout stay on screen while the element list scrolls under it.
+    // `flex_shrink: 0` keeps it at its content height; the page below takes the
+    // rest.
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_shrink: 0.0,
+                padding: UiRect::all(Val::Px(12.0)),
+                ..column(Val::ZERO)
+            },
+            BackgroundColor(HEADER_BAR_BACKGROUND),
+            ChildOf(root.0),
+        ))
+        .with_child((
+            Text::default(),
+            UiFont::Mono.at(CHROME_FONT_SIZE),
+            TextColor(HEADER_COLOR),
+            GalleryHeader,
+        ));
     let page = commands
         .spawn((
             Node {
-                // The window, minus a margin, scrolling on **both** axes: the
-                // element list runs past the window at the larger font sizes, and a
-                // gallery that cannot reach its own last element is not one. Both
-                // axes so a wide element (or a wide translation) stays reachable too.
+                // Takes the height the header leaves (`flex_grow` in the root's
+                // column) and scrolls its content: the element list runs past the
+                // window at the larger font sizes, and a gallery that cannot reach
+                // its own last element is not one. `min_height: 0` is what lets a
+                // flex child shrink below its content so the overflow actually
+                // clips and scrolls rather than growing off-screen. Both axes, so a
+                // wide element or translation stays reachable too. Driven by
+                // [`scroll_gallery`].
                 width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                padding: UiRect::all(Val::Px(16.0)),
                 overflow: Overflow::scroll(),
                 ..column(Val::Px(12.0))
             },
-            LogicalMargin(LogicalRect::all(Val::Px(16.0))),
+            // `Overflow::scroll` only sets the style; the offset lives in this
+            // separate component, which both the layout (to place the children)
+            // and [`scroll_gallery`] (to move it) need present from the start.
+            ScrollPosition::default(),
+            GalleryPage,
             ChildOf(root.0),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        UiFont::Mono.at(CHROME_FONT_SIZE),
-        TextColor(HEADER_COLOR),
-        GalleryHeader,
-        ChildOf(page),
-    ));
     let elements = commands
         .spawn((
             Node {
@@ -327,6 +392,101 @@ fn spawn_element_cards(commands: &mut Commands, parent: Entity, cell: GalleryCel
         ));
         (element.spawn)(commands, card, cell.cx());
     }
+    spawn_resizable_tabs_card(commands, parent, cell);
+    spawn_scroll_tabs_cards(commands, parent, cell);
+}
+
+/// Spawn the tab **scroll demo** cards — a few-tabs and a many-tabs copy of each
+/// orientation, so the scroll control (a vertical scrollbar, horizontal arrows)
+/// can be seen appearing when the tabs outgrow the space and staying hidden when
+/// they fit. Auto from available space — the pairs differ only in tab count.
+///
+/// Not driven by [`ELEMENTS`]: a scrolling strip clips its tabs, and the human
+/// wants to drive the wheel / arrows here.
+fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
+    use crate::ui_tab::{TabPlacement, spawn_tabs_scroll_demo};
+    for (placement, few, many, control, id) in [
+        (
+            TabPlacement::BlockStart,
+            "tabs-scroll-h-few",
+            "tabs-scroll-h-many",
+            "trailing-edge arrows",
+            "horizontal",
+        ),
+        (
+            TabPlacement::InlineStart,
+            "tabs-scroll-v-few",
+            "tabs-scroll-v-many",
+            "a scrollbar (drag it or use the wheel)",
+            "vertical",
+        ),
+    ] {
+        let card = commands
+            .spawn((
+                Node {
+                    padding: UiRect::all(Val::Px(10.0)),
+                    max_width: Val::Px(760.0),
+                    ..column(Val::Px(6.0))
+                },
+                BackgroundColor(CARD_BACKGROUND),
+                ChildOf(parent),
+            ))
+            .id();
+        commands.spawn((
+            Text::new(format!(
+                "{id} tab overflow — a few tabs (left, no control) beside many (right, {control}); \
+                 the control auto-shows from available space, not a flag."
+            )),
+            UiFont::Mono.at(CHROME_FONT_SIZE),
+            TextColor(CHROME_COLOR),
+            ChildOf(card),
+        ));
+        // The two copies side by side so the presence / absence of the control is
+        // a direct comparison.
+        let row = commands
+            .spawn((
+                Node {
+                    align_items: AlignItems::Start,
+                    ..row(Val::Px(16.0))
+                },
+                ChildOf(card),
+            ))
+            .id();
+        spawn_tabs_scroll_demo(commands, row, cell.cx(), placement, 3, few);
+        spawn_tabs_scroll_demo(commands, row, cell.cx(), placement, 12, many);
+    }
+}
+
+/// Spawn the resizable-tabs demo card — the one surface where a human can grab
+/// the divider and drag it.
+///
+/// Not driven by [`ELEMENTS`] because a clipped tab label is deliberate overflow
+/// the harness would flag (see [`crate::ui_tab::spawn_tabs_resizable_demo`]); the
+/// gallery hosts it by hand instead. Rebuilt with the rest on a cell change.
+fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
+    let card = commands
+        .spawn((
+            Node {
+                padding: UiRect::all(Val::Px(10.0)),
+                max_width: Val::Px(760.0),
+                ..column(Val::Px(6.0))
+            },
+            BackgroundColor(CARD_BACKGROUND),
+            ChildOf(parent),
+        ))
+        .id();
+    commands.spawn((
+        Text::new(
+            "tabs-resizable — vertical tabs with a draggable divider; grab the bright grip and \
+             drag to move the split (not in the harness registry — clipped labels are deliberate \
+             overflow)."
+                .to_owned(),
+        ),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(CHROME_COLOR),
+        ChildOf(card),
+    ));
+    crate::ui_tab::spawn_tabs_resizable_demo(commands, card, cell.cx());
 }
 
 /// Read the gallery's keys into [`GalleryCell`] / [`UiDirection`].

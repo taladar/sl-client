@@ -456,6 +456,32 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   draggable and dockable; here it is static so its layout is swept.",
         spawn: crate::floater::spawn_floater_specimen,
     },
+    UiElement {
+        id: "tabs-top",
+        summary: "A tabbed container with the tab strip on the top edge — three tabs fronting three \
+                  panels, one shown. The reusable widget (`crate::ui_tab`); one element per \
+                  placement so every orientation is swept.",
+        spawn: crate::ui_tab::spawn_tabs_block_start,
+    },
+    UiElement {
+        id: "tabs-bottom",
+        summary: "The tab widget with its strip on the bottom edge — a block-axis placement, which \
+                  stays bottom under RTL (only the inline axis mirrors).",
+        spawn: crate::ui_tab::spawn_tabs_block_end,
+    },
+    UiElement {
+        id: "tabs-leading",
+        summary: "The tab widget with a vertical strip on the leading edge (left under LTR); it \
+                  mirrors to the right under RTL with no separate code.",
+        spawn: crate::ui_tab::spawn_tabs_inline_start,
+    },
+    UiElement {
+        id: "tabs-trailing",
+        summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
+                  placement the reference viewer cannot express, usable for LTR too, not only as \
+                  an RTL mirror.",
+        spawn: crate::ui_tab::spawn_tabs_inline_end,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

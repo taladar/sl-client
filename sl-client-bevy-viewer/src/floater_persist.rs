@@ -52,6 +52,16 @@
 //!   at most that window of adjustments rather than the whole session (the clean
 //!   logout save in [`crate::session`] flushes the rest).
 //!
+//! # Tab-widget splits ride the same lifecycle
+//!
+//! A resizable vertical tab widget ([`crate::ui_tab`]) inside a floater carries a
+//! draggable strip width, and it is persisted here the same four ways, keyed by
+//! the **host floater's id and the strip's element id** (`tab_split_key`) so two
+//! tab widgets in one window keep their own splits. A strip that lives outside
+//! any floater (a gallery fixture) has no host and is simply not persisted. The
+//! width shares the one dirty clock and flush with the geometry above, so a drag
+//! and a move coalesce into the same disk write.
+//!
 //! Reference (Firestorm, read-only): `indra/llui/llfloater.cpp`
 //! (`storeRectControl` / `applyRectControl` / `storeVisibilityControl`).
 
@@ -62,6 +72,7 @@ use sl_settings::SettingValue;
 use crate::floater::{Floater, FloaterCommand, FloaterGeometry, FloaterOp};
 use crate::settings::{ViewerSettings, load_account_settings};
 use crate::ui::UiPanelShown;
+use crate::ui_tab::{TabStrip, TabStripWidth};
 
 /// The persisted-file section every floater's settings are grouped under
 /// (`[floater]`). The per-floater id in each name keeps the flat keys distinct.
@@ -94,10 +105,13 @@ impl Plugin for FloaterPersistPlugin {
             Update,
             (
                 register_floater_settings,
+                register_tab_split_settings,
                 // Seed only after the account scope is in, so a stored rect is
                 // actually present to read.
                 seed_floaters_from_settings.after(load_account_settings),
+                seed_tab_splits_from_settings.after(load_account_settings),
                 persist_floater_changes,
+                persist_tab_split_changes,
                 flush_floater_settings,
             )
                 .chain(),
@@ -357,12 +371,151 @@ fn flush_floater_settings(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tab-widget split persistence — the same four stages, for a resizable tab
+// strip's width, keyed by its host floater.
+// ---------------------------------------------------------------------------
+
+/// Marks a tab strip whose stored split width has been applied, so the seed runs
+/// once and the write-back only fires for real drags after it — the tab-split
+/// analogue of [`FloaterSeeded`].
+#[derive(Component, Debug, Clone, Copy)]
+struct TabSplitSeeded;
+
+/// The `[floater]` setting name for a tab widget's remembered split, keyed by the
+/// host floater and the strip's element id so two widgets in one window stay
+/// distinct.
+fn tab_split_key(floater_id: &str, element: &str) -> String {
+    format!("{floater_id}_{element}_split")
+}
+
+/// The id of the floater that hosts `strip`, or `None` if it lives outside any
+/// floater (a gallery strip) — those are not persisted.
+///
+/// Walks `strip` and its ancestors so a tab widget nested any depth inside a
+/// floater's content is found.
+fn host_floater_id(
+    strip: Entity,
+    parents: &Query<&ChildOf>,
+    floaters: &Query<&Floater>,
+) -> Option<&'static str> {
+    core::iter::successors(Some(strip), |entity| {
+        parents.get(*entity).ok().map(ChildOf::parent)
+    })
+    .find_map(|entity| floaters.get(entity).ok().map(|floater| floater.id))
+}
+
+/// **Register** each newly-spawned resizable tab strip's split setting, with its
+/// current width as the declared default. A strip outside any floater is skipped
+/// (nothing to key it by).
+fn register_tab_split_settings(
+    settings: Option<ResMut<ViewerSettings>>,
+    strips: Query<(Entity, &TabStrip, &TabStripWidth), Added<TabStripWidth>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<&Floater>,
+) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    for (entity, strip, width) in &strips {
+        let Some(floater_id) = host_floater_id(entity, &parents, &floaters) else {
+            continue;
+        };
+        settings.register_in(
+            FLOATER_SECTION,
+            &tab_split_key(floater_id, strip.element),
+            SettingValue::F32(width.0),
+            "Tab widget's strip / content split width (logical px)",
+        );
+    }
+}
+
+/// **Seed** every not-yet-seeded tab strip from its stored split, once the
+/// account scope is loaded. A strip with nothing stored keeps its spawn width.
+fn seed_tab_splits_from_settings(
+    settings: Option<Res<ViewerSettings>>,
+    mut strips: Query<(Entity, &TabStrip, &mut TabStripWidth), Without<TabSplitSeeded>>,
+    parents: Query<&ChildOf>,
+    floaters: Query<&Floater>,
+    mut commands: Commands,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if !settings.account_loaded() {
+        return;
+    }
+    let store = settings.store();
+    for (entity, strip, mut width) in &mut strips {
+        if let Some(floater_id) = host_floater_id(entity, &parents, &floaters) {
+            let key = tab_split_key(floater_id, strip.element);
+            if store.is_overridden(&key)
+                && let Ok(stored) = store.get_f32(&key)
+            {
+                width.0 = stored;
+            }
+        }
+        commands.entity(entity).insert(TabSplitSeeded);
+    }
+}
+
+/// The query filter [`persist_tab_split_changes`] runs on: a seeded strip whose
+/// width changed this frame. Aliased to keep the signature clear of
+/// `clippy::type_complexity`, mirroring [`ChangedSeededFloater`].
+type ChangedSeededTabSplit = (With<TabSplitSeeded>, Changed<TabStripWidth>);
+
+/// **Persist** a seeded strip's split whenever it is dragged, and mark the store
+/// dirty for the shared flush.
+fn persist_tab_split_changes(
+    settings: Option<ResMut<ViewerSettings>>,
+    strips: Query<(Entity, &TabStrip, &TabStripWidth), ChangedSeededTabSplit>,
+    parents: Query<&ChildOf>,
+    floaters: Query<&Floater>,
+    mut dirty: ResMut<FloaterPersistDirty>,
+    time: Res<Time>,
+) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    let mut any = false;
+    for (entity, strip, width) in &strips {
+        let Some(floater_id) = host_floater_id(entity, &parents, &floaters) else {
+            continue;
+        };
+        settings.set_account(
+            &tab_split_key(floater_id, strip.element),
+            SettingValue::F32(width.0),
+        );
+        any = true;
+    }
+    if any && dirty.since.is_none() {
+        dirty.since = Some(time.elapsed_secs());
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decode_rect, encode_rect, px_to_f32, round_px};
+    use super::{
+        decode_rect, encode_rect, px_to_f32, rect_key, round_px, tab_split_key, visible_key,
+    };
     use crate::floater::FloaterGeometry;
     use bevy::prelude::Vec2;
     use pretty_assertions::assert_eq;
+
+    /// A tab split is keyed by both the host floater and the strip element, and
+    /// stays distinct from the floater's own keys and from a second widget's.
+    #[test]
+    fn a_tab_split_is_keyed_by_floater_and_widget() {
+        assert_eq!(
+            tab_split_key("people", "friends-tabs"),
+            "people_friends-tabs_split"
+        );
+        let split = tab_split_key("people", "friends-tabs");
+        // Distinct from the host floater's own settings and from another widget's.
+        assert!(split != rect_key("people"));
+        assert!(split != visible_key("people"));
+        assert!(split != tab_split_key("people", "group-tabs"));
+    }
 
     /// A sized floater's rect round-trips: position and content size come back
     /// unchanged (to the pixel).
