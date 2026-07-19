@@ -1,0 +1,96 @@
+/*
+ * common.css — the structural skin rules, shared by every skin.
+ *
+ * This file maps widget CSS classes onto abstract ROLE TOKENS. Only the token
+ * *values* differ per skin (see each skin's skin.css); no rule here hardcodes a
+ * colour, and no rule uses a physical left/right box property — those are banned
+ * (see src/skin.rs BANNED_PHYSICAL_PROPERTIES). Directional boxes use the
+ * logical properties (margin-inline-start, padding-inline-start,
+ * border-inline-start-width, border-start-start-radius, …) so an RTL locale
+ * mirrors the layout with no separate skin.
+ *
+ * A panel references a role token, never an inline colour; a user theme is just
+ * a later :root {} that redefines any of these tokens.
+ */
+
+/* A framed content surface. */
+.sk-panel {
+  background-color: var(--surface-bg);
+  border-color: var(--surface-border);
+  border-width: 1px;
+  border-radius: var(--surface-radius);
+  padding: 12px;
+}
+
+/* A background-only surface (a card, a bar): recolours with the skin without
+ * imposing any border or padding of its own, so it can dress an existing
+ * hand-laid-out container. */
+.sk-card {
+  background-color: var(--card-bg);
+  border-radius: var(--control-radius);
+}
+
+/* An instruction / secondary line. */
+.sk-title {
+  color: var(--text-muted);
+}
+
+/* Primary body text. */
+.sk-text {
+  color: var(--text-primary);
+}
+
+/* A push button, with hover and keyboard-focus states. */
+.sk-button {
+  background-color: var(--control-bg);
+  color: var(--text-primary);
+  border-color: var(--control-border);
+  border-width: 2px;
+  border-radius: var(--control-radius);
+  padding: 5px 10px;
+}
+
+.sk-button:hover {
+  background-color: var(--control-bg-hover);
+}
+
+/* :focus-visible tracks bevy_input_focus's InputFocusVisible — the same Tab
+ * focus the widget scaffold drives — so the focus ring shows on Tab and hides
+ * on click, exactly like the hand-rolled ring it replaces. */
+.sk-button:focus-visible {
+  border-color: var(--focus-ring);
+}
+
+/* A leading accent bar with a hanging indent — the logical box case. Under RTL
+ * the bar and the wide indent mirror to the trailing edge with no rule change,
+ * because these are inline-start properties, not left. */
+.sk-accent {
+  border-color: var(--accent);
+  border-inline-start-width: 4px;
+  padding-inline-start: 24px;
+  padding-inline-end: 8px;
+  padding-block-start: 4px;
+  padding-block-end: 4px;
+}
+
+/* A tab shape — only the two top corners are rounded, and asymmetrically (a
+ * wide leading corner, a tight trailing one): the logical corner case, which
+ * mirrors under RTL. */
+.sk-tab {
+  background-color: var(--control-bg);
+  color: var(--text-primary);
+  border-start-start-radius: 12px;
+  border-start-end-radius: 4px;
+  padding: 4px 12px;
+}
+
+/* Meaning-bearing swatches. These are the semantic tokens the culture-colour
+ * and colour-blind overlays remap (a locale profile flips --gain / --loss); a
+ * meaning-bearing surface references one of these, never a literal colour. */
+.sk-gain {
+  color: var(--gain);
+}
+
+.sk-loss {
+  color: var(--loss);
+}

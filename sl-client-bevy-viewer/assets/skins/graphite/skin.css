@@ -1,0 +1,37 @@
+/*
+ * Graphite — a neutral dark-grey skin (the default).
+ *
+ * The structural rules come from common.css; this file only assigns values to
+ * the abstract role tokens. Every token is a role name with a direct value —
+ * there is no literal-colour-named palette tier. A user variant of this skin is
+ * just a later :root {} (a theme overlay) that redefines any of these.
+ */
+@import "skins/common.css";
+
+:root {
+  /* Surfaces */
+  --surface-bg: #1c1f26f2;
+  --surface-border: #333a47;
+  --surface-radius: 6px;
+  --card-bg: #262b34;
+
+  /* Text */
+  --text-primary: #e6ebf2;
+  --text-muted: #cbd5e2;
+
+  /* Controls */
+  --control-bg: #2a2f3a;
+  --control-bg-hover: #353c4a;
+  --control-border: #66809e;
+  --control-radius: 4px;
+
+  /* Focus ring — loud, so Tab movement is unmistakable. */
+  --focus-ring: #ffc740;
+
+  /* Accent */
+  --accent: #5cb8fa;
+
+  /* Meaning-bearing (culture / colour-blind overlays remap these). */
+  --gain: #3fa34d;
+  --loss: #c0392b;
+}

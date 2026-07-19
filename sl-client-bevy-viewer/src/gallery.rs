@@ -50,10 +50,13 @@ use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+use bevy::ui_widgets::{Activate, Button};
 use bevy::window::PresentMode;
+use bevy_flair::style::components::ClassList;
 use tracing::info;
 
 use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
+use crate::skin::SkinSelection;
 use crate::ui::{
     UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
     invalidate_logical_boxes, resolve_logical_boxes, row, spawn_ui_root,
@@ -204,6 +207,12 @@ pub fn run() {
                     }),
                     ..default()
                 })
+                // Watch the skin `.css` files: the gallery is the skin-authoring
+                // surface, so an edit re-applies live here without a restart.
+                .set(AssetPlugin {
+                    watch_for_changes_override: Some(true),
+                    ..default()
+                })
                 // The binary installs its own subscriber (`crate::init_tracing`),
                 // as the viewer does; two would clash over the global slot.
                 .disable::<LogPlugin>(),
@@ -225,6 +234,10 @@ pub fn run() {
         // The tab widget's runtime half: a resizable strip's width reaching layout
         // (the divider demo) and each tab's corners tracking the direction.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
+        // The skin / design-token system, so the gallery is dressed in a real
+        // skin and the switcher below can flip skins and theme overlays live.
+        .insert_resource(crate::skin::SkinSelection::resolve(None, None))
+        .add_plugins(crate::skin::ViewerSkinPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())
@@ -249,6 +262,7 @@ pub fn run() {
                 drive_gallery_keys,
                 respawn_elements_on_cell_change.after(drive_gallery_keys),
                 update_gallery_header,
+                update_skin_switcher_label,
                 drive_focus_ring,
                 scroll_gallery,
                 log_actions,
@@ -311,15 +325,23 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
     // live-cell readout stay on screen while the element list scrolls under it.
     // `flex_shrink: 0` keeps it at its content height; the page below takes the
     // rest.
-    commands
+    let header = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_shrink: 0.0,
                 padding: UiRect::all(Val::Px(12.0)),
-                ..column(Val::ZERO)
+                ..column(Val::Px(8.0))
             },
             BackgroundColor(HEADER_BAR_BACKGROUND),
+            // Skinned, so the header bar recolours with the skin too.
+            ClassList::new_with_classes(["sk-card"]),
+            // Above the scrolling page in the UI stack, so `bevy_ui` picking
+            // routes clicks on the switcher buttons to them even when the page is
+            // scrolled — the page's scrolled-off content is not clipped for
+            // picking and would otherwise sit over the sticky header and swallow
+            // the clicks (the "controls only work at the very top" symptom).
+            GlobalZIndex(1),
             ChildOf(root.0),
         ))
         .with_child((
@@ -327,7 +349,9 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
             UiFont::Mono.at(CHROME_FONT_SIZE),
             TextColor(HEADER_COLOR),
             GalleryHeader,
-        ));
+        ))
+        .id();
+    spawn_skin_switcher(&mut commands, header);
     let page = commands
         .spawn((
             Node {
@@ -366,6 +390,176 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
     spawn_element_cards(&mut commands, elements, *cell);
 }
 
+/// The label prefix in front of the live skin selection on the switcher.
+const SKIN_SWITCHER_PREFIX: &str = "  ⇦ live: ";
+
+/// A switcher control / chip's inline fallback background, so it is legible in
+/// the instant before the skin `.css` loads (the `.sk-*` classes recolour it
+/// once the skin is applied).
+const CHIP_FALLBACK_BG: Color = Color::srgb(0.16, 0.19, 0.25);
+
+/// A switcher control / chip's inline fallback border colour.
+const CHIP_FALLBACK_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
+
+/// A marker on the "next skin" button.
+#[derive(Component, Debug, Clone, Copy)]
+struct CycleSkinButton;
+
+/// A marker on the "next theme" button.
+#[derive(Component, Debug, Clone, Copy)]
+struct CycleThemeButton;
+
+/// A marker on the switcher's live-selection label text.
+#[derive(Component, Debug, Clone, Copy)]
+struct SkinSwitcherLabel;
+
+/// Spawn the skin / theme switcher control under the gallery header: two buttons
+/// that cycle the skin and its theme overlay, a live label of the current
+/// selection, and a strip of skinned sample chips (a button, a tab, an accent
+/// bar, and gain / loss swatches) that visibly recolour the instant a skin or
+/// theme is selected. The buttons and chips are themselves skinned (`.sk-*`),
+/// so the switcher is its own proof surface.
+fn spawn_skin_switcher(commands: &mut Commands, header: Entity) {
+    let strip = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
+                ..row(Val::Px(10.0))
+            },
+            ChildOf(header),
+        ))
+        .id();
+
+    commands
+        .spawn((switcher_button(), CycleSkinButton, ChildOf(strip)))
+        .with_child(chip_text("Skin ▸"))
+        .observe(cycle_skin_clicked);
+    commands
+        .spawn((switcher_button(), CycleThemeButton, ChildOf(strip)))
+        .with_child(chip_text("Theme ▸"))
+        .observe(cycle_theme_clicked);
+    commands.spawn((
+        Text::default(),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(HEADER_COLOR),
+        SkinSwitcherLabel,
+        ChildOf(strip),
+    ));
+
+    // Skinned sample chips: switching the skin or theme recolours these live.
+    commands
+        .spawn((chip("sk-button"), ChildOf(strip)))
+        .with_child(chip_text("Button"));
+    commands
+        .spawn((chip("sk-tab"), ChildOf(strip)))
+        .with_child(chip_text("Tab"));
+    // The logical-box demo: a leading accent bar + hanging indent that mirrors
+    // to the trailing edge under RTL (press `D`).
+    commands
+        .spawn((chip("sk-accent"), ChildOf(strip)))
+        .with_child(chip_text("Accent"));
+    commands.spawn((
+        Text::new("▲ gain"),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(HEADER_COLOR),
+        ClassList::new_with_classes(["sk-gain"]),
+        ChildOf(strip),
+    ));
+    commands.spawn((
+        Text::new("▼ loss"),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(HEADER_COLOR),
+        ClassList::new_with_classes(["sk-loss"]),
+        ChildOf(strip),
+    ));
+}
+
+/// The bundle shared by the two switcher buttons: a focusable `bevy_ui_widgets`
+/// button, skinned by the `sk-button` class, with inline fallback paint.
+fn switcher_button() -> impl Bundle {
+    (
+        Button,
+        ClassList::new_with_classes(["sk-button"]),
+        Node {
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+            border: UiRect::all(Val::Px(2.0)),
+            ..default()
+        },
+        BackgroundColor(CHIP_FALLBACK_BG),
+        BorderColor::all(CHIP_FALLBACK_BORDER),
+    )
+}
+
+/// A non-interactive skinned chip carrying the given `sk-*` class, with inline
+/// fallback paint.
+fn chip(class: &'static str) -> impl Bundle {
+    (
+        ClassList::new_with_classes([class]),
+        Node {
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+            border: UiRect::all(Val::Px(2.0)),
+            ..default()
+        },
+        BackgroundColor(CHIP_FALLBACK_BG),
+        BorderColor::all(CHIP_FALLBACK_BORDER),
+    )
+}
+
+/// A chip's text child. Its colour is inherited from the skinned parent (CSS
+/// `color` is an inherited property), with white as the pre-skin fallback.
+fn chip_text(label: &str) -> impl Bundle {
+    (
+        Text::new(label),
+        UiFont::Sans.at(CHROME_FONT_SIZE),
+        TextColor(Color::WHITE),
+    )
+}
+
+/// Observer: advance to the next skin when the skin button is activated.
+fn cycle_skin_clicked(_activate: On<Activate>, mut selection: ResMut<SkinSelection>) {
+    selection.cycle_skin();
+}
+
+/// Observer: advance the theme overlay when the theme button is activated.
+fn cycle_theme_clicked(_activate: On<Activate>, mut selection: ResMut<SkinSelection>) {
+    selection.cycle_theme();
+}
+
+/// Keep the switcher's live label in step with the current [`SkinSelection`].
+fn update_skin_switcher_label(
+    selection: Res<SkinSelection>,
+    mut labels: Query<&mut Text, With<SkinSwitcherLabel>>,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    let wanted = format!("{SKIN_SWITCHER_PREFIX}{}", selection.label());
+    for mut text in &mut labels {
+        if text.0 != wanted {
+            wanted.clone_into(&mut text.0);
+        }
+    }
+}
+
+/// The bundle shared by every gallery element card: a content-sized column with
+/// the card backdrop, **skinned** (`sk-card`) so it recolours with the active
+/// skin / theme — which is what makes a skin switch visibly reskin the whole
+/// gallery, not just the switcher chips.
+fn card_bundle(parent: Entity) -> impl Bundle {
+    (
+        Node {
+            padding: UiRect::all(Val::Px(10.0)),
+            max_width: Val::Px(760.0),
+            ..column(Val::Px(6.0))
+        },
+        BackgroundColor(CARD_BACKGROUND),
+        ClassList::new_with_classes(["sk-card"]),
+        ChildOf(parent),
+    )
+}
+
 /// Spawn one card per registered element into `parent`.
 ///
 /// Every element in [`ELEMENTS`] and nothing hand-picked, so an element added to
@@ -373,17 +567,7 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
 /// the harness.
 fn spawn_element_cards(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
     for element in ELEMENTS {
-        let card = commands
-            .spawn((
-                Node {
-                    padding: UiRect::all(Val::Px(10.0)),
-                    max_width: Val::Px(760.0),
-                    ..column(Val::Px(6.0))
-                },
-                BackgroundColor(CARD_BACKGROUND),
-                ChildOf(parent),
-            ))
-            .id();
+        let card = commands.spawn(card_bundle(parent)).id();
         commands.spawn((
             Text::new(format!("{} — {}", element.id, element.summary)),
             UiFont::Mono.at(CHROME_FONT_SIZE),
@@ -421,17 +605,7 @@ fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: Galler
             "vertical",
         ),
     ] {
-        let card = commands
-            .spawn((
-                Node {
-                    padding: UiRect::all(Val::Px(10.0)),
-                    max_width: Val::Px(760.0),
-                    ..column(Val::Px(6.0))
-                },
-                BackgroundColor(CARD_BACKGROUND),
-                ChildOf(parent),
-            ))
-            .id();
+        let card = commands.spawn(card_bundle(parent)).id();
         commands.spawn((
             Text::new(format!(
                 "{id} tab overflow — a few tabs (left, no control) beside many (right, {control}); \
@@ -464,17 +638,7 @@ fn spawn_scroll_tabs_cards(commands: &mut Commands, parent: Entity, cell: Galler
 /// the harness would flag (see [`crate::ui_tab::spawn_tabs_resizable_demo`]); the
 /// gallery hosts it by hand instead. Rebuilt with the rest on a cell change.
 fn spawn_resizable_tabs_card(commands: &mut Commands, parent: Entity, cell: GalleryCell) {
-    let card = commands
-        .spawn((
-            Node {
-                padding: UiRect::all(Val::Px(10.0)),
-                max_width: Val::Px(760.0),
-                ..column(Val::Px(6.0))
-            },
-            BackgroundColor(CARD_BACKGROUND),
-            ChildOf(parent),
-        ))
-        .id();
+    let card = commands.spawn(card_bundle(parent)).id();
     commands.spawn((
         Text::new(
             "tabs-resizable — vertical tabs with a draggable divider; grab the bright grip and \

@@ -1,0 +1,26 @@
+/*
+ * Dark — a higher-contrast, near-black theme OVERLAY on Graphite.
+ *
+ * This is the reference viewer's theme model, done as CSS: it @imports the base
+ * skin, then redefines only a SUBSET of the role tokens. Everything it does not
+ * mention (control-border, focus-ring, gain, loss, radii, text-muted, …) falls
+ * through to Graphite — exactly like themes/dark/colors.xml overriding a handful
+ * of the base's named colours.
+ *
+ * The base is imported into a cascade LAYER, and the overrides below are left
+ * un-layered. In CSS an un-layered rule beats any layered one regardless of
+ * source order, and bevy_flair implements this — which is what makes the overlay
+ * win (a plain @import places the base's :root such that it would otherwise beat
+ * the theme's, so the tokens never changed). The layer *is* the id-keyed merge:
+ * the base fills every token, the theme overrides its subset.
+ */
+@import "skins/graphite/skin.css" layer(skin);
+
+:root {
+  --surface-bg: #0a0c10fa;
+  --surface-border: #20262f;
+  --card-bg: #0e1218;
+  --control-bg: #14181f;
+  --text-primary: #f4f7fb;
+  --accent: #7cc9ff;
+}

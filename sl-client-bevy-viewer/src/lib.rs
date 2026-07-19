@@ -82,6 +82,7 @@ mod render_test;
 mod screenshot;
 mod session;
 mod settings;
+mod skin;
 mod sky;
 mod spacenav;
 mod terrain;
@@ -333,6 +334,20 @@ struct Options {
     /// left/right pan).
     #[clap(long, value_enum, default_value_t = SpinAxis::Yaw)]
     camera_spin_axis: SpinAxis,
+    /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
+    /// `azure`). Skins are colour / texture / font tokens only, never layout.
+    #[clap(long)]
+    skin: Option<String>,
+    /// A theme overlay for the skin — a file under
+    /// `assets/skins/<skin>/themes/` (e.g. `dark`), which redefines a subset of
+    /// the skin's tokens. Omit for the skin's own base.
+    #[clap(long)]
+    theme: Option<String>,
+    /// Watch the skin `.css` files and re-apply them live as they are edited —
+    /// the skin-authoring loop. Off by default (a tiny background cost); turn it
+    /// on while designing a skin or theme.
+    #[clap(long)]
+    watch_skins: bool,
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -523,6 +538,26 @@ fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
     }
 }
 
+/// The camera's start-up configuration for a viewer session — the fixed pose
+/// (if any) and the optional auto-spin — bundled so [`run_session`] stays within
+/// the argument-count lint.
+struct CameraStartup {
+    /// The fixed start pose, or the login-snapped default.
+    start: CameraStart,
+    /// The optional auto-spin survey pan.
+    spin: CameraSpin,
+}
+
+/// The skin configuration for a viewer session: which skin / theme to wear and
+/// whether to hot-watch the `.css` files. Bundled alongside [`CameraStartup`] to
+/// keep [`run_session`] within the argument-count lint.
+struct SkinRuntime {
+    /// The initial skin + theme selection.
+    selection: crate::skin::SkinSelection,
+    /// Whether to watch the skin `.css` files for live edits (`--watch-skins`).
+    watch: bool,
+}
+
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
 fn run_session(
@@ -531,9 +566,17 @@ fn run_session(
     play_animation: &[Uuid],
     repeat_animation: bool,
     screenshot_dir: Option<&Path>,
-    camera_start: CameraStart,
-    camera_spin: CameraSpin,
+    camera: CameraStartup,
+    skin: SkinRuntime,
 ) -> LoginOutcome {
+    let CameraStartup {
+        start: camera_start,
+        spin: camera_spin,
+    } = camera;
+    let SkinRuntime {
+        selection: skin,
+        watch: watch_skins,
+    } = skin;
     // Start the cursor free (visible, un-grabbed): the viewer opens in
     // third-person, whose pointer is free to click the world / UI.
     // `crate::input_context::drive_cursor_grab` captures it only when the camera
@@ -577,11 +620,19 @@ fn run_session(
                 primary_cursor_options: Some(cursor_options),
                 ..default()
             })
+            // Watch the asset directory so an edited skin `.css` re-applies live
+            // (`--watch-skins`, the skin-authoring loop). Off unless asked, since
+            // watching carries a small background cost.
+            .set(AssetPlugin {
+                watch_for_changes_override: watch_skins.then_some(true),
+                ..default()
+            })
             // The binary installs its own `tracing` subscriber (so the
             // pre-window login logs go somewhere); drop Bevy's `LogPlugin` to
             // avoid the "global subscriber already set" clash.
             .disable::<LogPlugin>(),
     )
+    .insert_resource(skin)
     .add_plugins(SlClientPlugin {
         params: params.clone(),
         diagnostics: true,
@@ -610,6 +661,12 @@ fn run_session(
     // direction-neutral / content-driven layout conventions the whole UI cluster
     // inherits.
     .add_plugins(ViewerUiPlugin)
+    // The UI skin / design-token system (viewer-ui-skin-tokens): stands up the
+    // `bevy_flair` CSS engine, registers the logical box / corner properties (so
+    // skins author `margin-inline-start`, never physical `left`), and dresses the
+    // `UiRoot` in the selected skin's hot-reloadable `.css` tokens. After
+    // `ViewerUiPlugin` so the `UiRoot` it styles already exists.
+    .add_plugins(crate::skin::ViewerSkinPlugin)
     // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
     // bundles behind Bevy assets with runtime locale switching, the `Translator`
     // string-lookup API (typed named arguments → per-locale plural / gender), and
@@ -1262,8 +1319,17 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             &options.play_animation,
             options.repeat_animation,
             options.screenshot_dir.as_deref(),
-            camera_start,
-            camera_spin,
+            CameraStartup {
+                start: camera_start,
+                spin: camera_spin,
+            },
+            SkinRuntime {
+                selection: crate::skin::SkinSelection::resolve(
+                    options.skin.clone(),
+                    options.theme.clone(),
+                ),
+                watch: options.watch_skins,
+            },
         );
         if let Some(challenge) = outcome.challenge {
             info!(

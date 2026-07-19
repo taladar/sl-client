@@ -1,0 +1,37 @@
+/*
+ * Azure — a cooler, brighter blue skin, visibly distinct from Graphite so a
+ * skin switch is obvious at a glance.
+ *
+ * Same structural rules (common.css), same role-token names — only the values
+ * differ. This is the whole point of the token model: a second skin is a second
+ * set of values, never a second layout.
+ */
+@import "skins/common.css";
+
+:root {
+  /* Surfaces */
+  --surface-bg: #0f2740f2;
+  --surface-border: #2f5f8f;
+  --surface-radius: 8px;
+  --card-bg: #103049;
+
+  /* Text */
+  --text-primary: #eaf3ff;
+  --text-muted: #b9d4ee;
+
+  /* Controls */
+  --control-bg: #173a5c;
+  --control-bg-hover: #1f4e79;
+  --control-border: #4a90d0;
+  --control-radius: 6px;
+
+  /* Focus ring */
+  --focus-ring: #ffd166;
+
+  /* Accent */
+  --accent: #38bdf8;
+
+  /* Meaning-bearing */
+  --gain: #2fbf71;
+  --loss: #e05252;
+}

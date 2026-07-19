@@ -158,6 +158,16 @@ exceptions = [
   # only affects the crate's own files, so it is safe as a library dependency;
   # allow it for that one crate rather than project-wide.
   { allow = ["MPL-2.0"], crate = "option-ext" },
+  # The Servo CSS stack (MPL-2.0) that `bevy_flair` — the viewer's UI skin engine
+  # (viewer-ui-skin-tokens) — is built on: the tokenizer, selector engine and
+  # their helpers. Same reasoning as `option-ext`: MPL-2.0 is file-level (weak)
+  # copyleft, safe as an unmodified library dependency, allowed per-crate rather
+  # than project-wide.
+  { allow = ["MPL-2.0"], crate = "cssparser" },
+  { allow = ["MPL-2.0"], crate = "cssparser-color" },
+  { allow = ["MPL-2.0"], crate = "cssparser-macros" },
+  { allow = ["MPL-2.0"], crate = "dtoa-short" },
+  { allow = ["MPL-2.0"], crate = "selectors" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,

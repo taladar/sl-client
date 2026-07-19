@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 98 |
-| blocked | 92 |
+| ready | 99 |
+| blocked | 91 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 511 |
+| done | 512 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **731** |
+| **total** | **732** |
 
 ## ideas (4)
 
@@ -30,13 +30,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-i18n-colorblind-accessibility`](ideas/viewer-i18n-colorblind-accessibility.md)
   — Colour-blind-accessible UI (no colour-as-sole-signal) (blocked by
-  `viewer-ui-skin-tokens`)
+  `viewer-ui-skin-tokens` (done))
 - [`viewer-i18n-cultural-color-meanings`](ideas/viewer-i18n-cultural-color-meanings.md)
-  — Culturally-aware UI colour semantics (blocked by `viewer-ui-skin-tokens`)
+  — Culturally-aware UI colour semantics (blocked by `viewer-ui-skin-tokens`
+  (done))
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (98)
+## ready (99)
 
 ### viewer
 
@@ -194,11 +195,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
+  Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-ui-skin-tokens` (done))
 - [`viewer-ui-settings-binding`](ready/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))
-- [`viewer-ui-skin-tokens`](ready/viewer-ui-skin-tokens.md) — Skin system —
-  design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
+  Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
+  `viewer-ui-skin-tokens` (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -267,7 +272,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (92)
+## blocked (91)
 
 ### viewer
 
@@ -495,9 +500,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-ui-menu-bar`](blocked/viewer-ui-menu-bar.md) — Top menu bar (blocked
   by `viewer-ui-context-menu`)
-- [`viewer-ui-notification-host`](blocked/viewer-ui-notification-host.md) —
-  Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-ui-skin-tokens`)
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
@@ -576,7 +578,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (511)
+## done (512)
 
 ### protocol
 
@@ -1036,6 +1038,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
+- [`viewer-ui-skin-tokens`](done/viewer-ui-skin-tokens.md) — Skin system —
+  design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-tab-widget`](done/viewer-ui-tab-widget.md) — Reusable tab widget
   (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —
