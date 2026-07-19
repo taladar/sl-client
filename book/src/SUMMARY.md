@@ -41,6 +41,11 @@
 - [Textures & the Asset Pipeline](content/textures.md)
 - [Meshes & the LLMesh Pipeline](content/meshes.md)
 
+## Authoring
+
+- [Writing Skins & Themes](authoring/skins.md)
+- [Writing Translations](authoring/translations.md)
+
 ## Tools
 
 - [The REPL test client](tools/sl-repl.md)
