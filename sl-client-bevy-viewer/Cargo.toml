@@ -31,12 +31,22 @@ avian3d = { version = "0.7.0" }
 # fallback is bundled separately (see `assets/fonts/`), because the system emoji
 # font is usually COLRv1, which swash cannot rasterise.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+# The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
+# bundles behind Bevy assets, with runtime locale switching. `bevy_fluent`
+# provides the asset loaders, the `Locale` negotiation input and the
+# `Localization` lookup resource; `fluent` / `fluent_content` are its runtime
+# types the lookup API (`src/i18n.rs`) builds typed named arguments with and
+# formats through (never a pre-formatted string); `unic-langid` is the language
+# tag those resources are keyed by.
+bevy_fluent = { version = "0.15.0" }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
 directories = { version = "6.0.0" }
 # The SpaceNavigator / 6-DOF device read (the `spacenav` feature, Linux-only for
 # now — see the `viewer-input-spacenav-crossplatform` roadmap task).
 evdev = { version = "0.13.2", optional = true }
+fluent = { version = "0.16.1" }
+fluent_content = { version = "0.0.5" }
 fs-err = { version = "3.3.0" }
 image = { version = "0.25.10", default-features = false, features = ["tga"] }
 # A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
@@ -60,6 +70,7 @@ sl-texture = { version = "0.1.0", path = "../sl-texture", features = [
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
+unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { version = "2.5.8" }
 
 [dev-dependencies]

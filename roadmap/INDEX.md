@@ -11,24 +11,32 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 1 |
-| ready | 95 |
-| blocked | 93 |
+| ideas | 4 |
+| ready | 99 |
+| blocked | 92 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 509 |
-| deferred | 7 |
+| done | 510 |
+| deferred | 9 |
 | wont-do | 3 |
-| **total** | **722** |
+| **total** | **731** |
 
-## ideas (1)
+## ideas (4)
 
 ### viewer
 
+- [`viewer-a11y-screen-reader`](ideas/viewer-a11y-screen-reader.md) —
+  Screen-reader / assistive-technology support (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-i18n-colorblind-accessibility`](ideas/viewer-i18n-colorblind-accessibility.md)
+  — Colour-blind-accessible UI (no colour-as-sole-signal) (blocked by
+  `viewer-ui-skin-tokens`)
+- [`viewer-i18n-cultural-color-meanings`](ideas/viewer-i18n-cultural-color-meanings.md)
+  — Culturally-aware UI colour semantics (blocked by `viewer-ui-skin-tokens`)
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (95)
+## ready (99)
 
 ### viewer
 
@@ -68,11 +76,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-i18n-fluent-scaffold`](ready/viewer-i18n-fluent-scaffold.md) — i18n
-  scaffold (Project Fluent via bevy_fluent) (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
+  Locale detection, override & runtime switch (blocked by
+  `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
+- [`viewer-i18n-number-datetime-formats`](ready/viewer-i18n-number-datetime-formats.md)
+  — Locale-aware number, currency & date/time formatting (blocked by
+  `viewer-i18n-fluent-scaffold` (done))
 - [`viewer-image-upload`](ready/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
+  — Keyboard bindings stable across physical keyboard layouts (blocked by
+  `viewer-input-action-map` (done))
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
@@ -105,6 +119,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-object-selection-core`](ready/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-os-portals-linux`](ready/viewer-os-portals-linux.md) — Linux
+  desktop-portal integration (FileChooser, OpenURI, …) (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-os-slurl-handler-linux`](ready/viewer-os-slurl-handler-linux.md) —
+  Register as the SLURL / hop URI handler (Linux) (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-parcel-borders-render`](ready/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
@@ -250,7 +270,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (93)
+## blocked (92)
 
 ### viewer
 
@@ -302,11 +322,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
 - [`viewer-i18n-chat-translation`](blocked/viewer-i18n-chat-translation.md) —
-  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`,
-  `viewer-chat-history-panel`)
-- [`viewer-i18n-locale-selection`](blocked/viewer-i18n-locale-selection.md) —
-  Locale detection, override & runtime switch (blocked by
-  `viewer-i18n-fluent-scaffold`, `viewer-ui-settings-store` (done))
+  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
+  (done), `viewer-chat-history-panel`)
 - [`viewer-in-world-sounds`](blocked/viewer-in-world-sounds.md) — In-world
   spatial sounds (blocked by `viewer-audio-backend`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
@@ -562,7 +579,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (509)
+## done (510)
 
 ### protocol
 
@@ -712,6 +729,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
+- [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
+  scaffold (Project Fluent via bevy_fluent) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action
   map & per-context binding profiles (blocked by `viewer-input-focus-contexts`
   (done))
@@ -1566,7 +1586,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (7)
+## deferred (9)
 
 ### protocol
 
@@ -1580,6 +1600,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-spacenav-device` (done))
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
   — Non-goals (deferred; candidate follow-up roadmaps)
+- [`viewer-os-native-integration-macos`](deferred/viewer-os-native-integration-macos.md)
+  — macOS native OS integration (file dialogs, OpenURI, notifications) (blocked
+  by `viewer-os-portals-linux`)
+- [`viewer-os-native-integration-windows`](deferred/viewer-os-native-integration-windows.md)
+  — Windows native OS integration (file dialogs, OpenURI, notifications)
+  (blocked by `viewer-os-portals-linux`)
 - [`viewer-p29-2`](deferred/viewer-p29-2-drive-its-animations.md) — Drive its
   animations
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)

@@ -121,6 +121,9 @@ const UI_DIRECTION_ENV: &str = "SL_VIEWER_UI_DIRECTION";
 /// The value of [`UI_DIRECTION_ENV`] that selects right-to-left.
 const UI_DIRECTION_RTL: &str = "rtl";
 
+/// The value of [`UI_DIRECTION_ENV`] that selects left-to-right.
+const UI_DIRECTION_LTR: &str = "ltr";
+
 /// The scaffold's startup work, as a set, so a panel spawned by another module
 /// can order itself after the root exists (`.after(UiScaffoldSystems::SpawnRoot)`)
 /// and read [`UiRoot`].
@@ -229,6 +232,26 @@ impl UiDirection {
         match value {
             Some(value) if value.eq_ignore_ascii_case(UI_DIRECTION_RTL) => Self::Rtl,
             Some(_) | None => Self::Ltr,
+        }
+    }
+
+    /// The direction the [`UI_DIRECTION_ENV`] knob *forces*, or `None` when it is
+    /// unset so the locale (`crate::i18n`) drives the layout instead.
+    ///
+    /// Distinct from [`from_env`](Self::from_env), which cannot tell "unset" from
+    /// "`ltr`": the i18n scaffold needs "no override" to be a third answer, so a
+    /// non-Latin locale can flip the layout while an explicit knob still wins.
+    pub(crate) fn rtl_override_from_env() -> Option<Self> {
+        Self::parse_override(std::env::var_os(UI_DIRECTION_ENV).as_deref())
+    }
+
+    /// [`Self::rtl_override_from_env`]'s decision, split out so it is testable
+    /// without touching the process environment.
+    fn parse_override(value: Option<&OsStr>) -> Option<Self> {
+        match value {
+            Some(value) if value.eq_ignore_ascii_case(UI_DIRECTION_RTL) => Some(Self::Rtl),
+            Some(value) if value.eq_ignore_ascii_case(UI_DIRECTION_LTR) => Some(Self::Ltr),
+            Some(_) | None => None,
         }
     }
 
@@ -1400,6 +1423,29 @@ mod tests {
                 UiDirection::parse(value.map(OsStr::new)),
                 want,
                 "{value:?} should seed {want:?}"
+            );
+        }
+    }
+
+    /// The *override* read (which the i18n scaffold uses) has a third answer the
+    /// seed cannot: `None` when unset, so a non-Latin locale drives the layout,
+    /// but an explicit `rtl` / `ltr` still forces its side.
+    #[test]
+    fn the_direction_override_distinguishes_unset_from_a_forced_side() {
+        for (value, want) in [
+            (Some("rtl"), Some(UiDirection::Rtl)),
+            (Some("RTL"), Some(UiDirection::Rtl)),
+            (Some("ltr"), Some(UiDirection::Ltr)),
+            (Some("LTR"), Some(UiDirection::Ltr)),
+            // Unset, or a typo, is "no override" — not a forced left-to-right —
+            // so the locale is free to mirror the layout.
+            (Some("sideways"), None),
+            (None, None),
+        ] {
+            assert_eq!(
+                UiDirection::parse_override(value.map(OsStr::new)),
+                want,
+                "{value:?} should override to {want:?}"
             );
         }
     }

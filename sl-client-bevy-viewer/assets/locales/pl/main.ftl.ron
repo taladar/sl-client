@@ -1,0 +1,10 @@
+// The Polish (`pl`) bundle manifest. Ships specifically because Polish is the
+// plural case the reference viewer's `LLTrans::getCountString` gets wrong: it
+// has `one` / `few` / `many` / `other` categories, and Fluent selects them from
+// CLDR rules rather than a hardcoded three-language ladder.
+(
+    locale: "pl",
+    resources: [
+        "main.ftl",
+    ],
+)

@@ -1,0 +1,10 @@
+// The English (`en`) bundle manifest — the base locale and the fallback for
+// every other locale (see `ViewerI18nPlugin`). `bevy_fluent` reads this `.ftl.ron`
+// to learn the locale tag and which `.ftl` resource files make up the bundle;
+// resource paths are relative to this file's directory.
+(
+    locale: "en",
+    resources: [
+        "main.ftl",
+    ],
+)

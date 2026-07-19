@@ -525,6 +525,11 @@ pub(crate) struct FloaterHandle {
     pub(crate) root: Entity,
     /// The content slot to parent the window's own UI into.
     pub(crate) content: Entity,
+    /// The title-bar text node. Exposed so a caller can bind it to a Fluent key
+    /// (`crate::i18n::Translated`) rather than a fixed [`FloaterSpec::title`]; the
+    /// floater's own active/inactive recolour only touches its colour, not its
+    /// text, so the two coexist.
+    pub(crate) title_text: Entity,
 }
 
 /// **Spawn a live floater** under `root`, starting hidden.
@@ -656,6 +661,7 @@ pub(crate) fn spawn_floater(
     FloaterHandle {
         root: floater,
         content: parts.content,
+        title_text: parts.title_text,
     }
 }
 

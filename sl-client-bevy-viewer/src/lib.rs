@@ -51,6 +51,7 @@ mod ground;
 mod hand_pose;
 mod hud;
 mod hud_pick;
+mod i18n;
 mod ik;
 mod input_action;
 mod input_context;
@@ -164,6 +165,7 @@ use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
+use crate::i18n::ViewerI18nPlugin;
 use crate::input_action::InputActionPlugin;
 use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
 use crate::inventory::InventoryPlugin;
@@ -608,6 +610,13 @@ fn run_session(
     // direction-neutral / content-driven layout conventions the whole UI cluster
     // inherits.
     .add_plugins(ViewerUiPlugin)
+    // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
+    // bundles behind Bevy assets with runtime locale switching, the `Translator`
+    // string-lookup API (typed named arguments → per-locale plural / gender), and
+    // the `UiLocale` resource carrying the locale's LTR/RTL direction and
+    // typographic conventions (the tab widget's truncation ellipsis). Ahead of
+    // every UI-bearing panel so panels are authored translatable from day one.
+    .add_plugins(ViewerI18nPlugin)
     // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
     // resizable strip's persisted / dragged width onto its node.
     .add_plugins(TabWidgetPlugin)

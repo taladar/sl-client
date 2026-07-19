@@ -51,6 +51,7 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::i18n::Translated;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
@@ -549,12 +550,13 @@ pub(crate) enum InventoryTab {
 }
 
 impl InventoryTab {
-    /// This tab's button label.
-    const fn label(self) -> &'static str {
+    /// This tab's button label as a Fluent key (the strip is spawned with
+    /// `translate_labels`, so `crate::i18n` resolves it per locale).
+    const fn label_key(self) -> &'static str {
         match self {
-            Self::Everything => "Everything",
-            Self::Recent => "Recent",
-            Self::Worn => "Worn",
+            Self::Everything => "inventory-tab-everything",
+            Self::Recent => "inventory-tab-recent",
+            Self::Worn => "inventory-tab-worn",
         }
     }
 }
@@ -1234,6 +1236,8 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
         root.0,
         FloaterSpec {
             id: INVENTORY_FLOATER_ID,
+            // A fallback shown only until the bundle loads and `Translated`
+            // resolves `inventory-title`; the localized title lives on the key.
             title: "Inventory".to_owned(),
             position: Vec2::new(20.0, 60.0),
             // A definite, resizable content area (the reference inventory has a
@@ -1254,12 +1258,17 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
     );
     let panel = handle.root;
     let content = handle.content;
+    // Localize the floater's title bar: bind its text node to the Fluent key so
+    // it tracks the active locale like the rest of the window.
+    commands
+        .entity(handle.title_text)
+        .insert(Translated::new("inventory-title"));
 
     // Tabs — the reusable strip widget ([`crate::ui_tab`]) in its horizontal
     // (top-edge) placement. One focus stop; the arrow keys move between the
     // Everything / Recent / Worn tabs, and the active one drives the shared list
     // via [`bridge_tab_selection`]. The labels are spawned in [`TAB_ORDER`].
-    let tab_labels = TAB_ORDER.map(|tab| tab.label().to_owned());
+    let tab_labels = TAB_ORDER.map(|tab| tab.label_key().to_owned());
     let tab_strip = spawn_tab_strip(
         &mut commands,
         content,
@@ -1272,6 +1281,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             font_size: CHROME_FONT_SIZE,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: true,
         },
     );
 
@@ -1284,13 +1294,13 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(content),
         ))
         .id();
-    let expand_all = spawn_toolbar_button(&mut commands, expand_row, "Expand all", 2);
+    let expand_all = spawn_toolbar_button(&mut commands, expand_row, "inventory-expand-all", 2);
     commands.entity(expand_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::ExpandAll);
         },
     );
-    let collapse_all = spawn_toolbar_button(&mut commands, expand_row, "Collapse all", 3);
+    let collapse_all = spawn_toolbar_button(&mut commands, expand_row, "inventory-collapse-all", 3);
     commands.entity(collapse_all).observe(
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::CollapseAll);
@@ -1368,7 +1378,7 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
 fn spawn_toolbar_button(
     commands: &mut Commands,
     parent: Entity,
-    label: &str,
+    label_key: &'static str,
     tab_index: i32,
 ) -> Entity {
     commands
@@ -1383,11 +1393,14 @@ fn spawn_toolbar_button(
             BorderColor::all(BUTTON_BORDER),
             BackgroundColor(BUTTON_BACKGROUND),
             Pickable::default(),
-            Name::new(format!("inventory-button:{label}")),
+            Name::new(format!("inventory-button:{label_key}")),
             ChildOf(parent),
         ))
         .with_child((
-            Text::new(label.to_owned()),
+            // Empty until `crate::i18n::apply_translations` resolves the key for
+            // the active locale (and re-resolves it on a locale switch).
+            Text::default(),
+            Translated::new(label_key),
             UiFont::Sans.at(CHROME_FONT_SIZE),
             TextColor(CHROME_COLOR),
         ))

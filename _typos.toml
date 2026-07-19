@@ -1,7 +1,12 @@
 # The vendored LL message template is upstream content with many typos in its
 # comments and message names; it is not ours to correct.
+#
+# `*.ftl` are Project Fluent translation bundles (viewer-i18n-fluent-scaffold):
+# they are prose in many languages by design, so an English typo checker only
+# produces false positives over them. Excluded wholesale rather than
+# allow-listing each foreign word as more locales land.
 [files]
-extend-exclude = ["sl-wire/message_template.msg"]
+extend-exclude = ["sl-wire/message_template.msg", "*.ftl"]
 
 [default]
 # The conformance records stamp a git-describe hash (e.g. "a843ba4-dirty") in
@@ -24,6 +29,10 @@ siz = "siz"
 # `lso2` compile target below and tailslide's `passes/lso`); not a typo of "also".
 LSO = "LSO"
 lso = "lso"
+# "elementy" is the Polish plural (`few` category) of "element". The `pl` bundle
+# itself is excluded (`*.ftl` above), but the i18n unit tests assert on the
+# formatted Polish string in Rust source; Polish, not a typo of "elementary".
+elementy = "elementy"
 
 [default.extend-identifiers]
 # `flate2` is the gzip crate (used for the inventory disk cache); not a typo

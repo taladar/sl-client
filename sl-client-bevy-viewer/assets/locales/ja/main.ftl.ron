@@ -1,0 +1,8 @@
+// The Japanese (`ja`) bundle manifest. Ships mainly to exercise the CJK
+// truncation-ellipsis convention and a plural-less language.
+(
+    locale: "ja",
+    resources: [
+        "main.ftl",
+    ],
+)

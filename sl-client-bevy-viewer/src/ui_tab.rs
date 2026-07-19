@@ -365,6 +365,12 @@ pub(crate) struct TabSpec<'labels> {
     /// (`viewer-i18n-fluent-scaffold`) is where this would eventually come from.
     /// Use [`DEFAULT_ELLIPSIS`] where the caller has no locale of its own.
     pub(crate) ellipsis: &'static str,
+    /// Whether [`labels`](Self::labels) are Fluent **keys** to translate
+    /// (`crate::i18n::Translated`, re-resolved on locale change / bundle load)
+    /// rather than literal display text. A translated strip's labels start empty
+    /// and fill once the bundle loads. Use it for real UI; `false` for the
+    /// gallery and tests, whose labels are fixed sample text.
+    pub(crate) translate_labels: bool,
 }
 
 impl TabSpec<'_> {
@@ -372,6 +378,28 @@ impl TabSpec<'_> {
     /// vertical strip.
     const fn is_resizable(&self) -> bool {
         self.placement.is_vertical() && self.strip_width.is_some()
+    }
+
+    /// The text a label node starts with: empty for a translated strip (the key
+    /// is not display text, and `crate::i18n::Translated` fills the real text once
+    /// the bundle loads), otherwise the literal label.
+    fn initial_label(&self, label: &str) -> String {
+        if self.translate_labels {
+            String::new()
+        } else {
+            label.to_owned()
+        }
+    }
+}
+
+/// Bind a tab-label node to its Fluent key when the strip is translated, so
+/// `crate::i18n::apply_translations` keeps it resolved; a no-op for a literal
+/// strip.
+fn translate_tab_label(commands: &mut Commands, label_entity: Entity, spec: &TabSpec, label: &str) {
+    if spec.translate_labels {
+        commands
+            .entity(label_entity)
+            .insert(crate::i18n::Translated::new(label.to_owned()));
     }
 }
 
@@ -410,6 +438,15 @@ pub(crate) struct TabLabelClip {
     /// The `…` marker node, shown only while this label overflows its box.
     pub(crate) ellipsis: Entity,
 }
+
+/// Marks a tab's truncation-ellipsis marker node, so the i18n scaffold
+/// (`crate::i18n::apply_locale_ellipsis`) can rewrite every marker's glyph to
+/// the active locale's `ui-ellipsis` — a single Latin `…` for most locales, the
+/// centred `……` for CJK. The glyph is [`TabSpec::ellipsis`] (defaulting to
+/// [`DEFAULT_ELLIPSIS`]) until the locale bundle resolves it; that is a static
+/// fallback, and the locale's convention is the source of truth once loaded.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct TabEllipsisMarker;
 
 /// A tab button: which strip it belongs to and its index within it. Carried so
 /// the selection observer can find every button of a strip and place it against
@@ -993,32 +1030,38 @@ fn spawn_tab_button(
                 ChildOf(button),
             ))
             .id();
-        commands.spawn((
-            Text::new(label.to_owned()),
-            TextLayout::no_wrap(),
-            UiFont::Sans.at(spec.font_size),
-            TextColor(TAB_LABEL_COLOR),
-            // Natural width, so the container — not the text — is what shrinks and
-            // clips, and the text overflows the container's trailing edge.
-            Node {
-                flex_shrink: 0.0,
-                ..default()
-            },
-            ChildOf(label_clip),
-        ));
+        let label_entity = commands
+            .spawn((
+                Text::new(spec.initial_label(label)),
+                TextLayout::no_wrap(),
+                UiFont::Sans.at(spec.font_size),
+                TextColor(TAB_LABEL_COLOR),
+                // Natural width, so the container — not the text — is what shrinks
+                // and clips, and the text overflows the container's trailing edge.
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                ChildOf(label_clip),
+            ))
+            .id();
+        translate_tab_label(commands, label_entity, spec, label);
         let ellipsis = spawn_tab_ellipsis(commands, button, spec, index);
         commands
             .entity(label_clip)
             .insert(TabLabelClip { ellipsis });
     } else {
-        commands.spawn((
-            Text::new(label.to_owned()),
-            TextLayout::no_wrap(),
-            UiFont::Sans.at(spec.font_size),
-            TextColor(TAB_LABEL_COLOR),
-            Name::new(format!("{}:tab-label:{index}", spec.element)),
-            ChildOf(button),
-        ));
+        let label_entity = commands
+            .spawn((
+                Text::new(spec.initial_label(label)),
+                TextLayout::no_wrap(),
+                UiFont::Sans.at(spec.font_size),
+                TextColor(TAB_LABEL_COLOR),
+                Name::new(format!("{}:tab-label:{index}", spec.element)),
+                ChildOf(button),
+            ))
+            .id();
+        translate_tab_label(commands, label_entity, spec, label);
     }
 
     button
@@ -1048,6 +1091,7 @@ fn spawn_tab_ellipsis(
                 ..default()
             },
             Name::new(format!("{}:tab-ellipsis:{index}", spec.element)),
+            TabEllipsisMarker,
             ChildOf(button),
         ))
         .id()
@@ -1410,6 +1454,7 @@ fn spawn_tabs_element(
             font_size: cx.font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: false,
         },
     );
     fill_sample_panels(commands, &handle.panels, cx);
@@ -1523,6 +1568,7 @@ pub(crate) fn spawn_tabs_resizable_demo(
             font_size: cx.font_size,
             strip_width: Some(110.0),
             ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: false,
         },
     );
     fill_sample_panels(commands, &handle.panels, cx);
@@ -1559,6 +1605,7 @@ pub(crate) fn spawn_tabs_scroll_demo(
             font_size: cx.font_size,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
+            translate_labels: false,
         },
     );
     // Distinct per-widget content (the element id + tab number), so a switch in
@@ -1693,6 +1740,7 @@ mod tests {
             font_size: 15.0,
             strip_width,
             ellipsis: super::DEFAULT_ELLIPSIS,
+            translate_labels: false,
         }
     }
 
@@ -2165,6 +2213,7 @@ mod tests {
                                 font_size: 15.0,
                                 strip_width: None,
                                 ellipsis: super::DEFAULT_ELLIPSIS,
+                                translate_labels: false,
                             },
                         );
                     })

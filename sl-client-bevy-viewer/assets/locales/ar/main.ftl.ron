@@ -1,0 +1,8 @@
+// The Arabic (`ar`) bundle manifest. Ships to exercise the right-to-left layout
+// direction the locale carries, and Arabic's six-way plural rules.
+(
+    locale: "ar",
+    resources: [
+        "main.ftl",
+    ],
+)
