@@ -1,0 +1,43 @@
+[package]
+name = "sl-l10n"
+description = "Locale-aware number, currency and date/time value formatting (CLDR/ICU) for Second Life / OpenSim clients"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "i18n", "l10n", "icu"]
+categories = ["internationalization", "localization", "value-formatting"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+# ICU4X (2.x): the CLDR-backed formatters. `compiled_data` (a default feature of
+# each) bakes the locale data into the binary, so the crate stays I/O-free — no
+# data files to ship or load at runtime, matching the other pure crates.
+# `fixed_decimal`'s `ryu` feature is what gates `Decimal::try_from_f64`, the
+# float entry point the decimal formatter needs.
+fixed_decimal = { version = "0.7.2", features = ["ryu"] }
+icu_calendar = { version = "2.2.1" }
+icu_datetime = { version = "2.2.0" }
+icu_decimal = { version = "2.2.0" }
+icu_locale_core = { version = "2.2.0" }
+# The `DataError` the ICU formatter constructors return; named directly so
+# `FormatError` can wrap it. The `sync` feature switches ICU4X's internal
+# reference-counted data pointer from `Rc` to `Arc`, which is what makes the
+# formatters `Send + Sync` — required to hold `LocaleFormatters` in a Bevy
+# resource (the whole `icu` graph shares this one `icu_provider`, so enabling it
+# here makes every `icu_*` formatter thread-safe).
+icu_provider = { version = "2.2.0", features = ["sync"] }
+icu_time = { version = "2.2.0" }
+thiserror = { version = "2.0.18" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

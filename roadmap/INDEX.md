@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 99 |
+| ready | 98 |
 | blocked | 92 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 510 |
+| done | 511 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **731** |
@@ -36,7 +36,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (99)
+## ready (98)
 
 ### viewer
 
@@ -79,9 +79,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
-- [`viewer-i18n-number-datetime-formats`](ready/viewer-i18n-number-datetime-formats.md)
-  — Locale-aware number, currency & date/time formatting (blocked by
-  `viewer-i18n-fluent-scaffold` (done))
 - [`viewer-image-upload`](ready/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
@@ -579,7 +576,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (510)
+## done (511)
 
 ### protocol
 
@@ -732,6 +729,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-i18n-number-datetime-formats`](done/viewer-i18n-number-datetime-formats.md)
+  — Locale-aware number, currency & date/time formatting (blocked by
+  `viewer-i18n-fluent-scaffold` (done))
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action
   map & per-context binding profiles (blocked by `viewer-input-focus-contexts`
   (done))

@@ -12,6 +12,7 @@ members = [
     "sl-conformance",
     "sl-emoji",
     "sl-j2c-encode",
+    "sl-l10n",
     "sl-llsd",
     "sl-lsl",
     "sl-lsl-lsp",

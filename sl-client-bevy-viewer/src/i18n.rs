@@ -62,6 +62,7 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_fluent::{FluentPlugin, Locale, Localization, LocalizationBuilder};
 use fluent::{FluentArgs, FluentValue};
 use fluent_content::{Content as _, Request};
+use sl_l10n::{CivilDateTime, DateTimeLength, DateTimeStyle, LocaleFormatters};
 use unic_langid::{LanguageIdentifier, langid};
 
 use crate::ui::{
@@ -111,6 +112,7 @@ impl Plugin for ViewerI18nPlugin {
             // loading; initialised so [`Translator`]'s `Res<Localization>` never
             // reads a missing resource in the frames before then.
             .init_resource::<Localization>()
+            .init_resource::<LocaleFormatting>()
             .insert_resource(DirectionOverride::from_env())
             .init_resource::<I18nDemoVisible>()
             .init_resource::<I18nDemoCount>()
@@ -124,6 +126,7 @@ impl Plugin for ViewerI18nPlugin {
                     // changes, then propagate the locale's conventions.
                     maintain_localization,
                     refresh_locale_ellipsis.after(maintain_localization),
+                    maintain_value_formatters,
                     sync_ui_direction,
                     apply_locale_ellipsis,
                     apply_translations,
@@ -356,6 +359,36 @@ fn refresh_locale_ellipsis(localization: Res<Localization>, mut locale: ResMut<U
     }
 }
 
+/// The active locale's value formatters (`viewer-i18n-number-datetime-formats`).
+///
+/// The CLDR/ICU-backed number, currency and date/time formatters the
+/// [`Translator`] exposes so a panel writes a grouped balance / coordinate /
+/// timestamp for the active locale rather than a bare `to_string()`. `None`
+/// until [`maintain_value_formatters`] first builds it (and never expected to
+/// stay `None`, since the locale tag always parses); the [`Translator`] helpers
+/// fall back to an un-grouped render while it is, mirroring the string lookup's
+/// key-fallback.
+#[derive(Resource, Debug, Default)]
+struct LocaleFormatting {
+    /// The formatters for [`UiLocale::lang`], rebuilt on a locale change.
+    formatters: Option<LocaleFormatters>,
+}
+
+/// (Re)build the [`LocaleFormatting`] formatters whenever the active locale
+/// changes, so the number / date conventions follow the language switch.
+fn maintain_value_formatters(locale: Res<UiLocale>, mut formatting: ResMut<LocaleFormatting>) {
+    if !locale.is_changed() {
+        return;
+    }
+    // `unic_langid` and `icu_locale_core` agree on BCP-47, so the tag string is
+    // the bridge between the Fluent locale and the ICU formatters.
+    let tag = locale.lang.to_string();
+    match LocaleFormatters::from_tag(&tag) {
+        Ok(formatters) => formatting.formatters = Some(formatters),
+        Err(error) => warn!(%tag, %error, "could not build locale value formatters"),
+    }
+}
+
 /// Drive [`UiDirection`] from the active locale, so a right-to-left locale
 /// mirrors the whole layout with no per-panel special-casing.
 ///
@@ -465,6 +498,8 @@ pub(crate) struct Translator<'w> {
     localization: Res<'w, Localization>,
     /// The active locale — read for the pseudolocale flag.
     locale: Res<'w, UiLocale>,
+    /// The active locale's value formatters (numbers / currency / date-time).
+    formatting: Res<'w, LocaleFormatting>,
 }
 
 impl Translator<'_> {
@@ -490,6 +525,71 @@ impl Translator<'_> {
         } else {
             raw
         }
+    }
+
+    /// The active formatters, or `None` before they have built (the first
+    /// frame). The value helpers fall back to a plain render while `None`.
+    ///
+    /// Value formatting is *not* pseudolocalised: a number or a date is not
+    /// prose, so mangling its digits would only obscure whether the grouping is
+    /// right — the axis the pseudolocale tests is string length, which the
+    /// surrounding label already carries.
+    fn formatters(&self) -> Option<&LocaleFormatters> {
+        self.formatting.formatters.as_ref()
+    }
+
+    /// Format a signed integer — an object / item count, an L$-less amount — with
+    /// the locale's grouping separator (`1,234,567`).
+    pub(crate) fn integer(&self, value: i64) -> String {
+        self.formatters()
+            .map_or_else(|| value.to_string(), |formatters| formatters.integer(value))
+    }
+
+    /// Format a float — a coordinate, a scale, a distance — to `fraction_digits`
+    /// places with the locale's grouping separator and decimal mark.
+    pub(crate) fn decimal(&self, value: f64, fraction_digits: u8) -> String {
+        self.formatters()
+            .and_then(|formatters| formatters.decimal(value, fraction_digits).ok())
+            .unwrap_or_else(|| {
+                let digits = usize::from(fraction_digits);
+                format!("{value:.digits$}")
+            })
+    }
+
+    /// Format a Linden-dollar balance (`L$1,234`), the amount grouped for the
+    /// locale.
+    pub(crate) fn currency_l(&self, value: i64) -> String {
+        self.formatters().map_or_else(
+            || format!("L${value}"),
+            |formatters| formatters.currency_l(value),
+        )
+    }
+
+    /// Format a civil date / time for the locale at the given style and length.
+    /// Falls back to an ISO-ish rendering before the formatters build or if a
+    /// component is out of range.
+    pub(crate) fn datetime(
+        &self,
+        when: CivilDateTime,
+        style: DateTimeStyle,
+        length: DateTimeLength,
+    ) -> String {
+        self.formatters()
+            .and_then(|formatters| formatters.datetime(when, style, length).ok())
+            .unwrap_or_else(|| {
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    when.year, when.month, when.day, when.hour, when.minute
+                )
+            })
+    }
+
+    /// Parse a number a user typed in the active locale's conventions back into
+    /// an `f64`, for a localized float input field. `None` if it does not parse
+    /// (or before the formatters build).
+    pub(crate) fn parse_number(&self, input: &str) -> Option<f64> {
+        self.formatters()
+            .and_then(|formatters| formatters.parse_number(input).ok())
     }
 }
 
@@ -676,7 +776,39 @@ enum I18nDemoLine {
     Gender,
     /// The gender-cycle button.
     GenderButton,
+    /// A grouped integer (an object / item count) — the number-formatting demo.
+    Number,
+    /// A grouped L$ balance — the currency-formatting demo.
+    Currency,
+    /// A fractional value (a coordinate) — the decimal-mark demo.
+    Coordinate,
+    /// A formatted date + time — the date/time-formatting demo.
+    DateTime,
+    /// The locale-formatted coordinate parsed back to its canonical value — the
+    /// input-parsing demo (a localized float field reads `128,75` as `128.75`).
+    ParseRoundTrip,
 }
+
+/// The count the demo's grouping line formats, big enough to show the locale's
+/// grouping separator (and, in Polish, the minimum-grouping rule).
+const DEMO_NUMBER: i64 = 1_234_567;
+
+/// The L$ balance the demo's currency line formats.
+const DEMO_BALANCE: i64 = 2_048_576;
+
+/// A coordinate-style fractional value the demo formats to two places, to show
+/// the locale's decimal mark (a dot in English, a comma in German / Polish).
+const DEMO_COORDINATE: f64 = 128.75;
+
+/// The date-time the demo formats, showing the locale's field order and digits.
+const DEMO_WHEN: CivilDateTime = CivilDateTime {
+    year: 2026,
+    month: 7,
+    day: 19,
+    hour: 14,
+    minute: 30,
+    second: 5,
+};
 
 /// Startup: spawn the demo panel under [`UiRoot`], hidden until `F6`.
 fn setup_i18n_demo(mut commands: Commands, root: Res<UiRoot>) {
@@ -706,6 +838,11 @@ fn setup_i18n_demo(mut commands: Commands, root: Res<UiRoot>) {
     demo_line(&mut commands, panel, I18nDemoLine::Greeting);
     demo_line(&mut commands, panel, I18nDemoLine::Plural);
     demo_line(&mut commands, panel, I18nDemoLine::Gender);
+    demo_line(&mut commands, panel, I18nDemoLine::Number);
+    demo_line(&mut commands, panel, I18nDemoLine::Currency);
+    demo_line(&mut commands, panel, I18nDemoLine::Coordinate);
+    demo_line(&mut commands, panel, I18nDemoLine::DateTime);
+    demo_line(&mut commands, panel, I18nDemoLine::ParseRoundTrip);
     // The buttons flow in text order, so they swap ends under RTL with no code
     // here saying so; they wrap rather than overflow when a label runs long.
     let buttons = commands
@@ -865,6 +1002,27 @@ fn update_i18n_demo_text(
                 &TransArgs::new().text("gender", gender.key()),
             ),
             I18nDemoLine::GenderButton => format!("Gender: {}", gender.key()),
+            I18nDemoLine::Number => format!("Number: {}", translator.integer(DEMO_NUMBER)),
+            I18nDemoLine::Currency => {
+                format!("Balance: {}", translator.currency_l(DEMO_BALANCE))
+            }
+            I18nDemoLine::Coordinate => {
+                format!("Position X: {}", translator.decimal(DEMO_COORDINATE, 2))
+            }
+            I18nDemoLine::DateTime => format!(
+                "When: {}",
+                translator.datetime(DEMO_WHEN, DateTimeStyle::DateTime, DateTimeLength::Medium)
+            ),
+            I18nDemoLine::ParseRoundTrip => {
+                // Format the coordinate for the locale, then parse that localized
+                // text back — the input-field path. The parsed value is the same
+                // canonical number regardless of locale.
+                let localized = translator.decimal(DEMO_COORDINATE, 2);
+                let parsed = translator
+                    .parse_number(&localized)
+                    .map_or_else(|| "?".to_owned(), |value| format!("{value}"));
+                format!("Parse: {localized} → {parsed}")
+            }
         };
         if text.0 != next {
             text.0 = next;
