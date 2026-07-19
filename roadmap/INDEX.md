@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 99 |
+| ready | 101 |
 | blocked | 91 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 512 |
+| done | 513 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **732** |
+| **total** | **735** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (99)
+## ready (101)
 
 ### viewer
 
@@ -88,6 +88,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
+- [`viewer-input-spacenav-settings-ui`](ready/viewer-input-spacenav-settings-ui.md)
+  — SpaceNavigator settings panel (blocked by
+  `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
+  (done))
 - [`viewer-inventory-advanced-filters`](ready/viewer-inventory-advanced-filters.md)
   — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-context-actions`](ready/viewer-inventory-context-actions.md)
@@ -139,6 +143,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-preferences-floater`](ready/viewer-preferences-floater.md) —
+  Preferences floater shell + settings store binding (blocked by
+  `viewer-ui-settings-binding` (done))
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
@@ -193,14 +200,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-test-harness` (done))
 - [`viewer-ui-bottom-toolbar`](ready/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
+  dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-settings-binding`](ready/viewer-ui-settings-binding.md) — Two-way
-  widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-ui-settings-store` (done))
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
@@ -337,13 +343,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-ui`](blocked/viewer-input-rebinding-ui.md) —
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget`,
-  `viewer-ui-settings-binding`)
+  `viewer-ui-settings-binding` (done))
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
-- [`viewer-input-spacenav-settings-ui`](blocked/viewer-input-spacenav-settings-ui.md)
-  — SpaceNavigator settings panel (blocked by
-  `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -422,9 +425,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-preferences-floater`)
 - [`viewer-preferences-debug-settings-editor`](blocked/viewer-preferences-debug-settings-editor.md)
   — Raw debug-settings editor (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-floater`](blocked/viewer-preferences-floater.md) —
-  Preferences floater shell + settings store binding (blocked by
-  `viewer-ui-settings-binding`)
 - [`viewer-preferences-graphics-tab`](blocked/viewer-preferences-graphics-tab.md)
   — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
 - [`viewer-prim-creation`](blocked/viewer-prim-creation.md) — Prim creation
@@ -500,6 +500,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-ui-menu-bar`](blocked/viewer-ui-menu-bar.md) — Top menu bar (blocked
   by `viewer-ui-context-menu`)
+- [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
+  — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
+  `viewer-ui-settings-binding` (done))
+- [`viewer-ui-settings-binding-text`](blocked/viewer-ui-settings-binding-text.md)
+  — Text-field↔settings two-way binding (blocked by
+  `viewer-ui-text-input-widget`, `viewer-ui-settings-binding` (done))
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
@@ -578,7 +584,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (512)
+## done (513)
 
 ### protocol
 
@@ -1036,6 +1042,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-settings-binding`](done/viewer-ui-settings-binding.md) — Two-way
+  widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-ui-settings-store` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
 - [`viewer-ui-skin-tokens`](done/viewer-ui-skin-tokens.md) — Skin system —

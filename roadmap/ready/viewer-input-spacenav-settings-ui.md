@@ -2,7 +2,7 @@
 id: viewer-input-spacenav-settings-ui
 title: SpaceNavigator settings panel
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-space-navigator
 blocked_by: [viewer-input-spacenav-camera-mapping, viewer-ui-settings-binding]
 ---

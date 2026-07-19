@@ -82,6 +82,7 @@ mod render_test;
 mod screenshot;
 mod session;
 mod settings;
+mod settings_binding;
 mod skin;
 mod sky;
 mod spacenav;
@@ -199,6 +200,7 @@ use crate::session::{
     repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
+use crate::settings_binding::SettingsBindingPlugin;
 use crate::sky::{
     apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
     center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
@@ -677,6 +679,10 @@ fn run_session(
     // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
     // resizable strip's persisted / dragged width onto its node.
     .add_plugins(TabWidgetPlugin)
+    // The two-way widget↔settings binding (viewer-ui-settings-binding): the
+    // `control_name=` idiom — a checkbox / slider names the setting it edits and
+    // the store and widget are kept in sync both ways. Also owns the `F7` demo.
+    .add_plugins(SettingsBindingPlugin)
     // Input focus / modal context (viewer-input-focus-contexts): derives who owns
     // the keyboard and the cursor from `bevy_input_focus`. Gates every world key
     // binding below via `world_has_keyboard`, so typing into a focused text field

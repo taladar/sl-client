@@ -85,15 +85,41 @@ impl ViewerSettings {
         self.declare(section, name, value, comment);
     }
 
+    /// Register a runtime-only setting whose overrides are never persisted (the
+    /// reference viewer's transient debug settings). The two-way binding demo
+    /// ([`crate::settings_binding`]) uses this so its scratch values write no junk
+    /// to the user's config.
+    pub(crate) fn register_transient(&mut self, name: &str, value: SettingValue, comment: &str) {
+        if let Err(error) = self.store.register_transient(name, value, comment) {
+            warn!("settings: could not register {name}: {error}");
+        }
+    }
+
     /// Write a value to the per-avatar [`Account`](Scope::Account) scope,
     /// logging and swallowing a (wrong-type or unregistered) error so a bad write
     /// can never abort a frame. The floater-geometry persistence
     /// ([`crate::floater_persist`]) writes each floater's remembered rect /
     /// visibility here as it changes.
     pub(crate) fn set_account(&mut self, name: &str, value: SettingValue) {
-        if let Err(error) = self.store.set(Scope::Account, name, value) {
+        self.set(Scope::Account, name, value);
+    }
+
+    /// Write a value to a chosen override scope, logging and swallowing a
+    /// (wrong-type or unregistered) error so a bad write can never abort a
+    /// frame. The two-way widget binding ([`crate::settings_binding`]) writes a
+    /// user edit here, at the binding's declared scope.
+    pub(crate) fn set(&mut self, scope: Scope, name: &str, value: SettingValue) {
+        if let Err(error) = self.store.set(scope, name, value) {
             warn!("settings: could not set {name}: {error}");
         }
+    }
+
+    /// Drop a setting's override in one scope, reverting it to the layer below
+    /// (see [`SettingsStore::reset`](sl_settings::SettingsStore::reset)). Returns
+    /// whether an override was actually present. A bound "reset to default"
+    /// control ([`crate::settings_binding`]) calls this.
+    pub(crate) fn reset(&mut self, scope: Scope, name: &str) -> bool {
+        self.store.reset(scope, name)
     }
 
     /// Whether the per-avatar account scope has been resolved and loaded (post
@@ -144,6 +170,18 @@ impl ViewerSettings {
             && let Err(error) = self.store.save_scope(Scope::Account, path)
         {
             warn!("settings: could not save {}: {error}", path.display());
+        }
+    }
+
+    /// Build a store-backed resource with no persistence paths, for unit tests
+    /// that drive the store directly (e.g. the two-way binding tests) without
+    /// touching the filesystem.
+    #[cfg(test)]
+    pub(crate) const fn from_store_for_test(store: SettingsStore) -> Self {
+        Self {
+            store,
+            global_path: PathBuf::new(),
+            account_path: None,
         }
     }
 }

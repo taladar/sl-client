@@ -2,7 +2,7 @@
 id: viewer-preferences-floater
 title: Preferences floater shell + settings store binding
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-preferences-ui
 blocked_by: [viewer-ui-settings-binding]
 ---
