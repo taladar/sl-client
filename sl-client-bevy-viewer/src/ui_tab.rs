@@ -108,7 +108,7 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
-use crate::ui::{UiDirection, column, row};
+use crate::ui::{FocusRevealBounds, UiDirection, column, row};
 use crate::ui_element::{ElementCx, TextMayClip, UiAction};
 use crate::ui_font::UiFont;
 
@@ -857,6 +857,11 @@ pub(crate) fn spawn_tab_container(
         .id();
 
     let strip = spawn_tab_strip(commands, container, spec);
+    // The strip is the widget's single focus stop, but tabbing to it should bring
+    // the whole widget (strip + panel) into view, not just the header row — so
+    // point the scaffold's scroll-into-view at the container
+    // (`viewer-ui-focus-scroll-into-view`).
+    commands.entity(strip).insert(FocusRevealBounds(container));
 
     let divider = resizable.then(|| spawn_divider(commands, container, spec, strip));
 

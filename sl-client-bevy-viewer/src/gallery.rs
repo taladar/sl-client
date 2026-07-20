@@ -58,7 +58,7 @@ use crate::pie_menu::{FIXTURE_PIE, OpenPieMenu, PieMenuPlugin};
 use crate::skin::SkinSelection;
 use crate::ui::{
     UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
-    invalidate_logical_boxes, resolve_logical_boxes, row, spawn_ui_root,
+    invalidate_logical_boxes, resolve_logical_boxes, row, scroll_focus_into_view, spawn_ui_root,
 };
 use crate::ui_element::{ELEMENTS, ElementCx, SCRIPTS, SampleText, UiAction};
 use crate::ui_font::{UiFont, register_ui_fonts};
@@ -285,6 +285,12 @@ pub fn run() {
             )
                 .chain()
                 .before(bevy::ui::UiSystems::Layout),
+        )
+        // *After* layout, so it reads this frame's computed boxes — the gallery
+        // page is the scroll container the focus ring exposed as needing this.
+        .add_systems(
+            PostUpdate,
+            scroll_focus_into_view.after(bevy::ui::UiSystems::Layout),
         )
         .run();
 }

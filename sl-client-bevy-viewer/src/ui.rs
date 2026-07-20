@@ -107,8 +107,8 @@
 
 use std::ffi::OsStr;
 
-use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
+use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
@@ -190,6 +190,13 @@ impl Plugin for ViewerUiPlugin {
                     // this frame is laid out with the boxes it asked for rather
                     // than one frame late.
                     .before(bevy::ui::UiSystems::Layout),
+            )
+            .add_systems(
+                PostUpdate,
+                // *After* layout, because it reads the freshly computed
+                // `ComputedNode` / `UiGlobalTransform` of the focused widget and
+                // its scroll container to decide how far to scroll.
+                scroll_focus_into_view.after(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -661,6 +668,188 @@ pub(crate) fn apply_panel_visibility(
     }
 }
 
+/// On a focusable widget, a wider entity whose bounds [`scroll_focus_into_view`]
+/// should bring into view *together with* the focus stop itself — for a composite
+/// widget whose focus stop is smaller than its meaningful visual whole.
+///
+/// A tab widget's focus stop is its header strip, but tabbing to it should reveal
+/// the whole widget (strip + panel), so the strip carries this pointing at its
+/// container. The reveal is the *union* of the two boxes, so the focus ring on
+/// the small stop stays visible even when the whole does not fit, and it works on
+/// both axes at once (a vertical tab strip, revealed horizontally, brings its
+/// side panel in the same way).
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct FocusRevealBounds(pub(crate) Entity);
+
+/// The scroll-offset delta, along one axis, that brings an item band fully into
+/// a viewport band — the pure heart of [`scroll_focus_into_view`], split out so
+/// it can be tested without a laid-out UI.
+///
+/// All four values are positions on the *same* axis in the *same* units (item and
+/// viewport as currently laid out), the axis increasing in the direction a
+/// growing [`ScrollPosition`] reveals — down / trailing. The result is the delta
+/// to *add* to the scroll offset, or `None` when the item already fits so the
+/// wheel is left alone:
+///
+/// - Item past the far (bottom / trailing) edge → a **positive** delta, scrolling
+///   until the item's far edge meets the viewport's.
+/// - Item past the near (top / leading) edge → a **negative** delta, scrolling
+///   back until the near edges meet. The near edge wins when the item is taller
+///   than the viewport (the reference "align the top" rule), so focus never lands
+///   with the item's start clipped.
+fn reveal_delta(viewport_min: f32, viewport_max: f32, item_min: f32, item_max: f32) -> Option<f32> {
+    if item_min < viewport_min {
+        // Above / before the viewport: scroll back so the near edges align.
+        Some(item_min - viewport_min)
+    } else if item_max > viewport_max {
+        // Below / after the viewport: scroll forward so the far edges align.
+        Some(item_max - viewport_max)
+    } else {
+        None
+    }
+}
+
+/// Scroll the keyboard-focused widget into view (`viewer-ui-focus-scroll-into-
+/// view`): when focus lands on a widget a scroll container has clipped off
+/// screen, nudge that container's [`ScrollPosition`] just enough to reveal it.
+///
+/// Runs only for *keyboard* focus (`InputFocusVisible` true), matching the focus
+/// ring — a mouse click cannot reach an off-screen widget anyway, so the scroll
+/// is left alone for the pointer. It walks up from the focused entity to the
+/// nearest ancestor that owns a `ScrollPosition` (a scroll container), compares
+/// the two boxes as the layout currently has them, and moves the offset by
+/// [`reveal_delta`] on each axis — a no-op when the widget already fits, so it
+/// never fights the wheel. Like the focus ring, it is one scaffold system that a
+/// new focusable widget in any scroll container gets for free.
+///
+/// `pub(crate)` so the gallery — which stands up the scaffold's systems by hand
+/// rather than adding [`ViewerUiPlugin`] — can register it too.
+pub(crate) fn scroll_focus_into_view(
+    focus: Res<InputFocus>,
+    focus_visible: Res<InputFocusVisible>,
+    parents: Query<&ChildOf>,
+    overflows: Query<&Node>,
+    reveal_targets: Query<&FocusRevealBounds>,
+    boxes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    mut containers: Query<&mut ScrollPosition>,
+) {
+    if !focus.is_changed() && !focus_visible.is_changed() {
+        return;
+    }
+    if !focus_visible.0 {
+        return;
+    }
+    let Some(focused) = focus.get() else {
+        return;
+    };
+    let Ok((focus_node, focus_transform)) = boxes.get(focused) else {
+        return;
+    };
+    // The nearest *scrolling* ancestor. Every UI node carries a `ScrollPosition`
+    // (it is a required component of `Node`), so a container is identified by its
+    // `Overflow` actually being set to `Scroll` on an axis — not by the mere
+    // presence of `ScrollPosition`, which would match the item's own parent and
+    // so never scroll anything.
+    let mut container = None;
+    let mut current = focused;
+    while let Ok(child_of) = parents.get(current) {
+        let parent = child_of.parent();
+        if overflows.get(parent).is_ok_and(scrolls_on_some_axis) {
+            container = Some(parent);
+            break;
+        }
+        current = parent;
+    }
+    let Some(container) = container else {
+        return;
+    };
+    let Ok(container_style) = overflows.get(container) else {
+        return;
+    };
+    let Ok((container_node, container_transform)) = boxes.get(container) else {
+        return;
+    };
+
+    // The box to reveal: the focus stop, unioned with any wider bounds the widget
+    // names (its whole self — a tab strip points at its container), so the ring on
+    // the small stop stays visible while as much of the whole as fits is brought
+    // in. Each box is centred on its world translation and sized in physical
+    // pixels; worked per-component in `f32` on purpose, as `Vec2`'s own `+`/`*`
+    // trip the workspace `arithmetic_side_effects` lint and primitive float ops do
+    // not.
+    let (reveal_node, reveal_transform) = reveal_targets
+        .get(focused)
+        .ok()
+        .and_then(|bounds| boxes.get(bounds.0).ok())
+        .unwrap_or((focus_node, focus_transform));
+    let item_min_x = f32::min(
+        focus_transform.translation.x - focus_node.size.x * 0.5,
+        reveal_transform.translation.x - reveal_node.size.x * 0.5,
+    );
+    let item_max_x = f32::max(
+        focus_transform.translation.x + focus_node.size.x * 0.5,
+        reveal_transform.translation.x + reveal_node.size.x * 0.5,
+    );
+    let item_min_y = f32::min(
+        focus_transform.translation.y - focus_node.size.y * 0.5,
+        reveal_transform.translation.y - reveal_node.size.y * 0.5,
+    );
+    let item_max_y = f32::max(
+        focus_transform.translation.y + focus_node.size.y * 0.5,
+        reveal_transform.translation.y + reveal_node.size.y * 0.5,
+    );
+
+    let view_centre = container_transform.translation;
+    let view_half_x = container_node.size.x * 0.5;
+    let view_half_y = container_node.size.y * 0.5;
+
+    // Only the axes the container actually scrolls: a `reveal_delta` on a
+    // non-scrolling axis would be a no-op in `bevy_ui` but is clearer skipped.
+    let delta_x = (container_style.overflow.x == OverflowAxis::Scroll)
+        .then(|| {
+            reveal_delta(
+                view_centre.x - view_half_x,
+                view_centre.x + view_half_x,
+                item_min_x,
+                item_max_x,
+            )
+        })
+        .flatten();
+    let delta_y = (container_style.overflow.y == OverflowAxis::Scroll)
+        .then(|| {
+            reveal_delta(
+                view_centre.y - view_half_y,
+                view_centre.y + view_half_y,
+                item_min_y,
+                item_max_y,
+            )
+        })
+        .flatten();
+    if delta_x.is_none() && delta_y.is_none() {
+        return;
+    }
+
+    let Ok(mut scroll) = containers.get_mut(container) else {
+        return;
+    };
+    // `ScrollPosition` is in logical pixels; the boxes are physical, so scale the
+    // delta down. `bevy_ui` clamps the far end at layout; the near end is 0.
+    let inverse_scale = container_node.inverse_scale_factor;
+    if let Some(delta) = delta_x {
+        scroll.0.x = (scroll.0.x + delta * inverse_scale).max(0.0);
+    }
+    if let Some(delta) = delta_y {
+        scroll.0.y = (scroll.0.y + delta * inverse_scale).max(0.0);
+    }
+}
+
+/// Whether a node's [`Overflow`] scrolls on at least one axis — the test for "is
+/// this a scroll container", used by [`scroll_focus_into_view`] because every
+/// `Node` has a `ScrollPosition` but only ones with `Overflow::scroll` move.
+fn scrolls_on_some_axis(node: &Node) -> bool {
+    node.overflow.x == OverflowAxis::Scroll || node.overflow.y == OverflowAxis::Scroll
+}
+
 /// A container whose children stack along the **block** axis (top to bottom),
 /// separated by `gap`, sized to its content.
 ///
@@ -1095,7 +1284,8 @@ mod tests {
         LogicalBorder, LogicalInset, LogicalMargin, LogicalPadding, LogicalRect, UiDemoButton,
         UiDemoLabelLong, UiDemoRoot, UiDemoTextSize, UiDemoVisible, UiDirection, UiPanelShown,
         UiRoot, UiRootNode, ViewerUiPlugin, apply_panel_visibility, apply_ui_direction, column,
-        invalidate_logical_boxes, resolve_logical_boxes, row, setup_ui_demo, spawn_ui_root,
+        invalidate_logical_boxes, resolve_logical_boxes, reveal_delta, row, setup_ui_demo,
+        spawn_ui_root,
     };
     use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
     use bevy::input_focus::{FocusCause, InputFocus};
@@ -1115,6 +1305,35 @@ mod tests {
         block_start: Val::Px(3.0),
         block_end: Val::Px(4.0),
     };
+
+    /// An item already wholly inside the viewport — including flush against both
+    /// edges — needs no scroll, so the wheel is left alone.
+    #[test]
+    fn reveal_delta_leaves_a_visible_item_alone() {
+        assert_eq!(reveal_delta(0.0, 100.0, 10.0, 90.0), None);
+        assert_eq!(reveal_delta(0.0, 100.0, 0.0, 100.0), None);
+    }
+
+    /// An item past the far edge scrolls forward by exactly the overshoot, so its
+    /// far edge lands on the viewport's.
+    #[test]
+    fn reveal_delta_scrolls_forward_for_an_item_past_the_far_edge() {
+        assert_eq!(reveal_delta(0.0, 100.0, 30.0, 120.0), Some(20.0));
+    }
+
+    /// An item before the near edge scrolls back by the (negative) shortfall, so
+    /// its near edge lands on the viewport's.
+    #[test]
+    fn reveal_delta_scrolls_back_for_an_item_before_the_near_edge() {
+        assert_eq!(reveal_delta(0.0, 100.0, -15.0, 40.0), Some(-15.0));
+    }
+
+    /// When the item is taller than the viewport, the near edge wins (align the
+    /// top) rather than the far edge, so focus never lands with its start clipped.
+    #[test]
+    fn reveal_delta_aligns_the_near_edge_when_the_item_is_taller_than_the_viewport() {
+        assert_eq!(reveal_delta(0.0, 100.0, -10.0, 150.0), Some(-10.0));
+    }
 
     /// Left-to-right is the identity mapping: inline start is left, inline end
     /// is right, and the block axis is top / bottom either way.
