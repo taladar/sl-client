@@ -326,8 +326,10 @@ fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
 // painted by `highlight_menu_hover` so it works with or without a skin.
 // ---------------------------------------------------------------------------
 
-/// A menu bar / drop-down surface background.
-const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
+/// A menu bar / drop-down surface background. Shared with the status area
+/// ([`crate::status_bar`]) so the two halves of the top row paint the same
+/// fallback colour when no skin is loaded.
+pub(crate) const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
 /// A menu-bar button / menu entry's resting background (transparent).
 const ENTRY_BACKGROUND: Color = Color::NONE;

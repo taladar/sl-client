@@ -55,3 +55,32 @@ inventory-tab-recent = Recent
 inventory-tab-worn = Worn
 inventory-expand-all = Expand all
 inventory-collapse-all = Collapse all
+
+## The status area (viewer-ui-status-bar) — the read-outs on the trailing edge
+## of the top menu bar.
+
+# Shown in the location read-out before the region is known (still logging in).
+status-bar-connecting = Connecting…
+
+# The L$ balance before the first reply from the grid.
+status-bar-balance-unknown = L$ --
+
+# The grid clock. The time is always Second Life Time (US Pacific), so the SLT
+# marker is fixed; only its placement around the formatted time is a
+# translator's call.
+status-bar-time = { $time } SLT
+
+# The frame rate read-out.
+status-bar-fps = { $fps } fps
+
+# The parcel permission placeholders — one letter each, always shown, brightened
+# when the permission is in force (denied here, or — for damage — enabled). An
+# interim stand-in for the reference viewer's parcel icons; kept to one letter so
+# the block stays compact and fixed-width.
+status-bar-icon-voice-abbr = V
+status-bar-icon-fly-abbr = F
+status-bar-icon-push-abbr = P
+status-bar-icon-build-abbr = B
+status-bar-icon-scripts-abbr = S
+status-bar-icon-see-avatars-abbr = A
+status-bar-icon-damage-abbr = D

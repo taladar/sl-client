@@ -89,6 +89,7 @@ mod settings_binding;
 mod skin;
 mod sky;
 mod spacenav;
+mod status_bar;
 mod terrain;
 mod texture_anim;
 mod textures;
@@ -113,7 +114,7 @@ use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::camera::{Exposure, Hdr};
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -160,8 +161,8 @@ use crate::camera::{
 };
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
 use crate::diagnostics::{
-    PipelineOverlayVisible, setup_diagnostics_overlay, setup_pipeline_overlay,
-    toggle_pipeline_overlay, update_diagnostics_overlay, update_pipeline_overlay,
+    PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
+    update_pipeline_overlay,
 };
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
@@ -737,6 +738,10 @@ fn run_session(
     // menu) whose term drives `crate::menu`'s `MenuFilter`, so opening a menu shows
     // only the matching entries. After the top-menu plugin, which spawns the field.
     .add_plugins(crate::menu_search::MenuSearchPlugin)
+    // The status area (viewer-ui-status-bar): the parcel permission icons,
+    // region / parcel / position, L$ balance, SLT time and FPS read-outs that
+    // share the top row, hugging its trailing edge next to the menu bar.
+    .add_plugins(crate::status_bar::StatusBarPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -782,13 +787,10 @@ fn run_session(
         PostUpdate,
         PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
     )
-    // Frame-time / FPS and entity-count instruments for the Phase 19 diagnostics
-    // overlay (the rendering-fidelity phases lean hard on the fetch/decode
-    // pipeline, so make the frame budget visible).
-    .add_plugins((
-        FrameTimeDiagnosticsPlugin::default(),
-        EntityCountDiagnosticsPlugin::default(),
-    ))
+    // Frame-time / FPS instruments — the smoothed FPS the status area
+    // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
+    // work is watched against.
+    .add_plugins(FrameTimeDiagnosticsPlugin::default())
     // P24.1: a larger sun/moon shadow map than the 2048 default, so the four
     // region-scale cascades (see `sky::shadow_cascades`) keep enough texels per
     // world unit to shadow an avatar crisply across a whole region.
@@ -892,7 +894,6 @@ fn run_session(
             setup_stars,
             setup_water,
             setup_chat_overlay,
-            setup_diagnostics_overlay,
             setup_pipeline_overlay,
             // The UI text & font foundation demo panel (viewer-ui-text-foundation),
             // which parents itself to the scaffold's `UiRoot` and so must see it.
@@ -1098,7 +1099,6 @@ fn run_session(
             // Tree level of detail (P26.2): regenerate any tree whose branching /
             // billboard tier the driver changed, after it has picked the tiers.
             apply_tree_lod.after(drive_render_priority),
-            update_diagnostics_overlay,
             // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
             // resource on the toggle key, then drive the panel's visibility and
             // (while shown) its text from the live store snapshots.

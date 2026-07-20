@@ -341,6 +341,40 @@ impl ParcelInfo {
     pub const fn deny_anonymous(&self) -> bool {
         self.flags().contains(sl_wire::ParcelFlags::DENY_ANONYMOUS)
     }
+
+    /// Anyone's scripts may run here (`PF_ALLOW_OTHER_SCRIPTS` /
+    /// `LLParcel::getAllowOtherScripts`, the parcel half of the reference
+    /// viewer's `LLViewerParcelMgr::allowAgentScripts`).
+    #[must_use]
+    pub const fn allow_other_scripts(&self) -> bool {
+        self.flags()
+            .contains(sl_wire::ParcelFlags::ALLOW_OTHER_SCRIPTS)
+    }
+
+    /// Residents may use voice chat here (`PF_ALLOW_VOICE_CHAT` /
+    /// `LLParcel::getParcelFlagAllowVoice`, the parcel half of the reference
+    /// viewer's `LLViewerParcelMgr::allowAgentVoice`).
+    #[must_use]
+    pub const fn allow_voice(&self) -> bool {
+        self.flags().contains(sl_wire::ParcelFlags::ALLOW_VOICE)
+    }
+
+    /// Pushing (`llPushObject`) against avatars is restricted here
+    /// (`PF_RESTRICT_PUSHOBJECT` / `LLParcel::getRestrictPushObject`, the parcel
+    /// half of the reference viewer's `LLViewerParcelMgr::allowAgentPush`).
+    #[must_use]
+    pub const fn restrict_push(&self) -> bool {
+        self.flags()
+            .contains(sl_wire::ParcelFlags::RESTRICT_PUSHOBJECT)
+    }
+
+    /// Damage (health / combat) is enabled here (`PF_ALLOW_DAMAGE` /
+    /// `LLParcel::getAllowDamage`, the parcel half of the reference viewer's
+    /// `LLViewerParcelMgr::allowAgentDamage`).
+    #[must_use]
+    pub const fn allow_damage(&self) -> bool {
+        self.flags().contains(sl_wire::ParcelFlags::ALLOW_DAMAGE)
+    }
 }
 
 /// Whether the region-local point `(x, y)` (metres) lies on the parcel described

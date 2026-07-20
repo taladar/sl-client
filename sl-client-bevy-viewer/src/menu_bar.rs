@@ -149,10 +149,11 @@ impl Plugin for TopMenuBarPlugin {
 
 /// Spawn the top menu bar under the UI root.
 ///
-/// Content-sized and top-aligned, per the bar's own convention (it sizes to its
-/// menu names and reflows on a font-size / locale change), so it sits at the top
-/// leading corner and leaves the rest of the top edge — where the diagnostics
-/// overlay and a future status area live — free.
+/// Spanning the **full window width** and top-aligned: the menu names sit at the
+/// leading corner (content-sized) and the status area ([`crate::status_bar`])
+/// fills the rest of the row to the trailing edge, so the top row reads as one
+/// continuous bar (the reference viewer's arrangement) rather than a
+/// content-sized huddle. It reflows on a font-size / locale change.
 fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
     let bar = spawn_menu_bar(
         &mut commands,
@@ -169,10 +170,21 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
         // `crate::menu`'s `menu_alt_enter`).
         PrimaryMenuBar,
     ));
+    // Stretch the (otherwise content-sized) menu-bar widget across the window so
+    // the status area's trailing read-outs reach the right edge. Patched here
+    // rather than in `spawn_menu_bar`, which the content-sized inventory gear /
+    // view menus share.
+    commands.entity(bar).entry::<Node>().and_modify(|mut node| {
+        node.width = Val::Percent(100.0);
+    });
     // The menu-search field sits in the bar, immediately after the last menu
     // (viewer-ui-menu-search): its text drives `crate::menu`'s `MenuFilter`, so
     // opening a menu while a term is active shows only the matching entries.
     crate::menu_search::spawn_menu_search_field(&mut commands, bar);
+    // The status area (viewer-ui-status-bar) fills the rest of the row after the
+    // search field, its parcel-name read-out flexing to push the balance / time /
+    // FPS to the trailing edge.
+    crate::status_bar::spawn_status_area(&mut commands, bar);
 }
 
 /// Recompute the bar's live conditions each frame from the world.

@@ -50,6 +50,11 @@ impl ParcelFlags {
     pub const ALLOW_ALL_OBJECT_ENTRY: Self = Self { bits: 1 << 27 };
     /// Group objects may enter the parcel from neighbours.
     pub const ALLOW_GROUP_OBJECT_ENTRY: Self = Self { bits: 1 << 28 };
+    /// Residents may use voice chat on the parcel (`PF_ALLOW_VOICE_CHAT`).
+    pub const ALLOW_VOICE: Self = Self { bits: 1 << 29 };
+    /// The parcel routes voice through the estate-wide channel rather than its
+    /// own (`PF_USE_ESTATE_VOICE_CHAN`).
+    pub const USE_ESTATE_VOICE_CHAN: Self = Self { bits: 1 << 30 };
     /// Age-unverified avatars are denied.
     pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 31 };
 
@@ -115,6 +120,14 @@ impl RegionFlags {
     /// Flying is blocked region-wide (the viewer's `REGION_FLAGS_BLOCK_FLY` —
     /// `LLViewerRegion::getBlockFly`, part of `LLAgent::canFly`).
     pub const BLOCK_FLY: Self = Self { bits: 1 << 19 };
+    /// Scripts owned by non-estate-managers are disabled region-wide
+    /// (`REGION_FLAGS_ESTATE_SKIP_SCRIPTS`, part of the reference viewer's
+    /// `LLViewerParcelMgr::allowAgentScripts`).
+    pub const ESTATE_SKIP_SCRIPTS: Self = Self { bits: 1 << 21 };
+    /// Pushing (`llPushObject`) against avatars is restricted region-wide
+    /// (`REGION_FLAGS_RESTRICT_PUSHOBJECT` / `LLViewerRegion::getRestrictPushObject`,
+    /// part of the reference viewer's `LLViewerParcelMgr::allowAgentPush`).
+    pub const RESTRICT_PUSHOBJECT: Self = Self { bits: 1 << 22 };
     /// The region restricts access to age-verified avatars.
     pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 24 };
     /// Flying above the region's height cap is blocked (`REGION_FLAGS_BLOCK_FLYOVER`).

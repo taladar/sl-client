@@ -153,6 +153,14 @@
   background-color: var(--control-border);
 }
 
+/* One status read-out on the top row (viewer-ui-status-bar): region / parcel /
+ * coordinates, balance, time, FPS. The read-outs fill the (full-width) menu
+ * bar's row, so they take that same surface; this rule carries only the skin's
+ * text colour. */
+.sk-status-readout {
+  color: var(--text-primary);
+}
+
 /* Meaning-bearing swatches. These are the semantic tokens the culture-colour
  * and colour-blind overlays remap (a locale profile flips --gain / --loss); a
  * meaning-bearing surface references one of these, never a literal colour. */
