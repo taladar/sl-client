@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 105 |
+| ready | 104 |
 | blocked | 88 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 520 |
+| done | 521 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **743** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (105)
+## ready (104)
 
 ### viewer
 
@@ -210,8 +210,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-gallery-tab-order`](ready/viewer-ui-gallery-tab-order.md) — Give
-  the gallery a sensible keyboard tab order
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
@@ -588,7 +586,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (520)
+## done (521)
 
 ### protocol
 
@@ -1050,6 +1048,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   a visible focus ring on the keyboard-focused widget
 - [`viewer-ui-focus-scroll-into-view`](done/viewer-ui-focus-scroll-into-view.md)
   — Scroll the keyboard-focused widget into view
+- [`viewer-ui-gallery-tab-order`](done/viewer-ui-gallery-tab-order.md) — Give
+  the gallery a sensible keyboard tab order
 - [`viewer-ui-inventory-gear-menu-clipped`](done/viewer-ui-inventory-gear-menu-clipped.md)
   — Inventory gear menu is clipped to the floater it drops from
 - [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by

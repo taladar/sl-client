@@ -46,7 +46,7 @@
 //! check just named.
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::input_focus::tab_navigation::TabNavigationPlugin;
+use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
@@ -286,13 +286,52 @@ pub fn run() {
                 .chain()
                 .before(bevy::ui::UiSystems::Layout),
         )
-        // *After* layout, so it reads this frame's computed boxes — the gallery
-        // page is the scroll container the focus ring exposed as needing this.
+        // *After* layout, so both read this frame's computed boxes: the gallery
+        // page is the scroll container the focus ring exposed as needing scroll-
+        // into-view, and the tab order is re-numbered from on-screen position.
         .add_systems(
             PostUpdate,
-            scroll_focus_into_view.after(bevy::ui::UiSystems::Layout),
+            (order_gallery_tab_stops, scroll_focus_into_view).after(bevy::ui::UiSystems::Layout),
         )
         .run();
+}
+
+/// Re-number the gallery's focus stops into reading order — top-to-bottom, then
+/// leading-to-trailing — so `Tab` walks the page the way the eye does.
+///
+/// Every specimen sets its own `TabIndex` (almost all `0`), and the gallery packs
+/// them from sources whose spawn / hierarchy order does not track where they land
+/// on screen — a `floater` specimen parents to the root, the header switcher sits
+/// above the page — so `bevy_input_focus`'s hierarchy-order tie-break makes `Tab`
+/// jump around (`viewer-ui-gallery-tab-order`). Sorting the live positions and
+/// assigning a rank sidesteps the cause whatever it is. Gallery-only: a real UI
+/// orders its own stops deliberately, at spawn.
+///
+/// Runs after layout (positions are valid) and re-derives every frame, so a
+/// cell-change respawn or a font-size reflow re-sorts for free; the `!=` guard
+/// keeps it a no-op once the ranks have settled.
+fn order_gallery_tab_stops(
+    positions: Query<(Entity, &UiGlobalTransform), With<TabIndex>>,
+    mut indices: Query<&mut TabIndex>,
+) {
+    let mut ordered: Vec<(Entity, f32, f32)> = positions
+        .iter()
+        .map(|(entity, transform)| (entity, transform.translation.y, transform.translation.x))
+        .collect();
+    // `total_cmp` is a total order (no `Option`, deterministic on ties), so the
+    // sort never oscillates frame to frame for a settled layout.
+    ordered.sort_by(|(_, a_y, a_x), (_, b_y, b_x)| a_y.total_cmp(b_y).then(a_x.total_cmp(b_x)));
+    for (rank, (entity, _, _)) in ordered.iter().enumerate() {
+        let Ok(mut index) = indices.get_mut(*entity) else {
+            continue;
+        };
+        // `TabIndex` is `i32`; a gallery never has 2^31 stops, but avoid the
+        // banned `as` cast anyway.
+        let want = TabIndex(i32::try_from(rank).unwrap_or(i32::MAX));
+        if *index != want {
+            *index = want;
+        }
+    }
 }
 
 /// A 2D camera: the gallery renders UI and nothing else. No 3D, no world, no
