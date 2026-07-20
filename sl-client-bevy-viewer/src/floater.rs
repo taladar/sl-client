@@ -284,6 +284,15 @@ impl Floater {
         self.content_size = geometry.content_size;
         self.minimized = geometry.minimized;
     }
+
+    /// Move the floater's free-floating position to `position` (logical
+    /// inline-start / block-start pixels), so a consumer can **anchor** it to
+    /// something on screen — e.g. the emoji-picker opened next to the field's
+    /// emoji button. The next frame's [`clamp_floaters_on_screen`] keeps it on
+    /// screen, and [`apply_floater_inset`] reflects it onto the node.
+    pub(crate) const fn set_position(&mut self, position: Vec2) {
+        self.position = position;
+    }
 }
 
 /// The chrome entities of a floater, held on its root so the systems find each

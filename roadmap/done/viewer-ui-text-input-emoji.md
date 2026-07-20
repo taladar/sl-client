@@ -2,7 +2,7 @@
 id: viewer-ui-text-input-emoji
 title: Emoji entry on the single-line text field
 topic: viewer
-status: ready
+status: done
 origin: follow-up requested during viewer-ui-text-input-widget (2026-07)
 blocked_by: [viewer-ui-text-input-widget]
 refs: [viewer-emoji-picker-floater, viewer-emoji-colon-autocomplete, viewer-chat-input-bar, viewer-emoji-data]
@@ -39,3 +39,25 @@ inserting a glyph is pure field state and reaches no session.
 
 Reference (Firestorm, read-only): `llchatentry` (the chat line editor with its
 emoji button), `llemojihelper` (the entry helper shared by the fields).
+
+## Done (2026-07-20)
+
+Realized as the reusable **chat-input widget** rather than a bare-field
+`TextInputSpec.emoji` flag (the emoji button sits *beside* the field, which is a
+composition, not a field property) — `sl-client-bevy-viewer/src/chat_input.rs`.
+`spawn_chat_input` builds a bordered box around a bare, filling single-line
+[[viewer-ui-text-input-widget]] field with a trailing **emoji button** that, on
+press, writes `OpenEmojiPicker { field, near: press-location }` — a new message
+[[viewer-emoji-picker-floater]] handles by targeting that field, anchoring the
+window at the click (new `Floater::set_position`), showing and raising it. The
+**insert-glyph-at-the-caret** primitive is the picker's existing
+`insert_glyph_into_field` (parley `insert_or_replace_selection`, grapheme-/IME-
+correct), so a chosen glyph lands in the field the button belongs to.
+
+The widget also attaches the inline `:`-completer
+([[viewer-emoji-colon-autocomplete]]) and emits a `ChatInputSubmit` on Enter; it
+reaches no session (constructible without wiring), and is swept live as the
+`chat-input` specimen. Its first consumers are the local-chat variant
+([[viewer-chat-channel-and-commands]]) and, as follow-ups, the nearby-chat bar
+([[viewer-chat-input-bar]]) and the conversations floater
+([[viewer-social-im-conversations]]).

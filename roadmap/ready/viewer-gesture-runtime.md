@@ -2,7 +2,7 @@
 id: viewer-gesture-runtime
 title: Gesture runtime — step sequencing + /-command triggers
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-gestures-ui
 blocked_by: [viewer-chat-channel-and-commands]
 refs: [viewer-ui-sound-effects]

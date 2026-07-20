@@ -246,6 +246,15 @@ pub fn run() {
         // The search-field widget's runtime half: clear-button / placeholder
         // visibility, so the search specimen behaves in the gallery too.
         .add_plugins(crate::ui_search::SearchFieldPlugin)
+        // The chat-input widgets' runtime halves, so the chat-input and
+        // local-chat-input specimens are live in the gallery — the `:`-completer,
+        // Enter-to-send and volume select box all work. The emoji button's
+        // `OpenEmojiPicker` message is declared here (the picker floater itself is
+        // not in the gallery), so the button is inert rather than a panic.
+        .add_plugins(crate::emoji_complete::ColonCompletePlugin)
+        .add_plugins(crate::chat_input::ChatInputPlugin)
+        .add_plugins(crate::local_chat_input::LocalChatInputPlugin)
+        .add_message::<crate::emoji_picker::OpenEmojiPicker>()
         // The skin / design-token system, so the gallery is dressed in a real
         // skin and the switcher below can flip skins and theme overlays live.
         .insert_resource(crate::skin::SkinSelection::resolve(None, None))

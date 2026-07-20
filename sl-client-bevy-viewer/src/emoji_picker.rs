@@ -60,7 +60,9 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use sl_emoji::{Emoji, Group, SkinTone, search};
 
-use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::floater::{
+    Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp, FloaterSpec, spawn_floater,
+};
 use crate::i18n::Translated;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
@@ -153,13 +155,14 @@ impl Plugin for EmojiPickerPlugin {
         app.init_resource::<EmojiPickerState>()
             .init_resource::<EmojiPickerView>()
             .init_resource::<EmojiTarget>()
+            .add_message::<OpenEmojiPicker>()
             .add_systems(
                 Startup,
                 spawn_emoji_picker.after(UiScaffoldSystems::SpawnRoot),
             )
             // The toggle is a no-op until the floater exists (it reads the UI
             // resource optionally), so registering it here is safe.
-            .add_systems(Update, toggle_emoji_picker)
+            .add_systems(Update, (toggle_emoji_picker, open_emoji_picker_for_field))
             // Remember the focused field the frame focus settles, before anything
             // reads the target.
             .add_systems(
@@ -246,6 +249,20 @@ impl Default for EmojiPickerView {
 /// grid never loses the field the user was typing in.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub(crate) struct EmojiTarget(Option<Entity>);
+
+/// A request to **open the picker for a specific field**, anchored near a point
+/// — written by a field's own emoji button ([`crate::chat_input`]). The picker
+/// shows itself, targets `field` (so the next glyph lands there rather than in
+/// whatever last held focus), moves next to `near`, and raises to the front.
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct OpenEmojiPicker {
+    /// The field a chosen glyph should be inserted into.
+    pub(crate) field: Entity,
+    /// Where to anchor the picker, in logical window pixels (the emoji button's
+    /// press location) — the picker's top-leading corner is placed here and the
+    /// manager's on-screen clamp pulls it back into view if it would overshoot.
+    pub(crate) near: Vec2,
+}
 
 /// The picker's live entities, published so the systems reach each part without a
 /// marker query per part.
@@ -694,6 +711,34 @@ fn toggle_emoji_picker(
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
         shown.0 = !shown.0;
     }
+}
+
+/// Open the picker for a specific field ([`OpenEmojiPicker`]): target that field,
+/// anchor the window next to the request point, show it and raise it. Drives the
+/// field-side emoji button ([`crate::chat_input`]).
+fn open_emoji_picker_for_field(
+    mut requests: MessageReader<OpenEmojiPicker>,
+    ui: Option<Res<EmojiPickerUi>>,
+    mut target: ResMut<EmojiTarget>,
+    mut floaters: Query<(&mut Floater, &mut UiPanelShown)>,
+    mut commands: MessageWriter<FloaterCommand>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    // Only the last request in a frame matters (two buttons cannot both win).
+    let Some(request) = requests.read().last() else {
+        return;
+    };
+    target.0 = Some(request.field);
+    if let Ok((mut floater, mut shown)) = floaters.get_mut(ui.panel) {
+        floater.set_position(request.near);
+        shown.0 = true;
+    }
+    commands.write(FloaterCommand {
+        floater: ui.panel,
+        op: FloaterOp::BringToFront,
+    });
 }
 
 // ---------------------------------------------------------------------------

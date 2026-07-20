@@ -40,8 +40,10 @@ mod bottom_toolbar;
 mod bump;
 mod camera;
 mod chat;
+mod chat_input;
 mod coords;
 mod diagnostics;
+mod emoji_complete;
 mod emoji_picker;
 mod environment;
 mod flexi;
@@ -60,6 +62,7 @@ mod input_context;
 mod inventory;
 mod legacy_materials;
 mod lights;
+mod local_chat_input;
 mod locomotion;
 mod locomotion_ik;
 mod look_at;
@@ -164,10 +167,12 @@ use crate::camera::{
     position_camera,
 };
 use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
+use crate::chat_input::ChatInputPlugin;
 use crate::diagnostics::{
     PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
     update_pipeline_overlay,
 };
+use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
@@ -185,6 +190,7 @@ use crate::legacy_materials::{
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
 };
 use crate::lights::{LocalLights, drive_local_lights};
+use crate::local_chat_input::LocalChatInputPlugin;
 use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
     MaterialManager, apply_material_overrides, apply_pbr_textures, poll_materials,
@@ -755,6 +761,20 @@ fn run_session(
     // widgets and the floater manager. After the floater plugin (its host) and
     // the inventory plugin (a search-field consumer it shares systems with).
     .add_plugins(EmojiPickerPlugin)
+    // The inline `:`-emoji completer (viewer-emoji-colon-autocomplete): a popup of
+    // matching short-codes on a field's trailing `:token`. Defines the
+    // `ColonCompleteSet` the chat input's Enter-to-send orders after.
+    .add_plugins(ColonCompletePlugin)
+    // The reusable chat-input widget (viewer-ui-text-input-emoji): a single-line
+    // field with an emoji button (opens the picker for it) and the `:`-completer,
+    // emitting a submit event. The base every chat surface is built on.
+    .add_plugins(ChatInputPlugin)
+    // The reusable local-chat-input widget (viewer-chat-channel-and-commands): the
+    // chat input plus a whisper/say/shout select box, `/N` channel routing,
+    // Shift/Ctrl+Enter volume overrides and the `/command` registry. Emits a
+    // structured submission; the live nearby-chat bar and conversations floater
+    // (each a follow-up) are its consumers.
+    .add_plugins(LocalChatInputPlugin)
     // The live top menu bar (viewer-ui-menu-bar): the strip of pull-down menu
     // names at the top of the screen, on `crate::menu`'s widget. After the
     // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.

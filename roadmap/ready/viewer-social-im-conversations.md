@@ -25,3 +25,23 @@ Reference (Firestorm, read-only): `llimview`, `llfloaterimsession`,
 
 Builds on: `protocol-2` IM and the `chat.rs` overlay. Supersedes the MVP "no
 chat input" non-goal.
+
+## Update (2026-07-20): reuse the chat-input widgets
+
+The two chat-entry widgets are done ([[viewer-ui-text-input-emoji]] /
+`crate::chat_input`, [[viewer-chat-channel-and-commands]] /
+`crate::local_chat_input`), so this task does not build a text entry — it
+**plugs the right widget into each pane**:
+
+- **local (nearby) chat** pane → the **local-chat-input** widget
+  (`spawn_local_chat_input`): it carries the whisper/say/shout select box, `/N`
+  channel routing, the `/command` registry and the Shift/Ctrl+Enter volume
+  overrides that only make sense for local chat.
+- **one-to-one IM, group chat, and conference/conversation** panes → the plain
+  **chat-input** widget (`spawn_chat_input`): the field + emoji button +
+  `:`-completer, with no channel/volume machinery (an IM has no channel or
+  shout). Map its `ChatInputSubmit` to the session's IM / group send.
+
+The nearby-chat *bar* (the always-visible bottom-edge one, distinct from this
+floater's local tab) is [[viewer-chat-input-bar]]; both consume the same
+local-chat-input widget.

@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 4 |
 | ready | 105 |
-| blocked | 84 |
+| blocked | 82 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 528 |
+| done | 531 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **747** |
+| **total** | **748** |
 
 ## ideas (4)
 
@@ -77,6 +77,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
+- [`viewer-gesture-runtime`](ready/viewer-gesture-runtime.md) — Gesture runtime
+  — step sequencing + /-command triggers (blocked by
+  `viewer-chat-channel-and-commands` (done))
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
@@ -223,9 +226,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-text-input-emoji`](ready/viewer-ui-text-input-emoji.md) — Emoji
-  entry on the single-line text field (blocked by `viewer-ui-text-input-widget`
-  (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
@@ -291,7 +291,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (84)
+## blocked (82)
 
 ### viewer
 
@@ -304,19 +304,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
-- [`viewer-chat-channel-and-commands`](blocked/viewer-chat-channel-and-commands.md)
-  — Chat channels, whisper/shout & /me (blocked by `viewer-chat-input-bar`)
 - [`viewer-chat-history-panel`](blocked/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`,
   `viewer-ui-floater-basic` (done))
+- [`viewer-chat-input-world-autostart`](blocked/viewer-chat-input-world-autostart.md)
+  — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`,
+  `viewer-ui-settings-store` (done))
 - [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
   script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
   Inventory / teleport offers + friendship / group invites (blocked by
   `viewer-ui-notification-host`)
-- [`viewer-emoji-colon-autocomplete`](blocked/viewer-emoji-colon-autocomplete.md)
-  — Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
-  `viewer-ui-text-input-widget` (done), `viewer-chat-input-bar`)
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
@@ -326,9 +324,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
   Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-gesture-runtime`)
-- [`viewer-gesture-runtime`](blocked/viewer-gesture-runtime.md) — Gesture
-  runtime — step sequencing + /-command triggers (blocked by
-  `viewer-chat-channel-and-commands`)
 - [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
   (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
@@ -578,7 +573,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (528)
+## done (531)
 
 ### protocol
 
@@ -724,8 +719,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-camera-transitions`](done/viewer-camera-transitions.md) — Smooth
   camera-mode transitions (blocked by `viewer-camera-mouselook` (done))
+- [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
+  — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
+  (done))
 - [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
   binaries' chat logs by grid + avatar, not name alone
+- [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —
+  Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
+  `viewer-ui-text-input-widget` (done))
 - [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
@@ -1090,6 +1091,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   font foundation (bevy_ui + parley bring-up)
 - [`viewer-ui-text-grapheme-backdelete`](done/viewer-ui-text-grapheme-backdelete.md)
   — Grapheme-correct backspace (parley backdelete deletes codepoints)
+- [`viewer-ui-text-input-emoji`](done/viewer-ui-text-input-emoji.md) — Emoji
+  entry on the single-line text field (blocked by `viewer-ui-text-input-widget`
+  (done))
 - [`viewer-ui-text-input-widget`](done/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))

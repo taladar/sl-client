@@ -542,6 +542,22 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   here it is static so its layout is swept.",
         spawn: crate::emoji_picker::spawn_emoji_picker_specimen,
     },
+    UiElement {
+        id: "chat-input",
+        summary: "The reusable chat-input widget (`crate::chat_input`): a single-line field in a \
+                  bordered box with a trailing emoji button and an inline `:`-completer. The live \
+                  widget opens the picker for its field and sends on Enter; here it is static so \
+                  the bar layout is swept.",
+        spawn: crate::chat_input::spawn_chat_input_specimen,
+    },
+    UiElement {
+        id: "local-chat-input",
+        summary: "The reusable local-chat-input widget (`crate::local_chat_input`): the chat input \
+                  plus a whisper/say/shout select box. The live widget parses `/N` channels and \
+                  `/command`s and maps Shift/Ctrl+Enter to whisper/shout; here it is static so the \
+                  bar layout is swept.",
+        spawn: crate::local_chat_input::spawn_local_chat_input_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

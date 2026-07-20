@@ -30,3 +30,23 @@ Reference (Firestorm, read-only): `fsfloaternearbychat` input, `llchatbar`,
 
 Builds on: `protocol-1` local chat, `chat.rs`, `typing.rs`. Supersedes the MVP
 "no chat input" non-goal.
+
+## Update (2026-07-20): the widget exists; this is now the live wiring
+
+The reusable **local-chat-input widget** is done
+([[viewer-chat-channel-and-commands]] /
+`sl-client-bevy-viewer/src/local_chat_input.rs`) — it already owns the field,
+the emoji button, the `:`-completer, the whisper/say/shout select box, `/N`
+channel routing, the `/command` registry and the Shift/Ctrl+Enter volume
+overrides, emitting a session-free `LocalChatSubmit`. So this task is now
+**narrowly the live nearby-chat bar**: place the widget in the bottom-area upper
+stack (`crate::bottom_toolbar::BottomArea::upper`), map its `LocalChatSubmit` to
+`Command::Chat`, drive `typing.rs::TypingState::set()`, and wire the focus flow
+(**Enter** focuses the bar / **Esc** blurs to World).
+
+The settings-gated
+**"a printable keypress in the World auto-starts local chat"** behaviour is
+split out to [[viewer-chat-input-world-autostart]] — it belongs to *this* live
+bar only, not the widget or the conversations-floater instance. The same widget
+is also plugged into the conversations floater by
+[[viewer-social-im-conversations]].
