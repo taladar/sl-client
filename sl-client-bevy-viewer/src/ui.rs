@@ -107,8 +107,8 @@
 
 use std::ffi::OsStr;
 
+use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin};
-use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
@@ -172,7 +172,6 @@ impl Plugin for ViewerUiPlugin {
                     toggle_ui_demo,
                     apply_ui_demo_visibility.after(toggle_ui_demo),
                     update_ui_demo_text,
-                    drive_ui_demo_focus_ring,
                 ),
             )
             .add_systems(
@@ -838,7 +837,8 @@ impl UiDemoTextSize {
 #[derive(Component, Debug, Clone, Copy)]
 struct UiDemoRoot;
 
-/// A marker on both of the demo's buttons, for the shared focus ring.
+/// A marker on both of the demo's buttons, so a test can find them (e.g. to
+/// assert each carries a `TabIndex`).
 #[derive(Component, Debug, Clone, Copy)]
 struct UiDemoButton;
 
@@ -868,12 +868,10 @@ const DEMO_TITLE_COLOR: Color = Color::srgb(0.80, 0.85, 0.92);
 /// A demo button's background.
 const DEMO_BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 
-/// A demo button's border when it does not hold focus.
+/// A demo button's border. The keyboard focus ring is now the shared outline
+/// the skin draws on any focusable widget (`viewer-ui-focus-ring-visible`), not
+/// a recolour of this border.
 const DEMO_BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
-
-/// A demo button's border when it holds focus — the focus ring. Deliberately
-/// loud: it is the only evidence that `Tab` moved anything.
-const DEMO_FOCUS_RING: Color = Color::srgb(1.0, 0.78, 0.25);
 
 /// The sample label's leading accent bar.
 const DEMO_ACCENT_COLOR: Color = Color::srgb(0.36, 0.72, 0.98);
@@ -1064,35 +1062,6 @@ fn update_ui_demo_text(
         }
         if font.font_size != font_size {
             font.font_size = font_size;
-        }
-    }
-}
-
-/// Draw the focus ring: the focused demo button gets a loud border, the rest the
-/// resting one.
-///
-/// Reads `InputFocusVisible` as well as [`InputFocus`], because `bevy_input_focus`
-/// distinguishes *having* focus from *showing* it — a click hides the ring, `Tab`
-/// brings it back — and a viewer that ignored that would light a button up merely
-/// because it was the last thing clicked.
-fn drive_ui_demo_focus_ring(
-    focus: Res<InputFocus>,
-    focus_visible: Res<InputFocusVisible>,
-    mut buttons: Query<(Entity, &mut BorderColor), With<UiDemoButton>>,
-) {
-    if !focus.is_changed() && !focus_visible.is_changed() {
-        return;
-    }
-    for (button, mut border) in &mut buttons {
-        let focused = focus_visible.0 && focus.get() == Some(button);
-        let color = if focused {
-            DEMO_FOCUS_RING
-        } else {
-            DEMO_BUTTON_BORDER
-        };
-        let target = BorderColor::all(color);
-        if *border != target {
-            *border = target;
         }
     }
 }

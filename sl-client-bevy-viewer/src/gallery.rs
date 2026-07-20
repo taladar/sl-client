@@ -46,8 +46,7 @@
 //! check just named.
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::input_focus::tab_navigation::{TabIndex, TabNavigationPlugin};
-use bevy::input_focus::{InputFocus, InputFocusVisible};
+use bevy::input_focus::tab_navigation::TabNavigationPlugin;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
@@ -271,7 +270,6 @@ pub fn run() {
                 update_gallery_header,
                 update_skin_switcher_label,
                 update_pointer_menu_label,
-                drive_focus_ring,
                 scroll_gallery,
                 log_actions,
                 quit_on_escape,
@@ -768,32 +766,6 @@ fn update_gallery_header(
     for mut text in &mut headers {
         if text.0 != wanted {
             wanted.clone_into(&mut text.0);
-        }
-    }
-}
-
-/// The focus ring, so `Tab` is visible.
-///
-/// Reads `InputFocusVisible` as well as [`InputFocus`], because `bevy_input_focus`
-/// distinguishes *having* focus from *showing* it: a click hides the ring, `Tab`
-/// brings it back.
-fn drive_focus_ring(
-    focus: Res<InputFocus>,
-    focus_visible: Res<InputFocusVisible>,
-    mut widgets: Query<(Entity, &mut BorderColor), With<TabIndex>>,
-) {
-    if !focus.is_changed() && !focus_visible.is_changed() {
-        return;
-    }
-    for (widget, mut border) in &mut widgets {
-        let focused = focus_visible.0 && focus.get() == Some(widget);
-        let target = BorderColor::all(if focused {
-            Color::srgb(1.0, 0.78, 0.25)
-        } else {
-            Color::srgb(0.40, 0.50, 0.62)
-        });
-        if *border != target {
-            *border = target;
         }
     }
 }

@@ -58,6 +58,7 @@
 //! in CSS are a separate follow-up (`viewer-ui-skin-l10n-functions`), for which
 //! the loader here leaves a preprocess seam.
 
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 // `CssPropertyRegistry`, `RegisterComponentPropertiesExt` and
@@ -216,6 +217,9 @@ impl Plugin for ViewerSkinPlugin {
                     // Re-dress the root when the switcher flips the selection.
                     apply_skin_selection.run_if(resource_changed::<SkinSelection>),
                     sync_skin_attributes,
+                    // Tag each focusable widget so the skin's focus-ring rule
+                    // reaches it (`viewer-ui-focus-ring-visible`).
+                    stamp_focus_ring_class,
                 ),
             )
             .add_systems(
@@ -227,6 +231,47 @@ impl Plugin for ViewerSkinPlugin {
                     .after(StyleSystems::ApplyComputedProperties)
                     .before(UiSystems::Layout),
             );
+    }
+}
+
+/// The CSS class the scaffold tags every focusable widget with, so the single
+/// `.sk-focusable:focus-visible` rule in `common.css` draws the keyboard focus
+/// ring on it. See [`stamp_focus_ring_class`].
+const FOCUSABLE_CLASS: &str = "sk-focusable";
+
+/// Tag every focusable widget with [`FOCUSABLE_CLASS`], so the skin's
+/// `.sk-focusable:focus-visible` outline rings it whenever keyboard focus lands
+/// there (`viewer-ui-focus-ring-visible`).
+///
+/// A widget is focusable exactly when it carries a `TabIndex` — the same thing
+/// `bevy_input_focus`'s tab navigation walks — so keying off `Added<TabIndex>`
+/// covers every one, present and future, with no per-widget wiring: a new
+/// focusable widget (a menu-bar button, an inventory row, a demo control) gets
+/// the ring for free the frame after it spawns. This is the one place the focus
+/// ring is wired; the CSS is the one place it is drawn.
+///
+/// The class is merged into whatever [`ClassList`] the widget already carries (a
+/// menu-bar button keeps its `sk-menu-bar-item`), or a fresh list is inserted
+/// when it has none. `Added<TabIndex>` also fires when a parked index is
+/// restored as a panel reopens ([`crate::ui::apply_panel_visibility`]); the
+/// `contains` guard makes that re-stamp a no-op.
+fn stamp_focus_ring_class(
+    mut commands: Commands,
+    mut focusable: Query<(Entity, Option<&mut ClassList>), Added<TabIndex>>,
+) {
+    for (entity, class_list) in &mut focusable {
+        match class_list {
+            Some(mut list) => {
+                if !list.contains(FOCUSABLE_CLASS) {
+                    list.add(FOCUSABLE_CLASS);
+                }
+            }
+            None => {
+                commands
+                    .entity(entity)
+                    .insert(ClassList::new_with_classes([FOCUSABLE_CLASS]));
+            }
+        }
     }
 }
 
@@ -817,11 +862,13 @@ fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BANNED_PHYSICAL_PROPERTIES, SKINS, SkinMargin, SkinRadius, SkinSelection, THEMES,
-        UiDirection, invalidate_skin_boxes, logical_replacement, resolve_skin_boxes,
-        scan_banned_properties,
+        BANNED_PHYSICAL_PROPERTIES, FOCUSABLE_CLASS, SKINS, SkinMargin, SkinRadius, SkinSelection,
+        THEMES, UiDirection, invalidate_skin_boxes, logical_replacement, resolve_skin_boxes,
+        scan_banned_properties, stamp_focus_ring_class,
     };
+    use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
+    use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
@@ -972,6 +1019,57 @@ mod tests {
                 "{direction:?}: leading margin -> right under RTL"
             );
         }
+        Ok(())
+    }
+
+    /// The scaffold tags every focusable widget (one carrying a `TabIndex`) with
+    /// [`FOCUSABLE_CLASS`], so the skin's `.sk-focusable:focus-visible` outline
+    /// reaches it: a bare widget gains a fresh class list, a widget that already
+    /// carries classes keeps them and gains this one too, and a non-focusable
+    /// entity is left untouched.
+    #[test]
+    fn stamp_tags_every_focusable_widget() -> Result<(), TestError> {
+        let mut app = App::new();
+        app.add_systems(Update, stamp_focus_ring_class);
+
+        let bare = app.world_mut().spawn(TabIndex(0)).id();
+        let classed = app
+            .world_mut()
+            .spawn((
+                TabIndex(0),
+                ClassList::new_with_classes(["sk-menu-bar-item"]),
+            ))
+            .id();
+        let plain = app.world_mut().spawn_empty().id();
+
+        app.update();
+
+        let bare_classes = app
+            .world()
+            .get::<ClassList>(bare)
+            .ok_or("a bare focusable widget was not given a class list")?;
+        assert!(
+            bare_classes.contains(FOCUSABLE_CLASS),
+            "a bare focusable widget must gain the focus-ring class"
+        );
+
+        let classed_classes = app
+            .world()
+            .get::<ClassList>(classed)
+            .ok_or("a classed focusable widget lost its class list")?;
+        assert!(
+            classed_classes.contains("sk-menu-bar-item"),
+            "an existing class must be preserved when the focus-ring class is added"
+        );
+        assert!(
+            classed_classes.contains(FOCUSABLE_CLASS),
+            "the focus-ring class must be merged in alongside existing classes"
+        );
+
+        assert!(
+            app.world().get::<ClassList>(plain).is_none(),
+            "a non-focusable entity (no TabIndex) must not be tagged"
+        );
         Ok(())
     }
 

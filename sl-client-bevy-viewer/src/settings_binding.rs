@@ -45,7 +45,6 @@
 
 use bevy::ecs::relationship::RelatedSpawnerCommands;
 use bevy::input_focus::tab_navigation::TabIndex;
-use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{
@@ -430,10 +429,10 @@ const DEMO_TITLE: &str = "Settings binding demo (F7) - toggle / drag to write th
 const DEMO_PANEL_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 /// The demo's heading / label colour.
 const DEMO_TEXT_COLOR: Color = Color::srgb(0.82, 0.87, 0.94);
-/// A demo control's border.
+/// A demo control's border. The keyboard focus ring is the shared outline the
+/// skin draws on any focusable widget (`viewer-ui-focus-ring-visible`), not a
+/// recolour of this border.
 const DEMO_CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
-/// A demo control's border when it holds focus — the focus ring.
-const DEMO_FOCUS_RING: Color = Color::srgb(0.95, 0.78, 0.30);
 /// The checkbox box's fill when unchecked.
 const DEMO_CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
 /// The checkbox box's fill when checked.
@@ -467,10 +466,6 @@ struct DemoCheckboxBox;
 /// A marker on the demo slider's thumb node, so it slides to the bound value.
 #[derive(Component, Debug, Clone, Copy)]
 struct DemoSliderThumb;
-
-/// A marker on every focusable demo control, for the shared focus ring.
-#[derive(Component, Debug, Clone, Copy)]
-struct DemoControl;
 
 /// Which of the demo's live labels a `Text` node is.
 #[derive(Component, Debug, Clone, Copy)]
@@ -560,7 +555,6 @@ fn spawn_demo_checkbox_row(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
                 BorderColor::all(DEMO_CONTROL_BORDER),
                 BackgroundColor(DEMO_CHECK_OFF),
                 TabIndex(0),
-                DemoControl,
                 DemoCheckboxBox,
             ));
             check_row.spawn((
@@ -597,7 +591,6 @@ fn spawn_demo_slider_row(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
                     BorderColor::all(DEMO_CONTROL_BORDER),
                     BackgroundColor(DEMO_TRACK_FILL),
                     TabIndex(0),
-                    DemoControl,
                 ))
                 .with_children(|track| {
                     track.spawn((
@@ -632,7 +625,6 @@ fn spawn_demo_reset_button(panel: &mut RelatedSpawnerCommands<'_, ChildOf>) {
         .spawn((
             Button,
             TabIndex(0),
-            DemoControl,
             Node {
                 padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
                 border: UiRect::all(Val::Px(2.0)),
@@ -685,13 +677,13 @@ fn apply_settings_binding_demo_visibility(
     }
 }
 
-/// Colour the demo checkbox's box from its `Checked` state, and every focusable
-/// demo control's border from focus (the shared focus ring).
+/// Colour the demo checkbox's box from its `Checked` state.
+///
+/// The keyboard focus ring these controls once painted by hand is now the shared
+/// outline the skin draws on every focusable widget
+/// (`viewer-ui-focus-ring-visible`), so nothing here touches the border.
 fn drive_demo_checkbox_visual(
-    focus: Res<InputFocus>,
-    focus_visible: Res<InputFocusVisible>,
     mut boxes: Query<(&mut BackgroundColor, Has<Checked>), With<DemoCheckboxBox>>,
-    mut controls: Query<(Entity, &mut BorderColor), With<DemoControl>>,
 ) {
     for (mut fill, checked) in &mut boxes {
         let target = BackgroundColor(if checked {
@@ -701,17 +693,6 @@ fn drive_demo_checkbox_visual(
         });
         if fill.0 != target.0 {
             *fill = target;
-        }
-    }
-    for (control, mut border) in &mut controls {
-        let focused = focus_visible.0 && focus.get() == Some(control);
-        let target = BorderColor::all(if focused {
-            DEMO_FOCUS_RING
-        } else {
-            DEMO_CONTROL_BORDER
-        });
-        if *border != target {
-            *border = target;
         }
     }
 }

@@ -54,11 +54,31 @@
   background-color: var(--control-bg-hover);
 }
 
-/* :focus-visible tracks bevy_input_focus's InputFocusVisible — the same Tab
- * focus the widget scaffold drives — so the focus ring shows on Tab and hides
- * on click, exactly like the hand-rolled ring it replaces. */
-.sk-button:focus-visible {
-  border-color: var(--focus-ring);
+/* The universal keyboard focus ring. Every focusable widget — one carrying a
+ * TabIndex — is tagged `.sk-focusable` by the scaffold (src/skin.rs
+ * `stamp_focus_ring_class`), so this one pair of rules rings all of them
+ * (menu-bar buttons, the inventory list / search / tabs, the demo controls)
+ * with no per-widget wiring, and a new focusable widget gets it for free.
+ *
+ * Drawn as an outline rather than a border recolour: an outline sits *outside*
+ * the border box, so it never disturbs the widget's own frame or reflows it,
+ * and a widget need not reserve a border to be ringed. It is themed by the
+ * --focus-ring token, so a user theme recolours it with everything else.
+ *
+ * :focus-visible tracks bevy_input_focus's InputFocusVisible — true on Tab,
+ * false on a pointer click (both driven by the plugins, see src/ui.rs) — so the
+ * ring shows for keyboard use and hides for the mouse, the conventional desktop
+ * behaviour. The base rule pins the resting outline to zero width, so when
+ * :focus-visible stops matching the ring collapses to nothing regardless of the
+ * colour the outline reverts to. */
+.sk-focusable {
+  outline-width: 0px;
+}
+
+.sk-focusable:focus-visible {
+  outline-color: var(--focus-ring);
+  outline-width: 2px;
+  outline-offset: 1px;
 }
 
 /* A leading accent bar with a hanging indent — the logical box case. Under RTL
