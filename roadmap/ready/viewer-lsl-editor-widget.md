@@ -2,7 +2,7 @@
 id: viewer-lsl-editor-widget
 title: LSL editor widget — a parley PlainEditor fork with coloured ranges
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-ui-text-foundation, viewer-ui-text-input-widget]
 refs: [viewer-notecard-editor]

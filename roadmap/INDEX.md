@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 103 |
-| blocked | 88 |
+| ready | 106 |
+| blocked | 84 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 523 |
+| done | 525 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **744** |
+| **total** | **745** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (103)
+## ready (106)
 
 ### viewer
 
@@ -69,6 +69,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-chat-input-bar`](ready/viewer-chat-input-bar.md) — Chat input bar
+  (local chat + focus) (blocked by `viewer-ui-text-input-widget` (done),
+  `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -117,6 +120,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
+- [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
+  widget — a parley PlainEditor fork with coloured ranges (blocked by
+  `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -196,6 +202,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-social-groups`](ready/viewer-social-groups.md) — Groups list + group
   profile / roles / notices (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
+- [`viewer-social-im-conversations`](ready/viewer-social-im-conversations.md) —
+  IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
+  (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-social-people-panel`](ready/viewer-social-people-panel.md) — People
   panel — friends / nearby / recent / blocked (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -206,19 +215,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done))
-- [`viewer-ui-bottom-toolbar`](ready/viewer-ui-bottom-toolbar.md) — Bottom
-  toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
+  — Text-field↔settings two-way binding (blocked by
+  `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
-  Reusable text-input widget (EditableText + IME preedit) (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-text-input-emoji`](ready/viewer-ui-text-input-emoji.md) — Emoji
+  entry on the single-line text field (blocked by `viewer-ui-text-input-widget`
+  (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
@@ -284,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (88)
+## blocked (84)
 
 ### viewer
 
@@ -302,9 +312,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-history-panel`](blocked/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`,
   `viewer-ui-floater-basic` (done))
-- [`viewer-chat-input-bar`](blocked/viewer-chat-input-bar.md) — Chat input bar
-  (local chat + focus) (blocked by `viewer-ui-text-input-widget`,
-  `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
 - [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
   script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
@@ -312,7 +319,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host`)
 - [`viewer-emoji-colon-autocomplete`](blocked/viewer-emoji-colon-autocomplete.md)
   — Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
-  `viewer-ui-text-input-widget`, `viewer-chat-input-bar`)
+  `viewer-ui-text-input-widget` (done), `viewer-chat-input-bar`)
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
@@ -343,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done), `viewer-gesture-runtime`)
 - [`viewer-input-rebinding-ui`](blocked/viewer-input-rebinding-ui.md) —
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
-  `viewer-input-conflict-detection`, `viewer-ui-text-input-widget`,
+  `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
@@ -354,9 +361,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
   — LSL editor save — upload/compile round-trip and error list (blocked by
   `viewer-lsl-editor-widget`)
-- [`viewer-lsl-editor-widget`](blocked/viewer-lsl-editor-widget.md) — LSL editor
-  widget — a parley PlainEditor fork with coloured ranges (blocked by
-  `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget`)
 - [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-audio-backend`)
@@ -483,9 +487,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
-- [`viewer-social-im-conversations`](blocked/viewer-social-im-conversations.md)
-  — IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-text-input-widget`)
 - [`viewer-streaming-audio`](blocked/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
 - [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
@@ -502,9 +503,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
   `viewer-ui-settings-binding` (done))
-- [`viewer-ui-settings-binding-text`](blocked/viewer-ui-settings-binding-text.md)
-  — Text-field↔settings two-way binding (blocked by
-  `viewer-ui-text-input-widget`, `viewer-ui-settings-binding` (done))
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
@@ -583,7 +581,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (523)
+## done (525)
 
 ### protocol
 
@@ -1031,6 +1029,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
+  toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
@@ -1084,6 +1084,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   font foundation (bevy_ui + parley bring-up)
 - [`viewer-ui-text-grapheme-backdelete`](done/viewer-ui-text-grapheme-backdelete.md)
   — Grapheme-correct backspace (parley backdelete deletes codepoints)
+- [`viewer-ui-text-input-widget`](done/viewer-ui-text-input-widget.md) —
+  Reusable text-input widget (EditableText + IME preedit) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
   (done))

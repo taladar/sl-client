@@ -2,7 +2,7 @@
 id: viewer-social-im-conversations
 title: IM / conversation UI + chat input
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-social-panels
 blocked_by: [viewer-ui-widget-scaffold, viewer-ui-text-input-widget]
 ---

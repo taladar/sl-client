@@ -104,6 +104,7 @@ mod ui_tab;
 #[cfg(test)]
 mod ui_test;
 mod ui_text;
+mod ui_text_input;
 mod underwater_fog;
 mod virtual_list;
 mod water;
@@ -225,6 +226,10 @@ use crate::ui_element::UiAction;
 use crate::ui_tab::TabWidgetPlugin;
 use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
+};
+use crate::ui_text_input::{
+    TextInputDemoVisible, TextInputPlugin, apply_text_input_demo_visibility, setup_text_input_demo,
+    toggle_text_input_demo, update_demo_value_readouts,
 };
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::virtual_list::VirtualListPlugin;
@@ -684,6 +689,11 @@ fn run_session(
     // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
     // resizable strip's persisted / dragged width onto its node.
     .add_plugins(TabWidgetPlugin)
+    // The reusable text-input widget's runtime half (viewer-ui-text-input-widget):
+    // the whole-string numeric validator that reverts a field to its last valid
+    // value when an edit makes it structurally invalid (a second '.', a misplaced
+    // '-') — the part `EditableTextFilter`'s per-character check cannot express.
+    .add_plugins(TextInputPlugin)
     // The two-way widget↔settings binding (viewer-ui-settings-binding): the
     // `control_name=` idiom — a checkbox / slider names the setting it edits and
     // the store and widget are kept in sync both ways. Also owns the `F7` demo.
@@ -875,6 +885,10 @@ fn run_session(
     // toggleable `EditableText` panel, seeded shown/hidden from
     // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
     .insert_resource(TextDemoVisible::from_env())
+    // The reusable text-input widget demo (viewer-ui-text-input-widget): a
+    // toggleable panel of single- / multi-line and numeric fields, seeded
+    // shown/hidden from `SL_VIEWER_TEXT_INPUT_DEMO` for the screenshot harness.
+    .insert_resource(TextInputDemoVisible::from_env())
     .insert_resource(PlayOnLogin {
         animations: play_animation
             .iter()
@@ -905,6 +919,9 @@ fn run_session(
             // The UI text & font foundation demo panel (viewer-ui-text-foundation),
             // which parents itself to the scaffold's `UiRoot` and so must see it.
             setup_text_demo.after(UiScaffoldSystems::SpawnRoot),
+            // The reusable text-input widget demo panel (viewer-ui-text-input-widget),
+            // likewise parented to the scaffold's `UiRoot`.
+            setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
             setup_avatar_body,
             // P35.1: the screen-space HUD screen + its attachment-point nodes, which
             // a worn HUD is routed onto instead of a body joint.
@@ -1117,6 +1134,14 @@ fn run_session(
             (
                 toggle_text_demo,
                 apply_text_demo_visibility.after(toggle_text_demo),
+            ),
+            // Reusable text-input widget (viewer-ui-text-input-widget): toggle /
+            // apply the demo panel's visibility (the F8 key), and keep the numeric
+            // rows' live parsed-value read-outs current.
+            (
+                toggle_text_input_demo,
+                apply_text_input_demo_visibility.after(toggle_text_input_demo),
+                update_demo_value_readouts,
             ),
             // Local lights (P25.2): render the nearest / brightest light-flagged
             // prims as Bevy point / spot lights, after the fly-camera so the

@@ -430,6 +430,34 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: spawn_text_editor,
     },
     UiElement {
+        id: "text-input-line",
+        summary: "The reusable single-line text field (`crate::ui_text_input`): a bordered, \
+                  glyph-width-sized `EditableText` that scrolls its content horizontally.",
+        spawn: crate::ui_text_input::spawn_line_specimen,
+    },
+    UiElement {
+        id: "text-input-multiline",
+        summary: "The reusable multi-line text field: newlines allowed, prose soft-wraps at a \
+                  bound and scrolls vertically.",
+        spawn: crate::ui_text_input::spawn_multiline_specimen,
+    },
+    UiElement {
+        id: "text-input-float",
+        summary: "The signed-decimal numeric field: accepts an optional `-`, digits and one `.`; \
+                  a bad character is rejected as typed and a bad arrangement reverted.",
+        spawn: crate::ui_text_input::spawn_float_specimen,
+    },
+    UiElement {
+        id: "text-input-integer",
+        summary: "The signed-integer numeric field: an optional `-` then digits.",
+        spawn: crate::ui_text_input::spawn_integer_specimen,
+    },
+    UiElement {
+        id: "text-input-unsigned",
+        summary: "The non-negative-integer numeric field: digits only, the sign key rejected.",
+        spawn: crate::ui_text_input::spawn_unsigned_specimen,
+    },
+    UiElement {
         id: "panel",
         summary: "A composite: a titled panel with prose and a button row, bounded but not \
                   sized.",

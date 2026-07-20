@@ -2,7 +2,7 @@
 id: viewer-ui-settings-binding-text
 title: Text-field↔settings two-way binding
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-ui-settings-binding — deferred as an extension point
   until the text-input widget exists (2026-07)
 blocked_by: [viewer-ui-text-input-widget, viewer-ui-settings-binding]

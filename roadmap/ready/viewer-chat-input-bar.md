@@ -2,7 +2,7 @@
 id: viewer-chat-input-bar
 title: Chat input bar (local chat + focus)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-social-panels
 blocked_by: [viewer-ui-text-input-widget, viewer-input-focus-contexts, viewer-ui-settings-store]
 ---

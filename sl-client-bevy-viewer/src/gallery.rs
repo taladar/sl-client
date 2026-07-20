@@ -240,6 +240,9 @@ pub fn run() {
         // The tab widget's runtime half: a resizable strip's width reaching layout
         // (the divider demo) and each tab's corners tracking the direction.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
+        // The text-input widget's runtime half: the numeric fields' whole-string
+        // validator, so a bad arrangement reverts in the gallery too.
+        .add_plugins(crate::ui_text_input::TextInputPlugin)
         // The skin / design-token system, so the gallery is dressed in a real
         // skin and the switcher below can flip skins and theme overlays live.
         .insert_resource(crate::skin::SkinSelection::resolve(None, None))

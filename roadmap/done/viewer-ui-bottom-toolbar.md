@@ -2,7 +2,7 @@
 id: viewer-ui-bottom-toolbar
 title: Bottom toolbar (button bar)
 topic: viewer
-status: ready
+status: done
 origin: gap noticed reviewing the UI cluster (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-ui-menu-bar, viewer-ui-floater-basic, viewer-chat-input-bar, viewer-volume-panel, viewer-quick-preferences]
