@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 105 |
 | blocked | 88 |
 | in-progress | 4 |
-| bugs | 11 |
-| done | 517 |
+| bugs | 10 |
+| done | 518 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **741** |
@@ -554,7 +554,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (11)
+## bugs (10)
 
 ### protocol
 
@@ -580,8 +580,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
-- [`viewer-ui-inventory-gear-menu-clipped`](bugs/viewer-ui-inventory-gear-menu-clipped.md)
-  — Inventory gear menu is clipped to the floater it drops from
 
 ### aditi
 
@@ -590,7 +588,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (517)
+## done (518)
 
 ### protocol
 
@@ -1048,6 +1046,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-floater-resize-dock`](done/viewer-ui-floater-resize-dock.md) —
   Floater window manager (resize / minimize / dock / tear-off) (blocked by
   `viewer-ui-floater-basic` (done))
+- [`viewer-ui-inventory-gear-menu-clipped`](done/viewer-ui-inventory-gear-menu-clipped.md)
+  — Inventory gear menu is clipped to the floater it drops from
 - [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by
   `viewer-ui-context-menu` (done))
 - [`viewer-ui-menu-keyboard-nav`](done/viewer-ui-menu-keyboard-nav.md) —

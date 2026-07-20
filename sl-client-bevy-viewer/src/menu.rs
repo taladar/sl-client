@@ -982,6 +982,18 @@ fn build_menu_popup(
             BackgroundColor(MENU_BACKGROUND),
             BorderColor::all(MENU_BORDER),
             GlobalZIndex(MENU_Z_INDEX),
+            // A drop-down is a floating layer: it must render in full even when it
+            // overhangs its anchor's edge. A button-anchored menu (`spawn_menu_button`
+            // / `open_host`, and every submenu) is spawned `ChildOf` a button that can
+            // live inside a clipping ancestor — the inventory floater's content slot
+            // sets `Overflow::clip()` — and a `CalculatedClip` is inherited by all
+            // descendants regardless of `position_type: Absolute` or `GlobalZIndex`, so
+            // without this the popup is cut off at the floater edge. `OverrideClip`
+            // discards any inherited clip (and picking honours it too), so the popup —
+            // and its rows, which inherit the now-cleared clip — draw and click in full.
+            // The free context-menu path already escapes clipping by parenting at the UI
+            // root; this makes every menu popup uniform.
+            OverrideClip,
             ClassList::new_with_classes(["sk-menu"]),
             Name::new(format!("menu-popup:{}", def.label)),
             ChildOf(anchor),
@@ -2599,6 +2611,89 @@ mod tests {
         assert!(
             find_by_name(&mut app, "menu-popup:Avatar").is_none(),
             "no menu is open on a freshly spawned bar"
+        );
+        Ok(())
+    }
+
+    /// A button-anchored drop-down escapes an enclosing `Overflow::clip()`
+    /// ancestor: the popup gets **no** `CalculatedClip`, so it renders (and picks)
+    /// in full even when it overhangs the clipping window — the inventory gear-menu
+    /// bug. A control sibling *inside* the same clip does get a clip, proving the
+    /// scene really clips and the assertion is not vacuous.
+    #[test]
+    fn a_menu_popup_escapes_a_clipping_ancestor() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().with_viewport(400, 300).build();
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                // A small window that clips its overflow, like the inventory
+                // floater's content slot, placed at the top-left corner.
+                let window = commands
+                    .spawn((
+                        Node {
+                            width: Val::Px(120.0),
+                            height: Val::Px(80.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Name::new("clip-window"),
+                        ChildOf(root.0),
+                    ))
+                    .id();
+                // A plain child inside the clip — the control that *should* inherit
+                // the window's clip.
+                commands.spawn((
+                    Node {
+                        width: Val::Px(200.0),
+                        height: Val::Px(200.0),
+                        ..default()
+                    },
+                    Name::new("clipped-control"),
+                    ChildOf(window),
+                ));
+                // The gear button lives inside the clipping window; its drop-down is
+                // spawned `ChildOf` the button, so without `OverrideClip` it would
+                // inherit the window's clip.
+                let button = commands
+                    .spawn((
+                        Node {
+                            width: Val::Px(20.0),
+                            height: Val::Px(20.0),
+                            ..default()
+                        },
+                        Name::new("gear-button"),
+                        ChildOf(window),
+                    ))
+                    .id();
+                build_menu_popup(
+                    &mut commands,
+                    button,
+                    &FIXTURE_AVATAR,
+                    "test",
+                    &MenuConditions::default(),
+                    DropDirection::Block,
+                    UiDirection::Ltr,
+                    None,
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        let control = find_by_name(&mut app, "clipped-control")
+            .ok_or_else(|| TestError::from("the clipped control was not spawned"))?;
+        assert!(
+            app.world().get::<CalculatedClip>(control).is_some(),
+            "the control child of the clip window must inherit its clip — otherwise the scene does \
+             not clip and the popup assertion below proves nothing"
+        );
+
+        let popup = find_by_name(&mut app, "menu-popup:Avatar")
+            .ok_or_else(|| TestError::from("the menu popup was not spawned"))?;
+        assert!(
+            app.world().get::<CalculatedClip>(popup).is_none(),
+            "a button-anchored menu popup must escape the enclosing floater clip (OverrideClip), so \
+             the drop-down is never cut off at the window edge"
         );
         Ok(())
     }
