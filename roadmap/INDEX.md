@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 106 |
-| blocked | 84 |
+| ready | 107 |
+| blocked | 85 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 525 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **745** |
+| **total** | **747** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (106)
+## ready (107)
 
 ### viewer
 
@@ -220,6 +220,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-search-field`](ready/viewer-ui-search-field.md) — Reusable
+  search-field widget (single-line field + clear button) (blocked by
+  `viewer-ui-text-input-widget` (done))
 - [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
   — Text-field↔settings two-way binding (blocked by
   `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
@@ -294,7 +297,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (84)
+## blocked (85)
 
 ### viewer
 
@@ -355,6 +358,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
+- [`viewer-inventory-search-adopt-widget`](blocked/viewer-inventory-search-adopt-widget.md)
+  — Adopt the reusable search-field widget in the inventory search (blocked by
+  `viewer-ui-search-field`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
