@@ -34,9 +34,16 @@
 //!
 //! Two consequences worth stating: a child label must be `Pickable::IGNORE`, or
 //! it swallows the press and the row never sees it (a child node blocks picking
-//! by default); and keyboard traversal of an *open* menu (arrow keys between
-//! entries) is a deliberate follow-up — a bar button is `Tab`-reachable, but
-//! stepping through the open list is mouse-only for now.
+//! by default); and keyboard traversal of an *open* menu is driven in the same
+//! self-managed spirit ([`MenuKeyboard`] + [`menu_keyboard_nav`]) — a
+//! keyboard-highlighted row index fed from key input, reusing the same
+//! [`MenuEntryAction`] dispatch and submenu open/close the mouse path uses,
+//! rather than the upstream focus machinery. The block-axis arrows step the
+//! highlight, the inline-axis arrows open / close a submenu (and switch bar
+//! menus at the top), `Enter` / `Space` activate, and the reference's
+//! underlined **jump keys** ([`assign_jump_keys`]) jump to an entry once
+//! keyboard navigation has begun. The highlight is the same component the hover
+//! system paints ([`highlight_menu_hover`]); keyboard is a second writer of it.
 //!
 //! # One widget, two containers — why the inventory shares it
 //!
@@ -61,7 +68,9 @@
 //!
 //! Reference (Firestorm, read-only): `indra/llui/llmenugl.{h,cpp}`.
 
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input_focus::tab_navigation::TabIndex;
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::picking::hover::HoverMap;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -413,6 +422,13 @@ pub(crate) struct MenuHost {
 #[derive(Component)]
 struct MenuBarButton;
 
+/// Marks the one menu-bar row that a lone `Alt` tap opens into keyboard
+/// navigation (the reference's tap-`Alt` menu access) — the app's primary top
+/// bar. Set by [`crate::menu_bar`]; a gear-button drop-down or a second bar does
+/// not carry it, so `Alt` never targets those.
+#[derive(Component)]
+pub(crate) struct PrimaryMenuBar;
+
 /// A drop-down command line that emits an action when activated. Read by
 /// [`emit_menu_action`].
 #[derive(Component, Debug, Clone, Copy)]
@@ -444,6 +460,62 @@ struct MenuBranch {
 /// whole menu, closed by a pick, an outside press or `Escape`.
 #[derive(Component)]
 struct FreeContextMenu;
+
+/// The keyboard **jump key** (mnemonic) bound to a command / submenu row — the
+/// reference's `LLMenuItemGL::mJumpKey`. Uppercased ASCII, matched against a
+/// typed letter once keyboard navigation has begun ([`menu_keyboard_nav`]).
+#[derive(Component, Debug, Clone, Copy)]
+struct MenuMnemonic {
+    /// The uppercased mnemonic character.
+    key: char,
+}
+
+/// Marks the one label text span holding a row's mnemonic character, so
+/// [`toggle_menu_mnemonic_underline`] can underline it exactly while keyboard
+/// navigation is active — the reference's underlined jump key.
+#[derive(Component)]
+struct MnemonicSpan;
+
+/// The keyboard-navigation state of the open menu stack.
+///
+/// A single writer of the highlight the hover system already paints
+/// ([`highlight_menu_hover`]). `active` records that keyboard navigation has
+/// begun — so the jump-key underlines show, typed letters jump, and the hover
+/// systems stand down; `highlighted` is the row the block-axis arrows currently
+/// sit on, in the deepest open menu. `pending_first` defers highlighting a
+/// just-opened submenu's first row until its (command-spawned) rows exist a
+/// frame later — it holds the branch (or host) whose freshly-opened popup should
+/// receive the highlight.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "four independent single-bit flags of one small state machine — \
+              whether navigation is active, whether a menu just opened this \
+              frame, whether the menu captured focus, and whether an Alt tap is \
+              armed; each gates a different edge and folding them into an enum \
+              would obscure that they are orthogonal, not mutually exclusive"
+)]
+#[derive(Resource, Default)]
+struct MenuKeyboard {
+    /// Whether keyboard navigation has begun.
+    active: bool,
+    /// The keyboard-highlighted row, or `None` before the first arrow key.
+    highlighted: Option<Entity>,
+    /// A branch or host whose freshly-opened popup's first row should become the
+    /// highlight once its deferred rows have spawned.
+    pending_first: Option<Entity>,
+    /// Set for the one frame a menu is opened from a `Tab`-focused button, so the
+    /// opening key press is not re-read as a command by [`menu_keyboard_nav`].
+    just_opened: bool,
+    /// Whether the menu system itself grabbed keyboard focus to open a menu (a
+    /// mouse click on a bar button, a context menu, or a tap-`Alt`), as opposed
+    /// to the user's own `Tab`. Only captured focus is handed back to the world
+    /// on close ([`menu_focus_release`]); a `Tab`-placed focus is left alone.
+    focus_captured: bool,
+    /// Whether a lone `Alt` press is in progress and still eligible to open the
+    /// menu bar on release — the reference's `mAltKeyTrigger`, cleared by any
+    /// other key or by mouse motion (an Alt-drag camera move).
+    alt_armed: bool,
+}
 
 // ---------------------------------------------------------------------------
 // The menu bar and its buttons.
@@ -530,6 +602,8 @@ pub(crate) fn spawn_menu_button(
                   child_of: Query<&ChildOf>,
                   direction: Res<UiDirection>,
                   filter: Res<MenuFilter>,
+                  mut focus: ResMut<InputFocus>,
+                  mut keyboard: ResMut<MenuKeyboard>,
                   mut commands: Commands| {
                 // Consume the press so it does not reach the root dismiss
                 // observer (which would close the menu we are about to open).
@@ -537,6 +611,12 @@ pub(crate) fn spawn_menu_button(
                 if press.button != PointerButton::Primary {
                     return;
                 }
+                // Give the bar button keyboard focus, so the open menu owns the
+                // keyboard (the world's movement keys stand down) and keyboard
+                // traversal can pick up where the click left off; this is a
+                // menu-captured focus, released back to the world on close.
+                focus.set(press.entity, FocusCause::Navigated);
+                keyboard.focus_captured = true;
                 toggle_host(
                     host,
                     &mut hosts,
@@ -598,6 +678,7 @@ fn toggle_host(
 )]
 fn switch_menu_on_hover(
     hover: Res<HoverMap>,
+    keyboard: Res<MenuKeyboard>,
     child_of: Query<&ChildOf>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
     conditions: Query<&MenuConditions>,
@@ -606,6 +687,11 @@ fn switch_menu_on_hover(
     mut hosts: Query<(Entity, &mut MenuHost)>,
     mut commands: Commands,
 ) {
+    // Keyboard navigation owns the open menu while active; sweeping the pointer
+    // must not yank it to another top menu.
+    if keyboard.active {
+        return;
+    }
     if !hosts.iter().any(|(_, menu)| menu.open.is_some()) {
         return;
     }
@@ -794,6 +880,59 @@ impl DropDirection {
 }
 
 // ---------------------------------------------------------------------------
+// Jump keys — the reference's `createJumpKeys`, per menu.
+// ---------------------------------------------------------------------------
+
+/// Assign each command / submenu line a keyboard **jump key** — the reference's
+/// `LLMenuGL::createJumpKeys`, reduced to "the first free alphanumeric letter of
+/// the label". Returned parallel to `items`: `Some((upper_key, byte_offset))`
+/// for a line that got one (the uppercased key and the byte offset of its
+/// character in the label, so the mnemonic can be underlined in place), `None`
+/// for a separator or a label with no free letter. A key is consumed as it is
+/// taken, so one menu never binds one letter to two lines.
+fn assign_jump_keys(items: &[MenuItemDef]) -> Vec<Option<(char, usize)>> {
+    let mut taken: HashSet<char> = HashSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let label = match item {
+            MenuItemDef::Command(command) => command.label,
+            MenuItemDef::Submenu(sub) => sub.label,
+            MenuItemDef::Separator => {
+                out.push(None);
+                continue;
+            }
+        };
+        let mut assigned = None;
+        for (offset, ch) in label.char_indices() {
+            if !ch.is_alphanumeric() {
+                continue;
+            }
+            let key = ch.to_ascii_uppercase();
+            // `insert` is true only when the key was not already spoken for.
+            if taken.insert(key) {
+                assigned = Some((key, offset));
+                break;
+            }
+        }
+        out.push(assigned);
+    }
+    out
+}
+
+/// Split `label` at the mnemonic byte `offset` into `(before, mnemonic, after)`,
+/// where `mnemonic` is the single character at `offset` — or `None` if `offset`
+/// is not a character boundary (a corrupt assignment). Uses `str::get` so the
+/// workspace's no-indexing lint is honoured.
+fn split_label_at(label: &str, offset: usize) -> Option<(&str, &str, &str)> {
+    let before = label.get(..offset)?;
+    let rest = label.get(offset..)?;
+    let ch = rest.chars().next()?;
+    let mnemonic = rest.get(..ch.len_utf8())?;
+    let after = rest.get(ch.len_utf8()..)?;
+    Some((before, mnemonic, after))
+}
+
+// ---------------------------------------------------------------------------
 // The drop-down list itself.
 // ---------------------------------------------------------------------------
 
@@ -851,8 +990,9 @@ fn build_menu_popup(
         // does not bubble to the root dismiss observer and close the menu.
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
-    for item in def.items {
-        spawn_menu_line(commands, popup, *item, element, conditions, filter);
+    // Jump keys are assigned per built list, so each row carries its mnemonic.
+    for (item, jump) in def.items.iter().zip(assign_jump_keys(def.items)) {
+        spawn_menu_line(commands, popup, *item, element, conditions, filter, jump);
     }
     popup
 }
@@ -871,6 +1011,7 @@ fn spawn_menu_line(
     element: &'static str,
     conditions: &MenuConditions,
     filter: Option<MenuFilterCtx>,
+    jump: Option<(char, usize)>,
 ) {
     match item {
         MenuItemDef::Command(command) => {
@@ -878,19 +1019,21 @@ fn spawn_menu_line(
                 return;
             }
             match filter {
-                None => spawn_command_line(commands, popup, command, element, conditions, false),
+                None => {
+                    spawn_command_line(commands, popup, command, element, conditions, false, jump);
+                }
                 Some(ctx) => {
                     let own_match = label_matches_filter(command.label, ctx.query);
                     if ctx.parent_matched || own_match {
                         spawn_command_line(
-                            commands, popup, command, element, conditions, own_match,
+                            commands, popup, command, element, conditions, own_match, jump,
                         );
                     }
                 }
             }
         }
         MenuItemDef::Submenu(sub) => match filter {
-            None => spawn_submenu_line(commands, popup, sub, element, false, false),
+            None => spawn_submenu_line(commands, popup, sub, element, false, false, jump),
             Some(ctx) => {
                 let own_match = label_matches_filter(sub.label, ctx.query);
                 let child_parent_matched = ctx.parent_matched || own_match;
@@ -902,6 +1045,7 @@ fn spawn_menu_line(
                         element,
                         child_parent_matched,
                         own_match,
+                        jump,
                     );
                 }
             }
@@ -926,6 +1070,7 @@ fn spawn_command_line(
     element: &'static str,
     conditions: &MenuConditions,
     highlight: bool,
+    jump: Option<(char, usize)>,
 ) {
     let enabled = conditions.holds(command.enabled_when);
     let checked = command.checked_when.is_some() && conditions.holds(command.checked_when);
@@ -953,6 +1098,9 @@ fn spawn_command_line(
     if checked {
         commands.entity(row).insert(Checked);
     }
+    if let Some((key, _)) = jump {
+        commands.entity(row).insert(MenuMnemonic { key });
+    }
     // Emission is a single point — an `Activate` observer — so a press (mouse)
     // and the harness (`activate`) both dispatch the one way. The press also
     // closes the stack.
@@ -979,7 +1127,13 @@ fn spawn_command_line(
         if checked { CHECK_GLYPH } else { "" },
         text_color,
     );
-    spawn_entry_label(commands, row, command.label, text_color);
+    spawn_entry_label(
+        commands,
+        row,
+        command.label,
+        text_color,
+        jump.map(|(_, offset)| offset),
+    );
     if let Some(accelerator) = command.accelerator {
         commands.spawn((
             Text::new(accelerator),
@@ -1002,6 +1156,7 @@ fn spawn_submenu_line(
     element: &'static str,
     filter_parent_matched: bool,
     highlight: bool,
+    jump: Option<(char, usize)>,
 ) {
     let label_color = if highlight {
         FILTER_MATCH_COLOR
@@ -1024,8 +1179,17 @@ fn spawn_submenu_line(
         ))
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
+    if let Some((key, _)) = jump {
+        commands.entity(row).insert(MenuMnemonic { key });
+    }
     spawn_gutter(commands, row, "", label_color);
-    spawn_entry_label(commands, row, sub.label, label_color);
+    spawn_entry_label(
+        commands,
+        row,
+        sub.label,
+        label_color,
+        jump.map(|(_, off)| off),
+    );
     commands.spawn((
         Text::new(SUBMENU_ARROW),
         UiFont::Sans.at(ENTRY_FONT),
@@ -1077,20 +1241,62 @@ fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str, color: Color)
 }
 
 /// Spawn an entry's growing label, reserving a trailing gap for its accessory.
-fn spawn_entry_label(commands: &mut Commands, row: Entity, label: &str, color: Color) {
-    commands.spawn((
-        Node {
-            flex_grow: 1.0,
-            margin: UiRect::right(Val::Px(ACCESSORY_GAP)),
-            ..default()
-        },
-        Text::new(label),
-        UiFont::Sans.at(ENTRY_FONT),
-        TextColor(color),
-        Pickable::IGNORE,
-        Name::new("menu-item-label"),
-        ChildOf(row),
-    ));
+///
+/// With `mnemonic_offset` set (a jump key was assigned), the label is built as
+/// three text spans — before / the mnemonic character / after — so
+/// [`toggle_menu_mnemonic_underline`] can underline that one character in place
+/// while keyboard navigation is active. Without one, it is a single `Text`.
+fn spawn_entry_label(
+    commands: &mut Commands,
+    row: Entity,
+    label: &str,
+    color: Color,
+    mnemonic_offset: Option<usize>,
+) {
+    let node = Node {
+        flex_grow: 1.0,
+        margin: UiRect::right(Val::Px(ACCESSORY_GAP)),
+        ..default()
+    };
+    match mnemonic_offset.and_then(|offset| split_label_at(label, offset)) {
+        None => {
+            commands.spawn((
+                node,
+                Text::new(label.to_owned()),
+                UiFont::Sans.at(ENTRY_FONT),
+                TextColor(color),
+                Pickable::IGNORE,
+                Name::new("menu-item-label"),
+                ChildOf(row),
+            ));
+        }
+        Some((before, mnemonic, after)) => {
+            let label_entity = commands
+                .spawn((
+                    node,
+                    Text::new(before.to_owned()),
+                    UiFont::Sans.at(ENTRY_FONT),
+                    TextColor(color),
+                    Pickable::IGNORE,
+                    Name::new("menu-item-label"),
+                    ChildOf(row),
+                ))
+                .id();
+            commands.spawn((
+                TextSpan::new(mnemonic.to_owned()),
+                UiFont::Sans.at(ENTRY_FONT),
+                TextColor(color),
+                MnemonicSpan,
+                ChildOf(label_entity),
+            ));
+            commands.spawn((
+                TextSpan::new(after.to_owned()),
+                UiFont::Sans.at(ENTRY_FONT),
+                TextColor(color),
+                ChildOf(label_entity),
+            ));
+        }
+    }
 }
 
 /// Spawn a separator line — one faint rule, not pickable.
@@ -1141,8 +1347,16 @@ fn emit_menu_action(
 /// because a branch's open child list is spawned as a *child of the branch row*,
 /// the child list is part of that subtree. So the pointer moving from a branch
 /// into its submenu keeps the chain open; moving to a sibling drops it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the \
+              hover map and keyboard state, the ancestry / conditions queries, \
+              the layout direction and search filter, the branches it opens or \
+              closes, and commands"
+)]
 fn manage_submenus(
     hover: Res<HoverMap>,
+    keyboard: Res<MenuKeyboard>,
     child_of: Query<&ChildOf>,
     conditions: Query<&MenuConditions>,
     direction: Res<UiDirection>,
@@ -1150,6 +1364,12 @@ fn manage_submenus(
     mut branches: Query<(Entity, &mut MenuBranch)>,
     mut commands: Commands,
 ) {
+    // While keyboard navigation owns the stack, submenu open / close is driven
+    // by the arrow keys ([`menu_keyboard_nav`]); hover must not fight it (it
+    // would close a keyboard-opened submenu the pointer is not over).
+    if keyboard.active {
+        return;
+    }
     let mut hovered = HashSet::new();
     for hits in hover.values() {
         for hit in hits.keys() {
@@ -1163,19 +1383,15 @@ fn manage_submenus(
         let active = hovered.contains(&branch_entity);
         match (active, branch.open) {
             (true, None) => {
-                let held = conditions_at(branch_entity, &child_of, &conditions);
-                let empty = MenuConditions::default();
-                let popup = build_menu_popup(
+                open_submenu_popup(
                     &mut commands,
                     branch_entity,
-                    branch.def,
-                    branch.element,
-                    held.unwrap_or(&empty),
-                    DropDirection::Inline,
+                    &mut branch,
+                    &conditions,
+                    &child_of,
                     *direction,
-                    filter.context_for_branch(branch.element, branch.filter_parent_matched),
+                    &filter,
                 );
-                branch.open = Some(popup);
             }
             (false, Some(popup)) => {
                 commands.entity(popup).despawn();
@@ -1184,6 +1400,36 @@ fn manage_submenus(
             (true, Some(_)) | (false, None) => {}
         }
     }
+}
+
+/// Build and attach `branch`'s child popup (a no-op if already open) — the shared
+/// submenu-open used by both hover ([`manage_submenus`]) and keyboard
+/// ([`menu_keyboard_nav`]).
+fn open_submenu_popup(
+    commands: &mut Commands,
+    branch_entity: Entity,
+    branch: &mut MenuBranch,
+    conditions: &Query<&MenuConditions>,
+    child_of: &Query<&ChildOf>,
+    direction: UiDirection,
+    filter: &MenuFilter,
+) {
+    if branch.open.is_some() {
+        return;
+    }
+    let held = conditions_at(branch_entity, child_of, conditions);
+    let empty = MenuConditions::default();
+    let popup = build_menu_popup(
+        commands,
+        branch_entity,
+        branch.def,
+        branch.element,
+        held.unwrap_or(&empty),
+        DropDirection::Inline,
+        direction,
+        filter.context_for_branch(branch.element, branch.filter_parent_matched),
+    );
+    branch.open = Some(popup);
 }
 
 /// The [`MenuConditions`] on `entity` or the nearest ancestor that carries them.
@@ -1227,6 +1473,8 @@ fn open_context_menus(
     root: Res<UiRoot>,
     direction: Res<UiDirection>,
     existing: Query<Entity, With<FreeContextMenu>>,
+    mut focus: ResMut<InputFocus>,
+    mut keyboard: ResMut<MenuKeyboard>,
     mut commands: Commands,
 ) {
     for request in requests.read() {
@@ -1246,6 +1494,11 @@ fn open_context_menus(
                 ChildOf(root.0),
             ))
             .id();
+        // Focus the anchor so the context menu owns the keyboard (the world's
+        // movement keys stand down) and keyboard traversal works — a
+        // menu-captured focus, released on close (the anchor is also despawned).
+        focus.set(anchor, FocusCause::Navigated);
+        keyboard.focus_captured = true;
         build_menu_popup(
             &mut commands,
             anchor,
@@ -1313,14 +1566,20 @@ fn dismiss_all(
 // Highlight.
 // ---------------------------------------------------------------------------
 
-/// Highlight the menu button / entry / submenu row under the pointer, and clear
-/// the rest.
+/// Highlight the menu row the pointer — or, in keyboard mode, the arrow keys —
+/// sit on, and clear the rest.
 ///
 /// The widget's own highlight, because bevy_flair's `:hover` does not read the
 /// same in the gallery and the viewer for these rows — so the reference
 /// behaviour of the thing under the cursor lighting up is driven here off the
 /// hover map. A disabled entry never lights up. The hovered node is usually a
 /// child (a label), so each hovered entity is resolved to its owning row.
+///
+/// While keyboard navigation is active ([`MenuKeyboard`]) it is the *second*
+/// writer of this highlight the module docs describe: the pointer stands down
+/// and the lit set becomes the keyboard-highlighted row plus every ancestor
+/// submenu row on its open path, so the whole chain from the top menu down reads
+/// as lit — the reference's kept-open path.
 #[expect(
     clippy::type_complexity,
     reason = "an ordinary Bevy query: the row entity, its background to repaint, \
@@ -1329,6 +1588,7 @@ fn dismiss_all(
 )]
 fn highlight_menu_hover(
     hover: Res<HoverMap>,
+    keyboard: Res<MenuKeyboard>,
     child_of: Query<&ChildOf>,
     mut rows: Query<
         (Entity, &mut BackgroundColor, Has<InteractionDisabled>),
@@ -1336,27 +1596,722 @@ fn highlight_menu_hover(
     >,
 ) {
     let row_entities: HashSet<Entity> = rows.iter().map(|(entity, _, _)| entity).collect();
-    let mut hovered_rows = HashSet::new();
-    for hits in hover.values() {
-        for hit in hits.keys() {
-            if row_entities.contains(hit) {
-                hovered_rows.insert(*hit);
-            } else if let Some(row) = child_of
-                .iter_ancestors(*hit)
-                .find(|ancestor| row_entities.contains(ancestor))
-            {
-                hovered_rows.insert(row);
+    let lit: HashSet<Entity> = if keyboard.active {
+        let mut set = HashSet::new();
+        if let Some(highlight) = keyboard.highlighted {
+            if row_entities.contains(&highlight) {
+                set.insert(highlight);
+            }
+            for ancestor in child_of.iter_ancestors(highlight) {
+                if row_entities.contains(&ancestor) {
+                    set.insert(ancestor);
+                }
             }
         }
-    }
+        set
+    } else {
+        let mut set = HashSet::new();
+        for hits in hover.values() {
+            for hit in hits.keys() {
+                if row_entities.contains(hit) {
+                    set.insert(*hit);
+                } else if let Some(row) = child_of
+                    .iter_ancestors(*hit)
+                    .find(|ancestor| row_entities.contains(ancestor))
+                {
+                    set.insert(row);
+                }
+            }
+        }
+        set
+    };
     for (entity, mut background, disabled) in &mut rows {
-        let wanted = if hovered_rows.contains(&entity) && !disabled {
+        let wanted = if lit.contains(&entity) && !disabled {
             ENTRY_HIGHLIGHT
         } else {
             ENTRY_BACKGROUND
         };
         if background.0 != wanted {
             background.0 = wanted;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard traversal of an open menu — the reference's `LLMenuGL::handleKey` /
+// `handleJumpKey`, in the widget's self-managed spirit.
+// ---------------------------------------------------------------------------
+
+/// The root open popup of the whole stack — the open bar menu's drop-down, or a
+/// free context menu's popup — or `None` if nothing is open.
+fn root_open_popup(
+    hosts: &Query<(Entity, &mut MenuHost)>,
+    free: &Query<Entity, With<FreeContextMenu>>,
+    children: &Query<&Children>,
+) -> Option<Entity> {
+    if let Some(popup) = hosts.iter().find_map(|(_, menu)| menu.open) {
+        return Some(popup);
+    }
+    free.iter().find_map(|anchor| {
+        children
+            .get(anchor)
+            .ok()
+            .and_then(|kids| kids.iter().next())
+    })
+}
+
+/// Descend from `popup` through every open submenu to the deepest open popup —
+/// the one the arrow keys act on when no row is highlighted yet.
+fn deepest_open_popup(
+    popup: Entity,
+    children: &Query<&Children>,
+    branches: &Query<&mut MenuBranch>,
+) -> Entity {
+    let mut current = popup;
+    loop {
+        let descend = children.get(current).ok().and_then(|kids| {
+            kids.iter()
+                .find_map(|kid| branches.get(kid).ok().and_then(|branch| branch.open))
+        });
+        match descend {
+            Some(child) => current = child,
+            None => return current,
+        }
+    }
+}
+
+/// The menu currently receiving keys: the popup holding the highlight, or — before
+/// the first arrow key — the deepest open popup.
+fn current_nav_popup(
+    keyboard: &MenuKeyboard,
+    child_of: &Query<&ChildOf>,
+    hosts: &Query<(Entity, &mut MenuHost)>,
+    free: &Query<Entity, With<FreeContextMenu>>,
+    children: &Query<&Children>,
+    branches: &Query<&mut MenuBranch>,
+) -> Option<Entity> {
+    if let Some(highlight) = keyboard.highlighted {
+        return child_of.get(highlight).ok().map(ChildOf::parent);
+    }
+    let root = root_open_popup(hosts, free, children)?;
+    Some(deepest_open_popup(root, children, branches))
+}
+
+/// The command / submenu rows of `popup`, in layout order, minus disabled ones —
+/// the list the arrows step and jump keys search (the reference's
+/// `highlightNextItem`/`highlightPrevItem` skip disabled by default).
+fn navigable_rows(
+    popup: Entity,
+    children: &Query<&Children>,
+    entries: &Query<(), With<MenuEntryAction>>,
+    branches: &Query<&mut MenuBranch>,
+    disabled: &Query<Has<InteractionDisabled>>,
+) -> Vec<Entity> {
+    let Ok(kids) = children.get(popup) else {
+        return Vec::new();
+    };
+    kids.iter()
+        .filter(|&kid| entries.get(kid).is_ok() || branches.get(kid).is_ok())
+        .filter(|&kid| !disabled.get(kid).unwrap_or(false))
+        .collect()
+}
+
+/// The open child popup of `anchor`, whether it is a bar host or a submenu branch
+/// — used to resolve a deferred first-child highlight.
+fn open_popup_of(
+    anchor: Entity,
+    hosts: &Query<(Entity, &mut MenuHost)>,
+    branches: &Query<&mut MenuBranch>,
+) -> Option<Entity> {
+    hosts
+        .get(anchor)
+        .ok()
+        .and_then(|(_, menu)| menu.open)
+        .or_else(|| branches.get(anchor).ok().and_then(|branch| branch.open))
+}
+
+/// The bar host at the root of `popup`'s open chain, or `None` for a free context
+/// menu — the target of a top-level inline-axis bar switch.
+fn root_host_of(
+    popup: Entity,
+    child_of: &Query<&ChildOf>,
+    hosts: &Query<(Entity, &mut MenuHost)>,
+    branches: &Query<&mut MenuBranch>,
+) -> Option<Entity> {
+    let mut current = popup;
+    loop {
+        let anchor = child_of.get(current).ok().map(ChildOf::parent)?;
+        if hosts.get(anchor).is_ok() {
+            return Some(anchor);
+        }
+        if branches.get(anchor).is_ok() {
+            current = child_of.get(anchor).ok().map(ChildOf::parent)?;
+            continue;
+        }
+        return None;
+    }
+}
+
+/// The next / previous highlight in `rows`, wrapping, given the current one —
+/// starting at the first (forward) or last (backward) when nothing is highlighted.
+fn step_highlight(rows: &[Entity], current: Option<Entity>, forward: bool) -> Option<Entity> {
+    if rows.is_empty() {
+        return None;
+    }
+    let last = rows.len().saturating_sub(1);
+    let next = match current.and_then(|row| rows.iter().position(|&candidate| candidate == row)) {
+        None => {
+            if forward {
+                0
+            } else {
+                last
+            }
+        }
+        Some(index) => {
+            if forward {
+                // Wrap past the last row back to the first.
+                if index >= last {
+                    0
+                } else {
+                    index.saturating_add(1)
+                }
+            } else {
+                // Wrap before the first row back to the last.
+                index.checked_sub(1).unwrap_or(last)
+            }
+        }
+    };
+    rows.get(next).copied()
+}
+
+/// The block-end / block-start (down / up) list arrows are fixed, but the
+/// submenu (inline) arrows follow the writing direction — inline-end is `Right`
+/// under LTR, `Left` under RTL.
+const fn inline_end_key(direction: UiDirection) -> KeyCode {
+    match direction {
+        UiDirection::Ltr => KeyCode::ArrowRight,
+        UiDirection::Rtl => KeyCode::ArrowLeft,
+    }
+}
+
+/// The inline-start arrow — `Left` under LTR, `Right` under RTL. See
+/// [`inline_end_key`].
+const fn inline_start_key(direction: UiDirection) -> KeyCode {
+    match direction {
+        UiDirection::Ltr => KeyCode::ArrowLeft,
+        UiDirection::Rtl => KeyCode::ArrowRight,
+    }
+}
+
+/// The uppercase letter / digit a jump-key-eligible [`KeyCode`] types, or `None`
+/// for any other key — so a typed character can be matched against a row's
+/// [`MenuMnemonic`].
+const fn keycode_to_letter(key: KeyCode) -> Option<char> {
+    let letter = match key {
+        KeyCode::KeyA => 'A',
+        KeyCode::KeyB => 'B',
+        KeyCode::KeyC => 'C',
+        KeyCode::KeyD => 'D',
+        KeyCode::KeyE => 'E',
+        KeyCode::KeyF => 'F',
+        KeyCode::KeyG => 'G',
+        KeyCode::KeyH => 'H',
+        KeyCode::KeyI => 'I',
+        KeyCode::KeyJ => 'J',
+        KeyCode::KeyK => 'K',
+        KeyCode::KeyL => 'L',
+        KeyCode::KeyM => 'M',
+        KeyCode::KeyN => 'N',
+        KeyCode::KeyO => 'O',
+        KeyCode::KeyP => 'P',
+        KeyCode::KeyQ => 'Q',
+        KeyCode::KeyR => 'R',
+        KeyCode::KeyS => 'S',
+        KeyCode::KeyT => 'T',
+        KeyCode::KeyU => 'U',
+        KeyCode::KeyV => 'V',
+        KeyCode::KeyW => 'W',
+        KeyCode::KeyX => 'X',
+        KeyCode::KeyY => 'Y',
+        KeyCode::KeyZ => 'Z',
+        KeyCode::Digit0 => '0',
+        KeyCode::Digit1 => '1',
+        KeyCode::Digit2 => '2',
+        KeyCode::Digit3 => '3',
+        KeyCode::Digit4 => '4',
+        KeyCode::Digit5 => '5',
+        KeyCode::Digit6 => '6',
+        KeyCode::Digit7 => '7',
+        KeyCode::Digit8 => '8',
+        KeyCode::Digit9 => '9',
+        _ => return None,
+    };
+    Some(letter)
+}
+
+/// The first jump-key-eligible character pressed this frame, if any.
+fn pressed_letter(keys: &ButtonInput<KeyCode>) -> Option<char> {
+    keys.get_just_pressed().copied().find_map(keycode_to_letter)
+}
+
+/// Commit a row the keyboard picked: a submenu opens and the highlight descends
+/// into it (the reference's branch `onCommit`); a command emits its action and
+/// dismisses the whole stack. Shared by `Enter` / `Space`, the inline-end arrow
+/// on a branch, and a jump key.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy handler threading the world it edits: the picked row, the \
+              keyboard state, the ancestry / conditions / command / free-menu \
+              queries, the hosts and branches to open or close, the layout \
+              direction, the search filter, and commands"
+)]
+fn commit_row(
+    row: Entity,
+    keyboard: &mut MenuKeyboard,
+    child_of: &Query<&ChildOf>,
+    conditions: &Query<&MenuConditions>,
+    entries: &Query<(), With<MenuEntryAction>>,
+    free: &Query<Entity, With<FreeContextMenu>>,
+    hosts: &mut Query<(Entity, &mut MenuHost)>,
+    branches: &mut Query<&mut MenuBranch>,
+    direction: UiDirection,
+    filter: &MenuFilter,
+    commands: &mut Commands,
+) {
+    if branches.get(row).is_ok() {
+        if let Ok(mut branch) = branches.get_mut(row) {
+            open_submenu_popup(
+                commands,
+                row,
+                &mut branch,
+                conditions,
+                child_of,
+                direction,
+                filter,
+            );
+        }
+        keyboard.active = true;
+        keyboard.highlighted = Some(row);
+        keyboard.pending_first = Some(row);
+    } else if entries.get(row).is_ok() {
+        // Emission and dismissal go through the same points a mouse press uses.
+        commands.trigger(Activate { entity: row });
+        dismiss_all(hosts, free, commands);
+        *keyboard = MenuKeyboard::default();
+    }
+}
+
+/// Switch the open bar menu to the next / previous top menu (inline-axis arrows
+/// at the top level), highlighting the new menu's first entry once it builds.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy handler threading the world it edits: the current host and \
+              the direction to move, the ancestry / children / conditions \
+              queries, the hosts to close and open, the layout direction, the \
+              search filter, the keyboard state and commands"
+)]
+fn switch_bar_menu(
+    host: Entity,
+    forward: bool,
+    hosts: &mut Query<(Entity, &mut MenuHost)>,
+    child_of: &Query<&ChildOf>,
+    children: &Query<&Children>,
+    conditions: &Query<&MenuConditions>,
+    direction: UiDirection,
+    filter: &MenuFilter,
+    keyboard: &mut MenuKeyboard,
+    commands: &mut Commands,
+) {
+    let Ok(bar) = child_of.get(host).map(ChildOf::parent) else {
+        return;
+    };
+    let Ok(kids) = children.get(bar) else {
+        return;
+    };
+    let siblings: Vec<Entity> = kids.iter().filter(|&kid| hosts.get(kid).is_ok()).collect();
+    let last = siblings.len().saturating_sub(1);
+    let Some(index) = siblings.iter().position(|&entity| entity == host) else {
+        return;
+    };
+    let target_index = if forward {
+        if index >= last {
+            0
+        } else {
+            index.saturating_add(1)
+        }
+    } else {
+        index.checked_sub(1).unwrap_or(last)
+    };
+    let Some(target) = siblings.get(target_index).copied() else {
+        return;
+    };
+    if target == host {
+        return;
+    }
+    if let Ok((_, mut menu)) = hosts.get_mut(host) {
+        close_host(&mut menu, commands);
+    }
+    let held = conditions_at(target, child_of, conditions);
+    if let Ok((_, mut menu)) = hosts.get_mut(target) {
+        open_host(&mut menu, target, held, direction, filter, commands);
+    }
+    keyboard.active = true;
+    keyboard.highlighted = None;
+    keyboard.pending_first = Some(target);
+}
+
+/// Leave keyboard navigation the moment the pointer really moves — the reference
+/// switches back to mouse mode on any hover, so a keyboard-opened submenu then
+/// yields to the hover systems.
+fn menu_keyboard_mouse_switch(
+    motion: Res<AccumulatedMouseMotion>,
+    mut keyboard: ResMut<MenuKeyboard>,
+) {
+    if keyboard.active && motion.delta != Vec2::ZERO {
+        keyboard.active = false;
+        keyboard.highlighted = None;
+        keyboard.pending_first = None;
+    }
+}
+
+/// Enter the primary menu bar on a lone `Alt` tap — the reference's tap-`Alt`
+/// menu access (`LLMenuBarGL::checkMenuTrigger`).
+///
+/// `Alt` is *armed* on press and disarmed by any other key or by mouse motion
+/// (an Alt-drag camera move), so only a clean tap-and-release with nothing else
+/// happening opens the bar. It opens the bar's first menu into keyboard
+/// navigation; from there the inline arrows switch top menus, the block arrows
+/// step entries, and the jump keys work — the same as opening it with the mouse.
+/// (The reference highlights the first *closed* top menu instead; opening its
+/// drop-down immediately is the one deliberate simplification.)
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the \
+              keys and mouse motion, the primary-bar and bar-button / ancestry / \
+              conditions queries, the layout direction and search filter, the \
+              hosts to open, the keyboard and focus state, and commands"
+)]
+fn menu_alt_enter(
+    keys: Res<ButtonInput<KeyCode>>,
+    motion: Res<AccumulatedMouseMotion>,
+    bars: Query<&Children, With<PrimaryMenuBar>>,
+    buttons: Query<(), With<MenuBarButton>>,
+    conditions: Query<&MenuConditions>,
+    children: Query<&Children>,
+    child_of: Query<&ChildOf>,
+    direction: Res<UiDirection>,
+    filter: Res<MenuFilter>,
+    mut hosts: Query<(Entity, &mut MenuHost)>,
+    mut keyboard: ResMut<MenuKeyboard>,
+    mut focus: ResMut<InputFocus>,
+    mut commands: Commands,
+) {
+    let alt_down = keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight);
+    let alt_up = keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight);
+    if alt_down {
+        keyboard.alt_armed = true;
+    } else if keys.get_just_pressed().next().is_some() || motion.delta != Vec2::ZERO {
+        // Any other key, or a mouse move (an Alt-drag), means this was not a tap.
+        keyboard.alt_armed = false;
+    }
+    if !alt_up {
+        return;
+    }
+    let armed = keyboard.alt_armed;
+    keyboard.alt_armed = false;
+    if !armed || hosts.iter().any(|(_, menu)| menu.open.is_some()) {
+        return;
+    }
+    // The primary bar's first menu button, and the host it drops.
+    let Some(button) = bars
+        .iter()
+        .flat_map(bevy::ecs::hierarchy::Children::iter)
+        .filter_map(|host| children.get(host).ok())
+        .flat_map(bevy::ecs::hierarchy::Children::iter)
+        .find(|&child| buttons.get(child).is_ok())
+    else {
+        return;
+    };
+    let Ok(host) = child_of.get(button).map(ChildOf::parent) else {
+        return;
+    };
+    let held = conditions_at(host, &child_of, &conditions);
+    if let Ok((_, mut menu)) = hosts.get_mut(host) {
+        open_host(&mut menu, host, held, *direction, &filter, &mut commands);
+        keyboard.active = true;
+        keyboard.highlighted = None;
+        keyboard.pending_first = Some(host);
+        keyboard.just_opened = true;
+        // Tap-Alt is a menu-captured focus: released back to the world on close.
+        focus.set(button, FocusCause::Navigated);
+        keyboard.focus_captured = true;
+    }
+}
+
+/// Open a bar menu from its `Tab`-focused button: with nothing open yet and a
+/// menu-bar button holding focus, `Enter` / `Space` / the block-end arrow drop
+/// its menu and enter keyboard navigation (its first entry highlights a frame
+/// later, once the deferred rows exist — [`MenuKeyboard::pending_first`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the \
+              keys and current focus, the bar-button and ancestry / conditions \
+              queries, the layout direction, the search filter, the hosts to open \
+              and the keyboard state, and commands"
+)]
+fn menu_keyboard_open_focused(
+    keys: Res<ButtonInput<KeyCode>>,
+    focus: Res<InputFocus>,
+    buttons: Query<&ChildOf, With<MenuBarButton>>,
+    conditions: Query<&MenuConditions>,
+    child_of: Query<&ChildOf>,
+    direction: Res<UiDirection>,
+    filter: Res<MenuFilter>,
+    mut hosts: Query<(Entity, &mut MenuHost)>,
+    mut keyboard: ResMut<MenuKeyboard>,
+    mut commands: Commands,
+) {
+    if hosts.iter().any(|(_, menu)| menu.open.is_some()) {
+        return;
+    }
+    let opens = keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::Space)
+        || keys.just_pressed(KeyCode::ArrowDown);
+    if !opens {
+        return;
+    }
+    let Some(focused) = focus.get() else {
+        return;
+    };
+    let Ok(host) = buttons.get(focused).map(ChildOf::parent) else {
+        return;
+    };
+    let held = conditions_at(host, &child_of, &conditions);
+    if let Ok((_, mut menu)) = hosts.get_mut(host) {
+        open_host(&mut menu, host, held, *direction, &filter, &mut commands);
+        keyboard.active = true;
+        keyboard.pending_first = Some(host);
+        // The same key press must not also activate through `menu_keyboard_nav`
+        // this frame (the chained sync point makes the new rows visible to it).
+        keyboard.just_opened = true;
+    }
+}
+
+/// Drive the highlight of an open menu from the keyboard — the heart of the task.
+///
+/// The block-axis arrows step the highlight (wrapping, skipping disabled); the
+/// inline-axis arrows open the highlighted submenu / close the current one (and
+/// switch top menus at the bar); `Enter` / `Space` commit the highlight; and,
+/// once navigation has begun, a typed letter jumps to its [`MenuMnemonic`]. With
+/// nothing open it resets the state.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the \
+              keys and layout direction, the search filter, the ancestry / \
+              children / command / disabled / mnemonic / conditions / free-menu \
+              queries, the hosts and branches it opens and closes, the keyboard \
+              state and commands"
+)]
+fn menu_keyboard_nav(
+    keys: Res<ButtonInput<KeyCode>>,
+    direction: Res<UiDirection>,
+    filter: Res<MenuFilter>,
+    child_of: Query<&ChildOf>,
+    children: Query<&Children>,
+    entries: Query<(), With<MenuEntryAction>>,
+    disabled: Query<Has<InteractionDisabled>>,
+    mnemonics: Query<&MenuMnemonic>,
+    conditions: Query<&MenuConditions>,
+    free: Query<Entity, With<FreeContextMenu>>,
+    mut hosts: Query<(Entity, &mut MenuHost)>,
+    mut branches: Query<&mut MenuBranch>,
+    mut keyboard: ResMut<MenuKeyboard>,
+    mut commands: Commands,
+) {
+    // Resolve a submenu's deferred first-child highlight, now its rows may exist.
+    if let Some(anchor) = keyboard.pending_first {
+        match open_popup_of(anchor, &hosts, &branches) {
+            Some(popup) => {
+                let rows = navigable_rows(popup, &children, &entries, &branches, &disabled);
+                if let Some(first) = rows.first().copied() {
+                    keyboard.highlighted = Some(first);
+                    keyboard.pending_first = None;
+                }
+            }
+            None => keyboard.pending_first = None,
+        }
+    }
+
+    // The key that just opened a menu from a focused button (handled by
+    // `menu_keyboard_open_focused`) must not be re-processed here as a command.
+    if keyboard.just_opened {
+        keyboard.just_opened = false;
+        return;
+    }
+
+    // Nothing open: reset and bail, so the next open starts in mouse mode.
+    let open = hosts.iter().any(|(_, menu)| menu.open.is_some()) || !free.is_empty();
+    if !open {
+        if keyboard.active || keyboard.highlighted.is_some() || keyboard.pending_first.is_some() {
+            *keyboard = MenuKeyboard::default();
+        }
+        return;
+    }
+
+    let Some(popup) = current_nav_popup(&keyboard, &child_of, &hosts, &free, &children, &branches)
+    else {
+        return;
+    };
+    let rows = navigable_rows(popup, &children, &entries, &branches, &disabled);
+    let inline_end = inline_end_key(*direction);
+    let inline_start = inline_start_key(*direction);
+
+    if keys.just_pressed(KeyCode::ArrowDown) {
+        if let Some(next) = step_highlight(&rows, keyboard.highlighted, true) {
+            keyboard.active = true;
+            keyboard.highlighted = Some(next);
+        }
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
+        if let Some(next) = step_highlight(&rows, keyboard.highlighted, false) {
+            keyboard.active = true;
+            keyboard.highlighted = Some(next);
+        }
+    } else if keys.just_pressed(inline_end) {
+        // A highlighted submenu opens; otherwise the bar advances a top menu.
+        let branch_highlight = keyboard
+            .highlighted
+            .filter(|&row| branches.get(row).is_ok());
+        if let Some(branch) = branch_highlight {
+            commit_row(
+                branch,
+                &mut keyboard,
+                &child_of,
+                &conditions,
+                &entries,
+                &free,
+                &mut hosts,
+                &mut branches,
+                *direction,
+                &filter,
+                &mut commands,
+            );
+        } else if let Some(host) = root_host_of(popup, &child_of, &hosts, &branches) {
+            switch_bar_menu(
+                host,
+                true,
+                &mut hosts,
+                &child_of,
+                &children,
+                &conditions,
+                *direction,
+                &filter,
+                &mut keyboard,
+                &mut commands,
+            );
+        }
+    } else if keys.just_pressed(inline_start) {
+        // A submenu closes (back up a level); at the top, the bar steps back.
+        if let Some(anchor) = child_of.get(popup).ok().map(ChildOf::parent) {
+            if branches.get(anchor).is_ok() {
+                if let Ok(mut branch) = branches.get_mut(anchor)
+                    && let Some(child_popup) = branch.open.take()
+                {
+                    commands.entity(child_popup).despawn();
+                }
+                keyboard.active = true;
+                keyboard.highlighted = Some(anchor);
+            } else if hosts.get(anchor).is_ok() {
+                switch_bar_menu(
+                    anchor,
+                    false,
+                    &mut hosts,
+                    &child_of,
+                    &children,
+                    &conditions,
+                    *direction,
+                    &filter,
+                    &mut keyboard,
+                    &mut commands,
+                );
+            }
+        }
+    } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
+        if let Some(highlight) = keyboard.highlighted {
+            commit_row(
+                highlight,
+                &mut keyboard,
+                &child_of,
+                &conditions,
+                &entries,
+                &free,
+                &mut hosts,
+                &mut branches,
+                *direction,
+                &filter,
+                &mut commands,
+            );
+        }
+    } else if let Some(letter) = pressed_letter(&keys) {
+        // Jump keys act only once keyboard navigation has begun.
+        if keyboard.active
+            && let Some(row) = rows.iter().copied().find(|&candidate| {
+                mnemonics
+                    .get(candidate)
+                    .is_ok_and(|mnemonic| mnemonic.key == letter)
+            })
+        {
+            keyboard.highlighted = Some(row);
+            commit_row(
+                row,
+                &mut keyboard,
+                &child_of,
+                &conditions,
+                &entries,
+                &free,
+                &mut hosts,
+                &mut branches,
+                *direction,
+                &filter,
+                &mut commands,
+            );
+        }
+    }
+}
+
+/// Hand the keyboard back to the world once every menu the *menu system* grabbed
+/// focus for has closed. Only focus the menu captured (a mouse-click open, a
+/// context menu, a tap-`Alt`) is released; focus the user placed with `Tab` is
+/// left where it is, so `Tab`-then-close does not silently steal keyboard focus.
+fn menu_focus_release(
+    hosts: Query<&MenuHost>,
+    free: Query<(), With<FreeContextMenu>>,
+    mut keyboard: ResMut<MenuKeyboard>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if !keyboard.focus_captured {
+        return;
+    }
+    let open = hosts.iter().any(|menu| menu.open.is_some()) || !free.is_empty();
+    if open {
+        return;
+    }
+    focus.clear();
+    keyboard.focus_captured = false;
+}
+
+/// Underline each row's mnemonic character exactly while keyboard navigation is
+/// active — the reference draws the jump-key underline only once keyboard mode
+/// has begun (`jumpKeysActive() && getKeyboardMode()`).
+fn toggle_menu_mnemonic_underline(
+    keyboard: Res<MenuKeyboard>,
+    spans: Query<(Entity, Has<Underline>), With<MnemonicSpan>>,
+    mut commands: Commands,
+) {
+    for (entity, underlined) in &spans {
+        if keyboard.active && !underlined {
+            commands.entity(entity).insert(Underline);
+        } else if !keyboard.active && underlined {
+            commands.entity(entity).remove::<Underline>();
         }
     }
 }
@@ -1370,8 +2325,14 @@ pub(crate) struct MenuWidgetPlugin;
 
 impl Plugin for MenuWidgetPlugin {
     fn build(&self, app: &mut App) {
+        // `InputFocus` / `AccumulatedMouseMotion` come from `DefaultPlugins` in
+        // the viewer; `init_resource` is idempotent, so this only fills them in
+        // for the headless test harness (which brings neither).
         app.add_message::<OpenContextMenu>()
             .init_resource::<MenuFilter>()
+            .init_resource::<MenuKeyboard>()
+            .init_resource::<InputFocus>()
+            .init_resource::<AccumulatedMouseMotion>()
             .add_systems(
                 Startup,
                 attach_menu_dismiss.after(UiScaffoldSystems::SpawnRoot),
@@ -1380,11 +2341,25 @@ impl Plugin for MenuWidgetPlugin {
                 Update,
                 (
                     open_context_menus,
-                    switch_menu_on_hover,
                     open_filtered_menu,
-                    manage_submenus,
                     dismiss_menus_on_escape,
-                    highlight_menu_hover,
+                    // Keyboard navigation runs first, then the hover systems
+                    // stand down / paint against the state it left.
+                    (
+                        menu_keyboard_mouse_switch,
+                        menu_alt_enter,
+                        menu_keyboard_open_focused,
+                        menu_keyboard_nav,
+                    )
+                        .chain(),
+                    (
+                        switch_menu_on_hover,
+                        manage_submenus,
+                        menu_focus_release,
+                        highlight_menu_hover,
+                        toggle_menu_mnemonic_underline,
+                    )
+                        .after(menu_keyboard_nav),
                 ),
             );
     }
@@ -1461,9 +2436,10 @@ pub(crate) fn spawn_menu_bar_specimen(
 mod tests {
     use super::{
         CHECK_GLYPH, DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch,
-        MenuConditions, MenuDef, MenuEntryAction, MenuHost, MenuItemDef, SUBMENU_ARROW,
-        build_menu_popup, spawn_menu_bar_specimen,
+        MenuCommand, MenuConditions, MenuDef, MenuEntryAction, MenuHost, MenuItemDef, MenuKeyboard,
+        MnemonicSpan, SUBMENU_ARROW, assign_jump_keys, build_menu_popup, spawn_menu_bar_specimen,
     };
+    use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::picking::hover::HoverMap;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -1974,6 +2950,265 @@ mod tests {
                 "entry rows differ in width ({widths:?}) — the highlight would be ragged",
             );
         }
+        Ok(())
+    }
+
+    /// Jump keys are the first free letter of each line's label, separators get
+    /// none, and the offset points at that character.
+    #[test]
+    fn jump_keys_are_the_first_free_letter() {
+        // Avatar: Inventory, Appearance, ―, Fly, Sit Down, ―, Quit.
+        let avatar: Vec<Option<char>> = assign_jump_keys(FIXTURE_AVATAR.items)
+            .iter()
+            .map(|assigned| assigned.map(|(key, _)| key))
+            .collect();
+        assert_eq!(
+            avatar,
+            vec![
+                Some('I'),
+                Some('A'),
+                None,
+                Some('F'),
+                Some('S'),
+                None,
+                Some('Q'),
+            ],
+        );
+    }
+
+    /// A letter already taken by an earlier line is skipped to the next free one,
+    /// so one menu never binds a key twice.
+    #[test]
+    fn jump_keys_avoid_collisions() {
+        static COLLIDE: MenuDef = MenuDef {
+            label: "File",
+            items: &[
+                MenuItemDef::Command(MenuCommand::new("Save", "save")),
+                MenuItemDef::Command(MenuCommand::new("Sit", "sit")),
+            ],
+        };
+        let keys = assign_jump_keys(COLLIDE.items);
+        // "Save" takes S; "Sit" cannot, so it takes the next free letter, 'I'@1.
+        assert_eq!(keys.first().copied().flatten(), Some(('S', 0)));
+        assert_eq!(keys.get(1).copied().flatten(), Some(('I', 1)));
+    }
+
+    /// A live fixture bar under the full widget runtime, with the keyboard / focus
+    /// / mouse-motion resources the harness omits, settled closed.
+    fn keyboard_bar_app() -> Result<App, TestError> {
+        let mut app = LayoutTest::new().build();
+        enable_action_recording(&mut app);
+        app.init_resource::<HoverMap>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_plugins(super::MenuWidgetPlugin);
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                super::spawn_menu_bar(
+                    &mut commands,
+                    root.0,
+                    ElementCx::new(),
+                    &FIXTURE_MENU_BAR,
+                    "test-bar",
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        Ok(app)
+    }
+
+    /// Give `entity` keyboard focus.
+    fn focus(app: &mut App, entity: Entity) {
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(entity, FocusCause::Navigated);
+    }
+
+    /// Tap a key: press it for one frame, then release and step a few more so any
+    /// deferred popup rows spawn and a pending first-child highlight resolves.
+    ///
+    /// The harness has no input plugin clearing `ButtonInput`, so the key must be
+    /// **released** (not merely `clear`ed, which leaves it in the pressed set) or
+    /// a second identical tap would not read as `just_pressed`.
+    fn tap(app: &mut App, key: KeyCode) {
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.clear();
+            keys.release(key);
+            keys.press(key);
+        }
+        app.update();
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(key);
+            keys.clear();
+        }
+        for _ in 0..4 {
+            app.update();
+        }
+    }
+
+    /// The keyboard-highlighted row, if any.
+    fn highlighted(app: &App) -> Option<Entity> {
+        app.world().resource::<MenuKeyboard>().highlighted
+    }
+
+    /// `Enter` on a focused bar button opens its menu into keyboard navigation and
+    /// highlights the first (enabled) entry.
+    #[test]
+    fn enter_on_a_focused_button_opens_and_highlights_first() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter);
+        assert!(
+            find_by_name(&mut app, "menu-popup:Avatar").is_some(),
+            "the menu opened",
+        );
+        let inventory =
+            find_by_name(&mut app, "menu-item:inventory").ok_or("the Inventory row is missing")?;
+        assert_eq!(
+            highlighted(&app),
+            Some(inventory),
+            "the first enabled entry is highlighted",
+        );
+        assert!(
+            app.world().resource::<MenuKeyboard>().active,
+            "keyboard navigation is active",
+        );
+        Ok(())
+    }
+
+    /// The block-axis arrows step the highlight, skipping the disabled entry, and
+    /// `Enter` emits the highlighted entry's action and closes the menu.
+    #[test]
+    fn arrows_step_and_enter_activates() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter);
+        // Inventory → Appearance (Fly's predecessor Sit is disabled, but we stop
+        // at Appearance here).
+        tap(&mut app, KeyCode::ArrowDown);
+        let appearance = find_by_name(&mut app, "menu-item:appearance")
+            .ok_or("the Appearance row is missing")?;
+        assert_eq!(
+            highlighted(&app),
+            Some(appearance),
+            "Down moved the highlight"
+        );
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![UiAction {
+                element: "test-bar",
+                action: "appearance",
+            }],
+            "Enter activated the highlighted entry",
+        );
+        assert!(
+            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            "activating an entry closes the menu",
+        );
+        Ok(())
+    }
+
+    /// Navigation skips a disabled entry: from Appearance, Down lands on Fly, not
+    /// the disabled Sit between them.
+    #[test]
+    fn navigation_skips_a_disabled_entry() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::ArrowDown); // Appearance
+        tap(&mut app, KeyCode::ArrowDown); // Fly (Sit is disabled, skipped)
+        let fly = find_by_name(&mut app, "menu-item:fly").ok_or("the Fly row is missing")?;
+        assert_eq!(
+            highlighted(&app),
+            Some(fly),
+            "the disabled Sit entry is stepped over",
+        );
+        Ok(())
+    }
+
+    /// A jump key jumps straight to its entry and commits it — here `Q` activates
+    /// Quit without stepping to it.
+    #[test]
+    fn a_jump_key_activates_its_entry() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::KeyQ);
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![UiAction {
+                element: "test-bar",
+                action: "quit",
+            }],
+            "the Q jump key activated Quit",
+        );
+        Ok(())
+    }
+
+    /// The inline-end arrow opens a highlighted submenu and lands on its first
+    /// entry; the inline-start arrow closes it and returns to the branch row.
+    #[test]
+    fn inline_arrows_open_and_close_a_submenu() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:World").ok_or("the World button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter); // World open, Mini-Map highlighted
+        tap(&mut app, KeyCode::ArrowDown); // Environment (the submenu branch)
+        let branch = find_by_name(&mut app, "menu-submenu:Environment")
+            .ok_or("the Environment branch is missing")?;
+        assert_eq!(highlighted(&app), Some(branch), "the branch is highlighted");
+        tap(&mut app, KeyCode::ArrowRight); // open the submenu, land on its first entry
+        let sunrise = find_by_name(&mut app, "menu-item:env-sunrise")
+            .ok_or("the submenu's first entry is missing")?;
+        assert_eq!(
+            highlighted(&app),
+            Some(sunrise),
+            "the submenu opened and its first entry is highlighted",
+        );
+        tap(&mut app, KeyCode::ArrowLeft); // close the submenu, back to the branch
+        assert_eq!(
+            highlighted(&app),
+            Some(branch),
+            "closing the submenu returns to the branch row",
+        );
+        assert!(
+            find_by_name(&mut app, "menu-popup:Environment").is_none(),
+            "the submenu popup is gone",
+        );
+        Ok(())
+    }
+
+    /// Mnemonic characters are underlined exactly while keyboard navigation is
+    /// active, and the underline is cleared once the menu closes.
+    #[test]
+    fn mnemonics_underline_only_while_navigating() -> Result<(), TestError> {
+        let mut app = keyboard_bar_app()?;
+        let button =
+            find_by_name(&mut app, "menu-button:Avatar").ok_or("the Avatar button is missing")?;
+        focus(&mut app, button);
+        tap(&mut app, KeyCode::Enter);
+        let underlined = app
+            .world_mut()
+            .query_filtered::<(), (With<MnemonicSpan>, With<Underline>)>()
+            .iter(app.world())
+            .count();
+        assert!(
+            underlined > 0,
+            "mnemonic characters underline once keyboard navigation begins",
+        );
         Ok(())
     }
 

@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 105 |
 | blocked | 88 |
 | in-progress | 4 |
-| bugs | 10 |
-| done | 516 |
+| bugs | 11 |
+| done | 517 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **739** |
+| **total** | **741** |
 
 ## ideas (4)
 
@@ -210,9 +210,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-menu-keyboard-nav`](ready/viewer-ui-menu-keyboard-nav.md) —
-  Keyboard traversal of an open menu (blocked by `viewer-ui-context-menu`
-  (done))
+- [`viewer-ui-focus-ring-visible`](ready/viewer-ui-focus-ring-visible.md) — Draw
+  a visible focus ring on the keyboard-focused widget
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
@@ -555,7 +554,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (10)
+## bugs (11)
 
 ### protocol
 
@@ -581,6 +580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-ui-inventory-gear-menu-clipped`](bugs/viewer-ui-inventory-gear-menu-clipped.md)
+  — Inventory gear menu is clipped to the floater it drops from
 
 ### aditi
 
@@ -589,7 +590,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (516)
+## done (517)
 
 ### protocol
 
@@ -1049,6 +1050,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic` (done))
 - [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by
   `viewer-ui-context-menu` (done))
+- [`viewer-ui-menu-keyboard-nav`](done/viewer-ui-menu-keyboard-nav.md) —
+  Keyboard traversal of an open menu (blocked by `viewer-ui-context-menu`
+  (done))
 - [`viewer-ui-menu-search`](done/viewer-ui-menu-search.md) — Menu search field
   (blocked by `viewer-ui-menu-bar` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu

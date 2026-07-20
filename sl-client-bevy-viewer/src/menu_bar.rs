@@ -38,7 +38,8 @@ use bevy::prelude::*;
 
 use crate::inventory::InventoryUi;
 use crate::menu::{
-    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, spawn_menu_bar,
+    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, PrimaryMenuBar,
+    spawn_menu_bar,
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
@@ -164,6 +165,9 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
         GlobalZIndex(TOP_BAR_Z),
         MenuConditions::default(),
         TopMenuBar,
+        // A lone `Alt` tap opens this bar into keyboard navigation (see
+        // `crate::menu`'s `menu_alt_enter`).
+        PrimaryMenuBar,
     ));
     // The menu-search field sits in the bar, immediately after the last menu
     // (viewer-ui-menu-search): its text drives `crate::menu`'s `MenuFilter`, so
