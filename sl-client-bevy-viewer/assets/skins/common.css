@@ -1,3 +1,6 @@
+/* biome-ignore-all lint/correctness/noUnknownProperty: bevy_flair defines
+   non-standard CSS properties (e.g. -bevy-image, -bevy-image-color) that biome,
+   a standard-CSS linter, does not know. */
 /*
  * common.css — the structural skin rules, shared by every skin.
  *
@@ -159,6 +162,18 @@
  * text colour. */
 .sk-status-readout {
   color: var(--text-primary);
+}
+
+/* A parcel-permission icon on the status row. It is shown only while its
+ * restriction is in force, so it carries the meaning-bearing "loss" colour — the
+ * PNG is a white glyph mask, and `-bevy-image-color` (bevy_flair's ImageNode
+ * tint) recolours it, so the culture-colour / colour-blind overlays remap it
+ * like any semantic swatch. A skin can override this tint here, or target one
+ * glyph through its per-icon class — e.g.
+ *   .sk-parcel-icon--voice { -bevy-image: url("my-voice.png"); }
+ * to swap just that glyph's art, or `-bevy-image-color` to re-tint just it. */
+.sk-parcel-icon {
+  -bevy-image-color: var(--loss);
 }
 
 /* Meaning-bearing swatches. These are the semantic tokens the culture-colour

@@ -130,6 +130,58 @@ to nothing leaves the property unset (usually invisible).
 | `.sk-accent` | a leading accent bar + hanging indent (logical box demo) |
 | `.sk-tab` | a tab shape with asymmetric top corners (logical corner demo) |
 | `.sk-gain` / `.sk-loss` | meaning-bearing colour swatches |
+| `.sk-menu-bar` / `.sk-menu` | the top bar / a drop-down menu surface |
+| `.sk-status-readout` | a status-row read-out (region / coordinates / balance / time / FPS) |
+| `.sk-parcel-icon` | a parcel-permission icon on the status row (see below) |
+
+### The status-bar parcel-permission icons
+
+The top row's status area shows the current parcel's permission icons — voice,
+fly, push, build, scripts, see-avatars and damage — each shown only while that
+restriction is in force. Each icon is a **white-on-transparent glyph mask**
+drawn with an `ImageNode`, so the skin **tints** it rather than shipping a
+coloured image. Two non-standard `bevy_flair` properties control an image (they
+also work on any other `ImageNode` a future widget adds):
+
+| Property | Sets | Use |
+| --- | --- | --- |
+| `-bevy-image-color` | the image's tint (multiplies the glyph) | recolour a white mask |
+| `-bevy-image` | the image itself (`url("skins/…/foo.png")`) | replace the glyph art |
+
+Every icon carries the shared class `.sk-parcel-icon` **and** a per-icon class,
+so a skin can restyle all of them at once or target one:
+
+| Class | Icon |
+| --- | --- |
+| `.sk-parcel-icon` | all parcel icons (default tint `var(--loss)`) |
+| `.sk-parcel-icon--voice` | voice disabled |
+| `.sk-parcel-icon--fly` | flying disabled |
+| `.sk-parcel-icon--push` | pushing restricted |
+| `.sk-parcel-icon--build` | building disabled |
+| `.sk-parcel-icon--scripts` | scripts disabled |
+| `.sk-parcel-icon--see-avatars` | avatars hidden |
+| `.sk-parcel-icon--damage` | damage enabled (a hazard) |
+
+```css
+/* Re-tint every parcel icon. */
+.sk-parcel-icon {
+  -bevy-image-color: var(--accent);
+}
+
+/* Replace just one glyph with your own art. The tint still multiplies, so ship
+   a white mask (or set `-bevy-image-color: #ffffff` to show it as-is). */
+.sk-parcel-icon--damage {
+  -bevy-image: url("skins/myskin/parcel-damage.png");
+}
+```
+
+Because the `-bevy-*` properties are not standard CSS, the commit-time `biome`
+lint reports them as unknown. A file that uses any of them **must** carry a
+file-level suppression as its first line (`common.css` does):
+
+```css
+/* biome-ignore-all lint/correctness/noUnknownProperty: bevy_flair -bevy-* */
+```
 
 ## Making a new skin
 
@@ -246,6 +298,8 @@ physical left/right and will not mirror; use the logical longhands instead.
   under the viewer's assets (`-bevy-image: url("skins/…/foo.png")`),
   **never a grid asset UUID** — grid textures (a texture-picker thumbnail, a
   texture display) are *content*, handled by the render pipeline, not the skin.
+  `-bevy-image-color` tints an `ImageNode` (multiplying the image); it recolours
+  a white glyph mask, as the parcel-permission icons above use it.
 - **`@import` paths are asset-root-relative** — `@import "skins/common.css";`
   resolves from the assets root, not the importing file's directory. Do **not**
   use `../`. Nested imports (theme → skin → common) work.

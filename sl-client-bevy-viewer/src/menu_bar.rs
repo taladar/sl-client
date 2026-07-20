@@ -154,7 +154,7 @@ impl Plugin for TopMenuBarPlugin {
 /// fills the rest of the row to the trailing edge, so the top row reads as one
 /// continuous bar (the reference viewer's arrangement) rather than a
 /// content-sized huddle. It reflows on a font-size / locale change.
-fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
+fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: Res<AssetServer>) {
     let bar = spawn_menu_bar(
         &mut commands,
         root.0,
@@ -184,7 +184,7 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
     // The status area (viewer-ui-status-bar) fills the rest of the row after the
     // search field, its parcel-name read-out flexing to push the balance / time /
     // FPS to the trailing edge.
-    crate::status_bar::spawn_status_area(&mut commands, bar);
+    crate::status_bar::spawn_status_area(&mut commands, &asset_server, bar);
 }
 
 /// Recompute the bar's live conditions each frame from the world.

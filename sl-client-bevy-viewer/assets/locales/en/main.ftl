@@ -73,14 +73,5 @@ status-bar-time = { $time } SLT
 # The frame rate read-out.
 status-bar-fps = { $fps } fps
 
-# The parcel permission placeholders — one letter each, always shown, brightened
-# when the permission is in force (denied here, or — for damage — enabled). An
-# interim stand-in for the reference viewer's parcel icons; kept to one letter so
-# the block stays compact and fixed-width.
-status-bar-icon-voice-abbr = V
-status-bar-icon-fly-abbr = F
-status-bar-icon-push-abbr = P
-status-bar-icon-build-abbr = B
-status-bar-icon-scripts-abbr = S
-status-bar-icon-see-avatars-abbr = A
-status-bar-icon-damage-abbr = D
+# The parcel permission icons carry no text (they are tinted glyph images), so
+# there are no string keys for them here.

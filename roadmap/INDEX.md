@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 104 |
+| ready | 103 |
 | blocked | 88 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 522 |
+| done | 523 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **744** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (104)
+## ready (103)
 
 ### viewer
 
@@ -216,9 +216,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-status-bar-parcel-icons`](ready/viewer-ui-status-bar-parcel-icons.md)
-  — Status-area parcel permission icon art (blocked by `viewer-ui-status-bar`
-  (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -586,7 +583,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (522)
+## done (523)
 
 ### protocol
 
@@ -1071,6 +1068,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-status-bar`](done/viewer-ui-status-bar.md) — Status area (region /
   parcel / balance / time / FPS / permission icons) (blocked by
   `viewer-ui-menu-bar` (done))
+- [`viewer-ui-status-bar-parcel-icons`](done/viewer-ui-status-bar-parcel-icons.md)
+  — Status-area parcel permission icon art (blocked by `viewer-ui-status-bar`
+  (done))
 - [`viewer-ui-tab-widget`](done/viewer-ui-tab-widget.md) — Reusable tab widget
   (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —

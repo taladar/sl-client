@@ -2,11 +2,30 @@
 id: viewer-ui-status-bar-parcel-icons
 title: Status-area parcel permission icon art
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-ui-status-bar (2026-07-20)
 blocked_by: [viewer-ui-status-bar]
 refs: [viewer-ui-status-bar]
 ---
+
+**Done (2026-07-20).** The single-letter placeholders are replaced by real icon
+glyphs (`assets/icons/parcel/*.png`, with the `.svg` sources beside them) drawn
+with `ImageNode` in `src/status_bar.rs`: a slashed microphone (voice), an
+up-arrow (fly), an arrow-into-a-wall (push), a cube (build), a document
+(scripts), an eye (see-avatars) and a heart (damage). These are **original
+glyphs**, authored as SVG → PNG white-on-transparent masks, not the reference
+viewer's own art (avoids importing its assets).
+
+- **Theme-tinted, skin-overridable.** The masks are tinted the skin's `--loss`
+  colour via `bevy_flair`'s `-bevy-image-color`. Each icon carries the shared
+  `.sk-parcel-icon` class **and** a per-icon class (`.sk-parcel-icon--voice`,
+  `…--fly`, …), so a skin can re-tint all/one or replace a glyph's art with
+  `-bevy-image: url(…)`. Documented in the skin-authoring book page
+  (`book/src/authoring/skins.md`).
+- **Show-only-when-restricted, constant width.** Each icon shows only while its
+  restriction is in force (the reference semantics), toggled via `Visibility`
+  (not `Display`) so its slot is always laid out and the icon bar keeps the same
+  width whether nothing or everything is restricted.
 
 Context: [context/viewer.md](../context/viewer.md).
 

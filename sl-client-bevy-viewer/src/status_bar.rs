@@ -1,7 +1,7 @@
 //! The viewer's **status area** (`viewer-ui-status-bar`): the read-outs that
 //! fill the top menu bar's row to its trailing edge — the parcel permission
-//! placeholders, the region name, the agent's coordinates, the parcel name, the
-//! L$ balance, the grid time, and the frame rate.
+//! icons, the region name, the agent's coordinates, the parcel name, the L$
+//! balance, the grid time, and the frame rate.
 //!
 //! Split out of [`crate::menu_bar`], which shipped the bar and the menu names
 //! but deliberately left this for its own pass: it is a distinct concern with
@@ -14,7 +14,7 @@
 //! after the menu-search field, as one flex item that grows to fill the row — so
 //! the top row reads as one continuous bar spanning the whole window, the
 //! reference viewer's arrangement. Its children run in the reference order
-//! (`panel_status_bar.xml`): the parcel permission letters, the region name, the
+//! (`panel_status_bar.xml`): the parcel permission icons, the region name, the
 //! coordinates, then the **flexible** parcel name (which absorbs the row's slack
 //! and so pushes the rest to the trailing edge), then the balance, the time and
 //! the FPS. Every element but the parcel name is **fixed-width**, so a value's
@@ -28,7 +28,7 @@
 //! menu bar, after the last menu — rather than moving to the trailing edge as
 //! the reference viewer does; only these read-outs live here.
 //!
-//! # Parcel permission placeholders
+//! # Parcel permission icons
 //!
 //! The permission logic mirrors `LLStatusBar::updateParcelIcons` /
 //! `LLViewerParcelMgr::allowAgent*`: a permission is "in force" when the ability
@@ -37,12 +37,21 @@
 //! (the hazard). The parcel comes from [`SlAgentParcel`], mirrored from the
 //! CAPS/UDP `ParcelProperties` the session ingests (see the
 //! `parcelproperties-via-caps-eventqueue` memory), combined with the current
-//! region's [`RegionFlags`]. Lacking the reference viewer's bundled parcel-icon
-//! textures, each permission is drawn for now as a single always-visible letter
-//! that brightens when in force — an interim **text placeholder** for the icon,
-//! replaced wholesale when the icon art is ported (its own follow-up task). The
-//! pathfinding-dirty / -disabled icons the reference also shows are Second Life
-//! navmesh state the viewer does not track yet, so they are omitted.
+//! region's [`RegionFlags`].
+//!
+//! Each permission is a bundled icon (`assets/icons/parcel/*.png`, sources beside
+//! them) — an original glyph rather than the reference viewer's own art: a
+//! slashed microphone, an up-arrow, an arrow into a wall, a cube, a document,
+//! an eye, and a heart. Each icon is **shown only while its restriction is in
+//! force** (the reference viewer's semantics — [`update_parcel_icons`] toggles
+//! its [`Visibility`]), but its slot is always laid out, so the icon bar keeps a
+//! constant width whether nothing or everything is restricted. The glyphs are
+//! white-on-transparent masks tinted the skin's "loss" colour
+//! ([`ImageNode::color`] via `-bevy-image-color`). A skin can override the tint,
+//! or replace / re-tint an individual glyph through its per-icon class
+//! ([`ParcelIcon::class`], e.g. `.sk-parcel-icon--voice`). The pathfinding-dirty
+//! / -disabled icons the reference also shows are Second Life navmesh state the
+//! viewer does not track yet, so they are omitted.
 //!
 //! # Time is always SLT
 //!
@@ -93,15 +102,14 @@ const TIME_WIDTH: f32 = 116.0;
 /// The fixed width of the FPS read-out, in logical pixels.
 const FPS_WIDTH: f32 = 60.0;
 
-/// The colour of an **active** parcel-permission letter — a restriction is in
-/// force (or, for damage, the hazard is on). Deliberately a fixed warm hue, not
-/// a skin token: these are interim text placeholders for the reference viewer's
-/// parcel icons, replaced wholesale when the icon art is ported.
-const ICON_ACTIVE: Color = Color::srgb(1.0, 0.5, 0.35);
+/// The side length of a parcel-permission icon, in logical pixels.
+const ICON_SIZE: f32 = 16.0;
 
-/// The colour of an **inactive** parcel-permission letter — the ability is
-/// allowed, so its placeholder sits muted.
-const ICON_MUTED: Color = Color::srgb(0.42, 0.45, 0.5);
+/// The CSS class on every parcel-permission icon, tinting it the skin's "loss"
+/// colour (theme-driven rather than a hard-coded hue). Each icon's slot is
+/// always laid out; only its [`Visibility`] toggles, so the icon shows only when
+/// its restriction is in force while the icon bar keeps a constant width.
+const ICON_CLASS: &str = "sk-parcel-icon";
 
 /// The settings key (under the `[statusbar]` section) gating the agent-position
 /// coordinates in the location read-out, mirroring the reference viewer's
@@ -109,8 +117,8 @@ const ICON_MUTED: Color = Color::srgb(0.42, 0.45, 0.5);
 /// only shapes the persisted file, not the lookup.
 const SHOW_COORDINATES_KEY: &str = "statusbar_show_coordinates";
 
-/// Which parcel permission a placeholder letter reflects, in the reference
-/// viewer's left-to-right order.
+/// Which parcel permission an icon reflects, in the reference viewer's
+/// left-to-right order.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum ParcelIcon {
     /// Voice chat is not allowed here.
@@ -141,17 +149,35 @@ impl ParcelIcon {
         Self::Damage,
     ];
 
-    /// The Fluent key for this permission's single-letter placeholder — a stand-in
-    /// for the reference viewer's parcel icon until the icon art is ported.
-    const fn abbr_key(self) -> &'static str {
+    /// This icon's default bundled image asset path (relative to the viewer's
+    /// asset root). Each is a white-on-transparent glyph mask, tinted at runtime
+    /// by the skin ([`ICON_CLASS`]); the sources are the `.svg` files beside them.
+    /// A skin can replace the glyph by setting `-bevy-image` on this icon's
+    /// per-icon class ([`class`](Self::class)).
+    const fn asset_path(self) -> &'static str {
         match self {
-            Self::Voice => "status-bar-icon-voice-abbr",
-            Self::Fly => "status-bar-icon-fly-abbr",
-            Self::Push => "status-bar-icon-push-abbr",
-            Self::Build => "status-bar-icon-build-abbr",
-            Self::Scripts => "status-bar-icon-scripts-abbr",
-            Self::SeeAvatars => "status-bar-icon-see-avatars-abbr",
-            Self::Damage => "status-bar-icon-damage-abbr",
+            Self::Voice => "icons/parcel/voice.png",
+            Self::Fly => "icons/parcel/fly.png",
+            Self::Push => "icons/parcel/push.png",
+            Self::Build => "icons/parcel/build.png",
+            Self::Scripts => "icons/parcel/scripts.png",
+            Self::SeeAvatars => "icons/parcel/avatars.png",
+            Self::Damage => "icons/parcel/damage.png",
+        }
+    }
+
+    /// This icon's per-icon CSS class, so a skin can target one glyph — e.g.
+    /// `.sk-parcel-icon--voice { -bevy-image: url("…"); }` to swap its art or
+    /// re-tint just it. Every icon also carries the shared [`ICON_CLASS`].
+    const fn class(self) -> &'static str {
+        match self {
+            Self::Voice => "sk-parcel-icon--voice",
+            Self::Fly => "sk-parcel-icon--fly",
+            Self::Push => "sk-parcel-icon--push",
+            Self::Build => "sk-parcel-icon--build",
+            Self::Scripts => "sk-parcel-icon--scripts",
+            Self::SeeAvatars => "sk-parcel-icon--see-avatars",
+            Self::Damage => "sk-parcel-icon--damage",
         }
     }
 }
@@ -297,12 +323,12 @@ fn register_status_bar_settings(settings: Option<ResMut<ViewerSettings>>) {
 ///
 /// The area is one flex item that grows to fill the row after the menus and
 /// search ([`flex_grow`](Node::flex_grow) `1`), holding — in the reference
-/// viewer's order — the parcel permission letters, the region name, the
+/// viewer's order — the parcel permission icons, the region name, the
 /// coordinates, the **flexible** parcel name (which absorbs the row's slack and
 /// so pushes the rest to the trailing edge), then the fixed-width balance, time
 /// and FPS. Every element but the parcel name is fixed-width, so a value's text
 /// length changing never shifts its neighbours.
-pub(crate) fn spawn_status_area(commands: &mut Commands, bar: Entity) {
+pub(crate) fn spawn_status_area(commands: &mut Commands, asset_server: &AssetServer, bar: Entity) {
     let area = commands
         .spawn((
             Node {
@@ -320,8 +346,8 @@ pub(crate) fn spawn_status_area(commands: &mut Commands, bar: Entity) {
         ))
         .id();
 
-    // The parcel-permission placeholders run first (leading), grouped in one row
-    // so they read as a block.
+    // The parcel-permission icons run first (leading), grouped in one row so they
+    // read as a block.
     let icons = commands
         .spawn((
             Node {
@@ -336,7 +362,7 @@ pub(crate) fn spawn_status_area(commands: &mut Commands, bar: Entity) {
         ))
         .id();
     for icon in ParcelIcon::ALL {
-        spawn_parcel_icon(commands, icons, icon);
+        spawn_parcel_icon(commands, asset_server, icons, icon);
     }
 
     // The read-outs, in reference order. Region and coordinates are fixed-width
@@ -368,15 +394,30 @@ pub(crate) fn spawn_status_area(commands: &mut Commands, bar: Entity) {
     spawn_readout(commands, area, StatusReadout::Fps, Some(FPS_WIDTH), true);
 }
 
-/// Spawn one parcel-permission placeholder letter under `parent`. The letter is
-/// always shown; its colour tracks whether the permission is in force (an interim
-/// stand-in for the reference viewer's parcel icon).
-fn spawn_parcel_icon(commands: &mut Commands, parent: Entity, icon: ParcelIcon) {
+/// Spawn one parcel-permission icon under `parent`. Its slot is always laid out
+/// (so the icon bar keeps a constant width), but it starts hidden and
+/// [`update_parcel_icons`] shows it only while its restriction is in force. The
+/// glyph is a white-on-transparent mask, so the skin's [`ImageNode::color`] tint
+/// (via `ICON_CLASS`) recolours it wholesale; the per-icon [`class`](ParcelIcon::class)
+/// lets a skin re-tint or replace just this glyph.
+fn spawn_parcel_icon(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    parent: Entity,
+    icon: ParcelIcon,
+) {
     commands.spawn((
-        Text::new(String::new()),
-        // Monospace so the letter block keeps a steady width.
-        UiFont::Mono.at(STATUS_FONT_SIZE),
-        TextColor(ICON_MUTED),
+        ImageNode::new(asset_server.load(icon.asset_path())),
+        Node {
+            width: Val::Px(ICON_SIZE),
+            height: Val::Px(ICON_SIZE),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        // Hidden — not `Display::None` — so its slot is reserved and the bar's
+        // width is the same whether or not the restriction is in force.
+        Visibility::Hidden,
+        ClassList::new_with_classes([ICON_CLASS, icon.class()]),
         icon,
         Name::new("status-parcel-icon"),
         ChildOf(parent),
@@ -581,37 +622,38 @@ fn fps_text(translator: &Translator, diagnostics: &DiagnosticsStore) -> String {
     translator.format("status-bar-fps", &TransArgs::new().text("fps", &fps))
 }
 
-/// Rewrite the parcel-permission placeholder letters each frame: fill each
-/// letter (localized) and colour it by whether the permission is in force for the
-/// current parcel + region. Every letter is always shown; an unresolved parcel
-/// leaves them all muted.
+/// Update each parcel-permission icon each frame: show it only while its
+/// restriction is in force for the current parcel + region (the reference
+/// viewer's semantics), hiding it otherwise. Visibility (not display) toggles, so
+/// the icon bar keeps a constant width either way. An unresolved parcel leaves
+/// them all hidden.
 fn update_parcel_icons(
-    translator: Translator,
     agent_parcel: Res<SlAgentParcel>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    mut chips: Query<(&ParcelIcon, &mut Text, &mut TextColor)>,
+    mut icons: Query<(&ParcelIcon, &mut Visibility)>,
 ) {
     let region_flags = regions.single().ok().map_or_else(
         || RegionFlags::from_bits(0),
         |region| RegionFlags::from_bits(region.0.region_flags),
     );
-    // With no resolved parcel there is nothing in force, so every letter is muted.
-    let icons = agent_parcel.current.as_ref().map(|parcel| ParcelIcons {
+    // With no resolved parcel there is nothing in force, so every icon is hidden.
+    let context = agent_parcel.current.as_ref().map(|parcel| ParcelIcons {
         parcel_flags: parcel.flags(),
         see_avs: parcel.see_avs,
         region: region_flags,
         can_fly: agent_parcel.can_fly,
     });
 
-    for (icon, mut text, mut color) in &mut chips {
-        let label = translator.get(icon.abbr_key());
-        if text.0 != label {
-            text.0 = label;
-        }
-        let active = icons.as_ref().is_some_and(|icons| icons.shown(*icon));
-        let next = if active { ICON_ACTIVE } else { ICON_MUTED };
-        if color.0 != next {
-            color.0 = next;
+    for (icon, mut visibility) in &mut icons {
+        let active = context.as_ref().is_some_and(|context| context.shown(*icon));
+        let next = if active {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        // Write through change detection only on a real change.
+        if *visibility != next {
+            *visibility = next;
         }
     }
 }
