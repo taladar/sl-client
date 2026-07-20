@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 101 |
-| blocked | 91 |
+| ready | 104 |
+| blocked | 89 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 513 |
+| done | 515 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **735** |
+| **total** | **738** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (101)
+## ready (104)
 
 ### viewer
 
@@ -53,6 +53,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
+- [`viewer-avatar-context-menu`](ready/viewer-avatar-context-menu.md) — Avatar
+  context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
+  (done))
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
@@ -77,6 +80,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-hud-context-menu`](ready/viewer-hud-context-menu.md) — HUD context /
+  pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
@@ -202,14 +207,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
   dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-context-menu`](ready/viewer-ui-context-menu.md) — Line-based
-  context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-menu-keyboard-nav`](ready/viewer-ui-menu-keyboard-nav.md) —
+  Keyboard traversal of an open menu (blocked by `viewer-ui-context-menu`
+  (done))
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-status-bar`](ready/viewer-ui-status-bar.md) — Status area (region
+  / parcel / balance / time / FPS / permission icons) (blocked by
+  `viewer-ui-menu-bar` (done))
 - [`viewer-ui-text-input-widget`](ready/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -278,13 +287,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (91)
+## blocked (89)
 
 ### viewer
 
-- [`viewer-avatar-context-menu`](blocked/viewer-avatar-context-menu.md) — Avatar
-  context / pie menu entries (self + others) (blocked by
-  `viewer-ui-context-menu`)
 - [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
   `viewer-name-tags-display-names`)
@@ -324,8 +330,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-channel-and-commands`)
 - [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
   (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
-- [`viewer-hud-context-menu`](blocked/viewer-hud-context-menu.md) — HUD context
-  / pie menu entries (blocked by `viewer-ui-context-menu`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -393,7 +397,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Notification list / history panel (blocked by `viewer-ui-notification-host`)
 - [`viewer-object-context-menu`](blocked/viewer-object-context-menu.md) — Object
   hover / context menu entries (blocked by `viewer-object-selection-core`,
-  `viewer-ui-radial-menu` (done), `viewer-ui-context-menu`)
+  `viewer-ui-radial-menu` (done), `viewer-ui-context-menu` (done))
 - [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
   — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
   `viewer-ui-floater-basic` (done))
@@ -498,8 +502,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core`,
   `viewer-input-action-map` (done))
-- [`viewer-ui-menu-bar`](blocked/viewer-ui-menu-bar.md) — Top menu bar (blocked
-  by `viewer-ui-context-menu`)
+- [`viewer-ui-menu-search`](blocked/viewer-ui-menu-search.md) — Menu search
+  field (blocked by `viewer-ui-menu-bar` (done), `viewer-ui-text-input-widget`)
 - [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
   `viewer-ui-settings-binding` (done))
@@ -584,7 +588,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (513)
+## done (515)
 
 ### protocol
 
@@ -1032,6 +1036,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based
+  context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
   manager (basic) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-persist-geometry`](done/viewer-ui-floater-persist-geometry.md)
@@ -1040,6 +1046,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-floater-resize-dock`](done/viewer-ui-floater-resize-dock.md) —
   Floater window manager (resize / minimize / dock / tear-off) (blocked by
   `viewer-ui-floater-basic` (done))
+- [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by
+  `viewer-ui-context-menu` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-binding`](done/viewer-ui-settings-binding.md) — Two-way

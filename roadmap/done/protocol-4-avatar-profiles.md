@@ -14,7 +14,8 @@ picks/notes · 3 pts. ✅ Done.** A standalone profile/picks checker. Implemente
 `AvatarPropertiesReply` + `AvatarInterestsReply` + `AvatarGroupsReply`) plus
 `request_avatar_picks` and `request_avatar_notes` (the `GenericMessage`
 `avatarpicksrequest` / `avatarnotesrequest` calls OpenSim expects). Surfaced as
-`Event::{AvatarProperties, AvatarInterests, AvatarGroups, AvatarPicks, AvatarNotes}`
+`Event::{AvatarProperties, AvatarInterests, AvatarGroups, AvatarPicks,
+AvatarNotes}`
 with value types (`AvatarProperties`, `AvatarInterests`,
 `AvatarGroupMembership`, `AvatarPick`). Wired as
 `Command::RequestAvatar{Properties, Picks,Notes}` through both runtimes;

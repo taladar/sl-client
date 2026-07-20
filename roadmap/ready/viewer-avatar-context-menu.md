@@ -2,10 +2,10 @@
 id: viewer-avatar-context-menu
 title: Avatar context / pie menu entries (self + others)
 topic: viewer
-status: blocked
+status: ready
 origin: gap noticed reviewing the UI cluster (2026-07)
-blocked_by: [viewer-ui-context-menu]
-refs: [viewer-ui-radial-menu, viewer-object-context-menu, viewer-social-profiles, viewer-avatar-radar]
+blocked_by: [viewer-ui-radial-menu]
+refs: [viewer-ui-context-menu, viewer-object-context-menu, viewer-social-profiles, viewer-avatar-radar]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

@@ -49,7 +49,8 @@ its circuit goes away. Public API: `Session::objects()` (all regions) /
 `objects_in_region(handle)` / `object(local_id)` (current region),
 `request_objects`, `request_object_properties` (select) / `deselect_objects`,
 wired as
-`Command`/`SlCommand::{RequestObjects, RequestObjectProperties, DeselectObjects}`
+`Command` /
+`SlCommand::{RequestObjects, RequestObjectProperties, DeselectObjects}`
 through both runtimes. Decoders + neighbour streaming covered by seven
 `sl-proto` lifecycle tests (full/terse/cached/compressed/kill/properties + a
 child-circuit neighbour test). *Live-verified against the local 2×2 OpenSim:

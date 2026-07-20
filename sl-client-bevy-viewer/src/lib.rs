@@ -62,6 +62,8 @@ mod locomotion;
 mod locomotion_ik;
 mod look_at;
 mod materials;
+mod menu;
+mod menu_bar;
 mod meshes;
 mod movement;
 mod objects;
@@ -706,6 +708,12 @@ fn run_session(
     // (viewer-object-context-menu), so nothing here opens one yet. The widget is
     // reachable in the gallery's `radial-menu-target` card meanwhile.
     .add_plugins(PieMenuPlugin)
+    // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
+    // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
+    // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
+    // mechanism only — which entries a menu holds is per-domain (the live top
+    // bar is `crate::menu_bar`, gear menus belong to their window).
+    .add_plugins(crate::menu::MenuWidgetPlugin)
     // The virtualized (windowed-recycling) list widget (viewer-ui-virtualized-list):
     // a bounded row pool that recycles as the viewport scrolls, so a long panel
     // (inventory, radar, chat at scale) costs the viewport, not the item count.
@@ -720,6 +728,10 @@ fn run_session(
     // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
     // in a floater, so it drags / resizes / minimizes / docks.
     .add_plugins(InventoryPlugin)
+    // The live top menu bar (viewer-ui-menu-bar): the strip of pull-down menu
+    // names at the top of the screen, on `crate::menu`'s widget. After the
+    // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.
+    .add_plugins(crate::menu_bar::TopMenuBarPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

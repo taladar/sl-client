@@ -84,6 +84,41 @@
   padding: 4px 12px;
 }
 
+/* A menu bar — the horizontal strip of pull-down buttons. A background-only
+ * surface (like a card) so it recolours with the skin. */
+.sk-menu-bar {
+  background-color: var(--surface-bg);
+}
+
+/* A menu-bar button (a top-level menu's label). The hover highlight is painted
+ * in Rust (src/menu.rs `highlight_menu_hover`), not here, so it reads the same
+ * with or without a skin; this rule only carries the skin's text colour and
+ * corner. Deliberately no `background-color`, so the skin does not fight the
+ * per-frame highlight. */
+.sk-menu-bar-item {
+  color: var(--text-primary);
+  border-radius: var(--control-radius);
+}
+
+/* A dropped-down / popped-up menu surface. */
+.sk-menu {
+  background-color: var(--surface-bg);
+  border-color: var(--surface-border);
+  border-radius: var(--surface-radius);
+}
+
+/* One entry row in a menu. Its highlight is Rust-painted (see above); this rule
+ * carries only the skin's text colour and corner, no background. */
+.sk-menu-item {
+  color: var(--text-primary);
+  border-radius: var(--control-radius);
+}
+
+/* The faint rule between two groups of entries. */
+.sk-menu-separator {
+  background-color: var(--control-border);
+}
+
 /* Meaning-bearing swatches. These are the semantic tokens the culture-colour
  * and colour-blind overlays remap (a locale profile flips --gain / --loss); a
  * meaning-bearing surface references one of these, never a literal colour. */

@@ -19,7 +19,8 @@ below, the visual-param bytes, the optional appearance-version / COF-version /
 flags, hover height, and attachments). The key piece is a faithful port of the
 viewer's packed-`TextureEntry` decoder in new `sl-proto/src/appearance.rs`
 (`decode_texture_entry`): the run-length
-`(default value, then (face-bitmask, value) overrides terminated by a zero bitmask)`
+`(default value, then (face-bitmask, value) overrides terminated by a zero
+bitmask)`
 form for all eleven per-face fields (texture id, tint colour un-inverted from
 the wire's `255−x`, scale, offset, rotation, bump/shiny/fullbright, media, glow,
 material id), matching `LLPrimitive::parseTEMessage`/`unpack_TEField`. New value

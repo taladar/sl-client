@@ -2099,10 +2099,18 @@ fn address_table(menu: &'static PieMenuDef) -> String {
 ///
 /// The **secondary** button, which is what a context menu is bound to on every
 /// desktop and in the reference viewer.
-fn open_pie_on_right_click(press: On<Pointer<Press>>, mut requests: MessageWriter<OpenPieMenu>) {
+fn open_pie_on_right_click(
+    mut press: On<Pointer<Press>>,
+    mut requests: MessageWriter<OpenPieMenu>,
+) {
     if press.button != PointerButton::Secondary {
         return;
     }
+    // This card is the pie's own demo (it prints the address table), so it opens
+    // a pie regardless of the gallery's right-click toggle — and it stops the
+    // press bubbling to the surface-wide handler, so a right-click here does not
+    // *also* open the toggle's menu.
+    press.propagate(false);
     requests.write(OpenPieMenu {
         menu: &FIXTURE_PIE,
         at: press.pointer_location.position,

@@ -52,7 +52,9 @@ use sl_client_bevy::{
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
+use crate::menu::{MenuCommand, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
@@ -149,6 +151,7 @@ impl Plugin for InventoryPlugin {
                     refresh_inventory_on_show,
                     ingest_inventory,
                     bridge_tab_selection,
+                    route_gear_menu,
                     apply_ui_actions,
                     read_search_field,
                     rebuild_view,
@@ -586,7 +589,7 @@ struct InventoryView {
 /// Entity handles for the window's parts, so the systems can find them without
 /// re-querying by marker every frame.
 #[derive(Resource)]
-struct InventoryUi {
+pub(crate) struct InventoryUi {
     /// The panel root (carries [`UiPanelShown`]).
     panel: Entity,
     /// The scrolling viewport (carries [`VirtualList`]).
@@ -596,6 +599,15 @@ struct InventoryUi {
     /// The reusable tab strip ([`crate::ui_tab`]) whose active index selects the
     /// list — mapped through [`TAB_ORDER`] by [`bridge_tab_selection`].
     tab_strip: Entity,
+}
+
+impl InventoryUi {
+    /// The window's panel-root entity — carries [`UiPanelShown`], so the top
+    /// menu bar ([`crate::menu_bar`]) can toggle the window and read whether it
+    /// is open without reaching into this module's private fields.
+    pub(crate) const fn panel(&self) -> Entity {
+        self.panel
+    }
 }
 
 /// The inventory list each tab of the strip selects, in the strip's button
@@ -674,6 +686,48 @@ enum InventoryUiAction {
     CollapseAll,
     /// Toggle a folder's expand state (from a row click).
     ToggleFolder(InventoryFolderKey),
+}
+
+/// The `element` the inventory gear menu attributes its picks to, so
+/// [`route_gear_menu`] routes its own menu and no other.
+const INVENTORY_GEAR_ELEMENT: &str = "inventory-gear";
+
+/// The inventory window's gear (options) menu — the reference's
+/// `menu_inventory_gear_default`, on [`crate::menu`]'s reusable widget. Its
+/// label is the gear glyph (U+2699). Only the entries with a live action today
+/// are wired; the rest are a placeholder for future inventory tasks.
+static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
+    label: "\u{2699}",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Expand All Folders", "expand-all")),
+        MenuItemDef::Command(MenuCommand::new("Collapse All Folders", "collapse-all")),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("(more options soon)", "noop").enabled_when("never")),
+    ],
+};
+
+/// Route the gear menu's picks (a [`UiAction`]) to the window's own
+/// [`InventoryUiAction`]s — the live wiring the reusable widget leaves to its
+/// host, exactly as the top menu bar wires its own picks
+/// ([`crate::menu_bar`]).
+fn route_gear_menu(
+    mut picks: MessageReader<UiAction>,
+    mut actions: MessageWriter<InventoryUiAction>,
+) {
+    for pick in picks.read() {
+        if pick.element != INVENTORY_GEAR_ELEMENT {
+            continue;
+        }
+        match pick.action {
+            "expand-all" => {
+                actions.write(InventoryUiAction::ExpandAll);
+            }
+            "collapse-all" => {
+                actions.write(InventoryUiAction::CollapseAll);
+            }
+            _ => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1305,6 +1359,21 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
         |_press: On<Pointer<Press>>, mut actions: MessageWriter<InventoryUiAction>| {
             actions.write(InventoryUiAction::CollapseAll);
         },
+    );
+    // The reference viewer's inventory **gear menu** — a drop-down of window
+    // options anchored to a button, built on the very same line-menu widget the
+    // top menu bar uses (`crate::menu`). This is the shared-widget point: the
+    // main bar and the inventory's gear button are two placements of one menu, so
+    // the entries a future task adds land in a `MenuDef` here, not a bespoke
+    // panel. Wired today to the expand / collapse actions the window already has;
+    // the rest of the reference's gear entries (sort, filters, new window) are a
+    // placeholder for future tasks.
+    crate::menu::spawn_menu_button(
+        &mut commands,
+        expand_row,
+        ElementCx::new(),
+        &INVENTORY_GEAR_MENU,
+        INVENTORY_GEAR_ELEMENT,
     );
 
     // Search field.

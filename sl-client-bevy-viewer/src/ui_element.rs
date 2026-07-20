@@ -482,6 +482,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   an RTL mirror.",
         spawn: crate::ui_tab::spawn_tabs_inline_end,
     },
+    UiElement {
+        id: "menu-bar",
+        summary: "A closed menu bar (`crate::menu`): a strip of pull-down buttons whose drop-downs \
+                  open on click — command / check / disabled entries, separators, accelerators and \
+                  a submenu. Swept closed; its opened drop-down layout is checked in the module's \
+                  own tests, and it is drivable live by the gallery's right-click menu toggle.",
+        spawn: crate::menu::spawn_menu_bar_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

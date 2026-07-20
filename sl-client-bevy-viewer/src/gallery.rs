@@ -231,6 +231,13 @@ pub fn run() {
         // restores the cursor itself rather than relying on the viewer's input
         // context, which this binary has not got.
         .add_plugins(PieMenuPlugin)
+        // The line-menu widget: the menu-bar specimen's drop-downs, and the
+        // context menu the right-click toggle below opens. Right-click anywhere
+        // in the gallery opens a pie or a drop-down context menu depending on the
+        // `PointerMenuStyle` toggle, so the two presentations of a menu are
+        // switchable side by side rather than one being a pre-opened card.
+        .add_plugins(crate::menu::MenuWidgetPlugin)
+        .init_resource::<PointerMenuStyle>()
         // The tab widget's runtime half: a resizable strip's width reaching layout
         // (the divider demo) and each tab's corners tracking the direction.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
@@ -263,6 +270,7 @@ pub fn run() {
                 respawn_elements_on_cell_change.after(drive_gallery_keys),
                 update_gallery_header,
                 update_skin_switcher_label,
+                update_pointer_menu_label,
                 drive_focus_ring,
                 scroll_gallery,
                 log_actions,
@@ -320,7 +328,7 @@ fn setup_gallery(mut commands: Commands, root: Res<crate::ui::UiRoot>, cell: Res
     // persistent on-screen menu, so there is nothing to scroll to an edge. The
     // observer sits on the scaffold root, which receives the press wherever no
     // blocking widget is under the pointer — the margins and gaps, and every edge.
-    commands.entity(root.0).observe(open_gallery_pie);
+    commands.entity(root.0).observe(open_gallery_menu);
     // A **sticky header bar** outside the scroll area, so the key legend and the
     // live-cell readout stay on screen while the element list scrolls under it.
     // `flex_shrink: 0` keeps it at its content height; the page below takes the
@@ -448,6 +456,21 @@ fn spawn_skin_switcher(commands: &mut Commands, header: Entity) {
         ChildOf(strip),
     ));
 
+    // The right-click menu toggle: flips whether a right-click anywhere opens a
+    // pie or a drop-down context menu, so both presentations are reachable from
+    // the same surface.
+    commands
+        .spawn((switcher_button(), PointerMenuButton, ChildOf(strip)))
+        .with_child(chip_text("Right-click ▸"))
+        .observe(cycle_pointer_menu_clicked);
+    commands.spawn((
+        Text::default(),
+        UiFont::Mono.at(CHROME_FONT_SIZE),
+        TextColor(HEADER_COLOR),
+        PointerMenuLabel,
+        ChildOf(strip),
+    ));
+
     // Skinned sample chips: switching the skin or theme recolours these live.
     commands
         .spawn((chip("sk-button"), ChildOf(strip)))
@@ -515,6 +538,36 @@ fn chip_text(label: &str) -> impl Bundle {
         UiFont::Sans.at(CHROME_FONT_SIZE),
         TextColor(Color::WHITE),
     )
+}
+
+/// Marker on the right-click menu toggle button.
+#[derive(Component)]
+struct PointerMenuButton;
+
+/// Marker on the right-click menu toggle's live-selection label.
+#[derive(Component)]
+struct PointerMenuLabel;
+
+/// Observer: flip the right-click menu presentation when its button is
+/// activated.
+fn cycle_pointer_menu_clicked(_activate: On<Activate>, mut style: ResMut<PointerMenuStyle>) {
+    style.cycle();
+}
+
+/// Keep the right-click toggle's live label in step with [`PointerMenuStyle`].
+fn update_pointer_menu_label(
+    style: Res<PointerMenuStyle>,
+    mut labels: Query<&mut Text, With<PointerMenuLabel>>,
+) {
+    if !style.is_changed() {
+        return;
+    }
+    let wanted = format!("{SKIN_SWITCHER_PREFIX}{}", style.label());
+    for mut text in &mut labels {
+        if text.0 != wanted {
+            wanted.clone_into(&mut text.0);
+        }
+    }
 }
 
 /// Observer: advance to the next skin when the skin button is activated.
@@ -760,22 +813,69 @@ fn log_actions(mut actions: MessageReader<UiAction>) {
     }
 }
 
-/// Open the fixture pie where the gallery was right-clicked.
+/// Which menu a right-click on the gallery surface opens — the two presentations
+/// of a menu, switchable so they can be compared without one being a pre-opened
+/// card. Cycled by the header's toggle button.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PointerMenuStyle {
+    /// A radial (pie) menu at the pointer.
+    #[default]
+    Pie,
+    /// A line-based drop-down context menu at the pointer.
+    DropDown,
+}
+
+impl PointerMenuStyle {
+    /// Advance to the other presentation.
+    const fn cycle(&mut self) {
+        *self = match *self {
+            Self::Pie => Self::DropDown,
+            Self::DropDown => Self::Pie,
+        };
+    }
+
+    /// The live label of the current presentation.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Pie => "pie",
+            Self::DropDown => "drop-down",
+        }
+    }
+}
+
+/// Open a menu where the gallery was right-clicked, in whichever presentation
+/// the [`PointerMenuStyle`] toggle selects.
 ///
-/// The **secondary** button, as a context menu is everywhere. It opens the pie at
-/// the pointer, so a right-click near a viewport edge exercises the inward clamp,
-/// and one in a corner exercises both edges at once — the placement cases the unit
-/// tests cover and this lets a person watch.
-fn open_gallery_pie(press: On<Pointer<Press>>, mut requests: MessageWriter<OpenPieMenu>) {
+/// The **secondary** button, as a context menu is everywhere. It opens at the
+/// pointer, so a right-click near a viewport edge exercises the inward clamp /
+/// edge flip, and one in a corner exercises both edges at once — the placement
+/// cases the unit tests cover and this lets a person watch, in either widget.
+fn open_gallery_menu(
+    press: On<Pointer<Press>>,
+    style: Res<PointerMenuStyle>,
+    mut pies: MessageWriter<OpenPieMenu>,
+    mut context_menus: MessageWriter<crate::menu::OpenContextMenu>,
+) {
     if press.button != PointerButton::Secondary {
         return;
     }
-    requests.write(OpenPieMenu {
-        menu: &FIXTURE_PIE,
-        at: press.pointer_location.position,
-        element: "radial-menu",
-        conditions: &[],
-    });
+    match *style {
+        PointerMenuStyle::Pie => {
+            pies.write(OpenPieMenu {
+                menu: &FIXTURE_PIE,
+                at: press.pointer_location.position,
+                element: "radial-menu",
+                conditions: &[],
+            });
+        }
+        PointerMenuStyle::DropDown => {
+            context_menus.write(crate::menu::OpenContextMenu {
+                menu: &crate::menu::FIXTURE_CONTEXT_MENU,
+                at: press.pointer_location.position,
+                element: "context-menu",
+            });
+        }
+    }
 }
 
 /// Quit on `Escape`.
