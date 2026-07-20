@@ -243,6 +243,9 @@ pub fn run() {
         // The text-input widget's runtime half: the numeric fields' whole-string
         // validator, so a bad arrangement reverts in the gallery too.
         .add_plugins(crate::ui_text_input::TextInputPlugin)
+        // The search-field widget's runtime half: clear-button / placeholder
+        // visibility, so the search specimen behaves in the gallery too.
+        .add_plugins(crate::ui_search::SearchFieldPlugin)
         // The skin / design-token system, so the gallery is dressed in a real
         // skin and the switcher below can flip skins and theme overlays live.
         .insert_resource(crate::skin::SkinSelection::resolve(None, None))

@@ -142,17 +142,18 @@
   background-color: var(--control-border);
 }
 
-/* The menu-search box in the bar — a single-line text input, so it takes the
- * skin's control surface, like the other editable fields. */
-.sk-menu-search-field {
+/* The reusable search box (viewer-ui-search-field) — a single-line text input,
+ * so it takes the skin's control surface, like the other editable fields. Used by
+ * the menu-bar filter and the inventory filter. */
+.sk-search-field {
   background-color: var(--control-bg);
   border-color: var(--control-border);
   border-radius: var(--control-radius);
   color: var(--text-primary);
 }
 
-/* The circular clear (×) button inside the search box. */
-.sk-menu-search-clear {
+/* The circular clear (×) button inside a search box. */
+.sk-search-clear {
   background-color: var(--control-border);
 }
 

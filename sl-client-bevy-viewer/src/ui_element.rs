@@ -458,6 +458,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_text_input::spawn_unsigned_specimen,
     },
     UiElement {
+        id: "search-field",
+        summary: "The reusable search-field widget (`crate::ui_search`): a single-line field in a \
+                  bordered box with a leading search glyph, a placeholder shown while empty, and a \
+                  trailing × clear button shown only while it holds a term. The menu-bar and \
+                  inventory search boxes are two live consumers.",
+        spawn: crate::ui_search::spawn_search_specimen,
+    },
+    UiElement {
         id: "panel",
         summary: "A composite: a titled panel with prose and a button row, bounded but not \
                   sized.",

@@ -325,6 +325,18 @@ pub(crate) struct TextInputSpec {
     /// A cap on the number of characters the field will hold, or `None` for no
     /// cap. Enforced by `bevy_text` itself ([`EditableText::max_characters`]).
     pub(crate) max_characters: Option<usize>,
+    /// Whether the field draws its own border and background (`true`, the
+    /// default). Set `false` to spawn a **bare** field for embedding inside a
+    /// container that carries the chrome itself — the search-field widget
+    /// ([`crate::ui_search`]) does this, decorating the box around the field
+    /// rather than the field.
+    pub(crate) decorated: bool,
+    /// Whether a single-line field **flex-grows to fill** its parent instead of
+    /// taking its intrinsic glyph-width (`false`, the default). A filled field
+    /// has no `visible_width`; it takes the room its container gives it and
+    /// scrolls. Ignored for the multi-line kind. Used by the search-field widget,
+    /// whose box sets the width and lets the field fill it up to the clear button.
+    pub(crate) fill: bool,
 }
 
 impl TextInputSpec {
@@ -341,6 +353,8 @@ impl TextInputSpec {
             width_glyphs: DEFAULT_WIDTH_GLYPHS,
             visible_lines: DEFAULT_VISIBLE_LINES,
             max_characters: None,
+            decorated: true,
+            fill: false,
         }
     }
 
@@ -394,10 +408,13 @@ pub(crate) fn spawn_text_input(
     if multiline {
         editor.visible_lines = Some(spec.visible_lines);
     } else {
-        // A single line high, sized by glyph-width rather than by content — the
-        // field is a fixed-size control that scrolls, not a label that grows.
+        // A single line high. A filling field takes the width its container gives
+        // it (no intrinsic width); an ordinary one is sized by glyph-width — a
+        // fixed-size control that scrolls, not a label that grows.
         editor.visible_lines = Some(1.0);
-        editor.visible_width = Some(spec.width_glyphs);
+        if !spec.fill {
+            editor.visible_width = Some(spec.width_glyphs);
+        }
     }
 
     // Numeric fields read better in the monospaced face (digits share an advance,
@@ -409,15 +426,24 @@ pub(crate) fn spawn_text_input(
         UiFont::Sans
     };
 
+    // Padding always (breathing room for the caret); the border only on a
+    // decorated field, because a bare one is decorated by the container it sits in.
     let mut node = Node {
-        border: UiRect::all(Val::Px(FIELD_BORDER_WIDTH)),
         padding: UiRect::all(Val::Px(FIELD_PADDING)),
         ..default()
     };
+    if spec.decorated {
+        node.border = UiRect::all(Val::Px(FIELD_BORDER_WIDTH));
+    }
     // A multi-line field wraps its prose at a bound (convention 2); a single-line
-    // field's width is its intrinsic control size, set on the editor above.
+    // field's width is its intrinsic control size (set on the editor above) unless
+    // it fills, in which case it grows to its container and shrinks below its
+    // content so the container's width — not the text — decides the field's.
     if multiline {
         node.max_width = Val::Px(MULTILINE_MAX_WIDTH);
+    } else if spec.fill {
+        node.flex_grow = 1.0;
+        node.min_width = Val::Px(0.0);
     }
 
     // A field always slices its own text at the edge — a single-line field scrolls
@@ -438,8 +464,6 @@ pub(crate) fn spawn_text_input(
         TextCursorStyle::default(),
         TabIndex(spec.tab_index),
         node,
-        BorderColor::all(FIELD_BORDER),
-        BackgroundColor(FIELD_BACKGROUND),
         TextMayClip {
             reason: clip_reason,
         },
@@ -447,6 +471,14 @@ pub(crate) fn spawn_text_input(
         ChildOf(parent),
     ));
 
+    // A decorated field draws its own border and background; a bare one leaves
+    // both to the container it is embedded in.
+    if spec.decorated {
+        field.insert((
+            BorderColor::all(FIELD_BORDER),
+            BackgroundColor(FIELD_BACKGROUND),
+        ));
+    }
     if let Some(filter) = spec.kind.char_filter() {
         field.insert(EditableTextFilter::new(filter));
     }

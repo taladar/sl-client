@@ -100,6 +100,7 @@ mod ui;
 mod ui_element;
 mod ui_font;
 mod ui_pseudoloc;
+mod ui_search;
 mod ui_tab;
 #[cfg(test)]
 mod ui_test;
@@ -694,6 +695,10 @@ fn run_session(
     // value when an edit makes it structurally invalid (a second '.', a misplaced
     // '-') — the part `EditableTextFilter`'s per-character check cannot express.
     .add_plugins(TextInputPlugin)
+    // The reusable search-field widget's runtime half (viewer-ui-search-field):
+    // the clear-button / placeholder visibility and clear-on-Escape, shared by the
+    // menu-bar and inventory search boxes.
+    .add_plugins(crate::ui_search::SearchFieldPlugin)
     // The two-way widget↔settings binding (viewer-ui-settings-binding): the
     // `control_name=` idiom — a checkbox / slider names the setting it edits and
     // the store and widget are kept in sync both ways. Also owns the `F7` demo.

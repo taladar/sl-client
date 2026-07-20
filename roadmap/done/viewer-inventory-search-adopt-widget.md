@@ -2,7 +2,7 @@
 id: viewer-inventory-search-adopt-widget
 title: Adopt the reusable search-field widget in the inventory search
 topic: viewer
-status: blocked
+status: done
 origin: follow-up requested during viewer-ui-text-input-widget (2026-07)
 blocked_by: [viewer-ui-search-field]
 refs: [viewer-inventory-search-filter, viewer-ui-menu-search]
@@ -32,3 +32,16 @@ call sites rather than one.
 
 Reference (Firestorm, read-only): `llfiltereditor` as used by the inventory
 panel's filter box.
+
+## Done (2026-07-20)
+
+`crate::inventory`'s hand-rolled search box (a bespoke `EditableText` plus a
+focus observer) is replaced by a `crate::ui_search::spawn_search_field` call
+(placeholder "Search inventory", leading glyph). `read_search_field` is
+untouched — it still reads the term off the stored field entity
+(`InventoryUi.search`, now the widget's field) and narrows the rows — so the
+model-filtering logic did not move; only the input chrome did. The manual focus
+observer is gone: `bevy_ui_widgets` focuses an `EditableText` on click already.
+
+This is the **second** independently-written consumer that proves
+[[viewer-ui-search-field]]: the menu bar and the inventory now share one widget.

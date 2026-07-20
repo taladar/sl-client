@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 107 |
-| blocked | 85 |
+| ready | 106 |
+| blocked | 84 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 525 |
+| done | 527 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **747** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (107)
+## ready (106)
 
 ### viewer
 
@@ -220,9 +220,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-search-field`](ready/viewer-ui-search-field.md) — Reusable
-  search-field widget (single-line field + clear button) (blocked by
-  `viewer-ui-text-input-widget` (done))
 - [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
   — Text-field↔settings two-way binding (blocked by
   `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
@@ -297,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (85)
+## blocked (84)
 
 ### viewer
 
@@ -358,9 +355,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
-- [`viewer-inventory-search-adopt-widget`](blocked/viewer-inventory-search-adopt-widget.md)
-  — Adopt the reusable search-field widget in the inventory search (blocked by
-  `viewer-ui-search-field`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -587,7 +581,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (525)
+## done (527)
 
 ### protocol
 
@@ -762,6 +756,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-search-adopt-widget`](done/viewer-inventory-search-adopt-widget.md)
+  — Adopt the reusable search-field widget in the inventory search (blocked by
+  `viewer-ui-search-field` (done))
 - [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
@@ -1064,6 +1061,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-menu-bar` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-search-field`](done/viewer-ui-search-field.md) — Reusable
+  search-field widget (single-line field + clear button) (blocked by
+  `viewer-ui-text-input-widget` (done))
 - [`viewer-ui-settings-binding`](done/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))

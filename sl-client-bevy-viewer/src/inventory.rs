@@ -1376,31 +1376,23 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
         INVENTORY_GEAR_ELEMENT,
     );
 
-    // Search field.
-    let mut search_field = EditableText::new("");
-    search_field.allow_newlines = false;
-    search_field.visible_lines = Some(1.0);
-    let search = commands
-        .spawn((
-            search_field,
-            UiFont::Sans.at(CHROME_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            bevy::text::TextCursorStyle::default(),
-            TabIndex(4),
-            Node {
-                border: UiRect::all(Val::Px(2.0)),
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
-                ..default()
-            },
-            BorderColor::all(BUTTON_BORDER),
-            BackgroundColor(Color::srgb(0.10, 0.12, 0.16)),
-            Name::new("inventory-search"),
-            ChildOf(content),
-        ))
-        .observe(|press: On<Pointer<Press>>, mut focus: ResMut<InputFocus>| {
-            focus.set(press.entity, FocusCause::Navigated);
-        })
-        .id();
+    // Search field — the reusable search-field widget (`crate::ui_search`), the
+    // same box the menu bar uses. It owns the border, the `×` clear button, the
+    // placeholder and clear-on-`Escape`; the inventory owns only what the term
+    // *means* (`read_search_field` narrows the shown rows to it). `bevy_ui_widgets`
+    // focuses the field on click, so no press observer is needed here.
+    let search = crate::ui_search::spawn_search_field(
+        &mut commands,
+        content,
+        &crate::ui_search::SearchFieldSpec {
+            tab_index: 4,
+            font_size: CHROME_FONT_SIZE,
+            placeholder: "Search inventory".to_owned(),
+            search_glyph: true,
+            ..crate::ui_search::SearchFieldSpec::new("inventory")
+        },
+    )
+    .field;
 
     // The virtualized viewport **fills** the floater's resizable content area: its
     // width comes from the content column's stretch and its height from
