@@ -75,3 +75,17 @@ status-bar-fps = { $fps } fps
 
 # The parcel permission icons carry no text (they are tinted glyph images), so
 # there are no string keys for them here.
+
+## The bottom toolbar (viewer-ui-bottom-toolbar) — the persistent strip of
+## toggle buttons that open the main floaters. Only Inventory is wired today; the
+## rest are disabled placeholders until their own floater tasks land.
+
+bottom-toolbar-inventory = Inventory
+bottom-toolbar-appearance = Appearance
+bottom-toolbar-map = Map
+bottom-toolbar-minimap = Mini-map
+bottom-toolbar-people = People
+# The chat *window* toggle (distinct from the always-visible nearby-chat input
+# bar that will sit above the button row).
+bottom-toolbar-conversations = Conversations
+bottom-toolbar-camera = Camera

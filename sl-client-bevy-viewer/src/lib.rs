@@ -36,6 +36,7 @@ mod avatars;
 mod bake_inputs;
 mod bake_publish;
 mod body_physics;
+mod bottom_toolbar;
 mod bump;
 mod camera;
 mod chat;
@@ -742,6 +743,12 @@ fn run_session(
     // region / parcel / position, L$ balance, SLT time and FPS read-outs that
     // share the top row, hugging its trailing edge next to the menu bar.
     .add_plugins(crate::status_bar::StatusBarPlugin)
+    // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
+    // toggle buttons that open the main floaters (Inventory wired today, the rest
+    // disabled placeholders until their tasks land), and the bottom-area layout
+    // host the nearby-chat / audio / voice / quick-preferences controls hang off.
+    // After the inventory plugin so its Inventory toggle can reach the window.
+    .add_plugins(crate::bottom_toolbar::BottomToolbarPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

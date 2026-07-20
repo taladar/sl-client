@@ -28,8 +28,15 @@ const CHAT_HISTORY_LINES: usize = 12;
 /// The overlay font size, in logical pixels.
 const CHAT_FONT_SIZE: f32 = 15.0;
 
-/// The inset, in logical pixels, of the overlay from the bottom-left corner.
+/// The inset, in logical pixels, of the overlay from the left edge.
 const CHAT_INSET: f32 = 10.0;
+
+/// How far up from the bottom edge the overlay sits, in logical pixels — enough
+/// to clear the persistent bottom toolbar ([`crate::bottom_toolbar`], a single
+/// button row) so the two do not overlap. A fixed clearance rather than measuring
+/// the bar: this debug overlay is a placeholder the nearby-chat bar will replace,
+/// so it is deliberately not worth wiring to the bar's live height.
+const CHAT_BOTTOM_INSET: f32 = 48.0;
 
 /// A marker component tagging the single overlay text node, so the update system
 /// can find and rewrite it.
@@ -106,7 +113,7 @@ pub(crate) fn setup_chat_overlay(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(CHAT_INSET),
-            bottom: Val::Px(CHAT_INSET),
+            bottom: Val::Px(CHAT_BOTTOM_INSET),
             ..default()
         },
         ChatOverlayText,

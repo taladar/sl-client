@@ -164,6 +164,23 @@
   color: var(--text-primary);
 }
 
+/* The bottom toolbar strip (viewer-ui-bottom-toolbar) — the persistent row of
+ * floater-toggle buttons. A background-only surface, like the menu bar, so it
+ * recolours with the skin. */
+.sk-toolbar-bar {
+  background-color: var(--surface-bg);
+}
+
+/* A bottom-toolbar button. Its enabled / lit (floater open) / disabled
+ * background and label colours are painted in Rust
+ * (src/bottom_toolbar.rs `update_toolbar_button_states`), one place for the three
+ * states, so this rule carries only the skin's corner and border — no
+ * `background-color`, so the skin does not fight the per-frame state paint. */
+.sk-toolbar-button {
+  border-color: var(--control-border);
+  border-radius: var(--control-radius);
+}
+
 /* A parcel-permission icon on the status row. It is shown only while its
  * restriction is in force, so it carries the meaning-bearing "loss" colour — the
  * PNG is a white glyph mask, and `-bevy-image-color` (bevy_flair's ImageNode

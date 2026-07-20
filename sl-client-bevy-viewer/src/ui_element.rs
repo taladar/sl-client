@@ -490,6 +490,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   own tests, and it is drivable live by the gallery's right-click menu toggle.",
         spawn: crate::menu::spawn_menu_bar_specimen,
     },
+    UiElement {
+        id: "bottom-toolbar",
+        summary: "The persistent bottom toolbar (`crate::bottom_toolbar`): a row of floater-toggle \
+                  buttons in an enabled, an active (lit) and a disabled placeholder state. The live \
+                  bar (bottom-anchored, wrapping upward) toggles the main floaters; here it is \
+                  static so all three button states' layouts are swept.",
+        spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.
