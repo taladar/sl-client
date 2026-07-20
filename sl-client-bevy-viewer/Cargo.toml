@@ -69,6 +69,9 @@ sl-anim = { version = "0.1.0", path = "../sl-anim" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",
 ] }
+# The emoji dataset & lookup layer (viewer-emoji-data): the grouped, searchable
+# glyph list the emoji-picker floater (`src/emoji_picker.rs`) presents.
+sl-emoji = { version = "0.1.0", path = "../sl-emoji" }
 # Locale-aware value formatting (viewer-i18n-number-datetime-formats): the CLDR/
 # ICU-backed number, currency and date/time formatters the `Translator` exposes,
 # so a panel writes a grouped balance / coordinate / timestamp for the active

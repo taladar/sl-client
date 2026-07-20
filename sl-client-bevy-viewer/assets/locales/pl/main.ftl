@@ -35,3 +35,7 @@ inventory-tab-recent = Ostatnie
 inventory-tab-worn = Noszone
 inventory-expand-all = Rozwiń wszystko
 inventory-collapse-all = Zwiń wszystko
+
+## The emoji-picker floater (viewer-emoji-picker-floater).
+
+emoji-picker-title = Emoji

@@ -56,6 +56,11 @@ inventory-tab-worn = Worn
 inventory-expand-all = Expand all
 inventory-collapse-all = Collapse all
 
+## The emoji-picker floater (viewer-emoji-picker-floater).
+
+# The picker window's title bar.
+emoji-picker-title = Emoji
+
 ## The status area (viewer-ui-status-bar) — the read-outs on the trailing edge
 ## of the top menu bar.
 

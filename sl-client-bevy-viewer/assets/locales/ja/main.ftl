@@ -27,3 +27,7 @@ inventory-tab-recent = 最近
 inventory-tab-worn = 着用中
 inventory-expand-all = すべて展開
 inventory-collapse-all = すべて折りたたむ
+
+## The emoji-picker floater (viewer-emoji-picker-floater).
+
+emoji-picker-title = 絵文字

@@ -42,6 +42,7 @@ mod camera;
 mod chat;
 mod coords;
 mod diagnostics;
+mod emoji_picker;
 mod environment;
 mod flexi;
 mod floater;
@@ -167,6 +168,7 @@ use crate::diagnostics::{
     PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
     update_pipeline_overlay,
 };
+use crate::emoji_picker::EmojiPickerPlugin;
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
@@ -746,6 +748,13 @@ fn run_session(
     // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
     // in a floater, so it drags / resizes / minimizes / docks.
     .add_plugins(InventoryPlugin)
+    // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
+    // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
+    // glyph inserts it into the text field the picker last saw focused. On the
+    // emoji dataset (`sl-emoji`), the search-field / tab / virtualized-list
+    // widgets and the floater manager. After the floater plugin (its host) and
+    // the inventory plugin (a search-field consumer it shares systems with).
+    .add_plugins(EmojiPickerPlugin)
     // The live top menu bar (viewer-ui-menu-bar): the strip of pull-down menu
     // names at the top of the screen, on `crate::menu`'s widget. After the
     // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.

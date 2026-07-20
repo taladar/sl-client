@@ -534,6 +534,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   static so all three button states' layouts are swept.",
         spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
     },
+    UiElement {
+        id: "emoji-picker",
+        summary: "The emoji-picker floater's novel layout (`crate::emoji_picker`): a couple of grid \
+                  rows of glyphs, the skin-tone swatch row and the preview line. The live floater \
+                  (`Ctrl+E`) filters, groups and inserts a chosen glyph into the focused field; \
+                  here it is static so its layout is swept.",
+        spawn: crate::emoji_picker::spawn_emoji_picker_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

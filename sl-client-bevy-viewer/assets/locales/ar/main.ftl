@@ -35,3 +35,7 @@ inventory-tab-recent = الأحدث
 inventory-tab-worn = المرتدى
 inventory-expand-all = توسيع الكل
 inventory-collapse-all = طي الكل
+
+## The emoji-picker floater (viewer-emoji-picker-floater).
+
+emoji-picker-title = رموز تعبيرية

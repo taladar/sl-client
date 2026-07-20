@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 106 |
+| ready | 105 |
 | blocked | 84 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 527 |
+| done | 528 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **747** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (106)
+## ready (105)
 
 ### viewer
 
@@ -75,9 +75,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
-- [`viewer-emoji-picker-floater`](ready/viewer-emoji-picker-floater.md) — Emoji
-  picker floater (blocked by `viewer-emoji-data` (done),
-  `viewer-ui-floater-basic` (done))
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
@@ -581,7 +578,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (527)
+## done (528)
 
 ### protocol
 
@@ -731,6 +728,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-emoji-data`](done/viewer-emoji-data.md) — Emoji dataset & lookup
   (adopt existing data)
+- [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
+  picker floater (blocked by `viewer-emoji-data` (done),
+  `viewer-ui-floater-basic` (done))
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold` (done))
