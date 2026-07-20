@@ -195,6 +195,13 @@ pub(crate) struct MenuBarDef {
 // Conditions — the same "named key, filled from the world" model as the pie.
 // ---------------------------------------------------------------------------
 
+/// The condition key that never holds — the convention for an entry that is
+/// present for structure but can never be activated (the top bar's "no entries
+/// yet" placeholder). The bar never sets it, so an `enabled_when(NEVER_CONDITION)`
+/// entry is always greyed; menu search ([`crate::menu_search`]) skips it, since a
+/// permanently unavailable entry is not a real search target.
+pub(crate) const NEVER_CONDITION: &str = "never";
+
 /// The conditions that currently hold, by name.
 ///
 /// A component rather than a resource, so two open menus (or a test's fixture
@@ -217,6 +224,94 @@ impl MenuConditions {
 }
 
 // ---------------------------------------------------------------------------
+// The menu-search filter — the reference's `hightlightAndHide`, applied while a
+// popup is built. Set by `crate::menu_search`; read here when a menu opens.
+// ---------------------------------------------------------------------------
+
+/// The active menu-search filter.
+///
+/// While `query` is non-empty, a popup for a menu under `element` is built to
+/// show only the entries whose label matches the query (drawn highlighted) — or
+/// every entry, under a menu whose own label matched — hiding the rest, the way
+/// the reference viewer's `LLStatusBar` filter does (`hightlightAndHide`). An
+/// empty `query`, or any menu under a different `element` (the inventory gear, a
+/// context menu), builds in full, unfiltered. Set from the search field in
+/// [`crate::menu_search`]; a default (empty) filter changes nothing.
+#[derive(Resource, Default)]
+pub(crate) struct MenuFilter {
+    /// The `element` whose menus this filters — [`crate::menu_bar`]'s top bar.
+    pub(crate) element: &'static str,
+    /// The lower-cased search term; empty means no active filter.
+    pub(crate) query: String,
+}
+
+impl MenuFilter {
+    /// The filter context for building a **top-level** popup of `def` under
+    /// `element`, or `None` when no filter applies to it. A top menu whose own
+    /// label matches the query shows its whole subtree (`parent_matched`).
+    fn context_for(&self, element: &'static str, def: &MenuDef) -> Option<MenuFilterCtx<'_>> {
+        if self.query.is_empty() || self.element != element {
+            return None;
+        }
+        Some(MenuFilterCtx {
+            query: &self.query,
+            parent_matched: label_matches_filter(def.label, &self.query),
+        })
+    }
+
+    /// The filter context for a **submenu** popup, whose branch recorded whether
+    /// an ancestor (or its own label) already matched (`parent_matched`).
+    fn context_for_branch(
+        &self,
+        element: &'static str,
+        parent_matched: bool,
+    ) -> Option<MenuFilterCtx<'_>> {
+        if self.query.is_empty() || self.element != element {
+            return None;
+        }
+        Some(MenuFilterCtx {
+            query: &self.query,
+            parent_matched,
+        })
+    }
+}
+
+/// The filter in force while one popup is built: the (non-empty, lower-cased)
+/// query, and whether an ancestor menu's label already matched it — in which
+/// case this whole level is shown, matching the reference's downward
+/// `hide = !bHighlighted` propagation.
+#[derive(Clone, Copy)]
+struct MenuFilterCtx<'a> {
+    /// The lower-cased search term.
+    query: &'a str,
+    /// Whether an ancestor menu (or this menu's own label) matched, so every
+    /// entry at this level is shown regardless of its own match.
+    parent_matched: bool,
+}
+
+/// Whether `label` contains `query` (a lower-cased, non-empty term),
+/// case-insensitively — the reference's substring test.
+fn label_matches_filter(label: &str, query: &str) -> bool {
+    label.to_lowercase().contains(query)
+}
+
+/// Whether `def`'s subtree carries a match for `query`: one of its commands'
+/// labels, or a submenu label or something inside a submenu. A never-enabled
+/// placeholder is not counted, so an unpopulated menu does not read as a hit.
+fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
+    def.items.iter().any(|item| match item {
+        MenuItemDef::Command(command) => {
+            command.enabled_when != Some(NEVER_CONDITION)
+                && label_matches_filter(command.label, query)
+        }
+        MenuItemDef::Submenu(sub) => {
+            label_matches_filter(sub.label, query) || subtree_matches_filter(sub, query)
+        }
+        MenuItemDef::Separator => false,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Look and feel. Const paint (so the skinless test / gallery reads right) plus a
 // `.sk-menu*` class for a loaded skin's colour / radius; the highlight itself is
 // painted by `highlight_menu_hover` so it works with or without a skin.
@@ -230,6 +325,12 @@ const ENTRY_BACKGROUND: Color = Color::NONE;
 
 /// A hovered menu button / entry's background — the highlight.
 const ENTRY_HIGHLIGHT: Color = Color::srgb(0.24, 0.34, 0.52);
+
+/// The label colour of an entry that **matched** the active menu-search filter —
+/// a warm accent, the reference viewer's `hightlightAndHide` highlight. A
+/// build-time text colour, not a per-frame background, so it does not fight the
+/// hover highlight ([`highlight_menu_hover`], which paints backgrounds).
+const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 
 /// A drop-down's border.
 const MENU_BORDER: Color = Color::srgb(0.30, 0.36, 0.46);
@@ -332,6 +433,11 @@ struct MenuBranch {
     element: &'static str,
     /// The open child-list popup entity, or `None` while closed.
     open: Option<Entity>,
+    /// Whether, when this branch was built under a menu-search filter, an
+    /// ancestor (or the submenu's own label) already matched — so the branch's
+    /// child popup shows its whole level. Meaningless (and `false`) when no
+    /// filter was active; read by [`manage_submenus`] to build the child popup.
+    filter_parent_matched: bool,
 }
 
 /// A free (anchorless) context menu's cursor anchor — the despawn handle for the
@@ -423,6 +529,7 @@ pub(crate) fn spawn_menu_button(
                   conditions: Query<&MenuConditions>,
                   child_of: Query<&ChildOf>,
                   direction: Res<UiDirection>,
+                  filter: Res<MenuFilter>,
                   mut commands: Commands| {
                 // Consume the press so it does not reach the root dismiss
                 // observer (which would close the menu we are about to open).
@@ -436,6 +543,7 @@ pub(crate) fn spawn_menu_button(
                     &conditions,
                     &child_of,
                     *direction,
+                    &filter,
                     &mut commands,
                 );
             },
@@ -463,6 +571,7 @@ fn toggle_host(
     conditions: &Query<&MenuConditions>,
     child_of: &Query<&ChildOf>,
     direction: UiDirection,
+    filter: &MenuFilter,
     commands: &mut Commands,
 ) {
     let was_open = hosts.get(host).is_ok_and(|(_, menu)| menu.open.is_some());
@@ -470,7 +579,7 @@ fn toggle_host(
     if !was_open {
         let held = conditions_at(host, child_of, conditions);
         if let Ok((_, mut menu)) = hosts.get_mut(host) {
-            open_host(&mut menu, host, held, direction, commands);
+            open_host(&mut menu, host, held, direction, filter, commands);
         }
     }
 }
@@ -481,12 +590,19 @@ fn toggle_host(
 ///
 /// Gated on a menu already being open: the *first* menu still opens on a click
 /// (a bare hover over the bar does nothing), matching the reference.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the hover map, the \
+              ancestry and bar-button queries, the live conditions, the layout direction, the \
+              menu-search filter, the hosts to (re)open and commands to do it with"
+)]
 fn switch_menu_on_hover(
     hover: Res<HoverMap>,
     child_of: Query<&ChildOf>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
     conditions: Query<&MenuConditions>,
     direction: Res<UiDirection>,
+    filter: Res<MenuFilter>,
     mut hosts: Query<(Entity, &mut MenuHost)>,
     mut commands: Commands,
 ) {
@@ -517,6 +633,7 @@ fn switch_menu_on_hover(
             &conditions,
             &child_of,
             *direction,
+            &filter,
             &mut commands,
         );
     }
@@ -529,12 +646,76 @@ fn close_all_hosts(hosts: &mut Query<(Entity, &mut MenuHost)>, commands: &mut Co
     }
 }
 
+/// Open the first bar menu that carries a match whenever the menu-search filter
+/// changes, so typing a term *shows* its result rather than waiting for the user
+/// to open a menu by hand.
+///
+/// "First" is bar order — the child order of the bar row — so the leftmost menu
+/// with at least one matching entry opens; the rest stay closed. Each filter
+/// change closes every menu under the filtered element and reopens the target
+/// against the current term, so refining the term rebuilds the open drop-down;
+/// clearing the term closes it. Runs only on a real filter change
+/// ([`MenuFilter`]'s change detection), so a menu opened or closed by hand while
+/// the term is steady is left alone.
+fn open_filtered_menu(
+    filter: Res<MenuFilter>,
+    conditions: Query<&MenuConditions>,
+    child_of: Query<&ChildOf>,
+    children: Query<&Children>,
+    direction: Res<UiDirection>,
+    mut hosts: Query<(Entity, &mut MenuHost)>,
+    mut commands: Commands,
+) {
+    if !filter.is_changed() {
+        return;
+    }
+    // The bar row holding the filtered element's hosts, walked in child order.
+    let bar = hosts
+        .iter()
+        .find(|(_, menu)| menu.element == filter.element)
+        .and_then(|(host, _)| child_of.get(host).ok())
+        .map(ChildOf::parent);
+    // The target: the first host, in bar order, whose subtree carries a match.
+    let target = if filter.query.is_empty() {
+        None
+    } else {
+        bar.and_then(|bar| children.get(bar).ok()).and_then(|kids| {
+            kids.iter().find(|&child| {
+                hosts.get(child).is_ok_and(|(_, menu)| {
+                    menu.element == filter.element
+                        && subtree_matches_filter(menu.def, &filter.query)
+                })
+            })
+        })
+    };
+    // Close every host under the element, then (re)open the target so its popup
+    // reflects the current term.
+    for (host_entity, mut menu) in hosts.iter_mut() {
+        if menu.element != filter.element {
+            continue;
+        }
+        close_host(&mut menu, &mut commands);
+        if Some(host_entity) == target {
+            let held = conditions_at(host_entity, &child_of, &conditions);
+            open_host(
+                &mut menu,
+                host_entity,
+                held,
+                *direction,
+                &filter,
+                &mut commands,
+            );
+        }
+    }
+}
+
 /// Build and attach `host`'s drop-down.
 fn open_host(
     host_menu: &mut MenuHost,
     host: Entity,
     conditions: Option<&MenuConditions>,
     direction: UiDirection,
+    filter: &MenuFilter,
     commands: &mut Commands,
 ) {
     let empty = MenuConditions::default();
@@ -547,6 +728,7 @@ fn open_host(
         held,
         DropDirection::Block,
         direction,
+        filter.context_for(host_menu.element, host_menu.def),
     );
     host_menu.open = Some(popup);
 }
@@ -620,6 +802,12 @@ impl DropDirection {
 /// A column of entry rows positioned against `anchor` by [`Popover`], built
 /// fresh on each open so its check / enabled / visible states reflect the
 /// conditions that hold *now*.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the popup builder takes each of the independent inputs its caller supplies: the \
+              spawn target, the menu to build, the element its picks are attributed to, the live \
+              conditions, the drop and layout directions, and the optional menu-search filter"
+)]
 fn build_menu_popup(
     commands: &mut Commands,
     anchor: Entity,
@@ -628,6 +816,7 @@ fn build_menu_popup(
     conditions: &MenuConditions,
     drop: DropDirection,
     direction: UiDirection,
+    filter: Option<MenuFilterCtx>,
 ) -> Entity {
     let popup = commands
         .spawn((
@@ -636,6 +825,15 @@ fn build_menu_popup(
                 padding: UiRect::all(Val::Px(MENU_PADDING)),
                 border: UiRect::all(Val::Px(1.0)),
                 min_width: Val::Px(MENU_MIN_WIDTH),
+                // Align children to the start, not the default stretch. An
+                // absolutely-positioned flex column that *stretches* its children
+                // on the cross axis is grown on the **main** (block) axis too by
+                // taffy — the popup ends up far taller than its rows, leaving dead
+                // space below the last entry (starkly visible on a one-line menu
+                // like the "(no entries yet)" placeholder). Rows and separators
+                // fill the width by an explicit `width: 100%` instead, which does
+                // not trip the quirk.
+                align_items: AlignItems::Start,
                 ..column(Val::Px(0.0))
             },
             Popover {
@@ -654,44 +852,89 @@ fn build_menu_popup(
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
     for item in def.items {
-        spawn_menu_line(commands, popup, *item, element, conditions);
+        spawn_menu_line(commands, popup, *item, element, conditions, filter);
     }
     popup
 }
 
 /// Spawn one drop-down line — a command, a submenu, or a separator.
+///
+/// With `filter` set (a menu-search term in force), the reference's
+/// `hightlightAndHide` applies: a command is shown only if its label matches (or
+/// an ancestor menu already matched), drawn highlighted on its own match; a
+/// submenu is shown only if its subtree carries a match; and separators are
+/// dropped, since the groups they divide are being filtered anyway.
 fn spawn_menu_line(
     commands: &mut Commands,
     popup: Entity,
     item: MenuItemDef,
     element: &'static str,
     conditions: &MenuConditions,
+    filter: Option<MenuFilterCtx>,
 ) {
     match item {
         MenuItemDef::Command(command) => {
-            if conditions.holds(command.visible_when) {
-                spawn_command_line(commands, popup, command, element, conditions);
+            if !conditions.holds(command.visible_when) {
+                return;
+            }
+            match filter {
+                None => spawn_command_line(commands, popup, command, element, conditions, false),
+                Some(ctx) => {
+                    let own_match = label_matches_filter(command.label, ctx.query);
+                    if ctx.parent_matched || own_match {
+                        spawn_command_line(
+                            commands, popup, command, element, conditions, own_match,
+                        );
+                    }
+                }
             }
         }
-        MenuItemDef::Submenu(sub) => spawn_submenu_line(commands, popup, sub, element),
-        MenuItemDef::Separator => spawn_separator_line(commands, popup),
+        MenuItemDef::Submenu(sub) => match filter {
+            None => spawn_submenu_line(commands, popup, sub, element, false, false),
+            Some(ctx) => {
+                let own_match = label_matches_filter(sub.label, ctx.query);
+                let child_parent_matched = ctx.parent_matched || own_match;
+                if child_parent_matched || subtree_matches_filter(sub, ctx.query) {
+                    spawn_submenu_line(
+                        commands,
+                        popup,
+                        sub,
+                        element,
+                        child_parent_matched,
+                        own_match,
+                    );
+                }
+            }
+        },
+        MenuItemDef::Separator => {
+            if filter.is_none() {
+                spawn_separator_line(commands, popup);
+            }
+        }
     }
 }
 
 /// Spawn a command line: [check gutter] [label] [accelerator].
+///
+/// `highlight` draws the label in the menu-search accent ([`FILTER_MATCH_COLOR`])
+/// — set when the entry itself matched an active filter; a disabled entry stays
+/// greyed regardless.
 fn spawn_command_line(
     commands: &mut Commands,
     popup: Entity,
     command: MenuCommand,
     element: &'static str,
     conditions: &MenuConditions,
+    highlight: bool,
 ) {
     let enabled = conditions.holds(command.enabled_when);
     let checked = command.checked_when.is_some() && conditions.holds(command.checked_when);
-    let text_color = if enabled {
-        ENTRY_TEXT
-    } else {
+    let text_color = if !enabled {
         ENTRY_TEXT_DISABLED
+    } else if highlight {
+        FILTER_MATCH_COLOR
+    } else {
+        ENTRY_TEXT
     };
     let action = command.action;
     let row = commands
@@ -757,7 +1000,14 @@ fn spawn_submenu_line(
     popup: Entity,
     sub: &'static MenuDef,
     element: &'static str,
+    filter_parent_matched: bool,
+    highlight: bool,
 ) {
+    let label_color = if highlight {
+        FILTER_MATCH_COLOR
+    } else {
+        ENTRY_TEXT
+    };
     let row = commands
         .spawn((
             entry_row_node(),
@@ -767,14 +1017,15 @@ fn spawn_submenu_line(
                 def: sub,
                 element,
                 open: None,
+                filter_parent_matched,
             },
             Name::new(format!("menu-submenu:{}", sub.label)),
             ChildOf(popup),
         ))
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
-    spawn_gutter(commands, row, "", ENTRY_TEXT);
-    spawn_entry_label(commands, row, sub.label, ENTRY_TEXT);
+    spawn_gutter(commands, row, "", label_color);
+    spawn_entry_label(commands, row, sub.label, label_color);
     commands.spawn((
         Text::new(SUBMENU_ARROW),
         UiFont::Sans.at(ENTRY_FONT),
@@ -789,6 +1040,10 @@ fn spawn_submenu_line(
 fn entry_row_node() -> Node {
     Node {
         align_items: AlignItems::Center,
+        // Fill the popup width by a percentage, not a cross-axis stretch — the
+        // popup aligns its children to the start to avoid a taffy height quirk
+        // (see `build_menu_popup`), so every row asks for the full width itself.
+        width: Val::Percent(100.0),
         padding: UiRect::axes(Val::Px(ENTRY_PADDING.x), Val::Px(ENTRY_PADDING.y)),
         column_gap: Val::Px(4.0),
         ..default()
@@ -843,7 +1098,13 @@ fn spawn_separator_line(commands: &mut Commands, popup: Entity) {
     commands.spawn((
         Node {
             height: Val::Px(1.0),
-            margin: UiRect::axes(Val::Px(4.0), Val::Px(4.0)),
+            // Fill the popup width via a percentage, not a cross-axis stretch:
+            // the popup aligns its children to the start to dodge a taffy quirk
+            // (see `build_menu_popup`), so a rule that relied on stretch would
+            // collapse to zero width. The horizontal inset comes from the popup's
+            // own padding rather than a margin that would overflow the 100%.
+            width: Val::Percent(100.0),
+            margin: UiRect::axes(Val::Px(0.0), Val::Px(4.0)),
             ..default()
         },
         BackgroundColor(SEPARATOR_COLOR),
@@ -885,6 +1146,7 @@ fn manage_submenus(
     child_of: Query<&ChildOf>,
     conditions: Query<&MenuConditions>,
     direction: Res<UiDirection>,
+    filter: Res<MenuFilter>,
     mut branches: Query<(Entity, &mut MenuBranch)>,
     mut commands: Commands,
 ) {
@@ -911,6 +1173,7 @@ fn manage_submenus(
                     held.unwrap_or(&empty),
                     DropDirection::Inline,
                     *direction,
+                    filter.context_for_branch(branch.element, branch.filter_parent_matched),
                 );
                 branch.open = Some(popup);
             }
@@ -991,6 +1254,8 @@ fn open_context_menus(
             &MenuConditions::default(),
             DropDirection::Block,
             *direction,
+            // A context menu is not the searched element, so it is never filtered.
+            None,
         );
     }
 }
@@ -1106,6 +1371,7 @@ pub(crate) struct MenuWidgetPlugin;
 impl Plugin for MenuWidgetPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<OpenContextMenu>()
+            .init_resource::<MenuFilter>()
             .add_systems(
                 Startup,
                 attach_menu_dismiss.after(UiScaffoldSystems::SpawnRoot),
@@ -1115,6 +1381,7 @@ impl Plugin for MenuWidgetPlugin {
                 (
                     open_context_menus,
                     switch_menu_on_hover,
+                    open_filtered_menu,
                     manage_submenus,
                     dismiss_menus_on_escape,
                     highlight_menu_hover,
@@ -1197,6 +1464,7 @@ mod tests {
         MenuConditions, MenuDef, MenuEntryAction, MenuHost, MenuItemDef, SUBMENU_ARROW,
         build_menu_popup, spawn_menu_bar_specimen,
     };
+    use bevy::picking::hover::HoverMap;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
@@ -1292,6 +1560,39 @@ mod tests {
                     &held,
                     DropDirection::Block,
                     UiDirection::Ltr,
+                    None,
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        Ok(app)
+    }
+
+    /// Spawn a drop-down for `menu` under a filter `query`, and settle its layout.
+    /// The filter's `parent_matched` is seeded from whether `menu`'s own label
+    /// matches, exactly as [`open_host`](super::open_host) does for a top menu.
+    fn filtered_popup_app(menu: &'static MenuDef, query: &str) -> Result<App, TestError> {
+        let mut app = LayoutTest::new().build();
+        enable_action_recording(&mut app);
+        let query = query.to_lowercase();
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands, root: Res<UiRoot>| {
+                let anchor = commands.spawn((Node::default(), ChildOf(root.0))).id();
+                let ctx = super::MenuFilterCtx {
+                    query: &query,
+                    parent_matched: super::label_matches_filter(menu.label, &query),
+                };
+                build_menu_popup(
+                    &mut commands,
+                    anchor,
+                    menu,
+                    "test",
+                    &MenuConditions::default(),
+                    DropDirection::Block,
+                    UiDirection::Ltr,
+                    Some(ctx),
                 );
             })
             .after(UiScaffoldSystems::SpawnRoot),
@@ -1431,6 +1732,248 @@ mod tests {
                 action: "quit",
             }],
         );
+        Ok(())
+    }
+
+    /// `subtree_matches_filter` sees into submenus and past the never-enabled
+    /// placeholder.
+    #[test]
+    fn subtree_match_sees_into_submenus() {
+        // "sunset" is only inside World's Environment submenu.
+        assert!(super::subtree_matches_filter(&FIXTURE_WORLD, "sunset"));
+        // "teleport" is a top-level World command.
+        assert!(super::subtree_matches_filter(&FIXTURE_WORLD, "teleport"));
+        // Nothing in World mentions "inventory".
+        assert!(!super::subtree_matches_filter(&FIXTURE_WORLD, "inventory"));
+    }
+
+    /// A filter shows only the matching command and hides the rest.
+    #[test]
+    fn a_filter_hides_non_matching_commands() -> Result<(), TestError> {
+        let mut app = filtered_popup_app(&FIXTURE_AVATAR, "fl")?;
+        let commands = app
+            .world_mut()
+            .query::<&MenuEntryAction>()
+            .iter(app.world())
+            .count();
+        assert_eq!(commands, 1, "only the matching Fly entry is shown");
+        assert!(
+            action_entity(&mut app, "fly").is_some(),
+            "the matching entry is present",
+        );
+        assert!(
+            action_entity(&mut app, "inventory").is_none(),
+            "a non-matching entry is hidden",
+        );
+        Ok(())
+    }
+
+    /// A filter that matches the menu's own label shows the whole menu — the
+    /// reference's downward "show everything under a matched menu" propagation.
+    #[test]
+    fn a_matched_menu_label_shows_every_entry() -> Result<(), TestError> {
+        let mut app = filtered_popup_app(&FIXTURE_AVATAR, "avatar")?;
+        let commands = app
+            .world_mut()
+            .query::<&MenuEntryAction>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            commands, 5,
+            "every command shows under a matched menu label"
+        );
+        Ok(())
+    }
+
+    /// A submenu is kept when its subtree carries a match, and dropped when it
+    /// does not — so a hit nested one level deep is still reachable.
+    #[test]
+    fn a_filter_keeps_a_submenu_with_a_nested_match() -> Result<(), TestError> {
+        let mut with_match = filtered_popup_app(&FIXTURE_WORLD, "sunset")?;
+        let branches = with_match
+            .world_mut()
+            .query::<&MenuBranch>()
+            .iter(with_match.world())
+            .count();
+        assert_eq!(branches, 1, "the Environment submenu is kept for its match");
+        let top_commands = with_match
+            .world_mut()
+            .query::<&MenuEntryAction>()
+            .iter(with_match.world())
+            .count();
+        assert_eq!(top_commands, 0, "no top-level World command matched");
+
+        let mut without_match = filtered_popup_app(&FIXTURE_WORLD, "mini")?;
+        let branches = without_match
+            .world_mut()
+            .query::<&MenuBranch>()
+            .iter(without_match.world())
+            .count();
+        assert_eq!(
+            branches, 0,
+            "the submenu is dropped when nothing in it matches"
+        );
+        Ok(())
+    }
+
+    /// Spawn a live fixture bar (element `test-bar`) under a full menu-widget
+    /// runtime, then apply the search filter `query` and settle. The bar's picks
+    /// need the picking / keyboard resources the layout harness omits.
+    fn filtered_bar_app(query: &str) -> Result<App, TestError> {
+        let mut app = LayoutTest::new().build();
+        enable_action_recording(&mut app);
+        app.init_resource::<HoverMap>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_plugins(super::MenuWidgetPlugin);
+        app.add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                super::spawn_menu_bar(
+                    &mut commands,
+                    root.0,
+                    ElementCx::new(),
+                    &FIXTURE_MENU_BAR,
+                    "test-bar",
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        app.insert_resource(super::MenuFilter {
+            element: "test-bar",
+            query: query.to_lowercase(),
+        });
+        settle(&mut app);
+        Ok(app)
+    }
+
+    /// A term opens the **first** bar menu (in bar order) that carries a match —
+    /// the leftmost, even when a later menu also matches.
+    #[test]
+    fn a_term_opens_the_first_matching_menu() -> Result<(), TestError> {
+        // "quit" is in Avatar (first). Avatar opens, World stays closed.
+        let mut app = filtered_bar_app("quit")?;
+        assert!(
+            find_by_name(&mut app, "menu-popup:Avatar").is_some(),
+            "the first matching menu opens",
+        );
+        assert!(
+            find_by_name(&mut app, "menu-popup:World").is_none(),
+            "a non-matching (or later) menu stays closed",
+        );
+        Ok(())
+    }
+
+    /// When only a later menu matches, that one opens — bar order, not always the
+    /// first menu.
+    #[test]
+    fn a_term_skips_to_a_later_matching_menu() -> Result<(), TestError> {
+        // "teleport" is only in World (second); Avatar has no match.
+        let mut app = filtered_bar_app("teleport")?;
+        assert!(
+            find_by_name(&mut app, "menu-popup:World").is_some(),
+            "the first *matching* menu opens, though it is not the first menu",
+        );
+        assert!(
+            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            "the earlier non-matching menu is left closed",
+        );
+        Ok(())
+    }
+
+    /// Clearing the term closes the menu the filter opened.
+    #[test]
+    fn clearing_the_term_closes_the_menu() -> Result<(), TestError> {
+        let mut app = filtered_bar_app("quit")?;
+        assert!(find_by_name(&mut app, "menu-popup:Avatar").is_some());
+        app.insert_resource(super::MenuFilter {
+            element: "test-bar",
+            query: String::new(),
+        });
+        settle(&mut app);
+        assert!(
+            find_by_name(&mut app, "menu-popup:Avatar").is_none(),
+            "an empty term closes the filter-opened menu",
+        );
+        Ok(())
+    }
+
+    /// A drop-down hugs its content vertically — no dead space below the last
+    /// entry. Guards the taffy quirk `build_menu_popup` sidesteps (an
+    /// absolutely-positioned column that stretches its children was grown far
+    /// taller than its rows, worst on the one-line "(no entries yet)" menu).
+    #[test]
+    fn a_popup_hugs_its_content_height() -> Result<(), TestError> {
+        static PLACEHOLDER: MenuDef = MenuDef {
+            label: "Comm",
+            items: &[MenuItemDef::Command(
+                super::MenuCommand::new("(no entries yet)", "noop").enabled_when("never"),
+            )],
+        };
+        let mut app = popup_app(&PLACEHOLDER, &[])?;
+        let popup = find_by_name(&mut app, "menu-popup:Comm")
+            .ok_or("the placeholder popup did not spawn")?;
+        let row =
+            find_by_name(&mut app, "menu-item:noop").ok_or("the placeholder row is missing")?;
+        let popup_height = app
+            .world()
+            .entity(popup)
+            .get::<bevy::ui::ComputedNode>()
+            .ok_or("no computed node on the popup")?
+            .size()
+            .y;
+        let row_height = app
+            .world()
+            .entity(row)
+            .get::<bevy::ui::ComputedNode>()
+            .ok_or("no computed node on the row")?
+            .size()
+            .y;
+        // The popup is the row plus its own padding (4 px each side) and border
+        // (1 px each side): 10 px of chrome, no dead line below.
+        let expected = row_height + 10.0;
+        assert!(
+            (popup_height - expected).abs() < 2.0,
+            "the popup should hug its one row ({expected} px), but is {popup_height} px tall — \
+             dead space below the entry has crept back",
+        );
+        Ok(())
+    }
+
+    /// Every command row in a drop-down is the same width, so the hover highlight
+    /// reads as a full-width bar rather than shrinking to each label — the width
+    /// is filled by an explicit `width: 100%`, since the popup cannot use a
+    /// cross-axis stretch (see [`a_popup_hugs_its_content_height`]).
+    #[test]
+    fn every_entry_row_is_full_width() -> Result<(), TestError> {
+        let mut app = popup_app(&FIXTURE_AVATAR, &[])?;
+        let widths: Vec<f32> = {
+            let popup = find_by_name(&mut app, "menu-popup:Avatar")
+                .ok_or("the Avatar popup did not spawn")?;
+            let kids: Vec<Entity> = app
+                .world()
+                .entity(popup)
+                .get::<Children>()
+                .map(|c| c.iter().collect())
+                .unwrap_or_default();
+            kids.into_iter()
+                .filter_map(|kid| {
+                    let entity = app.world().entity(kid);
+                    // Command rows only; a separator is a thin rule of its own and
+                    // carries no `MenuEntryAction`.
+                    entity.get::<MenuEntryAction>()?;
+                    entity.get::<bevy::ui::ComputedNode>().map(|cn| cn.size().x)
+                })
+                .collect()
+        };
+        assert!(widths.len() >= 2, "expected several command rows");
+        let first = widths.first().copied().unwrap_or(0.0);
+        for width in &widths {
+            assert!(
+                (width - first).abs() < 1.0,
+                "entry rows differ in width ({widths:?}) — the highlight would be ragged",
+            );
+        }
         Ok(())
     }
 

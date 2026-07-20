@@ -64,6 +64,7 @@ mod look_at;
 mod materials;
 mod menu;
 mod menu_bar;
+mod menu_search;
 mod meshes;
 mod movement;
 mod objects;
@@ -732,6 +733,10 @@ fn run_session(
     // names at the top of the screen, on `crate::menu`'s widget. After the
     // inventory plugin so the Avatar ▸ Inventory entry can toggle its window.
     .add_plugins(crate::menu_bar::TopMenuBarPlugin)
+    // Menu search (viewer-ui-menu-search): a text field in the bar (after the last
+    // menu) whose term drives `crate::menu`'s `MenuFilter`, so opening a menu shows
+    // only the matching entries. After the top-menu plugin, which spawns the field.
+    .add_plugins(crate::menu_search::MenuSearchPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

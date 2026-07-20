@@ -41,3 +41,7 @@ flate2 = "flate2"
 # `lso2` is the legacy-LSL-bytecode compile-target token (LSO2), an emerging
 # `ScriptTarget` value seen in the LL viewer; not a typo of "also".
 lso2 = "lso2"
+# `hightlightAndHide` is Firestorm's own (misspelled) method name for its
+# status-bar menu-search filter — cited verbatim so it stays greppable in the
+# reference source; theirs to spell, not ours to correct.
+hightlightAndHide = "hightlightAndHide"

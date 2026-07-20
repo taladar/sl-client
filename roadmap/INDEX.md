@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 104 |
-| blocked | 89 |
+| ready | 105 |
+| blocked | 88 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 515 |
+| done | 516 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **738** |
+| **total** | **739** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (104)
+## ready (105)
 
 ### viewer
 
@@ -102,6 +102,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-context-actions`](ready/viewer-inventory-context-actions.md)
   — Inventory context actions + drag-and-drop (blocked by
   `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-floater-menus`](ready/viewer-inventory-floater-menus.md) —
+  Inventory floater menus (gear options + create/New menu) (blocked by
+  `viewer-ui-menu-bar` (done))
 - [`viewer-inventory-gallery`](ready/viewer-inventory-gallery.md) — Inventory
   gallery view (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
@@ -287,7 +290,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (89)
+## blocked (88)
 
 ### viewer
 
@@ -502,8 +505,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core`,
   `viewer-input-action-map` (done))
-- [`viewer-ui-menu-search`](blocked/viewer-ui-menu-search.md) — Menu search
-  field (blocked by `viewer-ui-menu-bar` (done), `viewer-ui-text-input-widget`)
 - [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
   `viewer-ui-settings-binding` (done))
@@ -588,7 +589,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (515)
+## done (516)
 
 ### protocol
 
@@ -1048,6 +1049,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic` (done))
 - [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by
   `viewer-ui-context-menu` (done))
+- [`viewer-ui-menu-search`](done/viewer-ui-menu-search.md) — Menu search field
+  (blocked by `viewer-ui-menu-bar` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-settings-binding`](done/viewer-ui-settings-binding.md) — Two-way

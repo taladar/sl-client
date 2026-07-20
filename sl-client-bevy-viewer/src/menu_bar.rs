@@ -37,14 +37,18 @@
 use bevy::prelude::*;
 
 use crate::inventory::InventoryUi;
-use crate::menu::{MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, spawn_menu_bar};
+use crate::menu::{
+    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, spawn_menu_bar,
+};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
 
 /// The `element` the top menu bar attributes its actions to — the tag
 /// [`handle_top_menu_actions`] filters on, so it routes *its* menu's picks and
-/// not some other widget's.
-const TOP_MENU_ELEMENT: &str = "top-menu-bar";
+/// not some other widget's. Menu search ([`crate::menu_search`]) emits under the
+/// same tag, so activating a search hit routes through [`handle_top_menu_actions`]
+/// exactly as opening the menu and clicking the entry would.
+pub(crate) const TOP_MENU_ELEMENT: &str = "top-menu-bar";
 
 /// The z-index the bar renders at — above the floaters (so a window never covers
 /// the menu bar), below an open menu's popup (`crate::menu`'s `MENU_Z_INDEX`).
@@ -58,7 +62,7 @@ const INVENTORY_OPEN: &str = "inventory-open";
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
 static PLACEHOLDER_ITEMS: &[MenuItemDef] = &[MenuItemDef::Command(
-    MenuCommand::new("(no entries yet)", "noop").enabled_when("never"),
+    MenuCommand::new("(no entries yet)", "noop").enabled_when(NEVER_CONDITION),
 )];
 
 /// The Avatar (Me) menu — the two entries with a live target today.
@@ -106,8 +110,9 @@ static HELP_MENU: MenuDef = MenuDef {
     items: PLACEHOLDER_ITEMS,
 };
 
-/// The top menu bar, in the reference viewer's order.
-static TOP_MENU_BAR: MenuBarDef = MenuBarDef {
+/// The top menu bar, in the reference viewer's order. Exposed so menu search
+/// ([`crate::menu_search`]) can walk the same tree it draws.
+pub(crate) static TOP_MENU_BAR: MenuBarDef = MenuBarDef {
     menus: &[
         &AVATAR_MENU,
         &COMM_MENU,
@@ -160,6 +165,10 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>) {
         MenuConditions::default(),
         TopMenuBar,
     ));
+    // The menu-search field sits in the bar, immediately after the last menu
+    // (viewer-ui-menu-search): its text drives `crate::menu`'s `MenuFilter`, so
+    // opening a menu while a term is active shows only the matching entries.
+    crate::menu_search::spawn_menu_search_field(&mut commands, bar);
 }
 
 /// Recompute the bar's live conditions each frame from the world.
