@@ -91,10 +91,11 @@ behind it.
 to camera free-look, so the menu opens on the right-button release of a click
 (negligible travel, `RIGHT_CLICK_DRAG_SLOP`) — a look-drag never pops a menu.
 
-**Debug aids (kept, behind `SL_VIEWER_DEBUG_PICK`).** A cursor-following pick
-inspector (`update_pick_inspector`) shows live what a pick would hit (UI/HUD
-verdicts, nearest world and nearest-avatar ray hits), and the pick collider is
-drawn as a translucent box so its fit can be eyeballed. Off by default.
+**Debug aids (kept, split).** A cursor-following pick inspector
+(`update_pick_inspector`, behind `SL_VIEWER_DEBUG_PICK`) shows live what a
+pick would hit (UI/HUD verdicts, nearest world hit, resolved avatar pick);
+separately, `SL_VIEWER_DEBUG_PICK_BOX` draws the pick collider as a
+translucent box so its fit can be eyeballed. Both off by default.
 
 ### Deliberate departures from the reference
 

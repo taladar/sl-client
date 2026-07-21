@@ -2,7 +2,7 @@
 id: viewer-avatar-mesh-accurate-pick
 title: Mesh-accurate avatar picking (replace the bounding-box approximation)
 topic: viewer
-status: deferred
+status: done
 origin: viewer-avatar-context-menu review (2026-07)
 blocked_by: [viewer-avatar-context-menu]
 refs: [viewer-avatar-radar, viewer-object-selection-core]
@@ -49,3 +49,39 @@ avatars whose mesh has not decoded yet. The pick entry point is
 `request_avatar_menu_on_right_click` (`src/avatar_menu.rs`); the collider and
 its fit live in `src/avatars.rs`. This also matters for
 **inventory drag-and-drop onto an avatar**, which will reuse the same pick.
+
+## Outcome (2026-07): option 1 implemented — on-demand CPU skin
+
+`src/avatar_pick.rs`: an `AvatarPicker` `SystemParam` whose `pick(ray)`
+resolves a world ray to an avatar against its **posed** geometry, run only on
+demand (right-click release; the `SL_VIEWER_DEBUG_PICK` inspector). Per
+candidate avatar it CPU-reproduces the GPU matrix-palette skinning —
+`Σ wᵢ · (joint_worldᵢ · inverse_bindᵢ) · rest`, the R13-validated formula,
+reading the same joint-entity `GlobalTransform`s the render palette uses — and
+ray-tests the triangles (Möller–Trumbore, double-sided). Rigid parts
+(eyeballs) test at their posed `GlobalTransform`; placeholder spheres are
+intersected analytically.
+
+The fitted box was kept in two demoted roles: **broad phase** (an avatar is
+skinned only if the ray passes within its bounding sphere + a 1.5 m limb
+margin, so outstretched arms outside the torso box still pick) and
+**fallback** (an avatar with *no* visible decoded geometry — e.g. a mesh body
+still downloading with the system body alpha-hidden — stays clickable via the
+box). With visible geometry present, the box never picks: a ray through the
+box but off the silhouette is a miss.
+
+Worn rigged submeshes now carry `AvatarPickTarget` (spawned in
+`build_rigged_submeshes`), since on a modern mesh-body avatar they *are* the
+silhouette (the reference likewise ray-tests rigged attachments' posed
+triangles via `pick_rigged`; for the system body it uses collision-volume
+ellipsoids, which our posed system-body triangles strictly refine). Animesh
+(control-avatar) meshes stay untagged, matching the reference's
+control-avatar exclusion.
+
+Known approximation: render-time morph targets (breathing, body physics) are
+not folded into the CPU skin — the pick surface can sit a centimetre or two
+off the drawn pixels mid-bounce. Not reproduced: the box no longer being
+ray-cast means `MeshRayCast` is now avatar-free; nothing else consumed it.
+Unit tests cover the intersection math and the ECS-level decision logic
+(posed-hit vs bind-pose miss, box-through miss with geometry, hidden-geometry
+fallback, limb outside the box).

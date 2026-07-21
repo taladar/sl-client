@@ -33,6 +33,7 @@ mod animesh;
 mod appearance;
 mod avatar_assets;
 mod avatar_menu;
+mod avatar_pick;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;

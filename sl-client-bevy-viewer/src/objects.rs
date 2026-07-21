@@ -56,7 +56,7 @@ use sl_client_bevy::{
 
 use crate::animesh::ControlAvatarState;
 use crate::avatars::{
-    AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
+    AvatarBody, AvatarPickTarget, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
 use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
@@ -3018,6 +3018,15 @@ fn build_rigged_submeshes(
         ));
         if let Some(bom) = bom {
             spawned.insert(bom);
+        }
+        // A worn rigged submesh is part of its wearer's drawn silhouette — on a
+        // modern mesh-body avatar the *base* body is hidden, so without this tag
+        // the wearer's mesh-accurate pick (`crate::avatar_pick`) would find no
+        // geometry and fall back to the box. An animesh (no wearer, `agent`
+        // `None`) is not an avatar and stays untagged, matching the reference
+        // viewer's control-avatar exclusion from avatar picking.
+        if let Some(agent) = agent {
+            spawned.insert(AvatarPickTarget::new(agent));
         }
         face_entities.push(spawned.id());
     }

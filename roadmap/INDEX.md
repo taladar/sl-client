@@ -16,8 +16,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 79 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 540 |
-| deferred | 11 |
+| done | 541 |
+| deferred | 10 |
 | wont-do | 3 |
 | **total** | **755** |
 
@@ -563,7 +563,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (540)
+## done (541)
 
 ### protocol
 
@@ -694,6 +694,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))
+- [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
+  — Mesh-accurate avatar picking (replace the bounding-box approximation)
+  (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
@@ -1648,7 +1651,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (11)
+## deferred (10)
 
 ### protocol
 
@@ -1660,9 +1663,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
-- [`viewer-avatar-mesh-accurate-pick`](deferred/viewer-avatar-mesh-accurate-pick.md)
-  — Mesh-accurate avatar picking (replace the bounding-box approximation)
-  (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-input-spacenav-crossplatform`](deferred/viewer-input-spacenav-crossplatform.md)
   — SpaceNavigator support on Windows / macOS (blocked by
   `viewer-input-spacenav-device` (done))

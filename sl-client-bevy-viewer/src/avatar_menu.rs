@@ -56,14 +56,15 @@
 //! # How a pick reaches here
 //!
 //! Picking is deliberately reusable: every pickable piece of an avatar — the
-//! placeholder sphere, each rigged body part, and the floating name tag — carries
-//! [`crate::avatars::AvatarPickTarget`] with the avatar's agent id.
-//! [`request_avatar_menu_on_right_click`] resolves a right-click to an agent two
-//! ways, mirroring the reference's "name tag or the avatar itself": a UI hit on
-//! the name tag (through the hover map) or a [`MeshRayCast`] against the body /
-//! sphere. That same component is what a future **inventory drag-and-drop onto an
-//! avatar** will read to find its drop target, which is why the identity lives on
-//! the entities rather than in a menu-only lookup.
+//! placeholder sphere, each rigged body part, each worn rigged submesh, and the
+//! floating name tag — carries [`crate::avatars::AvatarPickTarget`] with the
+//! avatar's agent id. [`request_avatar_menu_on_right_click`] resolves a
+//! right-click to an agent two ways, mirroring the reference's "name tag or the
+//! avatar itself": a UI hit on the name tag (through the hover map) or the
+//! mesh-accurate world pick ([`crate::avatar_pick::AvatarPicker`]) against the
+//! avatar's **posed** geometry. That same picker is what a future **inventory
+//! drag-and-drop onto an avatar** will reuse to find its drop target, which is
+//! why the identity lives on the entities rather than in a menu-only lookup.
 //!
 //! Reference (Firestorm, read-only): `menu_pie_avatar_self.xml`,
 //! `menu_pie_avatar_other.xml` (the compass positions), and
@@ -77,6 +78,7 @@ use sl_client_bevy::{
     AgentKey, Command, MuteFlags, MuteType, SlAgentParcel, SlCommand, SlIdentity,
 };
 
+use crate::avatar_pick::{AvatarPicker, PickAccuracy};
 use crate::avatars::{AvatarPickTarget, AvatarState};
 use crate::camera::ViewerCamera;
 use crate::conversations::{ConversationKey, OpenConversation};
@@ -680,15 +682,15 @@ fn setup_pick_inspector(mut commands: Commands) {
 }
 
 /// Rewrite the pick inspector each frame with what a pick at the cursor would hit:
-/// the UI-occlusion verdict, the HUD-occlusion verdict, and the nearest world-ray
-/// hit (any mesh, and the nearest avatar piece), so the failing stage is visible
-/// without a click.
+/// the UI-occlusion verdict, the HUD-occlusion verdict, the nearest world-ray
+/// hit, and the resolved mesh-accurate avatar pick, so the failing stage is
+/// visible without a click.
 #[expect(
     clippy::too_many_arguments,
     reason = "a debug system reading everything a pick reads: the window, the world and HUD \
               cameras, render layers, the hover map / pickables / node sizes for UI occlusion, the \
-              name / parent / avatar-target queries to describe a hit, the ray caster, and the \
-              overlay node it writes"
+              name / parent / avatar-target queries to describe a hit, the ray caster, the avatar \
+              picker, and the overlay node it writes"
 )]
 fn update_pick_inspector(
     windows: Query<&Window>,
@@ -701,6 +703,7 @@ fn update_pick_inspector(
     names: Query<&Name>,
     parents: Query<&ChildOf>,
     pick_targets: Query<&AvatarPickTarget>,
+    picker: AvatarPicker,
     mut ray_cast: MeshRayCast,
     mut inspector: Query<(&mut Node, &mut Text), With<PickInspector>>,
 ) {
@@ -750,13 +753,18 @@ fn update_pick_inspector(
             )),
             None => lines.push("world→ (nothing)".to_owned()),
         }
-        let is_avatar = |entity: Entity| pick_targets.contains(entity);
-        let avatar_settings = MeshRayCastSettings::default()
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
-            .with_filter(&is_avatar);
-        match ray_cast.cast_ray(ray, &avatar_settings).first() {
-            Some((entity, hit)) => {
-                lines.push(format!("avatar→ {} @ {:.1}m", named(*entity), hit.distance));
+        // The real avatar resolution: the mesh-accurate pick against the posed
+        // geometry (with its box fallback), exactly what a right-click uses.
+        match picker.pick(ray) {
+            Some(hit) => {
+                let accuracy = match hit.accuracy {
+                    PickAccuracy::Mesh => "mesh",
+                    PickAccuracy::BoxFallback => "box",
+                };
+                lines.push(format!(
+                    "avatar→ {:?} @ {:.1}m ({accuracy})",
+                    hit.agent, hit.distance
+                ));
             }
             None => lines.push("avatar→ (none)".to_owned()),
         }
@@ -773,8 +781,11 @@ fn update_pick_inspector(
 ///    Checked first, and it wins even over the body behind it.
 /// 2. **The body / sphere** — no mesh-picking backend is installed (the viewer
 ///    raycasts on demand, like [`crate::hud_pick`]), so this casts a ray from the
-///    world camera through the cursor, filtered to entities carrying
-///    [`AvatarPickTarget`].
+///    world camera through the cursor and resolves it **mesh-accurately** via
+///    [`AvatarPicker`]: the avatar's posed, CPU-skinned triangles decide (the
+///    fitted box only stands in for an avatar with no visible decoded geometry
+///    yet), so a click just *off* an avatar's silhouette picks nothing, matching
+///    the reference.
 ///
 /// It opens on the right-button **release** of a click, not the press: a right-
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
@@ -783,18 +794,14 @@ fn update_pick_inspector(
 /// A right-click over a **blocking** UI element (an open floater) that is *not* a
 /// name tag suppresses the pick, so a menu drawn over the world does not also open
 /// an avatar pie behind it.
-///
-/// Note: [`MeshRayCast`] tests a skinned mesh against its **bind pose**, not the
-/// posed vertices, so a body pick can be a little off for a heavily-animated
-/// avatar; the name tag is the exact path, and this is why the tag is checked
-/// first.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion + name-tag path, the avatar-identity query, the window for the \
               cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
-              occlusion and body pick, and the open-request channel"
+              occlusion, the mesh-accurate avatar picker for the body pick, and the open-request \
+              channel"
 )]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -808,6 +815,7 @@ fn request_avatar_menu_on_right_click(
     camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
+    picker: AvatarPicker,
     mut ray_cast: MeshRayCast,
     mut requests: MessageWriter<OpenAvatarMenu>,
 ) {
@@ -857,24 +865,16 @@ fn request_avatar_menu_on_right_click(
         // `viewer-hud-context-menu`.)
         return;
     } else {
-        // 3. The body: cast a world ray at the cursor, avatars only.
+        // 3. The body: resolve the world ray at the cursor against the avatars'
+        // **posed** geometry (mesh-accurate, with the fitted box only as the
+        // no-geometry fallback) — see `crate::avatar_pick`.
         let Ok((camera, camera_transform)) = camera.single() else {
             return;
         };
         let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
             return;
         };
-        let is_avatar = |entity: Entity| pick_targets.contains(entity);
-        // `Any` visibility so the **hidden** body pick collider counts — it is a
-        // ray target that is never drawn (see `crate::avatars`). The filter keeps
-        // it to avatar pieces, so nothing else hidden is picked.
-        let settings = MeshRayCastSettings::default()
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
-            .with_filter(&is_avatar);
-        ray_cast
-            .cast_ray(ray, &settings)
-            .first()
-            .and_then(|(entity, _hit)| pick_targets.get(*entity).ok().map(AvatarPickTarget::agent))
+        picker.pick(ray).map(|hit| hit.agent)
     };
 
     if let Some(agent) = agent {

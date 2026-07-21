@@ -60,8 +60,9 @@ use crate::textures::{TextureDecoded, TextureManager, tint_color};
 use crate::ui_font::UiFont;
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
-/// UV-sphere, roughly avatar-sized).
-const AVATAR_SPHERE_RADIUS: f32 = 1.0;
+/// UV-sphere, roughly avatar-sized). Read by [`crate::avatar_pick`] to
+/// intersect the sphere analytically.
+pub(crate) const AVATAR_SPHERE_RADIUS: f32 = 1.0;
 
 /// The number of longitudinal segments (sectors) of the placeholder UV-sphere.
 const SPHERE_SECTORS: u32 = 32;
@@ -148,14 +149,17 @@ pub(crate) struct AvatarAnchor;
 /// picking reads.
 ///
 /// It sits on every pickable piece of an avatar: the placeholder sphere, each
-/// rigged base-body part, and the floating name tag. That breadth is the point —
-/// a ray that hits any body part, or a pointer over the name tag, resolves to the
+/// rigged base-body part, each **worn rigged-mesh submesh** (on a modern
+/// mesh-body avatar the base body is hidden, so the worn mesh *is* the
+/// silhouette), and the floating name tag. That breadth is the point — a ray
+/// that hits any body part, or a pointer over the name tag, resolves to the
 /// same agent through one component, so a caller never has to know *which* piece
 /// it hit. Kept separate from [`AvatarBodyPart`] (which also holds an agent) so
 /// non-mesh pieces (the sphere, the UI name tag) can carry the identity too, and
 /// so a future consumer — inventory **drag-and-drop onto an avatar** is the
 /// planned one — reads a single, purpose-named component rather than three
-/// different markers.
+/// different markers. The mesh-accurate pick over these pieces lives in
+/// [`crate::avatar_pick`].
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarPickTarget {
     /// The avatar this entity is part of.
@@ -163,19 +167,42 @@ pub(crate) struct AvatarPickTarget {
 }
 
 impl AvatarPickTarget {
+    /// Tag a pickable piece of `agent` (used by the rigged-attachment spawn in
+    /// [`crate::objects`], where the wearer is known only sometimes).
+    pub(crate) const fn new(agent: AgentKey) -> Self {
+        Self { agent }
+    }
+
     /// The avatar this entity belongs to.
     pub(crate) const fn agent(&self) -> AgentKey {
         self.agent
     }
 }
 
-/// A marker on an avatar's invisible **pick collider** capsule, carrying its
-/// avatar so [`fit_avatar_pick_colliders`] can size and place it from that
-/// avatar's posed skeleton each frame.
+/// A marker on an avatar's invisible **pick box**, carrying its avatar so
+/// [`fit_avatar_pick_colliders`] can size and place it from that avatar's
+/// posed skeleton each frame. Since the mesh-accurate pick
+/// ([`crate::avatar_pick`]) the box is no longer the primary pick target: it
+/// is the pick's **broad phase** (which avatars are worth CPU-skinning) and
+/// its **fallback** for an avatar with no visible decoded geometry yet.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarPickCollider {
     /// The avatar this collider stands in for.
     agent: AgentKey,
+}
+
+impl AvatarPickCollider {
+    /// Tag the pick box of `agent` (test scaffolding in
+    /// [`crate::avatar_pick`] builds one directly).
+    #[cfg(test)]
+    pub(crate) const fn new(agent: AgentKey) -> Self {
+        Self { agent }
+    }
+
+    /// The avatar this box stands in for.
+    pub(crate) const fn agent(&self) -> AgentKey {
+        self.agent
+    }
 }
 
 /// A marker on one rigged base-part render entity, tying it back to its avatar
@@ -396,15 +423,17 @@ struct AvatarAssets {
     mesh: Handle<Mesh>,
     /// The shared soft-blue material handle.
     material: Handle<StandardMaterial>,
-    /// The shared invisible capsule mesh used as a rigged body's **pick
+    /// The shared invisible box mesh used as a rigged body's **pick
     /// collider**. A body's real geometry is skinned, and a [`MeshRayCast`] tests
     /// a skinned mesh against its *bind* pose (not the posed vertices), so it
-    /// cannot reliably hit the avatar where it is drawn; a rigid capsule at the
-    /// body root gives a dependable ray target at the visible location. See
-    /// [`AvatarPickTarget`] and [`pick_collider_mesh`].
+    /// cannot reliably hit the avatar where it is drawn; a rigid box at the
+    /// body root gives a dependable stand-in volume at the visible location.
+    /// The mesh-accurate pick ([`crate::avatar_pick`]) uses it as its broad
+    /// phase and its no-geometry fallback. See [`AvatarPickTarget`] and
+    /// [`pick_collider_mesh`].
     collider: Handle<Mesh>,
     /// A translucent material used to **draw** the pick collider when debugging
-    /// (`SL_VIEWER_DEBUG_PICK`); the collider is otherwise material-less and never
+    /// (`SL_VIEWER_DEBUG_PICK_BOX`); the collider is otherwise material-less and never
     /// rendered.
     collider_material: Handle<StandardMaterial>,
 }
@@ -1112,18 +1141,18 @@ fn placeholder_sphere_mesh() -> Mesh {
         .uv(SPHERE_SECTORS, SPHERE_STACKS)
 }
 
-/// The **pick-collider** mesh — a **unit cube** a [`MeshRayCast`] can hit
-/// reliably where a rigged (skinned) body cannot be.
-/// [`fit_avatar_pick_colliders`] scales and places it to the avatar's posed
-/// skeleton each frame, so a unit cube here is only the base shape. Normally never
-/// rendered (its entity is [`Visibility::Hidden`]); it is drawn translucently
-/// under `SL_VIEWER_DEBUG_PICK`.
+/// The **pick-collider** mesh — a **unit cube** standing in where a rigged
+/// (skinned) body cannot be ray tested (the broad phase / fallback volume of
+/// [`crate::avatar_pick`]). [`fit_avatar_pick_colliders`] scales and places it
+/// to the avatar's posed skeleton each frame, so a unit cube here is only the
+/// base shape. Normally never rendered (its entity is [`Visibility::Hidden`]);
+/// it is drawn translucently under `SL_VIEWER_DEBUG_PICK_BOX`.
 fn pick_collider_mesh() -> Mesh {
     Cuboid::from_length(1.0).mesh().build()
 }
 
 /// The translucent material the pick collider is drawn with when
-/// `SL_VIEWER_DEBUG_PICK` is set — a see-through green box so its fit to the
+/// `SL_VIEWER_DEBUG_PICK_BOX` is set — a see-through green box so its fit to the
 /// avatar can be eyeballed.
 fn pick_collider_debug_material() -> StandardMaterial {
     StandardMaterial {
@@ -1136,10 +1165,13 @@ fn pick_collider_debug_material() -> StandardMaterial {
     }
 }
 
-/// Whether the pick collider should be **drawn** (the `SL_VIEWER_DEBUG_PICK` debug
-/// toggle) rather than left invisible.
+/// Whether the pick collider should be **drawn** (the `SL_VIEWER_DEBUG_PICK_BOX`
+/// debug toggle) rather than left invisible. Deliberately a *separate* env var
+/// from the `SL_VIEWER_DEBUG_PICK` cursor pick inspector: inspecting what a
+/// pick would resolve to is useful without painting a translucent green box
+/// over every avatar, so the box draw must be opted into on its own.
 fn pick_collider_debug_visible() -> bool {
-    std::env::var_os("SL_VIEWER_DEBUG_PICK").is_some()
+    std::env::var_os("SL_VIEWER_DEBUG_PICK_BOX").is_some()
 }
 
 /// Size and place each avatar's pick-collider box to fit its **posed** skeleton,
@@ -1428,20 +1460,14 @@ impl AvatarState {
                 Some((point_id, node))
             })
             .collect();
-        // The pick collider: a rigid box at the body root that a `MeshRayCast` can
-        // hit where the skinned body cannot be (see [`AvatarAssets::collider`]).
+        // The pick box: a rigid stand-in volume at the body root where the
+        // skinned body cannot be ray tested (see [`AvatarAssets::collider`]).
         // [`fit_avatar_pick_colliders`] sizes and places it each frame from the
         // posed skeleton; the initial transform below is a one-frame placeholder.
-        // Normally invisible (a ray target, never drawn); drawn translucently under
-        // `SL_VIEWER_DEBUG_PICK`.
-        //
-        // **No `NoFrustumCulling` here, deliberately.** `MeshRayCast`'s query reads
-        // `Aabb` non-optionally, so an entity without one is never cast against —
-        // and `calculate_bounds` only computes an `Aabb` for meshes *without*
-        // `NoFrustumCulling`. So the parts (which carry it) are correctly never
-        // picked, and this collider, which must be, omits it and gets its `Aabb`.
-        // Frustum culling only affects *rendering*; the ray cast uses
-        // `RayCastVisibility::Any`, ignoring visibility.
+        // The mesh-accurate pick ([`crate::avatar_pick`]) reads its
+        // `GlobalTransform` directly (broad phase + no-geometry fallback) — no
+        // `MeshRayCast` is aimed at it any more. Normally invisible (never
+        // drawn); drawn translucently under `SL_VIEWER_DEBUG_PICK_BOX`.
         let debug_visible = pick_collider_debug_visible();
         let mut collider_entity = commands.spawn((
             Mesh3d(collider),
