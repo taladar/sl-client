@@ -16,11 +16,15 @@ categories = ["game-development", "rendering", "visualization"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [features]
+# `spacenav` is on by default, so a plain `cargo build` drives the flycam from an
+# attached SpaceNavigator rather than the zeroed stub. It is Linux-only (evdev),
+# so a Windows / macOS build must turn it off (`--no-default-features`) until the
+# cross-platform read lands (viewer-input-spacenav-crossplatform); the
+# `SpacenavInput` stub then keeps consumers `cfg`-free.
+default = ["spacenav"]
+
 # Read a 3Dconnexion SpaceNavigator / SpaceMouse 6-DOF device to drive the flycam
-# (viewer-input-spacenav-device / -camera-mapping). Linux-only for now (evdev);
-# Windows / macOS support is a separate task. Off by default so a build without
-# the device library still compiles and the `SpacenavInput` stub keeps consumers
-# `cfg`-free.
+# (viewer-input-spacenav-device / -camera-mapping). Linux-only for now (evdev).
 spacenav = ["dep:evdev"]
 
 [dependencies]
