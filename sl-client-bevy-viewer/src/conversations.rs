@@ -663,6 +663,18 @@ impl ConversationsUi {
     pub(crate) const fn panel(&self) -> Entity {
         self.panel
     }
+
+    /// The vertical tab strip, so an external pane ([`crate::people`]) can add its
+    /// own pinned tab button into the same strip as the conversation tabs.
+    pub(crate) const fn strip(&self) -> Entity {
+        self.strip
+    }
+
+    /// The panel area, so an external pane can stack its own pane beside the
+    /// conversation panes (only one of all of them is ever displayed).
+    pub(crate) const fn panel_area(&self) -> Entity {
+        self.panel_area
+    }
 }
 
 /// The ECS nodes of one conversation's tab and pane.
@@ -714,6 +726,44 @@ struct RespondToInvite {
     accept: bool,
 }
 
+/// A request to open (create if needed) and activate `key`'s conversation — the
+/// hook another module uses to start an IM from outside the floater. The
+/// [`crate::people`] Friends list writes this to open a one-to-one IM tab for a
+/// selected friend in this same floater.
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct OpenConversation {
+    /// The conversation to open and select.
+    pub(crate) key: ConversationKey,
+}
+
+/// Which surface currently owns the conversations floater's shared strip and
+/// panel area: a **conversation** pane, or an **external** pane hosted in the
+/// same strip (the People / Contacts tab, [`crate::people`]). The two are
+/// mutually exclusive so exactly one pane is ever displayed — when an external
+/// pane owns the strip, every conversation pane is suppressed and no conversation
+/// tab reads as active.
+///
+/// Kept deliberately generic (an `external` flag, not "people") so this module
+/// stays unaware of what the other pane *is* — it only needs to know that
+/// something outside its own tab set is currently front.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct StripFocus {
+    /// `true` when a non-conversation (external) pane owns the strip.
+    external: bool,
+}
+
+impl StripFocus {
+    /// Whether an external (non-conversation) pane currently owns the strip.
+    pub(crate) const fn is_external(&self) -> bool {
+        self.external
+    }
+
+    /// Give the strip to the external pane (the People tab was selected).
+    pub(crate) const fn take_external(&mut self) {
+        self.external = true;
+    }
+}
+
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
@@ -722,9 +772,11 @@ pub(crate) struct ConversationsPlugin;
 impl Plugin for ConversationsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ConversationModel>()
+            .init_resource::<StripFocus>()
             .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
+            .add_message::<OpenConversation>()
             .add_systems(
                 Startup,
                 spawn_conversations_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -733,6 +785,7 @@ impl Plugin for ConversationsPlugin {
                 Update,
                 (
                     ingest_conversation_events,
+                    open_conversations,
                     apply_conversation_selection,
                     respond_to_invites,
                     close_conversations,
@@ -1356,13 +1409,33 @@ const fn is_displayable(chat_type: &ChatType, message: &str) -> bool {
 // Selection / invites / close / spawn / refresh
 // ---------------------------------------------------------------------------
 
-/// Apply the pending tab selections to the model.
+/// Open (create if needed) and activate conversations requested from outside the
+/// floater — the [`crate::people`] Friends "IM" action opening a one-to-one tab.
+/// Ensures the conversation exists so the next [`spawn_conversation_tabs`] gives
+/// it a view, selects it, and hands the strip back from any external pane.
+fn open_conversations(
+    mut opens: MessageReader<OpenConversation>,
+    mut model: ResMut<ConversationModel>,
+    mut focus: ResMut<StripFocus>,
+) {
+    for open in opens.read() {
+        model.ensure(open.key);
+        model.select(open.key);
+        focus.external = false;
+    }
+}
+
+/// Apply the pending tab selections to the model. Selecting a conversation tab
+/// also hands the strip back from any external pane ([`StripFocus`]), so its pane
+/// shows and the external one is suppressed.
 fn apply_conversation_selection(
     mut selections: MessageReader<SelectConversation>,
     mut model: ResMut<ConversationModel>,
+    mut focus: ResMut<StripFocus>,
 ) {
     for selection in selections.read() {
         model.select(selection.key);
+        focus.external = false;
     }
 }
 
@@ -1438,6 +1511,7 @@ fn spawn_conversation_tabs(
 )]
 fn refresh_conversations(
     model: Res<ConversationModel>,
+    focus: Res<StripFocus>,
     mut ui: Option<ResMut<ConversationsUi>>,
     translator: Translator,
     time: Res<Time>,
@@ -1460,7 +1534,10 @@ fn refresh_conversations(
         let Some(view) = ui.views.get_mut(&entry.key) else {
             continue;
         };
-        let is_active = entry.key == active_key;
+        // A conversation reads as active only while a conversation pane owns the
+        // strip; if an external pane (the People tab) holds it, every conversation
+        // pane is suppressed and no conversation tab highlights.
+        let is_active = !focus.is_external() && entry.key == active_key;
         let flashing = entry.unread > 0 && !is_active;
 
         // Tab label: resolved title + unread badge.

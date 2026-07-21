@@ -73,6 +73,31 @@ conversations-invite-prompt = You're invited to this conversation.
 conversations-invite-accept = Accept
 conversations-invite-decline = Decline
 
+## The People / Contacts surface (viewer-social-people-panel), hosted as a pinned
+## tab inside the Conversations floater: the Friends list plus a Groups
+## placeholder.
+
+# The pinned People tab in the conversations strip.
+people-tab = People
+# The Friends / Groups sub-tabs inside the People pane.
+people-friends-tab = Friends
+people-groups-tab = Groups
+# The Groups placeholder, until the group list (viewer-social-groups) is built.
+people-groups-placeholder = The group list lives in the Groups panel.
+# The friends-table column headers (always shown, even for an empty list).
+people-header-name = Name
+people-header-status = Status
+# The two permission-column groups: rights this agent grants the friend
+# ("They can …") and rights the friend grants this agent ("You can …"). Each group
+# has three generated icon columns (see online status, find on map, edit objects).
+people-rights-they = They
+people-rights-you = You
+# The per-friend action buttons under the Friends list.
+people-action-im = IM
+people-action-teleport = Offer Teleport
+people-action-remove = Remove Friend
+people-action-block = Block
+
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 # The picker window's title bar.

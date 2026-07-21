@@ -77,6 +77,7 @@ mod nearby_chat_bar;
 mod objects;
 mod particles;
 mod paths;
+mod people;
 mod physics;
 mod pie_menu;
 mod probes;
@@ -209,6 +210,7 @@ use crate::objects::{
     update_objects,
 };
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
+use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
@@ -808,6 +810,10 @@ fn run_session(
     // transcript pane plus its chat input. After the chat-input / local-chat-input
     // plugins whose widgets it hosts, and the floater manager.
     .add_plugins(ConversationsPlugin)
+    // The People / Contacts surface (viewer-social-people-panel): the Friends
+    // list hosted as a pinned tab inside the Conversations floater. After
+    // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
+    .add_plugins(PeoplePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
