@@ -1070,7 +1070,14 @@ impl Plugin for PieMenuPlugin {
 }
 
 /// Ask for a pie menu at a screen position — the widget's whole inward API.
-#[derive(Message, Debug, Clone, Copy)]
+///
+/// Not `Copy`: `conditions` is an **owned** list because the live viewer computes
+/// it at open from world / session state (is-this-me, am-I-sitting, is-this-a
+/// friend), which a `&'static` slice cannot express — only the fixtures know
+/// their conditions at compile time. The names inside are still `&'static str`,
+/// drawn from each menu's fixed condition vocabulary; it is only the *set that
+/// holds right now* that is built at runtime.
+#[derive(Message, Debug, Clone)]
 pub(crate) struct OpenPieMenu {
     /// The declaration to show.
     pub(crate) menu: &'static PieMenuDef,
@@ -1082,7 +1089,7 @@ pub(crate) struct OpenPieMenu {
     /// The conditions that hold right now. Snapshotted at open: a menu whose
     /// entries changed availability *while it was open* would be re-teaching the
     /// user's hand mid-gesture.
-    pub(crate) conditions: &'static [&'static str],
+    pub(crate) conditions: Vec<&'static str>,
 }
 
 /// Spawn a pie's node tree under `parent`, showing `menu`'s root.
@@ -1131,7 +1138,7 @@ pub(crate) fn spawn_pie_menu(
                 interaction: PieInteraction::Pinned,
                 element,
             },
-            conditions,
+            conditions.clone(),
             geometry,
             // The root's labels are spawned below for the empty (root) path, so the
             // displayed path starts empty and matches — `update_pie_labels` then
@@ -1194,7 +1201,12 @@ pub(crate) fn spawn_pie_menu(
         attach_pie_material(world);
     });
 
-    rebuild_pie_labels(commands, root, cx, menu, &PieConditions::default());
+    // The real conditions, not an empty set: a label's colour (enabled / disabled
+    // / sub-pie) is resolved here, so passing the default would paint every
+    // conditional entry as disabled even when it is live — the label would read
+    // grey while the shader and the pick logic (which do use the real conditions)
+    // treated it as enabled.
+    rebuild_pie_labels(commands, root, cx, menu, &conditions);
     root
 }
 
@@ -2117,7 +2129,7 @@ fn open_pie_on_right_click(
         element: "radial-menu",
         // No session here, so nothing conditional holds. The live viewer's own
         // menus will fill this from the object under the pointer.
-        conditions: &[],
+        conditions: Vec::new(),
     });
 }
 
@@ -2984,7 +2996,7 @@ mod tests {
             menu: &FIXTURE_PIE,
             at: Vec2::new(640.0, 360.0),
             element: "radial-menu",
-            conditions: &[],
+            conditions: Vec::new(),
         });
         settle(&mut app);
 
@@ -3304,7 +3316,7 @@ mod tests {
             menu: &FIXTURE_PIE,
             at: Vec2::new(640.0, 360.0),
             element: "radial-menu",
-            conditions: &[],
+            conditions: Vec::new(),
         });
         // Three settles: open spawns, the next frame measures the labels, the one
         // after that places them — the same measure-then-place lag `fit_pie_layout`

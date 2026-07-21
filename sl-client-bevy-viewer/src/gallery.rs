@@ -897,7 +897,7 @@ fn open_gallery_menu(
                 menu: &FIXTURE_PIE,
                 at: press.pointer_location.position,
                 element: "radial-menu",
-                conditions: &[],
+                conditions: Vec::new(),
             });
         }
         PointerMenuStyle::DropDown => {

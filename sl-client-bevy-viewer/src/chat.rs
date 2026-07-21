@@ -144,7 +144,13 @@ pub(crate) fn setup_chat_overlay(mut commands: Commands) {
             flex_direction: FlexDirection::Column,
             ..default()
         },
+        // A read-only heads-up overlay must never eat clicks: without this it
+        // blocks by default (`should_block_lower` defaults to `true` on a node with
+        // no `Pickable`), so its transient lines silently suppress world picking
+        // (touch, and the avatar context menu's body pick) wherever they float.
+        Pickable::IGNORE,
         ChatOverlayContainer,
+        Name::new("chat-overlay"),
     ));
 }
 
@@ -202,6 +208,9 @@ pub(crate) fn update_chat_overlay(
                 Text::new(line),
                 UiFont::Sans.at(CHAT_FONT_SIZE),
                 TextColor(Color::WHITE),
+                // Transparent to picks, like its container: a fading chat line must
+                // not block a world click that happens to land on it.
+                Pickable::IGNORE,
                 ChatOverlayLine { age: 0.0, seq },
                 ChildOf(container),
             ));

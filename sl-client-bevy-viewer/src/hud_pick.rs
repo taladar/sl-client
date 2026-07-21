@@ -75,6 +75,7 @@ pub(crate) fn pick_and_touch(
     keyboard: Res<ButtonInput<KeyCode>>,
     hover_map: Res<HoverMap>,
     pickables: Query<&Pickable>,
+    node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     fly_camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
@@ -98,7 +99,7 @@ pub(crate) fn pick_and_touch(
     // the HUD attachment (or world object) behind it. Only `bevy_ui` nodes are in
     // the hover map (no mesh-picking backend is installed), so a hovered
     // block-lower Pickable means the cursor is over a solid UI element; skip.
-    if pointer_over_blocking_ui(&hover_map, &pickables) {
+    if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
         return;
     }
     let Ok(window) = windows.single() else {
@@ -170,9 +171,43 @@ pub(crate) fn pick_and_touch(
     }
 }
 
+/// Whether the cursor is over a **HUD attachment** — a screen-space worn object,
+/// which occludes the world behind it.
+///
+/// HUDs are 3D meshes on the HUD render layer, not `bevy_ui` nodes, so they never
+/// appear in the [`HoverMap`]; this casts the same orthographic HUD ray
+/// [`pick_and_touch`] does (restricted to the HUD subtree, visible geometry only)
+/// and reports whether it struck anything. A world pick — touch, or the avatar
+/// context menu's body pick — must treat a HUD hit as occlusion and stop, so the
+/// occlusion order is **UI, then HUD attachments, then world**.
+pub(crate) fn pointer_over_hud(
+    cursor: Vec2,
+    hud_camera: &Query<(&Camera, &GlobalTransform), With<HudCamera>>,
+    layers: &Query<(Entity, &RenderLayers)>,
+    ray_cast: &mut MeshRayCast,
+) -> bool {
+    let hud_entities: HashSet<Entity> = layers
+        .iter()
+        .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
+        .map(|(entity, _layers)| entity)
+        .collect();
+    let Ok((camera, camera_transform)) = hud_camera.single() else {
+        return false;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+        return false;
+    };
+    let hud_filter = |entity: Entity| hud_entities.contains(&entity);
+    let settings = MeshRayCastSettings::default()
+        // Inherited visibility, as the HUD is drawn by its own camera (see
+        // `pick_and_touch`); only a *shown* HUD occludes.
+        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
+        .with_filter(&hud_filter);
+    !ray_cast.cast_ray(ray, &settings).is_empty()
+}
+
 /// Whether the pointer is over a **blocking** UI element — a hovered `bevy_ui`
-/// node that occludes what is behind it. Only UI hits populate the hover map (no
-/// mesh-picking backend is installed), so any hovered node here is UI.
+/// node that occludes what is behind it.
 ///
 /// A node **without** a [`Pickable`] component blocks by default in `bevy_ui`
 /// (`should_block_lower` defaults to `true`) — and most pane content (the pane
@@ -181,14 +216,31 @@ pub(crate) fn pick_and_touch(
 /// `Pickable { should_block_lower: false, .. }` — the full-window
 /// [`crate::ui::UiRoot`] and the (empty) dock host — are transparent to the pick,
 /// so an empty-UI click still touches the world / HUD through them.
-fn pointer_over_blocking_ui(hover_map: &HoverMap, pickables: &Query<&Pickable>) -> bool {
+///
+/// A hovered entry only occludes if it is an **actual UI node with positive
+/// area** — it has a [`ComputedNode`] whose laid-out size is non-zero. Two kinds
+/// of hover-map entry are *not* a UI surface and must never suppress a world pick:
+/// a hover entry that is not a `bevy_ui` node at all (it has no `ComputedNode`),
+/// and a degenerate zero-area node (e.g. an empty, collapsed text node). Without
+/// this guard such an entry — hovered everywhere, covering nothing — reported the
+/// whole world as "blocked", silently killing every world pick (touch, and the
+/// avatar context menu's body pick).
+pub(crate) fn pointer_over_blocking_ui(
+    hover_map: &HoverMap,
+    pickables: &Query<&Pickable>,
+    sizes: &Query<&ComputedNode>,
+) -> bool {
     hover_map
         .values()
         .flat_map(|hits| hits.keys())
         .any(|entity| {
-            pickables
+            let blocks = pickables
                 .get(*entity)
-                .map_or(true, |pickable| pickable.should_block_lower)
+                .map_or(true, |pickable| pickable.should_block_lower);
+            let has_area = sizes
+                .get(*entity)
+                .is_ok_and(|computed| computed.size().x > 0.0 && computed.size().y > 0.0);
+            blocks && has_area
         })
 }
 

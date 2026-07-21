@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 104 |
+| ready | 103 |
 | blocked | 79 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 539 |
-| deferred | 9 |
+| done | 540 |
+| deferred | 11 |
 | wont-do | 3 |
-| **total** | **753** |
+| **total** | **755** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (104)
+## ready (103)
 
 ### viewer
 
@@ -58,9 +58,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
-- [`viewer-avatar-context-menu`](ready/viewer-avatar-context-menu.md) — Avatar
-  context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
-  (done))
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
@@ -566,7 +563,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (539)
+## done (540)
 
 ### protocol
 
@@ -694,6 +691,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
+  context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
+  (done))
 - [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
@@ -1648,7 +1648,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (9)
+## deferred (11)
 
 ### protocol
 
@@ -1657,6 +1657,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
+  — Re-lay the avatar pie by meaning once most actions are implemented (blocked
+  by `viewer-avatar-context-menu` (done))
+- [`viewer-avatar-mesh-accurate-pick`](deferred/viewer-avatar-mesh-accurate-pick.md)
+  — Mesh-accurate avatar picking (replace the bounding-box approximation)
+  (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-input-spacenav-crossplatform`](deferred/viewer-input-spacenav-crossplatform.md)
   — SpaceNavigator support on Windows / macOS (blocked by
   `viewer-input-spacenav-device` (done))

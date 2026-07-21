@@ -377,6 +377,14 @@ impl FriendsModel {
         self.names.get(&id).map(String::as_str)
     }
 
+    /// Whether `agent` is already in the buddy cache — a friend.
+    ///
+    /// The avatar context menu reads this to disable "Add as Friend" for someone
+    /// who already is one, matching the reference viewer's `on_enable`.
+    pub(crate) fn is_friend(&self, agent: AgentKey) -> bool {
+        self.friends.contains_key(&FriendKey::from(agent.uuid()))
+    }
+
     /// The friends whose name is not yet resolved — the set to request names for.
     fn unnamed(&self) -> Vec<AgentKey> {
         self.friends

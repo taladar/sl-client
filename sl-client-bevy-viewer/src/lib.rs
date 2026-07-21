@@ -32,6 +32,7 @@ mod animations;
 mod animesh;
 mod appearance;
 mod avatar_assets;
+mod avatar_menu;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
@@ -151,14 +152,15 @@ use crate::animesh::{
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::avatar_assets::AvatarAssetLibrary;
+use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
     annotate_avatar_distances, apply_avatar_appearance, apply_avatar_bake_textures,
     apply_avatar_names, apply_avatar_part_visibility, apply_avatar_runtime_morphs,
     apply_bom_face_materials, apply_own_local_bake, apply_own_shape_from_wearables,
-    assign_avatar_bake_materials, focus_camera_on_volume_shape, ingest_avatar_bakes,
-    log_avatar_interest_census, position_name_tags, setup_avatar_body, toggle_volume_morphs,
-    update_avatar_objects, update_coarse_avatars,
+    assign_avatar_bake_materials, fit_avatar_pick_colliders, focus_camera_on_volume_shape,
+    ingest_avatar_bakes, log_avatar_interest_census, position_name_tags, setup_avatar_body,
+    toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -740,10 +742,12 @@ fn run_session(
     // The on-screen "Stop flycam" button (shown only in flycam mode).
     .add_plugins(FlycamButtonPlugin)
     // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
-    // which entries a given pie holds is per-domain and belongs with the domain
-    // (viewer-object-context-menu), so nothing here opens one yet. The widget is
-    // reachable in the gallery's `radial-menu-target` card meanwhile.
+    // which entries a given pie holds is per-domain and belongs with the domain.
     .add_plugins(PieMenuPlugin)
+    // The avatar context / pie menu (viewer-avatar-context-menu): the self / other
+    // entry trees and their dispatch, opened by right-clicking an avatar's name
+    // tag or body.
+    .add_plugins(AvatarMenuPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
@@ -1072,6 +1076,9 @@ fn run_session(
                 // `SL_VIEWER_LOG_AVATAR_INTEREST`; a no-op otherwise).
                 log_avatar_interest_census,
                 annotate_avatar_distances,
+                // Fit each avatar's pick-collider box to its posed skeleton, after
+                // the bodies (and their skeleton instances) exist.
+                fit_avatar_pick_colliders.after(update_avatar_objects),
             ),
             // Parent each worn attachment to its avatar's skeleton joint (P16.1),
             // after the avatars (and their skeleton instances) have been spawned.
