@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 103 |
+| ready | 105 |
 | blocked | 79 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 541 |
-| deferred | 10 |
+| deferred | 14 |
 | wont-do | 3 |
-| **total** | **755** |
+| **total** | **761** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (103)
+## ready (105)
 
 ### viewer
 
@@ -54,6 +54,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   antialiasing (FXAA / SMAA / TAA selection)
 - [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
   — CAS sharpening + anisotropic texture sampling
+- [`viewer-attachment-context-menu`](ready/viewer-attachment-context-menu.md) —
+  Attachment context / pie menu entries (worn on self + on others) (blocked by
+  `viewer-avatar-context-menu` (done))
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
@@ -121,6 +124,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory row decorations (permissions, worn-bold)
 - [`viewer-inventory-worn-actions`](ready/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
+- [`viewer-land-context-menu`](ready/viewer-land-context-menu.md) — Land /
+  terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -1651,7 +1656,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (10)
+## deferred (14)
 
 ### protocol
 
@@ -1660,14 +1665,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-attachment-menu-reorder-when-implemented`](deferred/viewer-attachment-menu-reorder-when-implemented.md)
+  — Re-lay the attachment pies by meaning once most actions are implemented
+  (blocked by `viewer-attachment-context-menu`)
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
+- [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)
+  — Re-lay the HUD pie by meaning once most actions are implemented (blocked by
+  `viewer-hud-context-menu`)
 - [`viewer-input-spacenav-crossplatform`](deferred/viewer-input-spacenav-crossplatform.md)
   — SpaceNavigator support on Windows / macOS (blocked by
   `viewer-input-spacenav-device` (done))
+- [`viewer-land-menu-reorder-when-implemented`](deferred/viewer-land-menu-reorder-when-implemented.md)
+  — Re-lay the land pie by meaning once most actions are implemented (blocked by
+  `viewer-land-context-menu`)
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
   — Non-goals (deferred; candidate follow-up roadmaps)
+- [`viewer-object-menu-reorder-when-implemented`](deferred/viewer-object-menu-reorder-when-implemented.md)
+  — Re-lay the object pie by meaning once most actions are implemented (blocked
+  by `viewer-object-context-menu`)
 - [`viewer-os-native-integration-macos`](deferred/viewer-os-native-integration-macos.md)
   — macOS native OS integration (file dialogs, OpenURI, notifications) (blocked
   by `viewer-os-portals-linux`)

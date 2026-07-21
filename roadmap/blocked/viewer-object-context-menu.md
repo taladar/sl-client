@@ -5,6 +5,7 @@ topic: viewer
 status: blocked
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-object-selection
 blocked_by: [viewer-object-selection-core, viewer-ui-radial-menu, viewer-ui-context-menu]
+refs: [viewer-land-context-menu, viewer-attachment-context-menu, viewer-hud-context-menu, viewer-object-menu-reorder-when-implemented]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -34,7 +35,23 @@ about:
 The entry set is **per target**, not one menu: the reference has a distinct pie
 per pick target — object, avatar (self / other), attachment (self / other),
 land, and muted particle source (seven `menu_pie_*.xml` files). Model the target
-discrimination here.
+discrimination here — but the *entries* of the non-object targets are their own
+tasks now: avatar is done ([[viewer-avatar-context-menu]]), land is
+[[viewer-land-context-menu]], the worn-attachment pies are
+[[viewer-attachment-context-menu]], HUDs are [[viewer-hud-context-menu]]. This
+task owns the **object** pie (and the small muted-particle-source one). The pie
+XMLs are shared by every skin (Vintage overrides none), so `default/xui/en/`
+is authoritative.
+
+Scope decision (2026-07-21): reproduce the **full reference entry set** at the
+reference compass positions, with not-yet-implemented entries declared greyed
+(the `UNIMPLEMENTED` condition pattern from `src/avatar_menu.rs`), and wire the
+simple ones whose wire paths exist — **Take**, **Take Copy**, **Delete**
+(Return), and Touch / Sit Here where the interaction paths are already there.
+The rest (buy, pay, edit, wear/attach, the script / pathfinding / derender
+tails) go live as their features land;
+[[viewer-object-menu-reorder-when-implemented]] then re-lays the pie by
+meaning.
 
 Reference (Firestorm, read-only): `llselectmgr`, `lltoolpie` (what is under the
 cursor and what may be done to it), `newview/llviewermenu.cpp` (the entry

@@ -49,3 +49,19 @@ above).
 Give-by-drag targets a **specific avatar**: dropping an inventory item onto an
 avatar in-world, onto a radar / people-list row, or onto their **profile**
 ([[viewer-social-profiles]]) gives it to them (the give wire path is done).
+
+## Menu shape (2026-07-21)
+
+The context menus for inventory **items and folders** are regular
+**drop-down / line menus** (the reusable `crate::menu` widget), exactly as in
+the reference — inventory never uses pies. Mirror the **reference's** per-type
+entry sets: the reference builds them all from one shared `menu_inventory.xml`
+whose entries each bridge type shows / hides / disables
+(`llinventorybridge.cpp`, `buildContextMenu` per `LL*Bridge`) — folders get
+New/Sort/Delete-category entries, wearables get Wear / Take Off, objects get
+Attach / Detach, landmarks Teleport, and so on; the Library subtree stays
+read-only. As with the pie menus: reproduce the reference entries, grey out
+what our side does not implement yet (the `UNIMPLEMENTED` condition pattern),
+and wire the simple ones (wear / detach / rename / delete / copy-paste /
+move-to-trash) now. The menu XML is skin-shared (the Vintage skin overrides
+none of it), so `default/xui/en/menu_inventory.xml` is authoritative.
