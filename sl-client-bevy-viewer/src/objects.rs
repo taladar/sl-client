@@ -257,6 +257,12 @@ struct TrackedObject {
     /// to its avatar's skeleton joint rather than a linkset root, by
     /// [`adopt_pending_attachments`] (P16.1).
     attachment_point: Option<u8>,
+    /// The object's last-seen `PrimFlags` bitfield (the update's `UpdateFlags`),
+    /// kept for the object context menu's enable gates
+    /// ([`ObjectState::pick_summary`]): the agent-relative permission bits
+    /// (you-owner, copy) and the touch-handler flag decide which pie slices are
+    /// live for this object.
+    update_flags: u32,
     /// The per-face child entities carrying this object's geometry: one per
     /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
     /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
@@ -531,6 +537,64 @@ impl ObjectState {
             .find(|tracked| tracked.full_key == key)
             .map(|tracked| tracked.entity)
     }
+
+    /// Everything the object context menu needs to know about a picked object
+    /// ([`crate::object_menu`]), resolved by walking the linkset parent chain up
+    /// to its root: the picked prim itself (the touch / sit target), the linkset
+    /// root (the derez target — take / delete / return act on roots), the
+    /// combined permission flags, and whether the chain is a worn attachment
+    /// (which gets an attachment pie, not the object one).
+    ///
+    /// The flags are the **union** of the picked prim's and the root's, because
+    /// the agent-relative bits (you-owner, copy) ride the root while the
+    /// touch-handler flag can sit on either. The walk is bounded like
+    /// [`in_hud_attachment`]'s, against a malformed (cyclic) parent link.
+    pub(crate) fn pick_summary(&self, scoped: ScopedObjectId) -> Option<ObjectPickSummary> {
+        let picked = self.objects.get(&scoped)?;
+        let mut root_scoped = scoped;
+        let mut root = picked;
+        let mut attachment = picked.attachment_point.is_some();
+        for _step in 0..MAX_PARENT_WALK {
+            if root.is_root || attachment {
+                break;
+            }
+            let next = root.parent;
+            let Some(parent) = self.objects.get(&next) else {
+                break;
+            };
+            root_scoped = next;
+            root = parent;
+            attachment = root.attachment_point.is_some();
+        }
+        Some(ObjectPickSummary {
+            picked_scoped: scoped,
+            picked_full: picked.full_key,
+            root_scoped,
+            root_full: root.full_key,
+            flags: picked.update_flags | root.update_flags,
+            attachment,
+        })
+    }
+}
+
+/// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities
+/// the object context menu's actions need, and the flag bits its enable gates
+/// read. See [`crate::object_menu`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ObjectPickSummary {
+    /// The picked prim itself — the touch and sit target.
+    pub(crate) picked_scoped: ScopedObjectId,
+    /// The picked prim's full (grid-wide) key — what `AgentRequestSit` targets.
+    pub(crate) picked_full: ObjectKey,
+    /// The linkset root — what take / delete / return derez.
+    pub(crate) root_scoped: ScopedObjectId,
+    /// The root's full key — what a properties(-family) request queries.
+    pub(crate) root_full: ObjectKey,
+    /// The union of the picked prim's and the root's `PrimFlags` bits.
+    pub(crate) flags: u32,
+    /// Whether the picked chain is worn on an avatar (including HUDs) — such a
+    /// pick belongs to the attachment pies, not the object one.
+    pub(crate) attachment: bool,
 }
 
 /// Marker for the per-object **geometry holder** entity — the child of an object
@@ -2008,6 +2072,7 @@ fn apply_object(
         existing.attachment_point = attachment_point;
         existing.animated = is_animated_object(object);
         existing.full_key = object.full_id;
+        existing.update_flags = object.update_flags;
         return;
     }
 
@@ -2090,6 +2155,7 @@ fn apply_object(
             is_root,
             parented,
             attachment_point,
+            update_flags: object.update_flags,
             face_entities,
             pending,
             mesh_rebuild: None,

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 112 |
+| ready | 116 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 543 |
+| done | 544 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **771** |
+| **total** | **776** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (112)
+## ready (116)
 
 ### viewer
 
@@ -80,6 +80,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
+- [`viewer-flexi-prim-picking`](ready/viewer-flexi-prim-picking.md) — Pick flexi
+  prims against their simulated geometry
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-gesture-runtime`](ready/viewer-gesture-runtime.md) — Gesture runtime
@@ -156,6 +158,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags — world-space billboard renderer
 - [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
   Name tags — wire GetDisplayNames caps into the tag
+- [`viewer-object-pie-buy-take-chain`](ready/viewer-object-pie-buy-take-chain.md)
+  — Object pie Buy slices + the reference Buy/Take autohide chain
+- [`viewer-object-pie-enable-fidelity`](ready/viewer-object-pie-enable-fidelity.md)
+  — Reference-faithful object pie enable predicates + mute naming
 - [`viewer-object-selection-core`](ready/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -176,6 +182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-options-general`](ready/viewer-parcel-options-general.md) —
   About Land floater — general / covenant / objects (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-particle-pick-mute`](ready/viewer-particle-pick-mute.md) — Particle
+  picking + the muted-particle-source pie
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
@@ -399,12 +407,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-editor-widget`, `viewer-notecard-format` (done))
 - [`viewer-notification-history`](blocked/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`)
-- [`viewer-object-context-menu`](blocked/viewer-object-context-menu.md) — Object
-  hover / context menu entries (blocked by `viewer-object-selection-core`,
-  `viewer-ui-radial-menu` (done), `viewer-ui-context-menu` (done))
 - [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
   — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
   `viewer-ui-floater-basic` (done))
+- [`viewer-object-pie-multi-select-take`](blocked/viewer-object-pie-multi-select-take.md)
+  — Object pie multi-selection take slices (blocked by
+  `viewer-object-selection-core`)
 - [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-object-selection-core`,
   `viewer-inventory-context-actions` (done))
@@ -584,7 +592,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (543)
+## done (544)
 
 ### protocol
 
@@ -822,6 +830,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cameras
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
+- [`viewer-object-context-menu`](done/viewer-object-context-menu.md) — Object
+  hover / context menu entries (blocked by `viewer-ui-radial-menu` (done),
+  `viewer-ui-context-menu` (done))
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the
@@ -1705,7 +1716,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Non-goals (deferred; candidate follow-up roadmaps)
 - [`viewer-object-menu-reorder-when-implemented`](deferred/viewer-object-menu-reorder-when-implemented.md)
   — Re-lay the object pie by meaning once most actions are implemented (blocked
-  by `viewer-object-context-menu`)
+  by `viewer-object-context-menu` (done))
 - [`viewer-os-native-integration-macos`](deferred/viewer-os-native-integration-macos.md)
   — macOS native OS integration (file dialogs, OpenURI, notifications) (blocked
   by `viewer-os-portals-linux`)

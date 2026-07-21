@@ -70,6 +70,8 @@
 //! `menu_pie_avatar_other.xml` (the compass positions), and
 //! `newview/llviewermenu.cpp` (the action handlers).
 
+use std::collections::HashSet;
+
 use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
@@ -82,9 +84,10 @@ use crate::avatar_pick::{AvatarPicker, PickAccuracy};
 use crate::avatars::{AvatarPickTarget, AvatarState};
 use crate::camera::ViewerCamera;
 use crate::conversations::{ConversationKey, OpenConversation};
-use crate::hud::HudCamera;
+use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
+use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
@@ -772,10 +775,11 @@ fn update_pick_inspector(
     *text = Text::new(lines.join("\n"));
 }
 
-/// Resolve a world right-click to an avatar and ask for its pie.
+/// Resolve a world right-click to its context-menu target — an avatar's pie, or
+/// the in-world object pie ([`crate::object_menu`]) — and ask for it.
 ///
-/// Two resolution paths, matching the reference's "the name tag or the avatar
-/// itself":
+/// Avatar resolution has two paths, matching the reference's "the name tag or
+/// the avatar itself":
 ///
 /// 1. **The name tag** — a `bevy_ui` node, so a hit shows up in the [`HoverMap`].
 ///    Checked first, and it wins even over the body behind it.
@@ -787,21 +791,26 @@ fn update_pick_inspector(
 ///    yet), so a click just *off* an avatar's silhouette picks nothing, matching
 ///    the reference.
 ///
+/// The same world ray is also resolved to an in-world object
+/// ([`ObjectPicker`]); when both an avatar and an object are hit, the **nearer**
+/// wins, so an object standing in front of an avatar gets the object pie and
+/// vice versa.
+///
 /// It opens on the right-button **release** of a click, not the press: a right-
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
 /// gesture starts. [`RIGHT_CLICK_DRAG_SLOP`] separates the two.
 ///
 /// A right-click over a **blocking** UI element (an open floater) that is *not* a
 /// name tag suppresses the pick, so a menu drawn over the world does not also open
-/// an avatar pie behind it.
+/// an avatar or object pie behind it.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion + name-tag path, the avatar-identity query, the window for the \
               cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
-              occlusion, the mesh-accurate avatar picker for the body pick, and the open-request \
-              channel"
+              occlusion, the mesh-accurate avatar picker and the object picker for the world \
+              pick, and the two open-request channels"
 )]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -816,8 +825,10 @@ fn request_avatar_menu_on_right_click(
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
     picker: AvatarPicker,
+    object_picker: ObjectPicker,
     mut ray_cast: MeshRayCast,
     mut requests: MessageWriter<OpenAvatarMenu>,
+    mut object_requests: MessageWriter<OpenObjectMenu>,
 ) {
     // Track the gesture: a press starts it, motion accumulates, a release decides.
     if buttons.just_pressed(MouseButton::Right) {
@@ -865,16 +876,40 @@ fn request_avatar_menu_on_right_click(
         // `viewer-hud-context-menu`.)
         return;
     } else {
-        // 3. The body: resolve the world ray at the cursor against the avatars'
-        // **posed** geometry (mesh-accurate, with the fitted box only as the
-        // no-geometry fallback) — see `crate::avatar_pick`.
+        // 3. The world: resolve the ray at the cursor against both candidate
+        // targets — the avatars' **posed** geometry (mesh-accurate, with the
+        // fitted box only as the no-geometry fallback — see `crate::avatar_pick`)
+        // and the in-world objects (`crate::object_menu`) — and let the nearer
+        // hit win.
         let Ok((camera, camera_transform)) = camera.single() else {
             return;
         };
         let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
             return;
         };
-        picker.pick(ray).map(|hit| hit.agent)
+        let avatar_hit = picker.pick(ray);
+        // The object ray must not strike HUD geometry: a HUD is screen-space
+        // (and has already had its chance to occlude above).
+        let hud_entities: HashSet<Entity> = layers
+            .iter()
+            .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
+            .map(|(entity, _layers)| entity)
+            .collect();
+        let object_hit = object_picker.pick(ray, &mut ray_cast, &hud_entities);
+        match (avatar_hit, object_hit) {
+            (avatar, Some(object))
+                if avatar
+                    .as_ref()
+                    .is_none_or(|avatar| object.distance < avatar.distance) =>
+            {
+                object_requests.write(OpenObjectMenu {
+                    hit: object,
+                    at: cursor,
+                });
+                None
+            }
+            (avatar, _object) => avatar.map(|hit| hit.agent),
+        }
     };
 
     if let Some(agent) = agent {

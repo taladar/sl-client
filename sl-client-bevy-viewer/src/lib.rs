@@ -79,6 +79,7 @@ mod menu_search;
 mod meshes;
 mod movement;
 mod nearby_chat_bar;
+mod object_menu;
 mod objects;
 mod particles;
 mod paths;
@@ -214,6 +215,7 @@ use crate::materials::{
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::movement::{AvatarControls, drive_avatar_controls};
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
+use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
     apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
@@ -753,6 +755,10 @@ fn run_session(
     // entry trees and their dispatch, opened by right-clicking an avatar's name
     // tag or body.
     .add_plugins(AvatarMenuPlugin)
+    // The in-world object context / pie menu (viewer-object-context-menu): the
+    // reference object entry tree and its dispatch, opened by right-clicking an
+    // in-world object (the shared resolver lives with the avatar menu).
+    .add_plugins(ObjectMenuPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The

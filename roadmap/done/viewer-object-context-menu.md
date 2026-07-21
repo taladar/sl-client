@@ -2,10 +2,10 @@
 id: viewer-object-context-menu
 title: Object hover / context menu entries
 topic: viewer
-status: blocked
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-object-selection
-blocked_by: [viewer-object-selection-core, viewer-ui-radial-menu, viewer-ui-context-menu]
-refs: [viewer-land-context-menu, viewer-attachment-context-menu, viewer-hud-context-menu, viewer-object-menu-reorder-when-implemented]
+blocked_by: [viewer-ui-radial-menu, viewer-ui-context-menu]
+refs: [viewer-object-selection-core, viewer-land-context-menu, viewer-attachment-context-menu, viewer-hud-context-menu, viewer-object-menu-reorder-when-implemented, viewer-object-pie-buy-take-chain, viewer-object-pie-multi-select-take, viewer-object-pie-enable-fidelity, viewer-particle-pick-mute, viewer-flexi-prim-picking]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -70,3 +70,60 @@ compass position must never move between commits. The test must fail if an entry
 moves, so that moving one is a *deliberate* edit to the committed table and not
 a silent side effect of a reorder by someone unaware of the angular-stability
 rule. No pie ships here without its address table pinned.
+
+## Done (2026-07-21)
+
+Landed as `src/object_menu.rs`: the full `menu_pie_object.xml` tree at the
+reference compass positions (reference slice order → East..SouthEast, the
+avatar-pie convention), opened as a **pie** (line presentation deferred, as
+for the avatar pies). The whole tree's address table is pinned in
+`object_pie_keeps_every_address`.
+
+**How a pick resolves without the selection core.** The task was formally
+blocked on [[viewer-object-selection-core]], but the menu needs only a
+single-object pick, not the maintained selection set: the shared right-click
+resolver in `src/avatar_menu.rs` now resolves the world ray against **both**
+the mesh-accurate avatar pick and a first-hit object pick
+(`object_menu::ObjectPicker`, the same ray walk the left-click touch uses),
+and the **nearer** hit wins. The linkset resolution (picked prim → root,
+combined `PrimFlags`, attachment detection) is `ObjectState::pick_summary` in
+`objects.rs`, which now tracks each object's last-seen update flags. The
+selection core remains its own task (multi-select, rubber-band, the
+select/deselect protocol); its `blocked_by` edge here became a `refs` entry.
+
+**Wired for real:** Touch (with the right-click ray's own `SurfaceInfo`, so
+`llDetectedTouch*` reads the true hit; enabled on `FLAGS_HANDLE_TOUCH`); Sit
+Here / Stand Up as the reference's **autohide chain** at one position
+(`PieContent::Chain`, its first live use; sit targets the picked prim with
+the object-local hit as offset); Take / Take Copy (both its addresses) /
+Delete / Return as `DerezObjects` on the linkset root (Objects folder,
+Objects folder copy, Trash, return-to-owner); Mute (an open-time
+`RequestObjectPropertiesFamily` supplies the name). Everything else sits
+greyed at its reference position via the `UNIMPLEMENTED` sentinel. The enable
+gates are deliberately simplified flag reads — see
+[[viewer-object-pie-enable-fidelity]] for the reference-faithful predicates
+(and the mute empty-name race).
+
+### Deliberate departures, each with its follow-up task
+
+- **No Buy / Take autohide chain at west (yet).** The reference chains a Buy
+  slice over the `Take >` sub-pie; buying is unwired and a chain member that
+  is a *sub-pie* is not expressible in `pie_menu` today, so west holds
+  `Take >` plainly and Buy keeps its other reference address (More >
+  south-east) as a greyed slice → [[viewer-object-pie-buy-take-chain]].
+- **Take's multi-selection slices are placeholders** (no multi-selection
+  yet); the reference's two separator slots stay empty →
+  [[viewer-object-pie-multi-select-take]].
+- **`Attach HUD >` is declared empty** (renders disabled) — the reference
+  fills it (and `Attach >`'s plain points) at runtime; the static Bento
+  `Ext. Skeleton >` tree is reproduced in full as greyed slices, pinning the
+  Bento addresses. Runtime lists land with wearing
+  ([[viewer-inventory-attach-to-point]] and the re-lay in
+  [[viewer-object-menu-reorder-when-implemented]]).
+- **Worn attachments open nothing** — they belong to
+  [[viewer-attachment-context-menu]] / [[viewer-hud-context-menu]].
+- **The muted-particle-source pie is deferred**: its one slice needs particle
+  picking, which the renderer does not do yet →
+  [[viewer-particle-pick-mute]].
+- **Flexi prims pick against a stale broad-phase `Aabb`** (a shared limit
+  with left-click touch) → [[viewer-flexi-prim-picking]].
