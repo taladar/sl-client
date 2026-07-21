@@ -55,11 +55,11 @@ use std::collections::{BTreeMap, VecDeque};
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatType, Command, GroupKey, ImDialog, ImSessionId, SlCommand, SlEvent,
+    AgentKey, ChatType, Command, GroupKey, ImDialog, ImSessionId, SlCommand, SlEvent, SlIdentity,
     SlSessionEvent, Uuid,
 };
 
-use crate::bottom_toolbar::BottomArea;
+use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translator};
@@ -186,6 +186,13 @@ const DOCK_INSET: f32 = 0.0;
 /// the floater manager's shared `DefaultDockHost` fill). Invisible until a
 /// floater docks into it, as the host content-sizes from empty.
 const DOCK_HOST_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.85);
+
+/// The dock host's z-index — one above the bottom bar
+/// ([`crate::bottom_toolbar::BOTTOM_BAR_Z`]). This host sits *against* that bar, so
+/// a floater docked here (which shares its host's z-plane, see
+/// [`crate::floater`]'s `dock`) must out-rank the bar or the bar swallows clicks on
+/// the docked floater's bottom-most control — its chat input.
+const DOCK_HOST_Z: i32 = BOTTOM_BAR_Z + 1;
 
 /// The Fluent key for the Nearby Chat tab's title.
 const NEARBY_TITLE_KEY: &str = "conversations-nearby";
@@ -816,7 +823,8 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
     // bottom-pinned container the floater docks into instead of the shared
     // top-trailing host. Empty (and so invisible) until docked;
     // [`position_conversations_dock_host`] keeps it pinned above the nearby-chat
-    // bar. Below the free floaters' raised z-order but above the ordinary panels.
+    // bar. Sits one above the bottom bar ([`DOCK_HOST_Z`]) so a floater docked
+    // against the bar still takes clicks on its chat input.
     let dock_host = commands
         .spawn((
             Node {
@@ -830,7 +838,7 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
             }),
             LogicalPadding(LogicalRect::all(Val::Px(4.0))),
             BackgroundColor(DOCK_HOST_BACKGROUND),
-            GlobalZIndex(0),
+            GlobalZIndex(DOCK_HOST_Z),
             Pickable {
                 should_block_lower: false,
                 is_hoverable: true,
@@ -1041,12 +1049,9 @@ fn spawn_conversation_view(
             ChildOf(tab_button),
         ))
         .id();
-    if !nearby {
-        spawn_tab_close_button(commands, tab_button, key);
-    }
-
     // The pane — [invite bar | transcript scroll | typing | input], hidden unless
-    // active.
+    // active. A closable tab's close button lives in the pane's top-trailing
+    // corner (below), not on the strip tab — the reference viewer's arrangement.
     let panel = commands
         .spawn((
             Node {
@@ -1139,6 +1144,13 @@ fn spawn_conversation_view(
         .field
     };
 
+    // Every closable (non-Nearby) tab carries a small ✕ in the **top-trailing
+    // corner of its pane** — spawned last so it paints over the transcript, and
+    // RTL-aware via `LogicalInset`. Nearby Chat cannot be closed, so it gets none.
+    if !nearby {
+        spawn_pane_close_button(commands, panel, key);
+    }
+
     ConversationView {
         tab_button,
         tab_label,
@@ -1152,23 +1164,34 @@ fn spawn_conversation_view(
     }
 }
 
-/// Spawn a tab's trailing close button, wired to a [`CloseConversation`] press.
-fn spawn_tab_close_button(commands: &mut Commands, tab_button: Entity, key: ConversationKey) {
+/// Spawn a conversation pane's close button — a small ✕ pinned to the pane's
+/// **top-trailing corner** (`LogicalInset` so it is top-right under LTR and
+/// top-left under RTL), wired to a [`CloseConversation`] press. It carries the
+/// panel background so it cleanly occludes the transcript line behind it, and is
+/// spawned as the pane's last child so it paints on top. The reference viewer puts
+/// the session-close control on the conversation content, not the tab.
+fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: ConversationKey) {
     commands
         .spawn((
             Node {
-                flex_shrink: 0.0,
-                padding: UiRect::all(Val::Px(2.0)),
+                position_type: PositionType::Absolute,
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
+            LogicalInset(LogicalRect {
+                block_start: Val::Px(2.0),
+                inline_end: Val::Px(2.0),
+                ..LogicalRect::AUTO
+            }),
+            BackgroundColor(PANEL_BACKGROUND),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
             },
-            Name::new("conversations-tab-close"),
-            ChildOf(tab_button),
+            Name::new("conversations-pane-close"),
+            ChildOf(panel),
         ))
         .with_child((
             Text::new(CLOSE_GLYPH.to_owned()),
@@ -1178,7 +1201,7 @@ fn spawn_tab_close_button(commands: &mut Commands, tab_button: Entity, key: Conv
         ))
         .observe(
             move |mut press: On<Pointer<Press>>, mut close: MessageWriter<CloseConversation>| {
-                // Don't let the press bubble to the tab's select observer.
+                // Don't let the press bubble to the transcript / pane behind it.
                 press.propagate(false);
                 if press.button == PointerButton::Primary {
                     close.write(CloseConversation { key });
@@ -1289,6 +1312,7 @@ fn spawn_invite_button(
 fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
+    identity: Res<SlIdentity>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -1339,13 +1363,19 @@ fn ingest_conversation_events(
                 from_name,
                 message,
             } => {
-                model.note_agent_name(*from_agent_id, from_name);
-                model.push_remote(
-                    ConversationKey::Group(*group_id),
-                    *from_agent_id,
-                    from_name,
-                    message,
-                );
+                // The grid broadcasts our own group message back to us; we already
+                // echo it locally as "You:" on send (`route_conversation_input`),
+                // so drop the self-echo to avoid showing it twice (once as "You:"
+                // and once under our own name).
+                if identity.agent_id != Some(*from_agent_id) {
+                    model.note_agent_name(*from_agent_id, from_name);
+                    model.push_remote(
+                        ConversationKey::Group(*group_id),
+                        *from_agent_id,
+                        from_name,
+                        message,
+                    );
+                }
             }
             SlSessionEvent::ConferenceSessionMessage {
                 session_id,
@@ -1353,13 +1383,17 @@ fn ingest_conversation_events(
                 from_name,
                 message,
             } => {
-                model.note_agent_name(*from_agent_id, from_name);
-                model.push_remote(
-                    ConversationKey::Conference(ImSessionId::from(*session_id)),
-                    *from_agent_id,
-                    from_name,
-                    message,
-                );
+                // Same self-echo suppression as group sessions (a conference
+                // session likewise echoes the sender's own line back).
+                if identity.agent_id != Some(*from_agent_id) {
+                    model.note_agent_name(*from_agent_id, from_name);
+                    model.push_remote(
+                        ConversationKey::Conference(ImSessionId::from(*session_id)),
+                        *from_agent_id,
+                        from_name,
+                        message,
+                    );
+                }
             }
             // An invitation opens the tab (and records its name) as a *pending
             // invite* — Accept / Decline in the pane — before any message arrives.

@@ -1084,10 +1084,18 @@ fn dock(
     floater.last_host = Some(host);
     floater.minimized = false;
     commands.entity(entity).insert(ChildOf(host));
+    // Sit the docked floater in its **host's** z-plane rather than a hardcoded 0.
+    // `GlobalZIndex` is global (not inherited), so a docked window at 0 loses the
+    // pick to anything drawn over it — e.g. the Conversations floater's dock host
+    // sits against the bottom bar (`GlobalZIndex` 9000), and a floater docked there
+    // at 0 would have its bottom-most control (the chat input) swallowed by the
+    // bar. The shared top-trailing host is at 0, so its docked floaters are
+    // unchanged.
+    let host_z = z_indices.get(host).map_or(0, |index| index.0);
     if let Ok(mut index) = z_indices.get_mut(entity)
-        && index.0 != 0
+        && index.0 != host_z
     {
-        index.0 = 0;
+        index.0 = host_z;
     }
 }
 

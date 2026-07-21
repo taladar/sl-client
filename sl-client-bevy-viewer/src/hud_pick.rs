@@ -35,6 +35,7 @@
 use std::collections::HashSet;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
     Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
@@ -64,13 +65,16 @@ type FaceQuery<'world, 'state> =
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the \
-              mouse button, the Alt modifier, the window for the cursor, the two cameras to cast \
-              from, the ray caster, the render-layer / face / object components a hit is resolved \
-              through, and the command channel the touch is sent on"
+              mouse button, the Alt modifier, the hover map that says the click landed on UI, the \
+              window for the cursor, the two cameras to cast from, the ray caster, the \
+              render-layer / face / object components a hit is resolved through, and the command \
+              channel the touch is sent on"
 )]
 pub(crate) fn pick_and_touch(
     buttons: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    hover_map: Res<HoverMap>,
+    pickables: Query<&Pickable>,
     windows: Query<&Window>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     fly_camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
@@ -86,6 +90,15 @@ pub(crate) fn pick_and_touch(
     // orbit gesture (`crate::camera::focus_on_object`), not a touch, so ignore it.
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
     if !buttons.just_pressed(TOUCH_BUTTON) || alt {
+        return;
+    }
+    // Respect UI occlusion. This pick casts its own ray instead of going through
+    // bevy_picking, so a floater's `should_block_lower` never gets to stop it —
+    // without this guard a click on a window drawn over the HUD would *also* touch
+    // the HUD attachment (or world object) behind it. Only `bevy_ui` nodes are in
+    // the hover map (no mesh-picking backend is installed), so a hovered
+    // block-lower Pickable means the cursor is over a solid UI element; skip.
+    if pointer_over_blocking_ui(&hover_map, &pickables) {
         return;
     }
     let Ok(window) = windows.single() else {
@@ -155,6 +168,28 @@ pub(crate) fn pick_and_touch(
             );
         }
     }
+}
+
+/// Whether the pointer is over a **blocking** UI element — a hovered `bevy_ui`
+/// node that occludes what is behind it. Only UI hits populate the hover map (no
+/// mesh-picking backend is installed), so any hovered node here is UI.
+///
+/// A node **without** a [`Pickable`] component blocks by default in `bevy_ui`
+/// (`should_block_lower` defaults to `true`) — and most pane content (the pane
+/// column, the group-list body, the transcript text) has no explicit `Pickable`,
+/// so it must count as blocking. Only nodes that opt **out** with an explicit
+/// `Pickable { should_block_lower: false, .. }` — the full-window
+/// [`crate::ui::UiRoot`] and the (empty) dock host — are transparent to the pick,
+/// so an empty-UI click still touches the world / HUD through them.
+fn pointer_over_blocking_ui(hover_map: &HoverMap, pickables: &Query<&Pickable>) -> bool {
+    hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .any(|entity| {
+            pickables
+                .get(*entity)
+                .map_or(true, |pickable| pickable.should_block_lower)
+        })
 }
 
 /// Resolve a ray hit to its object and touch it, carrying the surface the ray
