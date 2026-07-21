@@ -76,8 +76,8 @@ pub use sl_proto::{
     MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
     Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
+    Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
     ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
     ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
@@ -3344,6 +3344,22 @@ fn advance_running(
                     messages,
                     prev,
                 }));
+            }
+            Command::QueryNearbyChatHistoryPage {
+                already_shown,
+                before,
+                limit,
+            } => {
+                // Nearby chat has no in-memory ring: the whole page comes from the
+                // on-disk transcript, skipping the newest `already_shown` lines the
+                // caller already shows live (B9 paging discipline).
+                let consumed = before.map_or(0, MessageCursor::consumed_count);
+                let (lines, prev): (std::sync::Arc<[NearbyHistoryLine]>, _) =
+                    match chat_log.read_nearby_older_page(*already_shown, consumed, *limit) {
+                        Some((page, cursor)) => (page.into(), cursor),
+                        None => (Vec::new().into(), None),
+                    };
+                events.write(SlEvent(SessionEvent::NearbyChatHistoryPage { lines, prev }));
             }
             Command::QueryInventoryFolder {
                 folder,

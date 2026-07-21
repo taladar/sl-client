@@ -2366,6 +2366,30 @@ pub enum Command {
         /// The maximum number of messages in the page.
         limit: usize,
     },
+    /// Query one bounded, newest-first page of **nearby (local) chat** history
+    /// from the on-disk transcript. The runtime replies with
+    /// [`Event::NearbyChatHistoryPage`](crate::Event::NearbyChatHistoryPage); no
+    /// wire send.
+    ///
+    /// Nearby chat has no [`ChatSessionKind`] and no in-memory ring
+    /// ([`NearbyHistoryLine`](crate::NearbyHistoryLine) explains why), so this is a
+    /// separate query from [`QueryChatHistoryPage`](Self::QueryChatHistoryPage):
+    /// the whole page comes from the transcript file the runtime is appending live
+    /// chat to. `already_shown` is how many of the transcript's **newest** lines
+    /// the caller is already displaying from the live
+    /// [`ChatReceived`](crate::Event::ChatReceived) stream — those duplicate the
+    /// file's tail and are skipped so recall only surfaces lines *older* than what
+    /// is on screen.
+    QueryNearbyChatHistoryPage {
+        /// How many newest transcript lines to skip because the caller already
+        /// shows them live (see above); `0` recalls from the very newest line.
+        already_shown: usize,
+        /// The page boundary: `None` for the newest (un-skipped) page, or a `prev`
+        /// cursor from an earlier reply to continue older.
+        before: Option<MessageCursor>,
+        /// The maximum number of lines in the page.
+        limit: usize,
+    },
     /// Query the buddy cache with each friend's online flag. The runtime replies
     /// with [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot) built from
     /// [`Session::friends_presence`](crate::Session::friends_presence); no wire

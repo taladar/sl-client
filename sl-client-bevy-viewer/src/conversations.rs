@@ -83,6 +83,13 @@ const STRIP_ELEMENT: &str = "conversations-strip";
 /// full on-disk history (the chat-log transcript) is a separate paging concern.
 const HISTORY_CAP: usize = 200;
 
+/// How many persisted nearby-chat lines to recall from the on-disk transcript
+/// ([`crate::chat_log`]) when the panel first loads after login — the scrollback of
+/// previous conversation shown above the live lines, comparable to the reference
+/// viewer's log-recall window. A single page today; older paging on scroll-to-top
+/// is a follow-up.
+const RECALL_LIMIT: usize = 100;
+
 /// The vertical tab strip's starting width, in logical pixels — the draggable
 /// divider adjusts it from here, and a stored split overrides it at seed time.
 const STRIP_WIDTH: f32 = 150.0;
@@ -271,6 +278,13 @@ struct Conversation {
     /// Whether this is an invitation we have not yet accepted (shows the
     /// Accept / Decline bar). Cleared on accept or when the first message lands.
     pending_invite: bool,
+    /// Persisted **recall** lines rendered *above* the live [`lines`](Self::lines),
+    /// loaded once from the on-disk chat-log transcript so the panel opens on
+    /// previous-session history (the reference viewer's "load previous
+    /// conversation"). Only the Nearby tab populates this today (via
+    /// [`ConversationModel::set_nearby_recall`]); every other tab leaves it empty.
+    /// Not subject to the live [`HISTORY_CAP`] and never counted as unread.
+    recall: Vec<TranscriptLine>,
     /// Bumped on each appended line; the view's last-rendered value is compared
     /// against it to avoid rebuilding an unchanged transcript node.
     revision: u64,
@@ -285,6 +299,7 @@ impl Conversation {
             unread: 0,
             typing: BTreeMap::new(),
             pending_invite: false,
+            recall: Vec::new(),
             revision: 0,
         }
     }
@@ -441,6 +456,27 @@ impl ConversationModel {
                 body: body.to_owned(),
             },
         );
+    }
+
+    /// The number of **live** nearby-chat lines currently held — what the recall
+    /// query must skip (`already_shown`) so it only surfaces persisted history
+    /// *older* than the live tail already on screen.
+    fn nearby_live_len(&self) -> usize {
+        self.index_of(ConversationKey::Nearby)
+            .and_then(|index| self.entries.get(index))
+            .map_or(0, |entry| entry.lines.len())
+    }
+
+    /// Replace the Nearby tab's **recall** lines (the persisted history rendered
+    /// above the live transcript) and bump its revision so the view re-renders.
+    /// A no-op if the Nearby tab is somehow absent.
+    fn set_nearby_recall(&mut self, lines: Vec<TranscriptLine>) {
+        if let Some(index) = self.index_of(ConversationKey::Nearby)
+            && let Some(entry) = self.entries.get_mut(index)
+        {
+            entry.recall = lines;
+            entry.revision = entry.revision.wrapping_add(1);
+        }
     }
 
     /// Sets or clears a typist for `key`. A typing notification for an existing
@@ -613,8 +649,14 @@ fn invite_command(key: ConversationKey, accept: bool) -> Option<Command> {
     })
 }
 
-/// Renders a transcript to a single string, `you` labelling our own lines.
-fn format_transcript(lines: &VecDeque<TranscriptLine>, you: &str) -> String {
+/// Renders a transcript to a single string, `you` labelling our own lines. Takes
+/// an iterator so the caller can render the persisted **recall** lines and the
+/// live lines as one block (`recall.iter().chain(lines.iter())`) without joining
+/// two owned collections.
+fn format_transcript<'line>(
+    lines: impl IntoIterator<Item = &'line TranscriptLine>,
+    you: &str,
+) -> String {
     let mut out = String::new();
     for line in lines {
         if !out.is_empty() {
@@ -771,6 +813,15 @@ impl StripFocus {
     }
 }
 
+/// One-shot latch for the **nearby-chat history recall**: set once the recall
+/// query has been issued so it fires exactly once. The viewer logs in once per
+/// process, so it need not reset within a session (a relogin re-runs the app).
+#[derive(Resource, Debug, Default)]
+struct NearbyRecallState {
+    /// Whether the recall query has already been sent.
+    requested: bool,
+}
+
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
@@ -780,6 +831,7 @@ impl Plugin for ConversationsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ConversationModel>()
             .init_resource::<StripFocus>()
+            .init_resource::<NearbyRecallState>()
             .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
@@ -804,6 +856,7 @@ impl Plugin for ConversationsPlugin {
             .add_systems(
                 Update,
                 (
+                    request_nearby_recall,
                     route_conversation_input,
                     scroll_active_transcript,
                     position_conversations_dock_host,
@@ -1428,9 +1481,49 @@ fn ingest_conversation_events(
             SlSessionEvent::GroupProfileReceived(profile) => {
                 model.note_group_name(profile.group_id, &profile.name);
             }
+            // Persisted nearby-chat recall (reply to our one-shot
+            // `QueryNearbyChatHistoryPage`): the page is newest-first, so reverse it
+            // to oldest-first and set it as the Nearby tab's recall, rendered above
+            // the live lines. `prev` (older pages) is ignored for the single recall
+            // window today.
+            SlSessionEvent::NearbyChatHistoryPage { lines, prev: _prev } => {
+                let recalled: Vec<TranscriptLine> = lines
+                    .iter()
+                    .rev()
+                    .map(|line| TranscriptLine {
+                        own: false,
+                        speaker: line.speaker.clone().unwrap_or_default(),
+                        body: line.text.clone(),
+                    })
+                    .collect();
+                model.set_nearby_recall(recalled);
+            }
             _other => {}
         }
     }
+}
+
+/// Fire the one-shot **nearby-chat history recall** once we are logged in: ask the
+/// runtime for a page of persisted local-chat history from the on-disk transcript
+/// ([`crate::chat_log`]), which [`ingest_conversation_events`] renders above the
+/// live lines in the Nearby tab (the reference viewer's "load previous
+/// conversation"). `already_shown` is the current live nearby line count, so the
+/// recall only surfaces history *older* than what is already on screen.
+fn request_nearby_recall(
+    identity: Res<SlIdentity>,
+    model: Res<ConversationModel>,
+    mut state: ResMut<NearbyRecallState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if state.requested || identity.agent_id.is_none() {
+        return;
+    }
+    commands.write(SlCommand(Command::QueryNearbyChatHistoryPage {
+        already_shown: model.nearby_live_len(),
+        before: None,
+        limit: RECALL_LIMIT,
+    }));
+    state.requested = true;
 }
 
 /// Whether a nearby chat line should appear: it carries text and is not a
@@ -1614,7 +1707,8 @@ fn refresh_conversations(
         // Transcript, only when a new line landed.
         if view.rendered_revision != entry.revision {
             view.rendered_revision = entry.revision;
-            let rendered = format_transcript(&entry.lines, &you);
+            // Persisted recall lines first, then the live lines, as one block.
+            let rendered = format_transcript(entry.recall.iter().chain(entry.lines.iter()), &you);
             set_text(&mut texts, view.transcript_text, &rendered);
             // Pin the scroll to the newest line.
             if let Ok(mut scroll) = scrolls.get_mut(view.transcript_scroll) {
@@ -2035,8 +2129,37 @@ mod tests {
             body: "hey".to_owned(),
         });
         assert_eq!(
-            format_transcript(&lines, "You"),
+            format_transcript(lines.iter(), "You"),
             "Avatar Five: hi\nYou: hey"
+        );
+    }
+
+    /// Nearby recall lines render *above* the live lines, and only the Nearby tab
+    /// carries them.
+    #[test]
+    fn nearby_recall_renders_above_live_lines() {
+        let mut model = ConversationModel::default();
+        // A live line arrives first…
+        model.push_nearby("Avatar Live", "live line");
+        assert_eq!(model.nearby_live_len(), 1);
+        // …then persisted history is recalled (oldest-first, as the ingest builds).
+        model.set_nearby_recall(vec![
+            TranscriptLine {
+                own: false,
+                speaker: "Avatar Past".to_owned(),
+                body: "older".to_owned(),
+            },
+            TranscriptLine {
+                own: false,
+                speaker: "Avatar Past".to_owned(),
+                body: "newer".to_owned(),
+            },
+        ]);
+        let rendered = get(&model, ConversationKey::Nearby)
+            .map(|entry| format_transcript(entry.recall.iter().chain(entry.lines.iter()), "You"));
+        assert_eq!(
+            rendered,
+            Some("Avatar Past: older\nAvatar Past: newer\nAvatar Live: live line".to_owned())
         );
     }
 

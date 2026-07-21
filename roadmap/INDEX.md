@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 4 |
-| ready | 104 |
-| blocked | 80 |
+| ideas | 5 |
+| ready | 105 |
+| blocked | 79 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 537 |
+| done | 538 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **751** |
+| **total** | **753** |
 
-## ideas (4)
+## ideas (5)
 
 ### viewer
 
@@ -37,7 +37,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (104)
+### chat
+
+- [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
+  Server-side group / session chat history retrieval
+
+## ready (105)
 
 ### viewer
 
@@ -69,12 +74,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
-- [`viewer-chat-history-panel`](ready/viewer-chat-history-panel.md) — Chat
-  history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
-  (done), `viewer-ui-floater-basic` (done))
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
+- [`viewer-chat-overlay-fade`](ready/viewer-chat-overlay-fade.md) — Nearby-chat
+  overlay fade / decay
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -88,6 +92,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   setting
 - [`viewer-hud-context-menu`](ready/viewer-hud-context-menu.md) — HUD context /
   pie menu entries (blocked by `viewer-ui-radial-menu` (done))
+- [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
+  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
+  (done), `viewer-chat-history-panel` (done))
 - [`viewer-i18n-locale-selection`](ready/viewer-i18n-locale-selection.md) —
   Locale detection, override & runtime switch (blocked by
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
@@ -288,7 +295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (80)
+## blocked (79)
 
 ### viewer
 
@@ -320,9 +327,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
-- [`viewer-i18n-chat-translation`](blocked/viewer-i18n-chat-translation.md) —
-  Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
-  (done), `viewer-chat-history-panel`)
 - [`viewer-in-world-sounds`](blocked/viewer-in-world-sounds.md) — In-world
   spatial sounds (blocked by `viewer-audio-backend`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
@@ -564,7 +568,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (537)
+## done (538)
 
 ### protocol
 
@@ -713,6 +717,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
+- [`viewer-chat-history-panel`](done/viewer-chat-history-panel.md) — Chat
+  history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
+  (done), `viewer-ui-floater-basic` (done))
 - [`viewer-chat-input-bar`](done/viewer-chat-input-bar.md) — Chat input bar
   (local chat + focus) (blocked by `viewer-ui-text-input-widget` (done),
   `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))

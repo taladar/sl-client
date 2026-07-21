@@ -407,6 +407,7 @@ fn on_events(
             | SlSessionEvent::OpenRegionInfo(_)
             | SlSessionEvent::ChatSessions(_)
             | SlSessionEvent::ChatHistoryPage { .. }
+            | SlSessionEvent::NearbyChatHistoryPage { .. }
             | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::InventoryFolderPage { .. }
             | SlSessionEvent::InventoryRoots { .. }

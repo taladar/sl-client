@@ -13,8 +13,9 @@
 use fs_err::OpenOptions;
 use sl_proto::{
     AgentKey, ChatLogConfig, ChatSessionKind, ConversationKind, GroupKey, ImDialog, ImSessionId,
-    LogLineTime, MessageCursor, Session, SessionMessage, conference_log_file_name, format_log_line,
-    group_log_file_name, im_log_file_name, nearby_log_file_name, parse_log_lines,
+    LogLineTime, MessageCursor, NearbyHistoryLine, Session, SessionMessage,
+    conference_log_file_name, format_log_line, group_log_file_name, im_log_file_name,
+    nearby_log_file_name, parse_log_lines,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
@@ -613,6 +614,52 @@ impl ChatLog {
         let prev = (next < total).then(|| MessageCursor::from_consumed(next));
         Some((page, prev))
     }
+
+    /// Serves an **older** page of **nearby (local) chat** history from the flat
+    /// transcript the runtime is appending live chat to (`chat.txt`, or the current
+    /// day's `chat-YYYY-MM-DD.txt` when the date suffix is on).
+    ///
+    /// Nearby chat has no [`ChatSessionKind`] session and no in-memory ring, so —
+    /// unlike [`read_older_page`](Self::read_older_page) — the whole history lives
+    /// on disk. `already_shown` is how many of the file's **newest** lines the
+    /// caller is already displaying from the live `ChatReceived` stream (they
+    /// duplicate the tail and are skipped); `consumed` is the cursor's newest-first
+    /// count already paged past that. Returns the page (newest first) and the next
+    /// older cursor, or `None` when nearby logging is disabled or the transcript
+    /// does not exist yet.
+    pub(crate) fn read_nearby_older_page(
+        &self,
+        already_shown: usize,
+        consumed: usize,
+        limit: usize,
+    ) -> Option<(Vec<NearbyHistoryLine>, Option<MessageCursor>)> {
+        if !self.config.logs_nearby() {
+            return None;
+        }
+        let base = self.base_dir.as_ref()?;
+        let path = base.join(nearby_log_file_name(&self.config, &self.now()));
+        let text = read_full(&path).ok()?;
+        let parsed = parse_log_lines(&text);
+        // Skip the newest lines the caller already shows live, plus whatever older
+        // the cursor consumed, then take one page — the same skip discipline as
+        // [`read_older_page`](Self::read_older_page).
+        let skip = consumed.max(already_shown);
+        let total = parsed.len();
+        let page: Vec<NearbyHistoryLine> = parsed
+            .into_iter()
+            .rev()
+            .skip(skip)
+            .take(limit)
+            .map(|line| NearbyHistoryLine {
+                speaker: line.name,
+                timestamp: to_unix(line.time, self.offset),
+                text: line.message,
+            })
+            .collect();
+        let next = skip.saturating_add(page.len());
+        let prev = (next < total).then(|| MessageCursor::from_consumed(next));
+        Some((page, prev))
+    }
 }
 
 #[cfg(test)]
@@ -839,5 +886,93 @@ mod tests {
                 .is_none(),
             true
         );
+    }
+
+    /// A configuration that logs nearby (local) chat, for the recall tests.
+    fn nearby_config() -> ChatLogConfig {
+        ChatLogConfig {
+            enabled: [LoggedChatType::Nearby].into_iter().collect(),
+            ..ChatLogConfig::default()
+        }
+    }
+
+    #[test]
+    fn reads_older_nearby_pages_skipping_the_shown_tail() {
+        let dir = temp_dir("nearby-paging");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let mut log = ChatLog::new(
+            nearby_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        for index in 0..5 {
+            log.log_nearby("Alice Resident", &format!("line {index}"));
+        }
+        // The two newest lines (4, 3) are shown live; recall two older, newest first.
+        let page = log.read_nearby_older_page(2, 0, 2);
+        let texts = page.as_ref().map(|(lines, _cursor)| {
+            lines
+                .iter()
+                .map(|line| line.text.clone())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(texts, Some(vec!["line 2".to_owned(), "line 1".to_owned()]));
+        // The speaker's display name round-trips (nearby chat has no key to resolve).
+        let speaker = page
+            .as_ref()
+            .and_then(|(lines, _cursor)| lines.first())
+            .and_then(|line| line.speaker.clone());
+        assert_eq!(speaker, Some("Alice Resident".to_owned()));
+        let prev = page.and_then(|(_lines, cursor)| cursor);
+        assert_eq!(prev, Some(MessageCursor::from_consumed(4)));
+    }
+
+    #[test]
+    fn nearby_recall_walks_to_the_oldest_line() {
+        let dir = temp_dir("nearby-full");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let mut log = ChatLog::new(
+            nearby_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        for index in 0..4 {
+            log.log_nearby("Alice Resident", &format!("line {index}"));
+        }
+        // Nothing shown live: page the whole transcript two at a time to exhaustion.
+        let mut collected: Vec<String> = Vec::new();
+        let mut cursor = Some(MessageCursor::from_consumed(0));
+        while let Some(active) = cursor {
+            let Some((page, prev)) = log.read_nearby_older_page(0, active.consumed_count(), 2)
+            else {
+                break;
+            };
+            collected.extend(page.iter().map(|line| line.text.clone()));
+            cursor = prev;
+        }
+        assert_eq!(
+            collected,
+            vec![
+                "line 3".to_owned(),
+                "line 2".to_owned(),
+                "line 1".to_owned(),
+                "line 0".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn nearby_recall_is_none_when_logging_disabled() {
+        let dir = temp_dir("nearby-disabled");
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let log = ChatLog::new(
+            ChatLogConfig::default(),
+            Some(dir),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        assert_eq!(log.read_nearby_older_page(0, 0, 10).is_none(), true);
     }
 }

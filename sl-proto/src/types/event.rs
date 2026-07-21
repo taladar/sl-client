@@ -55,7 +55,10 @@ use uuid::Uuid;
 
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
-use crate::{ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, SessionMessage};
+use crate::{
+    ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, NearbyHistoryLine,
+    SessionMessage,
+};
 
 /// A high-level event surfaced to the driver/application.
 #[derive(Debug, Clone, PartialEq)]
@@ -1033,6 +1036,23 @@ pub enum Event {
         messages: Arc<[SessionMessage]>,
         /// A cursor for the next (older) page, or `None` at the oldest retained
         /// message.
+        prev: Option<MessageCursor>,
+    },
+    /// One bounded, newest-first page of **nearby (local) chat** history, surfaced
+    /// in reply to a
+    /// [`Command::QueryNearbyChatHistoryPage`](crate::Command::QueryNearbyChatHistoryPage)
+    /// and **synthesized locally** by the runtime from the on-disk transcript.
+    /// `prev` pages older when `Some`. The `lines` payload is an `Arc<[…]>` (an
+    /// `Arc` clone across the channel, never a deep copy).
+    ///
+    /// Separate from [`ChatHistoryPage`](Self::ChatHistoryPage) because nearby chat
+    /// is not a keyed [`ChatSessionKind`] session — see
+    /// [`NearbyHistoryLine`](crate::NearbyHistoryLine).
+    NearbyChatHistoryPage {
+        /// The page's lines, newest first, bounded to the requested limit.
+        lines: Arc<[NearbyHistoryLine]>,
+        /// A cursor for the next (older) page, or `None` at the oldest line on
+        /// disk.
         prev: Option<MessageCursor>,
     },
     /// The buddy cache with each friend's online flag, surfaced in reply to a

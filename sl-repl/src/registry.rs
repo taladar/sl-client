@@ -5459,6 +5459,21 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "query_nearby_chat_history_page",
+            usage: "[already_shown] [limit]",
+            // Recall older nearby (local) chat from the on-disk transcript. The
+            // `before` cursor is opaque (minted on a reply), so the REPL always
+            // requests the newest un-skipped page; `already_shown` (default 0) skips
+            // the newest lines already shown live and `limit` defaults to 50.
+            build: |args, ctx| {
+                Ok(Command::QueryNearbyChatHistoryPage {
+                    already_shown: args.parse_or(ctx, "already_shown", 0, "usize", 0)?,
+                    before: None,
+                    limit: args.parse_or(ctx, "limit", 1, "usize", 50)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "query_friends",
             usage: "",
             build: |_args, _ctx| Ok(Command::QueryFriends),

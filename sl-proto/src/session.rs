@@ -1215,8 +1215,8 @@ use self::chat_session::{ChatSession, TYPING_TIMEOUT};
 use self::inventory::Inventory;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
-    InviteChannel, MessageCursor, PendingInvite, SessionMessage, VoiceChannelInfo,
-    VoiceChannelState,
+    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, SessionMessage,
+    VoiceChannelInfo, VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;

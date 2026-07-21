@@ -143,6 +143,30 @@ pub struct SessionMessage {
     pub timestamp: Option<u32>,
 }
 
+/// One recalled line of **nearby (local) chat** history, read back from the
+/// on-disk transcript in reply to
+/// [`Command::QueryNearbyChatHistoryPage`](crate::Command::QueryNearbyChatHistoryPage).
+///
+/// Nearby chat is deliberately **not** a [`ChatSessionKind`] — it has no
+/// participant roster, no session id, and no in-memory ring in the sans-IO
+/// [`Session`](crate::Session); it is only spoken live (surfaced as
+/// [`ChatMessage`](crate::ChatMessage)) and appended to a flat transcript file.
+/// So its recall is a separate, simpler value type than the keyed
+/// [`SessionMessage`]: the transcript stores the speaker's **display name** (a
+/// string, not a resolvable key — most nearby speakers are avatars/objects we
+/// hold no key for), so that is what a recalled line carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NearbyHistoryLine {
+    /// The speaker's display name as written in the transcript, or `None` for a
+    /// plain-text fallback line that carried no recognisable `Name:` separator.
+    pub speaker: Option<String>,
+    /// The message text, with any folded multi-line continuations rejoined.
+    pub text: String,
+    /// The line's local wall-clock as a Unix timestamp, recovered from the
+    /// transcript's `[…]` prefix when it carried (and we could parse) one.
+    pub timestamp: Option<u32>,
+}
+
 /// The coordinates of a chat session's voice channel — the SL `voice_channel_info`
 /// block carried by a voice invitation and the `ChatSessionRequest "accept
 /// invitation"` reply. A small **client-local** struct (not a reuse of
