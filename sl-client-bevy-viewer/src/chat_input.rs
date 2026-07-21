@@ -112,8 +112,13 @@ pub(crate) struct ChatInputSpec {
     pub(crate) tab_index: i32,
     /// The field text's font size, in logical pixels.
     pub(crate) font_size: f32,
-    /// The box's least width, in logical pixels.
+    /// The box's least width, in logical pixels — a floor below which it will not
+    /// shrink.
     pub(crate) min_width: f32,
+    /// An explicit box width, or `None` (the default) to size to content above
+    /// [`min_width`](Self::min_width). The nearby-chat bar sets a percentage so the
+    /// bar spans a fraction of the screen.
+    pub(crate) width: Option<Val>,
 }
 
 impl ChatInputSpec {
@@ -124,6 +129,7 @@ impl ChatInputSpec {
             tab_index: 0,
             font_size: DEFAULT_FONT_SIZE,
             min_width: DEFAULT_MIN_WIDTH,
+            width: None,
         }
     }
 }
@@ -143,6 +149,7 @@ pub(crate) fn spawn_chat_input(
         .spawn((
             Node {
                 align_items: AlignItems::Center,
+                width: spec.width.unwrap_or(Val::Auto),
                 min_width: Val::Px(spec.min_width),
                 border: UiRect::all(Val::Px(1.0)),
                 padding: UiRect::axes(Val::Px(BOX_PADDING_X), Val::Px(BOX_PADDING_Y)),

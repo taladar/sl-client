@@ -72,6 +72,7 @@ mod menu_bar;
 mod menu_search;
 mod meshes;
 mod movement;
+mod nearby_chat_bar;
 mod objects;
 mod particles;
 mod paths;
@@ -166,7 +167,7 @@ use crate::camera::{
     CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
     position_camera,
 };
-use crate::chat::{ChatOverlay, setup_chat_overlay, update_chat_overlay};
+use crate::chat::{ChatOverlay, position_chat_overlay, setup_chat_overlay, update_chat_overlay};
 use crate::chat_input::ChatInputPlugin;
 use crate::diagnostics::{
     PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
@@ -198,6 +199,7 @@ use crate::materials::{
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::movement::{AvatarControls, drive_avatar_controls};
+use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
     apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
@@ -793,6 +795,12 @@ fn run_session(
     // host the nearby-chat / audio / voice / quick-preferences controls hang off.
     // After the inventory plugin so its Inventory toggle can reach the window.
     .add_plugins(crate::bottom_toolbar::BottomToolbarPlugin)
+    // The live nearby-chat bar (viewer-chat-input-bar): the local-chat-input
+    // widget placed in the bottom-area upper stack (above the button bar), sending
+    // its LocalChatSubmit as Command::Chat, driving the typing animation, and
+    // focused by Enter. The bottom toolbar's leading chat button toggles it. After
+    // the toolbar (whose BottomArea it fills) and the local-chat-input plugin.
+    .add_plugins(NearbyChatBarPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1098,8 +1106,10 @@ fn run_session(
                 drive_bake_publish,
             ),
             position_name_tags,
-            // Append newly received local chat to the on-screen overlay.
-            update_chat_overlay,
+            // Append newly received local chat to the on-screen overlay, and keep
+            // the overlay pinned just above the bottom area (toolbar + nearby-chat
+            // bar) so they never overlap as the bar grows / shrinks / toggles.
+            (update_chat_overlay, position_chat_overlay),
             // Quit handling: request a clean logout on the quit key, then force the
             // exit once the grace period lapses. Nested into one tuple to stay
             // within Bevy's per-tuple system limit. Only the key half is gated on
@@ -1270,14 +1280,14 @@ fn run_session(
                 .after(drive_avatar_controls)
                 .before(drive_avatar_skeletons)
                 .run_if(world_has_keyboard),
-            // Typing state animation for the own avatar (P31.9): toggle the typing
-            // state (the T key stands in for a chat-entry box), play `ANIM_AGENT_TYPE`
-            // locally, and broadcast a `StartTyping` / `StopTyping` `ChatFromViewer`.
-            // Like locomotion it must reconcile its client-driven set before the
-            // skeleton driver folds it into the frame's pose.
-            drive_own_typing
-                .before(drive_avatar_skeletons)
-                .run_if(world_has_keyboard),
+            // Typing state animation for the own avatar (P31.9): reconcile the typing
+            // state the nearby-chat bar drives, play `ANIM_AGENT_TYPE` locally, and
+            // broadcast a `StartTyping` / `StopTyping` `ChatFromViewer`. Not gated on
+            // `world_has_keyboard` — typing happens while the *chat field* holds the
+            // keyboard (the TextEntry context), so that gate would suppress it. Like
+            // locomotion it must reconcile its client-driven set before the skeleton
+            // driver folds it into the frame's pose.
+            drive_own_typing.before(drive_avatar_skeletons),
             drive_avatar_skeletons.after(apply_avatar_appearance),
             // Hand-pose morph (P31.13): cross-fade each avatar's hands into the pose
             // its highest-priority playing animation asks for. After the skeleton

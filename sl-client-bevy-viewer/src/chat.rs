@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use sl_client_bevy::{ChatMessage, ChatType, SlEvent, SlSessionEvent};
 
+use crate::bottom_toolbar::BottomArea;
 use crate::ui_font::UiFont;
 
 /// How many chat lines to keep in the overlay (older lines scroll off the top).
@@ -31,12 +32,15 @@ const CHAT_FONT_SIZE: f32 = 15.0;
 /// The inset, in logical pixels, of the overlay from the left edge.
 const CHAT_INSET: f32 = 10.0;
 
-/// How far up from the bottom edge the overlay sits, in logical pixels — enough
-/// to clear the persistent bottom toolbar ([`crate::bottom_toolbar`], a single
-/// button row) so the two do not overlap. A fixed clearance rather than measuring
-/// the bar: this debug overlay is a placeholder the nearby-chat bar will replace,
-/// so it is deliberately not worth wiring to the bar's live height.
+/// The overlay's initial distance from the bottom edge, in logical pixels, used
+/// until the bottom area has been measured — [`position_chat_overlay`] then keeps
+/// it just above the whole bottom area (toolbar + nearby-chat bar) so the two never
+/// overlap, whatever the bar's height or whether it is toggled off.
 const CHAT_BOTTOM_INSET: f32 = 48.0;
+
+/// The gap kept between the top of the bottom area and the overlay's lowest line,
+/// in logical pixels.
+const CHAT_OVERLAY_GAP: f32 = 6.0;
 
 /// A marker component tagging the single overlay text node, so the update system
 /// can find and rewrite it.
@@ -118,6 +122,37 @@ pub(crate) fn setup_chat_overlay(mut commands: Commands) {
         },
         ChatOverlayText,
     ));
+}
+
+/// Keep the overlay pinned just above the whole bottom area (the toolbar plus the
+/// nearby-chat bar), reading the area's measured height so the clearance follows
+/// the bar growing, shrinking, or being toggled off — no fixed magic number that
+/// only fits one bar layout.
+///
+/// Reads last frame's [`ComputedNode`] (laid out in `PostUpdate`); the bottom area
+/// changes height rarely, so a frame-old measurement never lets the two overlap by
+/// more than a hair. Inert until the bottom area exists.
+pub(crate) fn position_chat_overlay(
+    bottom_area: Option<Res<BottomArea>>,
+    computed: Query<&ComputedNode>,
+    mut overlays: Query<&mut Node, With<ChatOverlayText>>,
+) {
+    let Some(bottom_area) = bottom_area else {
+        return;
+    };
+    let Ok(node) = computed.get(bottom_area.area) else {
+        return;
+    };
+    let height = node.size().y * node.inverse_scale_factor();
+    if height <= 0.0 {
+        return;
+    }
+    let wanted = Val::Px(height + CHAT_OVERLAY_GAP);
+    if let Ok(mut overlay) = overlays.single_mut()
+        && overlay.bottom != wanted
+    {
+        overlay.bottom = wanted;
+    }
 }
 
 /// Fold every received local-chat message into the rolling history and rewrite

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 105 |
-| blocked | 82 |
+| ready | 106 |
+| blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 531 |
+| done | 532 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **748** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (105)
+## ready (106)
 
 ### viewer
 
@@ -69,9 +69,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
-- [`viewer-chat-input-bar`](ready/viewer-chat-input-bar.md) — Chat input bar
-  (local chat + focus) (blocked by `viewer-ui-text-input-widget` (done),
-  `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
+- [`viewer-chat-history-panel`](ready/viewer-chat-history-panel.md) — Chat
+  history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
+  (done), `viewer-ui-floater-basic` (done))
+- [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
+  — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
+  (done), `viewer-ui-settings-store` (done))
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -291,7 +294,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (82)
+## blocked (80)
 
 ### viewer
 
@@ -304,12 +307,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
-- [`viewer-chat-history-panel`](blocked/viewer-chat-history-panel.md) — Chat
-  history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`,
-  `viewer-ui-floater-basic` (done))
-- [`viewer-chat-input-world-autostart`](blocked/viewer-chat-input-world-autostart.md)
-  — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`,
-  `viewer-ui-settings-store` (done))
 - [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
   script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
@@ -573,7 +570,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (531)
+## done (532)
 
 ### protocol
 
@@ -722,6 +719,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
+- [`viewer-chat-input-bar`](done/viewer-chat-input-bar.md) — Chat input bar
+  (local chat + focus) (blocked by `viewer-ui-text-input-widget` (done),
+  `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
 - [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —

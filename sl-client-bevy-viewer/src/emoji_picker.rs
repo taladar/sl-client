@@ -58,6 +58,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus, InputFocusSystems};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::window::PrimaryWindow;
 use sl_emoji::{Emoji, Group, SkinTone, search};
 
 use crate::floater::{
@@ -104,6 +105,12 @@ const CELL_FONT_SIZE: f32 = 20.0;
 
 /// The chrome (title, tabs, preview) font size, in logical pixels.
 const CHROME_FONT_SIZE: f32 = 14.0;
+
+/// A first-frame estimate of the picker window's height, in logical pixels, used to
+/// place it **upward** (bottom at the anchor) before it has been measured — the
+/// exact height ([`apply_emoji_picker_anchor`]) snaps it the next frame. Erring a
+/// little high keeps the window fully on screen while it settles.
+const ESTIMATED_PICKER_HEIGHT: f32 = 440.0;
 
 /// A cell's hover highlight — a faint white wash, so the glyph under the pointer
 /// reads as the one a click would take.
@@ -155,14 +162,25 @@ impl Plugin for EmojiPickerPlugin {
         app.init_resource::<EmojiPickerState>()
             .init_resource::<EmojiPickerView>()
             .init_resource::<EmojiTarget>()
+            .init_resource::<PendingEmojiAnchor>()
             .add_message::<OpenEmojiPicker>()
             .add_systems(
                 Startup,
                 spawn_emoji_picker.after(UiScaffoldSystems::SpawnRoot),
             )
             // The toggle is a no-op until the floater exists (it reads the UI
-            // resource optionally), so registering it here is safe.
-            .add_systems(Update, (toggle_emoji_picker, open_emoji_picker_for_field))
+            // resource optionally), so registering it here is safe. The anchor
+            // refine runs after the open handler, snapping the window to its
+            // measured height once it has been laid out.
+            .add_systems(
+                Update,
+                (
+                    toggle_emoji_picker,
+                    open_emoji_picker_for_field,
+                    apply_emoji_picker_anchor,
+                )
+                    .chain(),
+            )
             // Remember the focused field the frame focus settles, before anything
             // reads the target.
             .add_systems(
@@ -249,6 +267,13 @@ impl Default for EmojiPickerView {
 /// grid never loses the field the user was typing in.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub(crate) struct EmojiTarget(Option<Entity>);
+
+/// A just-opened picker's anchor point (the emoji button's press location), held
+/// until [`apply_emoji_picker_anchor`] has snapped the window to its measured
+/// height — so the open-above / open-below choice uses the real size, not just the
+/// first-frame estimate. `None` once applied (or when nothing is pending).
+#[derive(Resource, Debug, Clone, Copy, Default)]
+struct PendingEmojiAnchor(Option<Vec2>);
 
 /// A request to **open the picker for a specific field**, anchored near a point
 /// — written by a field's own emoji button ([`crate::chat_input`]). The picker
@@ -720,7 +745,9 @@ fn open_emoji_picker_for_field(
     mut requests: MessageReader<OpenEmojiPicker>,
     ui: Option<Res<EmojiPickerUi>>,
     mut target: ResMut<EmojiTarget>,
+    mut pending: ResMut<PendingEmojiAnchor>,
     mut floaters: Query<(&mut Floater, &mut UiPanelShown)>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut commands: MessageWriter<FloaterCommand>,
 ) {
     let Some(ui) = ui else {
@@ -730,15 +757,73 @@ fn open_emoji_picker_for_field(
     let Some(request) = requests.read().last() else {
         return;
     };
+    let anchor = request.near;
     target.0 = Some(request.field);
+    let viewport_height = windows.single().map_or(f32::MAX, Window::height);
     if let Ok((mut floater, mut shown)) = floaters.get_mut(ui.panel) {
-        floater.set_position(request.near);
+        // Place it with a first-frame estimate (bottom-at-anchor or top-at-anchor,
+        // whichever fits); `apply_emoji_picker_anchor` snaps it to the measured
+        // height next frame.
+        let top = anchor_top(anchor.y, ESTIMATED_PICKER_HEIGHT, viewport_height);
+        floater.set_position(Vec2::new(anchor.x, top));
         shown.0 = true;
     }
+    pending.0 = Some(anchor);
     commands.write(FloaterCommand {
         floater: ui.panel,
         op: FloaterOp::BringToFront,
     });
+}
+
+/// The picker window's top edge for an anchor, opening in whichever direction has
+/// room for the whole window: **below** the anchor (top at the anchor) when it
+/// fits, otherwise **above** (bottom at the anchor). Never negative, so the top
+/// never leaves the screen.
+fn anchor_top(anchor_y: f32, height: f32, viewport_height: f32) -> f32 {
+    if anchor_y + height <= viewport_height {
+        anchor_y
+    } else {
+        (anchor_y - height).max(0.0)
+    }
+}
+
+/// Snap the just-opened picker to its **measured** height once it has been laid out
+/// (a frame after [`open_emoji_picker_for_field`] showed it), re-choosing the
+/// open-above / open-below direction from the real size so the whole window fits.
+fn apply_emoji_picker_anchor(
+    ui: Option<Res<EmojiPickerUi>>,
+    mut pending: ResMut<PendingEmojiAnchor>,
+    mut floaters: Query<(&mut Floater, &UiPanelShown)>,
+    computed: Query<&ComputedNode>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+) {
+    let Some(anchor) = pending.0 else {
+        return;
+    };
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok((mut floater, shown)) = floaters.get_mut(ui.panel) else {
+        pending.0 = None;
+        return;
+    };
+    if !shown.0 {
+        // Closed again before it was measured — nothing to place.
+        pending.0 = None;
+        return;
+    }
+    let Ok(node) = computed.get(ui.panel) else {
+        return;
+    };
+    let height = node.size().y * node.inverse_scale_factor();
+    if height <= 0.0 {
+        // Not laid out yet — try again next frame.
+        return;
+    }
+    let viewport_height = windows.single().map_or(f32::MAX, Window::height);
+    let top = anchor_top(anchor.y, height, viewport_height);
+    floater.set_position(Vec2::new(anchor.x, top));
+    pending.0 = None;
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,7 +1138,7 @@ pub(crate) fn spawn_emoji_picker_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, VIEWPORT_WIDTH, build_view,
+        CELL_SIZE, EmojiPickerState, GRID_COLUMNS, VIEWPORT_WIDTH, anchor_top, build_view,
         insert_glyph_into_editable, preview_text, row_count, toned_glyph,
     };
     use bevy::text::{EditableText, FontCx, LayoutCx};
@@ -1135,6 +1220,22 @@ mod tests {
             "🚀  rocket  :rocket:"
         );
         Ok(())
+    }
+
+    /// The picker opens **below** an anchor when the window fits under it, and
+    /// **above** (bottom at the anchor) when it does not — never off the top.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the anchor arithmetic produces exact, representable results, asserted exactly"
+    )]
+    #[test]
+    fn anchor_opens_where_there_is_room() {
+        // Room below (anchor high on a tall viewport): top sits at the anchor.
+        assert_eq!(anchor_top(100.0, 400.0, 1000.0), 100.0);
+        // No room below (anchor near the bottom): open above, bottom at the anchor.
+        assert_eq!(anchor_top(900.0, 400.0, 1000.0), 500.0);
+        // Taller than the whole viewport: clamped to the top, never negative.
+        assert_eq!(anchor_top(300.0, 800.0, 500.0), 0.0);
     }
 
     /// The default picker state is the first group, no query, the neutral tone.

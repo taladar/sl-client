@@ -2,7 +2,7 @@
 id: viewer-chat-history-panel
 title: Chat history panel (scrollable / resizable)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-social-panels
 blocked_by: [viewer-chat-input-bar, viewer-ui-floater-basic]
 ---

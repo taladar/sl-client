@@ -63,6 +63,7 @@ use bevy_flair::style::components::ClassList;
 
 use crate::i18n::Translated;
 use crate::inventory::InventoryUi;
+use crate::nearby_chat_bar::NearbyChatBar;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -147,6 +148,10 @@ impl ToolbarButtonVisual {
 /// live read-models each frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolbarTarget {
+    /// The nearby-chat bar ([`crate::nearby_chat_bar`]) — the leading toggle that
+    /// shows / hides the local-chat input above the button bar (the reference's
+    /// chat button).
+    NearbyChat,
     /// The inventory window ([`crate::inventory`]), toggled today.
     Inventory,
     /// A floater that has not landed yet — the button is a disabled placeholder
@@ -180,6 +185,13 @@ struct ToolbarButtonDef {
 /// own tasks land, exactly as the top menu bar ships its menu *names* ahead of
 /// their entries.
 static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
+    // The chat toggle leads the bar (leftmost under LTR, rightmost under RTL — the
+    // row mirrors for free), as the reference viewer places its chat button.
+    ToolbarButtonDef {
+        action: "toggle-nearby-chat",
+        label_key: "bottom-toolbar-chat",
+        target: ToolbarTarget::NearbyChat,
+    },
     ToolbarButtonDef {
         action: "toggle-inventory",
         label_key: "bottom-toolbar-inventory",
@@ -232,18 +244,20 @@ struct ToolbarButton {
 /// (nearby chat bar, volume, voice, quick preferences — each its own task) parent
 /// themselves **above** the button bar by spawning into [`upper`](Self::upper).
 #[derive(Resource, Debug, Clone, Copy)]
-#[expect(
-    dead_code,
-    reason = "the layout host is published for the neighbour bottom-edge control tasks (chat input \
-              bar, volume, voice, quick preferences); none has landed to read these yet, so the \
-              expectation fires as a reminder to drop it once the first one consumes the host"
-)]
 pub(crate) struct BottomArea {
-    /// The bottom-anchored column that holds the whole area.
+    /// The bottom-anchored column that holds the whole area — the chat overlay
+    /// ([`crate::chat`]) reads its measured height to sit just above it.
     pub(crate) area: Entity,
-    /// The stack above the button bar the neighbour controls fill.
+    /// The stack above the button bar the neighbour controls fill — the nearby-chat
+    /// bar ([`crate::nearby_chat_bar`]) spawns into it.
     pub(crate) upper: Entity,
-    /// The button-bar row itself.
+    /// The button-bar row itself. Still awaiting a consumer (a future control that
+    /// needs the bar strip directly rather than the upper stack).
+    #[expect(
+        dead_code,
+        reason = "the bar-strip handle is published for a future bottom-edge control that targets \
+                  the button row directly; `area` and `upper` are now consumed"
+    )]
     pub(crate) bar: Entity,
 }
 
@@ -449,6 +463,7 @@ fn build_button_box(
 fn handle_toolbar_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
+    mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
     for action in actions.read() {
@@ -461,6 +476,11 @@ fn handle_toolbar_actions(
         {
             shown.0 = !shown.0;
         }
+        if action.action == "toggle-nearby-chat"
+            && let Some(bar) = nearby_chat.as_deref_mut()
+        {
+            bar.toggle();
+        }
     }
 }
 
@@ -469,9 +489,11 @@ fn handle_toolbar_actions(
 fn resolve_target_open(
     target: ToolbarTarget,
     inventory: Option<&InventoryUi>,
+    nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
     match target {
+        ToolbarTarget::NearbyChat => nearby_chat.map(NearbyChatBar::is_shown),
         ToolbarTarget::Inventory => inventory
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
@@ -484,13 +506,15 @@ fn resolve_target_open(
 /// a real change so an idle bar does not re-trigger layout.
 fn update_toolbar_button_states(
     inventory: Option<Res<InventoryUi>>,
+    nearby_chat: Option<Res<NearbyChatBar>>,
     mut buttons: Query<(&ToolbarButton, &mut BackgroundColor)>,
     panels: Query<&UiPanelShown>,
     mut labels: Query<&mut TextColor>,
 ) {
     let inventory = inventory.as_deref();
+    let nearby_chat = nearby_chat.as_deref();
     for (button, mut background) in &mut buttons {
-        let visual = match resolve_target_open(button.target, inventory, &panels) {
+        let visual = match resolve_target_open(button.target, inventory, nearby_chat, &panels) {
             Some(true) => ToolbarButtonVisual::Active,
             Some(false) => ToolbarButtonVisual::Enabled,
             None => ToolbarButtonVisual::Disabled,
@@ -586,21 +610,27 @@ mod tests {
     use super::{TOOLBAR_BUTTONS, ToolbarButtonVisual, ToolbarTarget};
     use pretty_assertions::{assert_eq, assert_ne};
 
-    /// Exactly one toolbar button is wired to a live floater today (Inventory);
-    /// the rest are unlanded placeholders. A regression that silently disabled the
-    /// one live toggle, or wired a floater that does not exist, would trip here.
+    /// The wired toolbar buttons today are the leading nearby-chat toggle and
+    /// Inventory (in that order); the rest are unlanded placeholders. A regression
+    /// that silently disabled a live toggle, or wired a target that does not exist,
+    /// would trip here. The chat toggle leads the bar, as the reference places it.
     #[test]
-    fn only_inventory_is_wired() {
+    fn nearby_chat_and_inventory_are_wired() {
         let wired: Vec<&str> = TOOLBAR_BUTTONS
             .iter()
             .filter(|def| def.target.is_wired())
             .map(|def| def.action)
             .collect();
-        assert_eq!(wired, ["toggle-inventory"]);
+        assert_eq!(wired, ["toggle-nearby-chat", "toggle-inventory"]);
         assert!(
             TOOLBAR_BUTTONS
                 .iter()
                 .any(|def| def.target == ToolbarTarget::Inventory),
+        );
+        // The chat toggle is the first (leading) button.
+        assert_eq!(
+            TOOLBAR_BUTTONS.first().map(|def| def.action),
+            Some("toggle-nearby-chat"),
         );
     }
 

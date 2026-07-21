@@ -54,10 +54,9 @@ use crate::avatars::AvatarState;
 /// registry — the hands-on-keyboard gesture played and requested while typing.
 const TYPE_ANIMATION: &str = "type";
 
-/// Whether the own avatar is currently typing into local chat — the stand-in for
-/// "the chat bar is open and being typed into" until the viewer grows a real chat
-/// input. Toggled by the **T** key today; a future chat input drives the same
-/// state through [`set`](Self::set).
+/// Whether the own avatar is currently typing into local chat — driven by the
+/// nearby-chat bar ([`crate::nearby_chat_bar`]) through [`set`](Self::set): active
+/// while the bar is focused and holds a draft, inactive on send / blur.
 #[derive(Resource, Default)]
 pub(crate) struct TypingState {
     /// Whether typing is active this frame.
@@ -75,20 +74,21 @@ impl TypingState {
         self.active
     }
 
-    /// Set the typing state (a real chat input would call this on the first
-    /// character / on send). The wire edge is reconciled by
+    /// Set the typing state (the nearby-chat bar calls this while a draft is being
+    /// typed, and clears it on send / blur). The wire edge is reconciled by
     /// [`drive_own_typing`], so this only records intent.
     pub(crate) const fn set(&mut self, active: bool) {
         self.active = active;
     }
 }
 
-/// Drive the own avatar's typing state each frame (P31.9): toggle it on the **T**
-/// key and, on the typing edge, send both wire signals — an `AgentAnimation`
-/// request that starts / stops `ANIM_AGENT_TYPE` (so the simulator rebroadcasts it
-/// and *other* viewers animate the typing) and a `StartTyping` / `StopTyping`
-/// `ChatFromViewer` (the "is typing" indicator) — while also playing the animation
-/// locally for immediate own-avatar feedback.
+/// Drive the own avatar's typing state each frame (P31.9): on the typing edge, send
+/// both wire signals — an `AgentAnimation` request that starts / stops
+/// `ANIM_AGENT_TYPE` (so the simulator rebroadcasts it and *other* viewers animate
+/// the typing) and a `StartTyping` / `StopTyping` `ChatFromViewer` (the "is typing"
+/// indicator) — while also playing the animation locally for immediate own-avatar
+/// feedback. The state itself is set by the nearby-chat bar
+/// ([`crate::nearby_chat_bar`]); this reconciles the edge from it.
 ///
 /// The wire signals are sent regardless of the own avatar's render state, since
 /// they are what let *other* clients see the typing; the local play is gated on the
@@ -97,13 +97,8 @@ impl TypingState {
 /// back as an `AvatarAnimation` the Phase 18 path also plays, but they share the
 /// one `ANIM_AGENT_TYPE` id so the pose merge collapses them to a single motion
 /// rather than doubling.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system reading time, keyboard, identity, avatars, the typing state, and both animation resources plus the command writer"
-)]
 pub(crate) fn drive_own_typing(
     time: Res<Time>,
-    keyboard: Res<ButtonInput<KeyCode>>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     mut state: ResMut<TypingState>,
@@ -112,11 +107,6 @@ pub(crate) fn drive_own_typing(
     mut writer: MessageWriter<SlCommand>,
 ) {
     let now = time.elapsed_secs();
-    // T toggles the chat-entry stand-in (until a real chat input drives the state).
-    if keyboard.just_pressed(KeyCode::KeyT) {
-        let toggled = !state.is_active();
-        state.set(toggled);
-    }
     let active = state.is_active();
     let type_id = sl_anim::builtin_animation_by_name(TYPE_ANIMATION).map(|builtin| builtin.id);
 

@@ -2,7 +2,7 @@
 id: viewer-chat-input-world-autostart
 title: World keypress auto-starts nearby chat
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-chat-input-bar during the chat-input widget work (2026-07)
 blocked_by: [viewer-chat-input-bar, viewer-ui-settings-store]
 ---

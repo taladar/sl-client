@@ -164,13 +164,9 @@ impl SlashCommands {
 }
 
 /// A resolved local-chat line to say: the channel, the wire chat type, and the
-/// message. A live consumer maps this to `Command::Chat`.
+/// message. A live consumer maps this to `Command::Chat` (the nearby-chat bar,
+/// [`crate::nearby_chat_bar`], does).
 #[derive(Message, Debug, Clone)]
-#[expect(
-    dead_code,
-    reason = "the widget's published output; its fields are read by the follow-up consumers (the \
-              nearby-chat bar and the conversations floater) that map it to Command::Chat"
-)]
 pub(crate) struct LocalChatSubmit {
     /// The field the line came from.
     pub(crate) field: Entity,
@@ -205,13 +201,9 @@ pub(crate) struct SlashCommandInvoked {
 pub(crate) struct LocalChatInputHandle {
     /// The chat box (from [`crate::chat_input`]).
     pub(crate) container: Entity,
-    /// The inner [`bevy::text::EditableText`] field. Exposed for the follow-up
-    /// consumers (the nearby-chat bar / conversations floater) that focus it and
-    /// read its value; the specimen uses only [`container`](Self::container).
-    #[expect(
-        dead_code,
-        reason = "published for the follow-up live consumers that focus / read the field"
-    )]
+    /// The inner [`bevy::text::EditableText`] field. Used by the nearby-chat bar
+    /// ([`crate::nearby_chat_bar`]) to focus it and read its value; the specimen
+    /// uses only [`container`](Self::container).
     pub(crate) field: Entity,
 }
 

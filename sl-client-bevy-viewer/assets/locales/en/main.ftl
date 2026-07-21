@@ -85,6 +85,7 @@ status-bar-fps = { $fps } fps
 ## toggle buttons that open the main floaters. Only Inventory is wired today; the
 ## rest are disabled placeholders until their own floater tasks land.
 
+bottom-toolbar-chat = Chat
 bottom-toolbar-inventory = Inventory
 bottom-toolbar-appearance = Appearance
 bottom-toolbar-map = Map
