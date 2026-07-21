@@ -2285,6 +2285,12 @@ fn drive_grant_confirm(
 
 /// Bind each pooled friend row to the [`FriendRow`] it now points at — on the
 /// frame the view rebuilt, the selection changed, or this row's index changed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the view / selection, the \
+              row pool and its part queries, and the commands that stamp each row's \
+              drag-and-drop give target"
+)]
 fn bind_friend_rows(
     view: Res<FriendsView>,
     selected: Res<SelectedFriend>,
@@ -2299,6 +2305,7 @@ fn bind_friend_rows(
     mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut checkboxes: Query<(&mut ImageNode, &mut CellFriend)>,
+    mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
@@ -2318,6 +2325,11 @@ fn bind_friend_rows(
             continue;
         };
         bound.0 = Some(friend_row.friend);
+        // The row doubles as an inventory drag-and-drop give target: dropping
+        // an item on a friend's row offers it to them.
+        commands
+            .entity(row_entity)
+            .insert(crate::inventory_drag::AgentDropTarget(friend_row.agent));
         if let Ok((mut text, mut color)) = texts.get_mut(parts.presence) {
             set_text(&mut text, presence_glyph(friend_row.online));
             *color = TextColor(if friend_row.online {

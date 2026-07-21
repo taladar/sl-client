@@ -45,7 +45,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    Command, FolderInfo, FolderState, FolderType, InventoryFolder, InventoryFolderKey,
+    AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolder, InventoryFolderKey,
     InventoryKey, InventoryType, ItemInfo, SlCommand, SlEvent, SlSessionEvent, Wearable,
     WearableType,
 };
@@ -57,7 +57,9 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
+use crate::virtual_list::{
+    VirtualList, VirtualRow, VirtualViewport, index_to_f32, layout_virtual_lists,
+};
 
 /// The uniform height of a tree row, in logical pixels. Drives the virtualized
 /// list's windowing.
@@ -124,6 +126,13 @@ const CHROME_FONT_SIZE: f32 = 14.0;
 /// A tree row's font size, in logical pixels.
 const ROW_FONT_SIZE: f32 = 14.0;
 
+/// A selected row's background.
+const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
+
+/// Two clicks on the same row within this window are a double-click (which
+/// toggles a folder), in seconds.
+const DOUBLE_CLICK_SECS: f64 = 0.35;
+
 /// The plugin that owns the inventory window.
 pub(crate) struct InventoryPlugin;
 
@@ -135,6 +144,8 @@ impl Plugin for InventoryPlugin {
         app.init_resource::<InventoryModel>()
             .init_resource::<InventoryState>()
             .init_resource::<InventoryView>()
+            .init_resource::<InventorySelection>()
+            .init_resource::<InlineRename>()
             .add_message::<InventoryUiAction>()
             .add_systems(
                 Startup,
@@ -161,7 +172,13 @@ impl Plugin for InventoryPlugin {
             )
             .add_systems(
                 Update,
-                (populate_new_rows, bind_rows)
+                (
+                    populate_new_rows,
+                    bind_rows,
+                    paint_selection,
+                    start_inline_rename,
+                    drive_inline_rename,
+                )
                     .chain()
                     .after(layout_virtual_lists),
             );
@@ -226,6 +243,105 @@ impl InventoryModel {
     /// The child folders of `parent`, or an empty slice when it has none.
     fn children_of(&self, parent: InventoryFolderKey) -> &[InventoryFolderKey] {
         self.child_folders.get(&parent).map_or(&[], Vec::as_slice)
+    }
+
+    /// The held info of a folder, if known.
+    pub(crate) fn folder_info(&self, folder: InventoryFolderKey) -> Option<&FolderInfo> {
+        self.folders.get(&folder)
+    }
+
+    /// Find a loaded item anywhere in the tree by its key. A linear scan over
+    /// the fetched folders — run on a click, not per frame, where the largest
+    /// real inventory is cheap.
+    pub(crate) fn find_item(&self, item: InventoryKey) -> Option<&ItemInfo> {
+        self.items
+            .values()
+            .flat_map(|items| items.iter())
+            .find(|info| info.item_id == item)
+    }
+
+    /// Whether a folder belongs to the read-only shared Library tree.
+    pub(crate) fn is_library(&self, folder: InventoryFolderKey) -> bool {
+        self.library_folders.contains(&folder)
+    }
+
+    /// The first folder of a given system type in the **agent's** tree (the
+    /// Library may carry same-typed folders; those never win), e.g. the Trash
+    /// or Lost And Found.
+    pub(crate) fn folder_by_type(&self, folder_type: FolderType) -> Option<InventoryFolderKey> {
+        self.folders
+            .values()
+            .filter(|info| !self.library_folders.contains(&info.folder_id))
+            .find(|info| info.folder_type == folder_type)
+            .map(|info| info.folder_id)
+    }
+
+    /// Whether `folder` is `ancestor` or sits anywhere below it — the check that
+    /// stops a folder being moved into its own subtree, and that classifies a
+    /// row as "inside the Trash". Walks the parent chain upward, bounded against
+    /// a (server-side impossible) parent cycle.
+    pub(crate) fn is_within(
+        &self,
+        folder: InventoryFolderKey,
+        ancestor: InventoryFolderKey,
+    ) -> bool {
+        let mut current = Some(folder);
+        for _step in 0..64 {
+            let Some(key) = current else {
+                return false;
+            };
+            if key == ancestor {
+                return true;
+            }
+            current = self.folders.get(&key).and_then(|info| info.parent_id);
+        }
+        false
+    }
+
+    /// The agent's own root folder ("My Inventory") — the first non-Library
+    /// root, the target of a right-click on the window's empty background.
+    pub(crate) fn agent_root(&self) -> Option<InventoryFolderKey> {
+        self.roots
+            .iter()
+            .copied()
+            .find(|root| !self.library_folders.contains(root))
+    }
+
+    /// The legacy worn-wearables set, for the wear / take-off wiring.
+    pub(crate) fn worn_wearables(&self) -> &[Wearable] {
+        &self.wearables
+    }
+
+    /// The Current Outfit Folder's fetched contents (empty when unknown or not
+    /// yet fetched) — the modern worn set, whose links mark items as worn.
+    pub(crate) fn cof_items(&self) -> &[ItemInfo] {
+        self.cof.map_or(&[], |cof| self.items_of(cof))
+    }
+
+    /// Whether a folder is currently expanded in the Everything tab.
+    pub(crate) fn is_expanded(&self, folder: InventoryFolderKey) -> bool {
+        self.expanded.contains(&folder)
+    }
+
+    /// Every **loaded** item in `folder`'s subtree (an unfetched folder's
+    /// contents are unknown and simply absent). Drives the outfit-folder
+    /// conditions and actions.
+    pub(crate) fn subtree_items(&self, folder: InventoryFolderKey) -> Vec<&ItemInfo> {
+        let mut out = Vec::new();
+        self.collect_subtree_items(folder, &mut out);
+        out
+    }
+
+    /// The recursive half of [`subtree_items`](Self::subtree_items).
+    fn collect_subtree_items<'model>(
+        &'model self,
+        folder: InventoryFolderKey,
+        out: &mut Vec<&'model ItemInfo>,
+    ) {
+        for &child in self.children_of(folder) {
+            self.collect_subtree_items(child, out);
+        }
+        out.extend(self.items_of(folder));
     }
 
     /// The fetched items of `folder`, or an empty slice when none are loaded.
@@ -495,33 +611,136 @@ impl InventoryModel {
             .collect()
     }
 
-    /// The Worn tab: the COF's contents if it holds any, else the legacy
-    /// `AgentWearables` set mapped to type labels. Filtered by the query.
-    fn worn_rows(&self, needle: &str) -> Vec<DisplayRow> {
-        let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(needle);
+    /// The worn set: each worn item's key with a display-name / type hint,
+    /// merged from the Current Outfit Folder's links (the modern worn set — a
+    /// link's asset id names the original item) and the legacy
+    /// `AgentWearables` set. Order: COF first, then wearables not already
+    /// present.
+    fn worn_item_keys(&self) -> Vec<(InventoryKey, String, InventoryType)> {
+        let mut keys: Vec<(InventoryKey, String, InventoryType)> = Vec::new();
+        let mut seen: HashSet<InventoryKey> = HashSet::new();
         if let Some(cof) = self.cof {
-            let items = self.items_of(cof);
-            if !items.is_empty() {
-                return items
-                    .iter()
-                    .filter(|item| matches(&item.name))
-                    .map(|item| item_row(item.item_id, &item.name, item.inv_type, 0))
-                    .collect();
+            for entry in self.items_of(cof) {
+                // A COF entry is normally a link (`AT_LINK`, asset id = the
+                // linked item); take the target so the row names the original.
+                let target = if entry.asset_type == AssetType::Other(24) {
+                    InventoryKey::from(entry.asset_id)
+                } else {
+                    entry.item_id
+                };
+                if seen.insert(target) {
+                    keys.push((target, entry.name.clone(), entry.inv_type));
+                }
             }
         }
-        self.wearables
+        for worn in &self.wearables {
+            if seen.insert(worn.item_id) {
+                keys.push((
+                    worn.item_id,
+                    wearable_label(worn.wearable_type).to_owned(),
+                    InventoryType::Wearable,
+                ));
+            }
+        }
+        keys
+    }
+
+    /// Mark in `keep` every folder whose subtree holds a worn item, so the Worn
+    /// tab can show each worn item **inside its folder hierarchy**; returns
+    /// whether this subtree held one.
+    fn mark_worn_subtree(
+        &self,
+        folder: InventoryFolderKey,
+        worn: &HashSet<InventoryKey>,
+        keep: &mut HashSet<InventoryFolderKey>,
+    ) -> bool {
+        let mut any = false;
+        for &child in self.children_of(folder) {
+            if self.mark_worn_subtree(child, worn, keep) {
+                any = true;
+            }
+        }
+        if self
+            .items_of(folder)
             .iter()
-            .filter_map(|worn| {
-                let name = wearable_label(worn.wearable_type);
-                matches(name).then(|| DisplayRow {
-                    key: RowKey::Item(worn.item_id),
-                    depth: 0,
-                    name: name.to_owned(),
-                    icon: item_icon(InventoryType::Wearable),
-                    arrow: RowArrow::Leaf,
-                })
-            })
-            .collect()
+            .any(|item| worn.contains(&item.item_id))
+        {
+            any = true;
+        }
+        if any {
+            keep.insert(folder);
+        }
+        any
+    }
+
+    /// Emit a kept folder of the Worn tab (shown expanded) and, recursively,
+    /// its kept child folders and its worn items, filtered by the query.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a recursive tree emitter threading the worn set, the kept-folder set, the \
+                  placed-item record and the query through each level"
+    )]
+    fn emit_worn_folder(
+        &self,
+        folder: InventoryFolderKey,
+        depth: usize,
+        worn: &HashSet<InventoryKey>,
+        keep: &HashSet<InventoryFolderKey>,
+        placed: &mut HashSet<InventoryKey>,
+        needle: &str,
+        rows: &mut Vec<DisplayRow>,
+    ) {
+        rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
+        let child_depth = depth.saturating_add(1);
+        for &child in self.children_of(folder) {
+            if keep.contains(&child) {
+                self.emit_worn_folder(child, child_depth, worn, keep, placed, needle, rows);
+            }
+        }
+        for item in self.items_of(folder) {
+            if worn.contains(&item.item_id)
+                && (needle.is_empty() || item.name.to_lowercase().contains(needle))
+            {
+                placed.insert(item.item_id);
+                rows.push(item_row(
+                    item.item_id,
+                    &item.name,
+                    item.inv_type,
+                    child_depth,
+                ));
+            }
+        }
+    }
+
+    /// The Worn tab: the worn set (COF links falling back to the legacy
+    /// `AgentWearables`), each item shown **inside its folder hierarchy** —
+    /// the ancestor folders that lead to it, expanded, the way the Everything
+    /// search narrows the tree. A worn item whose containing folder is not yet
+    /// fetched cannot be placed and is appended as a flat row instead, so
+    /// nothing worn is ever hidden. Filtered by the query.
+    fn worn_rows(&self, needle: &str) -> Vec<DisplayRow> {
+        let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(needle);
+        let worn_keys = self.worn_item_keys();
+        let worn: HashSet<InventoryKey> = worn_keys.iter().map(|(key, _, _)| *key).collect();
+        // The hierarchy half: folders on the path to a loaded worn item.
+        let mut keep = HashSet::new();
+        for &root in &self.roots {
+            self.mark_worn_subtree(root, &worn, &mut keep);
+        }
+        let mut rows = Vec::new();
+        let mut placed: HashSet<InventoryKey> = HashSet::new();
+        for &root in &self.roots {
+            if keep.contains(&root) {
+                self.emit_worn_folder(root, 0, &worn, &keep, &mut placed, needle, &mut rows);
+            }
+        }
+        // The flat tail: worn items whose place in the tree is not loaded yet.
+        for (key, name, inv_type) in worn_keys {
+            if !placed.contains(&key) && matches(&name) {
+                rows.push(item_row(key, &name, inv_type, 0));
+            }
+        }
+        rows
     }
 }
 
@@ -579,11 +798,114 @@ struct InventoryState {
 }
 
 /// The flattened rows the window is currently drawing — recomputed from the
-/// model whenever it, the tab or the query changes, and read by the row binder.
+/// model whenever it, the tab or the query changes, and read by the row binder
+/// (and by the context-menu / drag modules, which resolve a pointer hit back to
+/// the row it landed on).
 #[derive(Resource, Default)]
-struct InventoryView {
+pub(crate) struct InventoryView {
     /// The rows, top to bottom.
     rows: Vec<DisplayRow>,
+}
+
+impl InventoryView {
+    /// The rows currently shown, top to bottom.
+    pub(crate) fn rows(&self) -> &[DisplayRow] {
+        &self.rows
+    }
+}
+
+/// The list's selection — the usual list semantics: click selects one,
+/// `Ctrl`-click toggles, `Shift`-click extends from the anchor.
+///
+/// Keyed by [`RowKey`] (not row index), so the selection survives a view
+/// rebuild (expand / collapse, a fetched page); the anchor is an index because
+/// a `Shift` range is a *visual* span of the current view.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct InventorySelection {
+    /// The selected row keys.
+    selected: HashSet<RowKey>,
+    /// The range anchor: the index (in the current view) of the last plain or
+    /// `Ctrl` click.
+    anchor: Option<usize>,
+}
+
+impl InventorySelection {
+    /// Whether `key` is selected.
+    pub(crate) fn contains(&self, key: RowKey) -> bool {
+        self.selected.contains(&key)
+    }
+
+    /// Select exactly `key` (a plain click), anchoring at `index`.
+    pub(crate) fn select_single(&mut self, key: RowKey, index: usize) {
+        self.selected.clear();
+        self.selected.insert(key);
+        self.anchor = Some(index);
+    }
+
+    /// Toggle `key` (a `Ctrl`-click), anchoring at `index`.
+    fn toggle(&mut self, key: RowKey, index: usize) {
+        if !self.selected.remove(&key) {
+            self.selected.insert(key);
+        }
+        self.anchor = Some(index);
+    }
+
+    /// Select the visual range between the anchor and `index` (a `Shift`-click)
+    /// over the current `rows`, replacing the selection. Without an anchor it
+    /// falls back to a single select.
+    fn select_range(&mut self, rows: &[DisplayRow], index: usize) {
+        let Some(anchor) = self.anchor else {
+            if let Some(row) = rows.get(index) {
+                self.select_single(row.key(), index);
+            }
+            return;
+        };
+        let (first, last) = if anchor <= index {
+            (anchor, index)
+        } else {
+            (index, anchor)
+        };
+        self.selected.clear();
+        for row in rows
+            .iter()
+            .skip(first)
+            .take(last.saturating_sub(first).saturating_add(1))
+        {
+            self.selected.insert(row.key());
+        }
+    }
+
+    /// Clear the selection (a click on the list background).
+    pub(crate) fn clear(&mut self) {
+        self.selected.clear();
+        self.anchor = None;
+    }
+}
+
+/// The **inline rename** state: the reference edits a row's label in place,
+/// and so does this — while active, the row's label node is hidden and a text
+/// field sits in the row; `Enter` commits, `Escape` cancels, and scrolling the
+/// row away cancels (the pooled row is about to be recycled).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct InlineRename {
+    /// A rename asked for but not yet started — the row may not be on screen
+    /// (or, for a freshly created folder, not in the model) yet.
+    pub(crate) pending: Option<RowKey>,
+    /// The live in-row editor.
+    active: Option<ActiveRename>,
+}
+
+/// The live inline-rename editor's entities.
+#[derive(Debug, Clone, Copy)]
+struct ActiveRename {
+    /// The row key being renamed.
+    key: RowKey,
+    /// The key's index in the view when the editor opened.
+    index: usize,
+    /// The pooled row entity hosting the editor.
+    row: Entity,
+    /// The text field.
+    field: Entity,
 }
 
 /// Entity handles for the window's parts, so the systems can find them without
@@ -607,6 +929,12 @@ impl InventoryUi {
     /// is open without reaching into this module's private fields.
     pub(crate) const fn panel(&self) -> Entity {
         self.panel
+    }
+
+    /// The scrolling viewport entity (carries [`VirtualList`]) — the drag-and-
+    /// drop module maps pointer positions to rows against it.
+    pub(crate) const fn viewport(&self) -> Entity {
+        self.viewport
     }
 }
 
@@ -635,13 +963,30 @@ pub(crate) struct DisplayRow {
     arrow: RowArrow,
 }
 
+impl DisplayRow {
+    /// What this row refers to.
+    pub(crate) const fn key(&self) -> RowKey {
+        self.key
+    }
+
+    /// The row's label text.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The row's type-icon glyph.
+    pub(crate) const fn icon(&self) -> &'static str {
+        self.icon
+    }
+}
+
 /// What a [`DisplayRow`] points at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RowKey {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum RowKey {
     /// A folder, which a click expands or collapses.
     Folder(InventoryFolderKey),
-    /// An item, inert to a click for now (selection / context actions are a
-    /// follow-up).
+    /// An item (context actions and drag-and-drop resolve it through the
+    /// model).
     Item(InventoryKey),
 }
 
@@ -671,13 +1016,8 @@ impl RowArrow {
 
 /// A toolbar action, emitted by a tab or expand/collapse button and applied by
 /// [`apply_ui_actions`].
-#[expect(
-    variant_size_differences,
-    reason = "the folder-key variant is one Uuid; boxing it to even out a transient, \
-              short-lived message enum is not worth the indirection"
-)]
 #[derive(Message, Debug, Clone, Copy)]
-enum InventoryUiAction {
+pub(crate) enum InventoryUiAction {
     /// Switch to a tab.
     SelectTab(InventoryTab),
     /// Expand every folder.
@@ -686,6 +1026,10 @@ enum InventoryUiAction {
     CollapseAll,
     /// Toggle a folder's expand state (from a row click).
     ToggleFolder(InventoryFolderKey),
+    /// Expand one folder (idempotent) — the drag-hover auto-expand
+    /// ([`crate::inventory_drag`]), which must never *collapse* the folder a
+    /// drag lingers over.
+    ExpandFolder(InventoryFolderKey),
 }
 
 /// The `element` the inventory gear menu attributes its picks to, so
@@ -845,6 +1189,7 @@ fn toggle_inventory(
 fn refresh_inventory_on_show(
     ui: Option<Res<InventoryUi>>,
     shown: Query<&UiPanelShown, Changed<UiPanelShown>>,
+    state: Res<InventoryState>,
     mut model: ResMut<InventoryModel>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -860,6 +1205,13 @@ fn refresh_inventory_on_show(
         commands.write(SlCommand(Command::QueryInventoryFolders));
         // The Worn tab wants the COF contents; harmless if already held.
         request_worn_source(&mut model, &mut commands);
+        // The context menu's wear / take-off gating reads the legacy worn set;
+        // keep it fresh whenever the window opens.
+        commands.write(SlCommand(Command::RequestWearables));
+        // Re-opening onto the Worn tab needs the hierarchy sources too.
+        if state.tab == InventoryTab::Worn {
+            request_all_agent_folders(&mut model, &mut commands);
+        }
     }
 }
 
@@ -926,6 +1278,12 @@ fn ingest_inventory(
                         item.name.clone(),
                         InventoryType::from_code(i32::from(item.inv_type)),
                     );
+                    // A bulk update is how a paste-copy, a give, or a created
+                    // item lands; re-query its folder (if we hold it) so the
+                    // tree shows the new item without a manual refresh.
+                    if model.requested.contains(&item.folder_id) {
+                        query_folder_page(item.folder_id, &mut commands);
+                    }
                 }
             }
             SlSessionEvent::InventoryItemCreated { item, .. } => {
@@ -953,6 +1311,22 @@ fn request_worn_source(model: &mut InventoryModel, commands: &mut MessageWriter<
     }
 }
 
+/// Request the contents of every not-yet-fetched folder of the **agent** tree
+/// (the Library stays lazy) — the Worn tab's way of locating each worn item's
+/// place in the hierarchy. Each folder is requested at most once and the
+/// session's fetcher serves repeats from its disk cache, so this converges.
+fn request_all_agent_folders(model: &mut InventoryModel, commands: &mut MessageWriter<SlCommand>) {
+    let wanted: Vec<InventoryFolderKey> = model
+        .folders
+        .keys()
+        .copied()
+        .filter(|key| !model.library_folders.contains(key) && model.needs_fetch(*key))
+        .collect();
+    for folder in wanted {
+        request_folder(model, folder, commands);
+    }
+}
+
 /// Mark a folder requested and query its page (which auto-schedules the session's
 /// own fetch when the folder is not yet loaded).
 fn request_folder(
@@ -964,8 +1338,14 @@ fn request_folder(
     query_folder_page(folder, commands);
 }
 
-/// Send the page query for a folder.
-fn query_folder_page(folder: InventoryFolderKey, commands: &mut MessageWriter<SlCommand>) {
+/// Send the page query for a folder. Also the **refresh** path after a
+/// mutation: the session's cache applies moves / renames / removals
+/// optimistically, so re-querying a page immediately reflects them in the
+/// model (used by [`crate::inventory_actions`] and [`crate::inventory_drag`]).
+pub(crate) fn query_folder_page(
+    folder: InventoryFolderKey,
+    commands: &mut MessageWriter<SlCommand>,
+) {
     commands.write(SlCommand(Command::QueryInventoryFolder {
         folder,
         before: None,
@@ -993,6 +1373,11 @@ fn apply_ui_actions(
                 }
                 if tab == InventoryTab::Worn {
                     request_worn_source(&mut model, &mut commands);
+                    // Placing each worn item in its folder hierarchy needs the
+                    // folder that holds it — unknowable until fetched — so the
+                    // Worn tab kicks off the background fetch of every agent
+                    // folder (the session's fetcher dedupes and disk-caches).
+                    request_all_agent_folders(&mut model, &mut commands);
                 }
             }
             InventoryUiAction::ExpandAll => {
@@ -1015,6 +1400,11 @@ fn apply_ui_actions(
                     if model.needs_fetch(folder) {
                         request_folder(&mut model, folder, &mut commands);
                     }
+                }
+            }
+            InventoryUiAction::ExpandFolder(folder) => {
+                if model.expanded.insert(folder) && model.needs_fetch(folder) {
+                    request_folder(&mut model, folder, &mut commands);
                 }
             }
         }
@@ -1142,6 +1532,9 @@ fn populate_new_rows(
                 ..default()
             },
             Pickable::default(),
+            // Transparent until the drag-and-drop hover paints it as the drop
+            // target ([`crate::inventory_drag`]).
+            BackgroundColor(Color::NONE),
         ));
         let indent = commands.spawn((Node::default(), ChildOf(row_entity))).id();
         let arrow = commands
@@ -1184,7 +1577,10 @@ fn populate_new_rows(
                 icon,
                 label,
             })
-            .observe(on_row_press);
+            .observe(on_row_press)
+            .observe(crate::inventory_actions::on_row_context)
+            .observe(crate::inventory_drag::on_row_drag_start)
+            .observe(crate::inventory_drag::on_row_drag_end);
     }
 }
 
@@ -1234,13 +1630,81 @@ fn bind_rows(
     }
 }
 
+/// A primary press anywhere in the viewport: focus the list (so the wheel
+/// scrolls it), and — when the press landed on the empty background below the
+/// last row, not on a row — clear the selection, the usual list semantics.
+///
+/// A press on a row also bubbles here (rows do not consume the primary press,
+/// so an open menu's click-away dismissal still sees it); the row-vs-background
+/// distinction is therefore made geometrically, not by propagation.
+fn on_viewport_press(
+    press: On<Pointer<Press>>,
+    ui: Res<InventoryUi>,
+    view: Res<InventoryView>,
+    lists: Query<&VirtualList>,
+    geometry: Query<(&ComputedNode, &UiGlobalTransform)>,
+    mut selection: ResMut<InventorySelection>,
+    mut focus: ResMut<InputFocus>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    focus.set(ui.viewport, FocusCause::Navigated);
+    let Ok(list) = lists.get(ui.viewport) else {
+        return;
+    };
+    let Ok((computed, transform)) = geometry.get(ui.viewport) else {
+        return;
+    };
+    // The row index the press falls on, in list space (top of the viewport plus
+    // the scroll offset). Component-wise f32 maths, per the workspace
+    // `arithmetic_side_effects` convention on `glam` operators.
+    let scale = computed.inverse_scale_factor();
+    let top = transform.translation.y * scale - computed.size().y * scale / 2.0;
+    let offset = press.pointer_location.position.y - top + list.scroll_offset();
+    if list.row_height > 0.0 && offset >= 0.0 {
+        let past_end = offset / list.row_height >= index_to_f32(view.rows.len());
+        if past_end {
+            selection.clear();
+        }
+    }
+}
+
+/// Whether a logical-pixel point sits inside a UI node's rectangle.
+/// Component-wise f32 maths, per the workspace `arithmetic_side_effects`
+/// convention on `glam` operators.
+fn point_in_node(point: Vec2, computed: &ComputedNode, transform: &UiGlobalTransform) -> bool {
+    let scale = computed.inverse_scale_factor();
+    let size = computed.size();
+    let half_width = size.x * scale / 2.0;
+    let half_height = size.y * scale / 2.0;
+    let centre_x = transform.translation.x * scale;
+    let centre_y = transform.translation.y * scale;
+    (point.x - centre_x).abs() <= half_width && (point.y - centre_y).abs() <= half_height
+}
+
 /// A row was clicked: focus the window (so the wheel scrolls the list, not the
-/// camera) and, if it is a folder, toggle it.
+/// camera), update the **selection** with the usual list semantics — click
+/// selects one, `Ctrl`-click toggles, `Shift`-click extends from the anchor —
+/// and toggle a folder on its **arrow** or on a **double-click** (the
+/// reference's `llfolderview` behaviour; a plain click no longer toggles, it
+/// selects).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources: the row pool and its \
+              parts, the arrow geometry for the hit test, the view, the modifier keys and \
+              clock for the click semantics, and the selection / focus / action outputs"
+)]
 fn on_row_press(
     press: On<Pointer<Press>>,
-    rows: Query<&VirtualRow>,
+    rows: Query<(&VirtualRow, &RowParts)>,
+    arrows: Query<(&ComputedNode, &UiGlobalTransform)>,
     view: Res<InventoryView>,
     ui: Res<InventoryUi>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut last_click: Local<Option<(f64, usize)>>,
+    mut selection: ResMut<InventorySelection>,
     mut focus: ResMut<InputFocus>,
     mut actions: MessageWriter<InventoryUiAction>,
 ) {
@@ -1248,18 +1712,235 @@ fn on_row_press(
         return;
     }
     focus.set(ui.viewport, FocusCause::Navigated);
-    let Ok(row) = rows.get(press.entity) else {
+    let Ok((row, parts)) = rows.get(press.entity) else {
         return;
     };
     let Some(index) = row.index else {
         return;
     };
-    if let Some(DisplayRow {
-        key: RowKey::Folder(folder),
-        ..
-    }) = view.rows.get(index)
+    let Some(display) = view.rows.get(index) else {
+        return;
+    };
+    let key = display.key();
+
+    // A folder toggles on its expand arrow, or on a double-click anywhere.
+    let now = time.elapsed_secs_f64();
+    let double = last_click
+        .is_some_and(|(at, last_index)| last_index == index && now - at <= DOUBLE_CLICK_SECS);
+    *last_click = Some((now, index));
+    if let RowKey::Folder(folder) = key {
+        let on_arrow = arrows.get(parts.arrow).is_ok_and(|(computed, transform)| {
+            point_in_node(press.pointer_location.position, computed, transform)
+        });
+        if on_arrow || double {
+            actions.write(InventoryUiAction::ToggleFolder(folder));
+        }
+    }
+
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+    if shift {
+        selection.select_range(&view.rows, index);
+    } else if ctrl {
+        selection.toggle(key, index);
+    } else {
+        selection.select_single(key, index);
+    }
+}
+
+/// Paint each pooled row's selection background. Skipped mid-drag, when the
+/// drop-target highlight ([`crate::inventory_drag`]) owns the row backgrounds;
+/// runs write-guarded otherwise, so a still list costs comparisons only.
+fn paint_selection(
+    ui: Option<Res<InventoryUi>>,
+    selection: Res<InventorySelection>,
+    view: Res<InventoryView>,
+    drag: Res<crate::inventory_drag::InventoryDragState>,
+    mut rows: Query<(&VirtualRow, &ChildOf, &mut BackgroundColor)>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if drag.is_active() {
+        return;
+    }
+    for (row, child_of, mut background) in &mut rows {
+        if child_of.parent() != ui.viewport {
+            continue;
+        }
+        let selected = row
+            .index
+            .and_then(|index| view.rows.get(index))
+            .is_some_and(|display| selection.contains(display.key()));
+        let wanted = if selected {
+            SELECTED_ROW_BACKGROUND
+        } else {
+            Color::NONE
+        };
+        if background.0 != wanted {
+            background.0 = wanted;
+        }
+    }
+}
+
+/// Begin a pending inline rename once its row is on screen: hide the row's
+/// label, put a pre-filled text field in its place, and focus it.
+fn start_inline_rename(
+    mut rename: ResMut<InlineRename>,
+    view: Res<InventoryView>,
+    ui: Option<Res<InventoryUi>>,
+    rows: Query<(Entity, &VirtualRow, &RowParts, &ChildOf)>,
+    mut nodes: Query<&mut Node>,
+    mut focus: ResMut<InputFocus>,
+    mut commands: Commands,
+) {
+    if rename.active.is_some() {
+        return;
+    }
+    let Some(key) = rename.pending else {
+        return;
+    };
+    let Some(ui) = ui else {
+        return;
+    };
+    // The row may not be in the view yet (a freshly created folder's skeleton
+    // refresh is still in flight); keep the rename pending until it appears.
+    let Some(index) = view.rows.iter().position(|row| row.key() == key) else {
+        return;
+    };
+    let Some(name) = view.rows.get(index).map(DisplayRow::name) else {
+        return;
+    };
+    for (entity, row, parts, child_of) in &rows {
+        if child_of.parent() != ui.viewport || row.index != Some(index) {
+            continue;
+        }
+        if let Ok(mut label) = nodes.get_mut(parts.label) {
+            label.display = Display::None;
+        }
+        let field = crate::ui_text_input::spawn_text_input(
+            &mut commands,
+            entity,
+            &crate::ui_text_input::TextInputSpec {
+                initial: name.to_owned(),
+                font_size: ROW_FONT_SIZE,
+                width_glyphs: 22.0,
+                ..crate::ui_text_input::TextInputSpec::new(
+                    "inventory-rename",
+                    crate::ui_text_input::TextInputKind::Line,
+                )
+            },
+        );
+        focus.set(field, FocusCause::Navigated);
+        rename.pending = None;
+        rename.active = Some(ActiveRename {
+            key,
+            index,
+            row: entity,
+            field,
+        });
+        return;
+    }
+}
+
+/// Drive the open inline rename: `Enter` commits (an item renames through a
+/// same-folder `MoveInventoryItem`, a folder through `UpdateInventoryFolder`),
+/// `Escape` cancels, and the row scrolling away / rebinding cancels (its
+/// pooled entity is about to show something else).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the rename state, the \
+              keyboard, the view / model to resolve the renamed row, the field to read, the \
+              label to restore, and the command channels"
+)]
+fn drive_inline_rename(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    view: Res<InventoryView>,
+    model: Res<InventoryModel>,
+    rows: Query<(&VirtualRow, &RowParts)>,
+    fields: Query<&EditableText>,
+    mut nodes: Query<&mut Node>,
+    mut rename: ResMut<InlineRename>,
+    mut commands_bevy: Commands,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        rename.pending = None;
+        if let Some(active) = rename.active.take() {
+            end_inline_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+        }
+        return;
+    }
+    let Some(active) = rename.active else {
+        return;
+    };
+    // Cancel when the hosting row no longer shows the renamed key (scrolled
+    // away and recycled, or the view rebuilt underneath it).
+    let still_bound = rows
+        .get(active.row)
+        .is_ok_and(|(row, _parts)| row.index == Some(active.index))
+        && view
+            .rows
+            .get(active.index)
+            .is_some_and(|display| display.key() == active.key);
+    if !still_bound {
+        rename.active = None;
+        end_inline_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+        return;
+    }
+    if !keyboard.just_pressed(KeyCode::Enter) {
+        return;
+    }
+    let new_name = fields
+        .get(active.field)
+        .map(|field| field.value().to_string().trim().to_owned())
+        .unwrap_or_default();
+    if !new_name.is_empty() {
+        match active.key {
+            RowKey::Item(item_key) => {
+                if let Some(item) = model.find_item(item_key)
+                    && new_name != item.name
+                {
+                    commands.write(SlCommand(Command::MoveInventoryItem {
+                        item_id: item.item_id,
+                        folder_id: item.folder_id,
+                        new_name,
+                    }));
+                    query_folder_page(item.folder_id, &mut commands);
+                }
+            }
+            RowKey::Folder(folder_key) => {
+                if let Some(info) = model.folder_info(folder_key)
+                    && new_name != info.name
+                    && let Some(parent) = info.parent_id
+                {
+                    commands.write(SlCommand(Command::UpdateInventoryFolder {
+                        folder_id: info.folder_id,
+                        parent_id: parent,
+                        folder_type: info.folder_type,
+                        name: new_name,
+                    }));
+                    commands.write(SlCommand(Command::QueryInventoryFolders));
+                }
+            }
+        }
+    }
+    rename.active = None;
+    end_inline_rename(&active, &rows, &mut nodes, &mut commands_bevy);
+}
+
+/// Tear the inline editor down: despawn the field and restore the row's label.
+fn end_inline_rename(
+    active: &ActiveRename,
+    rows: &Query<(&VirtualRow, &RowParts)>,
+    nodes: &mut Query<&mut Node>,
+    commands: &mut Commands,
+) {
+    commands.entity(active.field).despawn();
+    if let Ok((_row, parts)) = rows.get(active.row)
+        && let Ok(mut label) = nodes.get_mut(parts.label)
     {
-        actions.write(InventoryUiAction::ToggleFolder(*folder));
+        label.display = Display::Flex;
     }
 }
 
@@ -1419,13 +2100,12 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             Name::new("inventory-viewport"),
             ChildOf(content),
         ))
-        .observe(
-            |press: On<Pointer<Press>>, ui: Res<InventoryUi>, mut focus: ResMut<InputFocus>| {
-                if press.button == PointerButton::Primary {
-                    focus.set(ui.viewport, FocusCause::Navigated);
-                }
-            },
-        )
+        .observe(on_viewport_press)
+        // A right-click on the list's empty background (below the last row)
+        // targets the agent root — the reference's "New Folder / Paste at top
+        // level" background menu. A row's own context observer consumes its
+        // press first, so only true background clicks reach this.
+        .observe(crate::inventory_actions::on_viewport_context)
         .id();
 
     commands.insert_resource(InventoryUi {
@@ -1713,6 +2393,41 @@ mod tests {
         let library_key =
             sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0x50));
         assert!(model.library_folders.contains(&library_key));
+    }
+
+    /// The Worn tab shows each worn item inside its folder hierarchy, and a
+    /// worn item whose folder is not loaded falls back to a flat row — nothing
+    /// worn is hidden.
+    #[test]
+    fn worn_tab_shows_the_folder_hierarchy_with_a_flat_fallback() {
+        let mut model = sample_model();
+        // The "Blue shirt" (item 10, in Clothing) is worn, plus a second worn
+        // item (0x99) that no loaded folder holds.
+        model.wearables = vec![
+            sl_client_bevy::Wearable {
+                item_id: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(10)),
+                asset_id: None,
+                wearable_type: sl_client_bevy::WearableType::Shirt,
+            },
+            sl_client_bevy::Wearable {
+                item_id: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x99)),
+                asset_id: None,
+                wearable_type: sl_client_bevy::WearableType::Pants,
+            },
+        ];
+        let rows = model.build_rows(InventoryTab::Worn, "");
+        // Hierarchy first — the ancestors of the placed shirt, expanded — then
+        // the flat fallback for the unplaced pants.
+        assert_eq!(
+            names(&rows),
+            vec!["My Inventory", "Clothing", "Blue shirt", "Pants"]
+        );
+        let shirt = rows.iter().find(|row| row.name == "Blue shirt");
+        assert_eq!(shirt.map(|row| row.depth), Some(2));
+        let pants = rows.iter().find(|row| row.name == "Pants");
+        assert_eq!(pants.map(|row| row.depth), Some(0));
+        // The sibling "Objects" folder holds nothing worn and is not shown.
+        assert!(!names(&rows).contains(&"Objects"));
     }
 
     /// The Recent tab lists pushed items newest-first and dedupes re-pushes.

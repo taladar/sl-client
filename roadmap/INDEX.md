@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 105 |
-| blocked | 79 |
+| ready | 112 |
+| blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 541 |
+| done | 543 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **761** |
+| **total** | **771** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (105)
+## ready (112)
 
 ### viewer
 
@@ -110,20 +110,33 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-advanced-filters`](ready/viewer-inventory-advanced-filters.md)
   — Inventory advanced filters (type / date / worn)
-- [`viewer-inventory-context-actions`](ready/viewer-inventory-context-actions.md)
-  — Inventory context actions + drag-and-drop (blocked by
-  `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-attach-to-point`](ready/viewer-inventory-attach-to-point.md)
+  — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
+- [`viewer-inventory-cof-maintenance`](ready/viewer-inventory-cof-maintenance.md)
+  — Maintain COF links on wear / detach (accurate worn state)
 - [`viewer-inventory-floater-menus`](ready/viewer-inventory-floater-menus.md) —
   Inventory floater menus (gear options + create/New menu) (blocked by
   `viewer-ui-menu-bar` (done))
+- [`viewer-inventory-folder-deep-copy`](ready/viewer-inventory-folder-deep-copy.md)
+  — Folder Copy / Paste (recursive deep copy)
 - [`viewer-inventory-gallery`](ready/viewer-inventory-gallery.md) — Inventory
   gallery view (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations
+- [`viewer-inventory-multi-select-actions`](ready/viewer-inventory-multi-select-actions.md)
+  — Multi-selection context actions + drag
+- [`viewer-inventory-new-wearables`](ready/viewer-inventory-new-wearables.md) —
+  New Clothes / New Body Parts creation
+- [`viewer-inventory-open-and-properties`](ready/viewer-inventory-open-and-properties.md)
+  — Item Open (per-type preview) + Properties floater
+- [`viewer-inventory-replace-outfit`](ready/viewer-inventory-replace-outfit.md)
+  — Replace Current Outfit (whole-outfit swap)
+- [`viewer-inventory-restore-item`](ready/viewer-inventory-restore-item.md) —
+  Restore Item from Trash
 - [`viewer-inventory-row-decorations`](ready/viewer-inventory-row-decorations.md)
   — Inventory row decorations (permissions, worn-bold)
-- [`viewer-inventory-worn-actions`](ready/viewer-inventory-worn-actions.md) —
-  Worn-item detach / take-off actions
+- [`viewer-inventory-share-picker`](ready/viewer-inventory-share-picker.md) —
+  Share (give via avatar picker)
 - [`viewer-land-context-menu`](ready/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
@@ -295,7 +308,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (79)
+## blocked (80)
 
 ### viewer
 
@@ -342,6 +355,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
+- [`viewer-inventory-give-via-profile`](blocked/viewer-inventory-give-via-profile.md)
+  — Give inventory by dropping onto a profile (blocked by
+  `viewer-social-profiles`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -391,7 +407,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic` (done))
 - [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-object-selection-core`,
-  `viewer-inventory-context-actions`)
+  `viewer-inventory-context-actions` (done))
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
@@ -568,7 +584,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (541)
+## done (543)
 
 ### protocol
 
@@ -762,6 +778,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
+- [`viewer-inventory-context-actions`](done/viewer-inventory-context-actions.md)
+  — Inventory context actions + drag-and-drop (blocked by
+  `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-folder-tree`](done/viewer-inventory-folder-tree.md) —
   Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`
   (done))
@@ -773,6 +792,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-search-field` (done))
 - [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
+  Worn-item detach / take-off actions
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))

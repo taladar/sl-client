@@ -105,6 +105,21 @@ impl VirtualList {
     pub(crate) const fn scroll_to_top(&mut self) {
         self.scroll = 0.0;
     }
+
+    /// The current scroll offset from the top, in logical pixels — read by a
+    /// consumer that maps a pointer position back to a row index (the inventory
+    /// drag-and-drop hit test).
+    pub(crate) const fn scroll_offset(&self) -> f32 {
+        self.scroll
+    }
+
+    /// Nudge the scroll offset by `delta` logical pixels (positive scrolls
+    /// toward the end). Clamped at the top here; the layout system clamps the
+    /// far end against the live viewport height, exactly as it does for the
+    /// wheel path.
+    pub(crate) const fn scroll_by(&mut self, delta: f32) {
+        self.scroll = (self.scroll + delta).max(0.0);
+    }
 }
 
 /// A pooled row entity: a child of a [`VirtualList`] viewport that is repeatedly
@@ -325,7 +340,7 @@ pub(crate) fn layout_virtual_lists(
 /// forbids them), by splitting the low 32 bits into two `u16` halves — the same
 /// trick [`crate::coords::metres_to_f32`] uses. Counts far beyond `u32` are not
 /// reachable by any real inventory, and saturate rather than wrap.
-fn index_to_f32(n: usize) -> f32 {
+pub(crate) fn index_to_f32(n: usize) -> f32 {
     let clamped = u32::try_from(n).unwrap_or(u32::MAX);
     let high = u16::try_from(clamped >> 16).unwrap_or(u16::MAX);
     let low = u16::try_from(clamped & 0xFFFF).unwrap_or(u16::MAX);

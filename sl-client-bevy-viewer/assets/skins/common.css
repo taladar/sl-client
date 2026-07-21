@@ -137,6 +137,14 @@
   border-radius: var(--control-radius);
 }
 
+/* A disabled (greyed-out) menu entry. Later in the cascade than
+ * `.sk-menu-item`, so its colour wins over the enabled rule on a row carrying
+ * both classes — without it, the skin's text colour would repaint the
+ * Rust-painted disabled grey and an unavailable entry would read enabled. */
+.sk-menu-item-disabled {
+  color: var(--text-disabled);
+}
+
 /* The faint rule between two groups of entries. */
 .sk-menu-separator {
   background-color: var(--control-border);

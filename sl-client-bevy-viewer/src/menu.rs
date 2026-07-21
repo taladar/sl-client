@@ -1096,11 +1096,20 @@ fn spawn_command_line(
         ENTRY_TEXT
     };
     let action = command.action;
+    // A disabled row carries a second class whose skin rule repaints the label
+    // in the skin's disabled grey — without it, the skin's `.sk-menu-item`
+    // text colour would override the Rust-painted `ENTRY_TEXT_DISABLED` and an
+    // unavailable entry would read enabled.
+    let classes: &[&str] = if enabled {
+        &["sk-menu-item"]
+    } else {
+        &["sk-menu-item", "sk-menu-item-disabled"]
+    };
     let row = commands
         .spawn((
             entry_row_node(),
             BackgroundColor(ENTRY_BACKGROUND),
-            ClassList::new_with_classes(["sk-menu-item"]),
+            ClassList::new_with_classes(classes.iter().copied()),
             MenuEntryAction { element, action },
             Name::new(format!("menu-item:{}", command.action)),
             ChildOf(popup),
@@ -1469,7 +1478,7 @@ fn conditions_at<'q>(
 
 /// Open a [`MenuDef`] at a screen point, with no anchor button — the shape a
 /// right-click context menu uses.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone)]
 pub(crate) struct OpenContextMenu {
     /// The menu to show.
     pub(crate) menu: &'static MenuDef,
@@ -1477,6 +1486,11 @@ pub(crate) struct OpenContextMenu {
     pub(crate) at: Vec2,
     /// The `element` its actions are attributed to.
     pub(crate) element: &'static str,
+    /// The condition names that hold for this open, snapshotted by the opener —
+    /// the same open-time model as [`crate::pie_menu::OpenPieMenu`]. Every
+    /// `enabled_when` / `checked_when` / `visible_when` key of the menu resolves
+    /// against this set; empty means every conditional entry reads unavailable.
+    pub(crate) conditions: Vec<&'static str>,
 }
 
 /// Spawn a popup for each [`OpenContextMenu`] request, anchored to a zero-size
@@ -1504,6 +1518,9 @@ fn open_context_menus(
                     ..default()
                 },
                 FreeContextMenu,
+                // Carried on the anchor so a submenu opened later resolves the
+                // same snapshot by ancestry ([`conditions_at`]).
+                MenuConditions(request.conditions.clone()),
                 Name::new("context-menu-anchor"),
                 ChildOf(root.0),
             ))
@@ -1518,7 +1535,7 @@ fn open_context_menus(
             anchor,
             request.menu,
             request.element,
-            &MenuConditions::default(),
+            &MenuConditions(request.conditions.clone()),
             DropDirection::Block,
             *direction,
             // A context menu is not the searched element, so it is never filtered.

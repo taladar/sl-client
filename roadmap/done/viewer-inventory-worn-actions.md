@@ -2,7 +2,7 @@
 id: viewer-inventory-worn-actions
 title: Worn-item detach / take-off actions
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-outfit-tab (2026-07) — the tab views shipped,
   the mutating actions did not
 ---
@@ -39,3 +39,13 @@ row affordances and command wiring.
 point** (or **HUD attachment point**) — "Attach To ▸" / "Attach To HUD ▸"
 submenus in the reference viewer — and "Add" attaches without detaching what is
 already on that point. Wire the point choice through to the attach command.
+
+## Done (2026-07-21)
+
+Landed as part of [[viewer-inventory-context-actions]]: the Worn tab's rows
+share the inventory context menu, so wear / add / take-off / detach work
+there (and everywhere), and the folder-level Add-To / Remove-From Current
+Outfit actions cover the outfit half (attachments included, batched via
+`RezMultipleAttachmentsFromInv`). The attach-**point** choice ("Attach To ▸" /
+"Attach To HUD ▸") noted below was split out as
+[[viewer-inventory-attach-to-point]].

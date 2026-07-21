@@ -905,6 +905,7 @@ fn open_gallery_menu(
                 menu: &crate::menu::FIXTURE_CONTEXT_MENU,
                 at: press.pointer_location.position,
                 element: "context-menu",
+                conditions: Vec::new(),
             });
         }
     }

@@ -2,7 +2,7 @@
 id: viewer-inventory-context-actions
 title: Inventory context actions + drag-and-drop
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-inventory-ui
 blocked_by: [viewer-inventory-folder-tree]
 ---
@@ -65,3 +65,31 @@ what our side does not implement yet (the `UNIMPLEMENTED` condition pattern),
 and wire the simple ones (wear / detach / rename / delete / copy-paste /
 move-to-trash) now. The menu XML is skin-shared (the Vintage skin overrides
 none of it), so `default/xui/en/menu_inventory.xml` is authoritative.
+
+## Done (2026-07-21)
+
+Implemented as `sl-client-bevy-viewer/src/inventory_actions.rs` (context
+menus + operations) and `inventory_drag.rs` (drag-and-drop), on the shared
+line-menu widget (`OpenContextMenu` grew open-time conditions, like the pie).
+One item menu + one folder menu mirroring `menu_inventory.xml`, entries
+shown / greyed per type via open-time conditions (entry tables pinned by
+tests); Library read-only throughout; Trash shows Purge / Empty Trash.
+
+Wired: inline rename (in-row editor; New Folder starts in it), cut / copy /
+paste / paste-as-link (single-entry clipboard), delete-to-trash, purge,
+empty trash / lost-and-found, New Script / Notecard / Gesture, landmark
+Teleport, gesture Activate / Deactivate, calling-card IM, wear / add /
+detach (attachments), wear / add / take-off (wearables), folder Add-To /
+Remove-From Current Outfit (wearables **and** attachments, batched).
+Drag-and-drop: move / Library-copy between folders with auto-scroll,
+hover auto-expand, target highlight, Esc cancel; drop onto an avatar /
+name tag / People row gives (self-drop wears); object items drop-rez
+in-world honouring the copy bit. Selection (click / Ctrl / Shift) landed in
+`inventory.rs` alongside; the Worn tab gained its folder hierarchy.
+
+Split out as follow-ups: [[viewer-inventory-attach-to-point]],
+[[viewer-inventory-replace-outfit]], [[viewer-inventory-folder-deep-copy]],
+[[viewer-inventory-share-picker]], [[viewer-inventory-open-and-properties]],
+[[viewer-inventory-new-wearables]], [[viewer-inventory-restore-item]],
+[[viewer-inventory-multi-select-actions]],
+[[viewer-inventory-give-via-profile]], [[viewer-inventory-cof-maintenance]].

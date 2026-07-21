@@ -64,6 +64,8 @@ mod ik;
 mod input_action;
 mod input_context;
 mod inventory;
+mod inventory_actions;
+mod inventory_drag;
 mod legacy_materials;
 mod lights;
 mod local_chat_input;
@@ -196,6 +198,8 @@ use crate::i18n::ViewerI18nPlugin;
 use crate::input_action::InputActionPlugin;
 use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
 use crate::inventory::InventoryPlugin;
+use crate::inventory_actions::InventoryActionsPlugin;
+use crate::inventory_drag::InventoryDragPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -769,6 +773,8 @@ fn run_session(
     // search bar, on the high-level inventory bridge, toggled with `Ctrl+I`. Hosted
     // in a floater, so it drags / resizes / minimizes / docks.
     .add_plugins(InventoryPlugin)
+    .add_plugins(InventoryActionsPlugin)
+    .add_plugins(InventoryDragPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the
