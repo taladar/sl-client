@@ -29,8 +29,21 @@
 //! `Enter` is handled **after** [`crate::emoji_complete::ColonCompleteSet`], so a
 //! press the completer accepted a suggestion with is not also a send.
 //!
+//! # Line-recall history (`viewer-chat-input-history`)
+//!
+//! Every field carries a per-field [`ChatInputHistory`]: each submitted line is
+//! pushed onto it, and **`Ctrl+Up`** / **`Ctrl+Down`** walk back and forth through
+//! it, replacing the field text (the reference's chat-bar recall). The `Ctrl`
+//! modifier keeps a bare `Up`/`Down` free for the `:`-completer popup and any
+//! caret movement. Stepping forward past the newest entry restores the draft that
+//! was in progress when recall began, so a stray `Ctrl+Up` is undoable. Because it
+//! lives on the base widget, every consumer — the nearby-chat bar, the local-chat
+//! variant, each Conversations-floater tab — gets it for free.
+//!
 //! Reference (Firestorm, read-only): `llchatentry` (the chat line editor with its
-//! emoji button), `llemojihelper`.
+//! emoji button), `llemojihelper`, `lllineeditor` (the up/down history recall).
+
+use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
@@ -75,6 +88,82 @@ const INNER_GAP: f32 = 4.0;
 /// among all editable fields, and a consumer can tell it from any other.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct ChatInputField;
+
+/// How many submitted lines a field's recall history keeps before the oldest is
+/// evicted — a few dozen, the reference's `LINE_HISTORY_MAX` order of magnitude.
+const HISTORY_CAP: usize = 32;
+
+/// A field's **line-recall history**: the lines submitted from it, plus the recall
+/// cursor and the saved in-progress draft. One per field (inserted by
+/// [`spawn_chat_input`]); [`recall_chat_history`] drives it from `Ctrl+Up` /
+/// `Ctrl+Down` and [`send_chat_input`] pushes each sent line.
+///
+/// The logic is pure and unit-tested — the system is only the keyboard-and-field
+/// glue over it.
+#[derive(Component, Debug, Default, Clone)]
+pub(crate) struct ChatInputHistory {
+    /// The submitted lines, oldest at the front, newest at the back.
+    entries: VecDeque<String>,
+    /// The recalled entry's index while walking history, or `None` when the field
+    /// shows the live draft (recall not active).
+    cursor: Option<usize>,
+    /// The in-progress text saved when recall started, restored when the walk
+    /// steps forward past the newest entry.
+    draft: String,
+}
+
+impl ChatInputHistory {
+    /// Record a submitted `line`, ending any active recall. A line identical to
+    /// the newest entry is not duplicated (the reference skips consecutive
+    /// repeats); the history is bounded to [`HISTORY_CAP`], evicting the oldest.
+    fn push(&mut self, line: &str) {
+        self.cursor = None;
+        self.draft.clear();
+        if self.entries.back().map(String::as_str) == Some(line) {
+            return;
+        }
+        self.entries.push_back(line.to_owned());
+        while self.entries.len() > HISTORY_CAP {
+            self.entries.pop_front();
+        }
+    }
+
+    /// Walk one step **back** (older) through the history, saving `current` as the
+    /// draft when recall first starts. Returns the text to place in the field, or
+    /// `None` when there is nothing older to show (empty history, or already at
+    /// the oldest entry).
+    fn recall_older(&mut self, current: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let index = match self.cursor {
+            None => {
+                current.clone_into(&mut self.draft);
+                self.entries.len().saturating_sub(1)
+            }
+            Some(0) => return None,
+            Some(current_index) => current_index.saturating_sub(1),
+        };
+        self.cursor = Some(index);
+        self.entries.get(index).cloned()
+    }
+
+    /// Walk one step **forward** (newer) through the history. Returns the text to
+    /// place in the field — the next entry, or the saved draft once the walk steps
+    /// past the newest entry — or `None` when recall is not active.
+    fn recall_newer(&mut self) -> Option<String> {
+        let current_index = self.cursor?;
+        let newest = self.entries.len().saturating_sub(1);
+        if current_index < newest {
+            let index = current_index.saturating_add(1);
+            self.cursor = Some(index);
+            self.entries.get(index).cloned()
+        } else {
+            self.cursor = None;
+            Some(self.draft.clone())
+        }
+    }
+}
 
 /// What [`spawn_chat_input`] hands back: the box and the inner field.
 #[derive(Debug, Clone, Copy)]
@@ -190,9 +279,11 @@ pub(crate) fn spawn_chat_input(
             ..TextInputSpec::new(spec.element, TextInputKind::Line)
         },
     );
-    commands
-        .entity(field)
-        .insert((ChatInputField, TextColor(TEXT_COLOR)));
+    commands.entity(field).insert((
+        ChatInputField,
+        ChatInputHistory::default(),
+        TextColor(TEXT_COLOR),
+    ));
 
     // The completer popup hangs above the whole box.
     attach_colon_complete(commands, field, container);
@@ -254,20 +345,23 @@ fn spawn_emoji_button(
 pub(crate) struct ChatInputPlugin;
 
 impl Plugin for ChatInputPlugin {
-    /// Register the send message and system.
+    /// Register the send message and the send / history-recall systems.
     fn build(&self, app: &mut App) {
-        app.add_message::<ChatInputSubmit>()
-            .add_systems(Update, send_chat_input.after(ColonCompleteSet));
+        app.add_message::<ChatInputSubmit>().add_systems(
+            Update,
+            (send_chat_input, recall_chat_history).after(ColonCompleteSet),
+        );
     }
 }
 
 /// Send the focused chat field's line on a non-empty `Enter`: emit a
-/// [`ChatInputSubmit`] carrying the text and the `Shift` / `Ctrl` modifiers, then
-/// clear the field. A blank line is a no-op (no send, no clear).
+/// [`ChatInputSubmit`] carrying the text and the `Shift` / `Ctrl` modifiers, push
+/// the line onto the field's recall history, then clear the field. A blank line is
+/// a no-op (no send, no clear).
 fn send_chat_input(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     focus: Res<bevy::input_focus::InputFocus>,
-    mut fields: Query<&mut EditableText, With<ChatInputField>>,
+    mut fields: Query<(&mut EditableText, &mut ChatInputHistory), With<ChatInputField>>,
     mut out: MessageWriter<ChatInputSubmit>,
     mut font_cx: ResMut<FontCx>,
     mut layout_cx: ResMut<LayoutCx>,
@@ -278,7 +372,7 @@ fn send_chat_input(
     let Some(focused) = focus.get() else {
         return;
     };
-    let Ok(mut editable) = fields.get_mut(focused) else {
+    let Ok((mut editable, mut history)) = fields.get_mut(focused) else {
         return;
     };
     let text = editable.value().to_string();
@@ -287,6 +381,7 @@ fn send_chat_input(
     }
     let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    history.push(&text);
     out.write(ChatInputSubmit {
         field: focused,
         text,
@@ -300,6 +395,54 @@ fn send_chat_input(
     driver.move_to_text_start();
     // Consume the Enter so nothing downstream re-sends it.
     keyboard.clear_just_pressed(KeyCode::Enter);
+}
+
+/// Recall the focused chat field's history: `Ctrl+Up` steps back to older
+/// submitted lines, `Ctrl+Down` forward toward the live draft, replacing the field
+/// text and parking the caret at the end. The `Ctrl` modifier leaves a bare
+/// `Up`/`Down` for the `:`-completer popup and caret movement; a step that has
+/// nothing to show is a no-op.
+fn recall_chat_history(
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    focus: Res<bevy::input_focus::InputFocus>,
+    mut fields: Query<(&mut EditableText, &mut ChatInputHistory), With<ChatInputField>>,
+    mut font_cx: ResMut<FontCx>,
+    mut layout_cx: ResMut<LayoutCx>,
+) {
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    if !ctrl {
+        return;
+    }
+    let older = keyboard.just_pressed(KeyCode::ArrowUp);
+    let newer = keyboard.just_pressed(KeyCode::ArrowDown);
+    if !(older || newer) {
+        return;
+    }
+    let Some(focused) = focus.get() else {
+        return;
+    };
+    let Ok((mut editable, mut history)) = fields.get_mut(focused) else {
+        return;
+    };
+    let replacement = if older {
+        let current = editable.value().to_string();
+        history.recall_older(&current)
+    } else {
+        history.recall_newer()
+    };
+    let Some(text) = replacement else {
+        return;
+    };
+    editable.editor.set_text(&text);
+    let mut driver = editable.editor.driver(&mut font_cx, &mut layout_cx);
+    driver.refresh_layout();
+    driver.move_to_text_end();
+    // Consume the arrow so the completer / caret does not also act on it.
+    keyboard.clear_just_pressed(if older {
+        KeyCode::ArrowUp
+    } else {
+        KeyCode::ArrowDown
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +474,8 @@ pub(crate) fn spawn_chat_input_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatInputField, ChatInputPlugin, ChatInputSpec, ChatInputSubmit, spawn_chat_input,
+        ChatInputField, ChatInputHistory, ChatInputPlugin, ChatInputSpec, ChatInputSubmit,
+        HISTORY_CAP, spawn_chat_input,
     };
     use crate::emoji_complete::ColonCompletePlugin;
     use crate::ui::{UiRoot, UiScaffoldSystems};
@@ -358,6 +502,72 @@ mod tests {
             );
         settle(&mut app);
         app
+    }
+
+    /// A fresh recall walks the newest-first history and back to the draft.
+    #[test]
+    fn history_recall_walks_back_and_forward_to_the_draft() {
+        let mut history = ChatInputHistory::default();
+        history.push("first");
+        history.push("second");
+        // Ctrl+Up from a live draft saves it and shows the newest line, then older.
+        assert_eq!(history.recall_older("draft"), Some("second".to_owned()));
+        assert_eq!(history.recall_older("draft"), Some("first".to_owned()));
+        // Nothing older than the oldest entry.
+        assert_eq!(history.recall_older("draft"), None);
+        // Ctrl+Down walks forward, and past the newest restores the saved draft.
+        assert_eq!(history.recall_newer(), Some("second".to_owned()));
+        assert_eq!(history.recall_newer(), Some("draft".to_owned()));
+        // Recall is no longer active.
+        assert_eq!(history.recall_newer(), None);
+    }
+
+    /// Recall on an empty history, or forward with no active recall, is a no-op.
+    #[test]
+    fn history_recall_no_ops_when_nothing_to_show() {
+        let mut history = ChatInputHistory::default();
+        assert_eq!(history.recall_older("draft"), None);
+        assert_eq!(history.recall_newer(), None);
+    }
+
+    /// A submitted line is not duplicated when it repeats the newest entry, and the
+    /// history is bounded to the cap (oldest evicted).
+    #[test]
+    fn history_dedupes_repeats_and_is_bounded() {
+        let mut history = ChatInputHistory::default();
+        history.push("same");
+        history.push("same");
+        // The consecutive repeat did not grow the history: one step back, then none.
+        assert_eq!(history.recall_older(""), Some("same".to_owned()));
+        assert_eq!(history.recall_older(""), None);
+
+        let mut history = ChatInputHistory::default();
+        for index in 0..(HISTORY_CAP + 10) {
+            history.push(&format!("line {index}"));
+        }
+        // Only the cap's worth survive: the newest is the last pushed, and walking
+        // all the way back reaches exactly HISTORY_CAP entries.
+        assert_eq!(
+            history.recall_older(""),
+            Some(format!("line {}", HISTORY_CAP + 9))
+        );
+        let mut count = 1;
+        while history.recall_older("").is_some() {
+            count += 1;
+        }
+        assert_eq!(count, HISTORY_CAP);
+    }
+
+    /// A new submission ends any active recall (cursor resets to the live draft).
+    #[test]
+    fn pushing_ends_active_recall() {
+        let mut history = ChatInputHistory::default();
+        history.push("old");
+        assert_eq!(history.recall_older("draft"), Some("old".to_owned()));
+        // Submitting while recalling resets to draft-mode, so a forward step now
+        // finds no active recall.
+        history.push("new");
+        assert_eq!(history.recall_newer(), None);
     }
 
     /// Pressing `Enter` on a non-empty focused field emits a submit carrying the

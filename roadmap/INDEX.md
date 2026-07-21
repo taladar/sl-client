@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 106 |
+| ready | 105 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 533 |
+| done | 534 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **749** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (106)
+## ready (105)
 
 ### viewer
 
@@ -72,8 +72,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-history-panel`](ready/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-floater-basic` (done))
-- [`viewer-chat-input-history`](ready/viewer-chat-input-history.md) — Chat-input
-  line history (Ctrl+Up / Ctrl+Down recall)
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
@@ -569,7 +567,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (533)
+## done (534)
 
 ### protocol
 
@@ -721,6 +719,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-input-bar`](done/viewer-chat-input-bar.md) — Chat input bar
   (local chat + focus) (blocked by `viewer-ui-text-input-widget` (done),
   `viewer-input-focus-contexts` (done), `viewer-ui-settings-store` (done))
+- [`viewer-chat-input-history`](done/viewer-chat-input-history.md) — Chat-input
+  line history (Ctrl+Up / Ctrl+Down recall)
 - [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —
