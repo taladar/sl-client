@@ -97,6 +97,11 @@ people-action-im = IM
 people-action-teleport = Offer Teleport
 people-action-remove = Remove Friend
 people-action-block = Block
+# The confirm dialog shown before granting a friend the edit-my-objects right
+# (the one dangerous grant); revokes and the other rights apply without a prompt.
+people-grant-confirm-prompt = Give { $name } permission to edit, delete or take your objects?
+people-grant-confirm-yes = Grant
+people-grant-confirm-no = Cancel
 
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 

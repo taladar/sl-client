@@ -60,9 +60,9 @@ use sl_client_bevy::{
 use sl_settings::SettingValue;
 
 use crate::conversations::{ConversationKey, ConversationsUi, OpenConversation, StripFocus};
-use crate::i18n::Translated;
+use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::{ViewerSettings, load_account_settings};
-use crate::ui::{UiScaffoldSystems, column, row};
+use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
@@ -196,6 +196,35 @@ const ACTION_REMOVE_KEY: &str = "people-action-remove";
 
 /// The Fluent key for the "Block" action button.
 const ACTION_BLOCK_KEY: &str = "people-action-block";
+
+/// The Fluent key for the grant-edit-objects confirmation prompt (arg `name`).
+const GRANT_CONFIRM_PROMPT_KEY: &str = "people-grant-confirm-prompt";
+
+/// The Fluent key for the confirm dialog's Grant button.
+const GRANT_CONFIRM_YES_KEY: &str = "people-grant-confirm-yes";
+
+/// The Fluent key for the confirm dialog's Cancel button.
+const GRANT_CONFIRM_NO_KEY: &str = "people-grant-confirm-no";
+
+/// The modal dim behind the confirm dialog.
+const CONFIRM_SCRIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
+
+/// The confirm dialog box's background.
+const CONFIRM_BOX_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
+
+/// The confirm dialog box's border — a warning accent, since it gates a dangerous
+/// grant.
+const CONFIRM_BOX_BORDER: Color = Color::srgb(0.62, 0.44, 0.20);
+
+/// The confirm dialog's Grant button background (a muted, cautionary amber).
+const CONFIRM_GRANT_BACKGROUND: Color = Color::srgb(0.52, 0.38, 0.16);
+
+/// The confirm dialog's Cancel button background.
+const CONFIRM_CANCEL_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
+
+/// The z-order of the confirm modal — far above the floaters' monotonically-
+/// climbing bring-to-front counter (which starts at 1), so it is never occluded.
+const CONFIRM_Z: i32 = 1_000_000;
 
 /// The sub-tab strip element id (its selection is not persisted per host — a
 /// light strip, distinct from the divider the floater persists).
@@ -969,6 +998,11 @@ pub(crate) struct PeopleUi {
     status_arrow: Entity,
     /// The generated table icons, for the row checkboxes' bind-time swap.
     icons: PeopleIcons,
+    /// The edit-objects grant-confirm modal overlay (shown while a grant is
+    /// pending).
+    confirm_overlay: Entity,
+    /// The confirm modal's prompt text node (rewritten with the friend's name).
+    confirm_text: Entity,
 }
 
 /// The ordered, render-ready friends projection the virtualized list binds to.
@@ -983,6 +1017,23 @@ pub(crate) struct FriendsView {
 /// The currently-selected friend, which the action bar acts on.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct SelectedFriend(Option<FriendKey>);
+
+/// A pending, not-yet-confirmed grant of the **edit-my-objects** right — the one
+/// right dangerous enough to gate behind a confirm dialog (the reference does the
+/// same). `None` when no confirm is open. The see-online / see-on-map grants and
+/// every revoke are immediate, so they never set this.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingGrantConfirm(Option<PendingGrant>);
+
+/// The friend and full rights bitfield a confirmed grant would apply.
+#[derive(Debug, Clone, Copy)]
+struct PendingGrant {
+    /// The friend whose granted rights would change.
+    friend: FriendKey,
+    /// The full rights bitfield to send on confirm (the current rights with the
+    /// edit-objects bit set).
+    rights: FriendRights,
+}
 
 /// A request to make the People tab the front surface — written by the People tab
 /// button's press observer.
@@ -1036,6 +1087,7 @@ impl Plugin for PeoplePlugin {
         app.init_resource::<FriendsModel>()
             .init_resource::<FriendsView>()
             .init_resource::<SelectedFriend>()
+            .init_resource::<PendingGrantConfirm>()
             .add_message::<SelectPeople>()
             .add_message::<SortByColumn>()
             .add_systems(Startup, register_people_settings)
@@ -1050,6 +1102,7 @@ impl Plugin for PeoplePlugin {
                     apply_sort,
                     rebuild_friends_view,
                     refresh_people,
+                    drive_grant_confirm,
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -1076,6 +1129,7 @@ fn spawn_people_tab(
     mut commands: Commands,
     conversations: Option<Res<ConversationsUi>>,
     people: Option<Res<PeopleUi>>,
+    root: Res<UiRoot>,
     mut images: ResMut<Assets<Image>>,
 ) {
     if people.is_some() {
@@ -1170,6 +1224,7 @@ fn spawn_people_tab(
     let (friends_content, friends_viewport, name_arrow, status_arrow) =
         spawn_friends_content(&mut commands, pane, &icons);
     let groups_content = spawn_groups_placeholder(&mut commands, pane);
+    let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
 
     commands.insert_resource(PeopleUi {
         tab_button,
@@ -1181,7 +1236,145 @@ fn spawn_people_tab(
         name_arrow,
         status_arrow,
         icons,
+        confirm_overlay,
+        confirm_text,
     });
+}
+
+/// Spawn the edit-objects grant-confirm modal: a full-window scrim (blocking
+/// clicks behind it) centred on a warning box with the prompt and Cancel / Grant
+/// buttons. Hidden until a grant is pending. Returns `(overlay, prompt_text)`.
+fn spawn_grant_confirm_modal(commands: &mut Commands, root: Entity) -> (Entity, Entity) {
+    let overlay = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                display: Display::None,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(CONFIRM_SCRIM),
+            GlobalZIndex(CONFIRM_Z),
+            // Block clicks (and the checkbox behind) while the modal is up.
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            Name::new("people-grant-confirm-overlay"),
+            ChildOf(root),
+        ))
+        .id();
+    let box_node = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(360.0),
+                padding: UiRect::all(Val::Px(14.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                align_items: AlignItems::Stretch,
+                ..column(Val::Px(12.0))
+            },
+            BorderColor::all(CONFIRM_BOX_BORDER),
+            BackgroundColor(CONFIRM_BOX_BACKGROUND),
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            Name::new("people-grant-confirm-box"),
+            ChildOf(overlay),
+        ))
+        .id();
+    let confirm_text = commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(CHROME_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            Pickable::IGNORE,
+            Name::new("people-grant-confirm-text"),
+            ChildOf(box_node),
+        ))
+        .id();
+    let buttons = commands
+        .spawn((
+            Node {
+                justify_content: JustifyContent::FlexEnd,
+                ..row(Val::Px(8.0))
+            },
+            Name::new("people-grant-confirm-buttons"),
+            ChildOf(box_node),
+        ))
+        .id();
+    spawn_confirm_button(
+        commands,
+        buttons,
+        GRANT_CONFIRM_NO_KEY,
+        CONFIRM_CANCEL_BACKGROUND,
+        false,
+    );
+    spawn_confirm_button(
+        commands,
+        buttons,
+        GRANT_CONFIRM_YES_KEY,
+        CONFIRM_GRANT_BACKGROUND,
+        true,
+    );
+    (overlay, confirm_text)
+}
+
+/// Spawn one confirm-modal button (`grant` = the Grant button, else Cancel).
+fn spawn_confirm_button(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    background: Color,
+    grant: bool,
+) {
+    commands
+        .spawn((
+            Node {
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(5.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(background),
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            Name::new("people-grant-confirm-button"),
+            ChildOf(parent),
+        ))
+        .with_child((
+            Text::new(String::new()),
+            UiFont::Sans.at(CHROME_FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            Translated::new(label_key),
+            Pickable::IGNORE,
+        ))
+        .observe(
+            move |mut press: On<Pointer<Press>>,
+                  mut pending: ResMut<PendingGrantConfirm>,
+                  mut model: ResMut<FriendsModel>,
+                  mut sl: MessageWriter<SlCommand>| {
+                press.propagate(false);
+                if press.button != PointerButton::Primary {
+                    return;
+                }
+                let taken = pending.0.take();
+                if grant && let Some(grant) = taken {
+                    model.set_granted(grant.friend, grant.rights);
+                    sl.write(SlCommand(Command::GrantUserRights {
+                        target: grant.friend,
+                        rights: grant.rights,
+                    }));
+                }
+            },
+        );
 }
 
 /// Spawn the Friends sub-tab content: a list column (a persistent, sortable table
@@ -1996,10 +2189,16 @@ fn spawn_row_rights_group(
 
 /// A granted-rights checkbox was clicked: flip that right and send the update
 /// (optimistically flipping the model too, so the box ticks immediately).
+///
+/// **Granting** the dangerous **edit-my-objects** right instead opens a confirm
+/// modal ([`PendingGrantConfirm`]) — nothing is sent until it is confirmed.
+/// Revoking edit-objects, and toggling see-online / see-on-map either way, apply
+/// immediately.
 fn on_toggle_right(
     press: On<Pointer<Press>>,
     cells: Query<(&RightCell, &CellFriend)>,
     mut model: ResMut<FriendsModel>,
+    mut pending: ResMut<PendingGrantConfirm>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -2015,11 +2214,51 @@ fn on_toggle_right(
         return;
     };
     let updated = toggled_rights(current, cell.kind);
+    // Granting edit-my-objects (the bit is going from off to on) needs a confirm;
+    // everything else applies at once.
+    if cell.kind == RightKind::Edit && !current.can_modify_objects() {
+        pending.0 = Some(PendingGrant {
+            friend,
+            rights: updated,
+        });
+        return;
+    }
     model.set_granted(friend, updated);
     sl.write(SlCommand(Command::GrantUserRights {
         target: friend,
         rights: updated,
     }));
+}
+
+/// Show / hide the grant-confirm modal from [`PendingGrantConfirm`], filling the
+/// prompt with the pending friend's name.
+fn drive_grant_confirm(
+    pending: Res<PendingGrantConfirm>,
+    ui: Option<Res<PeopleUi>>,
+    model: Res<FriendsModel>,
+    translator: Translator,
+    mut nodes: Query<&mut Node>,
+    mut texts: Query<&mut Text>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    set_display(&mut nodes, ui.confirm_overlay, pending.0.is_some());
+    if let Some(grant) = &pending.0 {
+        let agent = AgentKey::from(grant.friend);
+        let name = model
+            .name_of(agent)
+            .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
+        let prompt = translator.format(
+            GRANT_CONFIRM_PROMPT_KEY,
+            &TransArgs::new().text("name", &name),
+        );
+        if let Ok(mut text) = texts.get_mut(ui.confirm_text)
+            && text.0 != prompt
+        {
+            text.0 = prompt;
+        }
+    }
 }
 
 /// Bind each pooled friend row to the [`FriendRow`] it now points at — on the
