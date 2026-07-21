@@ -13,9 +13,9 @@
 //!
 //! # Scope of this task
 //!
-//! Only the **Friends** list is wired here; a **Groups** sub-tab is present as a
-//! placeholder whose real list is [`viewer-social-groups`]'s job. The
-//! nearby-avatars-with-distances list is the separate **radar**
+//! Only the **Friends** list is wired here; the **Groups** sub-tab's content slot
+//! is spawned here but filled by [`crate::groups`] (the `viewer-social-groups`
+//! task). The nearby-avatars-with-distances list is the separate **radar**
 //! (`viewer-avatar-radar`), and the reference's Recent / Blocked tabs are not
 //! built in this task.
 //!
@@ -168,9 +168,6 @@ const FRIENDS_TAB_KEY: &str = "people-friends-tab";
 /// The Fluent key for the Groups sub-tab's label.
 const GROUPS_TAB_KEY: &str = "people-groups-tab";
 
-/// The Fluent key for the Groups placeholder body text.
-const GROUPS_PLACEHOLDER_KEY: &str = "people-groups-placeholder";
-
 /// The Fluent key for the friends-table "Name" column header.
 const HEADER_NAME_KEY: &str = "people-header-name";
 
@@ -246,6 +243,11 @@ const SORT_ASCENDING_GLYPH: &str = "\u{25B2}";
 /// The sort-direction arrow shown on the primary sort column's header —
 /// descending.
 const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
+
+/// The longest gap between two clicks on the same row still counted as a
+/// double-click, in seconds — a double-click opens a one-to-one IM, like the IM
+/// button (the reference viewer's list double-click).
+const DOUBLE_CLICK_SECS: f32 = 0.4;
 
 // ---------------------------------------------------------------------------
 // Pure model
@@ -990,7 +992,11 @@ pub(crate) struct PeopleUi {
     friends_content: Entity,
     /// The virtualized friends-list viewport (carries [`VirtualList`]).
     friends_viewport: Entity,
-    /// The Groups placeholder content, shown for the Groups tab.
+    /// The Groups sub-tab content container, shown for the Groups tab. It is
+    /// spawned here (so the sub-tab switch in [`refresh_people`] can toggle it) but
+    /// filled by [`crate::groups`], which owns the group list — the same
+    /// deferred-into-another-plugin arrangement this pane itself uses with the
+    /// [`ConversationsUi`] strip.
     groups_content: Entity,
     /// The Name header's sort-direction arrow node (updated from the primary sort).
     name_arrow: Entity,
@@ -1005,6 +1011,16 @@ pub(crate) struct PeopleUi {
     confirm_text: Entity,
 }
 
+impl PeopleUi {
+    /// The Groups sub-tab content container, so [`crate::groups`] can build the
+    /// group list into the same pane the People surface owns (this pane still
+    /// toggles its visibility from the Friends / Groups sub-tab in
+    /// [`refresh_people`]).
+    pub(crate) const fn groups_content(&self) -> Entity {
+        self.groups_content
+    }
+}
+
 /// The ordered, render-ready friends projection the virtualized list binds to.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct FriendsView {
@@ -1017,6 +1033,18 @@ pub(crate) struct FriendsView {
 /// The currently-selected friend, which the action bar acts on.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct SelectedFriend(Option<FriendKey>);
+
+/// The last friend-row click, for detecting a double-click (two presses on the
+/// same friend within [`DOUBLE_CLICK_SECS`] open a one-to-one IM, like the IM
+/// button). Tracked by friend id, not row entity, since the virtualized rows are
+/// recycled.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct FriendClickTracker {
+    /// The friend the last press selected, if any.
+    friend: Option<FriendKey>,
+    /// When that press landed, in seconds since startup ([`Time::elapsed_secs`]).
+    time: f32,
+}
 
 /// A pending, not-yet-confirmed grant of the **edit-my-objects** right — the one
 /// right dangerous enough to gate behind a confirm dialog (the reference does the
@@ -1087,6 +1115,7 @@ impl Plugin for PeoplePlugin {
         app.init_resource::<FriendsModel>()
             .init_resource::<FriendsView>()
             .init_resource::<SelectedFriend>()
+            .init_resource::<FriendClickTracker>()
             .init_resource::<PendingGrantConfirm>()
             .add_message::<SelectPeople>()
             .add_message::<SortByColumn>()
@@ -1223,7 +1252,7 @@ fn spawn_people_tab(
 
     let (friends_content, friends_viewport, name_arrow, status_arrow) =
         spawn_friends_content(&mut commands, pane, &icons);
-    let groups_content = spawn_groups_placeholder(&mut commands, pane);
+    let groups_content = spawn_groups_content(&mut commands, pane);
     let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
 
     commands.insert_resource(PeopleUi {
@@ -1723,40 +1752,25 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
         );
 }
 
-/// Spawn the Groups sub-tab placeholder — the real group list is the separate
-/// `viewer-social-groups` task; this reproduces the Vintage layout's Groups tab
-/// slot with an explanatory line until then.
-fn spawn_groups_placeholder(commands: &mut Commands, pane: Entity) -> Entity {
-    let content = commands
+/// Spawn the Groups sub-tab content container — an empty column, hidden until the
+/// Groups sub-tab is selected. The group **list** that fills it is
+/// [`crate::groups`]'s job (the `viewer-social-groups` task); this pane only owns
+/// the slot and its Friends / Groups visibility toggle, exactly as the People pane
+/// itself is a slot hosted in the [`ConversationsUi`] strip.
+fn spawn_groups_content(commands: &mut Commands, pane: Entity) -> Entity {
+    commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
                 display: Display::None,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::all(Val::Px(12.0)),
-                ..column(Val::Px(6.0))
+                ..column(Val::ZERO)
             },
             Name::new("people-groups-content"),
             ChildOf(pane),
         ))
-        .id();
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(CHROME_FONT_SIZE),
-        TextColor(OFFLINE_COLOR),
-        Translated::new(GROUPS_PLACEHOLDER_KEY),
-        Node {
-            max_width: Val::Percent(90.0),
-            ..default()
-        },
-        Pickable::IGNORE,
-        Name::new("people-groups-placeholder"),
-        ChildOf(content),
-    ));
-    content
+        .id()
 }
 
 // ---------------------------------------------------------------------------
@@ -2338,23 +2352,47 @@ fn bind_friend_rows(
     }
 }
 
-/// A friend row was clicked: focus the list (so the wheel scrolls it) and select
-/// the friend it presents.
+/// A friend row was clicked: focus the list (so the wheel scrolls it), select the
+/// friend it presents, and — on a **double-click** (two presses on the same friend
+/// within [`DOUBLE_CLICK_SECS`]) — open a one-to-one IM, exactly like the IM button.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an observer's parameters are its injected queries / resources: the picked row, the \
+              viewport to focus, the click clock + tracker for double-click detection, the \
+              selection to set, and the writer a double-click opens the IM through"
+)]
 fn on_friend_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundFriend>,
     ui: Res<PeopleUi>,
+    time: Res<Time>,
+    mut tracker: ResMut<FriendClickTracker>,
     mut focus: ResMut<InputFocus>,
     mut selected: ResMut<SelectedFriend>,
+    mut open: MessageWriter<OpenConversation>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
     focus.set(ui.friends_viewport, FocusCause::Navigated);
-    if let Ok(bound) = rows.get(press.entity)
-        && let Some(friend) = bound.0
-    {
-        selected.0 = Some(friend);
+    let Ok(bound) = rows.get(press.entity) else {
+        return;
+    };
+    let Some(friend) = bound.0 else {
+        return;
+    };
+    selected.0 = Some(friend);
+    let now = time.elapsed_secs();
+    if tracker.friend == Some(friend) && now - tracker.time <= DOUBLE_CLICK_SECS {
+        // Second quick click on the same friend: open the one-to-one IM. Clear the
+        // tracker so a third click does not re-fire.
+        open.write(OpenConversation {
+            key: ConversationKey::Direct(AgentKey::from(friend)),
+        });
+        tracker.friend = None;
+    } else {
+        tracker.friend = Some(friend);
+        tracker.time = now;
     }
 }
 

@@ -2,7 +2,7 @@
 id: viewer-social-people-panel
 title: People panel — friends / nearby / recent / blocked
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-social-panels
 blocked_by: [viewer-ui-widget-scaffold, viewer-ui-virtualized-list]
 refs: [viewer-social-groups, viewer-avatar-radar, viewer-social-profiles]

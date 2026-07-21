@@ -82,8 +82,6 @@ people-tab = People
 # The Friends / Groups sub-tabs inside the People pane.
 people-friends-tab = Friends
 people-groups-tab = Groups
-# The Groups placeholder, until the group list (viewer-social-groups) is built.
-people-groups-placeholder = The group list lives in the Groups panel.
 # The friends-table column headers (always shown, even for an empty list).
 people-header-name = Name
 people-header-status = Status
@@ -102,6 +100,30 @@ people-action-block = Block
 people-grant-confirm-prompt = Give { $name } permission to edit, delete or take your objects?
 people-grant-confirm-yes = Grant
 people-grant-confirm-no = Cancel
+
+## The Groups list (viewer-social-groups), hosted in the Groups sub-tab of the
+## People pane inside the Conversations floater — the member's own groups, laid
+## out like the Friends list.
+
+# The groups-table "Name" column header.
+groups-header-name = Name
+# The groups-table "Active" column header (the currently-worn group title).
+groups-header-active = Active
+# The group-count line under the list ({ $count } is the number of groups).
+groups-count =
+    { $count ->
+        [one] { $count } group
+       *[other] { $count } groups
+    }
+# The per-group action buttons beside the list.
+groups-action-info = Info
+groups-action-im = IM
+groups-action-activate = Activate
+groups-action-leave = Leave
+# The confirm dialog shown before leaving a group ({ $name } is the group name).
+groups-leave-confirm-prompt = Leave the group "{ $name }"?
+groups-leave-confirm-yes = Leave
+groups-leave-confirm-no = Cancel
 
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 

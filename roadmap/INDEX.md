@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 4 |
-| ready | 105 |
+| ready | 104 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 534 |
+| done | 537 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **749** |
+| **total** | **751** |
 
 ## ideas (4)
 
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 
-## ready (105)
+## ready (104)
 
 ### viewer
 
@@ -202,11 +202,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-snapshot-quick-key`](ready/viewer-snapshot-quick-key.md) —
   Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
-- [`viewer-social-groups`](ready/viewer-social-groups.md) — Groups list + group
-  profile / roles / notices (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-ui-virtualized-list` (done))
-- [`viewer-social-people-panel`](ready/viewer-social-people-panel.md) — People
-  panel — friends / nearby / recent / blocked (blocked by
+- [`viewer-social-group-profile`](ready/viewer-social-group-profile.md) — Group
+  profile floater — general / members / roles / notices (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](ready/viewer-social-profiles.md) — Avatar profiles
   — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
@@ -567,7 +564,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (534)
+## done (537)
 
 ### protocol
 
@@ -1032,9 +1029,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-social-groups`](done/viewer-social-groups.md) — Groups list (Info /
+  IM / Activate / Leave) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-ui-virtualized-list` (done))
 - [`viewer-social-im-conversations`](done/viewer-social-im-conversations.md) —
   IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-text-input-widget` (done))
+- [`viewer-social-modify-rights-confirm`](done/viewer-social-modify-rights-confirm.md)
+  — Confirm before granting a friend edit-my-objects rights
+- [`viewer-social-people-panel`](done/viewer-social-people-panel.md) — People
+  panel — friends / nearby / recent / blocked (blocked by
+  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

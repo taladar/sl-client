@@ -53,6 +53,7 @@ mod floater_persist;
 mod flycam_ui;
 pub mod gallery;
 mod ground;
+mod groups;
 mod hand_pose;
 mod hud;
 mod hud_pick;
@@ -183,6 +184,7 @@ use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
+use crate::groups::GroupsPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
 use crate::i18n::ViewerI18nPlugin;
@@ -814,6 +816,10 @@ fn run_session(
     // list hosted as a pinned tab inside the Conversations floater. After
     // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
     .add_plugins(PeoplePlugin)
+    // The Groups list (viewer-social-groups): the member's own groups, built into
+    // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
+    // content slot it fills.
+    .add_plugins(GroupsPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
