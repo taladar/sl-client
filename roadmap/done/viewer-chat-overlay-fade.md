@@ -2,7 +2,7 @@
 id: viewer-chat-overlay-fade
 title: Nearby-chat overlay fade / decay
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-21); follow-up to viewer-p11-1 on-screen chat
 refs: [viewer-p11-1, viewer-chat-history-panel]
 ---

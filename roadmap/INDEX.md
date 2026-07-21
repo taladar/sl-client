@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 105 |
+| ready | 104 |
 | blocked | 79 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 538 |
+| done | 539 |
 | deferred | 9 |
 | wont-do | 3 |
 | **total** | **753** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (105)
+## ready (104)
 
 ### viewer
 
@@ -77,8 +77,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
-- [`viewer-chat-overlay-fade`](ready/viewer-chat-overlay-fade.md) — Nearby-chat
-  overlay fade / decay
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -568,7 +566,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (538)
+## done (539)
 
 ### protocol
 
@@ -727,6 +725,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   line history (Ctrl+Up / Ctrl+Down recall)
 - [`viewer-chat-log-grid-key`](done/viewer-chat-log-grid-key.md) — Key the REPL
   binaries' chat logs by grid + avatar, not name alone
+- [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
+  overlay fade / decay
 - [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —
   Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
   `viewer-ui-text-input-widget` (done))

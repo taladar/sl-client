@@ -170,7 +170,9 @@ use crate::camera::{
     CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
     position_camera,
 };
-use crate::chat::{ChatOverlay, position_chat_overlay, setup_chat_overlay, update_chat_overlay};
+use crate::chat::{
+    ChatOverlay, position_chat_overlay, setup_chat_overlay, tick_chat_overlay, update_chat_overlay,
+};
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
 use crate::diagnostics::{
@@ -1125,10 +1127,16 @@ fn run_session(
                 drive_bake_publish,
             ),
             position_name_tags,
-            // Append newly received local chat to the on-screen overlay, and keep
-            // the overlay pinned just above the bottom area (toolbar + nearby-chat
-            // bar) so they never overlap as the bar grows / shrinks / toggles.
-            (update_chat_overlay, position_chat_overlay),
+            // Append newly received local chat to the on-screen overlay, age each
+            // line so it fades and despawns once chat goes quiet
+            // (viewer-chat-overlay-fade), and keep the overlay pinned just above the
+            // bottom area (toolbar + nearby-chat bar) so they never overlap as the
+            // bar grows / shrinks / toggles.
+            (
+                update_chat_overlay,
+                tick_chat_overlay,
+                position_chat_overlay,
+            ),
             // Quit handling: request a clean logout on the quit key, then force the
             // exit once the grace period lapses. Nested into one tuple to stay
             // within Bevy's per-tuple system limit. Only the key half is gated on
