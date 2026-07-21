@@ -847,6 +847,7 @@ fn spawn_emoji_picker(mut commands: Commands, root: Res<UiRoot>) {
             // resizable rect.
             default_size: None,
             min_size: None,
+            dock_host: None,
             caps: FloaterCaps {
                 resizable: false,
                 minimizable: true,

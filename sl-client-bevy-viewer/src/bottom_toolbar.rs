@@ -61,6 +61,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
+use crate::conversations::{BLINK_HZ, ConversationModel, ConversationsUi};
 use crate::i18n::Translated;
 use crate::inventory::InventoryUi;
 use crate::nearby_chat_bar::NearbyChatBar;
@@ -154,6 +155,9 @@ enum ToolbarTarget {
     NearbyChat,
     /// The inventory window ([`crate::inventory`]), toggled today.
     Inventory,
+    /// The Conversations floater ([`crate::conversations`]) — nearby chat, IMs,
+    /// group chats and conferences.
+    Conversations,
     /// A floater that has not landed yet — the button is a disabled placeholder
     /// until its own task wires a real target here.
     Unlanded,
@@ -180,10 +184,12 @@ struct ToolbarButtonDef {
     target: ToolbarTarget,
 }
 
-/// The toolbar's buttons, in the reference viewer's left-to-right order. Only
-/// Inventory has a live floater today; the rest are shown disabled until their
-/// own tasks land, exactly as the top menu bar ships its menu *names* ahead of
-/// their entries.
+/// The toolbar's buttons, left-to-right. The two chat toggles lead the bar — the
+/// always-visible nearby-chat *input* bar, then the Conversations *window*
+/// (semantically the pair, so they sit together) — followed by the reference
+/// viewer's remaining buttons. Only nearby chat, Conversations and Inventory have
+/// a live target today; the rest are shown disabled until their own tasks land,
+/// exactly as the top menu bar ships its menu *names* ahead of their entries.
 static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
     // The chat toggle leads the bar (leftmost under LTR, rightmost under RTL — the
     // row mirrors for free), as the reference viewer places its chat button.
@@ -191,6 +197,13 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
         action: "toggle-nearby-chat",
         label_key: "bottom-toolbar-chat",
         target: ToolbarTarget::NearbyChat,
+    },
+    // Conversations sits right beside chat: the nearby-chat bar and the
+    // conversation window are the same "talk to people" pair.
+    ToolbarButtonDef {
+        action: "toggle-conversations",
+        label_key: "bottom-toolbar-conversations",
+        target: ToolbarTarget::Conversations,
     },
     ToolbarButtonDef {
         action: "toggle-inventory",
@@ -215,11 +228,6 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
     ToolbarButtonDef {
         action: "toggle-people",
         label_key: "bottom-toolbar-people",
-        target: ToolbarTarget::Unlanded,
-    },
-    ToolbarButtonDef {
-        action: "toggle-conversations",
-        label_key: "bottom-toolbar-conversations",
         target: ToolbarTarget::Unlanded,
     },
     ToolbarButtonDef {
@@ -463,6 +471,7 @@ fn build_button_box(
 fn handle_toolbar_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
+    conversations: Option<Res<ConversationsUi>>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
@@ -472,6 +481,12 @@ fn handle_toolbar_actions(
         }
         if action.action == "toggle-inventory"
             && let Some(ui) = &inventory
+            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        {
+            shown.0 = !shown.0;
+        }
+        if action.action == "toggle-conversations"
+            && let Some(ui) = &conversations
             && let Ok(mut shown) = panels.get_mut(ui.panel())
         {
             shown.0 = !shown.0;
@@ -489,12 +504,16 @@ fn handle_toolbar_actions(
 fn resolve_target_open(
     target: ToolbarTarget,
     inventory: Option<&InventoryUi>,
+    conversations: Option<&ConversationsUi>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
     match target {
         ToolbarTarget::NearbyChat => nearby_chat.map(NearbyChatBar::is_shown),
         ToolbarTarget::Inventory => inventory
+            .and_then(|ui| panels.get(ui.panel()).ok())
+            .map(|shown| shown.0),
+        ToolbarTarget::Conversations => conversations
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::Unlanded => None,
@@ -504,22 +523,54 @@ fn resolve_target_open(
 /// Keep each toolbar button's look current: lit while its floater is open, resting
 /// while closed, greyed while unlanded — writing through change detection only on
 /// a real change so an idle bar does not re-trigger layout.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the bar's look reads three live floater targets (inventory / conversations / nearby \
+              chat), the conversation model and blink clock for the attention flash, plus the \
+              button, panel and label queries it writes — one coherent per-frame repaint"
+)]
 fn update_toolbar_button_states(
     inventory: Option<Res<InventoryUi>>,
+    conversations: Option<Res<ConversationsUi>>,
+    conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
+    time: Res<Time>,
     mut buttons: Query<(&ToolbarButton, &mut BackgroundColor)>,
     panels: Query<&UiPanelShown>,
     mut labels: Query<&mut TextColor>,
 ) {
     let inventory = inventory.as_deref();
+    let conversations = conversations.as_deref();
     let nearby_chat = nearby_chat.as_deref();
+    // The Conversations button flashes while the window is closed and an IM /
+    // group / conference has unread lines — the reference's toolbar attention cue
+    // (the window is never popped open over what the user is doing).
+    let conversations_flash = conversation_model
+        .as_deref()
+        .is_some_and(ConversationModel::has_im_attention)
+        && (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
     for (button, mut background) in &mut buttons {
-        let visual = match resolve_target_open(button.target, inventory, nearby_chat, &panels) {
+        let visual = match resolve_target_open(
+            button.target,
+            inventory,
+            conversations,
+            nearby_chat,
+            &panels,
+        ) {
             Some(true) => ToolbarButtonVisual::Active,
             Some(false) => ToolbarButtonVisual::Enabled,
             None => ToolbarButtonVisual::Disabled,
         };
-        let bg = visual.background();
+        // A closed Conversations button with pending attention pulses to its lit
+        // colour on the blink's "on" phase.
+        let bg = if button.target == ToolbarTarget::Conversations
+            && visual == ToolbarButtonVisual::Enabled
+            && conversations_flash
+        {
+            ToolbarButtonVisual::Active.background()
+        } else {
+            visual.background()
+        };
         if background.0 != bg {
             background.0 = bg;
         }
@@ -610,10 +661,12 @@ mod tests {
     use super::{TOOLBAR_BUTTONS, ToolbarButtonVisual, ToolbarTarget};
     use pretty_assertions::{assert_eq, assert_ne};
 
-    /// The wired toolbar buttons today are the leading nearby-chat toggle and
-    /// Inventory (in that order); the rest are unlanded placeholders. A regression
-    /// that silently disabled a live toggle, or wired a target that does not exist,
-    /// would trip here. The chat toggle leads the bar, as the reference places it.
+    /// The wired toolbar buttons today are the leading nearby-chat toggle,
+    /// Conversations (its semantic pair, right beside it) and Inventory, in that
+    /// order; the rest are unlanded placeholders. A regression that silently
+    /// disabled a live toggle, reordered the pair, or wired a target that does not
+    /// exist would trip here. The chat toggle leads the bar, as the reference
+    /// places it.
     #[test]
     fn nearby_chat_and_inventory_are_wired() {
         let wired: Vec<&str> = TOOLBAR_BUTTONS
@@ -621,7 +674,14 @@ mod tests {
             .filter(|def| def.target.is_wired())
             .map(|def| def.action)
             .collect();
-        assert_eq!(wired, ["toggle-nearby-chat", "toggle-inventory"]);
+        assert_eq!(
+            wired,
+            [
+                "toggle-nearby-chat",
+                "toggle-conversations",
+                "toggle-inventory"
+            ]
+        );
         assert!(
             TOOLBAR_BUTTONS
                 .iter()

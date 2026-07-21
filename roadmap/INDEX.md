@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 532 |
+| done | 533 |
 | deferred | 9 |
 | wont-do | 3 |
-| **total** | **748** |
+| **total** | **749** |
 
 ## ideas (4)
 
@@ -72,6 +72,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-history-panel`](ready/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-floater-basic` (done))
+- [`viewer-chat-input-history`](ready/viewer-chat-input-history.md) — Chat-input
+  line history (Ctrl+Up / Ctrl+Down recall)
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
@@ -205,9 +207,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-social-groups`](ready/viewer-social-groups.md) — Groups list + group
   profile / roles / notices (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
-- [`viewer-social-im-conversations`](ready/viewer-social-im-conversations.md) —
-  IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-social-people-panel`](ready/viewer-social-people-panel.md) — People
   panel — friends / nearby / recent / blocked (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -570,7 +569,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (532)
+## done (533)
 
 ### protocol
 
@@ -1033,6 +1032,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-social-im-conversations`](done/viewer-social-im-conversations.md) —
+  IM / conversation UI + chat input (blocked by `viewer-ui-widget-scaffold`
+  (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

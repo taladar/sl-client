@@ -235,6 +235,11 @@ pub(crate) struct Floater {
     /// The last host it was docked in, so tearing off then re-docking returns it
     /// there (the reference's `mLastHostHandle`).
     last_host: Option<Entity>,
+    /// This floater's **preferred** dock host, when it wants to dock somewhere
+    /// other than the shared [`DefaultDockHost`] — e.g. the Conversations floater
+    /// docks to its own host beside the nearby-chat bar. Tried before
+    /// `last_host` / the default host when a dock is requested.
+    preferred_host: Option<Entity>,
     /// The smallest the content area may be resized to, in logical pixels — the
     /// floor the grip stops at. Per floater, because a scroll-list window's real
     /// minimum (the toolbar and search must still fit) is bigger than a bare
@@ -522,6 +527,11 @@ pub(crate) struct FloaterSpec {
     /// own chrome from spilling out (for the inventory, enough for the toolbar and
     /// search plus a few list rows).
     pub(crate) min_size: Option<Vec2>,
+    /// A **preferred** dock host for this floater, docked into ahead of the shared
+    /// [`DefaultDockHost`]. `None` (the default) uses the shared top-trailing host;
+    /// a floater that wants to dock elsewhere (the Conversations floater, beside
+    /// the nearby-chat bar) passes its own host here.
+    pub(crate) dock_host: Option<Entity>,
     /// Which chrome to offer.
     pub(crate) caps: FloaterCaps,
 }
@@ -585,6 +595,7 @@ pub(crate) fn spawn_floater(
                 minimized: false,
                 docked_in: None,
                 last_host: None,
+                preferred_host: spec.dock_host,
                 min_size: spec.min_size.unwrap_or(RESIZE_FLOOR),
                 caps: spec.caps,
             },
@@ -1025,9 +1036,12 @@ fn apply_floater_commands(
                         &mut z_top,
                     );
                     active.0 = Some(command.floater);
-                } else if let Some(host) = floater.last_host.or(dock_host.0) {
-                    // Re-dock into the last host if there is one (the reference's
-                    // `mLastHostHandle`), else the default host.
+                } else if let Some(host) =
+                    floater.preferred_host.or(floater.last_host).or(dock_host.0)
+                {
+                    // Dock into this floater's own preferred host if it has one,
+                    // else the last host it was docked in (the reference's
+                    // `mLastHostHandle`), else the shared default host.
                     dock(
                         command.floater,
                         &mut floater,
@@ -1431,6 +1445,7 @@ mod tests {
                     position: Vec2::new(30.0, 40.0),
                     default_size: None,
                     min_size: None,
+                    dock_host: None,
                     caps: FloaterCaps {
                         resizable: true,
                         minimizable: true,

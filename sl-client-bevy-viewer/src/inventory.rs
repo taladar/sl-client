@@ -1302,6 +1302,8 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             // need plus a few list rows — smaller than this the chrome would be
             // clipped by the window edge with nothing usable left.
             min_size: Some(Vec2::new(INVENTORY_MIN_WIDTH, INVENTORY_MIN_HEIGHT)),
+            // Uses the shared top-trailing dock host.
+            dock_host: None,
             caps: FloaterCaps {
                 resizable: true,
                 minimizable: true,

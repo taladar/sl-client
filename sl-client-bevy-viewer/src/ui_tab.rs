@@ -1310,7 +1310,7 @@ fn spawn_divider(
 /// direction; a trailing strip grows when it moves against it; and RTL flips
 /// which way the inline direction points on screen. The product of the two signs
 /// is the whole of it — no per-side branch.
-fn resize_strip_width(
+pub(crate) fn resize_strip_width(
     current: f32,
     delta_x: f32,
     placement: TabPlacement,

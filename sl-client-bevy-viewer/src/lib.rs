@@ -41,6 +41,7 @@ mod bump;
 mod camera;
 mod chat;
 mod chat_input;
+mod conversations;
 mod coords;
 mod diagnostics;
 mod emoji_complete;
@@ -169,6 +170,7 @@ use crate::camera::{
 };
 use crate::chat::{ChatOverlay, position_chat_overlay, setup_chat_overlay, update_chat_overlay};
 use crate::chat_input::ChatInputPlugin;
+use crate::conversations::ConversationsPlugin;
 use crate::diagnostics::{
     PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
     update_pipeline_overlay,
@@ -801,6 +803,11 @@ fn run_session(
     // focused by Enter. The bottom toolbar's leading chat button toggles it. After
     // the toolbar (whose BottomArea it fills) and the local-chat-input plugin.
     .add_plugins(NearbyChatBarPlugin)
+    // The Conversations floater (viewer-social-im-conversations): one window with
+    // vertical tabs for nearby chat, 1:1 IMs, group chats and conferences, each a
+    // transcript pane plus its chat input. After the chat-input / local-chat-input
+    // plugins whose widgets it hosts, and the floater manager.
+    .add_plugins(ConversationsPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1442,9 +1449,12 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
         if let Some(rejection) = outcome.rejected {
             // The viewer has no interactive prompt, so a retryable rejection is
             // reported and the run ends rather than looping (a rapid re-login
-            // may be flagged by the grid).
-            warn!(
-                "login rejected: {} ({}); not retrying",
+            // may be flagged by the grid). Logged at `error!` so a launch that
+            // fails login — e.g. an OpenSim stale-presence block on a too-quick
+            // re-login — is unmistakable in the log even at `RUST_LOG=error`,
+            // rather than looking like a silent early exit.
+            error!(
+                "login rejected: {} ({}); the viewer will exit without connecting",
                 rejection.reason, rejection.message
             );
         }

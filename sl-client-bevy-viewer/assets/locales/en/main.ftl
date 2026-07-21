@@ -56,6 +56,23 @@ inventory-tab-worn = Worn
 inventory-expand-all = Expand all
 inventory-collapse-all = Collapse all
 
+## The Conversations floater (viewer-social-im-conversations) — nearby chat, 1:1
+## IMs, group chats and conferences as vertical tabs.
+
+# The floater's title bar.
+conversations-title = Conversations
+# The always-present first tab: local (nearby) chat.
+conversations-nearby = Nearby Chat
+# The transcript speaker label for our own outbound lines.
+conversations-you = You
+# The "someone is typing" status line under a transcript.
+conversations-typing-one = { $name } is typing…
+conversations-typing-many = Several people are typing…
+# The pending-invite bar shown until a group / conference invite is accepted.
+conversations-invite-prompt = You're invited to this conversation.
+conversations-invite-accept = Accept
+conversations-invite-decline = Decline
+
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 # The picker window's title bar.

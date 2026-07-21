@@ -36,6 +36,7 @@
 
 use bevy::prelude::*;
 
+use crate::conversations::ConversationsUi;
 use crate::inventory::InventoryUi;
 use crate::menu::{
     MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, PrimaryMenuBar,
@@ -59,6 +60,10 @@ const TOP_BAR_Z: i32 = 9_000;
 /// check mark on the Avatar ▸ Inventory entry.
 const INVENTORY_OPEN: &str = "inventory-open";
 
+/// The condition key that holds while the Conversations floater is open — drives
+/// the check mark on the Comm ▸ Conversations entry.
+const CONVERSATIONS_OPEN: &str = "conversations-open";
+
 /// The placeholder shown in a menu that has no wired entries yet — a single
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
@@ -80,10 +85,16 @@ static AVATAR_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Comm menu — a name for future comms entries (chat, friends, groups).
+/// The Comm menu — the reference viewer's Communicate menu. Its Conversations
+/// entry opens the [`crate::conversations`] floater (the reference's
+/// `Comm > Conversations…`); friends / groups and the rest are future entries.
 static COMM_MENU: MenuDef = MenuDef {
     label: "Comm",
-    items: PLACEHOLDER_ITEMS,
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Conversations", "toggle-conversations")
+            .accel("Ctrl+T")
+            .checked_when(CONVERSATIONS_OPEN),
+    )],
 };
 
 /// The World menu — a name for future world entries (mini-map, world map,
@@ -194,15 +205,22 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 /// hold at open time), so nothing here needs to run against an open menu.
 fn update_top_menu_conditions(
     inventory: Option<Res<InventoryUi>>,
+    conversations: Option<Res<ConversationsUi>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
     let inventory_open = inventory
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let conversations_open = conversations
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
+    }
+    if conversations_open {
+        wanted.push(CONVERSATIONS_OPEN);
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
@@ -220,6 +238,7 @@ fn update_top_menu_conditions(
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
+    conversations: Option<Res<ConversationsUi>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -233,6 +252,13 @@ fn handle_top_menu_actions(
             }
             "toggle-inventory" => {
                 if let Some(ui) = &inventory
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-conversations" => {
+                if let Some(ui) = &conversations
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;
