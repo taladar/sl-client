@@ -26,7 +26,11 @@ Two masks plus a couple of standalone toggles:
   flexible objects, dynamic textures, and the UI / selected / highlighted
   compositing overlays.
 - **Standalone**: **Wireframe** (`Advanced.ToggleWireframe`, Ctrl+Shift+R) and
-  **Hide Particles** (`hideparticles`) — the two most-reached-for.
+  **Hide Particles** (`hideparticles`) — the two most-reached-for — plus the
+  attachment toggles the menu survey (2026-07-22) added: **Render Attached
+  Lights** (`RenderAttachedLights` — the anti-facelight switch), **Render
+  Attached Particles** (`RenderAttachedParticles`) and **HUD particles**
+  (`RenderHUDParticles`).
 
 Scope: a render-type / feature bitmask the draw systems consult before emitting
 each class, the toggles wired to keybinds ([[viewer-input-action-map]]) and menu
@@ -34,8 +38,9 @@ items, and persistence of the non-default ones. These are cheap individually —
 the value is having the whole set, because photographers compose with them.
 
 The related *diagnostic* overlays (bounding boxes, octree, normals, shadow
-frusta, the "info displays") are a separate concern — some already exist as our
-debug camera / env toggles, and the rest belong with a dev-tools task, not here.
+frusta, the "info displays") are a separate concern — now filed as
+[[viewer-render-metadata-overlays]]; some already exist as our debug camera /
+env toggles.
 
 Reference (Firestorm, read-only): `menu_viewer.xml` Advanced → Rendering → Types
 / Features, `Advanced.ToggleRenderType` / `ToggleFeature` / `ToggleWireframe`.

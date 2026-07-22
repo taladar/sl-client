@@ -41,6 +41,9 @@ first-time user can be asked to hand-write.
 - **MFA.** Drive the existing `Avatar::acquire_mfa()` from a TOTP / token prompt
   in the panel (real SL and aditi require it; local OpenSim does not), rather
   than the config-supplied token the test path uses.
+- **TOS / critical-message interstitials** are their own follow-up task,
+  [[viewer-login-tos]] — the flow here must leave the retry seam it hooks
+  into (login response says `tos`/`critical` → pause, show, retry).
 
 ## Keep the credentials.toml bypass
 

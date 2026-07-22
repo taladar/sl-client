@@ -28,17 +28,50 @@ verifying P23.1 water. Two distinct defects, one fixed, one **still open**:
   `class1/deferred/cloudsV` (the φ∈[0,π/8] dome, `calcPhi`, baked UV,
   `cloud_scale=0.4199`, the `0.96×15000` offset, the repeat sampler,
   `drawDome`→`mStripsVerts`) — there is only one cloud shader (no `class2`/
-  `class3` variant; `LLVOClouds` gone), so the code path is right. Yet the
-  dome projection maps the whole visible sky onto a tiny ~0.14-radius disc of
-  the cloud texture (≈0.66 tile), so only 1–2 features show →
-  one-sided. This mismatch with Firestorm's even clouds is **unexplained by
-  source archaeology** and needs a same-grid Firestorm pixel comparison /
-  runtime debugging. NOTE: a **separate confound was ruled out** — the EEP
-  environment was not ingested on aditi at all (see R19), so aditi ran on
-  WindLight defaults; with R19 fixed aditi now loads its real EEP and still
-  shows the one-quadrant clustering, confirming a projection defect, not a
-  settings problem. Candidate next step: the altitude-plane projection (sample
-  the cloud texture where the view ray meets the cloud-altitude plane), which
-  tiles evenly to the horizon — a deviation from the literal baked-UV formula
-  but matches Firestorm's result. The `SL_VIEWER_LOG_CLOUDS` env var logs the
-  live cloud EEP params + resolved texture id for comparison.
+  `class3` variant; `LLVOClouds` gone), so the code path is right. NOTE: a
+  **separate confound was ruled out** — the EEP environment was not ingested
+  on aditi at all (see R19), so aditi ran on WindLight defaults; with R19
+  fixed aditi now loads its real EEP and still shows the one-quadrant
+  clustering. The `SL_VIEWER_LOG_CLOUDS` env var logs the live cloud EEP
+  params + resolved texture id for comparison.
+
+**Root cause (found 2026-07-22, not yet fixed): the cloud-noise texture is
+uploaded sRGB; the reference samples it raw.**
+
+- `apply_cloud_textures` (`sl-client-bevy-viewer/src/sky.rs`) uploads the
+  decoded noise via `to_bevy_image` (`sl-client-bevy/src/textures.rs`),
+  which uses `TextureFormat::Rgba8UnormSrgb` — the GPU sRGB→linear-decodes
+  every sample (mid-gray byte 128 → 0.216). `clouds.wgsl` then treats the
+  sample as raw data (`cloudNoise(uv).x - 0.5` is the density term,
+  faithful to `cloudsF.glsl`).
+- The reference binds the noise as a plain `GL_RGBA8` texture (Firestorm
+  `llimagegl.cpp` default for 4-component fetched textures; `llvosky.cpp`
+  even calls `setExplicitFormat(GL_RGBA8, GL_RGBA)`) and `cloudsF.glsl` has
+  no `srgb_to_linear` — the reference shader sees the raw byte values.
+- Quantified on the actual default cloud texture
+  (`1dc1368f-e8fe-f02d-a08d-9d9f11c1af6b`, reassembled from the viewer's
+  own texture cache — 600-byte head in `texture.cache` + `.texture` body —
+  and decoded with `opj_decompress`): the `alpha1 > 0` threshold (linear
+  ≈0.46 with default `cloud_shadow` 0.27) needs byte ≥ ~117 raw but
+  byte ≥ ~181 after sRGB decode. Texels qualifying: **~46% raw vs ~9%
+  sRGB-decoded**. Spatially (4×4 block coverage map of the texture): at
+  ≥117 every block has 17–88% coverage (clouds everywhere); at ≥181 most
+  blocks are 0–5% and the survivors concentrate in a few isolated blobs —
+  exactly "clouds in one region, rest empty" within the ~0.9-tile window
+  the dome projects. The disturbance octaves and the `alpha2` self-shadow
+  are skewed the same way (milder).
+- **Projection deviation ruled out** (do not re-investigate): the
+  reference's dome draw sets the shader uniform
+  `camPosLocal = (0, camHeightLocal, 0)` in dome space
+  (`lldrawpoolwlsky.cpp` `renderDome`), so its
+  `rel_pos = position − (0, 14400, 0) + (0, 50, 0)` is exactly the
+  offset-baked local position the port uses; the reference also hits the
+  same `altitude_blend_factor` ≈0.32 at the horizon and the droop clamp
+  below it. The port's projection/lighting geometry are faithful; the
+  earlier "altitude-plane projection" candidate is unnecessary.
+- **Fix direction:** upload the cloud noise linear (`Rgba8Unorm`) + repeat,
+  like the four existing linear uploaders (`bump.rs`,
+  `legacy_materials.rs`, `water.rs`, `materials.rs`) — the
+  `to_bevy_image`-is-sRGB-only trap already documented for normal maps. The
+  redundant repeat-sampler override in `apply_cloud_textures` can fold into
+  that uploader.

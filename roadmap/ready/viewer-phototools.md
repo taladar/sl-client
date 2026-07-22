@@ -24,10 +24,11 @@ Two halves:
 - **Personal environment override.** Force a local time of day / sky / water —
   midday, sunset, a custom preset — regardless of what the region sends, and
   scrub the sun freely. The environment *rendering* already exists (`sky.rs`,
-  the P22 day-cycle and EEP ingest); what is missing is a **local override** on
-  top of the region's environment, plus quick access to it. (There is no
-  personal-environment-editing task yet — this is where that photographer-facing
-  slice lives; full EEP asset authoring is a larger, separate concern.)
+  the P22 day-cycle and EEP ingest); the **local override** layer is now its
+  own task, [[viewer-environment-personal-lighting]] — this floater's
+  environment half is quick access to it (full EEP asset authoring is
+  [[viewer-environment-fixed-editor]] and siblings). The reference's exodus
+  **vignette** post effect belongs in the graphics half here.
 - **Graphics quick-toggles.** The render knobs that change the *look*, surfaced
   live: shadows (P24), the reflection probes (P33), exposure / the tone mapper
   (P33.3), point-light limits, draw distance, and the render-quality tiers —

@@ -35,6 +35,12 @@ files, the user's git is better than anything we would wrap. What we uniquely
 *can* report is **grid-vs-disk** drift (`sl-script status`), the state git
 cannot see; leave disk-vs-HEAD to git.
 
+Git-ergonomics polish (2026-07-22): generate a `.gitignore` template into
+the tree root (ignore any transient state, keep sources + manifest),
+guarantee stable newlines / UTF-8 on write so re-downloads never produce
+noise diffs, and give `sl-script status` a porcelain output mode usable
+from git hooks / CI.
+
 Plan for **no-modify scripts** (mark read-only on disk so no one edits a file
 that can never go back). The buffer→inventory mapping (agent inventory vs. a
 script inside a prim, needing object id *and* item id) is **shared** with the

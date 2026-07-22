@@ -1,6 +1,6 @@
 ---
 id: viewer-voice-audio
-title: Voice audio transport (WebRTC + Vivox)
+title: Voice audio transport (WebRTC — no Vivox)
 topic: viewer
 status: blocked
 origin: reference-viewer feature-cluster survey (2026-07)
@@ -10,12 +10,14 @@ blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 Context: [context/viewer.md](../context/viewer.md).
 
 Turn the existing voice **signalling** into actual talk / listen: modern SL
-WebRTC media, the legacy Vivox path, microphone capture, per-speaker volume, and
-"who's speaking" indicators.
+WebRTC media, microphone capture, per-speaker volume, and "who's speaking"
+indicators. The UI over this transport is [[viewer-voice-controls]] and
+[[viewer-voice-call-dialogs]].
 
 **This explicitly supersedes the recorded "voice = signalling only" scope
-decision.** That dated from the protocol-library / MVP era; the fleshing-out
-agent should consciously reconcile it.
+decision** (superseded in memory 2026-07-22). **Vivox is out of scope
+entirely** (user decision, 2026-07-22): even Linden Lab no longer uses it,
+so nothing depending on the legacy Vivox path gets built — WebRTC only.
 
 ## The server spatialises, not us (2026-07 research)
 
