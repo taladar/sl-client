@@ -34,7 +34,13 @@ never double-linking); take-off / detach / remove-from-outfit /
 replace-outfit drop the matching links (batched RemoveInventoryItems),
 each followed by a COF page re-query; login reconciliation stays the
 existing seed from the COF's object links. Legacy fallbacks kept; all
-of it no-ops on a grid without a located COF. Not yet written: the
-reference's "@type*100+order" link-description layering strings —
-clothing layer order within a type is not preserved across viewers
-yet.
+of it no-ops on a grid without a located COF.
+
+Follow-up (2026-07-22): the reference's "@type*100+order"
+link-description layering tokens are now written on every clothing
+link add (dense per slot) and the surviving links renumbered on
+removal (`cof_order_description` / `parse_order_token` / the renumber
+pass, unit-tested). Remaining pieces live in
+[[viewer-outfit-layer-reorder]] (re-order UI + login read-back) and
+[[viewer-bake-cof-layer-order]] (client compositor sorts by the
+tokens).

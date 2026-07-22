@@ -757,8 +757,9 @@ fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>) {
     query_folder_page(item.folder_id, commands);
 }
 
-/// Rebuild an [`ItemInfo`] into the wire `InventoryItem` an update carries.
-fn to_wire_item(item: &ItemInfo) -> InventoryItem {
+/// Rebuild an [`ItemInfo`] into the wire `InventoryItem` an update carries
+/// (shared with the COF link renumbering in [`crate::inventory_actions`]).
+pub(crate) fn to_wire_item(item: &ItemInfo) -> InventoryItem {
     let (sale_type, sale_price) = match item.sale.clone() {
         Some((sale_type, price)) => (sale_type.to_code(), Some(price)),
         None => (SaleType::NotForSale.to_code(), None),

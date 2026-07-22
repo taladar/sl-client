@@ -818,7 +818,7 @@ fn drop_onto_agent(
                     crate::inventory_actions::replaced_by_wear(model.worn_wearables(), item);
                 let batch = crate::inventory_actions::cof_wear_link_commands(
                     model.cof_key(),
-                    model.cof_items(),
+                    &crate::inventory_actions::cof_links_with_slots(model),
                     item,
                     &replaced,
                 );

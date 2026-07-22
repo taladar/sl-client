@@ -1070,24 +1070,122 @@ pub(crate) fn replaced_by_wear(current: &[Wearable], item: &ItemInfo) -> Vec<Inv
         .collect()
 }
 
+/// The reference's clothing layer-ordering token for a COF link description:
+/// `"@" + (wearable_type * 100 + layer_index)` (`build_order_string`). The
+/// same-type sort every COF reader — the SL bake service included — applies
+/// to stack clothing layers.
+pub(crate) fn cof_order_description(slot: WearableType, index: u32) -> String {
+    let token = u32::from(slot.to_code())
+        .saturating_mul(100)
+        .saturating_add(index);
+    format!("@{token}")
+}
+
+/// Parse a COF link description's ordering token back into its
+/// `(wearable-type code, layer index)`. `None` for a token-less description.
+pub(crate) fn parse_order_token(description: &str) -> Option<(u8, u32)> {
+    let token: u32 = description.trim().strip_prefix('@')?.parse().ok()?;
+    let code = u8::try_from(token / 100).ok()?;
+    Some((code, token % 100))
+}
+
+/// A COF link paired with the **clothing slot** it orders under: the resolved
+/// target's slot, or `None` for body parts, attachments and gestures (which
+/// the reference does not order by description). Built by
+/// [`cof_links_with_slots`]; a plain-data pair so the ordering arithmetic
+/// stays pure and testable.
+pub(crate) type CofLink = (ItemInfo, Option<WearableType>);
+
+/// The COF's links, each resolved to its clothing slot: through the model
+/// when the link's target is loaded, else through the link's own ordering
+/// token; `None` when neither names a clothing layer.
+pub(crate) fn cof_links_with_slots(model: &InventoryModel) -> Vec<CofLink> {
+    model
+        .cof_items()
+        .iter()
+        .map(|link| {
+            let resolved = model
+                .find_item(InventoryKey::from(link.asset_id))
+                .filter(|target| {
+                    target.inv_type == InventoryType::Wearable
+                        && target.asset_type == AssetType::Clothing
+                })
+                .map(wearable_type_of);
+            let from_token = parse_order_token(&link.description)
+                .map(|(code, _index)| WearableType::from_code(code))
+                .filter(|slot| !slot.is_body_part());
+            (link.clone(), resolved.or(from_token))
+        })
+        .collect()
+}
+
+/// The dense renumbering updates for the given clothing `slots` over the
+/// surviving links: each slot's links sorted by their current token
+/// (token-less last, otherwise stable), renumbered `0..`, and every link
+/// whose token changed re-written via `UpdateInventoryItem` — the
+/// reference's `getWearableOrderingDescUpdates`.
+fn renumber_slot_updates(surviving: &[CofLink], slot_codes: &HashSet<u8>) -> Vec<Command> {
+    let mut out = Vec::new();
+    for &code in slot_codes {
+        let slot = WearableType::from_code(code);
+        let mut layer_links: Vec<&ItemInfo> = surviving
+            .iter()
+            .filter(|(_link, link_slot)| *link_slot == Some(slot))
+            .map(|(link, _slot)| link)
+            .collect();
+        layer_links.sort_by_key(|link| {
+            parse_order_token(&link.description).map_or(u32::MAX, |(_code, index)| index)
+        });
+        for (index, link) in layer_links.iter().enumerate() {
+            let wanted = cof_order_description(slot, u32::try_from(index).unwrap_or(u32::MAX));
+            if link.description != wanted {
+                let mut updated = (*link).clone();
+                updated.description = wanted;
+                out.push(Command::UpdateInventoryItem {
+                    item: Box::new(crate::inventory_properties::to_wire_item(&updated)),
+                    transaction_id: TransactionId::from(Uuid::nil()),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// The COF-link commands after wearing `item`: drop the `replaced` items'
-/// links, then link the item into the COF (skipped when already linked) —
-/// the reference's `addCOFItemLink` (the layer-ordering description string
-/// is not written yet). No-ops on a grid without a located COF.
+/// links, renumber the affected clothing slots dense, then link the item
+/// into the COF with the slot's next ordering token (skipped when already
+/// linked) — the reference's `addCOFItemLink` + `build_order_string`.
+/// No-ops on a grid without a located COF.
 pub(crate) fn cof_wear_link_commands(
     cof: Option<InventoryFolderKey>,
-    cof_items: &[ItemInfo],
+    cof_links: &[CofLink],
     item: &ItemInfo,
     replaced: &[InventoryKey],
 ) -> Vec<Command> {
     let Some(cof) = cof else {
         return Vec::new();
     };
-    let mut out = cof_remove_link_commands(cof_items, replaced);
-    let already_linked = cof_items
+    let mut out = cof_remove_link_commands(cof_links, replaced);
+    let already_linked = cof_links
         .iter()
-        .any(|link| link.asset_id == item.item_id.uuid());
+        .any(|(link, _slot)| link.asset_id == item.item_id.uuid());
     if !already_linked {
+        // A clothing layer's link carries the slot's next dense ordering
+        // token (counted over the links that survive the removals above).
+        let description =
+            if item.inv_type == InventoryType::Wearable && item.asset_type == AssetType::Clothing {
+                let slot = wearable_type_of(item);
+                let surviving = cof_links
+                    .iter()
+                    .filter(|(link, link_slot)| {
+                        *link_slot == Some(slot)
+                            && !replaced.iter().any(|target| link.asset_id == target.uuid())
+                    })
+                    .count();
+                cof_order_description(slot, u32::try_from(surviving).unwrap_or(u32::MAX))
+            } else {
+                String::new()
+            };
         out.push(Command::LinkInventoryItem(NewInventoryLink {
             folder_id: cof,
             linked_id: InventoryItemOrFolderKey::Item(item.item_id),
@@ -1095,7 +1193,7 @@ pub(crate) fn cof_wear_link_commands(
             link_type: AssetType::Other(24),
             inv_type: item.inv_type,
             name: item.name.clone(),
-            description: String::new(),
+            description,
         }));
     }
     out
@@ -1103,21 +1201,34 @@ pub(crate) fn cof_wear_link_commands(
 
 /// The COF-link removals for taken-off / detached items: one batch
 /// `RemoveInventoryItems` of every COF link whose target is in `removed` —
-/// the reference's `removeCOFItemLinks`.
+/// the reference's `removeCOFItemLinks` — followed by a dense renumbering of
+/// each affected clothing slot's surviving links.
 pub(crate) fn cof_remove_link_commands(
-    cof_items: &[ItemInfo],
+    cof_links: &[CofLink],
     removed: &[InventoryKey],
 ) -> Vec<Command> {
-    let links: Vec<InventoryKey> = cof_items
+    let is_removed = |link: &ItemInfo| removed.iter().any(|target| link.asset_id == target.uuid());
+    let links: Vec<InventoryKey> = cof_links
         .iter()
-        .filter(|link| removed.iter().any(|target| link.asset_id == target.uuid()))
-        .map(|link| link.item_id)
+        .filter(|(link, _slot)| is_removed(link))
+        .map(|(link, _slot)| link.item_id)
         .collect();
     if links.is_empty() {
-        Vec::new()
-    } else {
-        vec![Command::RemoveInventoryItems(links)]
+        return Vec::new();
     }
+    let affected: HashSet<u8> = cof_links
+        .iter()
+        .filter(|(link, _slot)| is_removed(link))
+        .filter_map(|(_link, slot)| slot.map(WearableType::to_code))
+        .collect();
+    let surviving: Vec<CofLink> = cof_links
+        .iter()
+        .filter(|(link, _slot)| !is_removed(link))
+        .cloned()
+        .collect();
+    let mut out = vec![Command::RemoveInventoryItems(links)];
+    out.extend(renumber_slot_updates(&surviving, &affected));
+    out
 }
 
 /// The wear-set the legacy `AgentIsNowWearing` should carry after wearing
@@ -1846,7 +1957,7 @@ fn handle_inventory_menu_actions(
                             &model,
                             cof_wear_link_commands(
                                 model.cof_key(),
-                                model.cof_items(),
+                                &cof_links_with_slots(&model),
                                 item,
                                 &replaced,
                             ),
@@ -1871,7 +1982,12 @@ fn handle_inventory_menu_actions(
                         }
                         write_cof_commands(
                             &model,
-                            cof_wear_link_commands(model.cof_key(), model.cof_items(), item, &[]),
+                            cof_wear_link_commands(
+                                model.cof_key(),
+                                &cof_links_with_slots(&model),
+                                item,
+                                &[],
+                            ),
                             &mut commands,
                         );
                     }
@@ -1894,7 +2010,7 @@ fn handle_inventory_menu_actions(
                 }
                 write_cof_commands(
                     &model,
-                    cof_remove_link_commands(model.cof_items(), &removed),
+                    cof_remove_link_commands(&cof_links_with_slots(&model), &removed),
                     &mut commands,
                 );
             }
@@ -1911,7 +2027,7 @@ fn handle_inventory_menu_actions(
                 }
                 write_cof_commands(
                     &model,
-                    cof_remove_link_commands(model.cof_items(), &removed),
+                    cof_remove_link_commands(&cof_links_with_slots(&model), &removed),
                     &mut commands,
                 );
             }
@@ -1939,11 +2055,11 @@ fn handle_inventory_menu_actions(
                     // Rewrite the COF: removed links out, the folder's
                     // outfit items linked in.
                     let mut cof_batch =
-                        cof_remove_link_commands(model.cof_items(), &no_longer_worn);
+                        cof_remove_link_commands(&cof_links_with_slots(&model), &no_longer_worn);
                     for item in items.iter().filter(|item| is_outfit_item(item)) {
                         cof_batch.extend(cof_wear_link_commands(
                             model.cof_key(),
-                            model.cof_items(),
+                            &cof_links_with_slots(&model),
                             item,
                             &[],
                         ));
@@ -1971,7 +2087,7 @@ fn handle_inventory_menu_actions(
                         let replaced = replaced_by_wear(model.worn_wearables(), item);
                         cof_batch.extend(cof_wear_link_commands(
                             model.cof_key(),
-                            model.cof_items(),
+                            &cof_links_with_slots(&model),
                             item,
                             &replaced,
                         ));
@@ -2011,7 +2127,7 @@ fn handle_inventory_menu_actions(
                     }
                     write_cof_commands(
                         &model,
-                        cof_remove_link_commands(model.cof_items(), &removed),
+                        cof_remove_link_commands(&cof_links_with_slots(&model), &removed),
                         &mut commands,
                     );
                 }
@@ -2047,7 +2163,7 @@ fn handle_inventory_menu_actions(
                                 &model,
                                 cof_wear_link_commands(
                                     model.cof_key(),
-                                    model.cof_items(),
+                                    &cof_links_with_slots(&model),
                                     item,
                                     &[],
                                 ),
@@ -2985,40 +3101,106 @@ mod tests {
     /// the targets' links.
     #[test]
     fn cof_links_follow_wear_and_removal() {
-        use super::{cof_remove_link_commands, cof_wear_link_commands};
+        use super::{cof_order_description, cof_remove_link_commands, cof_wear_link_commands};
         let cof = InventoryFolderKey::from(Uuid::from_u128(0xC0));
-        let shirt = item(0x10, InventoryType::Wearable, AssetType::Clothing, 0);
-        // An existing link to another item (the replaced shirt).
+        let mut shirt = item(0x10, InventoryType::Wearable, AssetType::Clothing, 0);
+        shirt.flags = u32::from(WearableType::Shirt.to_code());
+        // An existing shirt-slot link to another item (the replaced shirt).
         let mut old_link = item(0x11, InventoryType::Wearable, AssetType::Other(24), 0);
         old_link.asset_id = Uuid::from_u128(0x12);
+        old_link.description = cof_order_description(WearableType::Shirt, 0);
         let replaced = vec![InventoryKey::from(Uuid::from_u128(0x12))];
+        let links = vec![(old_link.clone(), Some(WearableType::Shirt))];
 
-        let batch = cof_wear_link_commands(Some(cof), &[old_link.clone()], &shirt, &replaced);
+        let batch = cof_wear_link_commands(Some(cof), &links, &shirt, &replaced);
         assert!(batch.iter().any(|command| matches!(
             command,
-            Command::RemoveInventoryItems(links) if links.contains(&old_link.item_id)
+            Command::RemoveInventoryItems(removed) if removed.contains(&old_link.item_id)
         )));
+        // The fresh link carries the slot's dense token: the replaced link is
+        // gone, so the new shirt is layer 0.
         assert!(batch.iter().any(|command| matches!(
             command,
-            Command::LinkInventoryItem(link) if link.folder_id == cof
+            Command::LinkInventoryItem(link)
+                if link.folder_id == cof
+                    && link.description == cof_order_description(WearableType::Shirt, 0)
+        )));
+        // Adding alongside (no replacement): the token continues the stack.
+        let batch = cof_wear_link_commands(Some(cof), &links, &shirt, &[]);
+        assert!(batch.iter().any(|command| matches!(
+            command,
+            Command::LinkInventoryItem(link)
+                if link.description == cof_order_description(WearableType::Shirt, 1)
         )));
         // Already linked: nothing added.
         let mut own_link = item(0x13, InventoryType::Wearable, AssetType::Other(24), 0);
         own_link.asset_id = shirt.item_id.uuid();
-        let batch = cof_wear_link_commands(Some(cof), &[own_link], &shirt, &[]);
+        let batch = cof_wear_link_commands(
+            Some(cof),
+            &[(own_link, Some(WearableType::Shirt))],
+            &shirt,
+            &[],
+        );
         assert!(batch.is_empty());
         // No COF located: a no-op.
         assert!(cof_wear_link_commands(None, &[], &shirt, &[]).is_empty());
         // Removal drops exactly the matching links.
-        let batch = cof_remove_link_commands(
-            &[old_link.clone()],
-            &[InventoryKey::from(Uuid::from_u128(0x12))],
-        );
+        let batch = cof_remove_link_commands(&links, &[InventoryKey::from(Uuid::from_u128(0x12))]);
         assert!(matches!(
             batch.first(),
-            Some(Command::RemoveInventoryItems(links)) if links.contains(&old_link.item_id)
+            Some(Command::RemoveInventoryItems(removed)) if removed.contains(&old_link.item_id)
         ));
-        assert!(cof_remove_link_commands(&[old_link], &[]).is_empty());
+        assert!(cof_remove_link_commands(&links, &[]).is_empty());
+    }
+
+    /// The ordering tokens round-trip, and removing a middle layer
+    /// renumbers the survivors dense (via link-description updates).
+    #[test]
+    fn cof_layer_tokens_renumber_dense() {
+        use super::{cof_order_description, cof_remove_link_commands, parse_order_token};
+        assert_eq!(
+            parse_order_token(&cof_order_description(WearableType::Tattoo, 3)),
+            Some((WearableType::Tattoo.to_code(), 3))
+        );
+        assert_eq!(parse_order_token(""), None);
+        assert_eq!(parse_order_token("a note"), None);
+
+        // Three tattoo layers 0/1/2; remove the middle one.
+        let make_link = |id: u128, target: u128, index: u32| {
+            let mut link = item(id, InventoryType::Wearable, AssetType::Other(24), 0);
+            link.asset_id = Uuid::from_u128(target);
+            link.description = cof_order_description(WearableType::Tattoo, index);
+            (link, Some(WearableType::Tattoo))
+        };
+        let links = vec![
+            make_link(0x20, 0x30, 0),
+            make_link(0x21, 0x31, 1),
+            make_link(0x22, 0x32, 2),
+        ];
+        let batch = cof_remove_link_commands(&links, &[InventoryKey::from(Uuid::from_u128(0x31))]);
+        // One removal batch, then exactly one renumber: layer 2 -> 1. The
+        // untouched layer 0 gets no update.
+        assert!(matches!(
+            batch.first(),
+            Some(Command::RemoveInventoryItems(removed))
+                if removed == &vec![InventoryKey::from(Uuid::from_u128(0x21))]
+        ));
+        let updates: Vec<_> = batch
+            .iter()
+            .filter_map(|command| match command {
+                Command::UpdateInventoryItem { item, .. } => {
+                    Some((item.item_id, item.description.clone()))
+                }
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            updates,
+            vec![(
+                InventoryKey::from(Uuid::from_u128(0x22)),
+                cof_order_description(WearableType::Tattoo, 1)
+            )]
+        );
     }
 
     /// Multi-selection conditions are the intersection of every row's set —

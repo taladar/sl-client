@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 104 |
-| blocked | 86 |
+| ready | 106 |
+| blocked | 87 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 561 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **787** |
+| **total** | **790** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (104)
+## ready (106)
 
 ### protocol
 
@@ -69,6 +69,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
+- [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
+  Client-side bake honours COF layer-ordering tokens
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
 - [`viewer-camera-controls-window`](ready/viewer-camera-controls-window.md) —
@@ -146,6 +148,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-os-slurl-handler-linux`](ready/viewer-os-slurl-handler-linux.md) —
   Register as the SLURL / hop URI handler (Linux) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-outfit-editor`](ready/viewer-outfit-editor.md) — Outfit editor — edit
+  the current outfit, save to My Outfits
 - [`viewer-parcel-borders-render`](ready/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))
@@ -293,7 +297,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (86)
+## blocked (87)
 
 ### viewer
 
@@ -407,6 +411,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-object-selection-core`,
   `viewer-inventory-context-actions` (done))
+- [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
+  Clothing layer re-ordering UI (and token read-back) (blocked by
+  `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync-deliberately-out-of-scope-recorded-so-it-is-a.md)
   — Voice lip-sync — deliberately OUT OF SCOPE (recorded so it is a known gap,
   not an oversight) (blocked by `viewer-voice-audio`)
