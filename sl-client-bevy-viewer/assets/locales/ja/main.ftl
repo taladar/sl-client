@@ -66,3 +66,31 @@ avatar-picker-tab-near-me = 近くの人
 avatar-picker-go = 検索
 avatar-picker-ok = OK
 avatar-picker-cancel = キャンセル
+## The item properties floater + Open previews
+## (viewer-inventory-open-and-properties).
+
+item-properties-title = アイテムのプロパティ
+item-properties-name = 名前:
+item-properties-description = 説明:
+item-properties-creator = 制作者:
+item-properties-owner = 所有者:
+item-properties-acquired = 取得日:
+item-properties-you-can = あなたの権限:
+item-properties-modify = 編集
+item-properties-copy = コピー
+item-properties-transfer = 譲渡
+item-properties-group = グループ:
+item-properties-share = 共有
+item-properties-anyone = 全員:
+item-properties-next-owner = 次の所有者:
+item-properties-for-sale = 販売中
+item-properties-sale-original = オリジナル
+item-properties-sale-copy = コピー
+item-properties-sale-contents = 中身
+landmark-teleport = テレポート
+animation-play-inworld = ワールドで再生
+animation-stop = 停止
+
+## The inventory gallery (viewer-inventory-gallery).
+
+inventory-gallery-title = インベントリギャラリー

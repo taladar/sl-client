@@ -55,7 +55,7 @@ use std::collections::{HashSet, VecDeque};
 use crate::avatar_menu::UNIMPLEMENTED;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::inventory::{
-    DisplayRow, InventoryModel, InventorySelection, InventoryView, RowKey, query_folder_page,
+    InventoryModel, InventorySelection, InventoryView, RowKey, query_folder_page,
 };
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::ui_element::UiAction;
@@ -137,6 +137,13 @@ pub(crate) const CAN_DELETE: &str = "can-delete";
 /// The target can be shared (given to another avatar via the picker): own
 /// inventory, and for an item one the owner may transfer.
 pub(crate) const CAN_SHARE: &str = "can-share";
+
+/// The target item's type has an Open preview in this viewer.
+pub(crate) const CAN_OPEN: &str = "can-open";
+
+/// The target item's asset id may be copied (full owner permissions — the
+/// reference's `canCopyAssetID` gate, sans the creator-override).
+pub(crate) const CAN_COPY_UUID: &str = "can-copy-uuid";
 
 /// New-item entries (New Folder / Script / Notecard / Gesture) apply — the
 /// target folder is writable.
@@ -416,13 +423,11 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
     label: "Item",
     items: &[
         MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
-        MenuItemDef::Command(MenuCommand::new("Open", "open").enabled_when(UNIMPLEMENTED)),
-        MenuItemDef::Command(
-            MenuCommand::new("Properties", "properties").enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("Open", "open").enabled_when(CAN_OPEN)),
+        MenuItemDef::Command(MenuCommand::new("Properties", "properties")),
         MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
         MenuItemDef::Command(
-            MenuCommand::new("Copy Asset UUID", "copy-asset-uuid").enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("Copy Asset UUID", "copy-asset-uuid").enabled_when(CAN_COPY_UUID),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
@@ -712,6 +717,16 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
     if mutable && item.permissions.owner.contains(Permissions::TRANSFER) {
         held.push(CAN_SHARE);
     }
+    if crate::inventory_properties::previewable(item.inv_type) {
+        held.push(CAN_OPEN);
+    }
+    if item
+        .permissions
+        .owner
+        .contains(Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER)
+    {
+        held.push(CAN_COPY_UUID);
+    }
     if facts.clipboard_has_entry && mutable {
         held.push(CAN_PASTE);
         held.push(CAN_PASTE_LINK);
@@ -995,16 +1010,17 @@ pub(crate) fn wear_commands(
 // Opening: right-click on a row / the list background.
 // ---------------------------------------------------------------------------
 
-/// Resolve a row's [`DisplayRow`] to a snapshot + conditions and open its menu.
-/// Returns `None` when the row cannot be resolved in the model (e.g. a Recent
-/// entry whose folder is not loaded).
+/// Resolve a row key to a snapshot + conditions and open its context menu —
+/// shared by the tree rows and the gallery tiles. Returns `None` when the
+/// key cannot be resolved in the model (e.g. a Recent entry whose folder is
+/// not loaded).
 #[expect(
     clippy::too_many_arguments,
     reason = "the resolution reads every fact source the conditions draw on: the model, the \
               clipboard, the tracked worn / gesture sets, and the two output channels"
 )]
-fn open_menu_for_row(
-    row: &DisplayRow,
+pub(crate) fn open_inventory_context_menu(
+    key: RowKey,
     at: Vec2,
     model: &InventoryModel,
     clipboard: &InventoryClipboard,
@@ -1018,7 +1034,7 @@ fn open_menu_for_row(
         trash.is_some_and(|trash_key| model.is_within(folder, trash_key))
     };
     let clipboard_has_entry = clipboard.entry.is_some();
-    let (menu, conditions, snapshot) = match row.key() {
+    let (menu, conditions, snapshot) = match key {
         RowKey::Folder(key) => {
             let info = model.folder_info(key)?.clone();
             let subtree = model.subtree_items(key);
@@ -1109,8 +1125,8 @@ pub(crate) fn on_row_context(
     if !selection.contains(display.key()) {
         selection.select_single(display.key(), index);
     }
-    open_menu_for_row(
-        display,
+    open_inventory_context_menu(
+        display.key(),
         press.pointer_location.position,
         &model,
         &clipboard,
@@ -1223,27 +1239,50 @@ pub(crate) fn paste_commands(
 /// Handle a picked inventory context-menu entry.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the action stream, the \
-              target / clipboard / worn / gesture stashes, the model for trash lookups, the \
-              identity, and the command / conversation / rename channels"
+    clippy::type_complexity,
+    reason = "a Bevy system's parameters are its injected resources — grouped into tuples by \
+              role (the mutated stashes, the message outputs) to fit the SystemParam arity"
 )]
 fn handle_inventory_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<InventoryMenuTarget>,
     model: Res<InventoryModel>,
     identity: Res<SlIdentity>,
-    mut clipboard: ResMut<InventoryClipboard>,
-    mut worn: ResMut<WornAttachments>,
-    mut gestures: ResMut<ActiveGestures>,
-    mut rename: ResMut<crate::inventory::InlineRename>,
-    mut pending_share: ResMut<PendingShare>,
-    mut pending_wearables: ResMut<PendingWearableUploads>,
+    stashes: (
+        ResMut<InventoryClipboard>,
+        ResMut<WornAttachments>,
+        ResMut<ActiveGestures>,
+        ResMut<crate::inventory::InlineRename>,
+        ResMut<PendingShare>,
+        ResMut<PendingWearableUploads>,
+    ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
-    mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
-    mut conversations: MessageWriter<OpenConversation>,
-    mut picker_opens: MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
-    mut commands: MessageWriter<SlCommand>,
+    mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
+    outputs: (
+        MessageWriter<crate::inventory::InventoryUiAction>,
+        MessageWriter<OpenConversation>,
+        MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
+        MessageWriter<crate::inventory_properties::OpenItemPreview>,
+        MessageWriter<crate::inventory_properties::OpenItemProperties>,
+        MessageWriter<SlCommand>,
+    ),
 ) {
+    let (
+        mut clipboard,
+        mut worn,
+        mut gestures,
+        mut rename,
+        mut pending_share,
+        mut pending_wearables,
+    ) = stashes;
+    let (
+        mut ui_actions,
+        mut conversations,
+        mut picker_opens,
+        mut previews,
+        mut properties,
+        mut commands,
+    ) = outputs;
     for action in actions.read() {
         if action.element != INVENTORY_MENU_ELEMENT {
             continue;
@@ -1258,6 +1297,27 @@ fn handle_inventory_menu_actions(
                 picker_opens.write(crate::avatar_picker::OpenAvatarPicker {
                     requester: SHARE_REQUESTER,
                 });
+            }
+            "open" => {
+                if let MenuTarget::Item(item) = &menu_target {
+                    previews
+                        .write(crate::inventory_properties::OpenItemPreview { item: item.clone() });
+                }
+            }
+            "properties" => {
+                if let MenuTarget::Item(item) = &menu_target {
+                    properties.write(crate::inventory_properties::OpenItemProperties {
+                        item: item.clone(),
+                    });
+                }
+            }
+            "copy-asset-uuid" => {
+                if let MenuTarget::Item(item) = &menu_target
+                    && let Some(clipboard) = system_clipboard.as_deref_mut()
+                {
+                    // A failed clipboard write (headless run) is dropped.
+                    let _set = clipboard.set_text(item.asset_id.to_string());
+                }
             }
             "rename" => {
                 // The tree edits the label in place ([`crate::inventory`]'s

@@ -74,3 +74,31 @@ avatar-picker-tab-near-me = بالقرب مني
 avatar-picker-go = بحث
 avatar-picker-ok = موافق
 avatar-picker-cancel = إلغاء
+## The item properties floater + Open previews
+## (viewer-inventory-open-and-properties).
+
+item-properties-title = خصائص العنصر
+item-properties-name = الاسم:
+item-properties-description = الوصف:
+item-properties-creator = المنشئ:
+item-properties-owner = المالك:
+item-properties-acquired = تاريخ الحصول:
+item-properties-you-can = يمكنك:
+item-properties-modify = تعديل
+item-properties-copy = نسخ
+item-properties-transfer = نقل
+item-properties-group = المجموعة:
+item-properties-share = مشاركة
+item-properties-anyone = الجميع:
+item-properties-next-owner = المالك التالي:
+item-properties-for-sale = للبيع
+item-properties-sale-original = الأصل
+item-properties-sale-copy = نسخة
+item-properties-sale-contents = المحتويات
+landmark-teleport = الانتقال الآني
+animation-play-inworld = تشغيل في العالم
+animation-stop = إيقاف
+
+## The inventory gallery (viewer-inventory-gallery).
+
+inventory-gallery-title = معرض المخزون

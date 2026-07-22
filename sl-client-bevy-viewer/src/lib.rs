@@ -69,6 +69,8 @@ mod inventory;
 mod inventory_actions;
 mod inventory_drag;
 mod inventory_filters;
+mod inventory_gallery;
+mod inventory_properties;
 mod land_menu;
 mod legacy_materials;
 mod lights;
@@ -208,6 +210,8 @@ use crate::inventory::InventoryPlugin;
 use crate::inventory_actions::InventoryActionsPlugin;
 use crate::inventory_drag::InventoryDragPlugin;
 use crate::inventory_filters::InventoryFiltersPlugin;
+use crate::inventory_gallery::InventoryGalleryPlugin;
+use crate::inventory_properties::InventoryPropertiesPlugin;
 use crate::land_menu::LandMenuPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
@@ -798,6 +802,8 @@ fn run_session(
     .add_plugins(InventoryActionsPlugin)
     .add_plugins(InventoryDragPlugin)
     .add_plugins(InventoryFiltersPlugin)
+    .add_plugins(InventoryGalleryPlugin)
+    .add_plugins(InventoryPropertiesPlugin)
     .add_plugins(AvatarPickerPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a

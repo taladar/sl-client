@@ -1344,6 +1344,9 @@ const GEAR_FOLDERS_BY_NAME: &str = "gear-folders-by-name";
 /// The condition key held while the filters floater is open.
 const GEAR_FILTERS_OPEN: &str = "gear-filters-open";
 
+/// The condition key held while the gallery floater is open.
+const GEAR_GALLERY_OPEN: &str = "gear-gallery-open";
+
 /// The inventory window's gear (options) menu — the reference's
 /// `menu_inventory_gear_default` set (minus the Firestorm-only extras, the
 /// way the context menus omit the marketplace block), on [`crate::menu`]'s
@@ -1356,6 +1359,10 @@ static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("New Inventory Window", "new-window")
                 .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Gallery View", "gallery-view").checked_when(GEAR_GALLERY_OPEN),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
@@ -1433,10 +1440,14 @@ struct InventoryGearHost;
 fn update_gear_conditions(
     state: Res<InventoryState>,
     filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
+    gallery_ui: Option<Res<crate::inventory_gallery::GalleryUi>>,
     panels: Query<&UiPanelShown>,
     mut hosts: Query<&mut MenuConditions, With<InventoryGearHost>>,
 ) {
     let filters_open = filters_ui
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
+    let gallery_open = gallery_ui
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
@@ -1451,6 +1462,9 @@ fn update_gear_conditions(
     wanted.push(GEAR_FOLDERS_BY_NAME);
     if filters_open {
         wanted.push(GEAR_FILTERS_OPEN);
+    }
+    if gallery_open {
+        wanted.push(GEAR_GALLERY_OPEN);
     }
     for mut conditions in &mut hosts {
         if conditions.0 != wanted {
@@ -3063,6 +3077,7 @@ mod tests {
         }
         let expected = vec![
             ("New Inventory Window", "new-window"),
+            ("Gallery View", "gallery-view"),
             ("Sort by Name", "sort-by-name"),
             ("Sort by Most Recent", "sort-by-recent"),
             ("Sort Folders Always by Name", "sort-folders-by-name"),

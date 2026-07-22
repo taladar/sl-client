@@ -199,3 +199,31 @@ avatar-picker-tab-near-me = Near me
 avatar-picker-go = Go
 avatar-picker-ok = OK
 avatar-picker-cancel = Cancel
+## The item properties floater + Open previews
+## (viewer-inventory-open-and-properties).
+
+item-properties-title = Item Properties
+item-properties-name = Name:
+item-properties-description = Description:
+item-properties-creator = Creator:
+item-properties-owner = Owner:
+item-properties-acquired = Acquired:
+item-properties-you-can = You can:
+item-properties-modify = Modify
+item-properties-copy = Copy
+item-properties-transfer = Transfer
+item-properties-group = Group:
+item-properties-share = Share
+item-properties-anyone = Anyone:
+item-properties-next-owner = Next owner:
+item-properties-for-sale = For sale
+item-properties-sale-original = Original
+item-properties-sale-copy = Copy
+item-properties-sale-contents = Contents
+landmark-teleport = Teleport
+animation-play-inworld = Play in world
+animation-stop = Stop
+
+## The inventory gallery (viewer-inventory-gallery).
+
+inventory-gallery-title = Inventory Gallery

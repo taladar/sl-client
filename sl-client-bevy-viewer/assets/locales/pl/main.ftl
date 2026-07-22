@@ -74,3 +74,31 @@ avatar-picker-tab-near-me = W pobliżu
 avatar-picker-go = Szukaj
 avatar-picker-ok = OK
 avatar-picker-cancel = Anuluj
+## The item properties floater + Open previews
+## (viewer-inventory-open-and-properties).
+
+item-properties-title = Właściwości przedmiotu
+item-properties-name = Nazwa:
+item-properties-description = Opis:
+item-properties-creator = Twórca:
+item-properties-owner = Właściciel:
+item-properties-acquired = Uzyskano:
+item-properties-you-can = Możesz:
+item-properties-modify = Modyfikować
+item-properties-copy = Kopiować
+item-properties-transfer = Przekazać
+item-properties-group = Grupa:
+item-properties-share = Udostępnij
+item-properties-anyone = Wszyscy:
+item-properties-next-owner = Następny właściciel:
+item-properties-for-sale = Na sprzedaż
+item-properties-sale-original = Oryginał
+item-properties-sale-copy = Kopia
+item-properties-sale-contents = Zawartość
+landmark-teleport = Teleportuj
+animation-play-inworld = Odtwórz w świecie
+animation-stop = Zatrzymaj
+
+## The inventory gallery (viewer-inventory-gallery).
+
+inventory-gallery-title = Galeria ekwipunku
