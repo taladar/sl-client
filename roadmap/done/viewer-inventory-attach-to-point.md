@@ -2,7 +2,7 @@
 id: viewer-inventory-attach-to-point
 title: "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions /
   viewer-inventory-worn-actions (2026-07-21) — shipped greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions, viewer-attachment-context-menu]

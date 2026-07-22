@@ -2,7 +2,7 @@
 id: viewer-inventory-row-decorations
 title: Inventory row decorations (permissions, worn-bold)
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer parity notes on viewer-inventory-folder-tree (2026-07)
 ---
 

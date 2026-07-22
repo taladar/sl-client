@@ -46,8 +46,8 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
     AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolder, InventoryFolderKey,
-    InventoryKey, InventoryType, ItemInfo, SlCommand, SlEvent, SlSessionEvent, Wearable,
-    WearableType,
+    InventoryKey, InventoryType, ItemInfo, Permissions, SlCommand, SlEvent, SlSessionEvent,
+    Wearable, WearableType,
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -113,6 +113,10 @@ const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 /// A folder row label's colour — a touch warmer than an item, so the tree's
 /// structure reads at a glance.
 const FOLDER_LABEL_COLOR: Color = Color::srgb(0.98, 0.86, 0.55);
+
+/// A row's trailing suffix colour (the permission / worn decorations) — dimmer
+/// than the label, so the name stays the thing the eye reads first.
+const SUFFIX_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 
 /// An inactive toolbar button background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -462,28 +466,53 @@ impl InventoryModel {
     /// and the expand state, produce exactly the rows to draw, in order, each
     /// resolved to its label, icon and arrow. Tested directly; the Bevy side only
     /// renders the result.
-    pub(crate) fn build_rows(&self, tab: InventoryTab, query: &str) -> Vec<DisplayRow> {
+    pub(crate) fn build_rows(
+        &self,
+        tab: InventoryTab,
+        query: &str,
+        tracked_attachments: &HashSet<InventoryKey>,
+    ) -> Vec<DisplayRow> {
         let needle = query.trim().to_lowercase();
+        let worn = self.worn_set(tracked_attachments);
         match tab {
-            InventoryTab::Everything if needle.is_empty() => self.tree_rows(),
-            InventoryTab::Everything => self.search_rows(&needle),
-            InventoryTab::Recent => self.recent_rows(&needle),
-            InventoryTab::Worn => self.worn_rows(&needle),
+            InventoryTab::Everything if needle.is_empty() => self.tree_rows(&worn),
+            InventoryTab::Everything => self.search_rows(&needle, &worn),
+            InventoryTab::Recent => self.recent_rows(&needle, &worn),
+            InventoryTab::Worn => self.worn_rows(&needle, &worn),
         }
     }
 
+    /// Every currently worn item key — the COF links' targets, the legacy
+    /// wearables set, and the viewer-tracked attachments — the set the row
+    /// decorations (bold + `(worn)`) read.
+    pub(crate) fn worn_set(&self, tracked: &HashSet<InventoryKey>) -> HashSet<InventoryKey> {
+        let mut set: HashSet<InventoryKey> = self
+            .worn_item_keys()
+            .into_iter()
+            .map(|(key, _name, _ty)| key)
+            .collect();
+        set.extend(tracked.iter().copied());
+        set
+    }
+
     /// The Everything tab's tree, depth-first from the roots.
-    fn tree_rows(&self) -> Vec<DisplayRow> {
+    fn tree_rows(&self, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
         let mut rows = Vec::new();
         for &root in &self.roots {
-            self.emit_folder(root, 0, &mut rows);
+            self.emit_folder(root, 0, worn, &mut rows);
         }
         rows
     }
 
     /// Emit `folder`'s row, then — if expanded — its child folders and items,
     /// indented one level deeper.
-    fn emit_folder(&self, folder: InventoryFolderKey, depth: usize, rows: &mut Vec<DisplayRow>) {
+    fn emit_folder(
+        &self,
+        folder: InventoryFolderKey,
+        depth: usize,
+        worn: &HashSet<InventoryKey>,
+        rows: &mut Vec<DisplayRow>,
+    ) {
         let expanded = self.expanded.contains(&folder);
         let arrow = if expanded {
             RowArrow::Expanded
@@ -496,15 +525,10 @@ impl InventoryModel {
         }
         let child_depth = depth.saturating_add(1);
         for &child in self.children_of(folder) {
-            self.emit_folder(child, child_depth, rows);
+            self.emit_folder(child, child_depth, worn, rows);
         }
         for item in self.items_of(folder) {
-            rows.push(item_row(
-                item.item_id,
-                &item.name,
-                item.inv_type,
-                child_depth,
-            ));
+            rows.push(decorated_item_row(item, child_depth, worn));
         }
     }
 
@@ -519,6 +543,9 @@ impl InventoryModel {
             name,
             icon: folder_icon(folder_type, !matches!(arrow, RowArrow::Collapsed)),
             arrow,
+            suffix: String::new(),
+            bold: false,
+            italic: false,
         }
     }
 
@@ -527,7 +554,7 @@ impl InventoryModel {
     /// matching item or folder is kept and shown expanded — the way the reference
     /// viewer filters its tree. Only loaded folders' items are searchable (an
     /// unfetched folder's contents are not held).
-    fn search_rows(&self, needle: &str) -> Vec<DisplayRow> {
+    fn search_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
         let mut keep = HashSet::new();
         for &root in &self.roots {
             self.mark_matching_subtree(root, needle, &mut keep);
@@ -535,7 +562,7 @@ impl InventoryModel {
         let mut rows = Vec::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_search_folder(root, 0, needle, &keep, &mut rows);
+                self.emit_search_folder(root, 0, needle, &keep, worn, &mut rows);
             }
         }
         rows
@@ -581,33 +608,36 @@ impl InventoryModel {
         depth: usize,
         needle: &str,
         keep: &HashSet<InventoryFolderKey>,
+        worn: &HashSet<InventoryKey>,
         rows: &mut Vec<DisplayRow>,
     ) {
         rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
         let child_depth = depth.saturating_add(1);
         for &child in self.children_of(folder) {
             if keep.contains(&child) {
-                self.emit_search_folder(child, child_depth, needle, keep, rows);
+                self.emit_search_folder(child, child_depth, needle, keep, worn, rows);
             }
         }
         for item in self.items_of(folder) {
             if item.name.to_lowercase().contains(needle) {
-                rows.push(item_row(
-                    item.item_id,
-                    &item.name,
-                    item.inv_type,
-                    child_depth,
-                ));
+                rows.push(decorated_item_row(item, child_depth, worn));
             }
         }
     }
 
     /// The Recent tab: the received-since-login list, filtered by the query.
-    fn recent_rows(&self, needle: &str) -> Vec<DisplayRow> {
+    /// A recent entry whose item is held in a loaded folder is decorated like
+    /// a tree row; one not yet loaded draws plain.
+    fn recent_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
         self.recent
             .iter()
             .filter(|item| needle.is_empty() || item.name.to_lowercase().contains(needle))
-            .map(|item| item_row(item.key, &item.name, item.inv_type, 0))
+            .map(|item| {
+                self.find_item(item.key).map_or_else(
+                    || item_row(item.key, &item.name, item.inv_type, 0),
+                    |info| decorated_item_row(info, 0, worn),
+                )
+            })
             .collect()
     }
 
@@ -702,12 +732,7 @@ impl InventoryModel {
                 && (needle.is_empty() || item.name.to_lowercase().contains(needle))
             {
                 placed.insert(item.item_id);
-                rows.push(item_row(
-                    item.item_id,
-                    &item.name,
-                    item.inv_type,
-                    child_depth,
-                ));
+                rows.push(decorated_item_row(item, child_depth, worn));
             }
         }
     }
@@ -718,20 +743,19 @@ impl InventoryModel {
     /// search narrows the tree. A worn item whose containing folder is not yet
     /// fetched cannot be placed and is appended as a flat row instead, so
     /// nothing worn is ever hidden. Filtered by the query.
-    fn worn_rows(&self, needle: &str) -> Vec<DisplayRow> {
+    fn worn_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
         let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(needle);
         let worn_keys = self.worn_item_keys();
-        let worn: HashSet<InventoryKey> = worn_keys.iter().map(|(key, _, _)| *key).collect();
         // The hierarchy half: folders on the path to a loaded worn item.
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_worn_subtree(root, &worn, &mut keep);
+            self.mark_worn_subtree(root, worn, &mut keep);
         }
         let mut rows = Vec::new();
         let mut placed: HashSet<InventoryKey> = HashSet::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_worn_folder(root, 0, &worn, &keep, &mut placed, needle, &mut rows);
+                self.emit_worn_folder(root, 0, worn, &keep, &mut placed, needle, &mut rows);
             }
         }
         // The flat tail: worn items whose place in the tree is not loaded yet.
@@ -744,7 +768,8 @@ impl InventoryModel {
     }
 }
 
-/// Build an item's display row at a given depth.
+/// Build an item's display row at a given depth, undecorated (used where no
+/// [`ItemInfo`] is held — a Recent entry or an unplaced worn item).
 fn item_row(key: InventoryKey, name: &str, inv_type: InventoryType, depth: usize) -> DisplayRow {
     DisplayRow {
         key: RowKey::Item(key),
@@ -752,7 +777,67 @@ fn item_row(key: InventoryKey, name: &str, inv_type: InventoryType, depth: usize
         name: name.to_owned(),
         icon: item_icon(inv_type),
         arrow: RowArrow::Leaf,
+        suffix: String::new(),
+        bold: false,
+        italic: false,
     }
+}
+
+/// Build a loaded item's display row, decorated with the permission / link
+/// suffixes and the worn emphasis (`viewer-inventory-row-decorations`).
+fn decorated_item_row(item: &ItemInfo, depth: usize, worn: &HashSet<InventoryKey>) -> DisplayRow {
+    let is_worn = worn.contains(&item.item_id);
+    DisplayRow {
+        key: RowKey::Item(item.item_id),
+        depth,
+        name: item.name.clone(),
+        icon: item_icon(item.inv_type),
+        arrow: RowArrow::Leaf,
+        suffix: item_suffix(item, is_worn),
+        bold: is_worn,
+        // The reference draws an unworn link italic (worn wins over link).
+        italic: !is_worn && is_link_asset(item.asset_type),
+    }
+}
+
+/// Whether an asset type is one of the two inventory-link types.
+const fn is_link_asset(asset_type: AssetType) -> bool {
+    matches!(
+        asset_type,
+        AssetType::Other(ASSET_TYPE_LINK | ASSET_TYPE_LINK_FOLDER)
+    )
+}
+
+/// The `AT_LINK` asset-type wire code: an inventory link to an item.
+const ASSET_TYPE_LINK: i32 = 24;
+
+/// The `AT_LINK_FOLDER` asset-type wire code: an inventory link to a folder.
+const ASSET_TYPE_LINK_FOLDER: i32 = 25;
+
+/// The trailing suffix the reference viewer draws after an item's label
+/// (`LLItemBridge::getLabelSuffix`): a link is marked `(link)` (its
+/// permissions are the target's, not its own); otherwise each withheld owner
+/// permission is spelled out; and a worn item is marked `(worn)`.
+pub(crate) fn item_suffix(item: &ItemInfo, worn: bool) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if is_link_asset(item.asset_type) {
+        parts.push("(link)");
+    } else {
+        let owner = item.permissions.owner;
+        if !owner.contains(Permissions::COPY) {
+            parts.push("(no copy)");
+        }
+        if !owner.contains(Permissions::MODIFY) {
+            parts.push("(no modify)");
+        }
+        if !owner.contains(Permissions::TRANSFER) {
+            parts.push("(no transfer)");
+        }
+    }
+    if worn {
+        parts.push("(worn)");
+    }
+    parts.join(" ")
 }
 
 // ---------------------------------------------------------------------------
@@ -961,6 +1046,17 @@ pub(crate) struct DisplayRow {
     icon: &'static str,
     /// The expand-arrow state.
     arrow: RowArrow,
+    /// The trailing decoration text — the permission / link / worn suffixes
+    /// the reference viewer draws after the label ("(no copy) (worn)", …).
+    /// Empty for an undecorated row.
+    suffix: String,
+    /// Whether the label is drawn **bold** — a currently worn item, so the
+    /// outfit stands out in the tree (the reference's worn emphasis,
+    /// `LLItemBridge::getLabelStyle`).
+    bold: bool,
+    /// Whether the label is drawn **italic** — an inventory link that is not
+    /// worn (the reference's link emphasis; worn wins over link).
+    italic: bool,
 }
 
 impl DisplayRow {
@@ -1436,11 +1532,12 @@ fn read_search_field(
 fn rebuild_view(
     model: Res<InventoryModel>,
     state: Res<InventoryState>,
+    worn: Res<crate::inventory_actions::WornAttachments>,
     ui: Option<Res<InventoryUi>>,
     mut view: ResMut<InventoryView>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if !model.is_changed() && !state.is_changed() {
+    if !model.is_changed() && !state.is_changed() && !worn.is_changed() {
         return;
     }
     let Some(ui) = ui else {
@@ -1451,7 +1548,7 @@ fn rebuild_view(
     // model, so the position is kept (the reference viewer keeps it too); the
     // generic list clamps it if the list got shorter.
     let reset_scroll = state.is_changed();
-    view.rows = model.build_rows(state.tab, &state.query);
+    view.rows = model.build_rows(state.tab, &state.query, &worn.items);
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
         if reset_scroll {
@@ -1502,6 +1599,9 @@ struct RowParts {
     icon: Entity,
     /// The label text.
     label: Entity,
+    /// The trailing decoration text (permissions / link / worn), dimmer than
+    /// the label.
+    suffix: Entity,
 }
 
 /// Build the inner structure of a freshly-pooled row (once), and wire its click.
@@ -1569,6 +1669,14 @@ fn populate_new_rows(
                 ChildOf(row_entity),
             ))
             .id();
+        let suffix = commands
+            .spawn((
+                Text::new(""),
+                UiFont::Sans.at(ROW_FONT_SIZE),
+                TextColor(SUFFIX_COLOR),
+                ChildOf(row_entity),
+            ))
+            .id();
         commands
             .entity(row_entity)
             .insert(RowParts {
@@ -1576,6 +1684,7 @@ fn populate_new_rows(
                 arrow,
                 icon,
                 label,
+                suffix,
             })
             .observe(on_row_press)
             .observe(crate::inventory_actions::on_row_context)
@@ -1592,6 +1701,7 @@ fn bind_rows(
     rows: Query<(Ref<VirtualRow>, &ChildOf, &RowParts)>,
     mut nodes: Query<&mut Node>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut fonts: Query<&mut TextFont>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1626,6 +1736,30 @@ fn bind_rows(
                 RowKey::Folder(_) => FOLDER_LABEL_COLOR,
                 RowKey::Item(_) => LABEL_COLOR,
             });
+        }
+        // A worn item's label draws bold, an unworn link italic (the
+        // reference's `getLabelStyle`); write-guarded so an unchanged style
+        // does not re-measure the text.
+        if let Ok(mut font) = fonts.get_mut(parts.label) {
+            let weight = if display.bold {
+                FontWeight::BOLD
+            } else {
+                FontWeight::NORMAL
+            };
+            if font.weight != weight {
+                font.weight = weight;
+            }
+            let style = if display.italic {
+                FontStyle::Italic
+            } else {
+                FontStyle::Normal
+            };
+            if font.style != style {
+                font.style = style;
+            }
+        }
+        if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
+            set_text(&mut text, &display.suffix);
         }
     }
 }
@@ -2184,6 +2318,7 @@ pub(crate) fn spawn_inventory_row_sample(
         RowArrow::Expanded,
         folder_icon(FolderType::Clothing, true),
         "Clothing",
+        "",
     );
     spawn_sample_row(
         commands,
@@ -2193,12 +2328,17 @@ pub(crate) fn spawn_inventory_row_sample(
         RowArrow::Leaf,
         item_icon(InventoryType::Wearable),
         "A shirt",
+        "(no copy) (worn)",
     );
     list
 }
 
-/// Spawn one static sample row (indent, arrow, icon, label) for the registry
-/// sample.
+/// Spawn one static sample row (indent, arrow, icon, label, suffix) for the
+/// registry sample.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a static sample spawner mirroring the live row's parts, each an argument"
+)]
 fn spawn_sample_row(
     commands: &mut Commands,
     parent: Entity,
@@ -2207,11 +2347,16 @@ fn spawn_sample_row(
     arrow: RowArrow,
     icon: &str,
     label: &str,
+    suffix: &str,
 ) {
     let row_entity = commands
         .spawn((
             Node {
-                height: Val::Px(ROW_HEIGHT),
+                // A *minimum*, not the live rows' fixed height: the harness
+                // sweeps the sample across large fonts and long pseudolocale
+                // strings, where the wrapped label + suffix must be allowed to
+                // grow the row instead of escaping a fixed box.
+                min_height: Val::Px(ROW_HEIGHT),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(4.0),
                 ..row(Val::Px(0.0))
@@ -2248,16 +2393,25 @@ fn spawn_sample_row(
         TextColor(LABEL_COLOR),
         ChildOf(row_entity),
     ));
+    if !suffix.is_empty() {
+        commands.spawn((
+            Text::new(cx.text(suffix)),
+            cx.font(UiFont::Sans),
+            TextColor(SUFFIX_COLOR),
+            ChildOf(row_entity),
+        ));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         DisplayRow, InventoryModel, InventoryTab, InventoryType, ItemInfo, RowArrow, RowKey,
-        depth_indent, folder_icon, item_icon,
+        depth_indent, folder_icon, item_icon, item_suffix,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{FolderInfo, FolderState, FolderType};
+    use sl_client_bevy::{FolderInfo, FolderState, FolderType, Permissions};
+    use std::collections::HashSet;
 
     /// Build a folder-info skeleton entry.
     fn folder(id: u128, parent: Option<u128>, name: &str, ty: FolderType) -> FolderInfo {
@@ -2327,7 +2481,7 @@ mod tests {
     #[test]
     fn collapsed_tree_shows_only_roots() {
         let model = sample_model();
-        let rows = model.build_rows(InventoryTab::Everything, "");
+        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory"]);
         assert_eq!(rows.first().map(|row| row.arrow), Some(RowArrow::Collapsed));
     }
@@ -2340,11 +2494,11 @@ mod tests {
         let root = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(1));
         let clothing = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
         model.expanded.insert(root);
-        let rows = model.build_rows(InventoryTab::Everything, "");
+        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing", "Objects"]);
 
         model.expanded.insert(clothing);
-        let rows = model.build_rows(InventoryTab::Everything, "");
+        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(
             names(&rows),
             vec!["My Inventory", "Clothing", "Blue shirt", "Objects"]
@@ -2365,11 +2519,11 @@ mod tests {
     fn search_keeps_the_hierarchy_to_a_match() {
         let model = sample_model();
         // Nothing expanded, but the loaded item match pulls in its ancestors.
-        let rows = model.build_rows(InventoryTab::Everything, "shirt");
+        let rows = model.build_rows(InventoryTab::Everything, "shirt", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing", "Blue shirt"]);
         // A folder-name match keeps the folder and its ancestor, but not the
         // sibling folder or the non-matching item.
-        let rows = model.build_rows(InventoryTab::Everything, "cloth");
+        let rows = model.build_rows(InventoryTab::Everything, "cloth", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing"]);
     }
 
@@ -2387,7 +2541,7 @@ mod tests {
             folder_type: FolderType::RootInventory.to_code(),
             version: 1,
         }]);
-        let rows = model.build_rows(InventoryTab::Everything, "");
+        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
         // "My Inventory" (agent root) comes before "Library", even though L < M.
         assert_eq!(names(&rows), vec!["My Inventory", "Library"]);
         let library_key =
@@ -2415,7 +2569,7 @@ mod tests {
                 wearable_type: sl_client_bevy::WearableType::Pants,
             },
         ];
-        let rows = model.build_rows(InventoryTab::Worn, "");
+        let rows = model.build_rows(InventoryTab::Worn, "", &HashSet::new());
         // Hierarchy first — the ancestors of the placed shirt, expanded — then
         // the flat fallback for the unplaced pants.
         assert_eq!(
@@ -2439,7 +2593,7 @@ mod tests {
         model.push_recent(a, "First".to_owned(), InventoryType::Object);
         model.push_recent(b, "Second".to_owned(), InventoryType::Notecard);
         model.push_recent(a, "First again".to_owned(), InventoryType::Object);
-        let rows = model.build_rows(InventoryTab::Recent, "");
+        let rows = model.build_rows(InventoryTab::Recent, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["Second", "First"]);
     }
 
@@ -2465,5 +2619,58 @@ mod tests {
     fn indent_grows_with_depth() {
         assert_eq!(depth_indent(0), 0.0);
         assert_eq!(depth_indent(2), super::INDENT_PER_DEPTH * 2.0);
+    }
+
+    /// The permission suffixes spell out each withheld owner permission, a
+    /// link is marked `(link)` instead (its permissions are the target's),
+    /// and `(worn)` trails everything.
+    #[test]
+    fn suffixes_follow_permissions_link_and_worn() {
+        // All permissions withheld: every suffix, in reference order.
+        let locked = item(1, 2, "Locked", InventoryType::Object);
+        assert_eq!(
+            item_suffix(&locked, false),
+            "(no copy) (no modify) (no transfer)"
+        );
+        assert_eq!(
+            item_suffix(&locked, true),
+            "(no copy) (no modify) (no transfer) (worn)"
+        );
+        // Full permissions: nothing but the worn marker.
+        let mut open = item(2, 2, "Open", InventoryType::Object);
+        open.permissions.owner = Permissions::COPY | Permissions::MODIFY | Permissions::TRANSFER;
+        assert_eq!(item_suffix(&open, false), "");
+        assert_eq!(item_suffix(&open, true), "(worn)");
+        // A link shows `(link)` in place of the permission suffixes.
+        let mut link = item(3, 2, "Linked", InventoryType::Wearable);
+        link.asset_type = sl_client_bevy::AssetType::Other(24);
+        assert_eq!(item_suffix(&link, false), "(link)");
+    }
+
+    /// A worn item's tree row carries the bold emphasis and the `(worn)`
+    /// suffix; an unworn sibling does not.
+    #[test]
+    fn worn_rows_are_bold_and_suffixed() {
+        let mut model = sample_model();
+        let root = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(1));
+        let clothing = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
+        model.expanded.insert(root);
+        model.expanded.insert(clothing);
+        // The shirt (item 10) is tracked worn (e.g. an attachment we attached).
+        let mut tracked = HashSet::new();
+        tracked.insert(sl_client_bevy::InventoryKey::from(
+            sl_client_bevy::Uuid::from_u128(10),
+        ));
+        let rows = model.build_rows(InventoryTab::Everything, "", &tracked);
+        let shirt = rows.iter().find(|row| row.name == "Blue shirt");
+        assert_eq!(shirt.map(|row| row.bold), Some(true));
+        assert_eq!(
+            shirt.map(|row| row.suffix.as_str()),
+            Some("(no copy) (no modify) (no transfer) (worn)")
+        );
+        // Folders stay undecorated.
+        let folder = rows.iter().find(|row| row.name == "Clothing");
+        assert_eq!(folder.map(|row| row.bold), Some(false));
+        assert_eq!(folder.map(|row| row.suffix.as_str()), Some(""));
     }
 }

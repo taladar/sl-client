@@ -230,6 +230,83 @@ static NEW_BODY_PARTS_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The **"Attach To"** submenu: every named body attachment point, in wire-id
+/// order (the reference iterates `mAttachmentPoints`, a map keyed by id, and
+/// labels each point "Name (id)"; HUD points 31–38 live in the separate
+/// [`ATTACH_TO_HUD_MENU`]). Actions carry the wire id (`attach-point-<id>`),
+/// which the dispatcher parses back into an [`AttachmentPoint`].
+static ATTACH_TO_MENU: MenuDef = MenuDef {
+    label: "Attach To",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Chest (1)", "attach-point-1")),
+        MenuItemDef::Command(MenuCommand::new("Skull (2)", "attach-point-2")),
+        MenuItemDef::Command(MenuCommand::new("Left Shoulder (3)", "attach-point-3")),
+        MenuItemDef::Command(MenuCommand::new("Right Shoulder (4)", "attach-point-4")),
+        MenuItemDef::Command(MenuCommand::new("Left Hand (5)", "attach-point-5")),
+        MenuItemDef::Command(MenuCommand::new("Right Hand (6)", "attach-point-6")),
+        MenuItemDef::Command(MenuCommand::new("Left Foot (7)", "attach-point-7")),
+        MenuItemDef::Command(MenuCommand::new("Right Foot (8)", "attach-point-8")),
+        MenuItemDef::Command(MenuCommand::new("Spine (9)", "attach-point-9")),
+        MenuItemDef::Command(MenuCommand::new("Pelvis (10)", "attach-point-10")),
+        MenuItemDef::Command(MenuCommand::new("Mouth (11)", "attach-point-11")),
+        MenuItemDef::Command(MenuCommand::new("Chin (12)", "attach-point-12")),
+        MenuItemDef::Command(MenuCommand::new("Left Ear (13)", "attach-point-13")),
+        MenuItemDef::Command(MenuCommand::new("Right Ear (14)", "attach-point-14")),
+        MenuItemDef::Command(MenuCommand::new("Left Eyeball (15)", "attach-point-15")),
+        MenuItemDef::Command(MenuCommand::new("Right Eyeball (16)", "attach-point-16")),
+        MenuItemDef::Command(MenuCommand::new("Nose (17)", "attach-point-17")),
+        MenuItemDef::Command(MenuCommand::new("R Upper Arm (18)", "attach-point-18")),
+        MenuItemDef::Command(MenuCommand::new("R Forearm (19)", "attach-point-19")),
+        MenuItemDef::Command(MenuCommand::new("L Upper Arm (20)", "attach-point-20")),
+        MenuItemDef::Command(MenuCommand::new("L Forearm (21)", "attach-point-21")),
+        MenuItemDef::Command(MenuCommand::new("Right Hip (22)", "attach-point-22")),
+        MenuItemDef::Command(MenuCommand::new("R Upper Leg (23)", "attach-point-23")),
+        MenuItemDef::Command(MenuCommand::new("R Lower Leg (24)", "attach-point-24")),
+        MenuItemDef::Command(MenuCommand::new("Left Hip (25)", "attach-point-25")),
+        MenuItemDef::Command(MenuCommand::new("L Upper Leg (26)", "attach-point-26")),
+        MenuItemDef::Command(MenuCommand::new("L Lower Leg (27)", "attach-point-27")),
+        MenuItemDef::Command(MenuCommand::new("Stomach (28)", "attach-point-28")),
+        MenuItemDef::Command(MenuCommand::new("Left Pec (29)", "attach-point-29")),
+        MenuItemDef::Command(MenuCommand::new("Right Pec (30)", "attach-point-30")),
+        MenuItemDef::Command(MenuCommand::new("Neck (39)", "attach-point-39")),
+        MenuItemDef::Command(MenuCommand::new("Avatar Center (40)", "attach-point-40")),
+        MenuItemDef::Command(MenuCommand::new("Left Ring Finger (41)", "attach-point-41")),
+        MenuItemDef::Command(MenuCommand::new(
+            "Right Ring Finger (42)",
+            "attach-point-42",
+        )),
+        MenuItemDef::Command(MenuCommand::new("Tail Base (43)", "attach-point-43")),
+        MenuItemDef::Command(MenuCommand::new("Tail Tip (44)", "attach-point-44")),
+        MenuItemDef::Command(MenuCommand::new("Left Wing (45)", "attach-point-45")),
+        MenuItemDef::Command(MenuCommand::new("Right Wing (46)", "attach-point-46")),
+        MenuItemDef::Command(MenuCommand::new("Jaw (47)", "attach-point-47")),
+        MenuItemDef::Command(MenuCommand::new("Alt Left Ear (48)", "attach-point-48")),
+        MenuItemDef::Command(MenuCommand::new("Alt Right Ear (49)", "attach-point-49")),
+        MenuItemDef::Command(MenuCommand::new("Alt Left Eye (50)", "attach-point-50")),
+        MenuItemDef::Command(MenuCommand::new("Alt Right Eye (51)", "attach-point-51")),
+        MenuItemDef::Command(MenuCommand::new("Tongue (52)", "attach-point-52")),
+        MenuItemDef::Command(MenuCommand::new("Groin (53)", "attach-point-53")),
+        MenuItemDef::Command(MenuCommand::new("Left Hind Foot (54)", "attach-point-54")),
+        MenuItemDef::Command(MenuCommand::new("Right Hind Foot (55)", "attach-point-55")),
+    ],
+};
+
+/// The **"Attach To HUD"** submenu: the eight HUD slots (wire ids 31–38). The
+/// reference labels HUD points without the id suffix.
+static ATTACH_TO_HUD_MENU: MenuDef = MenuDef {
+    label: "Attach To HUD",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Center 2", "attach-point-31")),
+        MenuItemDef::Command(MenuCommand::new("Top Right", "attach-point-32")),
+        MenuItemDef::Command(MenuCommand::new("Top", "attach-point-33")),
+        MenuItemDef::Command(MenuCommand::new("Top Left", "attach-point-34")),
+        MenuItemDef::Command(MenuCommand::new("Center", "attach-point-35")),
+        MenuItemDef::Command(MenuCommand::new("Bottom Left", "attach-point-36")),
+        MenuItemDef::Command(MenuCommand::new("Bottom", "attach-point-37")),
+        MenuItemDef::Command(MenuCommand::new("Bottom Right", "attach-point-38")),
+    ],
+};
+
 /// The context menu for a **folder** row. Reference order: the trash /
 /// lost-and-found emptiers, the New … creators, the outfit block, then the
 /// shared rename / clipboard / delete tail.
@@ -284,11 +361,7 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
                 .enabled_when(CAN_DELETE),
         ),
         MenuItemDef::Command(MenuCommand::new("Purge Item", "purge").visible_when(IN_TRASH)),
-        MenuItemDef::Command(
-            MenuCommand::new("Restore Item", "restore")
-                .visible_when(IN_TRASH)
-                .enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("Restore Item", "restore").visible_when(IN_TRASH)),
     ],
 };
 
@@ -321,11 +394,7 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
                 .enabled_when(CAN_DELETE),
         ),
         MenuItemDef::Command(MenuCommand::new("Purge Item", "purge").visible_when(IN_TRASH)),
-        MenuItemDef::Command(
-            MenuCommand::new("Restore Item", "restore")
-                .visible_when(IN_TRASH)
-                .enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("Restore Item", "restore").visible_when(IN_TRASH)),
         MenuItemDef::Separator,
         // Landmark.
         MenuItemDef::Command(MenuCommand::new("Teleport", "teleport").visible_when(IS_LANDMARK)),
@@ -419,16 +488,8 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
                 .visible_when(IS_OBJECT)
                 .enabled_when(NOT_WORN),
         ),
-        MenuItemDef::Command(
-            MenuCommand::new("Attach To", "attach-to")
-                .visible_when(IS_OBJECT)
-                .enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Attach To HUD", "attach-to-hud")
-                .visible_when(IS_OBJECT)
-                .enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::SubmenuWhen(&ATTACH_TO_MENU, IS_OBJECT),
+        MenuItemDef::SubmenuWhen(&ATTACH_TO_HUD_MENU, IS_OBJECT),
         MenuItemDef::Command(
             MenuCommand::new("Touch", "touch")
                 .visible_when(IS_OBJECT)
@@ -677,6 +738,31 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
         held.push(FOLDER_HAS_WORN);
     }
     held
+}
+
+/// The system folder a restored item of a given asset type belongs in — the
+/// reference's `LLFolderType::assetTypeToFolderType`, used by Restore Item
+/// (`LLItemBridge::restoreItem`) because the wire does not record where a
+/// trashed item used to live. Asset types without a same-named system folder
+/// map to [`FolderType::None`], which the caller resolves to the agent root.
+pub(crate) const fn default_folder_type(asset_type: AssetType) -> FolderType {
+    match asset_type {
+        AssetType::Texture => FolderType::Texture,
+        AssetType::Sound => FolderType::Sound,
+        AssetType::CallingCard => FolderType::CallingCard,
+        AssetType::Landmark => FolderType::Landmark,
+        AssetType::Clothing => FolderType::Clothing,
+        AssetType::Object => FolderType::Object,
+        AssetType::Notecard => FolderType::Notecard,
+        AssetType::ScriptText => FolderType::ScriptText,
+        AssetType::Bodypart => FolderType::Bodypart,
+        AssetType::Animation => FolderType::Animation,
+        AssetType::Gesture => FolderType::Gesture,
+        AssetType::Mesh => FolderType::Mesh,
+        AssetType::Settings => FolderType::Settings,
+        AssetType::Material => FolderType::Material,
+        _other => FolderType::None,
+    }
 }
 
 /// Whether an item can be part of an outfit: a body wearable or an attachable
@@ -1197,6 +1283,47 @@ fn handle_inventory_menu_actions(
                     commands.write(SlCommand(Command::QueryInventoryFolders));
                 }
             },
+            "restore" => {
+                // The wire does not record where a trashed row came from; the
+                // reference restores to the type's system folder
+                // (`LLItemBridge::restoreItem` via `findCategoryUUIDForType`),
+                // falling back to the agent root.
+                match &menu_target {
+                    MenuTarget::Item(item) => {
+                        // A snapshot restores to the Photo Album, not Textures
+                        // (the reference's `IT_SNAPSHOT` special case).
+                        let wanted = if item.inv_type == InventoryType::Snapshot {
+                            FolderType::SnapshotCategory
+                        } else {
+                            default_folder_type(item.asset_type)
+                        };
+                        let dest = if wanted == FolderType::None {
+                            model.agent_root()
+                        } else {
+                            model.folder_by_type(wanted).or_else(|| model.agent_root())
+                        };
+                        if let Some(dest) = dest {
+                            commands.write(SlCommand(Command::MoveInventoryItem {
+                                item_id: item.item_id,
+                                folder_id: dest,
+                                new_name: String::new(),
+                            }));
+                            query_folder_page(item.folder_id, &mut commands);
+                            query_folder_page(dest, &mut commands);
+                        }
+                    }
+                    MenuTarget::Folder(folder) => {
+                        // A folder has no typed home; it restores to the root.
+                        if let Some(root) = model.agent_root() {
+                            commands.write(SlCommand(Command::MoveInventoryFolder {
+                                folder_id: folder.folder_id,
+                                parent_id: root,
+                            }));
+                            commands.write(SlCommand(Command::QueryInventoryFolders));
+                        }
+                    }
+                }
+            }
             "empty-trash" => {
                 if let Some(trash) = model.folder_by_type(FolderType::Trash) {
                     commands.write(SlCommand(Command::PurgeInventoryDescendents(trash)));
@@ -1373,10 +1500,37 @@ fn handle_inventory_menu_actions(
                     }
                 }
             }
-            // Every other entry is a disabled placeholder that never emits.
-            _other => {}
+            // The Attach To ▸ / Attach To HUD ▸ submenus: the action names the
+            // chosen point's wire id, and the attach **replaces** what is on
+            // that point (the reference's bare-point-id semantics; Add-along
+            // is the plain "Add" entry on the default point).
+            other => {
+                if let Some(point) = attach_point_of(other)
+                    && let MenuTarget::Item(item) = &menu_target
+                {
+                    commands.write(SlCommand(Command::RezAttachment(RezAttachment {
+                        item_id: item.item_id,
+                        owner_id: identity
+                            .agent_id
+                            .map_or_else(Uuid::nil, |agent| agent.uuid()),
+                        attachment_point: point,
+                        mode: AttachmentMode::Replace,
+                        name: item.name.clone(),
+                        description: item.description.clone(),
+                    })));
+                    worn.items.insert(item.item_id);
+                }
+                // Every other entry is a disabled placeholder that never emits.
+            }
         }
     }
+}
+
+/// Parse an `attach-point-<id>` menu action back into its attachment point.
+/// `None` for any other action string.
+pub(crate) fn attach_point_of(action: &str) -> Option<AttachmentPoint> {
+    let code: u8 = action.strip_prefix("attach-point-")?.parse().ok()?;
+    Some(AttachmentPoint::from_code(code))
 }
 
 /// Seed [`WornAttachments`] from the Current Outfit Folder once its contents
@@ -1482,7 +1636,9 @@ mod tests {
             for entry in menu.items {
                 match entry {
                     MenuItemDef::Command(command) => out.push((command.label, command.action)),
-                    MenuItemDef::Submenu(sub) => walk(sub, out),
+                    MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
+                        walk(sub, out);
+                    }
                     MenuItemDef::Separator => {}
                 }
             }
@@ -1528,8 +1684,61 @@ mod tests {
             ("Edit", "edit-wearable"),
             ("Wear", "attach"),
             ("Add", "attach-add"),
-            ("Attach To", "attach-to"),
-            ("Attach To HUD", "attach-to-hud"),
+            ("Chest (1)", "attach-point-1"),
+            ("Skull (2)", "attach-point-2"),
+            ("Left Shoulder (3)", "attach-point-3"),
+            ("Right Shoulder (4)", "attach-point-4"),
+            ("Left Hand (5)", "attach-point-5"),
+            ("Right Hand (6)", "attach-point-6"),
+            ("Left Foot (7)", "attach-point-7"),
+            ("Right Foot (8)", "attach-point-8"),
+            ("Spine (9)", "attach-point-9"),
+            ("Pelvis (10)", "attach-point-10"),
+            ("Mouth (11)", "attach-point-11"),
+            ("Chin (12)", "attach-point-12"),
+            ("Left Ear (13)", "attach-point-13"),
+            ("Right Ear (14)", "attach-point-14"),
+            ("Left Eyeball (15)", "attach-point-15"),
+            ("Right Eyeball (16)", "attach-point-16"),
+            ("Nose (17)", "attach-point-17"),
+            ("R Upper Arm (18)", "attach-point-18"),
+            ("R Forearm (19)", "attach-point-19"),
+            ("L Upper Arm (20)", "attach-point-20"),
+            ("L Forearm (21)", "attach-point-21"),
+            ("Right Hip (22)", "attach-point-22"),
+            ("R Upper Leg (23)", "attach-point-23"),
+            ("R Lower Leg (24)", "attach-point-24"),
+            ("Left Hip (25)", "attach-point-25"),
+            ("L Upper Leg (26)", "attach-point-26"),
+            ("L Lower Leg (27)", "attach-point-27"),
+            ("Stomach (28)", "attach-point-28"),
+            ("Left Pec (29)", "attach-point-29"),
+            ("Right Pec (30)", "attach-point-30"),
+            ("Neck (39)", "attach-point-39"),
+            ("Avatar Center (40)", "attach-point-40"),
+            ("Left Ring Finger (41)", "attach-point-41"),
+            ("Right Ring Finger (42)", "attach-point-42"),
+            ("Tail Base (43)", "attach-point-43"),
+            ("Tail Tip (44)", "attach-point-44"),
+            ("Left Wing (45)", "attach-point-45"),
+            ("Right Wing (46)", "attach-point-46"),
+            ("Jaw (47)", "attach-point-47"),
+            ("Alt Left Ear (48)", "attach-point-48"),
+            ("Alt Right Ear (49)", "attach-point-49"),
+            ("Alt Left Eye (50)", "attach-point-50"),
+            ("Alt Right Eye (51)", "attach-point-51"),
+            ("Tongue (52)", "attach-point-52"),
+            ("Groin (53)", "attach-point-53"),
+            ("Left Hind Foot (54)", "attach-point-54"),
+            ("Right Hind Foot (55)", "attach-point-55"),
+            ("Center 2", "attach-point-31"),
+            ("Top Right", "attach-point-32"),
+            ("Top", "attach-point-33"),
+            ("Top Left", "attach-point-34"),
+            ("Center", "attach-point-35"),
+            ("Bottom Left", "attach-point-36"),
+            ("Bottom", "attach-point-37"),
+            ("Bottom Right", "attach-point-38"),
             ("Touch", "touch"),
             ("Detach From Yourself", "detach"),
             ("Apply Only To Myself", "settings-apply-local"),
@@ -1587,6 +1796,56 @@ mod tests {
             expected,
             "a folder context-menu entry moved — if intended, bless it by editing this table"
         );
+    }
+
+    /// The attach-point action strings parse back to their wire points, and
+    /// anything else parses to nothing.
+    #[test]
+    fn attach_point_actions_round_trip() {
+        use super::attach_point_of;
+        use sl_client_bevy::AttachmentPoint;
+        assert_eq!(
+            attach_point_of("attach-point-1"),
+            Some(AttachmentPoint::Chest)
+        );
+        assert_eq!(
+            attach_point_of("attach-point-35"),
+            Some(AttachmentPoint::HudCenter)
+        );
+        assert_eq!(
+            attach_point_of("attach-point-55"),
+            Some(AttachmentPoint::RightHindFoot)
+        );
+        assert_eq!(attach_point_of("attach"), None);
+        assert_eq!(attach_point_of("attach-point-x"), None);
+    }
+
+    /// Restore Item's type→system-folder mapping follows the reference's
+    /// `assetTypeToFolderType`: same-named folders for the typed assets, and
+    /// `FolderType::None` (→ agent root) for the rest.
+    #[test]
+    fn restore_maps_asset_types_to_their_system_folders() {
+        use super::default_folder_type;
+        assert_eq!(default_folder_type(AssetType::Texture), FolderType::Texture);
+        assert_eq!(
+            default_folder_type(AssetType::Landmark),
+            FolderType::Landmark
+        );
+        assert_eq!(
+            default_folder_type(AssetType::Clothing),
+            FolderType::Clothing
+        );
+        assert_eq!(
+            default_folder_type(AssetType::Bodypart),
+            FolderType::Bodypart
+        );
+        assert_eq!(
+            default_folder_type(AssetType::ScriptText),
+            FolderType::ScriptText
+        );
+        // No same-named system folder: the caller falls back to the root.
+        assert_eq!(default_folder_type(AssetType::ImageJpeg), FolderType::None);
+        assert_eq!(default_folder_type(AssetType::Other(24)), FolderType::None);
     }
 
     /// A Library item exposes no mutation capabilities, but stays copyable —

@@ -180,6 +180,11 @@ pub(crate) enum MenuItemDef {
     /// A named submenu, opened toward the inline end of its line. Recursive: a
     /// submenu is an ordinary [`MenuDef`].
     Submenu(&'static MenuDef),
+    /// A [`Submenu`](Self::Submenu) that is present only while a condition
+    /// holds — the per-type submenus of a shared context menu (the inventory
+    /// item menu's "Attach To" shows only for object rows, the way a
+    /// [`MenuCommand`]'s `visible_when` hides a line).
+    SubmenuWhen(&'static MenuDef, &'static str),
     /// A horizontal rule between two groups of entries.
     Separator,
 }
@@ -313,7 +318,7 @@ fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
             command.enabled_when != Some(NEVER_CONDITION)
                 && label_matches_filter(command.label, query)
         }
-        MenuItemDef::Submenu(sub) => {
+        MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
             label_matches_filter(sub.label, query) || subtree_matches_filter(sub, query)
         }
         MenuItemDef::Separator => false,
@@ -898,7 +903,7 @@ fn assign_jump_keys(items: &[MenuItemDef]) -> Vec<Option<(char, usize)>> {
     for item in items {
         let label = match item {
             MenuItemDef::Command(command) => command.label,
-            MenuItemDef::Submenu(sub) => sub.label,
+            MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => sub.label,
             MenuItemDef::Separator => {
                 out.push(None);
                 continue;
@@ -1064,6 +1069,19 @@ fn spawn_menu_line(
                 }
             }
         },
+        MenuItemDef::SubmenuWhen(sub, when) => {
+            if conditions.holds(Some(when)) {
+                spawn_menu_line(
+                    commands,
+                    popup,
+                    MenuItemDef::Submenu(sub),
+                    element,
+                    conditions,
+                    filter,
+                    jump,
+                );
+            }
+        }
         MenuItemDef::Separator => {
             if filter.is_none() {
                 spawn_separator_line(commands, popup);
@@ -2495,7 +2513,9 @@ mod tests {
         for item in menu.items {
             match item {
                 MenuItemDef::Command(command) => out.push((here.clone(), command.action)),
-                MenuItemDef::Submenu(sub) => out.extend(action_paths(sub, &here)),
+                MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
+                    out.extend(action_paths(sub, &here));
+                }
                 MenuItemDef::Separator => {}
             }
         }

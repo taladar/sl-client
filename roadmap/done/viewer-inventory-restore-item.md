@@ -2,7 +2,7 @@
 id: viewer-inventory-restore-item
 title: Restore Item from Trash
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — shipped
   greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions]

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 112 |
+| ready | 109 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 548 |
+| done | 551 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (112)
+## ready (109)
 
 ### viewer
 
@@ -105,8 +105,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-advanced-filters`](ready/viewer-inventory-advanced-filters.md)
   — Inventory advanced filters (type / date / worn)
-- [`viewer-inventory-attach-to-point`](ready/viewer-inventory-attach-to-point.md)
-  — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
 - [`viewer-inventory-cof-maintenance`](ready/viewer-inventory-cof-maintenance.md)
   — Maintain COF links on wear / detach (accurate worn state)
 - [`viewer-inventory-floater-menus`](ready/viewer-inventory-floater-menus.md) —
@@ -126,10 +124,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Item Open (per-type preview) + Properties floater
 - [`viewer-inventory-replace-outfit`](ready/viewer-inventory-replace-outfit.md)
   — Replace Current Outfit (whole-outfit swap)
-- [`viewer-inventory-restore-item`](ready/viewer-inventory-restore-item.md) —
-  Restore Item from Trash
-- [`viewer-inventory-row-decorations`](ready/viewer-inventory-row-decorations.md)
-  — Inventory row decorations (permissions, worn-bold)
 - [`viewer-inventory-share-picker`](ready/viewer-inventory-share-picker.md) —
   Share (give via avatar picker)
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
@@ -583,7 +577,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (548)
+## done (551)
 
 ### protocol
 
@@ -784,6 +778,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
+- [`viewer-inventory-attach-to-point`](done/viewer-inventory-attach-to-point.md)
+  — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
 - [`viewer-inventory-context-actions`](done/viewer-inventory-context-actions.md)
   — Inventory context actions + drag-and-drop (blocked by
   `viewer-inventory-folder-tree` (done))
@@ -793,6 +789,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-restore-item`](done/viewer-inventory-restore-item.md) —
+  Restore Item from Trash
+- [`viewer-inventory-row-decorations`](done/viewer-inventory-row-decorations.md)
+  — Inventory row decorations (permissions, worn-bold)
 - [`viewer-inventory-search-adopt-widget`](done/viewer-inventory-search-adopt-widget.md)
   — Adopt the reusable search-field widget in the inventory search (blocked by
   `viewer-ui-search-field` (done))
