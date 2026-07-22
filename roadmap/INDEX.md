@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 113 |
+| ready | 112 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 547 |
+| done | 548 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (113)
+## ready (112)
 
 ### viewer
 
@@ -132,8 +132,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory row decorations (permissions, worn-bold)
 - [`viewer-inventory-share-picker`](ready/viewer-inventory-share-picker.md) —
   Share (give via avatar picker)
-- [`viewer-land-context-menu`](ready/viewer-land-context-menu.md) — Land /
-  terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -585,7 +583,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (547)
+## done (548)
 
 ### protocol
 
@@ -802,6 +800,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
+- [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
+  terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))
@@ -1711,7 +1711,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-spacenav-device` (done))
 - [`viewer-land-menu-reorder-when-implemented`](deferred/viewer-land-menu-reorder-when-implemented.md)
   — Re-lay the land pie by meaning once most actions are implemented (blocked by
-  `viewer-land-context-menu`)
+  `viewer-land-context-menu` (done))
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
   — Non-goals (deferred; candidate follow-up roadmaps)
 - [`viewer-object-menu-reorder-when-implemented`](deferred/viewer-object-menu-reorder-when-implemented.md)

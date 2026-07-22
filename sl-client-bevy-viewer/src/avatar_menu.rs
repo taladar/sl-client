@@ -88,9 +88,11 @@ use crate::conversations::{ConversationKey, OpenConversation};
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
+use crate::land_menu::{OpenLandMenu, pick_land};
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
+use crate::terrain::TerrainSurface;
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 
@@ -782,8 +784,9 @@ fn update_pick_inspector(
 }
 
 /// Resolve a world right-click to its context-menu target — an avatar's pie,
-/// the in-world object pie ([`crate::object_menu`]), or an attachment pie
-/// ([`crate::attachment_menu`]) — and ask for it.
+/// the in-world object pie ([`crate::object_menu`]), an attachment pie
+/// ([`crate::attachment_menu`]), or the land pie ([`crate::land_menu`]) — and
+/// ask for it.
 ///
 /// Avatar resolution has two paths, matching the reference's "the name tag or
 /// the avatar itself":
@@ -805,9 +808,11 @@ fn update_pick_inspector(
 /// ([`ObjectPicker`]); when both an avatar and an object are hit, the **nearer**
 /// wins, so an object standing in front of an avatar gets the object pie and
 /// vice versa — and an object hit that is itself a worn (rigid) attachment gets
-/// the attachment pie rather than the object one. A **HUD** attachment under
-/// the cursor occludes the world and resolves through its own orthographic ray
-/// to the attachment-self pie.
+/// the attachment pie rather than the object one. When the ray's first hit is
+/// **bare terrain** ([`pick_land`]) nearer than any avatar, the land pie opens
+/// instead ([`crate::land_menu`]) — the reference's `PICK_LAND` outcome. A
+/// **HUD** attachment under the cursor occludes the world and resolves through
+/// its own orthographic ray to the attachment-self pie.
 ///
 /// It opens on the right-button **release** of a click, not the press: a right-
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
@@ -822,8 +827,8 @@ fn update_pick_inspector(
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion + name-tag path, the avatar-identity query, the window for the \
               cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
-              pick, the mesh-accurate avatar picker and the object picker for the world \
-              pick, and the three open-request channels"
+              pick, the mesh-accurate avatar picker, the object picker and the terrain-marker \
+              query for the world pick, and the four open-request channels"
 )]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -839,16 +844,18 @@ fn request_avatar_menu_on_right_click(
     layers: Query<(Entity, &RenderLayers)>,
     picker: AvatarPicker,
     object_picker: ObjectPicker,
+    terrain: Query<(), With<TerrainSurface>>,
     mut ray_cast: MeshRayCast,
-    // The three open-request channels, tupled into one system param to stay
+    // The four open-request channels, tupled into one system param to stay
     // within Bevy's per-system parameter limit.
     requests: (
         MessageWriter<OpenAvatarMenu>,
         MessageWriter<OpenObjectMenu>,
         MessageWriter<OpenAttachmentMenu>,
+        MessageWriter<OpenLandMenu>,
     ),
 ) {
-    let (mut requests, mut object_requests, mut attachment_requests) = requests;
+    let (mut requests, mut object_requests, mut attachment_requests, mut land_requests) = requests;
     // Track the gesture: a press starts it, motion accumulates, a release decides.
     if buttons.just_pressed(MouseButton::Right) {
         gesture.down = true;
@@ -936,6 +943,10 @@ fn request_avatar_menu_on_right_click(
             .map(|(entity, _layers)| entity)
             .collect();
         let object_hit = object_picker.pick(ray, &mut ray_cast, &hud_entities);
+        // Bare terrain as the ray's first hit: mutually exclusive with an
+        // object first-hit (same ray, same filter), so it competes only with
+        // the (occlusion-blind) avatar pick, by distance.
+        let land_hit = pick_land(ray, &mut ray_cast, &terrain, &hud_entities);
         match (avatar_hit, object_hit) {
             (avatar, Some(object))
                 if avatar
@@ -960,32 +971,44 @@ fn request_avatar_menu_on_right_click(
                 }
                 None
             }
-            (Some(avatar), _object) => match avatar.worn {
-                // The nearest posed triangle belongs to a worn rigged submesh:
-                // resolve past the avatar to the worn object (submesh → worn
-                // object → wearer) and open the attachment pie. The CPU-skinned
-                // pick carries no face / UV surface, so Touch on this path goes
-                // without one. An unresolvable worn object (already gone from
-                // the tracked set) falls back to the wearer's avatar pie.
-                Some(worn) => match object_picker.summary_of(worn) {
-                    Some(summary) => {
-                        attachment_requests.write(OpenAttachmentMenu {
-                            summary,
-                            surface: None,
-                            wearer: Some(avatar.agent),
-                            hud: false,
-                            at: cursor,
-                        });
-                        None
-                    }
+            (Some(avatar), _object)
+                if land_hit.is_none_or(|land| avatar.distance <= land.distance) =>
+            {
+                match avatar.worn {
+                    // The nearest posed triangle belongs to a worn rigged
+                    // submesh: resolve past the avatar to the worn object
+                    // (submesh → worn object → wearer) and open the attachment
+                    // pie. The CPU-skinned pick carries no face / UV surface,
+                    // so Touch on this path goes without one. An unresolvable
+                    // worn object (already gone from the tracked set) falls
+                    // back to the wearer's avatar pie.
+                    Some(worn) => match object_picker.summary_of(worn) {
+                        Some(summary) => {
+                            attachment_requests.write(OpenAttachmentMenu {
+                                summary,
+                                surface: None,
+                                wearer: Some(avatar.agent),
+                                hud: false,
+                                at: cursor,
+                            });
+                            None
+                        }
+                        None => Some(avatar.agent),
+                    },
                     None => Some(avatar.agent),
-                },
-                None => Some(avatar.agent),
-            },
-            // Nothing hit. (`(None, Some(_))` is impossible — with no avatar
-            // hit the guard on the first arm always admits the object — but the
-            // guard does not count towards exhaustiveness.)
-            (None, _object) => None,
+                }
+            }
+            // No avatar or object won — bare terrain as the ray's first hit
+            // opens the land pie. (`(None, Some(_))` cannot reach here — with
+            // no avatar hit the guard on the first arm always admits the
+            // object — so this arm is an avatar out-distanced by terrain, or
+            // nothing but possibly terrain.)
+            _no_avatar_or_object => {
+                if land_hit.is_some() {
+                    land_requests.write(OpenLandMenu { at: cursor });
+                }
+                None
+            }
         }
     };
 

@@ -67,6 +67,7 @@ mod input_context;
 mod inventory;
 mod inventory_actions;
 mod inventory_drag;
+mod land_menu;
 mod legacy_materials;
 mod lights;
 mod local_chat_input;
@@ -203,6 +204,7 @@ use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyb
 use crate::inventory::InventoryPlugin;
 use crate::inventory_actions::InventoryActionsPlugin;
 use crate::inventory_drag::InventoryDragPlugin;
+use crate::land_menu::LandMenuPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
     drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
@@ -765,6 +767,10 @@ fn run_session(
     // viewer-hud-context-menu): the self / other entry trees and their dispatch,
     // opened by right-clicking a worn attachment — in world or on a HUD point.
     .add_plugins(AttachmentMenuPlugin)
+    // The land / terrain context / pie menu (viewer-land-context-menu): the
+    // reference land entry set and its dispatch, opened by right-clicking bare
+    // terrain (the shared resolver lives with the avatar menu).
+    .add_plugins(LandMenuPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
