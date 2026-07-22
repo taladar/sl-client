@@ -35,8 +35,12 @@
 //! The placeholder sphere of a coarse-only avatar (or a `--viewer-assets`-less
 //! run) is rigid and correctly placed, so it is intersected analytically.
 //!
-//! Entry point: [`AvatarPicker::pick`]. Consumers: the avatar context menu
-//! ([`crate::avatar_menu`]); planned: inventory drag-and-drop onto an avatar.
+//! Entry point: [`AvatarPicker::pick`]. Consumers: the shared right-click
+//! resolver in [`crate::avatar_menu`], which routes a hit either to the avatar
+//! pies or — when the nearest triangle belongs to a worn rigged attachment
+//! ([`AvatarRayHit::worn`]) — to the attachment pies
+//! ([`crate::attachment_menu`]); planned: inventory drag-and-drop onto an
+//! avatar.
 //!
 //! Known approximation: the CPU skin reads only positions, joints, and
 //! weights — the render-time morph targets (breathing, body physics, P31.12a)
@@ -47,9 +51,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
-use sl_client_bevy::AgentKey;
+use sl_client_bevy::{AgentKey, ScopedObjectId};
 
 use crate::avatars::{AVATAR_SPHERE_RADIUS, AvatarPickCollider, AvatarPickTarget, AvatarSphere};
+use crate::objects::WornPickTarget;
 
 /// How far, in metres, a posed limb can plausibly reach beyond the fitted pick
 /// box's bounding sphere. The box hugs the torso (fixed reference width /
@@ -81,12 +86,20 @@ pub(crate) struct AvatarRayHit {
     pub(crate) distance: f32,
     /// Whether posed geometry or the fallback box produced the hit.
     pub(crate) accuracy: PickAccuracy,
+    /// The **worn object** the hit submesh belongs to, when the nearest
+    /// triangle came from a worn rigged attachment
+    /// ([`WornPickTarget`]) — such a pick resolves to the attachment pies
+    /// ([`crate::attachment_menu`]), not the avatar ones. `None` when the hit
+    /// is the system body, a rigid body part, the placeholder sphere, or the
+    /// box fallback.
+    pub(crate) worn: Option<ScopedObjectId>,
 }
 
 /// The outcome of ray testing one avatar's posed geometry.
 enum MeshPickOutcome {
-    /// The nearest posed-triangle intersection, in metres along the ray.
-    Hit(f32),
+    /// The nearest posed-triangle intersection, in metres along the ray,
+    /// with the worn object of the submesh it struck (if any).
+    Hit(f32, Option<ScopedObjectId>),
     /// The avatar has visible geometry and the ray hits none of it — a
     /// mesh-accurate *no pick* (the click was off the silhouette).
     Miss,
@@ -123,6 +136,7 @@ pub(crate) struct AvatarPicker<'w, 's> {
             &'static InheritedVisibility,
             Option<&'static SkinnedMesh>,
             &'static GlobalTransform,
+            Option<&'static WornPickTarget>,
         ),
         Without<AvatarPickCollider>,
     >,
@@ -153,6 +167,7 @@ impl AvatarPicker<'_, '_> {
                         agent: target.agent(),
                         distance,
                         accuracy: PickAccuracy::Mesh,
+                        worn: None,
                     },
                 );
             }
@@ -166,12 +181,13 @@ impl AvatarPicker<'_, '_> {
                 continue;
             }
             match self.nearest_part_hit(agent, ray) {
-                MeshPickOutcome::Hit(distance) => consider(
+                MeshPickOutcome::Hit(distance, worn) => consider(
                     &mut best,
                     AvatarRayHit {
                         agent,
                         distance,
                         accuracy: PickAccuracy::Mesh,
+                        worn,
                     },
                 ),
                 // Geometry exists and the ray misses it: mesh-accurate no
@@ -185,6 +201,7 @@ impl AvatarPicker<'_, '_> {
                                 agent,
                                 distance,
                                 accuracy: PickAccuracy::BoxFallback,
+                                worn: None,
                             },
                         );
                     }
@@ -197,11 +214,13 @@ impl AvatarPicker<'_, '_> {
     /// Ray test one avatar's visible mesh pieces against their **posed**
     /// world-space triangles: CPU-skin each skinned piece from its live joint
     /// palette, place each rigid piece by its (posed) `GlobalTransform`, and
-    /// return the nearest intersection.
+    /// return the nearest intersection — together with the worn object of the
+    /// piece it landed on, so a hit on a worn attachment submesh routes to the
+    /// attachment pies rather than the avatar ones.
     fn nearest_part_hit(&self, agent: AgentKey, ray: Ray3d) -> MeshPickOutcome {
-        let mut nearest: Option<f32> = None;
+        let mut nearest: Option<(f32, Option<ScopedObjectId>)> = None;
         let mut any_geometry = false;
-        for (target, mesh3d, visibility, skinned, global) in &self.parts {
+        for (target, mesh3d, visibility, skinned, global, worn) in &self.parts {
             if target.agent() != agent || !visibility.get() {
                 continue;
             }
@@ -241,11 +260,18 @@ impl AvatarPicker<'_, '_> {
             };
             any_geometry = true;
             if let Some(distance) = nearest_triangle_entry(&world_positions, mesh.indices(), ray) {
-                nearest = Some(nearest.map_or(distance, |current| current.min(distance)));
+                let candidate = (distance, worn.map(|target| target.scoped));
+                nearest = Some(nearest.map_or(candidate, |current| {
+                    if distance < current.0 {
+                        candidate
+                    } else {
+                        current
+                    }
+                }));
             }
         }
         match nearest {
-            Some(distance) => MeshPickOutcome::Hit(distance),
+            Some((distance, worn)) => MeshPickOutcome::Hit(distance, worn),
             None if any_geometry => MeshPickOutcome::Miss,
             None => MeshPickOutcome::NoGeometry,
         }
@@ -704,6 +730,40 @@ mod tests {
         assert!(
             pick_in(&mut world, past_box)?.is_none(),
             "the widened broad phase must not itself pick"
+        );
+        Ok(())
+    }
+
+    /// A hit on a submesh tagged as a worn attachment reports the worn object
+    /// (so the resolver can open the attachment pies), while an untagged part
+    /// — the system body — reports none.
+    #[test]
+    fn pick_reports_the_worn_object_of_an_attachment_submesh() -> Result<(), TestError> {
+        use sl_client_bevy::{CircuitId, RegionLocalObjectId, ScopedObjectId};
+
+        let (mut world, agent) = rigged_pick_world(Visibility::Inherited);
+        let posed = ray_towards(Vec3::new(5.0, 0.0, 10.0), Vec3::new(5.0, 0.0, 0.0))?;
+        // Untagged (a base body part): no worn object.
+        let hit = pick_in(&mut world, posed)?.ok_or("posed aim must hit")?;
+        assert_eq!(hit.agent, agent);
+        assert_eq!(hit.worn, None, "an untagged part must not report worn");
+        // Tag the part as a worn attachment submesh: the same hit now carries
+        // the worn object's identity.
+        let scoped = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId::new(42));
+        let parts: Vec<Entity> = world
+            .query_filtered::<Entity, With<AvatarPickTarget>>()
+            .iter(&world)
+            .collect();
+        for part in parts {
+            world
+                .entity_mut(part)
+                .insert(crate::objects::WornPickTarget { scoped });
+        }
+        let hit = pick_in(&mut world, posed)?.ok_or("tagged aim must hit")?;
+        assert_eq!(
+            hit.worn,
+            Some(scoped),
+            "a worn submesh hit must resolve its worn object"
         );
         Ok(())
     }

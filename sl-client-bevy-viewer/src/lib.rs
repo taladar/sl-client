@@ -31,6 +31,7 @@
 mod animations;
 mod animesh;
 mod appearance;
+mod attachment_menu;
 mod avatar_assets;
 mod avatar_menu;
 mod avatar_pick;
@@ -155,6 +156,7 @@ use crate::animesh::{
     ControlAvatarState, drive_control_avatars, ingest_object_animations, pose_control_avatars,
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
+use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatars::{
@@ -759,6 +761,10 @@ fn run_session(
     // reference object entry tree and its dispatch, opened by right-clicking an
     // in-world object (the shared resolver lives with the avatar menu).
     .add_plugins(ObjectMenuPlugin)
+    // The worn-attachment context / pie menus (viewer-attachment-context-menu,
+    // viewer-hud-context-menu): the self / other entry trees and their dispatch,
+    // opened by right-clicking a worn attachment — in world or on a HUD point.
+    .add_plugins(AttachmentMenuPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 115 |
+| ready | 113 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 545 |
+| done | 547 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (115)
+## ready (113)
 
 ### viewer
 
@@ -54,9 +54,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   antialiasing (FXAA / SMAA / TAA selection)
 - [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
   — CAS sharpening + anisotropic texture sampling
-- [`viewer-attachment-context-menu`](ready/viewer-attachment-context-menu.md) —
-  Attachment context / pie menu entries (worn on self + on others) (blocked by
-  `viewer-avatar-context-menu` (done))
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
@@ -88,8 +85,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-hud-context-menu`](ready/viewer-hud-context-menu.md) — HUD context /
-  pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
@@ -590,7 +585,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (545)
+## done (547)
 
 ### protocol
 
@@ -718,6 +713,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
+  Attachment context / pie menu entries (worn on self + on others) (blocked by
+  `viewer-avatar-context-menu` (done))
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))
@@ -767,6 +765,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-floater-basic` (done))
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
+- [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
+  pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1699,13 +1699,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-attachment-menu-reorder-when-implemented`](deferred/viewer-attachment-menu-reorder-when-implemented.md)
   — Re-lay the attachment pies by meaning once most actions are implemented
-  (blocked by `viewer-attachment-context-menu`)
+  (blocked by `viewer-attachment-context-menu` (done))
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
 - [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)
   — Re-lay the HUD pie by meaning once most actions are implemented (blocked by
-  `viewer-hud-context-menu`)
+  `viewer-hud-context-menu` (done))
 - [`viewer-input-spacenav-crossplatform`](deferred/viewer-input-spacenav-crossplatform.md)
   — SpaceNavigator support on Windows / macOS (blocked by
   `viewer-input-spacenav-device` (done))

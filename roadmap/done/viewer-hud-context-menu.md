@@ -2,7 +2,7 @@
 id: viewer-hud-context-menu
 title: HUD context / pie menu entries
 topic: viewer
-status: ready
+status: done
 origin: gap noticed reviewing the UI cluster (2026-07)
 blocked_by: [viewer-ui-radial-menu]
 refs: [viewer-ui-context-menu, viewer-object-context-menu, viewer-attachment-context-menu, viewer-hud-menu-reorder-when-implemented]
@@ -36,3 +36,17 @@ Rendered by either the radial ([[viewer-ui-radial-menu]]) or line
 
 Reference (Firestorm, read-only): `menu_pie_attachment_self.xml`,
 `lltoolpie.cpp` (dispatch), `llviewermenu.cpp` (handlers).
+
+## Done (2026-07-22)
+
+Shipped with [[viewer-attachment-context-menu]] as one attachment-self pie
+(`sl-client-bevy-viewer/src/attachment_menu.rs`), exactly as the corrected
+scope says. The right-click resolver no longer swallows a click over a HUD:
+the same orthographic HUD-camera ray the left-click touch uses
+(`ObjectPicker::pick_hud`, restricted to the HUD layer, shown geometry only
+— so only *own* HUDs, which is what makes it always the self pie) resolves
+the picked prim + surface and opens the attachment-self pie. **Drop** is
+disabled on the HUD path (`TARGET_DROPPABLE` withheld — a HUD has no world
+position to drop at); **Detach** and **Touch** work as on any own
+attachment. Address table pinned by
+`attachment_self_pie_keeps_every_address`.

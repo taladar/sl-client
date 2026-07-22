@@ -221,6 +221,23 @@ pub(crate) struct PrimFaceEntity {
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct FaceTextureDebug(pub(crate) TextureFace);
 
+/// Tags a worn **rigged** submesh with the tracked worn object its geometry
+/// belongs to.
+///
+/// A rigged submesh hangs off the wearer's body root (not its own object
+/// entity, see [`apply_rigged_attachments`]), so a hit on it cannot be walked
+/// up the entity hierarchy to a [`SceneObject`]; this component carries the
+/// identity instead. The mesh-accurate avatar pick ([`crate::avatar_pick`])
+/// reads it so a right-click on a worn mesh resolves to the **attachment**
+/// pies ([`crate::attachment_menu`], submesh → worn object → wearer) rather
+/// than the wearer's plain avatar pie — the wearer itself rides the sibling
+/// [`AvatarPickTarget`]. An animesh submesh (no wearer) is never tagged.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct WornPickTarget {
+    /// The scoped id of the worn object this submesh renders.
+    pub(crate) scoped: ScopedObjectId,
+}
+
 /// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
 /// entity.
 struct TrackedObject {
@@ -543,12 +560,17 @@ impl ObjectState {
     /// to its root: the picked prim itself (the touch / sit target), the linkset
     /// root (the derez target — take / delete / return act on roots), the
     /// combined permission flags, and whether the chain is a worn attachment
-    /// (which gets an attachment pie, not the object one).
+    /// (which gets an attachment pie — [`crate::attachment_menu`] — rather than
+    /// the object one).
     ///
     /// The flags are the **union** of the picked prim's and the root's, because
     /// the agent-relative bits (you-owner, copy) ride the root while the
-    /// touch-handler flag can sit on either. The walk is bounded like
-    /// [`in_hud_attachment`]'s, against a malformed (cyclic) parent link.
+    /// touch-handler flag can sit on either. For an attachment the walk stops at
+    /// the **attachment root** (the object carrying the attachment point), whose
+    /// parent is the avatar wearing it — surfaced as
+    /// [`wearer`](ObjectPickSummary::wearer) so the attachment pies can decide
+    /// self vs other. The walk is bounded like [`in_hud_attachment`]'s, against
+    /// a malformed (cyclic) parent link.
     pub(crate) fn pick_summary(&self, scoped: ScopedObjectId) -> Option<ObjectPickSummary> {
         let picked = self.objects.get(&scoped)?;
         let mut root_scoped = scoped;
@@ -573,6 +595,7 @@ impl ObjectState {
             root_full: root.full_key,
             flags: picked.update_flags | root.update_flags,
             attachment,
+            wearer: attachment.then_some(root.parent),
         })
     }
 }
@@ -593,8 +616,14 @@ pub(crate) struct ObjectPickSummary {
     /// The union of the picked prim's and the root's `PrimFlags` bits.
     pub(crate) flags: u32,
     /// Whether the picked chain is worn on an avatar (including HUDs) — such a
-    /// pick belongs to the attachment pies, not the object one.
+    /// pick belongs to the attachment pies ([`crate::attachment_menu`]), not the
+    /// object one.
     pub(crate) attachment: bool,
+    /// For a worn chain, the scoped id of the **avatar object** the attachment
+    /// root hangs on (its wearer), resolvable to an agent via
+    /// [`AvatarState::agent_of`](crate::avatars::AvatarState::agent_of); `None`
+    /// for an ordinary in-world object.
+    pub(crate) wearer: Option<ScopedObjectId>,
 }
 
 /// Marker for the per-object **geometry holder** entity — the child of an object
@@ -2833,6 +2862,9 @@ pub(crate) fn apply_rigged_attachments(
             &texture_entry,
             root,
             bind_agent,
+            // A worn mesh's submeshes carry their worn-object identity for the
+            // attachment pies; an animesh (`bind_agent` `None`) is not worn.
+            bind_agent.is_some().then_some(scoped),
             key,
             &mut commands,
             &mut meshes,
@@ -3003,6 +3035,7 @@ fn build_rigged_submeshes(
     texture_entry: &[u8],
     root: Entity,
     agent: Option<AgentKey>,
+    worn: Option<ScopedObjectId>,
     mesh_key: MeshKey,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -3099,6 +3132,12 @@ fn build_rigged_submeshes(
         // viewer's control-avatar exclusion from avatar picking.
         if let Some(agent) = agent {
             spawned.insert(AvatarPickTarget::new(agent));
+        }
+        // …and the worn-object identity beside it, so that same pick can route a
+        // hit on this submesh to the attachment pies (`crate::attachment_menu`)
+        // instead of the wearer's plain avatar pie.
+        if let Some(scoped) = worn {
+            spawned.insert(WornPickTarget { scoped });
         }
         face_entities.push(spawned.id());
     }

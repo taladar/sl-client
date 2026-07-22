@@ -80,6 +80,7 @@ use sl_client_bevy::{
     AgentKey, Command, MuteFlags, MuteType, SlAgentParcel, SlCommand, SlIdentity,
 };
 
+use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatar_pick::{AvatarPicker, PickAccuracy};
 use crate::avatars::{AvatarPickTarget, AvatarState};
 use crate::camera::ViewerCamera;
@@ -131,8 +132,9 @@ pub(crate) const TARGET_NOT_FRIEND: &str = "target-not-friend";
 // compass East..SouthEast).
 // ---------------------------------------------------------------------------
 
-/// The "Mute >" sub-pie of the other-avatar pie (reference slot 1 / north-east).
-static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
+/// The "Mute >" sub-pie of the other-avatar pie (reference slot 1 / north-east),
+/// shared verbatim by the attachment-other pie ([`crate::attachment_menu`]).
+pub(crate) static OTHER_MUTE_PIE: PieMenuDef = PieMenuDef {
     label: "Mute",
     entries: &[
         PieEntry {
@@ -401,8 +403,9 @@ static SELF_TAKEOFF_PIE: PieMenuDef = PieMenuDef {
     ],
 };
 
-/// The "Reset >" sub-pie of the self "Appearance >" pie.
-static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
+/// The "Reset >" sub-pie of the self "Appearance >" pie, shared verbatim by
+/// both attachment pies' reset tails ([`crate::attachment_menu`]).
+pub(crate) static SELF_RESET_PIE: PieMenuDef = PieMenuDef {
     label: "Reset",
     entries: &[
         PieEntry {
@@ -600,8 +603,11 @@ pub(crate) struct SelfGroundSit {
 ///
 /// The pie's action strings are `&'static` and cannot carry a UUID, so the target
 /// is stashed here when the menu opens and read back when an action fires. Set on
-/// every open ([`open_avatar_menu`]); a stale value between opens is harmless
-/// because no avatar-menu [`UiAction`] is emitted unless a pie is open.
+/// every open — by [`open_avatar_menu`], and by the attachment pies' opener
+/// ([`crate::attachment_menu`]), which stores the **wearer** so its
+/// avatar-derived slices dispatch through the shared handler. A stale value
+/// between opens is harmless because no avatar-menu [`UiAction`] is emitted
+/// unless a pie is open.
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub(crate) struct AvatarMenuTarget {
     /// The picked agent, or `None` before any avatar menu has opened.
@@ -775,8 +781,9 @@ fn update_pick_inspector(
     *text = Text::new(lines.join("\n"));
 }
 
-/// Resolve a world right-click to its context-menu target — an avatar's pie, or
-/// the in-world object pie ([`crate::object_menu`]) — and ask for it.
+/// Resolve a world right-click to its context-menu target — an avatar's pie,
+/// the in-world object pie ([`crate::object_menu`]), or an attachment pie
+/// ([`crate::attachment_menu`]) — and ask for it.
 ///
 /// Avatar resolution has two paths, matching the reference's "the name tag or
 /// the avatar itself":
@@ -789,12 +796,18 @@ fn update_pick_inspector(
 ///    [`AvatarPicker`]: the avatar's posed, CPU-skinned triangles decide (the
 ///    fitted box only stands in for an avatar with no visible decoded geometry
 ///    yet), so a click just *off* an avatar's silhouette picks nothing, matching
-///    the reference.
+///    the reference. A hit whose nearest triangle belongs to a **worn rigged
+///    submesh** resolves past the avatar to the worn object, which gets the
+///    attachment pie (self vs other by the wearer), as the reference dispatches
+///    (`lltoolpie.cpp` `isAttachment()`).
 ///
 /// The same world ray is also resolved to an in-world object
 /// ([`ObjectPicker`]); when both an avatar and an object are hit, the **nearer**
 /// wins, so an object standing in front of an avatar gets the object pie and
-/// vice versa.
+/// vice versa — and an object hit that is itself a worn (rigid) attachment gets
+/// the attachment pie rather than the object one. A **HUD** attachment under
+/// the cursor occludes the world and resolves through its own orthographic ray
+/// to the attachment-self pie.
 ///
 /// It opens on the right-button **release** of a click, not the press: a right-
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
@@ -809,8 +822,8 @@ fn update_pick_inspector(
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion + name-tag path, the avatar-identity query, the window for the \
               cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
-              occlusion, the mesh-accurate avatar picker and the object picker for the world \
-              pick, and the two open-request channels"
+              pick, the mesh-accurate avatar picker and the object picker for the world \
+              pick, and the three open-request channels"
 )]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -827,9 +840,15 @@ fn request_avatar_menu_on_right_click(
     picker: AvatarPicker,
     object_picker: ObjectPicker,
     mut ray_cast: MeshRayCast,
-    mut requests: MessageWriter<OpenAvatarMenu>,
-    mut object_requests: MessageWriter<OpenObjectMenu>,
+    // The three open-request channels, tupled into one system param to stay
+    // within Bevy's per-system parameter limit.
+    requests: (
+        MessageWriter<OpenAvatarMenu>,
+        MessageWriter<OpenObjectMenu>,
+        MessageWriter<OpenAttachmentMenu>,
+    ),
 ) {
+    let (mut requests, mut object_requests, mut attachment_requests) = requests;
     // Track the gesture: a press starts it, motion accumulates, a release decides.
     if buttons.just_pressed(MouseButton::Right) {
         gesture.down = true;
@@ -871,9 +890,30 @@ fn request_avatar_menu_on_right_click(
         // and do not suppress this.
         return;
     } else if pointer_over_hud(cursor, &hud_camera, &layers, &mut ray_cast) {
-        // A HUD attachment is under the cursor: it occludes the world, so no avatar
-        // pie opens behind it. (A HUD gets its own menu — see
-        // `viewer-hud-context-menu`.)
+        // A HUD attachment is under the cursor: it occludes the world (so no
+        // avatar or object pie opens behind it), and — only the agent's own
+        // HUDs being routed to the screen and shown — it gets the
+        // attachment-self pie, resolved through the same orthographic HUD ray
+        // the left-click touch uses. A HUD hit that resolves to no tracked
+        // object still consumes the click (occlusion).
+        if let Ok((hud_cam, hud_transform)) = hud_camera.single()
+            && let Ok(hud_ray) = hud_cam.viewport_to_world(hud_transform, cursor)
+        {
+            let hud_entities: HashSet<Entity> = layers
+                .iter()
+                .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
+                .map(|(entity, _layers)| entity)
+                .collect();
+            if let Some(hit) = object_picker.pick_hud(hud_ray, &mut ray_cast, &hud_entities) {
+                attachment_requests.write(OpenAttachmentMenu {
+                    summary: hit.summary,
+                    surface: Some(hit.surface),
+                    wearer: None,
+                    hud: true,
+                    at: cursor,
+                });
+            }
+        }
         return;
     } else {
         // 3. The world: resolve the ray at the cursor against both candidate
@@ -902,13 +942,50 @@ fn request_avatar_menu_on_right_click(
                     .as_ref()
                     .is_none_or(|avatar| object.distance < avatar.distance) =>
             {
-                object_requests.write(OpenObjectMenu {
-                    hit: object,
-                    at: cursor,
-                });
+                if object.summary.attachment {
+                    // A worn (rigid) attachment: the attachment pies, self vs
+                    // other decided at open time by its wearer.
+                    attachment_requests.write(OpenAttachmentMenu {
+                        summary: object.summary,
+                        surface: Some(object.surface),
+                        wearer: None,
+                        hud: false,
+                        at: cursor,
+                    });
+                } else {
+                    object_requests.write(OpenObjectMenu {
+                        hit: object,
+                        at: cursor,
+                    });
+                }
                 None
             }
-            (avatar, _object) => avatar.map(|hit| hit.agent),
+            (Some(avatar), _object) => match avatar.worn {
+                // The nearest posed triangle belongs to a worn rigged submesh:
+                // resolve past the avatar to the worn object (submesh → worn
+                // object → wearer) and open the attachment pie. The CPU-skinned
+                // pick carries no face / UV surface, so Touch on this path goes
+                // without one. An unresolvable worn object (already gone from
+                // the tracked set) falls back to the wearer's avatar pie.
+                Some(worn) => match object_picker.summary_of(worn) {
+                    Some(summary) => {
+                        attachment_requests.write(OpenAttachmentMenu {
+                            summary,
+                            surface: None,
+                            wearer: Some(avatar.agent),
+                            hud: false,
+                            at: cursor,
+                        });
+                        None
+                    }
+                    None => Some(avatar.agent),
+                },
+                None => Some(avatar.agent),
+            },
+            // Nothing hit. (`(None, Some(_))` is impossible — with no avatar
+            // hit the guard on the first arm always admits the object — but the
+            // guard does not count towards exhaustiveness.)
+            (None, _object) => None,
         }
     };
 
@@ -957,6 +1034,14 @@ fn open_avatar_menu(
 
 /// Dispatch a picked avatar-menu slice to the behaviour behind it.
 ///
+/// Also accepts the **attachment** pies' element ([`ATTACHMENT_MENU_ELEMENT`]):
+/// their avatar-derived slices (IM / Mute / Add as Friend acting on the wearer,
+/// the sit / stand chain) declare the same action names, and
+/// [`crate::attachment_menu`]'s opener stores the wearer in
+/// [`AvatarMenuTarget`], so they run through exactly this code. The
+/// attachment-specific actions (detach / drop / touch) fall through here and
+/// are matched by the attachment module's own handler instead.
+///
 /// Only the actions this viewer can honour today are matched; every other slice
 /// is a disabled placeholder that never emits, so the fall-through is the whole of
 /// the not-yet-implemented set and is intentionally silent.
@@ -969,7 +1054,7 @@ fn handle_avatar_menu_actions(
     mut conversations: MessageWriter<OpenConversation>,
 ) {
     for action in actions.read() {
-        if action.element != AVATAR_MENU_ELEMENT {
+        if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
             continue;
         }
         let Some(agent) = target.agent else {
