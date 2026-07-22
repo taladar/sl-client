@@ -39,3 +39,38 @@ inventory-collapse-all = Zwiń wszystko
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 emoji-picker-title = Emoji
+## The inventory filters floater (viewer-inventory-advanced-filters).
+
+inventory-filters-title = Filtry ekwipunku
+inventory-filter-animations = Animacje
+inventory-filter-calling-cards = Wizytówki
+inventory-filter-clothing = Ubrania
+inventory-filter-gestures = Gesty
+inventory-filter-landmarks = Landmarki
+inventory-filter-materials = Materiały
+inventory-filter-notecards = Notki
+inventory-filter-objects = Obiekty
+inventory-filter-scripts = Skrypty
+inventory-filter-sounds = Dźwięki
+inventory-filter-textures = Tekstury
+inventory-filter-snapshots = Zdjęcia
+inventory-filter-settings = Ustawienia środowiska
+inventory-filter-all = Wszystkie
+inventory-filter-none = Żadne
+inventory-filter-worn = Tylko noszone
+inventory-filter-since-login = Od zalogowania
+inventory-filter-newer-than = Nowsze niż
+inventory-filter-older-than = Starsze niż
+inventory-filter-hours-label = Godziny
+inventory-filter-days-label = Dni
+inventory-filter-reset = Resetuj
+
+## The avatar picker floater (viewer-inventory-share-picker).
+
+avatar-picker-title = Wybierz rezydenta
+avatar-picker-tab-search = Szukaj
+avatar-picker-tab-friends = Znajomi
+avatar-picker-tab-near-me = W pobliżu
+avatar-picker-go = Szukaj
+avatar-picker-ok = OK
+avatar-picker-cancel = Anuluj

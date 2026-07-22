@@ -2,7 +2,7 @@
 id: viewer-inventory-share-picker
 title: Share (give via avatar picker)
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — shipped
   greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions]
@@ -21,3 +21,10 @@ want too.
 
 Reference (Firestorm, read-only): `llavatarpicker` / `llfloateravatarpicker`,
 `llinventoryfunctions.cpp` (`LLShareInfo` / the Share flow).
+
+Shipped 2026-07-22: a reusable `avatar_picker` module (requester-tagged
+open/pick messages) with the reference's Search (AvatarPickerRequest
+UDP) / Friends / Near Me sources; Near Me lists every known avatar
+nearest-first instead of the radius slider. The inventory Share entries
+go live through it (gated `can-share`: own inventory, transferable
+items). Pay / group invites / teleport offers can reuse the picker.

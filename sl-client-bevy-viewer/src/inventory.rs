@@ -52,7 +52,7 @@ use sl_client_bevy::{
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
-use crate::menu::{MenuCommand, MenuDef, MenuItemDef};
+use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -167,6 +167,7 @@ impl Plugin for InventoryPlugin {
                     ingest_inventory,
                     bridge_tab_selection,
                     route_gear_menu,
+                    update_gear_conditions,
                     apply_ui_actions,
                     read_search_field,
                     rebuild_view,
@@ -460,25 +461,36 @@ impl InventoryModel {
         !self.requested.contains(&folder) && !self.items.contains_key(&folder)
     }
 
-    /// Flatten the model into the linear row list for a tab and a search query.
+    /// Flatten the model into the linear row list for a tab and a view spec.
     ///
-    /// The pure heart of the window: given the tab, the (possibly empty) query,
-    /// and the expand state, produce exactly the rows to draw, in order, each
-    /// resolved to its label, icon and arrow. Tested directly; the Bevy side only
-    /// renders the result.
-    pub(crate) fn build_rows(
-        &self,
-        tab: InventoryTab,
-        query: &str,
-        tracked_attachments: &HashSet<InventoryKey>,
-    ) -> Vec<DisplayRow> {
-        let needle = query.trim().to_lowercase();
-        let worn = self.worn_set(tracked_attachments);
+    /// The pure heart of the window: given the tab, the (possibly empty)
+    /// query, the sort order, the advanced filter and the expand state,
+    /// produce exactly the rows to draw, in order, each resolved to its
+    /// label, icon, decorations and arrow. Tested directly; the Bevy side
+    /// only renders the result.
+    pub(crate) fn build_rows(&self, tab: InventoryTab, spec: &ViewSpec<'_>) -> Vec<DisplayRow> {
+        let needle = spec.query.trim().to_lowercase();
+        let worn = self.worn_set(spec.tracked_attachments);
+        let filter_active = spec.filter.is_active();
+        let passes = |item: &ItemInfo| {
+            spec.filter.passes(
+                item,
+                worn.contains(&item.item_id),
+                spec.now_unix,
+                spec.login_unix,
+            )
+        };
         match tab {
-            InventoryTab::Everything if needle.is_empty() => self.tree_rows(&worn),
-            InventoryTab::Everything => self.search_rows(&needle, &worn),
-            InventoryTab::Recent => self.recent_rows(&needle, &worn),
-            InventoryTab::Worn => self.worn_rows(&needle, &worn),
+            InventoryTab::Everything if needle.is_empty() && !filter_active => {
+                self.tree_rows(&worn, spec.sort)
+            }
+            // A text search and an active filter narrow the tree the same
+            // way: matching items shown inside their expanded ancestors.
+            InventoryTab::Everything => {
+                self.filtered_rows(&needle, &worn, spec.sort, filter_active, &passes)
+            }
+            InventoryTab::Recent => self.recent_rows(&needle, &worn, filter_active, &passes),
+            InventoryTab::Worn => self.worn_rows(&needle, &worn, spec.sort, &passes),
         }
     }
 
@@ -496,12 +508,45 @@ impl InventoryModel {
     }
 
     /// The Everything tab's tree, depth-first from the roots.
-    fn tree_rows(&self, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
+    fn tree_rows(&self, worn: &HashSet<InventoryKey>, sort: SortSpec) -> Vec<DisplayRow> {
         let mut rows = Vec::new();
         for &root in &self.roots {
-            self.emit_folder(root, 0, worn, &mut rows);
+            self.emit_folder(root, 0, worn, sort, &mut rows);
         }
         rows
+    }
+
+    /// A folder's child folders in display order: name order from the index,
+    /// with the system folders stably lifted to the top when the sort asks
+    /// for it (the reference's `SO_SYSTEM_FOLDERS_TO_TOP`).
+    fn ordered_children(
+        &self,
+        folder: InventoryFolderKey,
+        sort: SortSpec,
+    ) -> Vec<InventoryFolderKey> {
+        let mut children: Vec<InventoryFolderKey> = self.children_of(folder).to_vec();
+        if sort.system_folders_to_top {
+            children.sort_by_key(|key| {
+                self.folders
+                    .get(key)
+                    .is_none_or(|info| info.folder_type == FolderType::None)
+            });
+        }
+        children
+    }
+
+    /// A folder's items in display order: the held name order, or newest
+    /// first under the date sort (the reference's `SO_DATE`, ties by name).
+    fn ordered_items(&self, folder: InventoryFolderKey, sort: SortSpec) -> Vec<&ItemInfo> {
+        let mut items: Vec<&ItemInfo> = self.items_of(folder).iter().collect();
+        if sort.by_date {
+            items.sort_by(|a, b| {
+                b.creation_date
+                    .cmp(&a.creation_date)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+        }
+        items
     }
 
     /// Emit `folder`'s row, then — if expanded — its child folders and items,
@@ -511,6 +556,7 @@ impl InventoryModel {
         folder: InventoryFolderKey,
         depth: usize,
         worn: &HashSet<InventoryKey>,
+        sort: SortSpec,
         rows: &mut Vec<DisplayRow>,
     ) {
         let expanded = self.expanded.contains(&folder);
@@ -524,10 +570,10 @@ impl InventoryModel {
             return;
         }
         let child_depth = depth.saturating_add(1);
-        for &child in self.children_of(folder) {
-            self.emit_folder(child, child_depth, worn, rows);
+        for child in self.ordered_children(folder, sort) {
+            self.emit_folder(child, child_depth, worn, sort, rows);
         }
-        for item in self.items_of(folder) {
+        for item in self.ordered_items(folder, sort) {
             rows.push(decorated_item_row(item, child_depth, worn));
         }
     }
@@ -549,20 +595,32 @@ impl InventoryModel {
         }
     }
 
-    /// The Everything tab under an active search: the folder **hierarchy**
-    /// narrowed to the branches that lead to a match — every ancestor folder of a
-    /// matching item or folder is kept and shown expanded — the way the reference
-    /// viewer filters its tree. Only loaded folders' items are searchable (an
-    /// unfetched folder's contents are not held).
-    fn search_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
+    /// The Everything tab under an active search **or filter**: the folder
+    /// **hierarchy** narrowed to the branches that lead to a match — every
+    /// ancestor folder of a matching item (or, for a pure text search, a
+    /// matching folder name) is kept and shown expanded — the way the
+    /// reference viewer filters its tree. Only loaded folders' items are
+    /// searchable (an unfetched folder's contents are not held).
+    fn filtered_rows(
+        &self,
+        needle: &str,
+        worn: &HashSet<InventoryKey>,
+        sort: SortSpec,
+        filter_active: bool,
+        passes: &dyn Fn(&ItemInfo) -> bool,
+    ) -> Vec<DisplayRow> {
+        // A folder-name hit keeps its branch only under a pure text search:
+        // with a filter active the reference shows only folders that still
+        // hold passing content (the non-empty-folders rule).
+        let folder_names_match = !needle.is_empty() && !filter_active;
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_matching_subtree(root, needle, &mut keep);
+            self.mark_matching_subtree(root, needle, folder_names_match, passes, &mut keep);
         }
         let mut rows = Vec::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_search_folder(root, 0, needle, &keep, worn, &mut rows);
+                self.emit_filtered_folder(root, 0, needle, &keep, worn, sort, passes, &mut rows);
             }
         }
         rows
@@ -575,22 +633,24 @@ impl InventoryModel {
             .is_some_and(|info| info.name.to_lowercase().contains(needle))
     }
 
-    /// Mark `folder` in `keep` if it, or anything in its subtree, matches the
-    /// query, and return whether it did — so an ancestor of a match is retained.
+    /// Mark `folder` in `keep` if it, or anything in its subtree, matches,
+    /// and return whether it did — so an ancestor of a match is retained.
     fn mark_matching_subtree(
         &self,
         folder: InventoryFolderKey,
         needle: &str,
+        folder_names_match: bool,
+        passes: &dyn Fn(&ItemInfo) -> bool,
         keep: &mut HashSet<InventoryFolderKey>,
     ) -> bool {
-        let mut any = self.folder_name_matches(folder, needle);
+        let mut any = folder_names_match && self.folder_name_matches(folder, needle);
         for &child in self.children_of(folder) {
-            if self.mark_matching_subtree(child, needle, keep) {
+            if self.mark_matching_subtree(child, needle, folder_names_match, passes, keep) {
                 any = true;
             }
         }
         for item in self.items_of(folder) {
-            if item.name.to_lowercase().contains(needle) {
+            if item_matches(item, needle, passes) {
                 any = true;
             }
         }
@@ -602,41 +662,63 @@ impl InventoryModel {
 
     /// Emit a kept folder (shown expanded) and, recursively, its kept child
     /// folders and its matching items, indented one level deeper.
-    fn emit_search_folder(
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a recursive tree emitter threading the query, filter, sort, kept-folder and \
+                  worn sets through each level"
+    )]
+    fn emit_filtered_folder(
         &self,
         folder: InventoryFolderKey,
         depth: usize,
         needle: &str,
         keep: &HashSet<InventoryFolderKey>,
         worn: &HashSet<InventoryKey>,
+        sort: SortSpec,
+        passes: &dyn Fn(&ItemInfo) -> bool,
         rows: &mut Vec<DisplayRow>,
     ) {
         rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
         let child_depth = depth.saturating_add(1);
-        for &child in self.children_of(folder) {
+        for child in self.ordered_children(folder, sort) {
             if keep.contains(&child) {
-                self.emit_search_folder(child, child_depth, needle, keep, worn, rows);
+                self.emit_filtered_folder(
+                    child,
+                    child_depth,
+                    needle,
+                    keep,
+                    worn,
+                    sort,
+                    passes,
+                    rows,
+                );
             }
         }
-        for item in self.items_of(folder) {
-            if item.name.to_lowercase().contains(needle) {
+        for item in self.ordered_items(folder, sort) {
+            if item_matches(item, needle, passes) {
                 rows.push(decorated_item_row(item, child_depth, worn));
             }
         }
     }
 
-    /// The Recent tab: the received-since-login list, filtered by the query.
-    /// A recent entry whose item is held in a loaded folder is decorated like
-    /// a tree row; one not yet loaded draws plain.
-    fn recent_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
+    /// The Recent tab: the received-since-login list, narrowed by the query
+    /// and — where the item is held — the filter. A recent entry whose item
+    /// is held in a loaded folder is decorated like a tree row; one not yet
+    /// loaded draws plain (and is hidden by an active filter, whose
+    /// dimensions it cannot answer).
+    fn recent_rows(
+        &self,
+        needle: &str,
+        worn: &HashSet<InventoryKey>,
+        filter_active: bool,
+        passes: &dyn Fn(&ItemInfo) -> bool,
+    ) -> Vec<DisplayRow> {
         self.recent
             .iter()
             .filter(|item| needle.is_empty() || item.name.to_lowercase().contains(needle))
-            .map(|item| {
-                self.find_item(item.key).map_or_else(
-                    || item_row(item.key, &item.name, item.inv_type, 0),
-                    |info| decorated_item_row(info, 0, worn),
-                )
+            .filter_map(|item| match self.find_item(item.key) {
+                Some(info) => passes(info).then(|| decorated_item_row(info, 0, worn)),
+                None => (!filter_active).then(|| item_row(item.key, &item.name, item.inv_type, 0)),
             })
             .collect()
     }
@@ -704,11 +786,12 @@ impl InventoryModel {
     }
 
     /// Emit a kept folder of the Worn tab (shown expanded) and, recursively,
-    /// its kept child folders and its worn items, filtered by the query.
+    /// its kept child folders and its worn items, narrowed by the query and
+    /// the filter.
     #[expect(
         clippy::too_many_arguments,
         reason = "a recursive tree emitter threading the worn set, the kept-folder set, the \
-                  placed-item record and the query through each level"
+                  placed-item record, the sort, the filter and the query through each level"
     )]
     fn emit_worn_folder(
         &self,
@@ -718,19 +801,29 @@ impl InventoryModel {
         keep: &HashSet<InventoryFolderKey>,
         placed: &mut HashSet<InventoryKey>,
         needle: &str,
+        sort: SortSpec,
+        passes: &dyn Fn(&ItemInfo) -> bool,
         rows: &mut Vec<DisplayRow>,
     ) {
         rows.push(self.folder_row(folder, depth, RowArrow::Expanded));
         let child_depth = depth.saturating_add(1);
-        for &child in self.children_of(folder) {
+        for child in self.ordered_children(folder, sort) {
             if keep.contains(&child) {
-                self.emit_worn_folder(child, child_depth, worn, keep, placed, needle, rows);
+                self.emit_worn_folder(
+                    child,
+                    child_depth,
+                    worn,
+                    keep,
+                    placed,
+                    needle,
+                    sort,
+                    passes,
+                    rows,
+                );
             }
         }
-        for item in self.items_of(folder) {
-            if worn.contains(&item.item_id)
-                && (needle.is_empty() || item.name.to_lowercase().contains(needle))
-            {
+        for item in self.ordered_items(folder, sort) {
+            if worn.contains(&item.item_id) && item_matches(item, needle, passes) {
                 placed.insert(item.item_id);
                 rows.push(decorated_item_row(item, child_depth, worn));
             }
@@ -742,8 +835,14 @@ impl InventoryModel {
     /// the ancestor folders that lead to it, expanded, the way the Everything
     /// search narrows the tree. A worn item whose containing folder is not yet
     /// fetched cannot be placed and is appended as a flat row instead, so
-    /// nothing worn is ever hidden. Filtered by the query.
-    fn worn_rows(&self, needle: &str, worn: &HashSet<InventoryKey>) -> Vec<DisplayRow> {
+    /// nothing worn is ever hidden. Narrowed by the query and the filter.
+    fn worn_rows(
+        &self,
+        needle: &str,
+        worn: &HashSet<InventoryKey>,
+        sort: SortSpec,
+        passes: &dyn Fn(&ItemInfo) -> bool,
+    ) -> Vec<DisplayRow> {
         let matches = |name: &str| needle.is_empty() || name.to_lowercase().contains(needle);
         let worn_keys = self.worn_item_keys();
         // The hierarchy half: folders on the path to a loaded worn item.
@@ -755,7 +854,17 @@ impl InventoryModel {
         let mut placed: HashSet<InventoryKey> = HashSet::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_worn_folder(root, 0, worn, &keep, &mut placed, needle, &mut rows);
+                self.emit_worn_folder(
+                    root,
+                    0,
+                    worn,
+                    &keep,
+                    &mut placed,
+                    needle,
+                    sort,
+                    passes,
+                    &mut rows,
+                );
             }
         }
         // The flat tail: worn items whose place in the tree is not loaded yet.
@@ -766,6 +875,54 @@ impl InventoryModel {
         }
         rows
     }
+}
+
+/// The item sort order the gear menu drives — the reference's
+/// `LLInventoryFilter::ESortOrder` bits this viewer supports. Folders are
+/// always name-sorted (the wire carries no folder dates), so the reference's
+/// `SO_FOLDERS_BY_NAME` is permanently on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SortSpec {
+    /// Items newest-first (`SO_DATE`) instead of by name.
+    pub(crate) by_date: bool,
+    /// System folders stably lifted above user folders
+    /// (`SO_SYSTEM_FOLDERS_TO_TOP`).
+    pub(crate) system_folders_to_top: bool,
+}
+
+impl Default for SortSpec {
+    /// The reference default (`InventorySortOrder` = 7): most-recent items
+    /// first, folders by name, system folders on top.
+    fn default() -> Self {
+        Self {
+            by_date: true,
+            system_folders_to_top: true,
+        }
+    }
+}
+
+/// Everything the row flattening reads beyond the model itself — the query,
+/// the tracked-attachment worn source, the sort order, the advanced filter
+/// and the two timestamps its date dimensions compare against.
+pub(crate) struct ViewSpec<'a> {
+    /// The search query (empty for none).
+    pub(crate) query: &'a str,
+    /// The viewer-tracked worn attachments
+    /// ([`crate::inventory_actions::WornAttachments`]).
+    pub(crate) tracked_attachments: &'a HashSet<InventoryKey>,
+    /// The sort order.
+    pub(crate) sort: SortSpec,
+    /// The advanced filter ([`crate::inventory_filters`]).
+    pub(crate) filter: &'a crate::inventory_filters::ItemFilter,
+    /// The current unix time, for the filter's hours/days cutoff.
+    pub(crate) now_unix: i64,
+    /// The session's login unix time, for the filter's since-login switch.
+    pub(crate) login_unix: i64,
+}
+
+/// Whether an item matches the query **and** the filter predicate.
+fn item_matches(item: &ItemInfo, needle: &str, passes: &dyn Fn(&ItemInfo) -> bool) -> bool {
+    (needle.is_empty() || item.name.to_lowercase().contains(needle)) && passes(item)
 }
 
 /// Build an item's display row at a given depth, undecorated (used where no
@@ -880,6 +1037,8 @@ struct InventoryState {
     tab: InventoryTab,
     /// The current search query.
     query: String,
+    /// The gear menu's sort order.
+    sort: SortSpec,
 }
 
 /// The flattened rows the window is currently drawing — recomputed from the
@@ -964,6 +1123,17 @@ impl InventorySelection {
     pub(crate) fn clear(&mut self) {
         self.selected.clear();
         self.anchor = None;
+    }
+
+    /// The selection when it is exactly **one** row — the toolbar + menu's
+    /// create destination (an ambiguous multi-selection falls back to the
+    /// root instead of guessing).
+    pub(crate) fn single(&self) -> Option<RowKey> {
+        if self.selected.len() == 1 {
+            self.selected.iter().copied().next()
+        } else {
+            None
+        }
     }
 }
 
@@ -1132,27 +1302,158 @@ pub(crate) enum InventoryUiAction {
 /// [`route_gear_menu`] routes its own menu and no other.
 const INVENTORY_GEAR_ELEMENT: &str = "inventory-gear";
 
+/// The condition key held while items sort by name.
+const GEAR_SORT_NAME: &str = "gear-sort-by-name";
+
+/// The condition key held while items sort newest-first.
+const GEAR_SORT_DATE: &str = "gear-sort-by-date";
+
+/// The condition key held while system folders sort to the top.
+const GEAR_SYSTEM_TOP: &str = "gear-system-folders-top";
+
+/// The condition key for "Sort Folders Always by Name" — always held, since
+/// folders are permanently name-sorted (no folder dates on the wire); the
+/// entry itself stays greyed.
+const GEAR_FOLDERS_BY_NAME: &str = "gear-folders-by-name";
+
+/// The condition key held while the filters floater is open.
+const GEAR_FILTERS_OPEN: &str = "gear-filters-open";
+
 /// The inventory window's gear (options) menu — the reference's
-/// `menu_inventory_gear_default`, on [`crate::menu`]'s reusable widget. Its
-/// label is the gear glyph (U+2699). Only the entries with a live action today
-/// are wired; the rest are a placeholder for future inventory tasks.
+/// `menu_inventory_gear_default` set (minus the Firestorm-only extras, the
+/// way the context menus omit the marketplace block), on [`crate::menu`]'s
+/// reusable widget. Its label is the gear glyph (U+2699). Entries whose
+/// feature does not exist yet keep their reference place greyed on
+/// [`UNIMPLEMENTED`](crate::avatar_menu::UNIMPLEMENTED).
 static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
     label: "\u{2699}",
     items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("New Inventory Window", "new-window")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Sort by Name", "sort-by-name").checked_when(GEAR_SORT_NAME),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sort by Most Recent", "sort-by-recent").checked_when(GEAR_SORT_DATE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sort Folders Always by Name", "sort-folders-by-name")
+                .checked_when(GEAR_FOLDERS_BY_NAME)
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sort System Folders to Top", "sort-system-folders-to-top")
+                .checked_when(GEAR_SYSTEM_TOP),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Show Filters...", "show-filters").checked_when(GEAR_FILTERS_OPEN),
+        ),
+        MenuItemDef::Command(MenuCommand::new("Reset Filters", "reset-filters")),
         MenuItemDef::Command(MenuCommand::new("Expand All Folders", "expand-all")),
         MenuItemDef::Command(MenuCommand::new("Collapse All Folders", "collapse-all")),
         MenuItemDef::Separator,
-        MenuItemDef::Command(MenuCommand::new("(more options soon)", "noop").enabled_when("never")),
+        MenuItemDef::Command(MenuCommand::new(
+            "Empty Lost And Found",
+            "empty-lost-and-found",
+        )),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Save Texture As", "save-texture")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Share", "share").enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Find Original", "find-original")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Find All Links", "find-links")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Replace Links", "replace-links")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Show Links", "filter-show-links")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Show Only Links", "filter-only-links")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Hide Links", "filter-hide-links")
+                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("Empty Trash", "empty-trash")),
     ],
 };
 
-/// Route the gear menu's picks (a [`UiAction`]) to the window's own
-/// [`InventoryUiAction`]s — the live wiring the reusable widget leaves to its
-/// host, exactly as the top menu bar wires its own picks
-/// ([`crate::menu_bar`]).
+/// The marker on the gear button's host entity, whose [`MenuConditions`] the
+/// sort / filter check marks read.
+#[derive(Component)]
+struct InventoryGearHost;
+
+/// Keep the gear host's [`MenuConditions`] current: which sort mode is
+/// active, and whether the filters floater is open.
+fn update_gear_conditions(
+    state: Res<InventoryState>,
+    filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
+    panels: Query<&UiPanelShown>,
+    mut hosts: Query<&mut MenuConditions, With<InventoryGearHost>>,
+) {
+    let filters_open = filters_ui
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
+    let mut wanted: Vec<&'static str> = Vec::new();
+    wanted.push(if state.sort.by_date {
+        GEAR_SORT_DATE
+    } else {
+        GEAR_SORT_NAME
+    });
+    if state.sort.system_folders_to_top {
+        wanted.push(GEAR_SYSTEM_TOP);
+    }
+    wanted.push(GEAR_FOLDERS_BY_NAME);
+    if filters_open {
+        wanted.push(GEAR_FILTERS_OPEN);
+    }
+    for mut conditions in &mut hosts {
+        if conditions.0 != wanted {
+            conditions.0.clone_from(&wanted);
+        }
+    }
+}
+
+/// Route the gear menu's picks (a [`UiAction`]): the expand / collapse and
+/// sort toggles act on the window state, Show / Reset Filters drive the
+/// filters floater ([`crate::inventory_filters`]), and the two emptiers issue
+/// the same purge the context menu does.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the pick stream, the \
+              window / filter state, the filters floater, the model for the emptiers, and the \
+              command / action channels"
+)]
 fn route_gear_menu(
     mut picks: MessageReader<UiAction>,
     mut actions: MessageWriter<InventoryUiAction>,
+    mut state: ResMut<InventoryState>,
+    mut filter_state: ResMut<crate::inventory_filters::InventoryFilterState>,
+    filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
+    model: Res<InventoryModel>,
+    mut panels: Query<&mut UiPanelShown>,
+    mut fields: Query<&mut EditableText>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
     for pick in picks.read() {
         if pick.element != INVENTORY_GEAR_ELEMENT {
@@ -1165,7 +1466,44 @@ fn route_gear_menu(
             "collapse-all" => {
                 actions.write(InventoryUiAction::CollapseAll);
             }
-            _ => {}
+            "sort-by-name" => {
+                state.sort.by_date = false;
+            }
+            "sort-by-recent" => {
+                state.sort.by_date = true;
+            }
+            "sort-system-folders-to-top" => {
+                state.sort.system_folders_to_top = !state.sort.system_folders_to_top;
+            }
+            "show-filters" => {
+                if let Some(ui) = &filters_ui
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "reset-filters" => {
+                crate::inventory_filters::apply_reset(
+                    &mut filter_state,
+                    filters_ui.as_deref(),
+                    &mut fields,
+                );
+            }
+            "empty-trash" => {
+                if let Some(trash) = model.folder_by_type(FolderType::Trash) {
+                    commands.write(SlCommand(Command::PurgeInventoryDescendents(trash)));
+                    commands.write(SlCommand(Command::QueryInventoryFolders));
+                    query_folder_page(trash, &mut commands);
+                }
+            }
+            "empty-lost-and-found" => {
+                if let Some(lost) = model.folder_by_type(FolderType::LostAndFound) {
+                    commands.write(SlCommand(Command::PurgeInventoryDescendents(lost)));
+                    commands.write(SlCommand(Command::QueryInventoryFolders));
+                    query_folder_page(lost, &mut commands);
+                }
+            }
+            _other => {}
         }
     }
 }
@@ -1529,26 +1867,49 @@ fn read_search_field(
 /// Recompute the flattened view whenever the model, tab or query changed, keep
 /// the list's item count in step, and reset the scroll so a shorter new list is
 /// not left scrolled past its end.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the model, the window / \
+              filter / worn state, the login clock, the UI handles and the list"
+)]
 fn rebuild_view(
     model: Res<InventoryModel>,
     state: Res<InventoryState>,
     worn: Res<crate::inventory_actions::WornAttachments>,
+    filters: Res<crate::inventory_filters::InventoryFilterState>,
+    login_time: Res<crate::inventory_filters::SessionLoginTime>,
     ui: Option<Res<InventoryUi>>,
     mut view: ResMut<InventoryView>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if !model.is_changed() && !state.is_changed() && !worn.is_changed() {
+    if !model.is_changed() && !state.is_changed() && !worn.is_changed() && !filters.is_changed() {
         return;
     }
     let Some(ui) = ui else {
         return;
     };
     // Reset the scroll only when the *content* changes wholesale — a tab switch,
-    // a new search, or an open. Expanding or collapsing a folder changes only the
-    // model, so the position is kept (the reference viewer keeps it too); the
-    // generic list clamps it if the list got shorter.
-    let reset_scroll = state.is_changed();
-    view.rows = model.build_rows(state.tab, &state.query, &worn.items);
+    // a new search, a filter edit, or an open. Expanding or collapsing a folder
+    // changes only the model, so the position is kept (the reference viewer
+    // keeps it too); the generic list clamps it if the list got shorter.
+    let reset_scroll = state.is_changed() || filters.is_changed();
+    let now_unix = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs()),
+    )
+    .unwrap_or(0);
+    view.rows = model.build_rows(
+        state.tab,
+        &ViewSpec {
+            query: &state.query,
+            tracked_attachments: &worn.items,
+            sort: state.sort,
+            filter: &filters.filter,
+            now_unix,
+            login_unix: login_time.0,
+        },
+    );
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
         if reset_scroll {
@@ -2185,12 +2546,27 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
     // panel. Wired today to the expand / collapse actions the window already has;
     // the rest of the reference's gear entries (sort, filters, new window) are a
     // placeholder for future tasks.
-    crate::menu::spawn_menu_button(
+    let gear_host = crate::menu::spawn_menu_button(
         &mut commands,
         expand_row,
         ElementCx::new(),
         &INVENTORY_GEAR_MENU,
         INVENTORY_GEAR_ELEMENT,
+    );
+    // The gear entries' check marks (sort mode, filters open) read live
+    // conditions off the host, the menu-bar pattern.
+    commands
+        .entity(gear_host)
+        .insert((MenuConditions::default(), InventoryGearHost));
+    // The reference's **+** (create) menu sits beside the gear: the Upload /
+    // New-item entries (`menu_inventory_add.xml`), targeting the selected
+    // folder. Its defs and routing live in [`crate::inventory_actions`].
+    crate::menu::spawn_menu_button(
+        &mut commands,
+        expand_row,
+        ElementCx::new(),
+        &crate::inventory_actions::INVENTORY_ADD_MENU,
+        crate::inventory_actions::INVENTORY_ADD_ELEMENT,
     );
 
     // Search field — the reusable search-field widget (`crate::ui_search`), the
@@ -2477,11 +2853,40 @@ mod tests {
         rows.iter().map(|row| row.name.as_str()).collect()
     }
 
+    /// An empty tracked-attachment set, shared by the spec helpers.
+    static EMPTY_TRACKED: std::sync::LazyLock<HashSet<sl_client_bevy::InventoryKey>> =
+        std::sync::LazyLock::new(HashSet::new);
+
+    /// Flatten with a plain spec: the given query / tracked set, name sort
+    /// (so the fixtures' alphabetical expectations hold), no filter.
+    fn build(
+        model: &InventoryModel,
+        tab: InventoryTab,
+        query: &str,
+        tracked: &HashSet<sl_client_bevy::InventoryKey>,
+    ) -> Vec<DisplayRow> {
+        let filter = crate::inventory_filters::ItemFilter::default();
+        model.build_rows(
+            tab,
+            &super::ViewSpec {
+                query,
+                tracked_attachments: tracked,
+                sort: super::SortSpec {
+                    by_date: false,
+                    system_folders_to_top: false,
+                },
+                filter: &filter,
+                now_unix: 0,
+                login_unix: 0,
+            },
+        )
+    }
+
     /// A collapsed tree shows only the root.
     #[test]
     fn collapsed_tree_shows_only_roots() {
         let model = sample_model();
-        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory"]);
         assert_eq!(rows.first().map(|row| row.arrow), Some(RowArrow::Collapsed));
     }
@@ -2494,11 +2899,11 @@ mod tests {
         let root = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(1));
         let clothing = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
         model.expanded.insert(root);
-        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing", "Objects"]);
 
         model.expanded.insert(clothing);
-        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
         assert_eq!(
             names(&rows),
             vec!["My Inventory", "Clothing", "Blue shirt", "Objects"]
@@ -2519,11 +2924,11 @@ mod tests {
     fn search_keeps_the_hierarchy_to_a_match() {
         let model = sample_model();
         // Nothing expanded, but the loaded item match pulls in its ancestors.
-        let rows = model.build_rows(InventoryTab::Everything, "shirt", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "shirt", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing", "Blue shirt"]);
         // A folder-name match keeps the folder and its ancestor, but not the
         // sibling folder or the non-matching item.
-        let rows = model.build_rows(InventoryTab::Everything, "cloth", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "cloth", &HashSet::new());
         assert_eq!(names(&rows), vec!["My Inventory", "Clothing"]);
     }
 
@@ -2541,7 +2946,7 @@ mod tests {
             folder_type: FolderType::RootInventory.to_code(),
             version: 1,
         }]);
-        let rows = model.build_rows(InventoryTab::Everything, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Everything, "", &HashSet::new());
         // "My Inventory" (agent root) comes before "Library", even though L < M.
         assert_eq!(names(&rows), vec!["My Inventory", "Library"]);
         let library_key =
@@ -2569,7 +2974,7 @@ mod tests {
                 wearable_type: sl_client_bevy::WearableType::Pants,
             },
         ];
-        let rows = model.build_rows(InventoryTab::Worn, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Worn, "", &HashSet::new());
         // Hierarchy first — the ancestors of the placed shirt, expanded — then
         // the flat fallback for the unplaced pants.
         assert_eq!(
@@ -2593,7 +2998,7 @@ mod tests {
         model.push_recent(a, "First".to_owned(), InventoryType::Object);
         model.push_recent(b, "Second".to_owned(), InventoryType::Notecard);
         model.push_recent(a, "First again".to_owned(), InventoryType::Object);
-        let rows = model.build_rows(InventoryTab::Recent, "", &HashSet::new());
+        let rows = build(&model, InventoryTab::Recent, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["Second", "First"]);
     }
 
@@ -2619,6 +3024,144 @@ mod tests {
     fn indent_grows_with_depth() {
         assert_eq!(depth_indent(0), 0.0);
         assert_eq!(depth_indent(2), super::INDENT_PER_DEPTH * 2.0);
+    }
+
+    /// **The gear menu's entry table, pinned** (the menu-address convention:
+    /// moving an entry must be a deliberate edit here).
+    #[test]
+    fn gear_menu_keeps_every_entry() {
+        let mut entries = Vec::new();
+        for item in super::INVENTORY_GEAR_MENU.items {
+            if let crate::menu::MenuItemDef::Command(command) = item {
+                entries.push((command.label, command.action));
+            }
+        }
+        let expected = vec![
+            ("New Inventory Window", "new-window"),
+            ("Sort by Name", "sort-by-name"),
+            ("Sort by Most Recent", "sort-by-recent"),
+            ("Sort Folders Always by Name", "sort-folders-by-name"),
+            ("Sort System Folders to Top", "sort-system-folders-to-top"),
+            ("Show Filters...", "show-filters"),
+            ("Reset Filters", "reset-filters"),
+            ("Expand All Folders", "expand-all"),
+            ("Collapse All Folders", "collapse-all"),
+            ("Empty Lost And Found", "empty-lost-and-found"),
+            ("Save Texture As", "save-texture"),
+            ("Share", "share"),
+            ("Find Original", "find-original"),
+            ("Find All Links", "find-links"),
+            ("Replace Links", "replace-links"),
+            ("Show Links", "filter-show-links"),
+            ("Show Only Links", "filter-only-links"),
+            ("Hide Links", "filter-hide-links"),
+            ("Empty Trash", "empty-trash"),
+        ];
+        assert_eq!(
+            entries, expected,
+            "a gear-menu entry moved — if intended, bless it by editing this table"
+        );
+    }
+
+    /// The date sort puts newer items first (ties by name), and the
+    /// system-folders-to-top sort lifts typed folders above user folders
+    /// while keeping name order within each group.
+    #[test]
+    fn sorting_orders_items_and_folders() {
+        let mut model = InventoryModel::default();
+        model.merge_folders(
+            &[
+                folder(1, None, "My Inventory", FolderType::RootInventory),
+                folder(2, Some(1), "Aardvark", FolderType::None),
+                folder(3, Some(1), "Clothing", FolderType::Clothing),
+            ],
+            false,
+        );
+        let root = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(1));
+        let mut old_item = item(10, 1, "Old thing", InventoryType::Object);
+        old_item.creation_date = 100;
+        let mut new_item = item(11, 1, "New thing", InventoryType::Object);
+        new_item.creation_date = 200;
+        model.set_items(root, &[old_item, new_item]);
+        model.expanded.insert(root);
+
+        // Name sort, no system-top: alphabetical folders, alphabetical items.
+        let filter = crate::inventory_filters::ItemFilter::default();
+        let spec = |sort: super::SortSpec| super::ViewSpec {
+            query: "",
+            tracked_attachments: &EMPTY_TRACKED,
+            sort,
+            filter: &filter,
+            now_unix: 0,
+            login_unix: 0,
+        };
+        let rows = model.build_rows(
+            InventoryTab::Everything,
+            &spec(super::SortSpec {
+                by_date: false,
+                system_folders_to_top: false,
+            }),
+        );
+        assert_eq!(
+            names(&rows),
+            vec![
+                "My Inventory",
+                "Aardvark",
+                "Clothing",
+                "New thing",
+                "Old thing"
+            ]
+        );
+        // Date sort + system folders on top: Clothing lifts above Aardvark,
+        // the newer item leads.
+        let rows = model.build_rows(
+            InventoryTab::Everything,
+            &spec(super::SortSpec {
+                by_date: true,
+                system_folders_to_top: true,
+            }),
+        );
+        assert_eq!(
+            names(&rows),
+            vec![
+                "My Inventory",
+                "Clothing",
+                "Aardvark",
+                "New thing",
+                "Old thing"
+            ]
+        );
+    }
+
+    /// An active type filter narrows the tree like a search: passing items
+    /// keep their expanded ancestor chain, everything else is hidden.
+    #[test]
+    fn type_filter_narrows_the_tree() {
+        let mut model = sample_model();
+        let objects = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(3));
+        model.set_items(objects, &[item(11, 3, "A box", InventoryType::Object)]);
+        // Nothing expanded: the filter still finds the loaded items.
+        let mut only_objects = crate::inventory_filters::TypeFilterSet::none();
+        only_objects.toggle(crate::inventory_filters::TypeFilter::Object);
+        let filter = crate::inventory_filters::ItemFilter {
+            types: only_objects,
+            ..crate::inventory_filters::ItemFilter::default()
+        };
+        let spec = super::ViewSpec {
+            query: "",
+            tracked_attachments: &EMPTY_TRACKED,
+            sort: super::SortSpec {
+                by_date: false,
+                system_folders_to_top: false,
+            },
+            filter: &filter,
+            now_unix: 0,
+            login_unix: 0,
+        };
+        let rows = model.build_rows(InventoryTab::Everything, &spec);
+        // The shirt (a wearable) and its Clothing branch are gone; the box
+        // and its ancestors remain.
+        assert_eq!(names(&rows), vec!["My Inventory", "Objects", "A box"]);
     }
 
     /// The permission suffixes spell out each withheld owner permission, a
@@ -2661,7 +3204,7 @@ mod tests {
         tracked.insert(sl_client_bevy::InventoryKey::from(
             sl_client_bevy::Uuid::from_u128(10),
         ));
-        let rows = model.build_rows(InventoryTab::Everything, "", &tracked);
+        let rows = build(&model, InventoryTab::Everything, "", &tracked);
         let shirt = rows.iter().find(|row| row.name == "Blue shirt");
         assert_eq!(shirt.map(|row| row.bold), Some(true));
         assert_eq!(

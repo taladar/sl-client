@@ -35,6 +35,7 @@ mod attachment_menu;
 mod avatar_assets;
 mod avatar_menu;
 mod avatar_pick;
+mod avatar_picker;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
@@ -67,6 +68,7 @@ mod input_context;
 mod inventory;
 mod inventory_actions;
 mod inventory_drag;
+mod inventory_filters;
 mod land_menu;
 mod legacy_materials;
 mod lights;
@@ -160,6 +162,7 @@ use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_menu::AvatarMenuPlugin;
+use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
     annotate_avatar_distances, apply_avatar_appearance, apply_avatar_bake_textures,
@@ -204,6 +207,7 @@ use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyb
 use crate::inventory::InventoryPlugin;
 use crate::inventory_actions::InventoryActionsPlugin;
 use crate::inventory_drag::InventoryDragPlugin;
+use crate::inventory_filters::InventoryFiltersPlugin;
 use crate::land_menu::LandMenuPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
@@ -793,6 +797,8 @@ fn run_session(
     .add_plugins(InventoryPlugin)
     .add_plugins(InventoryActionsPlugin)
     .add_plugins(InventoryDragPlugin)
+    .add_plugins(InventoryFiltersPlugin)
+    .add_plugins(AvatarPickerPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the

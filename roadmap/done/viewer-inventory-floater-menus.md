@@ -2,7 +2,7 @@
 id: viewer-inventory-floater-menus
 title: Inventory floater menus (gear options + create/New menu)
 topic: viewer
-status: ready
+status: done
 origin: follow-up noted while shipping viewer-ui-menu-search (2026-07-20)
 blocked_by: [viewer-ui-menu-bar]
 refs: [viewer-inventory-context-actions]
@@ -39,3 +39,16 @@ the floater-level toolbar menus, not the item context menu.
 
 Reference (Firestorm, read-only): `menu_inventory_gear_default.xml`,
 `menu_inventory_add.xml`, `indra/newview/llpanelmaininventory.{h,cpp}`.
+
+Shipped 2026-07-22: the gear menu carries the reference entry set (minus
+the Firestorm-only extras, like the context menus omit the marketplace
+block) — live: both sort modes, system-folders-to-top, Show/Reset
+Filters, expand/collapse, Empty Trash / Lost And Found; greyed
+(`UNIMPLEMENTED`): New Inventory Window (no multi-window), Sort Folders
+Always by Name (checked — folders are always name-sorted; the wire
+carries no folder dates), Save Texture As / Share / Find
+Original+Links / Replace Links, and the link-visibility trio. The +
+menu ships the full `menu_inventory_add.xml` set with the four creators
+live; the Upload / Material / Settings entries stay greyed for their
+own tasks, and the wearable creators go live with
+[[viewer-inventory-new-wearables]].

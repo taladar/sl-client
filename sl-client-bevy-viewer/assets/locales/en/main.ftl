@@ -164,3 +164,38 @@ bottom-toolbar-people = People
 # bar that will sit above the button row).
 bottom-toolbar-conversations = Conversations
 bottom-toolbar-camera = Camera
+## The inventory filters floater (viewer-inventory-advanced-filters).
+
+inventory-filters-title = Inventory Filters
+inventory-filter-animations = Animations
+inventory-filter-calling-cards = Calling cards
+inventory-filter-clothing = Clothing
+inventory-filter-gestures = Gestures
+inventory-filter-landmarks = Landmarks
+inventory-filter-materials = Materials
+inventory-filter-notecards = Notecards
+inventory-filter-objects = Objects
+inventory-filter-scripts = Scripts
+inventory-filter-sounds = Sounds
+inventory-filter-textures = Textures
+inventory-filter-snapshots = Snapshots
+inventory-filter-settings = Settings
+inventory-filter-all = All
+inventory-filter-none = None
+inventory-filter-worn = Worn only
+inventory-filter-since-login = Since login
+inventory-filter-newer-than = Newer than
+inventory-filter-older-than = Older than
+inventory-filter-hours-label = Hours
+inventory-filter-days-label = Days
+inventory-filter-reset = Reset
+
+## The avatar picker floater (viewer-inventory-share-picker).
+
+avatar-picker-title = Choose Resident
+avatar-picker-tab-search = Search
+avatar-picker-tab-friends = Friends
+avatar-picker-tab-near-me = Near me
+avatar-picker-go = Go
+avatar-picker-ok = OK
+avatar-picker-cancel = Cancel

@@ -134,6 +134,10 @@ pub(crate) const CAN_PASTE_LINK: &str = "can-paste-link";
 /// The target can be deleted (moved to the Trash).
 pub(crate) const CAN_DELETE: &str = "can-delete";
 
+/// The target can be shared (given to another avatar via the picker): own
+/// inventory, and for an item one the owner may transfer.
+pub(crate) const CAN_SHARE: &str = "can-share";
+
 /// New-item entries (New Folder / Script / Notecard / Gesture) apply — the
 /// target folder is writable.
 pub(crate) const CAN_CREATE: &str = "can-create";
@@ -230,6 +234,76 @@ static NEW_BODY_PARTS_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The `element` the inventory **+ (create)** menu attributes its picks to.
+pub(crate) const INVENTORY_ADD_ELEMENT: &str = "inventory-add";
+
+/// The + menu's Upload submenu — every uploader is a future task
+/// (`viewer-image-upload`, `viewer-mesh-*`), kept greyed in reference order.
+static UPLOAD_MENU: MenuDef = MenuDef {
+    label: "Upload",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Image...", "upload-image")
+                .accel("Ctrl+U")
+                .enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sound...", "upload-sound").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Animation...", "upload-animation").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Model...", "upload-model").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Material...", "upload-material").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Bulk...", "upload-bulk").enabled_when(UNIMPLEMENTED),
+        ),
+    ],
+};
+
+/// The + menu's New Settings submenu — environment-settings creation is a
+/// future task, kept greyed in reference order.
+static NEW_SETTINGS_MENU: MenuDef = MenuDef {
+    label: "New Settings",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("New Sky", "new-sky").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(
+            MenuCommand::new("New Water", "new-water").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("New Day Cycle", "new-daycycle").enabled_when(UNIMPLEMENTED),
+        ),
+    ],
+};
+
+/// The inventory window's **+ (create)** menu — the reference's
+/// `menu_inventory_add.xml` in its order: the Upload submenu, the New …
+/// creators, the wearable submenus, then Shop. Creation targets the selected
+/// folder (or the root); [`handle_inventory_add_actions`] routes the picks.
+pub(crate) static INVENTORY_ADD_MENU: MenuDef = MenuDef {
+    label: "+",
+    items: &[
+        MenuItemDef::Submenu(&UPLOAD_MENU),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("New Folder", "new-folder")),
+        MenuItemDef::Command(MenuCommand::new("New Script", "new-script")),
+        MenuItemDef::Command(MenuCommand::new("New Notecard", "new-notecard")),
+        MenuItemDef::Command(MenuCommand::new("New Gesture", "new-gesture")),
+        MenuItemDef::Command(
+            MenuCommand::new("New Material", "new-material").enabled_when(UNIMPLEMENTED),
+        ),
+        MenuItemDef::Submenu(&NEW_CLOTHES_MENU),
+        MenuItemDef::Submenu(&NEW_BODY_PARTS_MENU),
+        MenuItemDef::Submenu(&NEW_SETTINGS_MENU),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("Shop...", "shop").enabled_when(UNIMPLEMENTED)),
+    ],
+};
+
 /// The **"Attach To"** submenu: every named body attachment point, in wire-id
 /// order (the reference iterates `mAttachmentPoints`, a map keyed by id, and
 /// labels each point "Name (id)"; HUD points 31–38 live in the separate
@@ -313,7 +387,7 @@ static ATTACH_TO_HUD_MENU: MenuDef = MenuDef {
 pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
     label: "Folder",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
         MenuItemDef::Command(
             MenuCommand::new("Empty Trash", "empty-trash").visible_when(IS_TRASH_FOLDER),
         ),
@@ -371,7 +445,7 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
 pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
     label: "Item",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
         MenuItemDef::Command(MenuCommand::new("Open", "open").enabled_when(UNIMPLEMENTED)),
         MenuItemDef::Command(
             MenuCommand::new("Properties", "properties").enabled_when(UNIMPLEMENTED),
@@ -665,6 +739,9 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
     if facts.in_library || item.permissions.owner.contains(Permissions::COPY) {
         held.push(CAN_COPY);
     }
+    if mutable && item.permissions.owner.contains(Permissions::TRANSFER) {
+        held.push(CAN_SHARE);
+    }
     if facts.clipboard_has_entry && mutable {
         held.push(CAN_PASTE);
         held.push(CAN_PASTE_LINK);
@@ -717,6 +794,7 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
     let mutable = !facts.in_library;
     if mutable {
         held.push(CAN_CREATE);
+        held.push(CAN_SHARE);
         // Only a plain user folder may be renamed / cut / deleted; the system
         // folders (Trash, Clothing, the root, …) keep their role.
         if folder.folder_type == FolderType::None {
@@ -1183,8 +1261,10 @@ fn handle_inventory_menu_actions(
     mut worn: ResMut<WornAttachments>,
     mut gestures: ResMut<ActiveGestures>,
     mut rename: ResMut<crate::inventory::InlineRename>,
+    mut pending_share: ResMut<PendingShare>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut conversations: MessageWriter<OpenConversation>,
+    mut picker_opens: MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for action in actions.read() {
@@ -1196,6 +1276,12 @@ fn handle_inventory_menu_actions(
         };
         let dest = destination_folder(&menu_target);
         match action.action {
+            "share" => {
+                pending_share.target = Some(menu_target.clone());
+                picker_opens.write(crate::avatar_picker::OpenAvatarPicker {
+                    requester: SHARE_REQUESTER,
+                });
+            }
             "rename" => {
                 // The tree edits the label in place ([`crate::inventory`]'s
                 // inline rename).
@@ -1338,50 +1424,14 @@ fn handle_inventory_menu_actions(
                     query_folder_page(lost, &mut commands);
                 }
             }
-            "new-folder" => {
-                // The UDP create lets the viewer pick the id, so the fresh
-                // folder can be put straight into **inline rename** (the
-                // reference's new-folder-starts-editing behaviour) once the
-                // refreshed skeleton shows it under its (expanded) parent.
-                let folder_id = InventoryFolderKey::from(Uuid::new_v4());
-                commands.write(SlCommand(Command::CreateInventoryFolder {
-                    folder_id,
-                    parent_id: dest,
-                    folder_type: FolderType::None,
-                    name: "New Folder".to_owned(),
-                }));
-                commands.write(SlCommand(Command::QueryInventoryFolders));
-                ui_actions.write(crate::inventory::InventoryUiAction::ExpandFolder(dest));
-                rename.pending = Some(RowKey::Folder(folder_id));
-            }
-            "new-script" => {
-                commands.write(SlCommand(Command::CreateScript {
-                    folder_id: dest,
-                    name: "New Script".to_owned(),
-                    description: String::new(),
-                    next_owner_mask: NEXT_OWNER_DEFAULT,
-                    language: ScriptLanguage::Lsl,
-                }));
-            }
-            "new-notecard" => {
-                commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
-                    folder_id: dest,
-                    next_owner_mask: NEXT_OWNER_DEFAULT,
-                    asset_type: AssetType::Notecard,
-                    inv_type: InventoryType::Notecard,
-                    name: "New Note".to_owned(),
-                    ..NewInventoryItem::default()
-                })));
-            }
-            "new-gesture" => {
-                commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
-                    folder_id: dest,
-                    next_owner_mask: NEXT_OWNER_DEFAULT,
-                    asset_type: AssetType::Gesture,
-                    inv_type: InventoryType::Gesture,
-                    name: "New Gesture".to_owned(),
-                    ..NewInventoryItem::default()
-                })));
+            "new-folder" | "new-script" | "new-notecard" | "new-gesture" => {
+                dispatch_create(
+                    action.action,
+                    dest,
+                    &mut commands,
+                    &mut ui_actions,
+                    &mut rename,
+                );
             }
             "teleport" => {
                 if let MenuTarget::Item(item) = &menu_target {
@@ -1533,6 +1583,137 @@ pub(crate) fn attach_point_of(action: &str) -> Option<AttachmentPoint> {
     Some(AttachmentPoint::from_code(code))
 }
 
+/// Issue the create commands for a New Folder / Script / Notecard / Gesture
+/// action into `dest` — shared by the folder context menu and the toolbar's
+/// **+** menu. Returns whether the action was one of the creators.
+fn dispatch_create(
+    action: &str,
+    dest: InventoryFolderKey,
+    commands: &mut MessageWriter<SlCommand>,
+    ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
+    rename: &mut crate::inventory::InlineRename,
+) -> bool {
+    match action {
+        "new-folder" => {
+            // The UDP create lets the viewer pick the id, so the fresh
+            // folder can be put straight into **inline rename** (the
+            // reference's new-folder-starts-editing behaviour) once the
+            // refreshed skeleton shows it under its (expanded) parent.
+            let folder_id = InventoryFolderKey::from(Uuid::new_v4());
+            commands.write(SlCommand(Command::CreateInventoryFolder {
+                folder_id,
+                parent_id: dest,
+                folder_type: FolderType::None,
+                name: "New Folder".to_owned(),
+            }));
+            commands.write(SlCommand(Command::QueryInventoryFolders));
+            ui_actions.write(crate::inventory::InventoryUiAction::ExpandFolder(dest));
+            rename.pending = Some(RowKey::Folder(folder_id));
+            true
+        }
+        "new-script" => {
+            commands.write(SlCommand(Command::CreateScript {
+                folder_id: dest,
+                name: "New Script".to_owned(),
+                description: String::new(),
+                next_owner_mask: NEXT_OWNER_DEFAULT,
+                language: ScriptLanguage::Lsl,
+            }));
+            true
+        }
+        "new-notecard" => {
+            commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
+                folder_id: dest,
+                next_owner_mask: NEXT_OWNER_DEFAULT,
+                asset_type: AssetType::Notecard,
+                inv_type: InventoryType::Notecard,
+                name: "New Note".to_owned(),
+                ..NewInventoryItem::default()
+            })));
+            true
+        }
+        "new-gesture" => {
+            commands.write(SlCommand(Command::CreateInventoryItem(NewInventoryItem {
+                folder_id: dest,
+                next_owner_mask: NEXT_OWNER_DEFAULT,
+                asset_type: AssetType::Gesture,
+                inv_type: InventoryType::Gesture,
+                name: "New Gesture".to_owned(),
+                ..NewInventoryItem::default()
+            })));
+            true
+        }
+        _other => false,
+    }
+}
+
+/// Route the toolbar **+** menu's picks: a create action lands in the
+/// **selected** folder — the selected folder row itself, a selected item's
+/// containing folder — or the agent root when nothing is selected, the
+/// reference's behaviour for the add menu.
+fn handle_inventory_add_actions(
+    mut actions: MessageReader<UiAction>,
+    model: Res<InventoryModel>,
+    selection: Res<InventorySelection>,
+    mut rename: ResMut<crate::inventory::InlineRename>,
+    mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for action in actions.read() {
+        if action.element != INVENTORY_ADD_ELEMENT {
+            continue;
+        }
+        let dest = selection
+            .single()
+            .and_then(|key| match key {
+                RowKey::Folder(folder) => Some(folder),
+                RowKey::Item(item) => model.find_item(item).map(|info| info.folder_id),
+            })
+            .filter(|folder| !model.is_library(*folder))
+            .or_else(|| model.agent_root());
+        let Some(dest) = dest else {
+            continue;
+        };
+        dispatch_create(
+            action.action,
+            dest,
+            &mut commands,
+            &mut ui_actions,
+            &mut rename,
+        );
+    }
+}
+
+/// The pending Share flow: the rows chosen when Share was picked, awaiting
+/// the avatar picker's choice.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingShare {
+    /// The snapshotted share source, or `None` when no Share is in flight.
+    pub(crate) target: Option<MenuTarget>,
+}
+
+/// The avatar-picker requester tag the Share flow uses.
+const SHARE_REQUESTER: &str = "inventory-share";
+
+/// Complete a Share when the avatar picker confirms: give the stashed item /
+/// folder to the chosen avatar (the same wire path as drag-to-give).
+fn handle_share_picks(
+    mut picks: MessageReader<crate::avatar_picker::AvatarPicked>,
+    mut pending: ResMut<PendingShare>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for pick in picks.read() {
+        if pick.requester != SHARE_REQUESTER {
+            continue;
+        }
+        if let Some(target) = pending.target.take()
+            && let Some(give) = crate::inventory_drag::give_command(&target, false, pick.agent)
+        {
+            commands.write(SlCommand(give));
+        }
+    }
+}
+
 /// Seed [`WornAttachments`] from the Current Outfit Folder once its contents
 /// load: a COF **link** whose asset id names an object item marks that item
 /// worn. Cheap and idempotent — recomputed only when the model changes.
@@ -1565,9 +1746,16 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<InventoryClipboard>()
             .init_resource::<WornAttachments>()
             .init_resource::<ActiveGestures>()
+            .init_resource::<PendingShare>()
             .add_systems(
                 Update,
-                (handle_inventory_menu_actions, seed_worn_from_cof).chain(),
+                (
+                    handle_inventory_menu_actions,
+                    handle_inventory_add_actions,
+                    handle_share_picks,
+                    seed_worn_from_cof,
+                )
+                    .chain(),
             );
     }
 }
@@ -1796,6 +1984,90 @@ mod tests {
             expected,
             "a folder context-menu entry moved — if intended, bless it by editing this table"
         );
+    }
+
+    /// **The + (create) menu's entry table, pinned.** As the context menus.
+    #[test]
+    fn add_menu_keeps_every_entry() {
+        let expected: Vec<(&str, &str)> = vec![
+            ("Image...", "upload-image"),
+            ("Sound...", "upload-sound"),
+            ("Animation...", "upload-animation"),
+            ("Model...", "upload-model"),
+            ("Material...", "upload-material"),
+            ("Bulk...", "upload-bulk"),
+            ("New Folder", "new-folder"),
+            ("New Script", "new-script"),
+            ("New Notecard", "new-notecard"),
+            ("New Gesture", "new-gesture"),
+            ("New Material", "new-material"),
+            ("New Shirt", "new-shirt"),
+            ("New Pants", "new-pants"),
+            ("New Shoes", "new-shoes"),
+            ("New Socks", "new-socks"),
+            ("New Jacket", "new-jacket"),
+            ("New Skirt", "new-skirt"),
+            ("New Gloves", "new-gloves"),
+            ("New Undershirt", "new-undershirt"),
+            ("New Underpants", "new-underpants"),
+            ("New Alpha Mask", "new-alpha"),
+            ("New Tattoo", "new-tattoo"),
+            ("New Universal", "new-universal"),
+            ("New Physics", "new-physics"),
+            ("New Shape", "new-shape"),
+            ("New Skin", "new-skin"),
+            ("New Hair", "new-hair"),
+            ("New Eyes", "new-eyes"),
+            ("New Sky", "new-sky"),
+            ("New Water", "new-water"),
+            ("New Day Cycle", "new-daycycle"),
+            ("Shop...", "shop"),
+        ];
+        assert_eq!(
+            entries(&super::INVENTORY_ADD_MENU),
+            expected,
+            "a + (create) menu entry moved — if intended, bless it by editing this table"
+        );
+    }
+
+    /// Share is enabled for own transferable items and own folders, withheld
+    /// in the Library and for no-transfer items.
+    #[test]
+    fn share_follows_transfer_and_library() {
+        use super::CAN_SHARE;
+        let transferable = item(
+            1,
+            InventoryType::Notecard,
+            AssetType::Notecard,
+            Permissions::TRANSFER.bits(),
+        );
+        let held = item_conditions(&transferable, ItemMenuFacts::default());
+        assert!(held.contains(&CAN_SHARE));
+
+        let no_transfer = item(2, InventoryType::Notecard, AssetType::Notecard, 0);
+        let held = item_conditions(&no_transfer, ItemMenuFacts::default());
+        assert!(!held.contains(&CAN_SHARE));
+
+        let held = item_conditions(
+            &transferable,
+            ItemMenuFacts {
+                in_library: true,
+                ..ItemMenuFacts::default()
+            },
+        );
+        assert!(!held.contains(&CAN_SHARE));
+
+        let user_folder = folder(3, FolderType::None);
+        let held = folder_conditions(&user_folder, FolderMenuFacts::default());
+        assert!(held.contains(&CAN_SHARE));
+        let held = folder_conditions(
+            &user_folder,
+            FolderMenuFacts {
+                in_library: true,
+                ..FolderMenuFacts::default()
+            },
+        );
+        assert!(!held.contains(&CAN_SHARE));
     }
 
     /// The attach-point action strings parse back to their wire points, and

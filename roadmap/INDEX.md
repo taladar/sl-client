@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 109 |
+| ready | 106 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 551 |
+| done | 554 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (109)
+## ready (106)
 
 ### viewer
 
@@ -103,13 +103,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
   (done))
-- [`viewer-inventory-advanced-filters`](ready/viewer-inventory-advanced-filters.md)
-  — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-cof-maintenance`](ready/viewer-inventory-cof-maintenance.md)
   — Maintain COF links on wear / detach (accurate worn state)
-- [`viewer-inventory-floater-menus`](ready/viewer-inventory-floater-menus.md) —
-  Inventory floater menus (gear options + create/New menu) (blocked by
-  `viewer-ui-menu-bar` (done))
 - [`viewer-inventory-folder-deep-copy`](ready/viewer-inventory-folder-deep-copy.md)
   — Folder Copy / Paste (recursive deep copy)
 - [`viewer-inventory-gallery`](ready/viewer-inventory-gallery.md) — Inventory
@@ -124,8 +119,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Item Open (per-type preview) + Properties floater
 - [`viewer-inventory-replace-outfit`](ready/viewer-inventory-replace-outfit.md)
   — Replace Current Outfit (whole-outfit swap)
-- [`viewer-inventory-share-picker`](ready/viewer-inventory-share-picker.md) —
-  Share (give via avatar picker)
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -577,7 +570,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (551)
+## done (554)
 
 ### protocol
 
@@ -778,11 +771,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
+- [`viewer-inventory-advanced-filters`](done/viewer-inventory-advanced-filters.md)
+  — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-attach-to-point`](done/viewer-inventory-attach-to-point.md)
   — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
 - [`viewer-inventory-context-actions`](done/viewer-inventory-context-actions.md)
   — Inventory context actions + drag-and-drop (blocked by
   `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-floater-menus`](done/viewer-inventory-floater-menus.md) —
+  Inventory floater menus (gear options + create/New menu) (blocked by
+  `viewer-ui-menu-bar` (done))
 - [`viewer-inventory-folder-tree`](done/viewer-inventory-folder-tree.md) —
   Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`
   (done))
@@ -798,6 +796,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-search-field` (done))
 - [`viewer-inventory-search-filter`](done/viewer-inventory-search-filter.md) —
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-share-picker`](done/viewer-inventory-share-picker.md) —
+  Share (give via avatar picker)
 - [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /

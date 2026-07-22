@@ -1332,6 +1332,32 @@ impl AvatarState {
         self.names.get(&agent).map(String::as_str)
     }
 
+    /// Every avatar this viewer currently knows in-world, with the anchor
+    /// entity whose transform places it — full objects first, then the
+    /// coarse-only dots. The avatar picker's Near Me tab reads this.
+    pub(crate) fn known_agents(&self) -> Vec<(AgentKey, Entity)> {
+        let mut agents: Vec<(AgentKey, Entity)> = self
+            .objects
+            .iter()
+            .map(|(agent, entities)| (*agent, entities.anchor))
+            .collect();
+        for (agent, entities) in &self.coarse {
+            if !self.objects.contains_key(agent) {
+                agents.push((*agent, entities.anchor));
+            }
+        }
+        agents
+    }
+
+    /// The anchor entity of an agent's in-world presence (a full object
+    /// preferred over a coarse dot), if any.
+    pub(crate) fn root_entity_of(&self, agent: AgentKey) -> Option<Entity> {
+        self.objects
+            .get(&agent)
+            .or_else(|| self.coarse.get(&agent))
+            .map(|entities| entities.anchor)
+    }
+
     /// Spawn the floating name-tag text node for `agent`, anchored to `anchor`
     /// and floating `tag_height` metres above it.
     fn spawn_label(

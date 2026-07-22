@@ -385,6 +385,27 @@ impl FriendsModel {
         self.friends.contains_key(&FriendKey::from(agent.uuid()))
     }
 
+    /// The whole roster as `(agent, display label)` pairs, name order — the
+    /// avatar picker's Friends tab reads this. A friend whose name has not
+    /// resolved yet labels as a provisional id fragment.
+    pub(crate) fn roster(&self) -> Vec<(AgentKey, String)> {
+        let mut entries: Vec<(AgentKey, String)> = self
+            .friends
+            .keys()
+            .map(|id| {
+                let agent = AgentKey::from(*id);
+                let label = self
+                    .names
+                    .get(&agent)
+                    .cloned()
+                    .unwrap_or_else(|| format!("({id})"));
+                (agent, label)
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.1.to_lowercase());
+        entries
+    }
+
     /// The friends whose name is not yet resolved — the set to request names for.
     fn unnamed(&self) -> Vec<AgentKey> {
         self.friends
