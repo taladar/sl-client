@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 11 |
+| ideas | 23 |
 | ready | 156 |
 | blocked | 119 |
 | in-progress | 4 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 563 |
 | deferred | 16 |
 | wont-do | 5 |
-| **total** | **884** |
+| **total** | **896** |
 
-## ideas (11)
+## ideas (23)
 
 ### viewer
 
@@ -46,6 +46,30 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   backup export / import (glTF-based)
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
+- [`viewer-perf-avatar-ground-probe`](ideas/viewer-perf-avatar-ground-probe.md)
+  — Avatar ground probe — stop per-frame full-scene raycasts
+- [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
+  — Chat transcript via virtual list — stop re-shaping the whole history
+- [`viewer-perf-flexi-settle-lod`](ideas/viewer-perf-flexi-settle-lod.md) —
+  Flexi prims — settle detection, distance LOD, stop per-frame re-upload
+- [`viewer-perf-frame-churn-cleanups`](ideas/viewer-perf-frame-churn-cleanups.md)
+  — Small per-frame churn cleanups (throttles + scratch reuse)
+- [`viewer-perf-gpu-particles`](ideas/viewer-perf-gpu-particles.md) —
+  GPU-instanced particle rendering
+- [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
+  — Don't rebuild the inventory view while the floater is closed
+- [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
+  — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-run-condition-gating`](ideas/viewer-perf-run-condition-gating.md)
+  — Gate idle systems with run conditions (pause off-screen/inactive work)
+- [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
+  — Solve each avatar skeleton once per frame unless an adjuster needs two
+- [`viewer-perf-terse-update-fast-path`](ideas/viewer-perf-terse-update-fast-path.md)
+  — Motion-only fast path for terse object updates
+- [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
+  Pause off-view texture animations, resume phase-exact
+- [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
+  — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
 ### chat
