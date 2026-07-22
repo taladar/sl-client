@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 99 |
-| blocked | 80 |
+| ready | 104 |
+| blocked | 86 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 561 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **776** |
+| **total** | **787** |
 
 ## ideas (5)
 
@@ -42,18 +42,27 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (99)
+## ready (104)
+
+### protocol
+
+- [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
+  sl-marketplace crate — SLM DirectDelivery JSON transport
 
 ### viewer
 
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
+- [`viewer-about-landmark-floater`](ready/viewer-about-landmark-floater.md) —
+  About Landmark floater — full detail view
 - [`viewer-ambient-occlusion`](ready/viewer-ambient-occlusion.md) — Screen-space
   ambient occlusion
 - [`viewer-antialiasing-post`](ready/viewer-antialiasing-post.md) — Post-process
   antialiasing (FXAA / SMAA / TAA selection)
 - [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
   — CAS sharpening + anisotropic texture sampling
+- [`viewer-appearance-editor-shell`](ready/viewer-appearance-editor-shell.md) —
+  Appearance editor shell — wearable editing mode, params, save
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
@@ -74,6 +83,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
+- [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
+  the chat display windows
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
@@ -85,6 +96,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-hover-tooltips`](ready/viewer-hover-tooltips.md) — In-world hover
+  tooltips (object / avatar / land inspectors)
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
@@ -103,8 +116,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
   (done))
-- [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
-  — Inventory marketplace operations
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -199,6 +210,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](ready/viewer-social-profiles.md) — Avatar profiles
   — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
+  Texture preview floater — full reference feature set
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
   Automatic (luminance-driven) exposure for the tone mapper
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
@@ -280,10 +293,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (80)
+## blocked (86)
 
 ### viewer
 
+- [`viewer-appearance-editor-bodyparts`](blocked/viewer-appearance-editor-bodyparts.md)
+  — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
+  `viewer-appearance-editor-shell`)
+- [`viewer-appearance-editor-clothing`](blocked/viewer-appearance-editor-clothing.md)
+  — Clothing-layer editors — params, fabric textures, tint (blocked by
+  `viewer-appearance-editor-shell`)
 - [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
   `viewer-name-tags-display-names`)
@@ -298,6 +317,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
   Inventory / teleport offers + friendship / group invites (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-edit-face-selection`](blocked/viewer-edit-face-selection.md) — Select
+  Face tool — per-face selection for texture edits (blocked by
+  `viewer-object-selection-core`)
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
@@ -327,9 +349,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
+- [`viewer-inspector-popups`](blocked/viewer-inspector-popups.md) — Avatar /
+  object inspector popups from clickable chat names (blocked by
+  `viewer-url-linkification`)
 - [`viewer-inventory-give-via-profile`](blocked/viewer-inventory-give-via-profile.md)
   — Give inventory by dropping onto a profile (blocked by
   `viewer-social-profiles`)
+- [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
+  — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
@@ -418,13 +445,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-parameter-editing`](blocked/viewer-prim-parameter-editing.md) —
   Prim parameter editing (blocked by `viewer-object-edit-floater-shell`)
 - [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
-  texture / material editing (blocked by `viewer-object-edit-floater-shell`)
+  texture / material editing (blocked by `viewer-object-edit-floater-shell`,
+  `viewer-edit-face-selection`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-preferences-floater`)
 - [`viewer-region-options-estate`](blocked/viewer-region-options-estate.md) —
   Region / Estate floater — estate tab (blocked by
+  `viewer-region-options-debug`)
+- [`viewer-region-options-general`](blocked/viewer-region-options-general.md) —
+  Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug`)
 - [`viewer-region-options-terrain`](blocked/viewer-region-options-terrain.md) —
   Region / Estate floater — terrain tab (blocked by
