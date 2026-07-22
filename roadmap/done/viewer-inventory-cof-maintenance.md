@@ -2,7 +2,7 @@
 id: viewer-inventory-cof-maintenance
 title: Maintain COF links on wear / detach (accurate worn state)
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — worn
   detection shipped best-effort
 refs: [viewer-inventory-context-actions, viewer-inventory-replace-outfit]
@@ -27,3 +27,14 @@ keep the legacy fallbacks.
 
 Reference (Firestorm, read-only): `llappearancemgr.cpp` (`updateCOF`,
 `addCOFItemLink` / `removeCOFItemLinks`).
+
+Shipped 2026-07-22: every wear / add / attach-to-point / drag-self-wear
+now links the item into the COF (dropping the replaced slot's links,
+never double-linking); take-off / detach / remove-from-outfit /
+replace-outfit drop the matching links (batched RemoveInventoryItems),
+each followed by a COF page re-query; login reconciliation stays the
+existing seed from the COF's object links. Legacy fallbacks kept; all
+of it no-ops on a grid without a located COF. Not yet written: the
+reference's "@type*100+order" link-description layering strings —
+clothing layer order within a type is not preserved across viewers
+yet.

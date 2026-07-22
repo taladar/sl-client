@@ -593,7 +593,7 @@ fn on_tile_context(
         selection.select_single(tile.0, 0);
     }
     let _opened = crate::inventory_actions::open_inventory_context_menu(
-        tile.0,
+        &[tile.0],
         press.pointer_location.position,
         &model,
         &clipboard,

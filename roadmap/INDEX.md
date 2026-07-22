@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 102 |
+| ready | 99 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 558 |
+| done | 561 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (102)
+## ready (99)
 
 ### viewer
 
@@ -103,14 +103,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
   (done))
-- [`viewer-inventory-cof-maintenance`](ready/viewer-inventory-cof-maintenance.md)
-  — Maintain COF links on wear / detach (accurate worn state)
 - [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations
-- [`viewer-inventory-multi-select-actions`](ready/viewer-inventory-multi-select-actions.md)
-  — Multi-selection context actions + drag
-- [`viewer-inventory-replace-outfit`](ready/viewer-inventory-replace-outfit.md)
-  — Replace Current Outfit (whole-outfit swap)
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -562,7 +556,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (558)
+## done (561)
 
 ### protocol
 
@@ -767,6 +761,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-attach-to-point`](done/viewer-inventory-attach-to-point.md)
   — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
+- [`viewer-inventory-cof-maintenance`](done/viewer-inventory-cof-maintenance.md)
+  — Maintain COF links on wear / detach (accurate worn state)
 - [`viewer-inventory-context-actions`](done/viewer-inventory-context-actions.md)
   — Inventory context actions + drag-and-drop (blocked by
   `viewer-inventory-folder-tree` (done))
@@ -780,6 +776,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-gallery`](done/viewer-inventory-gallery.md) — Inventory
   gallery view (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-multi-select-actions`](done/viewer-inventory-multi-select-actions.md)
+  — Multi-selection context actions + drag
 - [`viewer-inventory-new-wearables`](done/viewer-inventory-new-wearables.md) —
   New Clothes / New Body Parts creation
 - [`viewer-inventory-open-and-properties`](done/viewer-inventory-open-and-properties.md)
@@ -787,6 +785,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-replace-outfit`](done/viewer-inventory-replace-outfit.md) —
+  Replace Current Outfit (whole-outfit swap)
 - [`viewer-inventory-restore-item`](done/viewer-inventory-restore-item.md) —
   Restore Item from Trash
 - [`viewer-inventory-row-decorations`](done/viewer-inventory-row-decorations.md)

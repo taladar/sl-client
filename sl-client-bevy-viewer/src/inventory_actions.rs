@@ -387,7 +387,7 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
         MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Replace Current Outfit", "replace-outfit")
-                .enabled_when(UNIMPLEMENTED),
+                .enabled_when(FOLDER_HAS_WEARABLES),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Add To Current Outfit", "add-to-outfit")
@@ -578,13 +578,14 @@ pub(crate) enum MenuTarget {
     Folder(FolderInfo),
 }
 
-/// The row the currently-open inventory context menu acts on. Set on every
-/// open; a stale value between opens is harmless because the menu's element is
-/// only emitted while a menu is open.
+/// The rows the currently-open inventory context menu acts on — one snapshot
+/// per selected row (view order), a single entry for a plain right-click.
+/// Set on every open; a stale value between opens is harmless because the
+/// menu's element is only emitted while a menu is open.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct InventoryMenuTarget {
-    /// The snapshotted row, or `None` before any menu has opened.
-    pub(crate) target: Option<MenuTarget>,
+    /// The snapshotted rows, empty before any menu has opened.
+    pub(crate) targets: Vec<MenuTarget>,
 }
 
 /// Whether a clipboard entry pastes as a copy or a move.
@@ -596,13 +597,13 @@ pub(crate) enum ClipboardMode {
     Cut,
 }
 
-/// The inventory clipboard: at most one copied / cut row (the tree has no
-/// multi-select yet). Paste consumes a Cut entry; a Copy entry can be pasted
-/// repeatedly, matching the reference.
+/// The inventory clipboard: the copied / cut rows of one Copy / Cut action
+/// (the whole selection). Paste consumes a Cut entry; a Copy entry can be
+/// pasted repeatedly, matching the reference.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct InventoryClipboard {
-    /// The held entry, or `None` when the clipboard is empty.
-    pub(crate) entry: Option<(ClipboardMode, MenuTarget)>,
+    /// The held entries, or `None` when the clipboard is empty.
+    pub(crate) entry: Option<(ClipboardMode, Vec<MenuTarget>)>,
 }
 
 /// The attachments this viewer session knows to be worn, by inventory item id.
@@ -947,6 +948,178 @@ pub(crate) fn outfit_remove_commands(
     (commands, untracked)
 }
 
+/// The commands that **replace** the current outfit with a folder's contents
+/// (the reference's `wearInventoryCategory` with `append == false`): body
+/// parts are kept unless the folder supplies a replacement of that slot,
+/// clothing is replaced wholesale by the folder's layers, worn attachments
+/// not in the folder are detached and the folder's objects are added
+/// alongside. Returns the commands, the attachment ids now worn, and the
+/// item ids no longer worn (clothing and attachments).
+pub(crate) fn outfit_replace_commands(
+    items: &[ItemInfo],
+    current: &[Wearable],
+    cof_items: &[ItemInfo],
+    tracked_attachments: &HashSet<InventoryKey>,
+    own_agent: Option<AgentKey>,
+) -> (Vec<Command>, Vec<InventoryKey>, Vec<InventoryKey>) {
+    let mut commands = Vec::new();
+    let mut no_longer_worn = Vec::new();
+
+    // The new legacy wear-set: the folder's wearables, with each body-part
+    // slot falling back to what is currently worn there.
+    let folder_wearables: Vec<(&ItemInfo, WearableType)> = items
+        .iter()
+        .filter(|item| item.inv_type == InventoryType::Wearable)
+        .map(|item| (item, wearable_type_of(item)))
+        .collect();
+    let mut set: Vec<Wearable> = Vec::new();
+    for (item, slot) in &folder_wearables {
+        if set.iter().any(|worn| worn.item_id == item.item_id) {
+            continue;
+        }
+        if slot.is_body_part() && set.iter().any(|worn| worn.wearable_type == *slot) {
+            continue;
+        }
+        set.push(Wearable {
+            item_id: item.item_id,
+            asset_id: None,
+            wearable_type: *slot,
+        });
+    }
+    for worn in current {
+        if worn.wearable_type.is_body_part()
+            && !set
+                .iter()
+                .any(|new| new.wearable_type == worn.wearable_type)
+        {
+            // A body part the folder does not replace stays on — the avatar
+            // is never left without one.
+            set.push(*worn);
+        } else if !set.iter().any(|new| new.item_id == worn.item_id) {
+            // Everything else (a clothing layer not re-worn) comes off.
+            no_longer_worn.push(worn.item_id);
+        }
+    }
+    commands.push(Command::SetWearing(set));
+    commands.push(Command::RequestWearables);
+
+    // Attachments: the currently worn set is the viewer-tracked ids plus the
+    // COF's object links.
+    let mut worn_attachments: HashSet<InventoryKey> = tracked_attachments.clone();
+    for link in cof_items {
+        if matches!(
+            link.inv_type,
+            InventoryType::Object | InventoryType::Attachment
+        ) {
+            worn_attachments.insert(InventoryKey::from(link.asset_id));
+        }
+    }
+    let folder_attachments: Vec<&ItemInfo> = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.inv_type,
+                InventoryType::Object | InventoryType::Attachment
+            )
+        })
+        .collect();
+    let keep: HashSet<InventoryKey> = folder_attachments.iter().map(|item| item.item_id).collect();
+    for worn in &worn_attachments {
+        if !keep.contains(worn) {
+            commands.push(Command::DetachAttachmentIntoInventory { item_id: *worn });
+            no_longer_worn.push(*worn);
+        }
+    }
+    let mut now_worn = Vec::new();
+    let to_attach: Vec<RezAttachment> = folder_attachments
+        .iter()
+        .filter(|item| !worn_attachments.contains(&item.item_id))
+        .map(|item| {
+            now_worn.push(item.item_id);
+            RezAttachment {
+                item_id: item.item_id,
+                owner_id: own_agent.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                attachment_point: AttachmentPoint::Default,
+                mode: AttachmentMode::Add,
+                name: item.name.clone(),
+                description: item.description.clone(),
+            }
+        })
+        .collect();
+    if !to_attach.is_empty() {
+        commands.push(Command::RezAttachments {
+            compound_id: TransactionId::from(Uuid::new_v4()),
+            detach: DetachOrder::Keep,
+            attachments: to_attach,
+        });
+    }
+    (commands, now_worn, no_longer_worn)
+}
+
+/// The item ids a legacy Wear of `item` replaces (the same slot's current
+/// wearables) — the links the COF must drop when the wear commits.
+pub(crate) fn replaced_by_wear(current: &[Wearable], item: &ItemInfo) -> Vec<InventoryKey> {
+    if item.inv_type != InventoryType::Wearable {
+        return Vec::new();
+    }
+    let slot = wearable_type_of(item);
+    current
+        .iter()
+        .filter(|worn| worn.wearable_type == slot && worn.item_id != item.item_id)
+        .map(|worn| worn.item_id)
+        .collect()
+}
+
+/// The COF-link commands after wearing `item`: drop the `replaced` items'
+/// links, then link the item into the COF (skipped when already linked) —
+/// the reference's `addCOFItemLink` (the layer-ordering description string
+/// is not written yet). No-ops on a grid without a located COF.
+pub(crate) fn cof_wear_link_commands(
+    cof: Option<InventoryFolderKey>,
+    cof_items: &[ItemInfo],
+    item: &ItemInfo,
+    replaced: &[InventoryKey],
+) -> Vec<Command> {
+    let Some(cof) = cof else {
+        return Vec::new();
+    };
+    let mut out = cof_remove_link_commands(cof_items, replaced);
+    let already_linked = cof_items
+        .iter()
+        .any(|link| link.asset_id == item.item_id.uuid());
+    if !already_linked {
+        out.push(Command::LinkInventoryItem(NewInventoryLink {
+            folder_id: cof,
+            linked_id: InventoryItemOrFolderKey::Item(item.item_id),
+            // `AT_LINK` (24): an item link.
+            link_type: AssetType::Other(24),
+            inv_type: item.inv_type,
+            name: item.name.clone(),
+            description: String::new(),
+        }));
+    }
+    out
+}
+
+/// The COF-link removals for taken-off / detached items: one batch
+/// `RemoveInventoryItems` of every COF link whose target is in `removed` —
+/// the reference's `removeCOFItemLinks`.
+pub(crate) fn cof_remove_link_commands(
+    cof_items: &[ItemInfo],
+    removed: &[InventoryKey],
+) -> Vec<Command> {
+    let links: Vec<InventoryKey> = cof_items
+        .iter()
+        .filter(|link| removed.iter().any(|target| link.asset_id == target.uuid()))
+        .map(|link| link.item_id)
+        .collect();
+    if links.is_empty() {
+        Vec::new()
+    } else {
+        vec![Command::RemoveInventoryItems(links)]
+    }
+}
+
 /// The wear-set the legacy `AgentIsNowWearing` should carry after wearing
 /// `item`: the current set with the same slot **replaced** (`add == false`, the
 /// Wear action and any body part) or with the item **added alongside**
@@ -1010,31 +1183,40 @@ pub(crate) fn wear_commands(
 // Opening: right-click on a row / the list background.
 // ---------------------------------------------------------------------------
 
-/// Resolve a row key to a snapshot + conditions and open its context menu —
-/// shared by the tree rows and the gallery tiles. Returns `None` when the
+/// The conditions common to **every** selected row: the intersection, in
+/// the first row's order — the reference's multi-select gating (Delete only
+/// when everything is deletable, the type blocks only on a uniform
+/// selection). A multi-selection additionally withholds the single-row
+/// affordances (rename).
+pub(crate) fn intersect_conditions(sets: &[Vec<&'static str>]) -> Vec<&'static str> {
+    let Some(first) = sets.first() else {
+        return Vec::new();
+    };
+    let multi = sets.len() > 1;
+    first
+        .iter()
+        .copied()
+        .filter(|condition| sets.iter().all(|set| set.contains(condition)))
+        .filter(|condition| !(multi && *condition == CAN_RENAME))
+        .collect()
+}
+
+/// Resolve one row key to its snapshot and condition set. `None` when the
 /// key cannot be resolved in the model (e.g. a Recent entry whose folder is
 /// not loaded).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the resolution reads every fact source the conditions draw on: the model, the \
-              clipboard, the tracked worn / gesture sets, and the two output channels"
-)]
-pub(crate) fn open_inventory_context_menu(
+fn resolve_row_target(
     key: RowKey,
-    at: Vec2,
     model: &InventoryModel,
     clipboard: &InventoryClipboard,
     worn: &WornAttachments,
     gestures: &ActiveGestures,
-    target: &mut InventoryMenuTarget,
-    menus: &mut MessageWriter<OpenContextMenu>,
-) -> Option<()> {
+) -> Option<(MenuTarget, Vec<&'static str>)> {
     let trash = model.folder_by_type(FolderType::Trash);
     let in_trash = |folder: InventoryFolderKey| {
         trash.is_some_and(|trash_key| model.is_within(folder, trash_key))
     };
     let clipboard_has_entry = clipboard.entry.is_some();
-    let (menu, conditions, snapshot) = match key {
+    match key {
         RowKey::Folder(key) => {
             let info = model.folder_info(key)?.clone();
             let subtree = model.subtree_items(key);
@@ -1049,11 +1231,8 @@ pub(crate) fn open_inventory_context_menu(
                     is_worn(item, model.worn_wearables(), model.cof_items(), &worn.items)
                 }),
             };
-            (
-                &INVENTORY_FOLDER_MENU,
-                folder_conditions(&info, facts),
-                MenuTarget::Folder(info),
-            )
+            let conditions = folder_conditions(&info, facts);
+            Some((MenuTarget::Folder(info), conditions))
         }
         RowKey::Item(key) => {
             let info = model.find_item(key)?.clone();
@@ -1069,14 +1248,55 @@ pub(crate) fn open_inventory_context_menu(
                 ),
                 gesture_active: gestures.items.contains(&info.item_id),
             };
-            (
-                &INVENTORY_ITEM_MENU,
-                item_conditions(&info, facts),
-                MenuTarget::Item(info),
-            )
+            let conditions = item_conditions(&info, facts);
+            Some((MenuTarget::Item(info), conditions))
         }
+    }
+}
+
+/// Resolve a set of row keys (the clicked row, or the whole selection) to
+/// snapshots + intersected conditions and open the matching context menu —
+/// shared by the tree rows and the gallery tiles. An all-folder selection
+/// opens the folder menu; anything else the item menu. Returns `None` when
+/// nothing resolved.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the resolution reads every fact source the conditions draw on: the model, the \
+              clipboard, the tracked worn / gesture sets, and the two output channels"
+)]
+pub(crate) fn open_inventory_context_menu(
+    keys: &[RowKey],
+    at: Vec2,
+    model: &InventoryModel,
+    clipboard: &InventoryClipboard,
+    worn: &WornAttachments,
+    gestures: &ActiveGestures,
+    target: &mut InventoryMenuTarget,
+    menus: &mut MessageWriter<OpenContextMenu>,
+) -> Option<()> {
+    let mut snapshots = Vec::new();
+    let mut condition_sets = Vec::new();
+    for &key in keys {
+        if let Some((snapshot, conditions)) =
+            resolve_row_target(key, model, clipboard, worn, gestures)
+        {
+            snapshots.push(snapshot);
+            condition_sets.push(conditions);
+        }
+    }
+    if snapshots.is_empty() {
+        return None;
+    }
+    let all_folders = snapshots
+        .iter()
+        .all(|snapshot| matches!(snapshot, MenuTarget::Folder(_)));
+    let menu = if all_folders {
+        &INVENTORY_FOLDER_MENU
+    } else {
+        &INVENTORY_ITEM_MENU
     };
-    target.target = Some(snapshot);
+    let conditions = intersect_conditions(&condition_sets);
+    target.targets = snapshots;
     menus.write(OpenContextMenu {
         menu,
         at,
@@ -1120,13 +1340,19 @@ pub(crate) fn on_row_context(
     // Consume the press so the viewport's background handler does not also open
     // the root menu underneath this row's.
     press.propagate(false);
-    // The usual list semantics: a right-click on an unselected row selects it
-    // (a right-click inside the selection keeps the selection).
+    // The usual list semantics: a right-click on an unselected row selects it;
+    // a right-click **inside** the selection keeps it, and the menu acts on
+    // the whole selection.
     if !selection.contains(display.key()) {
         selection.select_single(display.key(), index);
     }
-    open_inventory_context_menu(
-        display.key(),
+    let keys = if selection.count() > 1 {
+        selection.keys_in_view_order(view.rows())
+    } else {
+        vec![display.key()]
+    };
+    let _opened = open_inventory_context_menu(
+        &keys,
         press.pointer_location.position,
         &model,
         &clipboard,
@@ -1162,7 +1388,7 @@ pub(crate) fn on_viewport_context(
             ..FolderMenuFacts::default()
         },
     );
-    target.target = Some(MenuTarget::Folder(info));
+    target.targets = vec![MenuTarget::Folder(info)];
     menus.write(OpenContextMenu {
         menu: &INVENTORY_FOLDER_MENU,
         at: press.pointer_location.position,
@@ -1236,6 +1462,24 @@ pub(crate) fn paste_commands(
     }
 }
 
+/// Write a COF-link batch and refresh the COF page (a no-op for an empty
+/// batch or a grid without a located COF).
+fn write_cof_commands(
+    model: &InventoryModel,
+    batch: Vec<Command>,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    if batch.is_empty() {
+        return;
+    }
+    for command in batch {
+        commands.write(SlCommand(command));
+    }
+    if let Some(cof) = model.cof_key() {
+        query_folder_page(cof, commands);
+    }
+}
+
 /// Handle a picked inventory context-menu entry.
 #[expect(
     clippy::too_many_arguments,
@@ -1287,21 +1531,25 @@ fn handle_inventory_menu_actions(
         if action.element != INVENTORY_MENU_ELEMENT {
             continue;
         }
-        let Some(menu_target) = target.target.clone() else {
+        let targets = target.targets.clone();
+        let Some(menu_target) = targets.first().cloned() else {
             continue;
         };
         let dest = destination_folder(&menu_target);
         match action.action {
             "share" => {
-                pending_share.target = Some(menu_target.clone());
+                pending_share.targets.clone_from(&targets);
                 picker_opens.write(crate::avatar_picker::OpenAvatarPicker {
                     requester: SHARE_REQUESTER,
                 });
             }
             "open" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    previews
-                        .write(crate::inventory_properties::OpenItemPreview { item: item.clone() });
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        previews.write(crate::inventory_properties::OpenItemPreview {
+                            item: item.clone(),
+                        });
+                    }
                 }
             }
             "properties" => {
@@ -1328,42 +1576,46 @@ fn handle_inventory_menu_actions(
                 });
             }
             "cut" => {
-                clipboard.entry = Some((ClipboardMode::Cut, menu_target.clone()));
+                clipboard.entry = Some((ClipboardMode::Cut, targets.clone()));
             }
             "copy" => {
-                clipboard.entry = Some((ClipboardMode::Copy, menu_target.clone()));
+                clipboard.entry = Some((ClipboardMode::Copy, targets.clone()));
                 // A copied folder prefetches its subtree, so the deep copy a
                 // later paste plans over sees the contents (the session's
                 // fetcher dedupes and serves repeats from its cache).
-                if let MenuTarget::Folder(folder) = &menu_target {
-                    for sub in model.subtree_folders(folder.folder_id) {
-                        query_folder_page(sub, &mut commands);
+                for target_row in &targets {
+                    if let MenuTarget::Folder(folder) = target_row {
+                        for sub in model.subtree_folders(folder.folder_id) {
+                            query_folder_page(sub, &mut commands);
+                        }
                     }
                 }
             }
             "paste" => {
-                if let Some((mode, entry)) = clipboard.entry.clone() {
-                    if let (ClipboardMode::Copy, MenuTarget::Folder(folder)) = (mode, &entry) {
-                        // A copied folder pastes as a recursive deep copy.
-                        for command in deep_copy_commands(
-                            &model,
-                            folder.folder_id,
-                            &folder.name,
-                            dest,
-                            identity.agent_id,
-                        ) {
-                            commands.write(SlCommand(command));
-                        }
-                        commands.write(SlCommand(Command::QueryInventoryFolders));
-                        query_folder_page(dest, &mut commands);
-                    } else {
-                        let (paste, refresh) =
-                            paste_commands(mode, &entry, dest, identity.agent_id);
-                        for command in paste {
-                            commands.write(SlCommand(command));
-                        }
-                        for folder in refresh {
-                            query_folder_page(folder, &mut commands);
+                if let Some((mode, entries)) = clipboard.entry.clone() {
+                    for entry in &entries {
+                        if let (ClipboardMode::Copy, MenuTarget::Folder(folder)) = (mode, entry) {
+                            // A copied folder pastes as a recursive deep copy.
+                            for command in deep_copy_commands(
+                                &model,
+                                folder.folder_id,
+                                &folder.name,
+                                dest,
+                                identity.agent_id,
+                            ) {
+                                commands.write(SlCommand(command));
+                            }
+                            commands.write(SlCommand(Command::QueryInventoryFolders));
+                            query_folder_page(dest, &mut commands);
+                        } else {
+                            let (paste, refresh) =
+                                paste_commands(mode, entry, dest, identity.agent_id);
+                            for command in paste {
+                                commands.write(SlCommand(command));
+                            }
+                            for folder in refresh {
+                                query_folder_page(folder, &mut commands);
+                            }
                         }
                     }
                     if mode == ClipboardMode::Cut {
@@ -1372,101 +1624,125 @@ fn handle_inventory_menu_actions(
                 }
             }
             "paste-link" => {
-                if let Some((_mode, entry)) = clipboard.entry.clone() {
-                    let link = match &entry {
-                        MenuTarget::Item(item) => NewInventoryLink {
-                            folder_id: dest,
-                            linked_id: InventoryItemOrFolderKey::Item(item.item_id),
-                            // `AT_LINK` (24): an item link.
-                            link_type: AssetType::Other(24),
-                            inv_type: item.inv_type,
-                            name: item.name.clone(),
-                            description: String::new(),
-                        },
-                        MenuTarget::Folder(folder) => NewInventoryLink {
-                            folder_id: dest,
-                            linked_id: InventoryItemOrFolderKey::Folder(folder.folder_id),
-                            // `AT_LINK_FOLDER` (25): a folder link.
-                            link_type: AssetType::Other(25),
-                            inv_type: InventoryType::Category,
-                            name: folder.name.clone(),
-                            description: String::new(),
-                        },
-                    };
-                    commands.write(SlCommand(Command::LinkInventoryItem(link)));
+                if let Some((_mode, entries)) = clipboard.entry.clone() {
+                    for entry in &entries {
+                        let link = match entry {
+                            MenuTarget::Item(item) => NewInventoryLink {
+                                folder_id: dest,
+                                linked_id: InventoryItemOrFolderKey::Item(item.item_id),
+                                // `AT_LINK` (24): an item link.
+                                link_type: AssetType::Other(24),
+                                inv_type: item.inv_type,
+                                name: item.name.clone(),
+                                description: String::new(),
+                            },
+                            MenuTarget::Folder(folder) => NewInventoryLink {
+                                folder_id: dest,
+                                linked_id: InventoryItemOrFolderKey::Folder(folder.folder_id),
+                                // `AT_LINK_FOLDER` (25): a folder link.
+                                link_type: AssetType::Other(25),
+                                inv_type: InventoryType::Category,
+                                name: folder.name.clone(),
+                                description: String::new(),
+                            },
+                        };
+                        commands.write(SlCommand(Command::LinkInventoryItem(link)));
+                    }
                 }
             }
             "delete" => {
                 if let Some(trash) = model.folder_by_type(FolderType::Trash) {
-                    match &menu_target {
-                        MenuTarget::Item(item) => {
-                            commands.write(SlCommand(Command::MoveInventoryItem {
-                                item_id: item.item_id,
-                                folder_id: trash,
-                                new_name: String::new(),
-                            }));
-                            query_folder_page(item.folder_id, &mut commands);
-                            query_folder_page(trash, &mut commands);
-                        }
-                        MenuTarget::Folder(folder) => {
-                            commands.write(SlCommand(Command::MoveInventoryFolder {
-                                folder_id: folder.folder_id,
-                                parent_id: trash,
-                            }));
-                            commands.write(SlCommand(Command::QueryInventoryFolders));
+                    for target_row in &targets {
+                        match target_row {
+                            MenuTarget::Item(item) => {
+                                commands.write(SlCommand(Command::MoveInventoryItem {
+                                    item_id: item.item_id,
+                                    folder_id: trash,
+                                    new_name: String::new(),
+                                }));
+                                query_folder_page(item.folder_id, &mut commands);
+                            }
+                            MenuTarget::Folder(folder) => {
+                                commands.write(SlCommand(Command::MoveInventoryFolder {
+                                    folder_id: folder.folder_id,
+                                    parent_id: trash,
+                                }));
+                                commands.write(SlCommand(Command::QueryInventoryFolders));
+                            }
                         }
                     }
+                    query_folder_page(trash, &mut commands);
                 }
             }
-            "purge" => match &menu_target {
-                MenuTarget::Item(item) => {
-                    commands.write(SlCommand(Command::RemoveInventoryItems(vec![item.item_id])));
-                    query_folder_page(item.folder_id, &mut commands);
+            "purge" => {
+                // One batch removal for the whole selection.
+                let mut item_ids = Vec::new();
+                let mut folder_ids = Vec::new();
+                let mut refresh = Vec::new();
+                for target_row in &targets {
+                    match target_row {
+                        MenuTarget::Item(item) => {
+                            item_ids.push(item.item_id);
+                            refresh.push(item.folder_id);
+                        }
+                        MenuTarget::Folder(folder) => folder_ids.push(folder.folder_id),
+                    }
                 }
-                MenuTarget::Folder(folder) => {
-                    commands.write(SlCommand(Command::RemoveInventoryFolders(vec![
-                        folder.folder_id,
-                    ])));
+                if !item_ids.is_empty() && folder_ids.is_empty() {
+                    commands.write(SlCommand(Command::RemoveInventoryItems(item_ids)));
+                } else if item_ids.is_empty() && !folder_ids.is_empty() {
+                    commands.write(SlCommand(Command::RemoveInventoryFolders(folder_ids)));
+                    commands.write(SlCommand(Command::QueryInventoryFolders));
+                } else if !item_ids.is_empty() || !folder_ids.is_empty() {
+                    commands.write(SlCommand(Command::RemoveInventoryObjects {
+                        folder_ids,
+                        item_ids,
+                    }));
                     commands.write(SlCommand(Command::QueryInventoryFolders));
                 }
-            },
+                for folder in refresh {
+                    query_folder_page(folder, &mut commands);
+                }
+            }
             "restore" => {
                 // The wire does not record where a trashed row came from; the
                 // reference restores to the type's system folder
                 // (`LLItemBridge::restoreItem` via `findCategoryUUIDForType`),
                 // falling back to the agent root.
-                match &menu_target {
-                    MenuTarget::Item(item) => {
-                        // A snapshot restores to the Photo Album, not Textures
-                        // (the reference's `IT_SNAPSHOT` special case).
-                        let wanted = if item.inv_type == InventoryType::Snapshot {
-                            FolderType::SnapshotCategory
-                        } else {
-                            default_folder_type(item.asset_type)
-                        };
-                        let dest = if wanted == FolderType::None {
-                            model.agent_root()
-                        } else {
-                            model.folder_by_type(wanted).or_else(|| model.agent_root())
-                        };
-                        if let Some(dest) = dest {
-                            commands.write(SlCommand(Command::MoveInventoryItem {
-                                item_id: item.item_id,
-                                folder_id: dest,
-                                new_name: String::new(),
-                            }));
-                            query_folder_page(item.folder_id, &mut commands);
-                            query_folder_page(dest, &mut commands);
+                for target_row in &targets {
+                    match target_row {
+                        MenuTarget::Item(item) => {
+                            // A snapshot restores to the Photo Album, not Textures
+                            // (the reference's `IT_SNAPSHOT` special case).
+                            let wanted = if item.inv_type == InventoryType::Snapshot {
+                                FolderType::SnapshotCategory
+                            } else {
+                                default_folder_type(item.asset_type)
+                            };
+                            let dest = if wanted == FolderType::None {
+                                model.agent_root()
+                            } else {
+                                model.folder_by_type(wanted).or_else(|| model.agent_root())
+                            };
+                            if let Some(dest) = dest {
+                                commands.write(SlCommand(Command::MoveInventoryItem {
+                                    item_id: item.item_id,
+                                    folder_id: dest,
+                                    new_name: String::new(),
+                                }));
+                                query_folder_page(item.folder_id, &mut commands);
+                                query_folder_page(dest, &mut commands);
+                            }
                         }
-                    }
-                    MenuTarget::Folder(folder) => {
-                        // A folder has no typed home; it restores to the root.
-                        if let Some(root) = model.agent_root() {
-                            commands.write(SlCommand(Command::MoveInventoryFolder {
-                                folder_id: folder.folder_id,
-                                parent_id: root,
-                            }));
-                            commands.write(SlCommand(Command::QueryInventoryFolders));
+                        MenuTarget::Folder(folder) => {
+                            // A folder has no typed home; it restores to the root.
+                            if let Some(root) = model.agent_root() {
+                                commands.write(SlCommand(Command::MoveInventoryFolder {
+                                    folder_id: folder.folder_id,
+                                    parent_id: root,
+                                }));
+                                commands.write(SlCommand(Command::QueryInventoryFolders));
+                            }
                         }
                     }
                 }
@@ -1517,69 +1793,162 @@ fn handle_inventory_menu_actions(
                 }
             }
             "activate-gesture" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    commands.write(SlCommand(Command::ActivateGestures {
-                        gestures: vec![GestureActivation {
+                let batch: Vec<GestureActivation> = targets
+                    .iter()
+                    .filter_map(|target_row| match target_row {
+                        MenuTarget::Item(item) => Some(GestureActivation {
                             item_id: item.item_id,
                             asset_id: item.asset_id,
-                        }],
-                    }));
-                    gestures.items.insert(item.item_id);
+                        }),
+                        MenuTarget::Folder(_folder) => None,
+                    })
+                    .collect();
+                if !batch.is_empty() {
+                    for activation in &batch {
+                        gestures.items.insert(activation.item_id);
+                    }
+                    commands.write(SlCommand(Command::ActivateGestures { gestures: batch }));
                 }
             }
             "deactivate-gesture" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    commands.write(SlCommand(Command::DeactivateGestures {
-                        item_ids: vec![item.item_id],
-                    }));
-                    gestures.items.remove(&item.item_id);
+                let item_ids: Vec<InventoryKey> = targets
+                    .iter()
+                    .filter_map(|target_row| match target_row {
+                        MenuTarget::Item(item) => Some(item.item_id),
+                        MenuTarget::Folder(_folder) => None,
+                    })
+                    .collect();
+                if !item_ids.is_empty() {
+                    for item_id in &item_ids {
+                        gestures.items.remove(item_id);
+                    }
+                    commands.write(SlCommand(Command::DeactivateGestures { item_ids }));
                 }
             }
             "wear-wearable" | "attach" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    for command in
-                        wear_commands(item, identity.agent_id, model.worn_wearables(), false)
-                    {
-                        commands.write(SlCommand(command));
-                    }
-                    if matches!(
-                        item.inv_type,
-                        InventoryType::Object | InventoryType::Attachment
-                    ) {
-                        worn.items.insert(item.item_id);
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        for command in
+                            wear_commands(item, identity.agent_id, model.worn_wearables(), false)
+                        {
+                            commands.write(SlCommand(command));
+                        }
+                        if matches!(
+                            item.inv_type,
+                            InventoryType::Object | InventoryType::Attachment
+                        ) {
+                            worn.items.insert(item.item_id);
+                        }
+                        // Keep the COF authoritative: replace the slot's
+                        // links with this item's.
+                        let replaced = replaced_by_wear(model.worn_wearables(), item);
+                        write_cof_commands(
+                            &model,
+                            cof_wear_link_commands(
+                                model.cof_key(),
+                                model.cof_items(),
+                                item,
+                                &replaced,
+                            ),
+                            &mut commands,
+                        );
                     }
                 }
             }
             "add-wearable" | "attach-add" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    for command in
-                        wear_commands(item, identity.agent_id, model.worn_wearables(), true)
-                    {
-                        commands.write(SlCommand(command));
-                    }
-                    if matches!(
-                        item.inv_type,
-                        InventoryType::Object | InventoryType::Attachment
-                    ) {
-                        worn.items.insert(item.item_id);
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        for command in
+                            wear_commands(item, identity.agent_id, model.worn_wearables(), true)
+                        {
+                            commands.write(SlCommand(command));
+                        }
+                        if matches!(
+                            item.inv_type,
+                            InventoryType::Object | InventoryType::Attachment
+                        ) {
+                            worn.items.insert(item.item_id);
+                        }
+                        write_cof_commands(
+                            &model,
+                            cof_wear_link_commands(model.cof_key(), model.cof_items(), item, &[]),
+                            &mut commands,
+                        );
                     }
                 }
             }
             "take-off" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    commands.write(SlCommand(Command::SetWearing(take_off_set(
-                        model.worn_wearables(),
-                        item.item_id,
-                    ))));
+                // One SetWearing without every taken-off layer.
+                let mut set: Vec<Wearable> = model.worn_wearables().to_vec();
+                let before = set.len();
+                let mut removed = Vec::new();
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        set = take_off_set(&set, item.item_id);
+                        removed.push(item.item_id);
+                    }
+                }
+                if set.len() != before {
+                    commands.write(SlCommand(Command::SetWearing(set)));
                     commands.write(SlCommand(Command::RequestWearables));
                 }
+                write_cof_commands(
+                    &model,
+                    cof_remove_link_commands(model.cof_items(), &removed),
+                    &mut commands,
+                );
             }
             "detach" => {
-                if let MenuTarget::Item(item) = &menu_target {
-                    commands.write(SlCommand(Command::DetachAttachmentIntoInventory {
-                        item_id: item.item_id,
-                    }));
-                    worn.items.remove(&item.item_id);
+                let mut removed = Vec::new();
+                for target_row in &targets {
+                    if let MenuTarget::Item(item) = target_row {
+                        commands.write(SlCommand(Command::DetachAttachmentIntoInventory {
+                            item_id: item.item_id,
+                        }));
+                        worn.items.remove(&item.item_id);
+                        removed.push(item.item_id);
+                    }
+                }
+                write_cof_commands(
+                    &model,
+                    cof_remove_link_commands(model.cof_items(), &removed),
+                    &mut commands,
+                );
+            }
+            "replace-outfit" => {
+                if let MenuTarget::Folder(folder) = &menu_target {
+                    let items: Vec<ItemInfo> = model
+                        .subtree_items(folder.folder_id)
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    let (batch, now_worn, no_longer_worn) = outfit_replace_commands(
+                        &items,
+                        model.worn_wearables(),
+                        model.cof_items(),
+                        &worn.items,
+                        identity.agent_id,
+                    );
+                    for command in batch {
+                        commands.write(SlCommand(command));
+                    }
+                    worn.items.extend(now_worn.iter().copied());
+                    for item_id in &no_longer_worn {
+                        worn.items.remove(item_id);
+                    }
+                    // Rewrite the COF: removed links out, the folder's
+                    // outfit items linked in.
+                    let mut cof_batch =
+                        cof_remove_link_commands(model.cof_items(), &no_longer_worn);
+                    for item in items.iter().filter(|item| is_outfit_item(item)) {
+                        cof_batch.extend(cof_wear_link_commands(
+                            model.cof_key(),
+                            model.cof_items(),
+                            item,
+                            &[],
+                        ));
+                    }
+                    write_cof_commands(&model, cof_batch, &mut commands);
                 }
             }
             "add-to-outfit" => {
@@ -1595,6 +1964,19 @@ fn handle_inventory_menu_actions(
                         commands.write(SlCommand(command));
                     }
                     worn.items.extend(now_worn);
+                    // COF links: a replaced body part's link drops, every
+                    // added outfit item links in.
+                    let mut cof_batch = Vec::new();
+                    for item in items.iter().filter(|item| is_outfit_item(item)) {
+                        let replaced = replaced_by_wear(model.worn_wearables(), item);
+                        cof_batch.extend(cof_wear_link_commands(
+                            model.cof_key(),
+                            model.cof_items(),
+                            item,
+                            &replaced,
+                        ));
+                    }
+                    write_cof_commands(&model, cof_batch, &mut commands);
                 }
             }
             "remove-from-outfit" => {
@@ -1613,9 +1995,25 @@ fn handle_inventory_menu_actions(
                     for command in batch {
                         commands.write(SlCommand(command));
                     }
+                    // Every removed item's COF link drops: the detached
+                    // attachments plus the taken-off clothing layers.
+                    let mut removed: Vec<InventoryKey> = no_longer_worn.clone();
+                    for item in &items {
+                        if item.inv_type == InventoryType::Wearable
+                            && !wearable_type_of(item).is_body_part()
+                            && is_worn(item, model.worn_wearables(), model.cof_items(), &worn.items)
+                        {
+                            removed.push(item.item_id);
+                        }
+                    }
                     for item_id in no_longer_worn {
                         worn.items.remove(&item_id);
                     }
+                    write_cof_commands(
+                        &model,
+                        cof_remove_link_commands(model.cof_items(), &removed),
+                        &mut commands,
+                    );
                 }
             }
             // The Attach To ▸ / Attach To HUD ▸ submenus: the action names the
@@ -1623,20 +2021,40 @@ fn handle_inventory_menu_actions(
             // that point (the reference's bare-point-id semantics; Add-along
             // is the plain "Add" entry on the default point).
             other => {
-                if let Some(point) = attach_point_of(other)
-                    && let MenuTarget::Item(item) = &menu_target
-                {
-                    commands.write(SlCommand(Command::RezAttachment(RezAttachment {
-                        item_id: item.item_id,
-                        owner_id: identity
-                            .agent_id
-                            .map_or_else(Uuid::nil, |agent| agent.uuid()),
-                        attachment_point: point,
-                        mode: AttachmentMode::Replace,
-                        name: item.name.clone(),
-                        description: item.description.clone(),
-                    })));
-                    worn.items.insert(item.item_id);
+                if let Some(point) = attach_point_of(other) {
+                    // The first selected object replaces the point; any
+                    // further selected objects add alongside it there.
+                    let mut first = true;
+                    for target_row in &targets {
+                        if let MenuTarget::Item(item) = target_row {
+                            commands.write(SlCommand(Command::RezAttachment(RezAttachment {
+                                item_id: item.item_id,
+                                owner_id: identity
+                                    .agent_id
+                                    .map_or_else(Uuid::nil, |agent| agent.uuid()),
+                                attachment_point: point,
+                                mode: if first {
+                                    AttachmentMode::Replace
+                                } else {
+                                    AttachmentMode::Add
+                                },
+                                name: item.name.clone(),
+                                description: item.description.clone(),
+                            })));
+                            worn.items.insert(item.item_id);
+                            first = false;
+                            write_cof_commands(
+                                &model,
+                                cof_wear_link_commands(
+                                    model.cof_key(),
+                                    model.cof_items(),
+                                    item,
+                                    &[],
+                                ),
+                                &mut commands,
+                            );
+                        }
+                    }
                 }
                 // Every other entry is a disabled placeholder that never emits.
             }
@@ -2047,8 +2465,8 @@ fn handle_inventory_add_actions(
 /// the avatar picker's choice.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct PendingShare {
-    /// The snapshotted share source, or `None` when no Share is in flight.
-    pub(crate) target: Option<MenuTarget>,
+    /// The snapshotted share sources; empty when no Share is in flight.
+    pub(crate) targets: Vec<MenuTarget>,
 }
 
 /// The avatar-picker requester tag the Share flow uses.
@@ -2065,10 +2483,10 @@ fn handle_share_picks(
         if pick.requester != SHARE_REQUESTER {
             continue;
         }
-        if let Some(target) = pending.target.take()
-            && let Some(give) = crate::inventory_drag::give_command(&target, false, pick.agent)
-        {
-            commands.write(SlCommand(give));
+        for target in pending.targets.drain(..) {
+            if let Some(give) = crate::inventory_drag::give_command(&target, false, pick.agent) {
+                commands.write(SlCommand(give));
+            }
         }
     }
 }
@@ -2493,6 +2911,148 @@ mod tests {
         ] {
             assert!(wearable_slot_of(action).is_some(), "unmapped: {action}");
         }
+    }
+
+    /// Replace Current Outfit keeps unreplaced body parts, swaps clothing
+    /// wholesale, detaches worn attachments the folder lacks and adds the
+    /// folder's own.
+    #[test]
+    fn replace_outfit_swaps_safely() {
+        use super::outfit_replace_commands;
+        // Currently worn: a shape, a shirt, and a tracked attachment.
+        let current = vec![
+            Wearable {
+                item_id: InventoryKey::from(Uuid::from_u128(0x80)),
+                asset_id: None,
+                wearable_type: WearableType::Shape,
+            },
+            Wearable {
+                item_id: InventoryKey::from(Uuid::from_u128(0x81)),
+                asset_id: None,
+                wearable_type: WearableType::Shirt,
+            },
+        ];
+        let mut tracked = HashSet::new();
+        let old_attachment = InventoryKey::from(Uuid::from_u128(0x82));
+        tracked.insert(old_attachment);
+        // The folder: new pants (clothing), and one new attachment. No body
+        // parts, so the shape must survive.
+        let mut pants = item(0x90, InventoryType::Wearable, AssetType::Clothing, 0);
+        pants.flags = u32::from(WearableType::Pants.to_code());
+        let new_attachment = item(0x91, InventoryType::Object, AssetType::Object, 0);
+
+        let (commands, now_worn, no_longer) = outfit_replace_commands(
+            &[pants.clone(), new_attachment.clone()],
+            &current,
+            &[],
+            &tracked,
+            Some(AgentKey::from(Uuid::from_u128(1))),
+        );
+        let set = commands
+            .iter()
+            .find_map(|command| match command {
+                Command::SetWearing(set) => Some(set.clone()),
+                _other => None,
+            })
+            .unwrap_or_default();
+        // Shape kept, shirt gone, pants on.
+        assert!(
+            set.iter()
+                .any(|worn| worn.wearable_type == WearableType::Shape)
+        );
+        assert!(
+            !set.iter()
+                .any(|worn| worn.item_id == InventoryKey::from(Uuid::from_u128(0x81)))
+        );
+        assert!(set.iter().any(|worn| worn.item_id == pants.item_id));
+        // The old attachment detaches; the new one attaches alongside.
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::DetachAttachmentIntoInventory { item_id } if *item_id == old_attachment
+        )));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::RezAttachments { attachments, .. }
+                if attachments.iter().any(|rez| rez.item_id == new_attachment.item_id)
+        )));
+        assert_eq!(now_worn, vec![new_attachment.item_id]);
+        assert!(no_longer.contains(&old_attachment));
+        assert!(no_longer.contains(&InventoryKey::from(Uuid::from_u128(0x81))));
+    }
+
+    /// COF link maintenance: wearing links the item in (dropping the
+    /// replaced slot's links, never double-linking); removal drops exactly
+    /// the targets' links.
+    #[test]
+    fn cof_links_follow_wear_and_removal() {
+        use super::{cof_remove_link_commands, cof_wear_link_commands};
+        let cof = InventoryFolderKey::from(Uuid::from_u128(0xC0));
+        let shirt = item(0x10, InventoryType::Wearable, AssetType::Clothing, 0);
+        // An existing link to another item (the replaced shirt).
+        let mut old_link = item(0x11, InventoryType::Wearable, AssetType::Other(24), 0);
+        old_link.asset_id = Uuid::from_u128(0x12);
+        let replaced = vec![InventoryKey::from(Uuid::from_u128(0x12))];
+
+        let batch = cof_wear_link_commands(Some(cof), &[old_link.clone()], &shirt, &replaced);
+        assert!(batch.iter().any(|command| matches!(
+            command,
+            Command::RemoveInventoryItems(links) if links.contains(&old_link.item_id)
+        )));
+        assert!(batch.iter().any(|command| matches!(
+            command,
+            Command::LinkInventoryItem(link) if link.folder_id == cof
+        )));
+        // Already linked: nothing added.
+        let mut own_link = item(0x13, InventoryType::Wearable, AssetType::Other(24), 0);
+        own_link.asset_id = shirt.item_id.uuid();
+        let batch = cof_wear_link_commands(Some(cof), &[own_link], &shirt, &[]);
+        assert!(batch.is_empty());
+        // No COF located: a no-op.
+        assert!(cof_wear_link_commands(None, &[], &shirt, &[]).is_empty());
+        // Removal drops exactly the matching links.
+        let batch = cof_remove_link_commands(
+            &[old_link.clone()],
+            &[InventoryKey::from(Uuid::from_u128(0x12))],
+        );
+        assert!(matches!(
+            batch.first(),
+            Some(Command::RemoveInventoryItems(links)) if links.contains(&old_link.item_id)
+        ));
+        assert!(cof_remove_link_commands(&[old_link], &[]).is_empty());
+    }
+
+    /// Multi-selection conditions are the intersection of every row's set —
+    /// Delete survives only if every row is deletable, a type block only on
+    /// a uniform selection — and a multi-selection withholds Rename.
+    #[test]
+    fn multi_select_conditions_intersect() {
+        use super::intersect_conditions;
+        let landmark = item(1, InventoryType::Landmark, AssetType::Landmark, 0);
+        let object = item(2, InventoryType::Object, AssetType::Object, 0);
+        let landmark_set = item_conditions(&landmark, ItemMenuFacts::default());
+        let object_set = item_conditions(&object, ItemMenuFacts::default());
+        let mixed = intersect_conditions(&[landmark_set.clone(), object_set.clone()]);
+        // Mixed types: neither type block survives, the shared mutations do.
+        assert!(!mixed.contains(&IS_LANDMARK));
+        assert!(!mixed.contains(&IS_OBJECT));
+        assert!(mixed.contains(&CAN_DELETE));
+        assert!(mixed.contains(&CAN_CUT));
+        // A multi-selection cannot rename, even though each row could.
+        assert!(landmark_set.contains(&CAN_RENAME));
+        assert!(!mixed.contains(&CAN_RENAME));
+        // A single-row "intersection" keeps everything, rename included.
+        let single = intersect_conditions(std::slice::from_ref(&landmark_set));
+        assert_eq!(single, landmark_set);
+        // A trashed row's absence of CAN_DELETE wins over the other row.
+        let trashed = item_conditions(
+            &object,
+            ItemMenuFacts {
+                in_trash: true,
+                ..ItemMenuFacts::default()
+            },
+        );
+        let with_trashed = intersect_conditions(&[object_set, trashed]);
+        assert!(!with_trashed.contains(&CAN_DELETE));
     }
 
     /// The attach-point action strings parse back to their wire points, and

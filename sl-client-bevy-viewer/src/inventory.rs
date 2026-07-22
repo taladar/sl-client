@@ -323,6 +323,12 @@ impl InventoryModel {
         self.cof.map_or(&[], |cof| self.items_of(cof))
     }
 
+    /// The Current Outfit Folder's key, once located in the skeleton — the
+    /// folder the COF-link maintenance writes into.
+    pub(crate) const fn cof_key(&self) -> Option<InventoryFolderKey> {
+        self.cof
+    }
+
     /// Whether a folder is currently expanded in the Everything tab.
     pub(crate) fn is_expanded(&self, folder: InventoryFolderKey) -> bool {
         self.expanded.contains(&folder)
@@ -1159,6 +1165,20 @@ impl InventorySelection {
         } else {
             None
         }
+    }
+
+    /// How many rows are selected.
+    pub(crate) fn count(&self) -> usize {
+        self.selected.len()
+    }
+
+    /// The selected keys in the order `rows` presents them (top to bottom),
+    /// so a batch context action or drag runs in view order.
+    pub(crate) fn keys_in_view_order(&self, rows: &[DisplayRow]) -> Vec<RowKey> {
+        rows.iter()
+            .map(DisplayRow::key)
+            .filter(|key| self.selected.contains(key))
+            .collect()
     }
 }
 

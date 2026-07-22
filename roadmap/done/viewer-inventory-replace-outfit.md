@@ -2,7 +2,7 @@
 id: viewer-inventory-replace-outfit
 title: Replace Current Outfit (whole-outfit swap)
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — shipped
   greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions, viewer-inventory-cof-maintenance]
@@ -24,3 +24,11 @@ swap should rewrite the Current Outfit Folder's links too.
 
 Reference (Firestorm, read-only): `llappearancemgr.cpp`
 (`wearInventoryCategory` / `updateCOF`).
+
+Shipped 2026-07-22: outfit_replace_commands (pure, unit-tested)
+implements the reference's append==false semantics — body parts kept
+unless the folder replaces the slot, clothing swapped wholesale, worn
+attachments not in the folder detached explicitly and the folder's
+objects added alongside (per-point ADD-bit semantics; the modern
+reference never sends FirstDetachAll either). On a COF grid the swap
+also rewrites the Current Outfit Folder's links.

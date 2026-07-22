@@ -53,7 +53,8 @@ use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::inventory::{
-    InventoryModel, InventoryUi, InventoryUiAction, InventoryView, RowKey, query_folder_page,
+    InventoryModel, InventorySelection, InventoryUi, InventoryUiAction, InventoryView, RowKey,
+    query_folder_page,
 };
 use crate::inventory_actions::{MenuTarget, WornAttachments, wear_commands};
 use crate::ui::UiRoot;
@@ -97,10 +98,10 @@ pub(crate) struct AgentDropTarget(pub(crate) AgentKey);
 /// The live drag, while one is in progress.
 #[derive(Debug, Clone)]
 struct ActiveDrag {
-    /// The dragged row, snapshotted at drag start.
-    source: MenuTarget,
-    /// Whether the source sits in the read-only Library (drops become copies).
-    from_library: bool,
+    /// The dragged rows, snapshotted at drag start (the whole selection when
+    /// the drag began inside it), each with whether it sits in the read-only
+    /// Library (a Library drop becomes a copy).
+    sources: Vec<(MenuTarget, bool)>,
     /// The ghost entity following the pointer.
     ghost: Entity,
     /// The destination folder currently hovered, if any.
@@ -287,6 +288,7 @@ pub(crate) fn on_row_drag_start(
     rows: Query<&VirtualRow>,
     view: Res<InventoryView>,
     model: Res<InventoryModel>,
+    selection: Res<InventorySelection>,
     root: Res<UiRoot>,
     time: Res<Time>,
     mut state: ResMut<InventoryDragState>,
@@ -302,28 +304,46 @@ pub(crate) fn on_row_drag_start(
     let Some(display) = row.index.and_then(|index| view.rows().get(index)) else {
         return;
     };
-    let (source, from_library) = match display.key() {
-        RowKey::Folder(key) => {
-            let Some(info) = model.folder_info(key).cloned() else {
-                return;
-            };
-            // The press that began this gesture already toggled the folder;
-            // a drag is not a click, so put the expand state back.
-            actions.write(InventoryUiAction::ToggleFolder(key));
-            (MenuTarget::Folder(info), model.is_library(key))
-        }
-        RowKey::Item(key) => {
-            let Some(info) = model.find_item(key).cloned() else {
-                return;
-            };
-            let library = model.is_library(info.folder_id);
-            (MenuTarget::Item(info), library)
-        }
+    // Dragging a selected row drags the whole selection, in view order.
+    let keys = if selection.contains(display.key()) && selection.count() > 1 {
+        selection.keys_in_view_order(view.rows())
+    } else {
+        vec![display.key()]
     };
+    let mut sources: Vec<(MenuTarget, bool)> = Vec::new();
+    for key in keys {
+        match key {
+            RowKey::Folder(folder_key) => {
+                if let Some(info) = model.folder_info(folder_key).cloned() {
+                    sources.push((MenuTarget::Folder(info), model.is_library(folder_key)));
+                }
+            }
+            RowKey::Item(item_key) => {
+                if let Some(info) = model.find_item(item_key).cloned() {
+                    let library = model.is_library(info.folder_id);
+                    sources.push((MenuTarget::Item(info), library));
+                }
+            }
+        }
+    }
+    if sources.is_empty() {
+        return;
+    }
+    // The press that began this gesture already toggled the dragged folder
+    // row; a drag is not a click, so put the expand state back.
+    if let RowKey::Folder(key) = display.key() {
+        actions.write(InventoryUiAction::ToggleFolder(key));
+    }
     // Component-wise: whole-`Vec2` `+` is a `glam` operator the workspace
     // `arithmetic_side_effects` lint trips on.
     let pointer = drag.pointer_location.position;
     let at = Vec2::new(pointer.x + GHOST_OFFSET.x, pointer.y + GHOST_OFFSET.y);
+    // A multi-row drag's ghost shows the count instead of one row's label.
+    let (ghost_icon, ghost_label) = if sources.len() > 1 {
+        (String::new(), format!("{} items", sources.len()))
+    } else {
+        (display.icon().to_owned(), display.name().to_owned())
+    };
     let ghost = commands
         .spawn((
             Node {
@@ -342,21 +362,20 @@ pub(crate) fn on_row_drag_start(
             ChildOf(root.0),
         ))
         .with_child((
-            Text::new(display.icon().to_owned()),
+            Text::new(ghost_icon),
             UiFont::Sans.at(GHOST_FONT_SIZE),
             TextColor(GHOST_COLOR),
             Pickable::IGNORE,
         ))
         .with_child((
-            Text::new(display.name().to_owned()),
+            Text::new(ghost_label),
             UiFont::Sans.at(GHOST_FONT_SIZE),
             TextColor(GHOST_COLOR),
             Pickable::IGNORE,
         ))
         .id();
     state.active = Some(ActiveDrag {
-        source,
-        from_library,
+        sources,
         ghost,
         hover_folder: None,
         hover_since: time.elapsed_secs_f64(),
@@ -665,24 +684,32 @@ pub(crate) fn on_row_drag_end(
         );
         return;
     }
-    if let MenuTarget::Item(item) = &active.source
-        && matches!(
-            item.inv_type,
-            InventoryType::Object | InventoryType::Attachment
-        )
-        && !active.from_library
-    {
-        let settings = MeshRayCastSettings::default();
-        if let Some((_entity, hit)) = ray_cast.cast_ray(ray, &settings).first() {
-            let start = bevy_to_sl_vec(camera_transform.translation());
-            let end = bevy_to_sl_vec(hit.point);
-            commands.write(SlCommand(rez_object_command(item, start, end)));
-            query_folder_page(item.folder_id, &mut commands);
+    let settings = MeshRayCastSettings::default();
+    if let Some((_entity, hit)) = ray_cast.cast_ray(ray, &settings).first() {
+        let start = bevy_to_sl_vec(camera_transform.translation());
+        let end = bevy_to_sl_vec(hit.point);
+        for (source, from_library) in &active.sources {
+            if let MenuTarget::Item(item) = source
+                && matches!(
+                    item.inv_type,
+                    InventoryType::Object | InventoryType::Attachment
+                )
+                && !from_library
+            {
+                commands.write(SlCommand(rez_object_command(
+                    item,
+                    start.clone(),
+                    end.clone(),
+                )));
+                query_folder_page(item.folder_id, &mut commands);
+            }
         }
     }
 }
 
-/// Issue the commands for a drop onto a destination folder in the list.
+/// Issue the commands for a drop onto a destination folder in the list —
+/// every dragged row is applied independently (a rejected row is skipped,
+/// the rest land).
 fn drop_into_folder(
     active: &ActiveDrag,
     dest: InventoryFolderKey,
@@ -691,68 +718,74 @@ fn drop_into_folder(
     actions: &mut MessageWriter<InventoryUiAction>,
     commands: &mut MessageWriter<SlCommand>,
 ) {
-    let (source_is_folder, same_folder, dest_in_subtree) = match &active.source {
-        MenuTarget::Folder(folder) => (
-            true,
-            folder.parent_id == Some(dest) || folder.folder_id == dest,
-            model.is_within(dest, folder.folder_id),
-        ),
-        MenuTarget::Item(item) => (false, item.folder_id == dest, false),
-    };
-    let decision = classify_folder_drop(
-        source_is_folder,
-        active.from_library,
-        model.is_library(dest),
-        same_folder,
-        dest_in_subtree,
-    );
-    match (decision, &active.source) {
-        (FolderDrop::Move, MenuTarget::Item(item)) => {
-            commands.write(SlCommand(Command::MoveInventoryItem {
-                item_id: item.item_id,
-                folder_id: dest,
-                new_name: String::new(),
-            }));
-            query_folder_page(item.folder_id, commands);
-            query_folder_page(dest, commands);
-        }
-        (FolderDrop::Move, MenuTarget::Folder(folder)) => {
-            commands.write(SlCommand(Command::MoveInventoryFolder {
-                folder_id: folder.folder_id,
-                parent_id: dest,
-            }));
-            commands.write(SlCommand(Command::QueryInventoryFolders));
-        }
-        (FolderDrop::Copy, MenuTarget::Item(item)) => {
-            let owner = match item.owner {
-                sl_client_bevy::OwnerKey::Agent(agent) => agent,
-                _other => own_agent.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
-            };
-            commands.write(SlCommand(Command::CopyInventoryItem {
-                old_agent_id: owner,
-                old_item_id: item.item_id,
-                new_folder_id: dest,
-                new_name: String::new(),
-            }));
-        }
-        (FolderDrop::Copy, MenuTarget::Folder(folder)) => {
-            // A dragged Library folder deep-copies into the drop target.
-            for command in crate::inventory_actions::deep_copy_commands(
-                model,
-                folder.folder_id,
-                &folder.name,
-                dest,
-                own_agent,
-            ) {
-                commands.write(SlCommand(command));
+    let mut any_landed = false;
+    for (source, from_library) in &active.sources {
+        let (source_is_folder, same_folder, dest_in_subtree) = match source {
+            MenuTarget::Folder(folder) => (
+                true,
+                folder.parent_id == Some(dest) || folder.folder_id == dest,
+                model.is_within(dest, folder.folder_id),
+            ),
+            MenuTarget::Item(item) => (false, item.folder_id == dest, false),
+        };
+        let decision = classify_folder_drop(
+            source_is_folder,
+            *from_library,
+            model.is_library(dest),
+            same_folder,
+            dest_in_subtree,
+        );
+        match (decision, source) {
+            (FolderDrop::Move, MenuTarget::Item(item)) => {
+                commands.write(SlCommand(Command::MoveInventoryItem {
+                    item_id: item.item_id,
+                    folder_id: dest,
+                    new_name: String::new(),
+                }));
+                query_folder_page(item.folder_id, commands);
+                query_folder_page(dest, commands);
             }
-            commands.write(SlCommand(Command::QueryInventoryFolders));
-            query_folder_page(dest, commands);
+            (FolderDrop::Move, MenuTarget::Folder(folder)) => {
+                commands.write(SlCommand(Command::MoveInventoryFolder {
+                    folder_id: folder.folder_id,
+                    parent_id: dest,
+                }));
+                commands.write(SlCommand(Command::QueryInventoryFolders));
+            }
+            (FolderDrop::Copy, MenuTarget::Item(item)) => {
+                let owner = match item.owner {
+                    sl_client_bevy::OwnerKey::Agent(agent) => agent,
+                    _other => own_agent.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+                };
+                commands.write(SlCommand(Command::CopyInventoryItem {
+                    old_agent_id: owner,
+                    old_item_id: item.item_id,
+                    new_folder_id: dest,
+                    new_name: String::new(),
+                }));
+            }
+            (FolderDrop::Copy, MenuTarget::Folder(folder)) => {
+                // A dragged Library folder deep-copies into the drop target.
+                for command in crate::inventory_actions::deep_copy_commands(
+                    model,
+                    folder.folder_id,
+                    &folder.name,
+                    dest,
+                    own_agent,
+                ) {
+                    commands.write(SlCommand(command));
+                }
+                commands.write(SlCommand(Command::QueryInventoryFolders));
+                query_folder_page(dest, commands);
+            }
+            _rejected => continue,
         }
-        _rejected => return,
+        any_landed = true;
     }
     // Show where it landed.
-    actions.write(InventoryUiAction::ExpandFolder(dest));
+    if any_landed {
+        actions.write(InventoryUiAction::ExpandFolder(dest));
+    }
 }
 
 /// Issue the commands for a drop onto an avatar: wear it on **yourself**
@@ -765,24 +798,44 @@ fn drop_onto_agent(
     worn: &mut WornAttachments,
     commands: &mut MessageWriter<SlCommand>,
 ) {
-    if identity.agent_id == Some(agent) {
-        if let MenuTarget::Item(item) = &active.source
-            && !active.from_library
-        {
-            for command in wear_commands(item, identity.agent_id, model.worn_wearables(), false) {
-                commands.write(SlCommand(command));
+    for (source, from_library) in &active.sources {
+        if identity.agent_id == Some(agent) {
+            if let MenuTarget::Item(item) = source
+                && !from_library
+            {
+                for command in wear_commands(item, identity.agent_id, model.worn_wearables(), false)
+                {
+                    commands.write(SlCommand(command));
+                }
+                if matches!(
+                    item.inv_type,
+                    InventoryType::Object | InventoryType::Attachment
+                ) {
+                    worn.items.insert(item.item_id);
+                }
+                // Keep the COF authoritative for a drag-wear too.
+                let replaced =
+                    crate::inventory_actions::replaced_by_wear(model.worn_wearables(), item);
+                let batch = crate::inventory_actions::cof_wear_link_commands(
+                    model.cof_key(),
+                    model.cof_items(),
+                    item,
+                    &replaced,
+                );
+                if !batch.is_empty() {
+                    for command in batch {
+                        commands.write(SlCommand(command));
+                    }
+                    if let Some(cof) = model.cof_key() {
+                        query_folder_page(cof, commands);
+                    }
+                }
             }
-            if matches!(
-                item.inv_type,
-                InventoryType::Object | InventoryType::Attachment
-            ) {
-                worn.items.insert(item.item_id);
-            }
+            continue;
         }
-        return;
-    }
-    if let Some(give) = give_command(&active.source, active.from_library, agent) {
-        commands.write(SlCommand(give));
+        if let Some(give) = give_command(source, *from_library, agent) {
+            commands.write(SlCommand(give));
+        }
     }
 }
 
