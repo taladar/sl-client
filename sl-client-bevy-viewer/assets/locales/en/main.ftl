@@ -227,3 +227,100 @@ animation-stop = Stop
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Inventory Gallery
+
+## The avatar profile floater (viewer-social-profiles). Labels follow the
+## reference's legacy in-viewer profile (the Vintage skin's panel_profile_*).
+
+profile-title = Profile
+profile-tab-second-life = 2nd Life
+profile-tab-web = Web
+profile-tab-picks = Picks
+profile-tab-classifieds = Classifieds
+profile-tab-first-life = 1st Life
+profile-tab-notes = Notes
+profile-name = Name:
+profile-key = Key:
+profile-online = Online
+profile-offline = Offline
+profile-birthdate = Birthdate:
+profile-account = Account:
+profile-account-resident = Resident
+profile-account-trial = Trial
+profile-account-charter = Charter Member
+profile-account-employee = Linden Lab Employee
+profile-payment-on-file = Payment Info On File
+profile-payment-used = Payment Info Used
+profile-payment-none = No Payment Info On File
+profile-partner = Partner:
+profile-partner-none = None
+profile-groups = Groups:
+profile-groups-none = None
+profile-about = About:
+profile-show-in-search = Show in search
+profile-save = Save
+profile-discard = Discard
+profile-im = Instant Message
+profile-offer-teleport = Offer Teleport
+profile-add-friend = Add Friend
+profile-remove-friend = Remove Friend
+profile-block = Block
+profile-find-on-map = Find on Map
+profile-invite-to-group = Invite to Group
+profile-pay = Pay
+# The label leading the pay amount field (the currency sign).
+profile-pay-amount = L$
+profile-web-url = URL:
+profile-web-none = (no profile URL)
+profile-first-life-about = About:
+profile-notes-hint = Make notes about this person here. No one else can see your notes.
+profile-loading = (loading)
+# Shown for a pick / classified location that moves to the agent's current
+# parcel on the next save.
+profile-location-pending = (will update after save)
+profile-picks-header = Tell everyone about your favorite places.
+profile-picks-none = No Picks
+profile-pick-new = New…
+profile-pick-delete = Delete…
+profile-pick-name = Name:
+profile-pick-desc = Description:
+profile-pick-location = Location:
+profile-pick-teleport = Teleport
+profile-pick-show-on-map = Show on Map
+profile-pick-set-location = Set Location
+profile-pick-save = Save Pick
+profile-classifieds-none = No Classifieds
+profile-classified-new = New…
+profile-classified-delete = Delete…
+profile-classified-name = Title:
+profile-classified-desc = Description:
+profile-classified-location = Location:
+profile-classified-category = Category:
+profile-classified-content-type = Content Type:
+profile-classified-general = General Content
+profile-classified-moderate = Moderate Content
+profile-classified-auto-renew = Auto renew each week
+profile-classified-price = Price for listing:
+profile-classified-creation-date = Creation date:
+profile-classified-teleport = Teleport
+profile-classified-map = Map
+profile-classified-set-location = Set to Current Location
+profile-classified-save = Save
+profile-classified-publish = Publish
+profile-classified-cancel = Cancel
+profile-category-any = Any Category
+profile-category-shopping = Shopping
+profile-category-land-rental = Land Rental
+profile-category-property-rental = Property Rental
+profile-category-special-attraction = Special Attraction
+profile-category-new-products = New Products
+profile-category-employment = Employment
+profile-category-wanted = Wanted
+profile-category-service = Service
+profile-category-personal = Personal
+# The People list's per-friend Profile action button.
+people-action-profile = Profile
+# The Share area: the whole profile floater accepts inventory drops.
+profile-share = Share:
+profile-share-hint = Drop inventory items here to give them to this person.
+# An unset profile / pick / classified image box.
+profile-image-none = (no image)

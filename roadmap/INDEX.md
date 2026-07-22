@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 106 |
-| blocked | 87 |
+| ready | 107 |
+| blocked | 88 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 561 |
+| done | 563 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **790** |
+| **total** | **794** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (106)
+## ready (107)
 
 ### protocol
 
@@ -202,6 +202,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-mirror-download`](ready/viewer-script-mirror-download.md) —
   Scripts on disk — mirror grid scripts to a directory tree
+- [`viewer-search-floater`](ready/viewer-search-floater.md) — Search floater —
+  directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-floater`](ready/viewer-snapshot-floater.md) — Snapshot
@@ -212,8 +214,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-social-group-profile`](ready/viewer-social-group-profile.md) — Group
   profile floater — general / members / roles / notices (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-social-profiles`](ready/viewer-social-profiles.md) — Avatar profiles
-  — picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
   Texture preview floater — full reference feature set
 - [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
@@ -232,6 +232,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-texture-picker`](ready/viewer-ui-texture-picker.md) — Texture
+  picker floater — choose a texture from inventory (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
@@ -297,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (87)
+## blocked (88)
 
 ### viewer
 
@@ -356,9 +359,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inspector-popups`](blocked/viewer-inspector-popups.md) — Avatar /
   object inspector popups from clickable chat names (blocked by
   `viewer-url-linkification`)
-- [`viewer-inventory-give-via-profile`](blocked/viewer-inventory-give-via-profile.md)
-  — Give inventory by dropping onto a profile (blocked by
-  `viewer-social-profiles`)
 - [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -454,6 +454,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
   texture / material editing (blocked by `viewer-object-edit-floater-shell`,
   `viewer-edit-face-selection`)
+- [`viewer-profile-image-editing`](blocked/viewer-profile-image-editing.md) —
+  Profile floater — set the profile / pick / classified images (blocked by
+  `viewer-ui-texture-picker`)
+- [`viewer-profile-web-tab-browser`](blocked/viewer-profile-web-tab-browser.md)
+  — Profile Web tab — render the feed in the embedded browser (blocked by
+  `viewer-media-prim-browser`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
@@ -594,7 +600,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (561)
+## done (563)
 
 ### protocol
 
@@ -814,6 +820,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-gallery`](done/viewer-inventory-gallery.md) — Inventory
   gallery view (blocked by `viewer-inventory-folder-tree` (done))
+- [`viewer-inventory-give-via-profile`](done/viewer-inventory-give-via-profile.md)
+  — Give inventory by dropping onto a profile (blocked by
+  `viewer-social-profiles` (done))
 - [`viewer-inventory-multi-select-actions`](done/viewer-inventory-multi-select-actions.md)
   — Multi-selection context actions + drag
 - [`viewer-inventory-new-wearables`](done/viewer-inventory-new-wearables.md) —
@@ -1125,6 +1134,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-social-people-panel`](done/viewer-social-people-panel.md) — People
   panel — friends / nearby / recent / blocked (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-social-profiles`](done/viewer-social-profiles.md) — Avatar profiles —
+  picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

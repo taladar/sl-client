@@ -21,3 +21,9 @@ the gear menu's "Save Texture As".
 
 Reference (Firestorm, read-only): `llpreviewtexture.cpp`,
 `floater_preview_texture.xml`.
+
+Note (2026-07-22): this floater is **subject-bound** — it opens on a
+particular subject rather than persistent app state — so exempt it from
+floater persistence (`floater_persist::FloaterPersistExempt` on the root,
+as the avatar profile and item previews do): no restored rectangle, no
+restored "open".

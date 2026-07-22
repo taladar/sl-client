@@ -133,6 +133,15 @@ struct FloaterPersistDirty {
 #[derive(Component, Debug, Clone, Copy)]
 struct FloaterSeeded;
 
+/// Opts a floater **out of persistence entirely** — no settings registered, no
+/// geometry / open-state seed, no write-back, and no tab-split persistence for
+/// strips it hosts. For windows whose state is meaningless across sessions:
+/// the avatar profile carries no persisted target avatar, so restoring its
+/// rectangle — let alone "open" — would only ever restore an empty shell.
+/// Insert it on the floater root right after `spawn_floater`.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub(crate) struct FloaterPersistExempt;
+
 /// The query filter [`persist_floater_changes`] runs on: a seeded floater whose
 /// geometry *or* open state changed this frame. Aliased to keep the system
 /// signature readable (and clear of `clippy::type_complexity`).
@@ -140,6 +149,14 @@ type ChangedSeededFloater = (
     With<FloaterSeeded>,
     Or<(Changed<Floater>, Changed<UiPanelShown>)>,
 );
+
+/// The filter for a floater persistence has not yet touched: registered on
+/// spawn ([`register_floater_settings`]) — unless opted out.
+type AddedPersistedFloater = (Added<Floater>, Without<FloaterPersistExempt>);
+
+/// The filter for a floater still awaiting its stored-geometry seed
+/// ([`seed_floaters_from_settings`]) — again minus the opted-out ones.
+type UnseededPersistedFloater = (Without<FloaterSeeded>, Without<FloaterPersistExempt>);
 
 /// The `[floater]` setting name for a floater's remembered rectangle.
 fn rect_key(id: &str) -> String {
@@ -227,7 +244,7 @@ fn px_to_f32(value: i32) -> f32 {
 /// [`ViewerSettings::register_in`].
 fn register_floater_settings(
     settings: Option<ResMut<ViewerSettings>>,
-    floaters: Query<(&Floater, &UiPanelShown), Added<Floater>>,
+    floaters: Query<(&Floater, &UiPanelShown), AddedPersistedFloater>,
 ) {
     let Some(mut settings) = settings else {
         return;
@@ -272,7 +289,7 @@ fn register_floater_settings(
 /// clamp (a manager system) then rescues a rect saved on a larger display.
 fn seed_floaters_from_settings(
     settings: Option<Res<ViewerSettings>>,
-    mut floaters: Query<(Entity, &mut Floater, &mut UiPanelShown), Without<FloaterSeeded>>,
+    mut floaters: Query<(Entity, &mut Floater, &mut UiPanelShown), UnseededPersistedFloater>,
     mut commands: Commands,
     mut floater_commands: MessageWriter<FloaterCommand>,
 ) {
@@ -390,19 +407,21 @@ fn tab_split_key(floater_id: &str, element: &str) -> String {
 }
 
 /// The id of the floater that hosts `strip`, or `None` if it lives outside any
-/// floater (a gallery strip) — those are not persisted.
+/// floater (a gallery strip) or inside a [`FloaterPersistExempt`] one — those
+/// are not persisted.
 ///
 /// Walks `strip` and its ancestors so a tab widget nested any depth inside a
 /// floater's content is found.
 fn host_floater_id(
     strip: Entity,
     parents: &Query<&ChildOf>,
-    floaters: &Query<&Floater>,
+    floaters: &Query<(&Floater, Has<FloaterPersistExempt>)>,
 ) -> Option<&'static str> {
     core::iter::successors(Some(strip), |entity| {
         parents.get(*entity).ok().map(ChildOf::parent)
     })
-    .find_map(|entity| floaters.get(entity).ok().map(|floater| floater.id))
+    .find_map(|entity| floaters.get(entity).ok())
+    .and_then(|(floater, exempt)| (!exempt).then_some(floater.id))
 }
 
 /// **Register** each newly-spawned resizable tab strip's split setting, with its
@@ -412,7 +431,7 @@ fn register_tab_split_settings(
     settings: Option<ResMut<ViewerSettings>>,
     strips: Query<(Entity, &TabStrip, &TabStripWidth), Added<TabStripWidth>>,
     parents: Query<&ChildOf>,
-    floaters: Query<&Floater>,
+    floaters: Query<(&Floater, Has<FloaterPersistExempt>)>,
 ) {
     let Some(mut settings) = settings else {
         return;
@@ -436,7 +455,7 @@ fn seed_tab_splits_from_settings(
     settings: Option<Res<ViewerSettings>>,
     mut strips: Query<(Entity, &TabStrip, &mut TabStripWidth), Without<TabSplitSeeded>>,
     parents: Query<&ChildOf>,
-    floaters: Query<&Floater>,
+    floaters: Query<(&Floater, Has<FloaterPersistExempt>)>,
     mut commands: Commands,
 ) {
     let Some(settings) = settings else {
@@ -470,7 +489,7 @@ fn persist_tab_split_changes(
     settings: Option<ResMut<ViewerSettings>>,
     strips: Query<(Entity, &TabStrip, &TabStripWidth), ChangedSeededTabSplit>,
     parents: Query<&ChildOf>,
-    floaters: Query<&Floater>,
+    floaters: Query<(&Floater, Has<FloaterPersistExempt>)>,
     mut dirty: ResMut<FloaterPersistDirty>,
     time: Res<Time>,
 ) {

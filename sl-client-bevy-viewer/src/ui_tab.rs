@@ -519,10 +519,10 @@ pub(crate) struct TabArrowGlyph {
     pub(crate) toward_end: bool,
 }
 
-/// What [`spawn_tab_container`] hands back: the outer container and the panel
-/// slots for the caller to fill.
+/// What [`spawn_tab_container`] hands back: the outer container, the panel
+/// area, and the panel slots for the caller to fill.
 ///
-/// Deliberately just these two — the widget owns its own strip, buttons and
+/// Deliberately just these — the widget owns its own strip, buttons and
 /// divider (a consumer finds the strip by its [`TabStrip`] component to react to
 /// `Changed<TabStrip>`), so returning them would be surface nobody reads. A
 /// consumer that comes to need one adds the field with its reader.
@@ -530,6 +530,13 @@ pub(crate) struct TabArrowGlyph {
 pub(crate) struct TabContainerHandle {
     /// The outer container node.
     pub(crate) container: Entity,
+    /// The strip wrapper (the `[viewport, controls]` row;
+    /// [`fill_tab_container`] lifts its scroll-axis bound so the bar tracks a
+    /// definite parent).
+    pub(crate) strip: Entity,
+    /// The one-cell grid the panels stack in ([`fill_tab_container`] restyles
+    /// it to track a definite parent).
+    pub(crate) panel_area: Entity,
     /// The panel slots, in tab order — spawn each tab's content into these.
     pub(crate) panels: Vec<Entity>,
 }
@@ -933,7 +940,105 @@ pub(crate) fn spawn_tab_container(
     // The strip, buttons and divider are intentionally not returned — see
     // [`TabContainerHandle`]; each is reachable by its component and drives
     // itself.
-    TabContainerHandle { container, panels }
+    TabContainerHandle {
+        container,
+        strip,
+        panel_area,
+        panels,
+    }
+}
+
+/// Restyle a just-spawned tab container to **fill a definite-size parent** (a
+/// resizable floater's content slot) instead of content-sizing: the container,
+/// strip and panel area grow (min 0) to the space the parent gives them, the
+/// one grid cell becomes `1fr` so the panels track that size rather than their
+/// content, and each panel scrolls its overflow vertically — by wheel (the
+/// panels join [`scroll_tabs_with_wheel`] via [`TabViewport`]) and by a
+/// trailing-edge scrollbar that appears only while its panel both overflows
+/// and is the visible one.
+///
+/// A content-driven host (the default) skips this and keeps the widget sized
+/// to its largest panel.
+pub(crate) fn fill_tab_container(
+    commands: &mut Commands,
+    placement: TabPlacement,
+    handle: &TabContainerHandle,
+) {
+    let mut container_node = placement.container_node();
+    container_node.flex_grow = 1.0;
+    container_node.min_width = Val::Px(0.0);
+    container_node.min_height = Val::Px(0.0);
+    commands.entity(handle.container).insert(container_node);
+    // The strip's scroll-axis cap becomes the parent's size, so the tab bar
+    // widens (or, vertical, lengthens) with the floater instead of stopping at
+    // the fixed bound.
+    let mut strip_node = placement.wrapper_node(None);
+    if placement.is_vertical() {
+        strip_node.max_height = Val::Percent(100.0);
+    } else {
+        strip_node.max_width = Val::Percent(100.0);
+    }
+    commands.entity(handle.strip).insert(strip_node);
+    commands.entity(handle.panel_area).insert(Node {
+        display: Display::Grid,
+        // `1fr`, not `auto`: the cell takes the area's size, so the panels
+        // track the parent instead of the largest panel's content.
+        grid_template_columns: vec![GridTrack::flex(1.0)],
+        grid_template_rows: vec![GridTrack::flex(1.0)],
+        flex_grow: 1.0,
+        min_width: Val::Px(0.0),
+        min_height: Val::Px(0.0),
+        ..default()
+    });
+    for panel in &handle.panels {
+        commands.entity(*panel).insert((
+            Node {
+                grid_column: GridPlacement::start(1),
+                grid_row: GridPlacement::start(1),
+                padding: UiRect::all(Val::Px(12.0)),
+                min_width: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
+                ..column(Val::Px(8.0))
+            },
+            ScrollPosition::default(),
+            // The wheel system scrolls the innermost vertical viewport under
+            // the pointer; a nested strip inside the panel still wins because
+            // the walk starts at the hovered node.
+            TabViewport { vertical: true },
+        ));
+        // The panel's scrollbar: a later sibling in the same grid cell (so it
+        // draws over the panel), hugging the trailing edge. Shown by
+        // `apply_tab_scroll_controls` only while the panel overflows and is
+        // itself visible.
+        commands
+            .spawn((
+                Scrollbar {
+                    target: *panel,
+                    orientation: ControlOrientation::Vertical,
+                    min_thumb_length: SCROLLBAR_MIN_THUMB,
+                },
+                Node {
+                    grid_column: GridPlacement::start(1),
+                    grid_row: GridPlacement::start(1),
+                    justify_self: JustifySelf::End,
+                    width: Val::Px(SCROLLBAR_THICKNESS),
+                    ..default()
+                },
+                BackgroundColor(SCROLLBAR_TRACK_COLOR),
+                Visibility::Hidden,
+                TabScrollControl {
+                    viewport: *panel,
+                    vertical: true,
+                },
+                Name::new("fill-panel-scrollbar"),
+                ChildOf(handle.panel_area),
+            ))
+            .with_child((
+                ScrollbarThumb::default(),
+                BackgroundColor(SCROLLBAR_THUMB_COLOR),
+            ));
+    }
 }
 
 /// The clamped active index a spec resolves to — shared by the strip (for
@@ -1138,20 +1243,26 @@ fn apply_tab_ellipsis(
 /// overflows on the scroll axis, and hide it when the tabs fit — so the control
 /// appears from available space, never configuration. Hidden, not removed, so the
 /// tabs never jump and the measurement stays stable.
+///
+/// A viewport that is itself `Visibility::Hidden` (a fill-mode tab **panel**
+/// whose tab is not selected) keeps its control hidden regardless of overflow
+/// — the panels stack in one grid cell, so an inactive panel's scrollbar would
+/// otherwise draw over the visible one.
 fn apply_tab_scroll_controls(
-    viewports: Query<&ComputedNode, With<TabViewport>>,
-    mut controls: Query<(&TabScrollControl, &mut Visibility)>,
+    viewports: Query<(&ComputedNode, Option<&Visibility>), With<TabViewport>>,
+    mut controls: Query<(&TabScrollControl, &mut Visibility), Without<TabViewport>>,
 ) {
     for (control, mut visibility) in &mut controls {
-        let Ok(computed) = viewports.get(control.viewport) else {
+        let Ok((computed, viewport_visibility)) = viewports.get(control.viewport) else {
             continue;
         };
+        let viewport_hidden = viewport_visibility.is_some_and(|vis| *vis == Visibility::Hidden);
         let overflow = if control.vertical {
             computed.content_size.y > computed.size.y + f32::EPSILON
         } else {
             computed.content_size.x > computed.size.x + f32::EPSILON
         };
-        let wanted = if overflow {
+        let wanted = if overflow && !viewport_hidden {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -2183,6 +2294,90 @@ mod tests {
                 Visibility::Hidden,
                 "the control is hidden until the tabs overflow"
             );
+        }
+        Ok(())
+    }
+
+    /// **Real layout:** a [`fill_tab_container`]ed widget tracks a
+    /// definite-size parent — the resizable-floater shape that motivated it
+    /// (`viewer-social-profiles`): the container takes the slot's size and the
+    /// panels grow to the panel area instead of content-sizing, while the
+    /// default (unfilled) widget stays content-sized.
+    #[test]
+    fn a_filled_container_tracks_a_definite_parent() -> Result<(), TestError> {
+        use crate::ui::{UiRoot, UiScaffoldSystems, column};
+        use crate::ui_test::{LayoutTest, settle};
+        const SLOT: Vec2 = Vec2::new(400.0, 540.0);
+        for fill in [false, true] {
+            let mut app = LayoutTest::new().build();
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    // The resizable floater's content slot: definite size,
+                    // clipped.
+                    let slot = commands
+                        .spawn((
+                            Node {
+                                width: Val::Px(SLOT.x),
+                                height: Val::Px(SLOT.y),
+                                overflow: Overflow::clip(),
+                                ..column(Val::Px(6.0))
+                            },
+                            Name::new("fill-fixture:slot"),
+                            ChildOf(root.0),
+                        ))
+                        .id();
+                    let labels: Vec<String> = ["One", "Two", "Three"].map(str::to_owned).into();
+                    let tabs = spawn_tab_container(
+                        &mut commands,
+                        slot,
+                        &super::TabSpec {
+                            element: "fill-fixture",
+                            placement: TabPlacement::BlockStart,
+                            labels: &labels,
+                            active: 0,
+                            tab_index: 1,
+                            font_size: 14.0,
+                            strip_width: None,
+                            ellipsis: super::DEFAULT_ELLIPSIS,
+                            translate_labels: false,
+                        },
+                    );
+                    for panel in &tabs.panels {
+                        commands.spawn((Text::new("panel line"), ChildOf(*panel)));
+                    }
+                    if fill {
+                        super::fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+                    }
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
+            let measure = |app: &mut App, name: &str| -> Option<Vec2> {
+                let mut query = app.world_mut().query::<(&ComputedNode, &Name)>();
+                query
+                    .iter(app.world())
+                    .find(|(_computed, node_name)| node_name.as_str() == name)
+                    .map(|(computed, _name)| computed.size * computed.inverse_scale_factor)
+            };
+            let container =
+                measure(&mut app, "fill-fixture:tab-container").ok_or("no container")?;
+            let panel = measure(&mut app, "fill-fixture:panel:0").ok_or("no panel")?;
+            if fill {
+                assert!(
+                    (container.y - SLOT.y).abs() < 2.0,
+                    "filled: the container tracks the slot height ({container})"
+                );
+                assert!(
+                    panel.y > SLOT.y * 0.8,
+                    "filled: the panels grow to the area ({panel})"
+                );
+            } else {
+                assert!(
+                    container.y < SLOT.y * 0.5,
+                    "unfilled: the widget stays content-sized ({container})"
+                );
+            }
         }
         Ok(())
     }

@@ -36,6 +36,7 @@ mod avatar_assets;
 mod avatar_menu;
 mod avatar_pick;
 mod avatar_picker;
+mod avatar_profile;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
@@ -165,6 +166,7 @@ use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatar_picker::AvatarPickerPlugin;
+use crate::avatar_profile::AvatarProfilePlugin;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
     annotate_avatar_distances, apply_avatar_appearance, apply_avatar_bake_textures,
@@ -805,6 +807,10 @@ fn run_session(
     .add_plugins(InventoryGalleryPlugin)
     .add_plugins(InventoryPropertiesPlugin)
     .add_plugins(AvatarPickerPlugin)
+    // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
+    // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
+    // Profile slice and the People list, editable for one's own profile.
+    .add_plugins(AvatarProfilePlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the

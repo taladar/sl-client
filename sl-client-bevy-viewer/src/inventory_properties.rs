@@ -198,6 +198,11 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
             },
         },
     );
+    // Subject-bound: the shown item is not persisted, so neither is the
+    // floater (`FloaterPersistExempt` — see the avatar profile).
+    commands
+        .entity(properties.root)
+        .insert(crate::floater_persist::FloaterPersistExempt);
     commands
         .entity(properties.title_text)
         .insert(Translated::new("item-properties-title"));
@@ -250,6 +255,10 @@ fn spawn_preview_floater(
             },
         },
     );
+    // Subject-bound, like the properties floater: not persisted.
+    commands
+        .entity(handle.root)
+        .insert(crate::floater_persist::FloaterPersistExempt);
     PreviewFloater {
         panel: handle.root,
         content: handle.content,

@@ -59,6 +59,7 @@ use sl_client_bevy::{
 
 use sl_settings::SettingValue;
 
+use crate::avatar_profile::OpenAvatarProfile;
 use crate::conversations::{ConversationKey, ConversationsUi, OpenConversation, StripFocus};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::{ViewerSettings, load_account_settings};
@@ -184,6 +185,9 @@ const GROUP_YOU_KEY: &str = "people-rights-you";
 
 /// The Fluent key for the "IM" action button.
 const ACTION_IM_KEY: &str = "people-action-im";
+
+/// The Fluent key for the "Profile" action button.
+const ACTION_PROFILE_KEY: &str = "people-action-profile";
 
 /// The Fluent key for the "Offer Teleport" action button.
 const ACTION_TELEPORT_KEY: &str = "people-action-teleport";
@@ -961,6 +965,9 @@ enum FriendAction {
     /// Open a one-to-one IM tab for the friend (via
     /// [`OpenConversation`], not a wire command).
     Im,
+    /// Open the friend's profile floater (via
+    /// [`OpenAvatarProfile`], not a wire command).
+    Profile,
     /// Offer the friend a teleport to us.
     OfferTeleport,
     /// Remove the friendship.
@@ -974,6 +981,7 @@ impl FriendAction {
     const fn label_key(self) -> &'static str {
         match self {
             Self::Im => ACTION_IM_KEY,
+            Self::Profile => ACTION_PROFILE_KEY,
             Self::OfferTeleport => ACTION_TELEPORT_KEY,
             Self::RemoveFriend => ACTION_REMOVE_KEY,
             Self::Block => ACTION_BLOCK_KEY,
@@ -982,12 +990,13 @@ impl FriendAction {
 }
 
 /// The wire [`Command`] an action produces for `friend` (named `name` for the
-/// mute entry), or `None` for [`FriendAction::Im`] — which opens a conversation
-/// tab rather than sending a command. Pure so the routing is unit-testable.
+/// mute entry), or `None` for [`FriendAction::Im`] and
+/// [`FriendAction::Profile`] — which open a conversation tab / the profile
+/// floater rather than sending a command. Pure so the routing is unit-testable.
 fn friend_command(action: FriendAction, friend: FriendKey, name: &str) -> Option<Command> {
     let agent = AgentKey::from(friend);
     match action {
-        FriendAction::Im => None,
+        FriendAction::Im | FriendAction::Profile => None,
         FriendAction::OfferTeleport => Some(Command::OfferTeleport {
             targets: vec![agent],
             message: String::new(),
@@ -1519,6 +1528,7 @@ fn spawn_friends_content(
         .id();
     for action in [
         FriendAction::Im,
+        FriendAction::Profile,
         FriendAction::OfferTeleport,
         FriendAction::RemoveFriend,
         FriendAction::Block,
@@ -1758,7 +1768,8 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                   selected: Res<SelectedFriend>,
                   model: Res<FriendsModel>,
                   mut sl: MessageWriter<SlCommand>,
-                  mut open: MessageWriter<OpenConversation>| {
+                  mut open: MessageWriter<OpenConversation>,
+                  mut profiles: MessageWriter<OpenAvatarProfile>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
@@ -1771,6 +1782,10 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                     open.write(OpenConversation {
                         key: ConversationKey::Direct(agent),
                     });
+                    return;
+                }
+                if action == FriendAction::Profile {
+                    profiles.write(OpenAvatarProfile { agent });
                     return;
                 }
                 let name = model.name_of(agent).unwrap_or_default();
@@ -2634,6 +2649,7 @@ mod tests {
     fn action_command_mapping() {
         let friend = FriendKey::from(Uuid::from_u128(7));
         assert!(friend_command(FriendAction::Im, friend, "x").is_none());
+        assert!(friend_command(FriendAction::Profile, friend, "x").is_none());
         assert!(matches!(
             friend_command(FriendAction::OfferTeleport, friend, ""),
             Some(Command::OfferTeleport { .. })

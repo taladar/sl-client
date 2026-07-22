@@ -20,3 +20,9 @@ region-handshake flow.
 Builds on: `protocol-14` estate / region.
 
 Deps: [[viewer-ui-widget-scaffold]].
+
+Note (2026-07-22): this floater is **subject-bound** — it opens on a
+particular subject rather than persistent app state — so exempt it from
+floater persistence (`floater_persist::FloaterPersistExempt` on the root,
+as the avatar profile and item previews do): no restored rectangle, no
+restored "open".

@@ -12,8 +12,8 @@
 //! # What is wired, and what is a disabled placeholder
 //!
 //! The reference offers many avatar actions; most of them are features this
-//! viewer does not have yet (a profile floater, a pay dialog, an abuse report,
-//! outfit editing, the moderation powers). Those are declared **in their
+//! viewer does not have yet (a pay dialog, an abuse report, outfit editing,
+//! the moderation powers). Those are declared **in their
 //! reference compass positions but disabled** — a slice you can see and aim at but
 //! not pick, so the menu's shape (the muscle memory) is laid down now and the
 //! slices light up as the features land. A disabled slice is one whose `when`
@@ -33,6 +33,8 @@
 //! - **Add as Friend** (other) → [`Command::OfferFriendship`], disabled via
 //!   [`TARGET_NOT_FRIEND`] when the agent already is a friend, matching the
 //!   reference's `on_enable`.
+//! - **Profile** (self and other) → opens the avatar profile floater
+//!   ([`crate::avatar_profile::OpenAvatarProfile`]).
 //!
 //! # Where we depart from the reference, on purpose
 //!
@@ -82,6 +84,7 @@ use sl_client_bevy::{
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatar_pick::{AvatarPicker, PickAccuracy};
+use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::{AvatarPickTarget, AvatarState};
 use crate::camera::ViewerCamera;
 use crate::conversations::{ConversationKey, OpenConversation};
@@ -241,7 +244,7 @@ pub(crate) static AVATAR_OTHER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Profile",
                 action: "profile",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -506,7 +509,7 @@ pub(crate) static AVATAR_SELF_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Profile",
                 action: "profile",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -1075,6 +1078,7 @@ fn handle_avatar_menu_actions(
     mut ground_sit: ResMut<SelfGroundSit>,
     mut commands: MessageWriter<SlCommand>,
     mut conversations: MessageWriter<OpenConversation>,
+    mut profiles: MessageWriter<OpenAvatarProfile>,
 ) {
     for action in actions.read() {
         if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
@@ -1096,6 +1100,9 @@ fn handle_avatar_menu_actions(
                 conversations.write(OpenConversation {
                     key: ConversationKey::Direct(agent),
                 });
+            }
+            "profile" => {
+                profiles.write(OpenAvatarProfile { agent });
             }
             "mute" => {
                 let name = avatars
@@ -1377,11 +1384,11 @@ mod tests {
         // No conditions held except standing (so Sit/Stand resolve) — the shape
         // the live viewer opens the other pie in has no sentinel.
         let other = resolve_slots(&AVATAR_OTHER_PIE, &PieConditions::default());
-        let profile = slot_at(&other, Compass::East)?;
-        assert_eq!(profile.outcome, SlotOutcome::Action("profile"));
+        let go_to = slot_at(&other, Compass::North)?;
+        assert_eq!(go_to.outcome, SlotOutcome::Action("go-to"));
         assert!(
-            !profile.enabled,
-            "Profile is a placeholder and must read disabled until it is wired"
+            !go_to.enabled,
+            "Go To is a placeholder and must read disabled until it is wired"
         );
         // And it is not alone: none of the sentinel-gated leaves are enabled.
         assert!(
@@ -1392,11 +1399,18 @@ mod tests {
             !slot_at(&other, Compass::SouthWest)?.enabled,
             "Pay is a placeholder and must read disabled"
         );
+        // Profile went live with the profile floater: unconditional, like IM.
+        let profile = slot_at(&other, Compass::East)?;
+        assert_eq!(profile.outcome, SlotOutcome::Action("profile"));
+        assert!(
+            profile.enabled,
+            "Profile is wired to the profile floater and must be enabled"
+        );
         // The proof that the sentinel is what disables them: hold it, and they
         // light up. The live viewer never does this.
         let held = resolve_slots(&AVATAR_OTHER_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::East)?.enabled,
+            slot_at(&held, Compass::North)?.enabled,
             "holding the sentinel proves it is the only thing gating the placeholder"
         );
         Ok(())

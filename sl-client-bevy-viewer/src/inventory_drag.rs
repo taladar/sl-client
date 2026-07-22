@@ -645,17 +645,13 @@ pub(crate) fn on_row_drag_end(
         return;
     }
 
-    // 2. An avatar-keyed UI node under the pointer: a people row or a name tag.
+    // 2. An avatar-keyed UI node under the pointer: a people row, a name tag,
+    //    or the profile floater (whose root carries the target — the hovered
+    //    node is one of its children, so walk up).
     let ui_agent = hover_map
         .values()
         .flat_map(|hits| hits.keys())
-        .find_map(|hovered| {
-            agent_targets
-                .get(*hovered)
-                .map(|target| target.0)
-                .ok()
-                .or_else(|| pick_targets.get(*hovered).ok().map(AvatarPickTarget::agent))
-        });
+        .find_map(|hovered| agent_target_at(*hovered, &agent_targets, &pick_targets, &child_of));
     if let Some(agent) = ui_agent {
         drop_onto_agent(&active, agent, &identity, &model, &mut worn, &mut commands);
         return;
@@ -788,6 +784,31 @@ fn drop_into_folder(
     }
 }
 
+/// The agent a hovered UI node drops onto, if any: the node's own (or its
+/// nearest ancestor's) [`AgentDropTarget`] or [`AvatarPickTarget`]. The
+/// ancestor walk is what lets a container stamp its **root** — the profile
+/// floater does — while the pointer hovers one of its children.
+fn agent_target_at(
+    hovered: Entity,
+    agent_targets: &Query<&AgentDropTarget>,
+    pick_targets: &Query<&AvatarPickTarget>,
+    child_of: &Query<&ChildOf>,
+) -> Option<AgentKey> {
+    let mut node = hovered;
+    loop {
+        if let Ok(target) = agent_targets.get(node) {
+            return Some(target.0);
+        }
+        if let Ok(target) = pick_targets.get(node) {
+            return Some(target.agent());
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return None,
+        }
+    }
+}
+
 /// Issue the commands for a drop onto an avatar: wear it on **yourself**
 /// (object → attach, wearable → wear), give it to anyone else.
 fn drop_onto_agent(
@@ -854,8 +875,14 @@ impl Plugin for InventoryDragPlugin {
 
 #[cfg(test)]
 mod tests {
-    use super::{FolderDrop, classify_folder_drop, give_command, rez_object_command, row_index_at};
+    use super::{
+        AgentDropTarget, FolderDrop, agent_target_at, classify_folder_drop, give_command,
+        rez_object_command, row_index_at,
+    };
+    use crate::avatars::AvatarPickTarget;
     use crate::inventory_actions::MenuTarget;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{ChildOf, Query, World};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
@@ -999,5 +1026,53 @@ mod tests {
             &moved,
             Command::RezObjectFromInventory { params } if params.remove_item
         ));
+    }
+
+    /// The UI drop-target lookup finds a target on the hovered node itself, on
+    /// an ancestor (the profile floater stamps its **root** while a child is
+    /// hovered — `viewer-inventory-give-via-profile`), accepts the name tags'
+    /// `AvatarPickTarget`, and yields nothing on an untargeted tree.
+    #[test]
+    fn agent_drop_target_resolves_through_ancestors() {
+        let mut world = World::new();
+        let floater_agent = AgentKey::from(Uuid::from_u128(0xAA));
+        let tag_agent = AgentKey::from(Uuid::from_u128(0xBB));
+        // A floater root carrying the target, with a nested child.
+        let root = world.spawn(AgentDropTarget(floater_agent)).id();
+        let middle = world.spawn(ChildOf(root)).id();
+        let leaf = world.spawn(ChildOf(middle)).id();
+        // A name tag carrying the pick target directly.
+        let tag = world.spawn(AvatarPickTarget::new(tag_agent)).id();
+        // An unrelated node with no target anywhere above it.
+        let bare_parent = world.spawn(()).id();
+        let bare = world.spawn(ChildOf(bare_parent)).id();
+        let mut queries = SystemState::<(
+            Query<&AgentDropTarget>,
+            Query<&AvatarPickTarget>,
+            Query<&ChildOf>,
+        )>::new(&mut world);
+        // `SystemState::get` is fallible and `expect` is denied workspace-wide,
+        // so an unbuildable query set fails the assertion below instead.
+        let queries = queries.get(&world).ok();
+        assert!(queries.is_some(), "the test queries must build");
+        let Some((agent_targets, pick_targets, child_of)) = queries else {
+            return;
+        };
+        assert_eq!(
+            agent_target_at(root, &agent_targets, &pick_targets, &child_of),
+            Some(floater_agent)
+        );
+        assert_eq!(
+            agent_target_at(leaf, &agent_targets, &pick_targets, &child_of),
+            Some(floater_agent)
+        );
+        assert_eq!(
+            agent_target_at(tag, &agent_targets, &pick_targets, &child_of),
+            Some(tag_agent)
+        );
+        assert_eq!(
+            agent_target_at(bare, &agent_targets, &pick_targets, &child_of),
+            None
+        );
     }
 }
