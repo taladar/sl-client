@@ -1,0 +1,47 @@
+[package]
+name = "sl-cef"
+description = "Offscreen Chromium (CEF) web-media engine for Second Life / OpenSim viewers — windowless browser surfaces behind an engine-agnostic MediaBackend trait (CPU BGRA frames, portable input, per-surface isolation)"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "cef", "browser", "media"]
+categories = ["game-development", "web-programming", "rendering"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[[bin]]
+name = "sl-cef-helper"
+path = "src/bin/sl-cef-helper.rs"
+
+[dependencies]
+cef = { version = "150.2.1" }
+fs-err = { version = "3.3.0" }
+thiserror = { version = "2.0.18" }
+tracing = { version = "0.1.41" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+# This crate deliberately does NOT inherit the workspace lints: like
+# `sl-j2c-encode` it owns `unsafe` FFI (reading CEF's paint buffers), which
+# the workspace-wide `unsafe_code = "forbid"` policy would reject. Unsafe is
+# permitted here but every block must still carry a safety comment.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+missing_docs_in_private_items = "deny"
+as_conversions = "deny"
+indexing_slicing = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"

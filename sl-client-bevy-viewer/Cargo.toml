@@ -70,6 +70,7 @@ image = { version = "0.25.10", default-features = false, features = ["tga"] }
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
+sl-cef = { version = "0.1.0", path = "../sl-cef" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",
 ] }

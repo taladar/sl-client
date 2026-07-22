@@ -2,9 +2,9 @@
 id: viewer-media-prim-browser
 title: Media-on-a-prim & embedded web browser
 topic: viewer
-status: blocked
+status: in-progress
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
+refs: [viewer-audio-backend, viewer-video-playback]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -155,3 +155,44 @@ Builds on: `protocol-24` (`MediaEntry` / `ObjectMedia`, already decoded).
 
 Deps: [[viewer-ui-widget-scaffold]] (the floaters), [[viewer-audio-backend]]
 (page audio must reach the mixer to be muted, bussed and spatialised).
+
+## Progress (2026-07-22)
+
+The CEF engine and both interaction surfaces are implemented and committed:
+
+- **`sl-cef` crate**: the `MediaBackend` / `MediaSurface` traits and the CEF
+  implementation — windowless browsers, external message pump, CPU BGRA
+  `on_paint` path, per-surface isolated request contexts, portable input
+  (Windows VK codes + committed text via `vk`), popup suppression, and the
+  `sl-cef-helper` subprocess binary (`browser_subprocess_path`, so the viewer
+  binary is never re-executed — same architecture as planned, cleaner entry).
+  The prebuilt CEF download is pinned to `.cef/` via `.cargo/config.toml`
+  (`CEF_PATH`), and binaries get an `$ORIGIN` rpath.
+- **UI widget** (`browser_widget`): the `LLMediaCtrl` equivalent — a
+  surface-backed image node with click-to-focus, pointer / wheel / keyboard
+  routing (Tab deliberately stays with UI focus-nav; Escape releases), lazy
+  surface creation at laid-out size, live in the gallery via a data-URL
+  specimen.
+- **Web floater** (`web_floater`, Content ▸ Web Browser): back / forward /
+  stop-or-reload / address bar / secure lock / open-external / status +
+  progress row, shared (trusted) request context.
+- **Profile Web tab** renders the profile URL's page with the reference's
+  load-time status line (`viewer-profile-web-tab-browser`, now done).
+- **Media-on-a-prim** (`media_prim`): `MediaURL` version tracking →
+  `RequestObjectMedia`, per-face entries, interest-ranked surface driver
+  (cap 8, 30/15/5/1 fps tiers), face-material swap (unlit, original handle
+  restored), reference focus model (first click focuses,
+  `first_click_interact`, Escape releases, keyboard via the new
+  `InputContext::Media`), `perms_interact` gating, white-list bounce-back.
+- **Floating controls bar** (`media_controls`): back / forward / home /
+  stop-or-reload / mute / zoom-unzoom / open-external / URL field with
+  white-list check + `ObjectMediaNavigate` broadcast, progress read-out,
+  secure lock, mini-controls and `perms_control` gating, projected above the
+  face and hidden after ~3 s idle.
+
+Still open here: **page audio into the mixer** (blocked on
+[[viewer-audio-backend]]; until then CEF plays audio directly and the bar's
+mute toggle is the only control), **spatialisation**, the **GStreamer
+direct-video split** ([[viewer-video-playback]]), zero-copy (deferred
+headroom, as designed), cursor-shape adoption over media, and in-page IME
+composition (committed text works).

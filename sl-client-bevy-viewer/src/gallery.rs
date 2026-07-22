@@ -259,6 +259,12 @@ pub fn run() {
         // skin and the switcher below can flip skins and theme overlays live.
         .insert_resource(crate::skin::SkinSelection::resolve(None, None))
         .add_plugins(crate::skin::ViewerSkinPlugin)
+        // The web-media engine + browser widget, so the browser-view specimen
+        // renders a real (offline, data-URL) page in the gallery — the fastest
+        // way to exercise the embedded browser without a login. Soft-fails to
+        // a placeholder when the CEF runtime is unavailable.
+        .add_plugins(crate::media_engine::MediaEnginePlugin { enabled: true })
+        .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())

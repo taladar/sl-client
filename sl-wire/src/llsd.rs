@@ -495,6 +495,85 @@ impl MediaEntry {
         push_int_field(out, "perms_control", i32::from(self.perms_control));
         out.push_str("</map>");
     }
+
+    /// Whether `url` may be navigated to under this entry's white-list: `true`
+    /// when the white-list is disabled, empty, or matched. Mirrors the
+    /// viewer's `LLMediaEntry::checkCandidateUrl` — a viewer must bounce a
+    /// navigation whose target fails this check back to the current (or home)
+    /// URL.
+    #[must_use]
+    pub fn check_candidate_url(&self, url: &url::Url) -> bool {
+        if self.whitelist_enable {
+            Self::url_passes_whitelist(url, &self.whitelist)
+        } else {
+            true
+        }
+    }
+
+    /// Whether `url` matches `whitelist` (an **empty** list passes
+    /// everything, matching the viewer's `checkUrlAgainstWhitelist`). Each
+    /// entry is split into scheme / authority / path parts, each a
+    /// case-insensitive glob pattern where `*` matches any run of characters
+    /// and an absent part matches anything (a scheme-less entry like
+    /// `example.com` matches that host under any scheme; a path-less entry
+    /// matches every path).
+    #[must_use]
+    pub fn url_passes_whitelist(url: &url::Url, whitelist: &[String]) -> bool {
+        if whitelist.is_empty() {
+            return true;
+        }
+        whitelist
+            .iter()
+            .any(|filter| whitelist_entry_matches(url, filter))
+    }
+}
+
+/// Whether one white-list entry matches `url` (see
+/// [`MediaEntry::url_passes_whitelist`]).
+fn whitelist_entry_matches(url: &url::Url, filter: &str) -> bool {
+    let (scheme_pattern, rest) = match filter.split_once("://") {
+        Some((scheme, rest)) => (scheme, rest),
+        None => ("", filter),
+    };
+    let (authority_pattern, path_pattern) = match rest.find('/') {
+        Some(index) => rest.split_at(index),
+        None => (rest, ""),
+    };
+    glob_match(url.scheme(), scheme_pattern)
+        && glob_match(url.authority(), authority_pattern)
+        && glob_match(url.path(), path_pattern)
+}
+
+/// Case-insensitive full-string glob match where `*` matches any run of
+/// characters and the **empty pattern matches everything** (the viewer's
+/// `pattern_match` semantics for white-list URL parts).
+fn glob_match(candidate: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    let candidate = candidate.to_lowercase();
+    let pattern = pattern.to_lowercase();
+    let mut parts = pattern.split('*');
+    let Some(first) = parts.next() else {
+        return candidate.is_empty();
+    };
+    let Some(after_prefix) = candidate.strip_prefix(first) else {
+        return false;
+    };
+    let middle_and_last: Vec<&str> = parts.collect();
+    let Some((last, middles)) = middle_and_last.split_last() else {
+        // No `*` at all: the pattern must equal the candidate.
+        return after_prefix.is_empty();
+    };
+    let mut remaining = after_prefix;
+    for middle in middles {
+        let Some(found) = remaining.find(middle) else {
+            return false;
+        };
+        let after = found.saturating_add(middle.len());
+        remaining = remaining.get(after..).unwrap_or("");
+    }
+    remaining.ends_with(last)
 }
 
 /// Reads a boolean LLSD map field, falling back to `default` when absent. A

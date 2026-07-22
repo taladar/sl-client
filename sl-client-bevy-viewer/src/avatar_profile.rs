@@ -313,6 +313,10 @@ pub(crate) struct ProfileUi {
     about_field: Option<Entity>,
     /// The profile URL field (own profile only).
     url_field: Option<Entity>,
+    /// The Web tab's embedded browser view, when a profile URL is shown.
+    web_view: Option<Entity>,
+    /// The Web tab's load-status line under the browser view.
+    web_status: Option<Entity>,
     /// The 1st-life About field (own profile only).
     fl_about_field: Option<Entity>,
     /// The Notes field.
@@ -411,6 +415,7 @@ impl Plugin for AvatarProfilePlugin {
                     track_list_selection,
                     rebuild_profile_tabs,
                     poll_profile_textures,
+                    update_profile_web_status,
                 )
                     .chain(),
             );
@@ -486,6 +491,8 @@ fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
         tabs: tabs.panels,
         about_field: None,
         url_field: None,
+        web_view: None,
+        web_status: None,
         fl_about_field: None,
         notes_field: None,
         pay_amount_field: None,
@@ -1025,6 +1032,8 @@ fn build_web_tab(
     ui: &mut ProfileUi,
 ) {
     ui.url_field = None;
+    ui.web_view = None;
+    ui.web_status = None;
     spawn_section_label(commands, panel, "profile-web-url");
     let url = state
         .properties
@@ -1036,7 +1045,7 @@ fn build_web_tab(
             commands,
             panel,
             &TextInputSpec {
-                initial: url,
+                initial: url.clone(),
                 font_size: PROFILE_FONT_SIZE,
                 width_glyphs: 30.0,
                 tab_index: 2,
@@ -1062,7 +1071,34 @@ fn build_web_tab(
     } else if url.is_empty() {
         spawn_key_label(commands, panel, "profile-web-none", DIM_LABEL_COLOR);
     } else {
-        spawn_text_block(commands, panel, url);
+        spawn_text_block(commands, panel, url.clone());
+    }
+    // The reference renders the profile URL's page in an embedded browser
+    // below the URL line (`LLPanelProfileWeb`), with a load-status string —
+    // navigation driven by code, no visible URL bar
+    // (`viewer-profile-web-tab-browser`).
+    if let Some(page) = crate::web_floater::normalize_web_url(&url) {
+        ui.web_view = Some(crate::browser_widget::spawn_browser_view(
+            commands,
+            panel,
+            &crate::browser_widget::BrowserViewSpec {
+                initial_url: page,
+                isolated: false,
+                tab_index: 5,
+                fixed_height: Some(320.0),
+            },
+        ));
+        ui.web_status = Some(
+            commands
+                .spawn((
+                    Text::default(),
+                    Translated::new("profile-web-loading"),
+                    UiFont::Sans.at(PROFILE_FONT_SIZE),
+                    TextColor(DIM_LABEL_COLOR),
+                    ChildOf(panel),
+                ))
+                .id(),
+        );
     }
 }
 
@@ -2284,6 +2320,62 @@ fn poll_profile_textures(
             state.pending_textures.push((key, node));
         }
     }
+}
+
+/// Keep the Web tab's load-status line current: "loading" while the embedded
+/// page loads, then the reference's load-time string ("Page loaded in N s")
+/// once it finishes. Tracks the view entity so a tab rebuild restarts the
+/// clock.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the profile \
+              floater's entities, the browser view / surface lookups, the clock, the \
+              translator and the status label"
+)]
+fn update_profile_web_status(
+    ui: Res<ProfileUi>,
+    views: Query<&crate::browser_widget::BrowserView>,
+    surfaces: bevy::ecs::system::NonSend<crate::media_engine::MediaSurfaces>,
+    time: Res<Time>,
+    translator: crate::i18n::Translator,
+    mut tracked: Local<Option<(Entity, f64, bool)>>,
+    mut texts: Query<&mut Text>,
+    mut commands: Commands,
+) {
+    let (Some(view_entity), Some(status_entity)) = (ui.web_view, ui.web_status) else {
+        *tracked = None;
+        return;
+    };
+    let now = time.elapsed_secs_f64();
+    let restart = !matches!(*tracked, Some((entity, _, _)) if entity == view_entity);
+    if restart {
+        *tracked = Some((view_entity, now, false));
+    }
+    let Some((_, started, done)) = tracked.as_mut() else {
+        return;
+    };
+    if *done {
+        return;
+    }
+    let Ok(view) = views.get(view_entity) else {
+        return;
+    };
+    let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+        return;
+    };
+    if slot.status.loading || slot.status.progress < 1.0 {
+        return;
+    }
+    let seconds = format!("{:.2}", now - *started);
+    let line = translator.format(
+        "profile-web-loaded",
+        &crate::i18n::TransArgs::new().text("seconds", &seconds),
+    );
+    if let Ok(mut text) = texts.get_mut(status_entity) {
+        text.0 = line;
+    }
+    commands.entity(status_entity).remove::<Translated>();
+    *done = true;
 }
 
 // ---------------------------------------------------------------------------

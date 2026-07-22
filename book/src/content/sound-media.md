@@ -86,10 +86,19 @@ the application supplies.
 >   the simulator side as `ServerEvent::TriggerSound`
 >   (`sl-proto/src/sim_session.rs`); REPL token `trigger_sound`.
 > - Media: `ParcelMediaUpdateInfo`, `ParcelMediaCommand` in
->   `sl-proto/src/types/parcel.rs`; `MediaEntry` / `ObjectMediaResponse` in
+>   `sl-proto/src/types/parcel.rs`; `MediaEntry` / `ObjectMediaResponse` (and
+>   the navigation white-list check `MediaEntry::check_candidate_url`) in
 >   `sl-wire/src/llsd.rs`; CAPS driver `sl-client-tokio/src/media.rs`; example
 >   `sl-client-tokio/examples/object_media.rs`. Caps `CAP_OBJECT_MEDIA`,
 >   `CAP_OBJECT_MEDIA_NAVIGATE`.
+> - Rendering media: the `sl-cef` crate embeds offscreen Chromium behind the
+>   engine-agnostic `MediaBackend` / `MediaSurface` traits (CPU BGRA frames,
+>   portable VK-code + text input, isolated per-surface request contexts,
+>   `sl-cef-helper` subprocess binary). The Bevy viewer drives it in
+>   `sl-client-bevy-viewer/src/media_engine.rs` (pump + frame mirror),
+>   `browser_widget.rs` / `web_floater.rs` (embedded browser UI),
+>   `media_prim.rs` (media-on-a-prim surfaces, focus and input routing) and
+>   `media_controls.rs` (the floating per-face controls bar).
 > - Voice: caps `CAP_PROVISION_VOICE_ACCOUNT`, `CAP_PARCEL_VOICE_INFO`,
 >   `CAP_VOICE_SIGNALING`; LLSD helpers in `sl-wire/src/voice.rs`; driver
 >   `sl-client-tokio/src/voice.rs`; example `sl-client-tokio/examples/voice.rs`.

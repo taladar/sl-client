@@ -256,3 +256,133 @@ mod test {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod media_whitelist {
+    use sl_wire::MediaEntry;
+
+    type TestError = Box<dyn std::error::Error>;
+
+    /// Parses a URL for the white-list tests.
+    fn url(text: &str) -> Result<url::Url, TestError> {
+        Ok(url::Url::parse(text)?)
+    }
+
+    #[test]
+    fn disabled_whitelist_passes_everything() -> Result<(), TestError> {
+        let entry = MediaEntry {
+            whitelist_enable: false,
+            whitelist: vec!["example.com".to_owned()],
+            ..MediaEntry::default()
+        };
+        assert!(entry.check_candidate_url(&url("https://evil.invalid/")?));
+        Ok(())
+    }
+
+    #[test]
+    fn empty_whitelist_passes_everything() -> Result<(), TestError> {
+        let entry = MediaEntry {
+            whitelist_enable: true,
+            whitelist: Vec::new(),
+            ..MediaEntry::default()
+        };
+        assert!(entry.check_candidate_url(&url("https://anything.invalid/")?));
+        Ok(())
+    }
+
+    #[test]
+    fn schemeless_host_entry_matches_any_scheme_and_path() -> Result<(), TestError> {
+        let whitelist = vec!["example.com".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://example.com/deep/path?q=1")?,
+            &whitelist
+        ));
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("http://example.com/")?,
+            &whitelist
+        ));
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://sub.example.com/")?,
+            &whitelist
+        ));
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://example.com.evil.invalid/")?,
+            &whitelist
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn wildcard_subdomain_entry() -> Result<(), TestError> {
+        let whitelist = vec!["*.example.com".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://media.example.com/x")?,
+            &whitelist
+        ));
+        // The reference glob needs at least the dot: the bare apex does not
+        // match `*.example.com`.
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://example.com/")?,
+            &whitelist
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn scheme_restriction_is_honoured() -> Result<(), TestError> {
+        let whitelist = vec!["https://example.com".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://example.com/")?,
+            &whitelist
+        ));
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("http://example.com/")?,
+            &whitelist
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn path_prefix_pattern_with_wildcard() -> Result<(), TestError> {
+        let whitelist = vec!["example.com/media/*".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://example.com/media/clip.html")?,
+            &whitelist
+        ));
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://example.com/other/clip.html")?,
+            &whitelist
+        ));
+        // Without a wildcard the path must match exactly.
+        let exact = vec!["example.com/media".to_owned()];
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://example.com/media/clip.html")?,
+            &exact
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn matching_is_case_insensitive_and_any_entry_suffices() -> Result<(), TestError> {
+        let whitelist = vec!["other.invalid".to_owned(), "EXAMPLE.com".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://example.COM/")?,
+            &whitelist
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn authority_includes_port() -> Result<(), TestError> {
+        let whitelist = vec!["example.com:8080".to_owned()];
+        assert!(MediaEntry::url_passes_whitelist(
+            &url("https://example.com:8080/")?,
+            &whitelist
+        ));
+        assert!(!MediaEntry::url_passes_whitelist(
+            &url("https://example.com/")?,
+            &whitelist
+        ));
+        Ok(())
+    }
+}

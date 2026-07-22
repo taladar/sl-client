@@ -558,6 +558,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   bar layout is swept.",
         spawn: crate::local_chat_input::spawn_local_chat_input_specimen,
     },
+    UiElement {
+        id: "browser-view",
+        summary: "The embedded-browser view (`crate::browser_widget`): a surface-backed image \
+                  node with click-to-focus input routing. In the gallery the web-media engine is \
+                  live and renders an offline data-URL page; in a headless test it stays the \
+                  dark placeholder.",
+        spawn: crate::browser_widget::spawn_browser_specimen,
+    },
 ];
 
 /// The accent colour on a label's leading edge.

@@ -43,6 +43,7 @@ use sl_client_bevy::{
 
 use crate::camera::ViewerCamera;
 use crate::hud::{HudCamera, on_hud_layer};
+use crate::media_prim::MediaWorldClick;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
@@ -86,6 +87,7 @@ pub(crate) fn pick_and_touch(
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     mut writer: MessageWriter<SlCommand>,
+    mut media_clicks: MessageWriter<MediaWorldClick>,
 ) {
     // A plain left-click touches; an `Alt`-held left-click is the camera focus /
     // orbit gesture (`crate::camera::focus_on_object`), not a touch, so ignore it.
@@ -142,6 +144,7 @@ pub(crate) fn pick_and_touch(
                 &globals,
                 &parents,
                 &mut writer,
+                &mut media_clicks,
                 "HUD",
             )
         {
@@ -165,6 +168,7 @@ pub(crate) fn pick_and_touch(
                 &globals,
                 &parents,
                 &mut writer,
+                &mut media_clicks,
                 "world",
             );
         }
@@ -259,6 +263,7 @@ fn touch_hit(
     globals: &Query<&GlobalTransform>,
     parents: &Query<&ChildOf>,
     writer: &mut MessageWriter<SlCommand>,
+    media_clicks: &mut MessageWriter<MediaWorldClick>,
     which: &str,
 ) -> bool {
     // The ray strikes a face/submesh child entity: its Linden face index and the
@@ -287,6 +292,21 @@ fn touch_hit(
         face.map(|(_marker, FaceTextureDebug(tf))| tf),
         object_global,
     );
+    // A face flagged for media-on-a-prim claims the click for the media
+    // system (focus / interact, `crate::media_prim`) instead of a touch —
+    // the reference's `handleMediaClick` running before `handleLeftClickPick`
+    // dispatches the touch.
+    if let Some((marker, FaceTextureDebug(tf))) = face
+        && tf.media_enabled()
+    {
+        media_clicks.write(MediaWorldClick {
+            entity,
+            scoped,
+            face: marker.face_id,
+            uv: Vec2::new(surface.uv[0], surface.uv[1]),
+        });
+        return true;
+    }
     info!(
         "P35.3 touch ({which}) object {scoped:?} face={} pos=({:.2},{:.2},{:.2})",
         surface.face_index, surface.position.x, surface.position.y, surface.position.z,

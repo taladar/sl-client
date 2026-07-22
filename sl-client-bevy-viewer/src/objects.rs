@@ -598,6 +598,28 @@ impl ObjectState {
             wearer: attachment.then_some(root.parent),
         })
     }
+
+    /// The per-face child entities of the object with grid-wide key `key`, or
+    /// `None` if the object is unknown (or not yet tessellated). Used by the
+    /// media-on-a-prim driver ([`crate::media_prim`]) to find the face entity a
+    /// media surface's texture goes onto. A scan like [`entity_of`](Self::entity_of),
+    /// run only when media data changes — not per frame.
+    pub(crate) fn face_entities_by_key(&self, key: ObjectKey) -> Option<&[Entity]> {
+        self.objects
+            .values()
+            .find(|tracked| tracked.full_key == key)
+            .map(|tracked| tracked.face_entities.as_slice())
+    }
+
+    /// The `UpdateFlags` bits of the object with grid-wide key `key` (its own,
+    /// not OR-ed with its root's), or `None` if unknown. The media permission
+    /// check reads the you-owner bit from these.
+    pub(crate) fn update_flags_by_key(&self, key: ObjectKey) -> Option<u32> {
+        self.objects
+            .values()
+            .find(|tracked| tracked.full_key == key)
+            .map(|tracked| tracked.update_flags)
+    }
 }
 
 /// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities

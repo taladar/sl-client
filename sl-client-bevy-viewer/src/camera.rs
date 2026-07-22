@@ -323,6 +323,14 @@ impl CameraRig {
         self.yaw = (-dir.x).atan2(-dir.z);
         self.pitch = dir.y.asin().clamp(-MAX_PITCH, MAX_PITCH);
     }
+
+    /// Place the focus-on-point eye offset directly (world space, eye = point +
+    /// offset). The media-controls **Zoom** ([`crate::media_controls`]) uses this
+    /// to park the camera squarely in front of a media face — the counterpart of
+    /// [`focus_on_object`] capturing the offset at an alt-click.
+    pub(crate) const fn set_point_offset(&mut self, offset: Vec3) {
+        self.point_offset = offset;
+    }
 }
 
 /// The feathering state of the SpaceNavigator flycam: the per-axis smoothed

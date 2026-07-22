@@ -42,6 +42,7 @@ mod bake_inputs;
 mod bake_publish;
 mod body_physics;
 mod bottom_toolbar;
+mod browser_widget;
 mod bump;
 mod camera;
 mod chat;
@@ -80,6 +81,10 @@ mod locomotion;
 mod locomotion_ik;
 mod look_at;
 mod materials;
+mod media_controls;
+mod media_engine;
+mod media_keys;
+mod media_prim;
 mod menu;
 mod menu_bar;
 mod menu_search;
@@ -129,6 +134,7 @@ mod ui_text_input;
 mod underwater_fog;
 mod virtual_list;
 mod water;
+mod web_floater;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -402,6 +408,11 @@ struct Options {
     /// on while designing a skin or theme.
     #[clap(long)]
     watch_skins: bool,
+    /// Disable the embedded web-media engine (CEF): no media-on-a-prim, no
+    /// in-viewer browser floater, no profile Web-tab page rendering. The
+    /// escape hatch when the CEF runtime misbehaves on a system.
+    #[clap(long)]
+    disable_web_media: bool,
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -614,6 +625,11 @@ struct SkinRuntime {
 
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the viewer's startup knobs, already bundled where they group naturally \
+              (camera, skin); the media switch is a lone boolean"
+)]
 fn run_session(
     params: &LoginParams,
     viewer_assets: Option<&Path>,
@@ -622,6 +638,7 @@ fn run_session(
     screenshot_dir: Option<&Path>,
     camera: CameraStartup,
     skin: SkinRuntime,
+    media_enabled: bool,
 ) -> LoginOutcome {
     let CameraStartup {
         start: camera_start,
@@ -811,6 +828,25 @@ fn run_session(
     // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
     // Profile slice and the People list, editable for one's own profile.
     .add_plugins(AvatarProfilePlugin)
+    // The web-media engine (viewer-media-prim-browser): offscreen Chromium
+    // (sl-cef) pumped on the main thread, one surface per embedded page. The
+    // consumers below (browser widget / floater, media-on-a-prim, controls
+    // bar) all no-op when it is disabled or failed to start.
+    .add_plugins(crate::media_engine::MediaEnginePlugin {
+        enabled: media_enabled,
+    })
+    // The embedded-browser UI widget (LLMediaCtrl): surface-backed image
+    // nodes with click-to-focus pointer / keyboard routing.
+    .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
+    // The in-viewer web browser floater (floater_web_content): navigation
+    // toolbar + browser view + status row, opened from Content ▸ Web Browser.
+    .add_plugins(crate::web_floater::WebFloaterPlugin)
+    // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
+    // driving per-face surfaces, world input routing and the focus model.
+    .add_plugins(crate::media_prim::MediaPrimPlugin)
+    // The floating media controls bar above the media face under the cursor
+    // (LLPanelPrimMediaControls).
+    .add_plugins(crate::media_controls::MediaControlsPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the
@@ -1506,6 +1542,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 ),
                 watch: options.watch_skins,
             },
+            !options.disable_web_media,
         );
         if let Some(challenge) = outcome.challenge {
             info!(

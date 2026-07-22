@@ -18,6 +18,9 @@ sl-conformance.log
 tarpaulin-report.html
 tarpaulin-report.json
 /target
+# prebuilt CEF binary distribution downloaded by the cef-dll-sys build script
+# (see .cargo/config.toml CEF_PATH)
+/.cef
 /book/book
 bom.xml
 bom.json

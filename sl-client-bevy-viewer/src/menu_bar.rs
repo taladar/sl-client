@@ -64,6 +64,10 @@ const INVENTORY_OPEN: &str = "inventory-open";
 /// the check mark on the Comm ▸ Conversations entry.
 const CONVERSATIONS_OPEN: &str = "conversations-open";
 
+/// The condition key that holds while the web browser floater is open — drives
+/// the check mark on the Content ▸ Web Browser entry.
+const WEB_BROWSER_OPEN: &str = "web-browser-open";
+
 /// The placeholder shown in a menu that has no wired entries yet — a single
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
@@ -110,10 +114,13 @@ static BUILD_MENU: MenuDef = MenuDef {
     items: PLACEHOLDER_ITEMS,
 };
 
-/// The Content menu — a name for future search / marketplace entries.
+/// The Content menu — the in-viewer web browser today; search / marketplace
+/// are future entries.
 static CONTENT_MENU: MenuDef = MenuDef {
     label: "Content",
-    items: PLACEHOLDER_ITEMS,
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Web Browser", "toggle-web-browser").checked_when(WEB_BROWSER_OPEN),
+    )],
 };
 
 /// The Help menu — a name for future help / about entries.
@@ -206,6 +213,7 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 fn update_top_menu_conditions(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
+    web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -215,12 +223,18 @@ fn update_top_menu_conditions(
     let conversations_open = conversations
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let web_browser_open = web_browser
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
     }
     if conversations_open {
         wanted.push(CONVERSATIONS_OPEN);
+    }
+    if web_browser_open {
+        wanted.push(WEB_BROWSER_OPEN);
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
@@ -239,6 +253,7 @@ fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
+    web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -259,6 +274,13 @@ fn handle_top_menu_actions(
             }
             "toggle-conversations" => {
                 if let Some(ui) = &conversations
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-web-browser" => {
+                if let Some(ui) = &web_browser
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;

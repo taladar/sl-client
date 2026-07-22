@@ -145,6 +145,9 @@ exceptions = [
   # Boost license; allow it only for those crates rather than project-wide.
   { allow = ["BSL-1.0"], crate = "error-code" },
   { allow = ["BSL-1.0"], crate = "clipboard-win" },
+  # The bzip2 licence (BSD-style permissive); libbz2-rs-sys is a build-time
+  # dependency of the CEF binary downloader (download-cef -> cef-dll-sys).
+  { allow = ["bzip2-1.0.6"], crate = "libbz2-rs-sys" },
   # `openjpeg-sys` (the OpenJPEG C bindings behind `jpeg2k`, used by sl-texture
   # for JPEG-2000 decoding) is BSD-2-Clause, a permissive license; allow it for
   # that crate rather than project-wide.

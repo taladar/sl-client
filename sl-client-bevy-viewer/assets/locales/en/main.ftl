@@ -271,6 +271,8 @@ profile-pay = Pay
 profile-pay-amount = L$
 profile-web-url = URL:
 profile-web-none = (no profile URL)
+profile-web-loading = Loading…
+profile-web-loaded = Page loaded in { $seconds } s
 profile-first-life-about = About:
 profile-notes-hint = Make notes about this person here. No one else can see your notes.
 profile-loading = (loading)
@@ -324,3 +326,7 @@ profile-share = Share:
 profile-share-hint = Drop inventory items here to give them to this person.
 # An unset profile / pick / classified image box.
 profile-image-none = (no image)
+
+## The in-viewer web browser floater (web_floater.rs).
+
+web-floater-title = Web Browser

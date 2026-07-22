@@ -1,0 +1,9 @@
+# Workspace-local cargo configuration.
+
+[env]
+# Where the cef-dll-sys build script downloads/looks up the prebuilt CEF
+# binary distribution. Pinning it inside the workspace (gitignored) keeps the
+# ~1 GB download out of `target/` so `cargo clean` does not force a
+# re-download. `force = false` (the default) lets a developer override it
+# with their own CEF_PATH.
+CEF_PATH = { value = ".cef", relative = true }

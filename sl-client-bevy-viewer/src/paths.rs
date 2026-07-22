@@ -69,6 +69,14 @@ pub(crate) fn cache_accounts_base() -> Option<PathBuf> {
     Some(project_dirs()?.cache_dir().join(ACCOUNTS_SUBDIR))
 }
 
+/// The web-media (CEF) engine's cache root under the **cache** directory —
+/// Chromium's disk caches and logs, shared across avatars like the asset
+/// caches — or `None` when the platform has no cache directory (the engine
+/// then keeps its caches under the working directory).
+pub(crate) fn media_engine_cache_dir() -> Option<PathBuf> {
+    Some(project_dirs()?.cache_dir().join("cef"))
+}
+
 /// The machine-wide global settings file, under the config root — falling back
 /// to the working directory when the platform has no config directory.
 pub(crate) fn global_settings_file() -> PathBuf {

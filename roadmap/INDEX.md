@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 5 |
 | ready | 107 |
-| blocked | 88 |
-| in-progress | 4 |
+| blocked | 86 |
+| in-progress | 5 |
 | bugs | 10 |
-| done | 563 |
+| done | 564 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **794** |
@@ -300,7 +300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (88)
+## blocked (86)
 
 ### viewer
 
@@ -367,9 +367,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
   — LSL editor save — upload/compile round-trip and error list (blocked by
   `viewer-lsl-editor-widget`)
-- [`viewer-media-prim-browser`](blocked/viewer-media-prim-browser.md) —
-  Media-on-a-prim & embedded web browser (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-audio-backend`)
 - [`viewer-mesh-cost-estimate`](blocked/viewer-mesh-cost-estimate.md) —
   Streaming cost / land-impact estimate (blocked by `viewer-mesh-encoder`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
@@ -457,9 +454,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profile-image-editing`](blocked/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker`)
-- [`viewer-profile-web-tab-browser`](blocked/viewer-profile-web-tab-browser.md)
-  — Profile Web tab — render the feed in the embedded browser (blocked by
-  `viewer-media-prim-browser`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
@@ -553,10 +547,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (4)
+## in-progress (5)
 
 ### viewer
 
+- [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
+  Media-on-a-prim & embedded web browser
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -600,7 +596,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (563)
+## done (564)
 
 ### protocol
 
@@ -1062,6 +1058,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Decode ParcelOverlay into a 64×64 grid resource
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
+- [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
+  Profile Web tab — render the feed in the embedded browser
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
   skinning distortion
 - [`viewer-r10`](done/viewer-r10-tiled-faces-need-a-repeating-texture-sampler.md)
