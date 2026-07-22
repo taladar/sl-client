@@ -2,7 +2,7 @@
 id: viewer-inventory-folder-deep-copy
 title: Folder Copy / Paste (recursive deep copy)
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — shipped
   greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions]
@@ -21,3 +21,11 @@ only Library items copy; a dragged Library folder is rejected).
 
 Reference (Firestorm, read-only): `llinventoryfunctions.cpp`
 (`copy_inventory_category`), `llinventorybridge.cpp`.
+
+Shipped 2026-07-22: folder Copy is live (user + outfit folders, Library
+included — the Library-folder copy-out unlock), Copy prefetches the
+subtree pages, and paste / a Library-folder drag plans the reference's
+copy_inventory_category walk: create the destination folder first
+(client-picked id), copy the loaded copyable items, re-link links, skip
+no-copy items, recurse. Only loaded contents copy; the prefetch makes
+that the common case.

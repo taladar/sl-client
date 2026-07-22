@@ -2,7 +2,7 @@
 id: viewer-inventory-new-wearables
 title: New Clothes / New Body Parts creation
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-inventory-context-actions (2026-07-21) — shipped
   greyed (UNIMPLEMENTED)
 refs: [viewer-inventory-context-actions]
@@ -26,3 +26,15 @@ format is already parsed for bakes — `sl-avatar`), upload it, then
 
 Reference (Firestorm, read-only): `llwearable.cpp` / `llwearabletype.cpp`,
 `llagentwearables.cpp` (`createWearable`).
+
+Shipped 2026-07-22: every New Clothes / New Body Parts creator (context
+menu + the toolbar's + menu) authors the slot's default `.wearable`
+(LLWearable version 22, permissions/sale blocks, the slot's avatar_lad
+params at their defaults — empty without `--viewer-assets` — and no
+layer textures; round-trip pinned against the shared parser), uploads
+it via `UploadAsset` (NewFileAgentInventory; OpenSim accepts
+wearable/clothing+bodypart), then stamps the created item's wearable
+flags via `ChangeInventoryItemFlags` when the reply lands (the uploader
+path leaves flags empty, which would read as a Shape) — matched FIFO,
+since the reply carries no correlation id. SL-grid behaviour of
+NewFileAgentInventory for wearables still wants a live aditi check.

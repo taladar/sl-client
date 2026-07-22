@@ -354,6 +354,31 @@ impl InventoryModel {
         self.items.get(&folder).map_or(&[], Vec::as_slice)
     }
 
+    /// The fetched items of `folder` (empty when unfetched) — the crate-facing
+    /// face of [`items_of`](Self::items_of), for the folder deep-copy walk.
+    pub(crate) fn loaded_items_of(&self, folder: InventoryFolderKey) -> &[ItemInfo] {
+        self.items_of(folder)
+    }
+
+    /// The child folders of `folder` — the crate-facing face of
+    /// [`children_of`](Self::children_of), for the folder deep-copy walk.
+    pub(crate) fn child_folders_of(&self, folder: InventoryFolderKey) -> &[InventoryFolderKey] {
+        self.children_of(folder)
+    }
+
+    /// Every folder of `folder`'s subtree (itself included), depth-first —
+    /// the set a folder Copy prefetches so the eventual paste has contents to
+    /// copy.
+    pub(crate) fn subtree_folders(&self, folder: InventoryFolderKey) -> Vec<InventoryFolderKey> {
+        let mut out = vec![folder];
+        let mut cursor = 0;
+        while let Some(&current) = out.get(cursor) {
+            out.extend_from_slice(self.children_of(current));
+            cursor = cursor.saturating_add(1);
+        }
+        out
+    }
+
     /// Merge a batch of folders into the tree, then rebuild the index.
     ///
     /// Merging rather than replacing is what lets the agent tree (from
@@ -3131,6 +3156,74 @@ mod tests {
                 "Old thing"
             ]
         );
+    }
+
+    /// The folder deep-copy plan follows the reference's
+    /// `copy_inventory_category`: destination folder first, then the loaded
+    /// items (copyable copied, no-copy skipped, links re-linked), then the
+    /// sub-folders recursively into the fresh parent.
+    #[test]
+    fn deep_copy_plans_folders_items_and_links() {
+        use sl_client_bevy::Command;
+        let mut model = sample_model();
+        let clothing = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
+        // Clothing: one copyable item, one no-copy item, one link.
+        let mut copyable = item(0x21, 2, "Copyable", InventoryType::Wearable);
+        copyable.permissions.owner = sl_client_bevy::Permissions::COPY;
+        let no_copy = item(0x22, 2, "No copy", InventoryType::Wearable);
+        let mut link = item(0x23, 2, "A link", InventoryType::Wearable);
+        link.asset_type = sl_client_bevy::AssetType::Other(24);
+        link.asset_id = sl_client_bevy::Uuid::from_u128(0x21);
+        model.set_items(clothing, &[copyable.clone(), no_copy, link]);
+
+        let dest = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xD0));
+        let plan = crate::inventory_actions::deep_copy_commands(
+            &model,
+            clothing,
+            "Clothing",
+            dest,
+            Some(sl_client_bevy::AgentKey::from(
+                sl_client_bevy::Uuid::from_u128(1),
+            )),
+        );
+        // Create-the-folder first, into the destination.
+        assert!(matches!(
+            plan.first(),
+            Some(Command::CreateInventoryFolder { parent_id, name, .. })
+                if *parent_id == dest && name == "Clothing"
+        ));
+        let new_folder = plan
+            .iter()
+            .find_map(|command| match command {
+                Command::CreateInventoryFolder {
+                    folder_id,
+                    parent_id,
+                    ..
+                } if *parent_id == dest => Some(*folder_id),
+                _other => None,
+            })
+            .unwrap_or_else(|| {
+                sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::nil())
+            });
+        // Exactly one item copy (the copyable one), into the fresh folder.
+        let copies: Vec<_> = plan
+            .iter()
+            .filter_map(|command| match command {
+                Command::CopyInventoryItem {
+                    old_item_id,
+                    new_folder_id,
+                    ..
+                } => Some((*old_item_id, *new_folder_id)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(copies, vec![(copyable.item_id, new_folder)]);
+        // The link re-links to its target inside the fresh folder.
+        assert!(plan.iter().any(|command| matches!(
+            command,
+            Command::LinkInventoryItem(link_command)
+                if link_command.folder_id == new_folder
+        )));
     }
 
     /// An active type filter narrows the tree like a search: passing items

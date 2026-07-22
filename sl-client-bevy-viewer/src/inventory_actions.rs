@@ -47,10 +47,10 @@ use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
     FolderInfo, FolderType, GestureActivation, InventoryFolderKey, InventoryItemOrFolderKey,
     InventoryKey, InventoryType, ItemInfo, NewInventoryItem, NewInventoryLink, Permissions,
-    RezAttachment, ScriptLanguage, SlCommand, SlIdentity, TransactionId, Uuid, Wearable,
-    WearableType,
+    RezAttachment, ScriptLanguage, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TransactionId,
+    Uuid, VisualParams, Wearable, WearableType,
 };
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use crate::avatar_menu::UNIMPLEMENTED;
 use crate::conversations::{ConversationKey, OpenConversation};
@@ -179,45 +179,19 @@ const NEXT_OWNER_DEFAULT: u32 = 0x0000_E000;
 static NEW_CLOTHES_MENU: MenuDef = MenuDef {
     label: "New Clothes",
     items: &[
-        MenuItemDef::Command(
-            MenuCommand::new("New Shirt", "new-shirt").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Pants", "new-pants").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Shoes", "new-shoes").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Socks", "new-socks").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Jacket", "new-jacket").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Skirt", "new-skirt").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Gloves", "new-gloves").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Undershirt", "new-undershirt").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Underpants", "new-underpants").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Alpha Mask", "new-alpha").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Tattoo", "new-tattoo").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Universal", "new-universal").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("New Physics", "new-physics").enabled_when(UNIMPLEMENTED),
-        ),
+        MenuItemDef::Command(MenuCommand::new("New Shirt", "new-shirt")),
+        MenuItemDef::Command(MenuCommand::new("New Pants", "new-pants")),
+        MenuItemDef::Command(MenuCommand::new("New Shoes", "new-shoes")),
+        MenuItemDef::Command(MenuCommand::new("New Socks", "new-socks")),
+        MenuItemDef::Command(MenuCommand::new("New Jacket", "new-jacket")),
+        MenuItemDef::Command(MenuCommand::new("New Skirt", "new-skirt")),
+        MenuItemDef::Command(MenuCommand::new("New Gloves", "new-gloves")),
+        MenuItemDef::Command(MenuCommand::new("New Undershirt", "new-undershirt")),
+        MenuItemDef::Command(MenuCommand::new("New Underpants", "new-underpants")),
+        MenuItemDef::Command(MenuCommand::new("New Alpha Mask", "new-alpha")),
+        MenuItemDef::Command(MenuCommand::new("New Tattoo", "new-tattoo")),
+        MenuItemDef::Command(MenuCommand::new("New Universal", "new-universal")),
+        MenuItemDef::Command(MenuCommand::new("New Physics", "new-physics")),
     ],
 };
 
@@ -225,12 +199,10 @@ static NEW_CLOTHES_MENU: MenuDef = MenuDef {
 static NEW_BODY_PARTS_MENU: MenuDef = MenuDef {
     label: "New Body Parts",
     items: &[
-        MenuItemDef::Command(
-            MenuCommand::new("New Shape", "new-shape").enabled_when(UNIMPLEMENTED),
-        ),
-        MenuItemDef::Command(MenuCommand::new("New Skin", "new-skin").enabled_when(UNIMPLEMENTED)),
-        MenuItemDef::Command(MenuCommand::new("New Hair", "new-hair").enabled_when(UNIMPLEMENTED)),
-        MenuItemDef::Command(MenuCommand::new("New Eyes", "new-eyes").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(MenuCommand::new("New Shape", "new-shape")),
+        MenuItemDef::Command(MenuCommand::new("New Skin", "new-skin")),
+        MenuItemDef::Command(MenuCommand::new("New Hair", "new-hair")),
+        MenuItemDef::Command(MenuCommand::new("New Eyes", "new-eyes")),
     ],
 };
 
@@ -421,9 +393,7 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
         MenuItemDef::Command(MenuCommand::new("Cut", "cut").enabled_when(CAN_CUT)),
-        // A folder deep-copy (recursive item copies into a fresh tree) is not
-        // wired yet; the entry keeps its reference place.
-        MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(UNIMPLEMENTED)),
+        MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
         MenuItemDef::Command(MenuCommand::new("Paste", "paste").enabled_when(CAN_PASTE)),
         MenuItemDef::Command(
             MenuCommand::new("Paste As Link", "paste-link").enabled_when(CAN_PASTE_LINK),
@@ -785,6 +755,11 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
         FolderType::Trash => held.push(IS_TRASH_FOLDER),
         FolderType::LostAndFound => held.push(IS_LOST_FOUND_FOLDER),
         _other => {}
+    }
+    // A plain user folder (or an outfit) deep-copies — Library ones included,
+    // which is what lets a Library folder be copied out.
+    if matches!(folder.folder_type, FolderType::None | FolderType::Outfit) {
+        held.push(CAN_COPY);
     }
     held.push(if facts.in_trash {
         IN_TRASH
@@ -1262,6 +1237,8 @@ fn handle_inventory_menu_actions(
     mut gestures: ResMut<ActiveGestures>,
     mut rename: ResMut<crate::inventory::InlineRename>,
     mut pending_share: ResMut<PendingShare>,
+    mut pending_wearables: ResMut<PendingWearableUploads>,
+    library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut conversations: MessageWriter<OpenConversation>,
     mut picker_opens: MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
@@ -1295,15 +1272,39 @@ fn handle_inventory_menu_actions(
             }
             "copy" => {
                 clipboard.entry = Some((ClipboardMode::Copy, menu_target.clone()));
+                // A copied folder prefetches its subtree, so the deep copy a
+                // later paste plans over sees the contents (the session's
+                // fetcher dedupes and serves repeats from its cache).
+                if let MenuTarget::Folder(folder) = &menu_target {
+                    for sub in model.subtree_folders(folder.folder_id) {
+                        query_folder_page(sub, &mut commands);
+                    }
+                }
             }
             "paste" => {
                 if let Some((mode, entry)) = clipboard.entry.clone() {
-                    let (paste, refresh) = paste_commands(mode, &entry, dest, identity.agent_id);
-                    for command in paste {
-                        commands.write(SlCommand(command));
-                    }
-                    for folder in refresh {
-                        query_folder_page(folder, &mut commands);
+                    if let (ClipboardMode::Copy, MenuTarget::Folder(folder)) = (mode, &entry) {
+                        // A copied folder pastes as a recursive deep copy.
+                        for command in deep_copy_commands(
+                            &model,
+                            folder.folder_id,
+                            &folder.name,
+                            dest,
+                            identity.agent_id,
+                        ) {
+                            commands.write(SlCommand(command));
+                        }
+                        commands.write(SlCommand(Command::QueryInventoryFolders));
+                        query_folder_page(dest, &mut commands);
+                    } else {
+                        let (paste, refresh) =
+                            paste_commands(mode, &entry, dest, identity.agent_id);
+                        for command in paste {
+                            commands.write(SlCommand(command));
+                        }
+                        for folder in refresh {
+                            query_folder_page(folder, &mut commands);
+                        }
                     }
                     if mode == ClipboardMode::Cut {
                         clipboard.entry = None;
@@ -1424,10 +1425,17 @@ fn handle_inventory_menu_actions(
                     query_folder_page(lost, &mut commands);
                 }
             }
-            "new-folder" | "new-script" | "new-notecard" | "new-gesture" => {
+            "new-folder" | "new-script" | "new-notecard" | "new-gesture" | "new-shirt"
+            | "new-pants" | "new-shoes" | "new-socks" | "new-jacket" | "new-skirt"
+            | "new-gloves" | "new-undershirt" | "new-underpants" | "new-alpha" | "new-tattoo"
+            | "new-universal" | "new-physics" | "new-shape" | "new-skin" | "new-hair"
+            | "new-eyes" => {
                 dispatch_create(
                     action.action,
                     dest,
+                    identity.agent_id,
+                    library.as_ref().map(|library| library.params()),
+                    &mut pending_wearables,
                     &mut commands,
                     &mut ui_actions,
                     &mut rename,
@@ -1583,16 +1591,295 @@ pub(crate) fn attach_point_of(action: &str) -> Option<AttachmentPoint> {
     Some(AttachmentPoint::from_code(code))
 }
 
+// ---------------------------------------------------------------------------
+// Folder deep copy (viewer-inventory-folder-deep-copy).
+// ---------------------------------------------------------------------------
+
+/// The `AT_LINK` / `AT_LINK_FOLDER` wire codes, for the deep copy's re-link
+/// handling.
+const LINK_ASSET_CODES: (i32, i32) = (24, 25);
+
+/// The commands of a **recursive folder copy** into `dest` — the reference's
+/// `copy_inventory_category`: create the destination folder first, then per
+/// folder copy its loaded items (a link is **re-linked** to its target, a
+/// no-copy item is **skipped**, everything else `CopyInventoryItem`s), then
+/// recurse into the sub-folders. Only **loaded** contents copy — the Copy
+/// action prefetches the subtree so a paste normally sees everything.
+pub(crate) fn deep_copy_commands(
+    model: &InventoryModel,
+    source: InventoryFolderKey,
+    source_name: &str,
+    dest: InventoryFolderKey,
+    own_agent: Option<AgentKey>,
+) -> Vec<Command> {
+    let mut out = Vec::new();
+    deep_copy_folder(model, source, source_name, dest, own_agent, &mut out);
+    out
+}
+
+/// One level of [`deep_copy_commands`]'s walk.
+fn deep_copy_folder(
+    model: &InventoryModel,
+    source: InventoryFolderKey,
+    source_name: &str,
+    dest: InventoryFolderKey,
+    own_agent: Option<AgentKey>,
+    out: &mut Vec<Command>,
+) {
+    // The UDP create lets the viewer pick the id, so the items can be
+    // addressed into the new folder in the same command batch.
+    let new_id = InventoryFolderKey::from(Uuid::new_v4());
+    out.push(Command::CreateInventoryFolder {
+        folder_id: new_id,
+        parent_id: dest,
+        folder_type: FolderType::None,
+        name: source_name.to_owned(),
+    });
+    let from_library = model.is_library(source);
+    for item in model.loaded_items_of(source) {
+        let (link_code, link_folder_code) = LINK_ASSET_CODES;
+        if item.asset_type == AssetType::Other(link_code) {
+            // A link re-links to its original target in the copy.
+            out.push(Command::LinkInventoryItem(NewInventoryLink {
+                folder_id: new_id,
+                linked_id: InventoryItemOrFolderKey::Item(InventoryKey::from(item.asset_id)),
+                link_type: AssetType::Other(link_code),
+                inv_type: item.inv_type,
+                name: item.name.clone(),
+                description: item.description.clone(),
+            }));
+            continue;
+        }
+        if item.asset_type == AssetType::Other(link_folder_code) {
+            // A folder link likewise re-links.
+            out.push(Command::LinkInventoryItem(NewInventoryLink {
+                folder_id: new_id,
+                linked_id: InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(
+                    item.asset_id,
+                )),
+                link_type: AssetType::Other(link_folder_code),
+                inv_type: InventoryType::Category,
+                name: item.name.clone(),
+                description: item.description.clone(),
+            }));
+            continue;
+        }
+        // The reference skips a no-copy item (move_no_copy_items is only used
+        // by the marketplace path).
+        if !from_library && !item.permissions.owner.contains(Permissions::COPY) {
+            continue;
+        }
+        let owner = match item.owner {
+            sl_client_bevy::OwnerKey::Agent(agent) => agent,
+            _other => own_agent.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+        };
+        out.push(Command::CopyInventoryItem {
+            old_agent_id: owner,
+            old_item_id: item.item_id,
+            new_folder_id: new_id,
+            new_name: String::new(),
+        });
+    }
+    let children: Vec<InventoryFolderKey> = model.child_folders_of(source).to_vec();
+    for child in children {
+        let child_name = model
+            .folder_info(child)
+            .map_or_else(String::new, |info| info.name.clone());
+        deep_copy_folder(model, child, &child_name, new_id, own_agent, out);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// New-wearable creation (viewer-inventory-new-wearables).
+// ---------------------------------------------------------------------------
+
+/// The wearable creations whose upload reply has not arrived yet, oldest
+/// first. `NewFileAgentInventory` creates the item server-side but leaves its
+/// flags empty, so the reply is followed with a `ChangeInventoryItemFlags`
+/// carrying the slot — matched FIFO (the reply carries no correlation id).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingWearableUploads {
+    /// The in-flight creations: the slot to stamp and the folder to refresh.
+    queue: VecDeque<(WearableType, InventoryFolderKey)>,
+}
+
+/// The wearable slot (and default item name) a create action names.
+pub(crate) fn wearable_slot_of(action: &str) -> Option<(WearableType, &'static str)> {
+    match action {
+        "new-shirt" => Some((WearableType::Shirt, "New Shirt")),
+        "new-pants" => Some((WearableType::Pants, "New Pants")),
+        "new-shoes" => Some((WearableType::Shoes, "New Shoes")),
+        "new-socks" => Some((WearableType::Socks, "New Socks")),
+        "new-jacket" => Some((WearableType::Jacket, "New Jacket")),
+        "new-skirt" => Some((WearableType::Skirt, "New Skirt")),
+        "new-gloves" => Some((WearableType::Gloves, "New Gloves")),
+        "new-undershirt" => Some((WearableType::Undershirt, "New Undershirt")),
+        "new-underpants" => Some((WearableType::Underpants, "New Underpants")),
+        "new-alpha" => Some((WearableType::Alpha, "New Alpha")),
+        "new-tattoo" => Some((WearableType::Tattoo, "New Tattoo")),
+        "new-universal" => Some((WearableType::Universal, "New Universal")),
+        "new-physics" => Some((WearableType::Physics, "New Physics")),
+        "new-shape" => Some((WearableType::Shape, "New Shape")),
+        "new-skin" => Some((WearableType::Skin, "New Skin")),
+        "new-hair" => Some((WearableType::Hair, "New Hair")),
+        "new-eyes" => Some((WearableType::Eyes, "New Eyes")),
+        _other => None,
+    }
+}
+
+/// The `avatar_lad.xml` `wearable` attribute value naming a slot's visual
+/// params (the filter [`default_wearable_asset`] applies).
+const fn wearable_param_group(slot: WearableType) -> &'static str {
+    match slot {
+        WearableType::Shape => "shape",
+        WearableType::Skin => "skin",
+        WearableType::Hair => "hair",
+        WearableType::Eyes => "eyes",
+        WearableType::Shirt => "shirt",
+        WearableType::Pants => "pants",
+        WearableType::Shoes => "shoes",
+        WearableType::Socks => "socks",
+        WearableType::Jacket => "jacket",
+        WearableType::Gloves => "gloves",
+        WearableType::Undershirt => "undershirt",
+        WearableType::Underpants => "underpants",
+        WearableType::Skirt => "skirt",
+        WearableType::Alpha => "alpha",
+        WearableType::Tattoo => "tattoo",
+        WearableType::Physics => "physics",
+        _other => "universal",
+    }
+}
+
+/// Author the default `.wearable` asset text for a fresh wearable of `slot` —
+/// the reference's `LLWearable::exportStream` shape (`LLWearable version 22`,
+/// the permissions / sale blocks, `type`, then every visual param of the
+/// slot's `avatar_lad` group at its default weight; no layer textures). The
+/// param set comes from the loaded avatar definitions; without them
+/// (`--viewer-assets` absent) the asset carries no params, which the grid
+/// accepts and the reference viewer treats as all-defaults.
+pub(crate) fn default_wearable_asset(
+    name: &str,
+    slot: WearableType,
+    own_agent: Option<AgentKey>,
+    params: Option<&VisualParams>,
+) -> String {
+    use std::fmt::Write as _;
+    let group = wearable_param_group(slot);
+    let defaults: Vec<(i32, f32)> = params.map_or_else(Vec::new, |params| {
+        params
+            .all()
+            .iter()
+            .filter(|param| param.wearable.as_deref() == Some(group))
+            .map(|param| (param.id, param.default))
+            .collect()
+    });
+    let creator = own_agent.map_or_else(Uuid::nil, |agent| agent.uuid());
+    let mut text = String::new();
+    let _written = writeln!(text, "LLWearable version 22");
+    let _written = writeln!(text, "{name}");
+    let _written = writeln!(text);
+    let _written = writeln!(text, "\tpermissions 0");
+    let _written = writeln!(text, "\t{{");
+    let _written = writeln!(text, "\t\tbase_mask\t7fffffff");
+    let _written = writeln!(text, "\t\towner_mask\t7fffffff");
+    let _written = writeln!(text, "\t\tgroup_mask\t00000000");
+    let _written = writeln!(text, "\t\teveryone_mask\t00000000");
+    let _written = writeln!(text, "\t\tnext_owner_mask\t0008e000");
+    let _written = writeln!(text, "\t\tcreator_id\t{creator}");
+    let _written = writeln!(text, "\t\towner_id\t{creator}");
+    let _written = writeln!(text, "\t\tlast_owner_id\t{}", Uuid::nil());
+    let _written = writeln!(text, "\t\tgroup_id\t{}", Uuid::nil());
+    let _written = writeln!(text, "\t}}");
+    let _written = writeln!(text, "\tsale_info\t0");
+    let _written = writeln!(text, "\t{{");
+    let _written = writeln!(text, "\t\tsale_type\tnot");
+    let _written = writeln!(text, "\t\tsale_price\t10");
+    let _written = writeln!(text, "\t}}");
+    let _written = writeln!(text, "type {}", slot.to_code());
+    let _written = writeln!(text, "parameters {}", defaults.len());
+    for (id, weight) in defaults {
+        let _written = writeln!(text, "{id} {weight}");
+    }
+    let _written = writeln!(text, "textures 0");
+    text
+}
+
+/// Finish an in-flight wearable creation when its upload reply lands: stamp
+/// the fresh item's flags with the wearable slot (the uploader path leaves
+/// them empty, which would read as a Shape) and refresh its folder. Matched
+/// FIFO against [`PendingWearableUploads`]; an upload failure drops the
+/// oldest pending entry.
+fn handle_wearable_uploads(
+    mut events: MessageReader<SlEvent>,
+    mut pending: ResMut<PendingWearableUploads>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::AssetUploaded {
+                new_inventory_item: Some(item),
+                ..
+            } => {
+                if let Some((slot, folder)) = pending.queue.pop_front() {
+                    commands.write(SlCommand(Command::ChangeInventoryItemFlags {
+                        item_id: InventoryKey::from(*item),
+                        flags: u32::from(slot.to_code()),
+                    }));
+                    query_folder_page(folder, &mut commands);
+                }
+            }
+            SlSessionEvent::AssetUploadFailed { .. } => {
+                let _dropped = pending.queue.pop_front();
+            }
+            _other => {}
+        }
+    }
+}
+
 /// Issue the create commands for a New Folder / Script / Notecard / Gesture
 /// action into `dest` — shared by the folder context menu and the toolbar's
 /// **+** menu. Returns whether the action was one of the creators.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared create dispatcher takes every creation input: the action, the \
+              destination, the identity, the wearable param source, the pending-upload queue \
+              and the three output channels"
+)]
 fn dispatch_create(
     action: &str,
     dest: InventoryFolderKey,
+    own_agent: Option<AgentKey>,
+    params: Option<&VisualParams>,
+    pending_wearables: &mut PendingWearableUploads,
     commands: &mut MessageWriter<SlCommand>,
     ui_actions: &mut MessageWriter<crate::inventory::InventoryUiAction>,
     rename: &mut crate::inventory::InlineRename,
 ) -> bool {
+    // The wearable creators: author the slot's default asset, upload it (the
+    // uploader creates the item), and stamp the flags when the reply lands.
+    if let Some((slot, name)) = wearable_slot_of(action) {
+        let asset_type = if slot.is_body_part() {
+            AssetType::Bodypart
+        } else {
+            AssetType::Clothing
+        };
+        let text = default_wearable_asset(name, slot, own_agent, params);
+        commands.write(SlCommand(Command::UploadAsset {
+            folder_id: dest,
+            asset_type,
+            inventory_type: InventoryType::Wearable,
+            name: name.to_owned(),
+            description: String::new(),
+            next_owner_mask: NEXT_OWNER_DEFAULT,
+            group_mask: 0,
+            everyone_mask: 0,
+            expected_upload_cost: 0,
+            data: text.into_bytes(),
+        }));
+        pending_wearables.queue.push_back((slot, dest));
+        return true;
+    }
     match action {
         "new-folder" => {
             // The UDP create lets the viewer pick the id, so the fresh
@@ -1651,10 +1938,19 @@ fn dispatch_create(
 /// **selected** folder — the selected folder row itself, a selected item's
 /// containing folder — or the agent root when nothing is selected, the
 /// reference's behaviour for the add menu.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the pick stream, the \
+              model / selection, the identity, the wearable param source, the pending queue \
+              and the output channels"
+)]
 fn handle_inventory_add_actions(
     mut actions: MessageReader<UiAction>,
     model: Res<InventoryModel>,
     selection: Res<InventorySelection>,
+    identity: Res<SlIdentity>,
+    library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
+    mut pending_wearables: ResMut<PendingWearableUploads>,
     mut rename: ResMut<crate::inventory::InlineRename>,
     mut ui_actions: MessageWriter<crate::inventory::InventoryUiAction>,
     mut commands: MessageWriter<SlCommand>,
@@ -1677,6 +1973,9 @@ fn handle_inventory_add_actions(
         dispatch_create(
             action.action,
             dest,
+            identity.agent_id,
+            library.as_ref().map(|lib| lib.params()),
+            &mut pending_wearables,
             &mut commands,
             &mut ui_actions,
             &mut rename,
@@ -1747,12 +2046,14 @@ impl Plugin for InventoryActionsPlugin {
             .init_resource::<WornAttachments>()
             .init_resource::<ActiveGestures>()
             .init_resource::<PendingShare>()
+            .init_resource::<PendingWearableUploads>()
             .add_systems(
                 Update,
                 (
                     handle_inventory_menu_actions,
                     handle_inventory_add_actions,
                     handle_share_picks,
+                    handle_wearable_uploads,
                     seed_worn_from_cof,
                 )
                     .chain(),
@@ -2068,6 +2369,70 @@ mod tests {
             },
         );
         assert!(!held.contains(&CAN_SHARE));
+    }
+
+    /// A freshly authored default wearable parses back through the shared
+    /// `.wearable` decoder with its version, type and (empty) sections
+    /// intact — the byte-level contract with the reference importer.
+    #[test]
+    fn default_wearable_asset_round_trips() {
+        use super::default_wearable_asset;
+        let text = default_wearable_asset(
+            "New Shirt",
+            WearableType::Shirt,
+            Some(AgentKey::from(Uuid::from_u128(7))),
+            None,
+        );
+        let parsed = sl_client_bevy::WearableAsset::parse(&text).ok();
+        assert_eq!(parsed.as_ref().map(|asset| asset.version), Some(22));
+        assert_eq!(
+            parsed.as_ref().map(|asset| asset.name.as_str()),
+            Some("New Shirt")
+        );
+        assert_eq!(
+            parsed.as_ref().map(|asset| asset.wearable_type),
+            Some(WearableType::Shirt)
+        );
+        assert_eq!(parsed.as_ref().map(|asset| asset.params.len()), Some(0));
+        assert_eq!(parsed.as_ref().map(|asset| asset.textures.len()), Some(0));
+    }
+
+    /// The wearable create actions map every slot, and asset types split
+    /// body parts from clothing.
+    #[test]
+    fn wearable_slots_cover_every_creator() {
+        use super::wearable_slot_of;
+        assert_eq!(
+            wearable_slot_of("new-shirt"),
+            Some((WearableType::Shirt, "New Shirt"))
+        );
+        assert_eq!(
+            wearable_slot_of("new-shape"),
+            Some((WearableType::Shape, "New Shape"))
+        );
+        assert_eq!(wearable_slot_of("new-folder"), None);
+        // Every creator entry of the two submenus resolves to a slot.
+        for action in [
+            "new-shirt",
+            "new-pants",
+            "new-shoes",
+            "new-socks",
+            "new-jacket",
+            "new-skirt",
+            "new-gloves",
+            "new-undershirt",
+            "new-underpants",
+            "new-alpha",
+            "new-tattoo",
+            "new-universal",
+            "new-physics",
+            "new-shape",
+            "new-skin",
+            "new-hair",
+            "new-eyes",
+        ] {
+            assert!(wearable_slot_of(action).is_some(), "unmapped: {action}");
+        }
     }
 
     /// The attach-point action strings parse back to their wire points, and

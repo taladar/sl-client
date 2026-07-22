@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 106 |
+| ready | 104 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 554 |
+| done | 556 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (106)
+## ready (104)
 
 ### viewer
 
@@ -105,16 +105,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-cof-maintenance`](ready/viewer-inventory-cof-maintenance.md)
   — Maintain COF links on wear / detach (accurate worn state)
-- [`viewer-inventory-folder-deep-copy`](ready/viewer-inventory-folder-deep-copy.md)
-  — Folder Copy / Paste (recursive deep copy)
 - [`viewer-inventory-gallery`](ready/viewer-inventory-gallery.md) — Inventory
   gallery view (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations
 - [`viewer-inventory-multi-select-actions`](ready/viewer-inventory-multi-select-actions.md)
   — Multi-selection context actions + drag
-- [`viewer-inventory-new-wearables`](ready/viewer-inventory-new-wearables.md) —
-  New Clothes / New Body Parts creation
 - [`viewer-inventory-open-and-properties`](ready/viewer-inventory-open-and-properties.md)
   — Item Open (per-type preview) + Properties floater
 - [`viewer-inventory-replace-outfit`](ready/viewer-inventory-replace-outfit.md)
@@ -570,7 +566,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (554)
+## done (556)
 
 ### protocol
 
@@ -781,9 +777,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-floater-menus`](done/viewer-inventory-floater-menus.md) —
   Inventory floater menus (gear options + create/New menu) (blocked by
   `viewer-ui-menu-bar` (done))
+- [`viewer-inventory-folder-deep-copy`](done/viewer-inventory-folder-deep-copy.md)
+  — Folder Copy / Paste (recursive deep copy)
 - [`viewer-inventory-folder-tree`](done/viewer-inventory-folder-tree.md) —
   Inventory folder tree + item icons (blocked by `viewer-ui-virtualized-list`
   (done))
+- [`viewer-inventory-new-wearables`](done/viewer-inventory-new-wearables.md) —
+  New Clothes / New Body Parts creation
 - [`viewer-inventory-outfit-tab`](done/viewer-inventory-outfit-tab.md) — Worn /
   current-outfit tab + recent items (blocked by `viewer-inventory-folder-tree`
   (done))

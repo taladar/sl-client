@@ -143,8 +143,8 @@ pub(crate) enum FolderDrop {
 /// Classify a drop of a dragged row onto a destination folder.
 ///
 /// - into the **Library** — rejected (it is read-only);
-/// - a **Library** source — a copy for an item, rejected for a folder (deep
-///   folder copies are not wired);
+/// - a **Library** source — a copy (an item copies singly, a folder deep-
+///   copies recursively);
 /// - into the **same folder** it is already in — rejected (a no-op move);
 /// - a folder into its **own subtree** — rejected (the server would orphan it);
 /// - otherwise — a move.
@@ -165,11 +165,7 @@ pub(crate) const fn classify_folder_drop(
         return FolderDrop::Reject;
     }
     if source_from_library {
-        return if source_is_folder {
-            FolderDrop::Reject
-        } else {
-            FolderDrop::Copy
-        };
+        return FolderDrop::Copy;
     }
     if source_is_folder && dest_in_source_subtree {
         return FolderDrop::Reject;
@@ -739,6 +735,20 @@ fn drop_into_folder(
                 new_name: String::new(),
             }));
         }
+        (FolderDrop::Copy, MenuTarget::Folder(folder)) => {
+            // A dragged Library folder deep-copies into the drop target.
+            for command in crate::inventory_actions::deep_copy_commands(
+                model,
+                folder.folder_id,
+                &folder.name,
+                dest,
+                own_agent,
+            ) {
+                commands.write(SlCommand(command));
+            }
+            commands.write(SlCommand(Command::QueryInventoryFolders));
+            query_folder_page(dest, commands);
+        }
         _rejected => return,
     }
     // Show where it landed.
@@ -849,10 +859,10 @@ mod tests {
             classify_folder_drop(false, true, false, false, false),
             FolderDrop::Copy
         );
-        // A Library folder: rejected (no deep copy wired).
+        // A Library folder: a recursive deep copy.
         assert_eq!(
             classify_folder_drop(true, true, false, false, false),
-            FolderDrop::Reject
+            FolderDrop::Copy
         );
         // A folder into its own subtree: rejected.
         assert_eq!(
