@@ -363,6 +363,7 @@ fn create_browser_surfaces(
             isolated: view.isolated,
             max_fps: 30,
             muted: false,
+            loop_media: false,
         };
         let Some(id) = surfaces.create(&mut engine, &mut images, &config) else {
             // No engine: leave the placeholder and stop retrying.

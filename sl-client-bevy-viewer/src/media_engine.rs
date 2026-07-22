@@ -1,18 +1,25 @@
-//! The viewer's web-media engine runtime (`viewer-media-prim-browser`): the
-//! Bevy side of [`sl_cef`] — one offscreen Chromium per *surface*, pumped once
-//! per frame on the main thread, each surface's BGRA paints mirrored into a
-//! Bevy [`Image`] that UI widgets ([`crate::browser_widget`]) and in-world
-//! media faces ([`crate::media_prim`]) sample.
+//! The viewer's media engine runtime (`viewer-media-prim-browser` /
+//! `viewer-video-playback`): the Bevy side of the [`sl_media`] boundary and
+//! its **two** engines — offscreen Chromium ([`sl_cef`]) for web pages, and
+//! GStreamer ([`sl_gst`]) for direct video / audio URLs — one offscreen
+//! *surface* per page / stream, pumped once per frame on the main thread,
+//! each surface's BGRA frames mirrored into a Bevy [`Image`] that UI widgets
+//! ([`crate::browser_widget`]) and in-world media faces
+//! ([`crate::media_prim`]) sample. Which engine serves a URL is decided by
+//! [`sl_media::classify_url`] (the `mime_types.xml` dispatch); the mirror
+//! path is engine-agnostic.
 //!
-//! Everything CEF is thread-affine and `!Send`, so the engine and the surface
-//! table live in **non-send** resources ([`MediaEngine`], [`MediaSurfaces`])
-//! — Bevy then schedules every system touching them onto the main thread,
-//! which is exactly the thread that initialised CEF.
+//! Everything CEF is thread-affine and `!Send`, so the engines and the
+//! surface table live in **non-send** resources ([`MediaEngine`],
+//! [`MediaSurfaces`]) — Bevy then schedules every system touching them onto
+//! the main thread, which is exactly the thread that initialised CEF. The
+//! GStreamer backend is pumped on the same thread for uniformity (its
+//! pipelines run their own streaming threads regardless).
 //!
-//! The engine is optional at every level: `--disable-web-media` skips
-//! initialisation, a missing `sl-cef-helper` binary or CEF runtime fails
-//! soft (a warning, no browser surfaces), and every consumer treats "no
-//! engine" as "surface never appears".
+//! The engines are optional at every level: `--disable-web-media` /
+//! `--disable-video-media` skip initialisation, a missing `sl-cef-helper`
+//! binary or engine runtime fails soft (a warning, no surfaces), and every
+//! consumer treats "no engine" as "surface never appears".
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -44,22 +51,41 @@ impl MediaSurfaceId {
     pub(crate) const PLACEHOLDER: Self = Self(u64::MAX);
 }
 
-/// The global engine (non-send resource): `None` until initialised, and again
-/// after shutdown or a failed initialisation.
+/// Which engine a surface runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum MediaEngineKind {
+    /// The web browser engine (CEF).
+    #[default]
+    Web,
+    /// The video / audio playback engine (GStreamer).
+    Video,
+}
+
+/// The global engines (non-send resource): each `None` until initialised,
+/// and again after shutdown or a failed initialisation.
 #[derive(Default)]
 pub(crate) struct MediaEngine {
-    /// The engine backend, when live.
+    /// The web (CEF) backend, when live.
     backend: Option<Box<dyn MediaBackend>>,
+    /// The video / audio playback (GStreamer) backend, when live.
+    video_backend: Option<Box<dyn MediaBackend>>,
     /// Whether initialisation already ran (successfully or not), so it is
     /// attempted once.
     initialized: bool,
-    /// Whether the engine is enabled at all (`--disable-web-media` clears it).
+    /// Whether the web engine is enabled at all (`--disable-web-media`
+    /// clears it).
     pub(crate) enabled: bool,
+    /// Whether the video engine is enabled at all (`--disable-video-media`
+    /// clears it).
+    pub(crate) video_enabled: bool,
 }
 
 /// One live surface: the engine-side handle plus the Bevy image its frames
 /// are mirrored into.
 pub(crate) struct MediaSlot {
+    /// Which engine the surface runs on (decides the control set the UI
+    /// offers: navigation for web, transport for video).
+    pub(crate) kind: MediaEngineKind,
     /// The engine surface.
     pub(crate) surface: Box<dyn sl_cef::MediaSurface>,
     /// The Bevy image the newest frame lives in (BGRA, sRGB).
@@ -91,16 +117,32 @@ pub(crate) struct MediaSurfaces {
 }
 
 impl MediaSurfaces {
-    /// Creates a surface through `engine`, allocating its mirror [`Image`]
-    /// (a 1×1 placeholder until the first paint arrives). Returns `None` when
-    /// the engine is not live or refuses the surface.
+    /// Creates a surface through `engine`'s web (CEF) backend, allocating its
+    /// mirror [`Image`] (a 1×1 placeholder until the first paint arrives).
+    /// Returns `None` when the engine is not live or refuses the surface.
     pub(crate) fn create(
         &mut self,
         engine: &mut MediaEngine,
         images: &mut Assets<Image>,
         config: &SurfaceConfig,
     ) -> Option<MediaSurfaceId> {
-        let backend = engine.backend.as_mut()?;
+        self.create_kind(engine, images, config, MediaEngineKind::Web)
+    }
+
+    /// Creates a surface on the backend for `kind` (web pages on CEF, direct
+    /// video / audio on GStreamer), allocating its mirror [`Image`]. Returns
+    /// `None` when that engine is not live or refuses the surface.
+    pub(crate) fn create_kind(
+        &mut self,
+        engine: &mut MediaEngine,
+        images: &mut Assets<Image>,
+        config: &SurfaceConfig,
+        kind: MediaEngineKind,
+    ) -> Option<MediaSurfaceId> {
+        let backend = match kind {
+            MediaEngineKind::Web => engine.backend.as_mut()?,
+            MediaEngineKind::Video => engine.video_backend.as_mut()?,
+        };
         match backend.create_surface(config) {
             Ok(surface) => {
                 let id = MediaSurfaceId(self.next);
@@ -109,6 +151,7 @@ impl MediaSurfaces {
                 self.slots.insert(
                     id,
                     MediaSlot {
+                        kind,
                         surface,
                         image,
                         status: SurfaceStatus::default(),
@@ -162,20 +205,25 @@ fn placeholder_image() -> Image {
     )
 }
 
-/// The web-media engine plugin. `enabled: false` (from `--disable-web-media`)
-/// registers the resources but never initialises CEF, so every consumer sees
-/// a permanently empty surface table.
+/// The media engine plugin. `enabled: false` (from `--disable-web-media`) /
+/// `video_enabled: false` (from `--disable-video-media`) register the
+/// resources but never initialise that engine, so its consumers see a
+/// permanently empty surface table.
 pub(crate) struct MediaEnginePlugin {
-    /// Whether the engine may initialise at all.
+    /// Whether the web (CEF) engine may initialise at all.
     pub(crate) enabled: bool,
+    /// Whether the video (GStreamer) engine may initialise at all.
+    pub(crate) video_enabled: bool,
 }
 
 impl Plugin for MediaEnginePlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(MediaEngine {
             backend: None,
+            video_backend: None,
             initialized: false,
             enabled: self.enabled,
+            video_enabled: self.video_enabled,
         });
         app.insert_non_send(MediaSurfaces::default());
         app.add_systems(Startup, initialize_media_engine);
@@ -184,14 +232,33 @@ impl Plugin for MediaEnginePlugin {
     }
 }
 
-/// Startup: initialise the CEF runtime (once), pointing it at the
+/// Startup: initialise the engine runtimes (once) — CEF pointed at the
 /// `sl-cef-helper` binary next to the viewer executable and the shared cache
-/// directory. Failure is soft: the viewer runs without web media.
+/// directory, GStreamer with a loud log of the system's playback gaps
+/// (missing HTTP source / decoders). Failure is soft: the viewer runs
+/// without the failed engine.
 fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
-    if engine.initialized || !engine.enabled {
+    if engine.initialized {
         return;
     }
     engine.initialized = true;
+    if engine.video_enabled {
+        match sl_gst::GstMediaBackend::initialize() {
+            Ok(backend) => {
+                engine.video_backend = Some(Box::new(backend));
+                info!("video-media engine (GStreamer) initialised");
+                for gap in sl_gst::playback_gaps() {
+                    warn!("video-media capability gap: {gap}");
+                }
+            }
+            Err(error) => {
+                warn!("video-media engine failed to initialise; continuing without it: {error}");
+            }
+        }
+    }
+    if !engine.enabled {
+        return;
+    }
     let subprocess_path = helper_path();
     if subprocess_path.is_none() {
         warn!(
@@ -248,10 +315,12 @@ fn pump_media_engine(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let Some(backend) = engine.backend.as_mut() else {
-        return;
-    };
-    backend.pump();
+    if let Some(backend) = engine.backend.as_mut() {
+        backend.pump();
+    }
+    if let Some(backend) = engine.video_backend.as_mut() {
+        backend.pump();
+    }
 
     let mut finished: Vec<MediaSurfaceId> = Vec::new();
     for (&id, slot) in &mut surfaces.slots {
@@ -378,6 +447,9 @@ fn shutdown_media_engine_on_exit(
     }
     surfaces.slots.clear();
     if let Some(mut backend) = engine.backend.take() {
+        backend.shutdown();
+    }
+    if let Some(mut backend) = engine.video_backend.take() {
         backend.shutdown();
     }
 }

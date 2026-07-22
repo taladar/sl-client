@@ -77,12 +77,14 @@ sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
 # The emoji dataset & lookup layer (viewer-emoji-data): the grouped, searchable
 # glyph list the emoji-picker floater (`src/emoji_picker.rs`) presents.
 sl-emoji = { version = "0.1.0", path = "../sl-emoji" }
+sl-gst = { version = "0.1.0", path = "../sl-gst" }
 # Locale-aware value formatting (viewer-i18n-number-datetime-formats): the CLDR/
 # ICU-backed number, currency and date/time formatters the `Translator` exposes,
 # so a panel writes a grouped balance / coordinate / timestamp for the active
 # locale rather than a bare `to_string()`. The text side is `bevy_fluent`; this
 # is the value side Fluent's `NUMBER()` / `DATETIME()` cannot do.
 sl-l10n = { version = "0.1.0", path = "../sl-l10n" }
+sl-media = { version = "0.1.0", path = "../sl-media" }
 sl-notecard = { version = "0.1.0", path = "../sl-notecard" }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
 sl-settings = { version = "0.1.0", path = "../sl-settings" }

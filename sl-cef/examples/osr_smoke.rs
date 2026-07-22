@@ -39,6 +39,7 @@ fn main() {
             isolated: true,
             max_fps: 30,
             muted: true,
+            loop_media: false,
         })
         .unwrap_or_else(|error| panic!("surface creation failed: {error}"));
 

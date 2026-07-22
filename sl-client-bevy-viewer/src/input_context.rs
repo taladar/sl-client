@@ -168,8 +168,9 @@ pub(crate) fn compute_input_context(
         Some(Ok(false)) => InputContext::UiWidget,
         Some(Err(_)) | None => {
             // No UI focus: a focused in-world media face takes the keyboard
-            // before the world does.
-            if media.is_some_and(|media| media.focused.is_some()) {
+            // before the world does — browser pages only; a focused video
+            // face leaves the keyboard with the world.
+            if media.is_some_and(|media| media.focused.is_some() && media.focused_takes_keyboard) {
                 InputContext::Media
             } else {
                 InputContext::World

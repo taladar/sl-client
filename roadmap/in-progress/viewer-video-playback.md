@@ -2,9 +2,9 @@
 id: viewer-video-playback
 title: Video playback backend (a second media engine, not the browser)
 topic: viewer
-status: blocked
+status: in-progress
 origin: user request (2026-07)
-blocked_by: [viewer-audio-backend]
+refs: [viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -91,4 +91,47 @@ Reference (Firestorm, read-only): `media_plugins/media_plugin_libvlc`,
 Builds on: `protocol-24` media-on-a-prim (`MediaEntry` / `ObjectMedia` are
 already decoded; the viewer just never reads them).
 
-Deps: [[viewer-audio-backend]] (the video's audio must go through the mixer).
+Deps: [[viewer-audio-backend]] (the video's audio must go through the
+mixer) — for the *mixer hand-off only*; the interim below unblocked
+playback itself.
+
+## Progress (2026-07-22)
+
+The engine, the dispatch and the transport controls are implemented:
+
+- **`sl-media` crate**: the `MediaBackend` / `MediaSurface` traits moved
+  out of `sl-cef` (which re-exports them) into a shared crate, extended
+  with the playback half — `PlaybackStatus` (state / position / duration /
+  seekable / buffering) on `SurfaceStatus`, default-no-op `play` / `pause`
+  / `seek` / `set_volume` methods, `loop_media` on `SurfaceConfig` — plus
+  `classify_url`, the scheme/extension → web-vs-video dispatch table
+  (unit-tested). Extension-based dispatch is a documented simplification
+  of the reference's HTTP content-type probe; extension-less media URLs
+  land in the browser.
+- **`sl-gst` crate**: `GstMediaBackend` — one `playbin3` per surface with
+  a `videoconvert ! appsink` BGRA video sink; frames are stride-stripped
+  into the shared frame store on the streaming thread (unit-tested against
+  `videotestsrc`) and mirrored by the existing engine-agnostic texture
+  path. The bus pump defers pipeline actions out of the lock (a flushing
+  seek can block on the appsink thread), holds/resumes on buffering, loops
+  on EOS when `auto_loop`, and turns errors + `missing-plugin` messages
+  into loud `load_error` text (unit-tested via a nonexistent file URI).
+  A/V sync is GStreamer's own for now: both sinks follow the pipeline
+  clock, audio to the system device (the same interim as CEF page audio).
+- **Viewer**: the media engine holds both backends
+  (`--disable-video-media` mirrors `--disable-web-media`);
+  `media_prim` classifies each entry's URL and starts the surface on the
+  right engine (re-dispatching when a server-side navigate crosses
+  engines); the floating controls bar grows a **video mode** — play-pause,
+  restart, a seek scrubber + position ∕ duration read-out (hidden for
+  unseekable live streams), mute, zoom, open-external, with the stream
+  title / decoder-gap error in the status slot. A focused video face
+  deliberately leaves the keyboard with the world (nothing to type at).
+
+Still open here: the PCM hand-off + per-prim spatialisation (filed as
+[[viewer-gst-audio-mixer-handoff]], waits on [[viewer-audio-backend]]),
+zero-copy per-platform frame paths (deferred
+headroom, as designed), a served-MIME probe if extension dispatch proves
+insufficient, and legacy whole-parcel media video
+(`ParcelMediaUpdate` / `ParcelMediaCommand` — the pre-MoaP parcel media
+texture).

@@ -535,6 +535,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
     },
     UiElement {
+        id: "parcel-audio-bar",
+        summary: "The parcel streaming-audio cluster (`crate::parcel_audio`): the ♫ marker, a \
+                  width-capped now-playing title, play and mute glyph buttons and the volume \
+                  slider. The live cluster (trailing side of the bottom area) follows the \
+                  agent's parcel stream; here it is static so its layout is swept.",
+        spawn: crate::parcel_audio::spawn_parcel_audio_specimen,
+    },
+    UiElement {
         id: "emoji-picker",
         summary: "The emoji-picker floater's novel layout (`crate::emoji_picker`): a couple of grid \
                   rows of glyphs, the skin-tone swatch row and the preview line. The live floater \

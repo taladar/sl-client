@@ -1,0 +1,26 @@
+[package]
+name = "sl-media"
+description = "Engine-agnostic media-surface traits and types for Second Life / OpenSim viewers — the MediaBackend / MediaSurface boundary (CPU BGRA frames, portable input, playback status) shared by the CEF web engine and the GStreamer video engine, plus the URL → media-kind dispatch table"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "media", "browser", "video"]
+categories = ["game-development", "multimedia", "rendering"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+thiserror = { version = "2.0.18" }
+url = { version = "2.5.4" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

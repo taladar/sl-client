@@ -37,10 +37,12 @@ use sl_client_bevy::{
 use crate::camera::ViewerCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, surface_info_from_hit};
 use crate::input_context::InputContext;
-use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
+use crate::media_engine::{
+    MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
+};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
-use sl_cef::{KeyInput, SurfaceConfig};
+use sl_cef::{KeyInput, MediaKind, SurfaceConfig, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
 /// reference's `PluginInstancesTotal`).
@@ -86,6 +88,11 @@ pub(crate) struct MediaWorldClick {
 pub(crate) struct MediaFocus {
     /// The face holding media keyboard focus, if any.
     pub(crate) focused: Option<MediaTarget>,
+    /// Whether the focused face is a browser page that takes the keyboard
+    /// away from the world ([`crate::input_context`]); a focused *video*
+    /// face keeps the bar visible but leaves the keyboard with the world —
+    /// there is nothing to type at a video.
+    pub(crate) focused_takes_keyboard: bool,
     /// The media face under the cursor this frame, if any.
     pub(crate) hover: Option<MediaTarget>,
     /// The surface pixel under the cursor on the hover face.
@@ -130,6 +137,10 @@ impl MediaData {
 
 /// The runtime state of one face whose surface is live.
 pub(crate) struct ActiveMedia {
+    /// Which engine the surface runs on (browser page vs video playback) —
+    /// decides the input routing here and the control set the floating bar
+    /// shows.
+    pub(crate) kind: MediaEngineKind,
     /// The engine surface.
     pub(crate) surface: MediaSurfaceId,
     /// The face entity currently wearing the media material.
@@ -223,6 +234,11 @@ fn claim_media_wheel(
     let Some(active) = state.active.get(&target) else {
         return;
     };
+    if active.kind != MediaEngineKind::Web {
+        // A video surface has nothing to scroll; leave the wheel to the
+        // camera zoom.
+        return;
+    }
     let Some(slot) = surfaces.get(active.surface) else {
         return;
     };
@@ -282,9 +298,10 @@ pub(crate) fn media_pixel_from_uv(uv: Vec2, size: UVec2) -> (i32, i32) {
 fn ingest_media_events(
     mut events: MessageReader<SlEvent>,
     mut data: ResMut<MediaData>,
-    state: Res<MediaPrimState>,
-    surfaces: NonSend<MediaSurfaces>,
+    mut state: ResMut<MediaPrimState>,
+    mut surfaces: NonSendMut<MediaSurfaces>,
     mut commands: MessageWriter<SlCommand>,
+    mut entity_commands: Commands,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -311,7 +328,10 @@ fn ingest_media_events(
                 faces,
             } => {
                 // A server-side navigation shows up as a changed current_url:
-                // follow it on the live surface.
+                // follow it on the live surface — unless the new URL belongs
+                // to the *other* engine (a page navigated to a direct video
+                // URL, or back), in which case the surface is closed and the
+                // driver restarts it on the right engine.
                 for (index, entry) in faces.iter().enumerate() {
                     let Some(entry) = entry else { continue };
                     let Ok(face) = u16::try_from(index) else {
@@ -324,10 +344,24 @@ fn ingest_media_events(
                     let previous = data.entry(target).and_then(|old| old.current_url.clone());
                     if entry.current_url != previous
                         && let Some(active) = state.active.get(&target)
-                        && let Some(slot) = surfaces.get(active.surface)
                         && let Some(url) = &entry.current_url
                     {
-                        slot.surface.navigate(url.as_str());
+                        let wanted = match classify_url(url) {
+                            MediaKind::Web => MediaEngineKind::Web,
+                            MediaKind::Video | MediaKind::Audio => MediaEngineKind::Video,
+                        };
+                        if wanted == active.kind {
+                            if let Some(slot) = surfaces.get(active.surface) {
+                                slot.surface.navigate(url.as_str());
+                            }
+                        } else {
+                            close_media_surface(
+                                target,
+                                &mut state,
+                                &mut surfaces,
+                                &mut entity_commands,
+                            );
+                        }
                     }
                 }
                 debug!(
@@ -474,6 +508,7 @@ fn drive_media_surfaces(
         close_media_surface(target, &mut state, &mut surfaces, &mut commands);
         if focus.focused == Some(target) {
             focus.focused = None;
+            focus.focused_takes_keyboard = false;
         }
     }
 
@@ -556,14 +591,17 @@ fn start_media_surface(
     mesh_materials: &Query<&MeshMaterial3d<StandardMaterial>>,
     commands: &mut Commands,
 ) -> bool {
-    let url = entry
-        .current_url
-        .as_ref()
-        .or(entry.home_url.as_ref())
-        .map(url::Url::to_string);
+    let url = entry.current_url.as_ref().or(entry.home_url.as_ref());
     let Some(url) = url else {
         return false;
     };
+    // The mime_types.xml dispatch: direct video / audio URLs go to the
+    // GStreamer engine, everything else to the browser.
+    let kind = match classify_url(url) {
+        MediaKind::Web => MediaEngineKind::Web,
+        MediaKind::Video | MediaKind::Audio => MediaEngineKind::Video,
+    };
+    let url = url.to_string();
     let width = u32::try_from(entry.width_pixels.clamp(0, 4096)).unwrap_or(0);
     let height = u32::try_from(entry.height_pixels.clamp(0, 4096)).unwrap_or(0);
     let config = SurfaceConfig {
@@ -573,12 +611,14 @@ fn start_media_surface(
         isolated: true,
         max_fps: 15,
         muted: false,
+        loop_media: entry.auto_loop,
     };
-    let Some(id) = surfaces.create(engine, images, &config) else {
+    let Some(id) = surfaces.create_kind(engine, images, &config, kind) else {
         return false;
     };
-    debug!("media surface started for {target:?} at {url}");
+    debug!("media surface started for {target:?} at {url} ({kind:?})");
     let mut active = ActiveMedia {
+        kind,
         surface: id,
         face_entity,
         restore: Handle::default(),
@@ -859,6 +899,7 @@ fn handle_media_clicks(
         }
         let was_focused = focus.focused == Some(target);
         focus.focused = Some(target);
+        focus.focused_takes_keyboard = false;
         if !state.active.contains_key(&target) {
             // First interaction starts the media (the reference's click-to-play).
             let started = start_media_surface(
@@ -881,6 +922,10 @@ fn handle_media_clicks(
         } else if let Some(active) = state.active.get_mut(&target) {
             active.user_started = true;
         }
+        focus.focused_takes_keyboard = state
+            .active
+            .get(&target)
+            .is_some_and(|active| active.kind == MediaEngineKind::Web);
         // Forward the press when already focused, or on the first click with
         // `first_click_interact`.
         if (was_focused || entry.first_click_interact)
@@ -991,7 +1036,14 @@ fn release_media_focus_on_escape(
     state: Res<MediaPrimState>,
     surfaces: NonSend<MediaSurfaces>,
 ) {
-    if *context != InputContext::Media || !keyboard.just_pressed(KeyCode::Escape) {
+    if !keyboard.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    // Web focus owns the keyboard (Media context); a focused video face
+    // leaves the keyboard with the world, so accept its Escape there too.
+    let releasable = *context == InputContext::Media
+        || (*context == InputContext::World && focus.focused.is_some());
+    if !releasable {
         return;
     }
     if let Some(target) = focus.focused.take()
@@ -1000,6 +1052,7 @@ fn release_media_focus_on_escape(
     {
         slot.surface.set_focus(false);
     }
+    focus.focused_takes_keyboard = false;
     focus.pressed = None;
 }
 

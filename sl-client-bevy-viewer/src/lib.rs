@@ -93,6 +93,7 @@ mod movement;
 mod nearby_chat_bar;
 mod object_menu;
 mod objects;
+mod parcel_audio;
 mod particles;
 mod paths;
 mod people;
@@ -321,6 +322,10 @@ pub enum Error {
     version = clap::crate_version!(),
     disable_version_flag = true,
 )]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CLI switches are independent flags by nature; clap derives the parser from them"
+)]
 struct Options {
     /// The TOML credentials file.
     #[clap(
@@ -413,6 +418,11 @@ struct Options {
     /// escape hatch when the CEF runtime misbehaves on a system.
     #[clap(long)]
     disable_web_media: bool,
+    /// Disable the video/audio playback engine (GStreamer): no direct-URL
+    /// video on media-on-a-prim faces and no parcel radio streams. The
+    /// escape hatch when the system's GStreamer misbehaves.
+    #[clap(long)]
+    disable_video_media: bool,
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -623,12 +633,23 @@ struct SkinRuntime {
     watch: bool,
 }
 
+/// Which media engines a viewer session may start: the web (CEF) and video
+/// (GStreamer) switches from `--disable-web-media` / `--disable-video-media`.
+/// Bundled alongside [`CameraStartup`] to keep [`run_session`] within the
+/// argument-count lint.
+struct MediaRuntime {
+    /// Whether the web (CEF) engine may initialise.
+    web: bool,
+    /// Whether the video (GStreamer) engine may initialise.
+    video: bool,
+}
+
 /// Run one windowed session to completion, returning any recoverable login
 /// outcome (an MFA challenge or a retryable rejection) it stopped on.
 #[expect(
     clippy::too_many_arguments,
     reason = "the viewer's startup knobs, already bundled where they group naturally \
-              (camera, skin); the media switch is a lone boolean"
+              (camera, skin, media)"
 )]
 fn run_session(
     params: &LoginParams,
@@ -638,7 +659,7 @@ fn run_session(
     screenshot_dir: Option<&Path>,
     camera: CameraStartup,
     skin: SkinRuntime,
-    media_enabled: bool,
+    media: MediaRuntime,
 ) -> LoginOutcome {
     let CameraStartup {
         start: camera_start,
@@ -833,7 +854,8 @@ fn run_session(
     // consumers below (browser widget / floater, media-on-a-prim, controls
     // bar) all no-op when it is disabled or failed to start.
     .add_plugins(crate::media_engine::MediaEnginePlugin {
-        enabled: media_enabled,
+        enabled: media.web,
+        video_enabled: media.video,
     })
     // The embedded-browser UI widget (LLMediaCtrl): surface-backed image
     // nodes with click-to-focus pointer / keyboard routing.
@@ -847,6 +869,9 @@ fn run_session(
     // The floating media controls bar above the media face under the cursor
     // (LLPanelPrimMediaControls).
     .add_plugins(crate::media_controls::MediaControlsPlugin)
+    // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
+    // stream following the agent's parcel, with its bottom-bar controls.
+    .add_plugins(crate::parcel_audio::ParcelAudioPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the
@@ -1542,7 +1567,10 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 ),
                 watch: options.watch_skins,
             },
-            !options.disable_web_media,
+            MediaRuntime {
+                web: !options.disable_web_media,
+                video: !options.disable_video_media,
+            },
         );
         if let Some(challenge) = outcome.challenge {
             info!(

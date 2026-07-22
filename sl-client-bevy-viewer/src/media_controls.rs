@@ -1,10 +1,15 @@
-//! The **floating media controls bar** (`viewer-media-prim-browser`): the
-//! reference viewer's `LLPanelPrimMediaControls` — a small button bar hovering
-//! above the media face under the cursor (or holding focus), with back /
-//! forward / home / stop-or-reload / URL / mute / zoom / open-external
-//! controls, a load progress read-out and the secure-lock marker (the Vintage
-//! skin's `panel_prim_media_controls.xml` web-mode set; the movie scrubber
-//! belongs to the separate video-playback task).
+//! The **floating media controls bar** (`viewer-media-prim-browser` /
+//! `viewer-video-playback`): the reference viewer's
+//! `LLPanelPrimMediaControls` — a small button bar hovering above the media
+//! face under the cursor (or holding focus). For a **web** surface it shows
+//! the browser set — back / forward / home / stop-or-reload / URL / mute /
+//! zoom / open-external, a load progress read-out and the secure-lock marker
+//! (the Vintage skin's `panel_prim_media_controls.xml` web-mode set). For a
+//! **video** surface (a GStreamer playback face) it shows the movie set
+//! instead: play-pause / restart, a seek scrubber with a position ∕ duration
+//! read-out (hidden for unseekable live streams), mute, zoom and
+//! open-external — with the stream's "now playing" title (or its loud
+//! missing-decoder error) in the status slot.
 //!
 //! Placement mirrors the reference's `updateShape`: the face's bounding box
 //! corners are projected to the viewport, and the bar sits centred above the
@@ -26,16 +31,20 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::{
+    Activate, Button, Slider, SliderDragState, SliderRange, SliderStep, SliderThumb, SliderValue,
+    ValueChange,
+};
+use sl_cef::PlaybackState;
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::camera::{CameraRig, FocusTarget, ViewerCamera};
-use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
+use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{
     MediaData, MediaFocus, MediaPrimState, MediaTarget, media_permission_allows,
 };
 use crate::objects::ObjectState;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -59,19 +68,39 @@ const BAR_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
 /// Bar text colour for unavailable actions.
 const BAR_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
 
+/// The seek scrubber track's width, in logical pixels.
+const SCRUB_TRACK_WIDTH: f32 = 220.0;
+/// The seek scrubber thumb's width, in logical pixels.
+const SCRUB_THUMB_WIDTH: f32 = 10.0;
+/// The seek scrubber track / thumb height, in logical pixels.
+const SCRUB_TRACK_HEIGHT: f32 = 12.0;
+/// The scrubber track's fill.
+const SCRUB_TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
+/// The scrubber thumb's fill.
+const SCRUB_THUMB_FILL: Color = Color::srgb(0.62, 0.72, 0.86);
+
+/// A marker on the seek scrubber's thumb node, so it slides to the playback
+/// position.
+#[derive(Component, Debug, Clone, Copy)]
+struct ScrubThumb;
+
 /// The bar's entities.
 #[derive(Resource)]
 struct MediaControlsUi {
     /// The bar root (absolute-positioned, shown/hidden).
     root: Entity,
-    /// The URL field (hidden for mini controls).
+    /// The URL field (hidden for mini controls and video surfaces).
     url_field: Entity,
     /// The URL row wrapper (hidden with the field).
     url_row: Entity,
-    /// Back button label.
-    back_label: Entity,
-    /// Forward button label.
-    forward_label: Entity,
+    /// Play-pause button (video surfaces only) and its glyph label.
+    play: (Entity, Entity),
+    /// Back button (web surfaces only) and its label.
+    back: (Entity, Entity),
+    /// Forward button (web surfaces only) and its label.
+    forward: (Entity, Entity),
+    /// Home button (web surfaces only).
+    home: Entity,
     /// Stop-or-reload label.
     reload_label: Entity,
     /// Mute toggle label.
@@ -82,6 +111,12 @@ struct MediaControlsUi {
     status_text: Entity,
     /// The secure-lock glyph.
     lock: Entity,
+    /// The seek-scrubber row (video surfaces with a seekable stream).
+    scrub_row: Entity,
+    /// The seek slider.
+    scrub_slider: Entity,
+    /// The position ∕ duration read-out.
+    time_text: Entity,
 }
 
 /// Which media face the bar currently controls, plus the zoom state.
@@ -109,6 +144,7 @@ impl Plugin for MediaControlsPlugin {
                 Update,
                 (
                     update_media_controls,
+                    drive_scrub_visual,
                     handle_media_control_actions,
                     unzoom_on_focus_loss,
                 )
@@ -156,12 +192,14 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(bar),
         ))
         .id();
-    let back_label = spawn_bar_button(&mut commands, buttons, "◀", "back", 30);
-    let forward_label = spawn_bar_button(&mut commands, buttons, "▶", "forward", 31);
-    let _home = spawn_bar_button(&mut commands, buttons, "⌂", "home", 32);
-    let reload_label = spawn_bar_button(&mut commands, buttons, "⟳", "reload-or-stop", 33);
-    let mute_label = spawn_bar_button(&mut commands, buttons, "🔊", "mute-toggle", 34);
-    let zoom_label = spawn_bar_button(&mut commands, buttons, "⊕", "zoom-toggle", 35);
+    let play = spawn_bar_button(&mut commands, buttons, "▶", "play-pause", 29);
+    let back = spawn_bar_button(&mut commands, buttons, "◀", "back", 30);
+    let forward = spawn_bar_button(&mut commands, buttons, "▶", "forward", 31);
+    let (home, _home_label) = spawn_bar_button(&mut commands, buttons, "⌂", "home", 32);
+    let (_reload, reload_label) =
+        spawn_bar_button(&mut commands, buttons, "⟳", "reload-or-stop", 33);
+    let (_mute, mute_label) = spawn_bar_button(&mut commands, buttons, "🔊", "mute-toggle", 34);
+    let (_zoom, zoom_label) = spawn_bar_button(&mut commands, buttons, "⊕", "zoom-toggle", 35);
     let _external = spawn_bar_button(&mut commands, buttons, "↗", "open-external", 36);
     let status_text = commands
         .spawn((
@@ -171,6 +209,8 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(buttons),
         ))
         .id();
+
+    let (scrub_row, scrub_slider, time_text) = spawn_scrub_row(&mut commands, bar);
 
     let url_row = commands
         .spawn((
@@ -208,24 +248,203 @@ fn spawn_media_controls(mut commands: Commands, root: Res<UiRoot>) {
         root: bar,
         url_field,
         url_row,
-        back_label,
-        forward_label,
+        play,
+        back,
+        forward,
+        home,
         reload_label,
         mute_label,
         zoom_label,
         status_text,
         lock,
+        scrub_row,
+        scrub_slider,
+        time_text,
     });
 }
 
-/// One glyph button on the bar; returns the label entity.
+/// The video seek row: a scrubber slider whose drags seek the surface, plus
+/// the position ∕ duration read-out. Returns `(row, slider, time_text)`.
+fn spawn_scrub_row(commands: &mut Commands, bar: Entity) -> (Entity, Entity, Entity) {
+    let scrub_row = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                // Hidden until a seekable video surface is under the bar.
+                display: Display::None,
+                ..row(Val::Px(6.0))
+            },
+            ChildOf(bar),
+        ))
+        .id();
+    let slider = commands
+        .spawn((
+            Slider::default(),
+            SliderValue(0.0),
+            SliderRange::new(0.0, 1.0),
+            SliderStep(1.0),
+            Node {
+                width: Val::Px(SCRUB_TRACK_WIDTH),
+                height: Val::Px(SCRUB_TRACK_HEIGHT),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(Color::srgb(0.3, 0.3, 0.35)),
+            BackgroundColor(SCRUB_TRACK_FILL),
+            TabIndex(38),
+            Pickable::default(),
+            Name::new("media-controls-scrubber"),
+            ChildOf(scrub_row),
+        ))
+        .observe(on_scrub_change)
+        .id();
+    commands.spawn((
+        SliderThumb,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(SCRUB_THUMB_WIDTH),
+            height: Val::Px(SCRUB_TRACK_HEIGHT),
+            ..default()
+        },
+        LogicalInset(LogicalRect {
+            inline_start: Val::Px(0.0),
+            ..LogicalRect::ZERO
+        }),
+        BackgroundColor(SCRUB_THUMB_FILL),
+        ScrubThumb,
+        Pickable::IGNORE,
+        ChildOf(slider),
+    ));
+    let time_text = commands
+        .spawn((
+            Text::default(),
+            UiFont::Sans.at(11.0),
+            TextColor(BAR_LABEL),
+            ChildOf(scrub_row),
+        ))
+        .id();
+    (scrub_row, slider, time_text)
+}
+
+/// Observer: the scrubber was dragged — seek the bar's surface to the new
+/// position (the slider range is the media duration in seconds).
+fn on_scrub_change(
+    change: On<ValueChange<f32>>,
+    bar_state: Res<MediaControlsState>,
+    prim_state: Res<MediaPrimState>,
+    surfaces: NonSend<MediaSurfaces>,
+    mut commands: Commands,
+) {
+    // Reflect the drag on the widget (the headless slider does not move its
+    // own value).
+    commands
+        .entity(change.source)
+        .insert(SliderValue(change.value));
+    let Some(target) = bar_state.target else {
+        return;
+    };
+    let Some(active) = prim_state.active.get(&target) else {
+        return;
+    };
+    let Some(slot) = surfaces.get(active.surface) else {
+        return;
+    };
+    slot.surface.seek(f64::from(change.value));
+}
+
+/// Keep the scrubber's thumb at the slider's value, and the slider tracking
+/// the playback position while it is not being dragged.
+fn drive_scrub_visual(
+    ui: Option<Res<MediaControlsUi>>,
+    bar_state: Res<MediaControlsState>,
+    prim_state: Res<MediaPrimState>,
+    surfaces: NonSend<MediaSurfaces>,
+    sliders: Query<(&SliderValue, &SliderRange, &SliderDragState), With<Slider>>,
+    mut thumbs: Query<&mut LogicalInset, With<ScrubThumb>>,
+    mut commands: Commands,
+) {
+    let Some(ui) = ui else { return };
+    let Ok((value, range, drag)) = sliders.get(ui.scrub_slider) else {
+        return;
+    };
+    // Track the live position (and duration → range) unless the user is
+    // mid-drag. `SliderValue` / `SliderRange` are immutable components, so
+    // updates go through insertion.
+    if !drag.dragging
+        && let Some(target) = bar_state.target
+        && let Some(active) = prim_state.active.get(&target)
+        && let Some(slot) = surfaces.get(active.surface)
+        && let Some(playback) = &slot.status.playback
+    {
+        if let Some(duration) = playback.duration_seconds {
+            let end = as_slider_seconds(duration).max(1.0);
+            // Bit-exact change detection, not a numeric comparison.
+            if range.end().to_bits() != end.to_bits() {
+                commands
+                    .entity(ui.scrub_slider)
+                    .insert(SliderRange::new(0.0, end));
+            }
+        }
+        let position = as_slider_seconds(playback.position_seconds);
+        if value.0.to_bits() != position.to_bits() {
+            commands
+                .entity(ui.scrub_slider)
+                .insert(SliderValue(position));
+        }
+    }
+    let span = range.span();
+    let fraction = if span > f32::EPSILON {
+        ((value.0 - range.start()) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let offset = fraction * (SCRUB_TRACK_WIDTH - SCRUB_THUMB_WIDTH);
+    for mut inset in &mut thumbs {
+        if inset.0.inline_start != Val::Px(offset) {
+            inset.0.inline_start = Val::Px(offset);
+        }
+    }
+}
+
+/// A media position in seconds as the scrubber's `f32` value.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::as_conversions,
+    reason = "media positions are far below f32's precision loss threshold for whole seconds"
+)]
+fn as_slider_seconds(seconds: f64) -> f32 {
+    seconds.clamp(0.0, f64::from(f32::MAX)) as f32
+}
+
+/// A playback time as `m:ss` (or `h:mm:ss` from an hour up), for the
+/// scrubber's read-out.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions,
+    reason = "the value is clamped non-negative and rounded before the cast, and a media \
+              position always fits u64"
+)]
+fn format_media_time(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let secs = total % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{secs:02}")
+    } else {
+        format!("{minutes}:{secs:02}")
+    }
+}
+
+/// One glyph button on the bar; returns `(button, label)`.
 fn spawn_bar_button(
     commands: &mut Commands,
     parent: Entity,
     glyph: &str,
     action: &'static str,
     tab_index: i32,
-) -> Entity {
+) -> (Entity, Entity) {
     let button = commands
         .spawn((
             Button,
@@ -250,7 +469,7 @@ fn spawn_bar_button(
             },
         )
         .id();
-    commands
+    let label = commands
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(12.0),
@@ -258,7 +477,8 @@ fn spawn_bar_button(
             Pickable::IGNORE,
             ChildOf(button),
         ))
-        .id()
+        .id();
+    (button, label)
 }
 
 /// The bar's chrome queries, bundled to stay within Bevy's system-parameter
@@ -410,16 +630,56 @@ fn update_media_controls(
         // ---- Chrome sync.
         let status = &slot.status;
         let mini = entry.controls == CONTROLS_MINI;
-        if let Ok(mut node) = chrome.nodes.get_mut(ui.url_row) {
-            let want = if mini { Display::None } else { Display::Flex };
-            if node.display != want {
-                node.display = want;
+        let video = slot.kind == MediaEngineKind::Video;
+        let playback = status.playback.as_ref();
+        // Which rows / buttons this surface kind shows.
+        set_display(&mut chrome.nodes, ui.url_row, !video && !mini);
+        let seekable = playback
+            .is_some_and(|playback| playback.seekable && playback.duration_seconds.is_some());
+        set_display(&mut chrome.nodes, ui.scrub_row, video && seekable && !mini);
+        set_display(&mut chrome.nodes, ui.play.0, video);
+        set_display(&mut chrome.nodes, ui.back.0, !video);
+        set_display(&mut chrome.nodes, ui.forward.0, !video);
+        set_display(&mut chrome.nodes, ui.home, !video);
+        if video {
+            if let Ok(mut play) = chrome.texts.get_mut(ui.play.1) {
+                // Glyphs chosen for bundled-font coverage: U+23F5/U+23F8 are
+                // in none of the UI faces (they render as tofu).
+                let want = match playback.map(|playback| playback.state) {
+                    Some(PlaybackState::Playing | PlaybackState::Buffering) => "❚❚",
+                    _paused_or_none => "▶",
+                };
+                if play.0 != want {
+                    want.clone_into(&mut play.0);
+                }
             }
+            if let Ok(mut time) = chrome.texts.get_mut(ui.time_text)
+                && let Some(playback) = playback
+            {
+                let want = playback.duration_seconds.map_or_else(
+                    || format_media_time(playback.position_seconds),
+                    |duration| {
+                        format!(
+                            "{} / {}",
+                            format_media_time(playback.position_seconds),
+                            format_media_time(duration)
+                        )
+                    },
+                );
+                if time.0 != want {
+                    time.0 = want;
+                }
+            }
+        } else {
+            set_color(&mut chrome.colors, ui.back.1, status.can_go_back);
+            set_color(&mut chrome.colors, ui.forward.1, status.can_go_forward);
         }
-        set_color(&mut chrome.colors, ui.back_label, status.can_go_back);
-        set_color(&mut chrome.colors, ui.forward_label, status.can_go_forward);
         if let Ok(mut reload) = chrome.texts.get_mut(ui.reload_label) {
-            let want = if status.loading { "✕" } else { "⟳" };
+            let want = if !video && status.loading {
+                "✕"
+            } else {
+                "⟳"
+            };
             if reload.0 != want {
                 want.clone_into(&mut reload.0);
             }
@@ -441,7 +701,7 @@ fn update_media_controls(
             }
         }
         if let Ok(mut lock) = chrome.visibilities.get_mut(ui.lock) {
-            let want = if status.url.starts_with("https://") {
+            let want = if !video && status.url.starts_with("https://") {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
@@ -450,7 +710,8 @@ fn update_media_controls(
                 *lock = want;
             }
         }
-        if input_focus.get() != Some(ui.url_field)
+        if !video
+            && input_focus.get() != Some(ui.url_field)
             && let Ok(mut editor) = chrome.editors.get_mut(ui.url_field)
             && editor.value().to_string() != status.url
         {
@@ -462,7 +723,19 @@ fn update_media_controls(
             );
         }
         if let Ok(mut text) = chrome.texts.get_mut(ui.status_text) {
-            let want = if status.loading {
+            // Video surfaces put their "now playing" title (or their loud
+            // decoder-gap error) here; web surfaces their load progress.
+            let want = if video {
+                status.load_error.clone().unwrap_or_else(|| {
+                    if playback.is_some_and(|playback| playback.state == PlaybackState::Buffering) {
+                        playback
+                            .and_then(|playback| playback.buffering_percent)
+                            .map_or_else(String::new, |percent| format!("{percent}%"))
+                    } else {
+                        status.title.clone()
+                    }
+                })
+            } else if status.loading {
                 format!("{:.0}%", status.progress * 100.0)
             } else {
                 String::new()
@@ -489,6 +762,16 @@ fn set_color(colors: &mut Query<&mut TextColor>, label: Entity, enabled: bool) {
         let want = if enabled { BAR_LABEL } else { BAR_LABEL_DIM };
         if color.0 != want {
             color.0 = want;
+        }
+    }
+}
+
+/// Show or hide a node via its `display` property.
+fn set_display(nodes: &mut Query<&mut Node>, entity: Entity, shown: bool) {
+    if let Ok(mut node) = nodes.get_mut(entity) {
+        let want = if shown { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
         }
     }
 }
@@ -586,13 +869,26 @@ fn handle_media_control_actions(
         match action.action {
             "back" => slot.surface.go_back(),
             "forward" => slot.surface.go_forward(),
+            "play-pause" => {
+                let playing = slot.status.playback.as_ref().is_some_and(|playback| {
+                    matches!(
+                        playback.state,
+                        PlaybackState::Playing | PlaybackState::Buffering | PlaybackState::Loading
+                    )
+                });
+                if playing {
+                    slot.surface.pause();
+                } else {
+                    slot.surface.play();
+                }
+            }
             "home" => {
                 if let Some(home) = data.entry(target).and_then(|entry| entry.home_url.as_ref()) {
                     slot.surface.navigate(home.as_str());
                 }
             }
             "reload-or-stop" => {
-                if slot.status.loading {
+                if slot.kind == MediaEngineKind::Web && slot.status.loading {
                     slot.surface.stop();
                 } else {
                     slot.surface.reload();

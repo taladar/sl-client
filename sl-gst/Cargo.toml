@@ -1,0 +1,29 @@
+[package]
+name = "sl-gst"
+description = "GStreamer playback media engine for Second Life / OpenSim viewers — direct video / audio URLs and parcel radio streams behind the engine-agnostic sl-media MediaBackend trait (playbin3, CPU BGRA frames via appsink, system decoders only) plus the parcel streaming-audio player"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "gstreamer", "video", "media"]
+categories = ["game-development", "multimedia"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+gstreamer = { version = "0.24.4" }
+gstreamer-app = { version = "0.24.0" }
+gstreamer-video = { version = "0.24.0" }
+sl-media = { version = "0.1.0", path = "../sl-media" }
+tracing = { version = "0.1.41" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+
+[lints]
+workspace = true

@@ -91,14 +91,27 @@ the application supplies.
 >   `sl-wire/src/llsd.rs`; CAPS driver `sl-client-tokio/src/media.rs`; example
 >   `sl-client-tokio/examples/object_media.rs`. Caps `CAP_OBJECT_MEDIA`,
 >   `CAP_OBJECT_MEDIA_NAVIGATE`.
-> - Rendering media: the `sl-cef` crate embeds offscreen Chromium behind the
->   engine-agnostic `MediaBackend` / `MediaSurface` traits (CPU BGRA frames,
->   portable VK-code + text input, isolated per-surface request contexts,
->   `sl-cef-helper` subprocess binary). The Bevy viewer drives it in
+> - Rendering media: the engine-agnostic `MediaBackend` / `MediaSurface`
+>   boundary lives in the `sl-media` crate (CPU BGRA frames, portable
+>   VK-code + text input, navigation *and* playback status), with **two**
+>   engines behind it: `sl-cef` embeds offscreen Chromium for web pages
+>   (isolated per-surface request contexts, `sl-cef-helper` subprocess
+>   binary) and `sl-gst` plays direct video / audio URLs through GStreamer
+>   (`playbin3` + BGRA `appsink`, system decoders only, loud
+>   `missing-plugin` errors). `sl_media::classify_url` dispatches a media
+>   URL to its engine by scheme / extension (the reference's
+>   `mime_types.xml` role). The Bevy viewer drives both in
 >   `sl-client-bevy-viewer/src/media_engine.rs` (pump + frame mirror),
 >   `browser_widget.rs` / `web_floater.rs` (embedded browser UI),
 >   `media_prim.rs` (media-on-a-prim surfaces, focus and input routing) and
->   `media_controls.rs` (the floating per-face controls bar).
+>   `media_controls.rs` (the floating per-face controls bar — browser
+>   chrome for pages, transport + seek scrubber for video).
+> - Parcel streaming audio: `sl_gst::AudioStreamPlayer` (audio-only
+>   `playbin3`, ICY "now playing" tags) driven by
+>   `sl-client-bevy-viewer/src/parcel_audio.rs` — per-parcel switching off
+>   `music_url`, an autoplay policy behind the persisted
+>   `MusicStreamEnabled` / `MusicStreamVolume` settings, and the bottom-bar
+>   play / mute / volume cluster.
 > - Voice: caps `CAP_PROVISION_VOICE_ACCOUNT`, `CAP_PARCEL_VOICE_INFO`,
 >   `CAP_VOICE_SIGNALING`; LLSD helpers in `sl-wire/src/voice.rs`; driver
 >   `sl-client-tokio/src/voice.rs`; example `sl-client-tokio/examples/voice.rs`.

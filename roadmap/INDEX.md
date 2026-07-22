@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 107 |
+| ready | 108 |
 | blocked | 86 |
-| in-progress | 5 |
+| in-progress | 7 |
 | bugs | 10 |
 | done | 564 |
 | deferred | 14 |
 | wont-do | 3 |
-| **total** | **794** |
+| **total** | **797** |
 
 ## ideas (5)
 
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (107)
+## ready (108)
 
 ### protocol
 
@@ -237,6 +237,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-web-openid-auth`](ready/viewer-web-openid-auth.md) — Second Life
+  website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
   floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -319,6 +321,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
+- [`viewer-cef-audio-mixer-handoff`](blocked/viewer-cef-audio-mixer-handoff.md)
+  — CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
+  `viewer-audio-backend`)
 - [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
   script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
 - [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
@@ -336,6 +341,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
   Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-gesture-runtime`)
+- [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
+  — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
+  by `viewer-audio-backend`)
 - [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
   (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
@@ -500,8 +508,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
-- [`viewer-streaming-audio`](blocked/viewer-streaming-audio.md) — Parcel
-  streaming-audio / media-audio player (blocked by `viewer-audio-backend`)
 - [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host`)
@@ -519,9 +525,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
-- [`viewer-video-playback`](blocked/viewer-video-playback.md) — Video playback
-  backend (a second media engine, not the browser) (blocked by
-  `viewer-audio-backend`)
 - [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
   video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-video-playback`)
@@ -547,12 +550,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (5)
+## in-progress (7)
 
 ### viewer
 
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
+- [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
+  streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -561,6 +566,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream PR — parley: honour the emoji presentation selector (VS16)
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
+- [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
+  playback backend (a second media engine, not the browser)
 
 ## bugs (10)
 

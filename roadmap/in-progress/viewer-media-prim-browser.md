@@ -190,9 +190,13 @@ The CEF engine and both interaction surfaces are implemented and committed:
   secure lock, mini-controls and `perms_control` gating, projected above the
   face and hidden after ~3 s idle.
 
-Still open here: **page audio into the mixer** (blocked on
-[[viewer-audio-backend]]; until then CEF plays audio directly and the bar's
-mute toggle is the only control), **spatialisation**, the **GStreamer
-direct-video split** ([[viewer-video-playback]]), zero-copy (deferred
+Still open here: **page audio into the mixer** (filed as
+[[viewer-cef-audio-mixer-handoff]], blocked on [[viewer-audio-backend]];
+until then CEF plays audio directly and the bar's mute toggle is the only
+control), **spatialisation**, zero-copy (deferred
 headroom, as designed), cursor-shape adoption over media, and in-page IME
-composition (committed text works).
+composition (committed text works). The **GStreamer direct-video split**
+landed 2026-07-22: the `MediaBackend` / `MediaSurface` traits moved to the
+shared `sl-media` crate (re-exported by `sl-cef`), `sl-gst` implements the
+playback side, and `media_prim` dispatches each entry's URL by
+`classify_url` — see [[viewer-video-playback]].

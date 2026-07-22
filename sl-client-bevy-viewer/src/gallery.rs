@@ -263,7 +263,12 @@ pub fn run() {
         // renders a real (offline, data-URL) page in the gallery — the fastest
         // way to exercise the embedded browser without a login. Soft-fails to
         // a placeholder when the CEF runtime is unavailable.
-        .add_plugins(crate::media_engine::MediaEnginePlugin { enabled: true })
+        .add_plugins(crate::media_engine::MediaEnginePlugin {
+            enabled: true,
+            // The gallery has no in-world media faces, so the video engine
+            // has nothing to show; skip initialising GStreamer.
+            video_enabled: false,
+        })
         .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.

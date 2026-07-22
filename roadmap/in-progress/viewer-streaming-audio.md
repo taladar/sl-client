@@ -2,9 +2,9 @@
 id: viewer-streaming-audio
 title: Parcel streaming-audio / media-audio player
 topic: viewer
-status: blocked
+status: in-progress
 origin: reference-viewer feature-cluster survey (2026-07)
-blocked_by: [viewer-audio-backend]
+refs: [viewer-audio-backend]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -44,4 +44,35 @@ Reference (Firestorm, read-only): `llaudio/llstreamingaudio_*`,
 Builds on: `protocol-24` parcel media / audio caps. Supersedes the MVP "no
 sound" non-goal.
 
-Deps: [[viewer-audio-backend]] (device, decode, mixer).
+Deps: [[viewer-audio-backend]] (device, decode, mixer) — for the *mixer
+hand-off only* since the interim below unblocked playback itself.
+
+## Progress (2026-07-22)
+
+The stream player and its bottom-bar controls are implemented:
+
+- **`sl-gst` `AudioStreamPlayer`**: an audio-only `playbin3` (video /
+  subtitle streams deselected) per stream URL — GStreamer owns the network
+  stack as planned, ICY metadata arrives as title tags ("now playing"),
+  buffering messages hold/resume the pipeline, and failures are loud:
+  `missing-plugin` descriptions (and the no-HTTP-source case) become the
+  status error text. `playback_gaps()` logs absent system capabilities
+  (HTTP source, HLS demux, MP3/AAC/H.264 decoders) once at startup.
+- **Viewer `parcel_audio` module**: follows `SlAgentParcel`'s `music_url`
+  per parcel / region change; the autoplay policy is the persisted
+  `MusicStreamEnabled` setting (default on) with a per-URL user-stop
+  memory (stopping one parcel's stream does not silence the next). Volume
+  lives in the persisted `MusicStreamVolume` setting.
+- **Bottom-bar cluster** (trailing side of the bottom area, shown only
+  while the parcel has a stream): ♫ marker, width-capped now-playing /
+  host / error text, play–stop and mute glyph buttons, and a volume
+  slider bound to the settings store. Registered as a gallery specimen
+  (`parcel-audio-bar`).
+
+**Interim**: audio goes straight to the system device (`autoaudiosink`) —
+the same interim as CEF page audio — because the mixer
+([[viewer-audio-backend]]) does not exist yet. Still open here: the PCM
+hand-off to the mixer's music bus (filed as
+[[viewer-gst-audio-mixer-handoff]]), and the fuller
+nearby-media panel (the reference's list of *all* nearby media with
+per-item control) beyond this compact cluster.
