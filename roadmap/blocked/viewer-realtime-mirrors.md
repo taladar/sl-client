@@ -2,8 +2,9 @@
 id: viewer-realtime-mirrors
 title: Real-time mirrors (hero probes)
 topic: viewer
-status: ready
+status: blocked
 origin: render-feature gap analysis vs Firestorm (2026-07)
+blocked_by: [viewer-perf-probe-scheduling]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -29,4 +30,8 @@ Reference (Firestorm, read-only): the hero-probe path, `RenderMirrors`,
 `RenderHeroProbe*`.
 
 Builds on: the P33 reflection-probe infrastructure (this is its dynamic,
-per-frame cousin).
+per-frame cousin). Blocked on [[viewer-perf-probe-scheduling]]: a hero
+probe is a scheduler client pinned to every-frame cadence, and on
+today's capture cost structure a per-frame six-face render would tank
+the frame rate — the change-driven scheduler and the cheap-capture work
+it builds on are this feature's perf foundation.

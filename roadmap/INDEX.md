@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 22 |
-| ready | 158 |
-| blocked | 122 |
+| ideas | 25 |
+| ready | 163 |
+| blocked | 123 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 563 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **900** |
+| **total** | **909** |
 
-## ideas (22)
+## ideas (25)
 
 ### viewer
 
@@ -60,6 +60,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Don't rebuild the inventory view while the floater is closed
 - [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
+  — Separate low-res irradiance path for probes (reference-style 16 px)
+- [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
+  — Skip capture for occluded reflection probes (blocked by
+  `viewer-perf-probe-scheduling`)
 - [`viewer-perf-run-condition-gating`](ideas/viewer-perf-run-condition-gating.md)
   — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
@@ -70,9 +75,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
+- [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
+  Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (158)
+## ready (163)
 
 ### protocol
 
@@ -278,6 +285,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
+  — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
+- [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)
+  — Reduce directional shadow-cascade cost for probe capture views
+- [`viewer-perf-probe-filter-on-capture`](ready/viewer-perf-probe-filter-on-capture.md)
+  — Filter probe cubemaps only on capture completion; blit only dirty faces
+- [`viewer-perf-probe-instrumentation`](ready/viewer-perf-probe-instrumentation.md)
+  — Reflection-probe cost instrumentation (capture / blit / filter buckets)
+- [`viewer-perf-probe-quality-knobs`](ready/viewer-perf-probe-quality-knobs.md)
+  — Reflection-probe quality settings (detail, resolution, pool, budget)
+- [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
+  Change-driven probe capture scheduling (zero idle cost)
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -296,8 +315,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-store` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
-- [`viewer-realtime-mirrors`](ready/viewer-realtime-mirrors.md) — Real-time
-  mirrors (hero probes)
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-options-debug`](ready/viewer-region-options-debug.md) — Region
@@ -457,7 +474,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (122)
+## blocked (123)
 
 ### viewer
 
@@ -674,6 +691,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-preferences-floater`)
+- [`viewer-realtime-mirrors`](blocked/viewer-realtime-mirrors.md) — Real-time
+  mirrors (hero probes) (blocked by `viewer-perf-probe-scheduling`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
   — Region / parcel environment settings panel (blocked by
   `viewer-region-options-general`, `viewer-environment-my-environments`)
