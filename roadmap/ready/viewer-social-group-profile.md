@@ -39,7 +39,8 @@ name the type.
 
 Not in scope here (as in the reference's other tabs): Land / Assets, Money /
 accounting, Experiences, Banned Residents, and the group create / search /
-invite dialogs.
+invite dialogs — all filed as [[viewer-social-group-extras]] (search lives in
+the search floater).
 
 Reference (Firestorm, read-only): `llpanelgroup`, `llpanelgroupgeneral`,
 `llpanelgrouproles`, `llpanelgroupnotices`, `llgroupmgr`, Vintage

@@ -30,7 +30,14 @@ Deliberately **not** here: the parcel colour / border layer
 ([[viewer-minimap-parcel-overlay]]) and the Firestorm-style nearby-avatar list
 ([[viewer-avatar-radar]]) — both build on this one.
 
-Reference (Firestorm, read-only): `llnetmap`, `llfloatermap`.
+Vintage note (2026-07-22, user-corrected): in the Vintage skin the minimap
+is a **free-floating window** (its XUI override only pins a larger minimum
+size, disables minimize, and changes the default spawn position — it does
+not dock it). So: an ordinary floater here, default-spawning top-right,
+with minimize disabled to match.
+
+Reference (Firestorm, read-only): `llnetmap`, `llfloatermap`; Vintage
+`floater_map.xml` override.
 
 Builds on: `CoarseLocationUpdate` handling in `avatars.rs` (incl. the
 `viewer-r24` per-region fix) and the existing scene mirror.

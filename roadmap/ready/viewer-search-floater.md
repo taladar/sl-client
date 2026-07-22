@@ -19,7 +19,8 @@ the **directory protocol**, which is fully implemented (`api-g4`):
 - **Groups** (`DirFindQuery` groups flag → `DirGroupsReply`) — rows open the
   group profile ([[viewer-social-group-profile]]).
 - **Events** (`DirFindQuery` events flags → `DirEventsReply`), with the
-  date / category filters the reference offers.
+  date / category filters the reference offers — result rows open the event
+  detail floater ([[viewer-event-details]]).
 - **Places** (`DirPlacesQuery` → `DirPlacesReply`) and **Land** sales
   (`DirLandQuery` → `DirLandReply`, price / area sort flags).
 - **Classifieds** (`DirClassifiedQuery` → `DirClassifiedReply`) — rows show

@@ -13,13 +13,25 @@ Add the reference viewer's tag **decorations** on top of the world-space
 renderer ([[viewer-name-tags-billboard-render]]):
 
 - a **group title** line above the name;
-- **"(Away)" / "(Busy)"** status text;
-- a **typing indicator**;
-- **friend / group / muted** colouring;
-- the **client-tag** style question.
+- the comma-joined **status line** (the 2026-07-22 nametag survey's full
+  set): Away, Busy/DND, Autoresponse (own tag —
+  [[viewer-do-not-disturb-away]]), Muted, "Appearance" while editing
+  appearance, "Loading..." while the avatar is a cloud;
+- a **typing indicator** line (setting-gated, as FS's
+  `FSShowTypingStateInNameTag`), plus the rez-state debug line
+  (`NameTagDebugAVRezState`);
+- the **username / legacy-name** second line options
+  (`NameTagShowUsernames`, `FSNameTagShowLegacyUsernames`) and show-own-tag;
+- **friend / group / muted** colouring, **contact-set** colouring
+  ([[viewer-contact-sets]]), and the minimap mark-colour override;
+- the **client-tag** display / colouring question (`FSColorClienttags`
+  family — decide how much of the tag-guessing system to carry);
+- a **speaking-indicator** hook: the voice dot placement, fed by the
+  per-agent voice activity [[viewer-voice-controls]] surfaces once voice
+  audio lands (in scope since 2026-07-22).
 
-A *speaking* indicator is explicitly out of scope — it needs decoded voice
-([[viewer-voice-audio]]) and this project scopes voice to signalling only.
+The complexity (ARC) and distance lines with range colouring are split out
+to [[viewer-name-tags-complexity-distance]].
 
 Reference (Firestorm, read-only): `llhudnametag`,
 `llvoavatar::idleUpdateNameTag`, `llavatarnamecache`.

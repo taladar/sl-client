@@ -17,6 +17,8 @@ bound to the typed settings store through the floater's binding.
 
 Render effects ship enabled-by-default and env-gated; this tab surfaces the
 settings that drive them, it is not a build prerequisite for any effect.
+Named save/load of this whole settings group is
+[[viewer-graphics-presets]], which builds on this tab.
 
 Reference (Firestorm, read-only): `llfloaterpreference*` (the graphics panels).
 

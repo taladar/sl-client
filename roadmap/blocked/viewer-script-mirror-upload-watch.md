@@ -23,7 +23,9 @@ payment script. Consequences baked into the design: **upload on save is
 opt-in**, local checking ([[viewer-lsl-semantic-pass]]) carries the fast
 feedback loop, grid diagnostics arrive only on an explicit push, and a headless
 push must carry the current `is_script_running` state or it will start or stop
-scripts as a side effect.
+scripts as a side effect. (For version-control workflows the porcelain
+`sl-script status` of [[viewer-script-mirror-download]] is the CI/hook
+surface; pushes stay explicit.)
 
 **Sync as a three-way state** (`disk_hash`, `last_synced_hash`,
 `grid_asset_id`): grid→disk overwrites only a *clean* file, and on a dirty one

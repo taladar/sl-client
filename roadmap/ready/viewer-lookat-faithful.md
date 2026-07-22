@@ -31,7 +31,9 @@ The faithful version, per the reference:
   higher-priority played animation overrides the look-at head/eye pose).
 - **A debug gizmo** drawing every avatar's current look-at target as a small 3D
   marker, like the reference's "Show Look At"
-  (`LLHUDEffectLookAt::sDebugLookAt`).
+  (`LLHUDEffectLookAt::sDebugLookAt`) — and its Develop-menu twin **"Show
+  Point At"** (`LLHUDEffectPointAt` targets), so both halves of the pair
+  land together.
 
 Reference (Firestorm, read-only): `indra/newview/llhudeffectlookat.cpp/h`,
 `indra/newview/llagentcamera.cpp` (`setLookAt` / `setFocusGlobal`),

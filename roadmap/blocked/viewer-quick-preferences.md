@@ -19,6 +19,11 @@ Firestorm's Quick Preferences is the model, including that its **contents are
 user-configurable** — the panel is a curated view over the settings store, not a
 fixed list.
 
+Vintage note (2026-07-22 skin survey): the Vintage bottom bar surfaces a
+quick-prefs button (and the AO toggles) inline —
+[[viewer-vintage-bottom-bar]] reserves the slot this panel opens from;
+the AO half is [[viewer-animation-overrider]].
+
 That is the design question worth settling here: rather than a hard-coded
 floater, make it a *view* over the typed settings store the preferences floater
 ([[viewer-preferences-floater]]) defines, so a setting can be surfaced in the

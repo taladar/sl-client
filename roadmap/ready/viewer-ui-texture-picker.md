@@ -15,8 +15,9 @@ The reference's **texture picker** (`LLFloaterTexturePicker`, opened by every
 `texture_picker` / `LLTextureCtrl` widget): a floater listing the inventory's
 textures / snapshots with a search filter, a preview pane, and **None** /
 **Blank** / **Default** quick choices, returning the chosen `TextureKey` to
-the widget that opened it. Local-file preview and the bake channels can wait;
-inventory selection + preview + None/Blank is the useful core.
+the widget that opened it. Local-file textures are the follow-up task
+[[viewer-local-textures]] (the picker's "Local" tab), and the bake channels
+can wait; inventory selection + preview + None/Blank is the useful core.
 
 Ship it as a reusable widget: an `OpenTexturePicker { requester, current }`
 message and a `TexturePicked { requester, texture }` reply, so any panel can
