@@ -520,7 +520,9 @@ impl InventoryModel {
             InventoryTab::Everything => {
                 self.filtered_rows(&needle, &worn, spec.sort, filter_active, &passes)
             }
-            InventoryTab::Recent => self.recent_rows(&needle, &worn, filter_active, &passes),
+            InventoryTab::Recent => {
+                self.recent_rows(&needle, &worn, spec.sort, filter_active, &passes)
+            }
             InventoryTab::Worn => self.worn_rows(&needle, &worn, spec.sort, &passes),
         }
     }
@@ -732,26 +734,56 @@ impl InventoryModel {
         }
     }
 
-    /// The Recent tab: the received-since-login list, narrowed by the query
-    /// and — where the item is held — the filter. A recent entry whose item
-    /// is held in a loaded folder is decorated like a tree row; one not yet
-    /// loaded draws plain (and is hidden by an active filter, whose
-    /// dimensions it cannot answer).
+    /// The Recent tab: the received-since-login items, each shown **inside
+    /// its folder hierarchy** — the ancestor folders that lead to it,
+    /// expanded, exactly like the Worn tab — narrowed by the query and the
+    /// filter. A recent item whose containing folder is not loaded yet is
+    /// appended as a flat row (newest first) so nothing recent is hidden;
+    /// an active filter hides those flat rows, whose dimensions it cannot
+    /// answer.
     fn recent_rows(
         &self,
         needle: &str,
         worn: &HashSet<InventoryKey>,
+        sort: SortSpec,
         filter_active: bool,
         passes: &dyn Fn(&ItemInfo) -> bool,
     ) -> Vec<DisplayRow> {
-        self.recent
-            .iter()
-            .filter(|item| needle.is_empty() || item.name.to_lowercase().contains(needle))
-            .filter_map(|item| match self.find_item(item.key) {
-                Some(info) => passes(info).then(|| decorated_item_row(info, 0, worn)),
-                None => (!filter_active).then(|| item_row(item.key, &item.name, item.inv_type, 0)),
-            })
-            .collect()
+        let members: HashSet<InventoryKey> = self.recent.iter().map(|item| item.key).collect();
+        // The hierarchy half: folders on the path to a loaded recent item.
+        let mut keep = HashSet::new();
+        for &root in &self.roots {
+            self.mark_member_subtree(root, &members, &mut keep);
+        }
+        let mut rows = Vec::new();
+        let mut placed: HashSet<InventoryKey> = HashSet::new();
+        for &root in &self.roots {
+            if keep.contains(&root) {
+                self.emit_member_folder(
+                    root,
+                    0,
+                    &members,
+                    worn,
+                    &keep,
+                    &mut placed,
+                    needle,
+                    sort,
+                    passes,
+                    &mut rows,
+                );
+            }
+        }
+        // The flat tail: recent items not yet placeable in the tree, newest
+        // first (the held list's order).
+        for item in &self.recent {
+            if !placed.contains(&item.key)
+                && (needle.is_empty() || item.name.to_lowercase().contains(needle))
+                && !filter_active
+            {
+                rows.push(item_row(item.key, &item.name, item.inv_type, 0));
+            }
+        }
+        rows
     }
 
     /// The worn set: each worn item's key with a display-name / type hint,
@@ -788,25 +820,26 @@ impl InventoryModel {
         keys
     }
 
-    /// Mark in `keep` every folder whose subtree holds a worn item, so the Worn
-    /// tab can show each worn item **inside its folder hierarchy**; returns
-    /// whether this subtree held one.
-    fn mark_worn_subtree(
+    /// Mark in `keep` every folder whose subtree holds a member item (a worn
+    /// item for the Worn tab, a recent one for the Recent tab), so the tab
+    /// can show each member **inside its folder hierarchy**; returns whether
+    /// this subtree held one.
+    fn mark_member_subtree(
         &self,
         folder: InventoryFolderKey,
-        worn: &HashSet<InventoryKey>,
+        members: &HashSet<InventoryKey>,
         keep: &mut HashSet<InventoryFolderKey>,
     ) -> bool {
         let mut any = false;
         for &child in self.children_of(folder) {
-            if self.mark_worn_subtree(child, worn, keep) {
+            if self.mark_member_subtree(child, members, keep) {
                 any = true;
             }
         }
         if self
             .items_of(folder)
             .iter()
-            .any(|item| worn.contains(&item.item_id))
+            .any(|item| members.contains(&item.item_id))
         {
             any = true;
         }
@@ -816,18 +849,21 @@ impl InventoryModel {
         any
     }
 
-    /// Emit a kept folder of the Worn tab (shown expanded) and, recursively,
-    /// its kept child folders and its worn items, narrowed by the query and
-    /// the filter.
+    /// Emit a kept folder of a membership tab (Worn / Recent), shown
+    /// expanded, and, recursively, its kept child folders and its member
+    /// items, narrowed by the query and the filter. `members` selects the
+    /// items shown; `worn` only decorates.
     #[expect(
         clippy::too_many_arguments,
-        reason = "a recursive tree emitter threading the worn set, the kept-folder set, the \
-                  placed-item record, the sort, the filter and the query through each level"
+        reason = "a recursive tree emitter threading the member / worn sets, the kept-folder \
+                  set, the placed-item record, the sort, the filter and the query through \
+                  each level"
     )]
-    fn emit_worn_folder(
+    fn emit_member_folder(
         &self,
         folder: InventoryFolderKey,
         depth: usize,
+        members: &HashSet<InventoryKey>,
         worn: &HashSet<InventoryKey>,
         keep: &HashSet<InventoryFolderKey>,
         placed: &mut HashSet<InventoryKey>,
@@ -840,9 +876,10 @@ impl InventoryModel {
         let child_depth = depth.saturating_add(1);
         for child in self.ordered_children(folder, sort) {
             if keep.contains(&child) {
-                self.emit_worn_folder(
+                self.emit_member_folder(
                     child,
                     child_depth,
+                    members,
                     worn,
                     keep,
                     placed,
@@ -854,7 +891,7 @@ impl InventoryModel {
             }
         }
         for item in self.ordered_items(folder, sort) {
-            if worn.contains(&item.item_id) && item_matches(item, needle, passes) {
+            if members.contains(&item.item_id) && item_matches(item, needle, passes) {
                 placed.insert(item.item_id);
                 rows.push(decorated_item_row(item, child_depth, worn));
             }
@@ -879,15 +916,16 @@ impl InventoryModel {
         // The hierarchy half: folders on the path to a loaded worn item.
         let mut keep = HashSet::new();
         for &root in &self.roots {
-            self.mark_worn_subtree(root, worn, &mut keep);
+            self.mark_member_subtree(root, worn, &mut keep);
         }
         let mut rows = Vec::new();
         let mut placed: HashSet<InventoryKey> = HashSet::new();
         for &root in &self.roots {
             if keep.contains(&root) {
-                self.emit_worn_folder(
+                self.emit_member_folder(
                     root,
                     0,
+                    worn,
                     worn,
                     &keep,
                     &mut placed,
@@ -1785,6 +1823,11 @@ fn ingest_inventory(
                     item.name.clone(),
                     InventoryType::from_code(i32::from(item.inv_type)),
                 );
+                // The session cached the fresh item; re-query its folder so
+                // the tree shows it immediately (a New Notecard / Script /
+                // Gesture would otherwise only appear after an unrelated
+                // refresh).
+                request_folder(&mut model, item.folder_id, &mut commands);
             }
             SlSessionEvent::AgentWearables { wearables, .. } => {
                 model.wearables.clone_from(wearables);
@@ -3045,6 +3088,37 @@ mod tests {
         let pants = rows.iter().find(|row| row.name == "Pants");
         assert_eq!(pants.map(|row| row.depth), Some(0));
         // The sibling "Objects" folder holds nothing worn and is not shown.
+        assert!(!names(&rows).contains(&"Objects"));
+    }
+
+    /// A recent item held in a loaded folder shows inside its expanded
+    /// folder hierarchy (like the Worn tab); only unplaced ones fall back to
+    /// flat rows.
+    #[test]
+    fn recent_tab_shows_the_folder_hierarchy() {
+        let mut model = sample_model();
+        // The Blue shirt (item 10, in Clothing) arrives as recent, plus one
+        // unplaceable entry.
+        model.push_recent(
+            sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(10)),
+            "Blue shirt".to_owned(),
+            InventoryType::Wearable,
+        );
+        model.push_recent(
+            sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x99)),
+            "Unplaced".to_owned(),
+            InventoryType::Object,
+        );
+        let rows = build(&model, InventoryTab::Recent, "", &HashSet::new());
+        assert_eq!(
+            names(&rows),
+            vec!["My Inventory", "Clothing", "Blue shirt", "Unplaced"]
+        );
+        let shirt = rows.iter().find(|row| row.name == "Blue shirt");
+        assert_eq!(shirt.map(|row| row.depth), Some(2));
+        let unplaced = rows.iter().find(|row| row.name == "Unplaced");
+        assert_eq!(unplaced.map(|row| row.depth), Some(0));
+        // The sibling Objects folder holds nothing recent and is not shown.
         assert!(!names(&rows).contains(&"Objects"));
     }
 
