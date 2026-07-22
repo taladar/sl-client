@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 23 |
-| ready | 156 |
-| blocked | 119 |
+| ready | 157 |
+| blocked | 122 |
 | in-progress | 4 |
 | bugs | 10 |
 | done | 563 |
 | deferred | 16 |
 | wont-do | 5 |
-| **total** | **896** |
+| **total** | **900** |
 
 ## ideas (23)
 
@@ -77,7 +77,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (156)
+## ready (157)
 
 ### protocol
 
@@ -112,6 +112,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-virtualized-list` (done))
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
+  Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
@@ -150,9 +152,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
   the chat display windows
-- [`viewer-click-to-walk-autopilot`](ready/viewer-click-to-walk-autopilot.md) —
-  Click-to-walk, double-click teleport, autopilot (blocked by
-  `viewer-input-action-map` (done))
 - [`viewer-contact-sets`](ready/viewer-contact-sets.md) — Contact sets — named,
   coloured contact groups (blocked by `viewer-social-people-panel` (done))
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
@@ -172,6 +171,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-do-not-disturb-away`](ready/viewer-do-not-disturb-away.md) — Away /
   auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
   `viewer-chat-input-bar` (done))
+- [`viewer-double-click-teleport`](ready/viewer-double-click-teleport.md) —
+  In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-environment-fixed-editor`](ready/viewer-environment-fixed-editor.md)
   — Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -236,8 +237,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
-- [`viewer-minimap`](ready/viewer-minimap.md) — Minimap (net map) (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-minimap`](ready/viewer-minimap.md) — Minimap (net map) — floater,
+  surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
+  (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -455,7 +457,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (119)
+## blocked (122)
 
 ### viewer
 
@@ -561,8 +563,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing`)
 - [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
+- [`viewer-minimap-avatar-dots`](blocked/viewer-minimap-avatar-dots.md) —
+  Minimap avatar dots — colours, height cues, hover, chat rings (blocked by
+  `viewer-minimap`)
+- [`viewer-minimap-interactions`](blocked/viewer-minimap-interactions.md) —
+  Minimap interactions — clicks, double-click teleport, context menu (blocked by
+  `viewer-minimap`, `viewer-minimap-avatar-dots`)
+- [`viewer-minimap-object-layer`](blocked/viewer-minimap-object-layer.md) —
+  Minimap object layer — untextured objects, ownership & depth colours (blocked
+  by `viewer-minimap`)
 - [`viewer-minimap-parcel-overlay`](blocked/viewer-minimap-parcel-overlay.md) —
-  Parcel borders on the minimap (blocked by `viewer-minimap`,
+  Parcel fills & property lines on the minimap (blocked by `viewer-minimap`,
   `viewer-parcel-overlay-decode` (done))
 - [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
