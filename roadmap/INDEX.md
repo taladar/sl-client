@@ -11,8 +11,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 23 |
-| ready | 157 |
+| ideas | 22 |
+| ready | 158 |
 | blocked | 122 |
 | in-progress | 4 |
 | bugs | 10 |
@@ -21,7 +21,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | wont-do | 6 |
 | **total** | **900** |
 
-## ideas (23)
+## ideas (22)
 
 ### viewer
 
@@ -72,12 +72,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-### chat
-
-- [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
-  Server-side group / session chat history retrieval
-
-## ready (157)
+## ready (158)
 
 ### protocol
 
@@ -397,6 +392,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
   floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
   (done))
+
+### chat
+
+- [`chat-group-history-server-side`](ready/chat-group-history-server-side.md) —
+  Server-side group / session chat history ("fetch history")
 
 ### test
 
