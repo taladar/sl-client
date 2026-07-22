@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 5 |
-| ready | 116 |
+| ready | 115 |
 | blocked | 80 |
 | in-progress | 4 |
 | bugs | 10 |
-| done | 544 |
+| done | 545 |
 | deferred | 14 |
 | wont-do | 3 |
 | **total** | **776** |
@@ -42,7 +42,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](ideas/chat-group-history-server-side.md) —
   Server-side group / session chat history retrieval
 
-## ready (116)
+## ready (115)
 
 ### viewer
 
@@ -80,8 +80,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
   render beacons (physics / scripted / sound / particle markers)
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
-- [`viewer-flexi-prim-picking`](ready/viewer-flexi-prim-picking.md) — Pick flexi
-  prims against their simulated geometry
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-gesture-runtime`](ready/viewer-gesture-runtime.md) — Gesture runtime
@@ -592,7 +590,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (544)
+## done (545)
 
 ### protocol
 
@@ -767,6 +765,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
+  prims against their simulated geometry
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
   scaffold (Project Fluent via bevy_fluent) (blocked by
   `viewer-ui-widget-scaffold` (done))

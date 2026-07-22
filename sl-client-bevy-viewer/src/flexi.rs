@@ -57,6 +57,19 @@
 //! projection is frozen at the rest pose (ordinary per-face texgen UVs are
 //! parametric and stay correct under any bend).
 //!
+//! **Bounds and picking (`viewer-flexi-prim-picking`).** The in-place rewrite
+//! goes through `Assets::get_mut`, which marks the mesh asset changed — and
+//! Bevy's `calculate_bounds` refreshes a changed mesh's [`Aabb`] the same frame
+//! (its `AssetChanged<Mesh3d>` branch). The flexi faces are therefore ordinary
+//! `Aabb`-managed entities (no `NoFrustumCulling` opt-out): frustum culling
+//! follows the bent geometry, and — because `MeshRayCast` reads the `Aabb`
+//! non-optionally — the world ray-cast picks (left-click touch,
+//! [`crate::object_menu`]'s right-click pie) hit a flexi exactly where it is
+//! drawn. Before this, the opt-out left flexi faces with no `Aabb` at all,
+//! making every flexi prim silently untouchable and un-menu-able.
+//!
+//! [`Aabb`]: bevy::camera::primitives::Aabb
+//!
 //! [`apply_object`]: crate::objects
 //! [`FlexiChain`]: sl_client_bevy::FlexiChain
 //! [`tessellate_with_path`]: sl_client_bevy::tessellate_with_path
@@ -263,8 +276,12 @@ pub(crate) fn simulate_flexi(
 #[cfg(test)]
 mod tests {
     use super::{ObjectFlexi, flexi_from_object};
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{FlexibleData, Object, Vector};
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// A minimal plain prim object with no extra params — the fixture the flexi
     /// tests decorate.
@@ -373,5 +390,131 @@ mod tests {
                 scale: [1.0, 1.0, 1.0],
             })
         );
+    }
+
+    /// The full bounds pipeline the flexi pick relies on
+    /// (`viewer-flexi-prim-picking`): [`super::simulate_flexi`] rewrites the
+    /// face mesh through `Assets::get_mut`, and Bevy's `calculate_bounds` both
+    /// inserts the face's missing `Aabb` from the (already deformed) mesh and —
+    /// the part a Bevy upgrade could silently break — **refreshes** it via its
+    /// `AssetChanged<Mesh3d>` branch as the chain keeps moving. This is why a
+    /// flexi face needs no `NoFrustumCulling` opt-out, and why the ray-cast
+    /// picks (touch, the object pie) can trust a flexi's `Aabb` to track the
+    /// bent geometry.
+    #[test]
+    fn simulated_flexi_mesh_keeps_its_aabb_fresh() -> Result<(), TestError> {
+        use bevy::app::{App, PostUpdate, TaskPoolPlugin, Update};
+        use bevy::asset::{
+            AssetApp as _, AssetEventSystems, AssetPlugin, Assets, RenderAssetUsages,
+        };
+        use bevy::camera::primitives::{Aabb, MeshAabb as _};
+        use bevy::camera::visibility::calculate_bounds;
+        use bevy::ecs::schedule::IntoScheduleConfigs as _;
+        use bevy::mesh::{Mesh, Mesh3d, PrimitiveTopology};
+        use bevy::time::Time;
+        use bevy::transform::components::GlobalTransform;
+        use core::time::Duration;
+        use sl_client_bevy::{FlexiChain, PrimShapeFloat, PrimShapeParams};
+
+        /// Advance the clock one 50 ms frame and run the app's schedules.
+        fn step(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_millis(50));
+            app.update();
+        }
+
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<Mesh>();
+        app.init_resource::<Time>();
+        app.add_systems(Update, super::simulate_flexi);
+        // The real app gets this system from Bevy's `VisibilityPlugin`; ordered
+        // after the asset-event flush so the `AssetChanged` refresh lands the
+        // same frame the sim rewrote the mesh.
+        app.add_systems(PostUpdate, calculate_bounds.after(AssetEventSystems));
+
+        // A stand-in rest mesh: the sim overwrites the position / normal
+        // attributes wholesale, so only its bounds (a centimetre triangle at
+        // the origin) matter — as the "stale spawn geometry" the pipeline must
+        // replace.
+        let rest = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.0, 0.01, 0.0]],
+        );
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(rest);
+        let face = app.world_mut().spawn(Mesh3d(handle.clone())).id();
+
+        // A long, soft chain pushed hard sideways, so every step visibly moves
+        // the geometry (a purely axial setup could settle without lateral
+        // motion and mask a broken refresh).
+        let data = FlexibleData {
+            softness: 2,
+            tension: 0.5,
+            air_friction: 1.0,
+            gravity: 1.0,
+            wind_sensitivity: 0.0,
+            user_force: Vector {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        let shape = PrimShapeFloat::from_params(&PrimShapeParams::default());
+        let scale = [0.2, 0.2, 4.0];
+        let chain = FlexiChain::new(
+            &shape,
+            &super::flexi_attributes(&data),
+            scale,
+            [0.0; 3],
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        app.world_mut().spawn((
+            ObjectFlexi { data, scale },
+            super::FlexiSimState {
+                chain,
+                shape,
+                softness: 2,
+                face_entities: vec![face],
+            },
+            GlobalTransform::default(),
+        ));
+
+        step(&mut app);
+        let first = *app
+            .world()
+            .get::<Aabb>(face)
+            .ok_or("no Aabb after the first simulated frame")?;
+        // The insert already reflects the metre-scale swept prim, not the
+        // centimetre stand-in triangle.
+        assert!(
+            first.half_extents.length() > 0.05,
+            "spawn Aabb {first:?} still bounds the stand-in triangle"
+        );
+
+        for _frame in 0..10 {
+            step(&mut app);
+        }
+        let settled = *app.world().get::<Aabb>(face).ok_or("Aabb lost")?;
+        assert_ne!(
+            first, settled,
+            "the Aabb never refreshed as the chain moved — calculate_bounds' \
+             AssetChanged branch no longer covers the flexi rewrite"
+        );
+
+        // And the refreshed bounds are exactly the current mesh's own.
+        let expected = app
+            .world()
+            .resource::<Assets<Mesh>>()
+            .get(&handle)
+            .ok_or("mesh gone")?
+            .compute_aabb()
+            .ok_or("mesh has no computable Aabb")?;
+        assert_eq!(settled, expected);
+        Ok(())
     }
 }

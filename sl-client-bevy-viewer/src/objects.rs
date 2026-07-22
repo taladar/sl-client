@@ -1432,10 +1432,19 @@ const DEFAULT_FLEXI: FlexiAttributes = FlexiAttributes {
 /// chain is initialised from the prim's current pose and the rest path built from
 /// it, so the spawn geometry is a straight rest chain;
 /// [`simulate_flexi`](crate::flexi::simulate_flexi) then
-/// deforms and rewrites these same meshes each frame. Because the meshes are
-/// rewritten in place as the chain bends, each face opts out of frustum culling
-/// (its spawn-time AABB does not cover the bent geometry), the way the particle and
-/// skinned-mesh paths do.
+/// deforms and rewrites these same meshes each frame.
+///
+/// The faces stay **ordinary `Aabb`-managed entities** — deliberately *not* the
+/// skinned-mesh `NoFrustumCulling` opt-out (`viewer-flexi-prim-picking`). The
+/// per-frame rewrite goes through `Assets::get_mut`, which marks the mesh asset
+/// changed, and Bevy's `calculate_bounds` refreshes a changed mesh's `Aabb` in
+/// the same frame (its `AssetChanged<Mesh3d>` branch) — so frustum culling
+/// tracks the *bent* geometry rather than the spawn pose. Unlike a skinned mesh
+/// (whose deformation happens on the GPU and never exists in the mesh data), a
+/// flexi's deformed vertices genuinely live in the asset, so the refreshed
+/// bounds are exact. Keeping the `Aabb` is also what makes a flexi **pickable**:
+/// `MeshRayCast` reads it non-optionally, so the old opt-out silently excluded
+/// flexi prims from left-click touch and the object context menu entirely.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs, like the sibling build fns"
@@ -1486,9 +1495,6 @@ fn build_flexi_faces(
         prim_textures,
         priority,
     );
-    for &face in &face_entities {
-        commands.entity(face).insert(NoFrustumCulling);
-    }
     (face_entities, chain)
 }
 
@@ -3398,5 +3404,79 @@ mod tests {
             ShapeFingerprint::of(&reshaped),
             "a shape change must count"
         );
+    }
+
+    /// Flexi faces must stay ordinary `Aabb`-managed entities
+    /// (`viewer-flexi-prim-picking`): a `NoFrustumCulling` opt-out means
+    /// `calculate_bounds` never gives them an `Aabb` — and `MeshRayCast` reads
+    /// the `Aabb` non-optionally, so an opted-out flexi is silently invisible
+    /// to every world pick (left-click touch, the object pie menu) on top of
+    /// never being culled. The per-frame mesh rewrite keeps the `Aabb` fresh
+    /// instead (see `simulated_flexi_mesh_keeps_its_aabb_fresh` in
+    /// `crate::flexi`).
+    #[test]
+    fn flexi_faces_stay_aabb_managed() -> Result<(), Box<dyn core::error::Error>> {
+        use crate::textures::{PrimTextures, TextureManager};
+        use bevy::camera::visibility::NoFrustumCulling;
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, ResMut, StandardMaterial, World};
+        use sl_client_bevy::{FlexibleData, Priority};
+
+        /// The resources [`build_flexi_faces`](super::build_flexi_faces) takes,
+        /// as one `SystemState` tuple (named to satisfy `type_complexity`).
+        type BuildParams<'w, 's> = (
+            Commands<'w, 's>,
+            ResMut<'w, Assets<Mesh>>,
+            ResMut<'w, Assets<StandardMaterial>>,
+            ResMut<'w, TextureManager>,
+            ResMut<'w, PrimTextures>,
+        );
+
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<TextureManager>();
+        world.init_resource::<PrimTextures>();
+        let parent = world.spawn_empty().id();
+
+        let mut object = bare_object(pcode::PRIMITIVE);
+        object.extra.flexible = Some(FlexibleData {
+            softness: 2,
+            tension: 1.0,
+            air_friction: 2.0,
+            gravity: 0.3,
+            wind_sensitivity: 0.0,
+            user_force: zero(),
+        });
+
+        let mut state: SystemState<BuildParams> = SystemState::new(&mut world);
+        let (mut commands, mut meshes, mut materials, mut manager, mut prim_textures) = state
+            .get_mut(&mut world)
+            .map_err(|error| format!("system params: {error}"))?;
+        let (faces, _chain) = super::build_flexi_faces(
+            &object,
+            parent,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut manager,
+            &mut prim_textures,
+            Priority::IDLE,
+        );
+        state.apply(&mut world);
+
+        assert!(
+            !faces.is_empty(),
+            "a default prim must tessellate at least one flexi face"
+        );
+        for face in faces {
+            assert!(world.get::<Mesh3d>(face).is_some(), "face without a mesh");
+            assert!(
+                world.get::<NoFrustumCulling>(face).is_none(),
+                "a flexi face opted out of Aabb management — that makes it \
+                 invisible to MeshRayCast and unpickable (viewer-flexi-prim-picking)"
+            );
+        }
+        Ok(())
     }
 }
