@@ -15,9 +15,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 157 |
 | blocked | 122 |
 | in-progress | 4 |
-| bugs | 10 |
+| bugs | 11 |
 | done | 563 |
-| deferred | 16 |
+| deferred | 15 |
 | wont-do | 5 |
 | **total** | **900** |
 
@@ -804,7 +804,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (10)
+## bugs (11)
 
 ### protocol
 
@@ -817,6 +817,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-p29-2`](bugs/viewer-p29-2-drive-its-animations.md) — Drive its
+  animations
 - [`viewer-r18`](bugs/viewer-r18-cloud-layer-horizon-plume-fixed-one-quadrant-clustering.md)
   — Cloud layer — horizon plume fixed, one-quadrant clustering still broken
 - [`viewer-r23`](bugs/viewer-r23-avatar-stands-too-low-feet-sink-into-the-ground.md)
@@ -1975,7 +1977,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (16)
+## deferred (15)
 
 ### protocol
 
@@ -2014,8 +2016,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-os-native-integration-windows`](deferred/viewer-os-native-integration-windows.md)
   — Windows native OS integration (file dialogs, OpenURI, notifications)
   (blocked by `viewer-os-portals-linux`)
-- [`viewer-p29-2`](deferred/viewer-p29-2-drive-its-animations.md) — Drive its
-  animations
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 
