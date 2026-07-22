@@ -15,10 +15,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 157 |
 | blocked | 122 |
 | in-progress | 4 |
-| bugs | 11 |
+| bugs | 10 |
 | done | 563 |
 | deferred | 15 |
-| wont-do | 5 |
+| wont-do | 6 |
 | **total** | **900** |
 
 ## ideas (23)
@@ -804,7 +804,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-text-renderability-axis`](in-progress/viewer-ui-text-renderability-axis.md)
   — Upstream issue — font selection cannot see glyph-format renderability
 
-## bugs (11)
+## bugs (10)
 
 ### protocol
 
@@ -827,8 +827,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Prims that should be transparent render opaque
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
-- [`viewer-stand-foot-ik-knee-asymmetry`](bugs/viewer-stand-foot-ik-knee-asymmetry.md)
-  — Standing foot-IK bends the two knees by different amounts on flat ground
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -2029,7 +2027,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (5)
+## wont-do (6)
 
 ### viewer
 
@@ -2038,6 +2036,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
   Midnight is almost as bright as midday — NOT a viewer bug; the scenes had no
   night in them
+- [`viewer-stand-foot-ik-knee-asymmetry`](wont-do/viewer-stand-foot-ik-knee-asymmetry.md)
+  — Standing foot-IK bends the two knees by different amounts on flat ground
 - [`viewer-ui-radial-menu-concentric-rings`](wont-do/viewer-ui-radial-menu-concentric-rings.md)
   — Concentric-ring pie menu (angle picks direction, distance picks ring)
 - [`viewer-voice-morphing`](wont-do/viewer-voice-morphing.md) — Voice morphing
