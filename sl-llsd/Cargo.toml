@@ -16,7 +16,7 @@ categories = ["encoding", "parser-implementations"]
 [dependencies]
 base64 = { version = "0.22.1" }
 roxmltree = { version = "0.20.0" }
-sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.8.0" }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.49", features = ["formatting", "parsing"] }
 uuid = { version = "1.18.1" }

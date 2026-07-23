@@ -197,6 +197,7 @@ impl Session {
             seed_capability: None,
             pending_complete_movement: false,
             agent_appearance_service: None,
+            map_server_url: None,
             login_account: None,
             xfer_downloads: BTreeMap::new(),
             pending_xfer_uploads: BTreeMap::new(),
@@ -308,6 +309,16 @@ impl Session {
     #[must_use]
     pub const fn agent_appearance_service(&self) -> Option<&url::Url> {
         self.agent_appearance_service.as_ref()
+    }
+
+    /// The grid's map-tile server base URL from login, or `None` when the grid
+    /// did not announce one. World-map tiles are fetched from here as
+    /// `<url>map-<zoom>-<x>-<y>-objects.jpg` (zoom 1–8, tile-corner grid
+    /// coordinates). A region's `SimulatorFeatures` may carry a fresher
+    /// `map-server-url`; consumers should prefer that where present.
+    #[must_use]
+    pub const fn map_server_url(&self) -> Option<&url::Url> {
+        self.map_server_url.as_ref()
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
@@ -1273,6 +1284,7 @@ impl Session {
                 self.seed_capability = Some(success.seed_capability.clone());
                 self.agent_appearance_service
                     .clone_from(&success.agent_appearance_service);
+                self.map_server_url.clone_from(&success.map_server_url);
                 self.inventory.set_agent_root(success.inventory_root);
                 self.inventory.set_library_root(success.library_root);
                 self.inventory

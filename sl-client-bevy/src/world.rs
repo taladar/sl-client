@@ -51,6 +51,13 @@ pub struct SlIdentity {
     /// from here (`<url>texture/<avatar>/<slot>/<uuid>`), not by UUID from the
     /// `GetTexture` CDN. `None` on a grid without central baking (OpenSim).
     pub agent_appearance_service: Option<url::Url>,
+    /// The grid's map-tile server base URL from login, if the grid announced
+    /// one (`map-server-url`). World-map tiles are fetched from here as
+    /// `<url>map-<zoom>-<x>-<y>-objects.jpg`; a region's `SimulatorFeatures`
+    /// `map-server-url` — surfaced as
+    /// [`Event::SimulatorFeatures`](sl_proto::Event::SimulatorFeatures) — is
+    /// fresher and should win where present.
+    pub map_server_url: Option<url::Url>,
     /// The handle of the region the agent's root circuit currently occupies.
     /// Seeded from the login response and updated on each `RegionChanged`. The
     /// matching region entity is the one marked [`SlCurrentRegion`].

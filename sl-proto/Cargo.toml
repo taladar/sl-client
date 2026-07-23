@@ -18,7 +18,7 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 [dependencies]
 md5 = { version = "0.7.0" }
 sl-lsl = { version = "0.1.0", path = "../sl-lsl" }
-sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.8.0" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }
@@ -27,7 +27,7 @@ uuid = { version = "1.18.1" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
-sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.8.0" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 uuid = { version = "1.18.1" }
 

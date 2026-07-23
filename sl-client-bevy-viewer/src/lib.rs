@@ -138,6 +138,9 @@ mod underwater_fog;
 mod virtual_list;
 mod water;
 mod web_floater;
+mod world_map;
+mod world_map_math;
+mod world_map_tiles;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -868,6 +871,9 @@ fn run_session(
     // The minimap ("net map") floater: terrain / object / parcel layers,
     // avatar dots, frustum wedge, double-click teleport and context menu.
     .add_plugins(crate::minimap::MinimapPlugin)
+    // The world-map floater: grid-wide tile imagery (shared sl-map-apis
+    // fetch / cache), per-region info + item markers, region-name search.
+    .add_plugins(crate::world_map::WorldMapPlugin)
     // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
     // driving per-face surfaces, world input routing and the focus model.
     .add_plugins(crate::media_prim::MediaPrimPlugin)

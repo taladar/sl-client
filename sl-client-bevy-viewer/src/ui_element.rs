@@ -542,6 +542,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::minimap::spawn_minimap_specimen,
     },
     UiElement {
+        id: "worldmap",
+        summary: "The world-map floater's layout (`crate::world_map`): a tile-ish map surface \
+                  with region fills and markers beside the search side panel with result rows. \
+                  The live floater composites grid tiles and live markers into a CPU image; \
+                  here it is static so its layout is swept.",
+        spawn: crate::world_map::spawn_world_map_specimen,
+    },
+    UiElement {
         id: "parcel-audio-bar",
         summary: "The parcel streaming-audio cluster (`crate::parcel_audio`): the ♫ marker, a \
                   width-capped now-playing title, play and mute glyph buttons and the volume \

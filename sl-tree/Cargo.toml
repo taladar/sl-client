@@ -16,7 +16,7 @@ categories = ["game-development", "rendering", "rendering::data-formats"]
 exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
-sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.8.0" }
 uuid = { version = "1.18.1" }
 
 [dev-dependencies]

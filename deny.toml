@@ -155,6 +155,18 @@ exceptions = [
   # `arrayref` (BSD-2-Clause) is a transitive dependency of blake3 via bevy_asset
   # in sl-client-bevy's Bevy dependency tree.
   { allow = ["BSD-2-Clause"], crate = "arrayref" },
+  # `http-cache-semantics` (BSD-2-Clause, permissive) implements the RFC 9111
+  # cache freshness rules `sl-map-apis`' map-tile disk cache (the viewer's
+  # world-map tile fetcher) is built on.
+  { allow = ["BSD-2-Clause"], crate = "http-cache-semantics" },
+  # The AVIF encoder stack (all BSD-2-Clause, permissive) rides in through
+  # `sl-map-apis` → `imageproc` → `image` (default formats). `libfuzzer-sys`
+  # is `(MIT OR Apache-2.0) AND NCSA`; NCSA is the permissive University of
+  # Illinois/NCSA license.
+  { allow = ["BSD-2-Clause"], crate = "rav1e" },
+  { allow = ["BSD-2-Clause"], crate = "av1-grain" },
+  { allow = ["BSD-2-Clause"], crate = "v_frame" },
+  { allow = ["NCSA"], crate = "libfuzzer-sys" },
   # `option-ext` (MPL-2.0) is a transitive dependency of the `directories` crate
   # (via `dirs-sys`), which sl-client-bevy-viewer uses to resolve the platform
   # config / cache / data directories. MPL-2.0 is file-level (weak) copyleft that

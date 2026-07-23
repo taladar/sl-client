@@ -19,7 +19,7 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145" }
 sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
-sl-types = { version = "0.6.2", path = "../../sl-map-tools/sl-types" }
+sl-types = { version = "0.8.0" }
 thiserror = { version = "2.0.18" }
 uuid = { version = "1.18.1" }
 

@@ -102,6 +102,7 @@ mod test {
   <member><name>sim_port</name><value><i4>9000</i4></value></member>
   <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>
   <member><name>agent_appearance_service</name><value><string>https://appearance.example/</string></value></member>
+  <member><name>map-server-url</name><value><string>http://127.0.0.1:9000/</string></value></member>
   <member><name>message</name><value><string>Welcome</string></value></member>
 </struct></value></param></params></methodResponse>"#;
 
@@ -121,6 +122,10 @@ mod test {
                 .as_ref()
                 .map(url::Url::as_str),
             Some("https://appearance.example/")
+        );
+        assert_eq!(
+            success.map_server_url.as_ref().map(url::Url::as_str),
+            Some("http://127.0.0.1:9000/")
         );
         assert_eq!(success.message.as_deref(), Some("Welcome"));
         Ok(())
@@ -594,6 +599,7 @@ mod test {
                 1,
             )?],
             agent_appearance_service: None,
+            map_server_url: Some(url::Url::parse("http://127.0.0.1:9000/")?),
         })
     }
 
@@ -636,6 +642,7 @@ mod test {
         assert_eq!(parsed.library_root, success.library_root);
         assert_eq!(parsed.library_owner, success.library_owner);
         assert_eq!(parsed.library_skeleton, success.library_skeleton);
+        assert_eq!(parsed.map_server_url, success.map_server_url);
         Ok(())
     }
 

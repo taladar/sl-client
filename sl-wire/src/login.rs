@@ -401,6 +401,14 @@ pub struct LoginSuccess {
     /// `GetTexture`/`ViewerAsset` CDN (which rejects a baked id, typically with a
     /// `503`). `None` on a grid that does not central-bake (e.g. OpenSim).
     pub agent_appearance_service: Option<url::Url>,
+    /// The grid's map-tile server base URL, from the `map-server-url` response
+    /// field. World-map tiles are fetched from here as
+    /// `<url>map-<zoom>-<x>-<y>-objects.jpg` (zoom 1–8, grid coordinates
+    /// snapped to the tile corner). OpenSim announces it when its
+    /// `MapTileURL` is configured (the standalone default); a region's
+    /// `SimulatorFeatures` `map-server-url` — where present — is fresher and
+    /// should win. `None` when the grid does not announce one.
+    pub map_server_url: Option<url::Url>,
 }
 
 /// An agent's home location, parsed from the `home` login response field (a
@@ -619,6 +627,9 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
         agent_appearance_service: members
             .get("agent_appearance_service")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        map_server_url: members
+            .get("map-server-url")
             .and_then(|s| url::Url::parse(s.trim()).ok()),
     })))
 }
@@ -1094,6 +1105,11 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         push_id_array_member(out, "inventory-lib-owner", "agent_id", owner.uuid());
     }
     push_skeleton_member(out, "inventory-skel-lib", &success.library_skeleton);
+    push_opt_string_member(
+        out,
+        "map-server-url",
+        success.map_server_url.as_ref().map(url::Url::as_str),
+    );
 }
 
 /// Appends an `<i4>` struct member.

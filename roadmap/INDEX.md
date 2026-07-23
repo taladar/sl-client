@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 121 |
 | in-progress | 7 |
 | bugs | 10 |
-| done | 569 |
+| done | 572 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **918** |
+| **total** | **921** |
 
 ## ideas (26)
 
@@ -402,6 +402,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
+  route display on the minimap & world map (blocked by `viewer-minimap` (done),
+  `viewer-world-map-floater` (done))
 - [`viewer-water-exclusion`](ready/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
@@ -409,9 +412,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-virtualized-list` (done))
 - [`viewer-web-openid-auth`](ready/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
-- [`viewer-world-map-floater`](ready/viewer-world-map-floater.md) — World-map
-  floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
-  (done))
 
 ### chat
 
@@ -594,7 +594,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
 - [`viewer-minimap-menu-land-items`](blocked/viewer-minimap-menu-land-items.md)
   — Minimap context menu — About Land / Place Profile / World Map (blocked by
-  `viewer-parcel-options-general`, `viewer-world-map-floater`)
+  `viewer-parcel-options-general`, `viewer-world-map-floater` (done))
 - [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
   — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
   `viewer-contact-sets`)
@@ -775,6 +775,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
+  waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
+- [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
+  route following — advancing waypoint beacons (blocked by
+  `viewer-usb-route-map-display`, `viewer-beacons-beam-render`)
 - [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
   video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-video-playback`)
@@ -792,13 +797,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-volume-panel`](blocked/viewer-volume-panel.md) — Volume panel
   (master + per-category sliders) (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-audio-backend`)
-- [`viewer-world-map-markers`](blocked/viewer-world-map-markers.md) — World-map
-  floater — MapItem marker layers (blocked by `viewer-world-map-floater`)
-- [`viewer-world-map-search`](blocked/viewer-world-map-search.md) — World-map
-  floater — region-name search (blocked by `viewer-world-map-floater`)
 - [`viewer-world-map-tracking-teleport`](blocked/viewer-world-map-tracking-teleport.md)
   — World-map floater — tracking & teleport hand-off (blocked by
-  `viewer-world-map-floater`, `viewer-beacons-beam-render`,
+  `viewer-world-map-floater` (done), `viewer-beacons-beam-render`,
   `viewer-teleport-flow-progress`)
 
 ### test
@@ -861,7 +862,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (569)
+## done (572)
 
 ### protocol
 
@@ -1484,6 +1485,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-world-map-floater`](done/viewer-world-map-floater.md) — World-map
+  floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-world-map-markers`](done/viewer-world-map-markers.md) — World-map
+  floater — MapItem marker layers (blocked by `viewer-world-map-floater` (done))
+- [`viewer-world-map-search`](done/viewer-world-map-search.md) — World-map
+  floater — region-name search (blocked by `viewer-world-map-floater` (done))
 
 ### idiomatic
 

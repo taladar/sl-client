@@ -21,11 +21,10 @@
 //! terrain backdrop is shaded from our own terrain mirror (heights + splat
 //! weights) on every grid — the OpenSim world-map-tile backdrop belongs to the
 //! world-map floater's shared tile fetcher (`viewer-world-map-floater`); the
-//! collision ("banned parcel") fill has no data source yet; "open world map"
-//! on double-click falls back to only placing the tracking beacon until the
-//! world map floater exists; and a neighbour region whose circuit has not
-//! delivered a parcel overlay yet (OpenSim only pushes them on parcel
-//! changes) draws its full border outline instead of property lines.
+//! collision ("banned parcel") fill has no data source yet; and a neighbour
+//! region whose circuit has not delivered a parcel overlay yet (OpenSim only
+//! pushes them on parcel changes) draws its full border outline instead of
+//! property lines.
 
 use std::collections::HashMap;
 
@@ -1946,6 +1945,7 @@ fn on_minimap_click(
     identity: Res<SlIdentity>,
     mut tracking: ResMut<MapTracking>,
     mut commands: MessageWriter<SlCommand>,
+    mut world_map: MessageWriter<crate::world_map::OpenWorldMap>,
 ) {
     if click.button != PointerButton::Primary {
         return;
@@ -2013,8 +2013,14 @@ fn on_minimap_click(
             look_at: look,
         }));
     }
-    // The world-map action has no world-map floater to open yet
-    // (`viewer-world-map-floater`); the beacon above still places.
+    if action == DoubleClickAction::WorldMap {
+        // Hand off to the world-map floater, centred on the clicked point
+        // (the beacon above still places, as in the reference).
+        world_map.write(crate::world_map::OpenWorldMap {
+            east: global_e,
+            north: global_n,
+        });
+    }
 }
 
 /// A SHIFT-drag on the surface pans the map (2 px slop via the drag

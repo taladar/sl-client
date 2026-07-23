@@ -124,6 +124,7 @@ mod test {
             library_owner: None,
             library_skeleton: Vec::new(),
             agent_appearance_service: None,
+            map_server_url: None,
         })))
     }
 

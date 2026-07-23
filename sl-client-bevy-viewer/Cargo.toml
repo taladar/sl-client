@@ -28,6 +28,13 @@ default = ["spacenav"]
 spacenav = ["dep:evdev"]
 
 [dependencies]
+# OS clipboard for the world map's Copy SLURL (wayland-data-control covers
+# running under a Wayland compositor without a focused-window handle).
+# Default features off: the default `image-data` support would pull the AVIF
+# encoder stack (rav1e & co.) for image clipboards we do not use — text only.
+arboard = { version = "3.6.1", default-features = false, features = [
+    "wayland-data-control",
+] }
 avian3d = { version = "0.7.0" }
 # `system_font_discovery` turns on parley/fontique OS font enumeration and
 # fallback, so CJK / Cyrillic / Arabic / emoji text resolves to the host's fonts
@@ -53,6 +60,9 @@ bevy_flair = { version = "0.8.0" }
 bevy_fluent = { version = "0.15.0" }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
+# Sync-capable channels between the ECS and the world-map tile worker thread
+# (std mpsc receivers are not `Sync`, so they cannot sit in a resource).
+crossbeam-channel = { version = "0.5.15" }
 directories = { version = "6.0.0" }
 # The SpaceNavigator / 6-DOF device read (the `spacenav` feature, Linux-only for
 # now — see the `viewer-input-spacenav-crossplatform` roadmap task).
@@ -84,6 +94,9 @@ sl-gst = { version = "0.1.0", path = "../sl-gst" }
 # locale rather than a bare `to_string()`. The text side is `bevy_fluent`; this
 # is the value side Fluent's `NUMBER()` / `DATETIME()` cannot do.
 sl-l10n = { version = "0.1.0", path = "../sl-l10n" }
+# World-map tile fetch / disk cache (`MapTileCache`), shared with the
+# sl-map-tools CLI / web tools so the viewer does not grow a third fetcher.
+sl-map-apis = { version = "0.8.0" }
 sl-media = { version = "0.1.0", path = "../sl-media" }
 sl-notecard = { version = "0.1.0", path = "../sl-notecard" }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
@@ -92,7 +105,13 @@ sl-terrain = { version = "0.1.0", path = "../sl-terrain" }
 sl-texture = { version = "0.1.0", path = "../sl-texture", features = [
     "encode",
 ] }
+# Shared SL tool types (`MapTileDescriptor` / `ZoomLevel` / `GridCoordinates`)
+# so the world-map floater speaks the same tile geometry as `sl-map-apis`.
+sl-types = { version = "0.8.0" }
 thiserror = { version = "2.0.18" }
+# Drives the async `sl-map-apis` tile cache on the world-map tile service's
+# dedicated worker thread (a small current-thread runtime, not an app-wide one).
+tokio = { version = "1.52.3", features = ["net", "rt", "time"] }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
 unic-langid = { version = "0.9.6", features = ["macros"] }

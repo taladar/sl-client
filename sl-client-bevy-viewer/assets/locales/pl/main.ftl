@@ -123,3 +123,27 @@ minimap-tooltip-owner = Właściciel: { $name }
 minimap-tooltip-sale = Na sprzedaż: L$ { $price } ({ $area } m²)
 minimap-tooltip-hint-teleport = Kliknij dwukrotnie, aby się teleportować
 minimap-tooltip-hint-map = Kliknij dwukrotnie, aby otworzyć mapę świata
+
+## The world-map floater (world_map.rs).
+
+worldmap-floater-title = Mapa świata
+worldmap-tooltip-region = Region: { $name }
+worldmap-tooltip-region-agents = Awatary: { $count }
+worldmap-maturity-general = Kategoria: Ogólna
+worldmap-maturity-moderate = Kategoria: Umiarkowana
+worldmap-maturity-adult = Kategoria: Dla dorosłych
+worldmap-tooltip-agents = Awatary tutaj: { $count }
+worldmap-tooltip-telehub = Telehub: { $name }
+worldmap-tooltip-infohub = Infohub: { $name }
+worldmap-tooltip-land-sale = Na sprzedaż: { $name } — L$ { $price } ({ $area } m²)
+worldmap-tooltip-event = Wydarzenie: { $name }
+worldmap-location-none = Kliknij mapę, aby wybrać miejsce
+worldmap-button-teleport = Teleportuj
+worldmap-button-copy-slurl = Kopiuj SLURL
+worldmap-layer-people = Ludzie
+worldmap-layer-infohubs = Telehuby
+worldmap-layer-land-sale = Ziemia na sprzedaż
+worldmap-layer-events = Wydarzenia
+worldmap-layer-mature-events = Wydarzenia umiarkowane
+worldmap-layer-adult-events = Wydarzenia dla dorosłych
+worldmap-layer-region-names = Nazwy regionów

@@ -72,6 +72,10 @@ const WEB_BROWSER_OPEN: &str = "web-browser-open";
 /// check mark on the World ▸ Mini-Map entry.
 const MINIMAP_OPEN: &str = "minimap-open";
 
+/// The condition key that holds while the world-map floater is open — drives
+/// the check mark on the World ▸ World Map entry.
+const WORLD_MAP_OPEN: &str = "world-map-open";
+
 /// The placeholder shown in a menu that has no wired entries yet — a single
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
@@ -105,13 +109,20 @@ static COMM_MENU: MenuDef = MenuDef {
     )],
 };
 
-/// The World menu — the minimap today; world map, teleport and environment
+/// The World menu — the minimap and world map today; teleport and environment
 /// are future entries.
 static WORLD_MENU: MenuDef = MenuDef {
     label: "World",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Mini-Map", "toggle-minimap").checked_when(MINIMAP_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Mini-Map", "toggle-minimap").checked_when(MINIMAP_OPEN),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("World Map", "toggle-world-map")
+                .accel("Ctrl+M")
+                .checked_when(WORLD_MAP_OPEN),
+        ),
+    ],
 };
 
 /// The Build menu — a name for future build / edit entries.
@@ -221,6 +232,7 @@ fn update_top_menu_conditions(
     conversations: Option<Res<ConversationsUi>>,
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
+    world_map: Option<Res<crate::world_map::WorldMapUi>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -236,6 +248,9 @@ fn update_top_menu_conditions(
     let minimap_open = minimap
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let world_map_open = world_map
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -248,6 +263,9 @@ fn update_top_menu_conditions(
     }
     if minimap_open {
         wanted.push(MINIMAP_OPEN);
+    }
+    if world_map_open {
+        wanted.push(WORLD_MAP_OPEN);
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
@@ -262,12 +280,18 @@ fn update_top_menu_conditions(
 /// placeholder's `noop`, and any future entry whose handler is not written yet)
 /// fall through harmlessly, which is exactly what lets a future task add an
 /// entry to a `static` menu above and wire it here in one place.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the dispatcher fans out to every toggleable floater's UI resource; each new \
+              floater adds one parameter"
+)]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
+    world_map: Option<Res<crate::world_map::WorldMapUi>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -302,6 +326,13 @@ fn handle_top_menu_actions(
             }
             "toggle-minimap" => {
                 if let Some(ui) = &minimap
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-world-map" => {
+                if let Some(ui) = &world_map
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;

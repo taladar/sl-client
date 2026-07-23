@@ -123,3 +123,27 @@ minimap-tooltip-owner = المالك: { $name }
 minimap-tooltip-sale = للبيع: L$ { $price } ({ $area } م²)
 minimap-tooltip-hint-teleport = انقر نقرًا مزدوجًا للانتقال الآني
 minimap-tooltip-hint-map = انقر نقرًا مزدوجًا لفتح خريطة العالم
+
+## The world-map floater (world_map.rs).
+
+worldmap-floater-title = خريطة العالم
+worldmap-tooltip-region = المنطقة: { $name }
+worldmap-tooltip-region-agents = { $count } أفاتار
+worldmap-maturity-general = التصنيف: عام
+worldmap-maturity-moderate = التصنيف: متوسط
+worldmap-maturity-adult = التصنيف: للبالغين
+worldmap-tooltip-agents = { $count } أفاتار هنا
+worldmap-tooltip-telehub = تيليهَب: { $name }
+worldmap-tooltip-infohub = إنفوهَب: { $name }
+worldmap-tooltip-land-sale = للبيع: { $name } — L$ { $price } ({ $area } م²)
+worldmap-tooltip-event = حدث: { $name }
+worldmap-location-none = انقر على الخريطة لاختيار موقع
+worldmap-button-teleport = انتقال آني
+worldmap-button-copy-slurl = نسخ SLURL
+worldmap-layer-people = الأشخاص
+worldmap-layer-infohubs = تيليهَبات
+worldmap-layer-land-sale = أراضٍ للبيع
+worldmap-layer-events = الأحداث
+worldmap-layer-mature-events = أحداث متوسطة
+worldmap-layer-adult-events = أحداث للبالغين
+worldmap-layer-region-names = أسماء المناطق

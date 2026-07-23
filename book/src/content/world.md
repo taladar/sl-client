@@ -174,6 +174,16 @@ region's circuit and answered over UDP:
   overlays the per-region detail from the map blocks. Second Life's main grid is
   a single global layer; OpenSim grids report their own coverage.
 
+Modern grids additionally serve the zoomed-out imagery over plain HTTP: a
+**map-tile service** hosting `map-<zoom>-<x>-<y>-objects.jpg` files (zoom
+1–8; a zoom-`n` tile spans `2^(n-1)` regions per edge, its `x`/`y` snapped to
+that span). The service's base URL is announced as `map-server-url` — in the
+login response (OpenSim sends it whenever its `MapTileURL` is configured,
+which the standalone default does) and/or in a region's `SimulatorFeatures`
+`OpenSimExtras`; Second Life's main grid serves the same naming from its
+public CDN. A viewer that fetches these tiles only needs the UDP map-layer
+query as a legacy fallback.
+
 ## Reporting abuse & filing postcards
 
 Two outbound, fire-and-forget viewer actions reach the grid here:
@@ -286,6 +296,14 @@ None of these has a reply; the client just acts on them.
 >   requested rectangle / name / item type / region handle, plus the map-layer
 >   flags) and answers with `SimSession::send_map_block_reply` /
 >   `send_map_item_reply` / `send_map_layer_reply`.
+> - The map-tile service base URL from login is
+>   `LoginSuccess::map_server_url` (`sl-wire/src/login.rs`), kept on the
+>   session as `Session::map_server_url()` and mirrored into the Bevy
+>   viewer's `SlIdentity`; the `SimulatorFeatures` variant is
+>   `OpenSimExtras::map_server_url` (`sl-wire/src/sim_features.rs`). The Bevy
+>   viewer's world-map floater (`sl-client-bevy-viewer/src/world_map.rs`)
+>   fetches and caches the tiles through the sibling `sl-map-tools`
+>   workspace's `sl-map-apis` `MapTileCache`.
 > - Abuse reports use `sl-wire/src/abuse_report.rs` (`AbuseReport`,
 >   `AbuseReportType`): `Command::SendAbuseReport` encodes the `UserReport` UDP
 >   message; `Command::SendAbuseReportViaCaps { report, screenshot }` posts the

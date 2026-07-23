@@ -1082,6 +1082,11 @@ pub struct Session {
     /// fetched from here (`<url>texture/<avatar>/<slot>/<uuid>`), not by UUID from
     /// the `GetTexture` CDN. `None` on a grid without central baking (OpenSim).
     agent_appearance_service: Option<url::Url>,
+    /// The grid's map-tile server base URL, from the `map-server-url` login
+    /// field. World-map tiles are fetched from here as
+    /// `<url>map-<zoom>-<x>-<y>-objects.jpg`. `None` when the grid does not
+    /// announce one.
+    map_server_url: Option<url::Url>,
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,

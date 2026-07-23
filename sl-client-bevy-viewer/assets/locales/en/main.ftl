@@ -354,3 +354,30 @@ minimap-tooltip-owner = Owner: { $name }
 minimap-tooltip-sale = For sale: L$ { $price } ({ $area } m²)
 minimap-tooltip-hint-teleport = Double-click to teleport
 minimap-tooltip-hint-map = Double-click to open the world map
+
+## The world-map floater (world_map.rs).
+
+worldmap-floater-title = World Map
+worldmap-tooltip-region = Region: { $name }
+# The region's agent count from the map data.
+worldmap-tooltip-region-agents = { $count } avatars
+worldmap-maturity-general = Rating: General
+worldmap-maturity-moderate = Rating: Moderate
+worldmap-maturity-adult = Rating: Adult
+# An avatar-locations marker's count.
+worldmap-tooltip-agents = { $count } avatars here
+worldmap-tooltip-telehub = Telehub: { $name }
+worldmap-tooltip-infohub = Infohub: { $name }
+# A land-for-sale marker's parcel name, price and area.
+worldmap-tooltip-land-sale = For sale: { $name } — L$ { $price } ({ $area } m²)
+worldmap-tooltip-event = Event: { $name }
+worldmap-location-none = Click the map to select a location
+worldmap-button-teleport = Teleport
+worldmap-button-copy-slurl = Copy SLURL
+worldmap-layer-people = People
+worldmap-layer-infohubs = Telehubs
+worldmap-layer-land-sale = Land for Sale
+worldmap-layer-events = Events
+worldmap-layer-mature-events = Moderate Events
+worldmap-layer-adult-events = Adult Events
+worldmap-layer-region-names = Region Names

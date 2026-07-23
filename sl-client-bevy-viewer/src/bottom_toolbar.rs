@@ -69,6 +69,7 @@ use crate::nearby_chat_bar::NearbyChatBar;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::world_map::WorldMapUi;
 
 /// The `element` the bottom toolbar attributes its actions to — the tag
 /// [`handle_toolbar_actions`] filters on, so it routes *its* buttons' presses and
@@ -164,6 +165,8 @@ enum ToolbarTarget {
     Conversations,
     /// The minimap floater ([`crate::minimap`]).
     Minimap,
+    /// The world-map floater ([`crate::world_map`]).
+    WorldMap,
     /// A floater that has not landed yet — the button is a disabled placeholder
     /// until its own task wires a real target here.
     Unlanded,
@@ -224,7 +227,7 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
     ToolbarButtonDef {
         action: "toggle-map",
         label_key: "bottom-toolbar-map",
-        target: ToolbarTarget::Unlanded,
+        target: ToolbarTarget::WorldMap,
     },
     ToolbarButtonDef {
         action: "toggle-minimap",
@@ -479,6 +482,7 @@ fn handle_toolbar_actions(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
+    world_map: Option<Res<WorldMapUi>>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
@@ -504,6 +508,12 @@ fn handle_toolbar_actions(
         {
             shown.0 = !shown.0;
         }
+        if action.action == "toggle-map"
+            && let Some(ui) = &world_map
+            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        {
+            shown.0 = !shown.0;
+        }
         if action.action == "toggle-nearby-chat"
             && let Some(bar) = nearby_chat.as_deref_mut()
         {
@@ -519,6 +529,7 @@ fn resolve_target_open(
     inventory: Option<&InventoryUi>,
     conversations: Option<&ConversationsUi>,
     minimap: Option<&MinimapUi>,
+    world_map: Option<&WorldMapUi>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
@@ -531,6 +542,9 @@ fn resolve_target_open(
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::Minimap => minimap
+            .and_then(|ui| panels.get(ui.panel()).ok())
+            .map(|shown| shown.0),
+        ToolbarTarget::WorldMap => world_map
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::Unlanded => None,
@@ -550,6 +564,7 @@ fn update_toolbar_button_states(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
+    world_map: Option<Res<WorldMapUi>>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
     time: Res<Time>,
@@ -560,6 +575,7 @@ fn update_toolbar_button_states(
     let inventory = inventory.as_deref();
     let conversations = conversations.as_deref();
     let minimap = minimap.as_deref();
+    let world_map = world_map.as_deref();
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button flashes while the window is closed and an IM /
     // group / conference has unread lines — the reference's toolbar attention cue
@@ -574,6 +590,7 @@ fn update_toolbar_button_states(
             inventory,
             conversations,
             minimap,
+            world_map,
             nearby_chat,
             &panels,
         ) {
@@ -682,11 +699,11 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     /// The wired toolbar buttons today are the leading nearby-chat toggle,
-    /// Conversations (its semantic pair, right beside it), Inventory and the
-    /// minimap, in that order; the rest are unlanded placeholders. A regression
-    /// that silently disabled a live toggle, reordered the pair, or wired a
-    /// target that does not exist would trip here. The chat toggle leads the
-    /// bar, as the reference places it.
+    /// Conversations (its semantic pair, right beside it), Inventory, the
+    /// world map and the minimap, in that order; the rest are unlanded
+    /// placeholders. A regression that silently disabled a live toggle,
+    /// reordered the pair, or wired a target that does not exist would trip
+    /// here. The chat toggle leads the bar, as the reference places it.
     #[test]
     fn nearby_chat_and_inventory_are_wired() {
         let wired: Vec<&str> = TOOLBAR_BUTTONS
@@ -700,6 +717,7 @@ mod tests {
                 "toggle-nearby-chat",
                 "toggle-conversations",
                 "toggle-inventory",
+                "toggle-map",
                 "toggle-minimap"
             ]
         );

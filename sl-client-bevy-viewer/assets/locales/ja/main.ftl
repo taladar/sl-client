@@ -115,3 +115,27 @@ minimap-tooltip-owner = 所有者: { $name }
 minimap-tooltip-sale = 売り出し中: L$ { $price }（{ $area } m²）
 minimap-tooltip-hint-teleport = ダブルクリックでテレポート
 minimap-tooltip-hint-map = ダブルクリックで世界地図を開く
+
+## The world-map floater (world_map.rs).
+
+worldmap-floater-title = 世界地図
+worldmap-tooltip-region = リージョン: { $name }
+worldmap-tooltip-region-agents = アバター { $count } 人
+worldmap-maturity-general = レーティング: 一般
+worldmap-maturity-moderate = レーティング: 中程度
+worldmap-maturity-adult = レーティング: アダルト
+worldmap-tooltip-agents = ここにアバター { $count } 人
+worldmap-tooltip-telehub = テレハブ: { $name }
+worldmap-tooltip-infohub = インフォハブ: { $name }
+worldmap-tooltip-land-sale = 売り出し中: { $name } — L$ { $price }（{ $area } m²）
+worldmap-tooltip-event = イベント: { $name }
+worldmap-location-none = 地図をクリックして場所を選択
+worldmap-button-teleport = テレポート
+worldmap-button-copy-slurl = SLURLをコピー
+worldmap-layer-people = 人
+worldmap-layer-infohubs = テレハブ
+worldmap-layer-land-sale = 売地
+worldmap-layer-events = イベント
+worldmap-layer-mature-events = 中程度のイベント
+worldmap-layer-adult-events = アダルトイベント
+worldmap-layer-region-names = リージョン名
