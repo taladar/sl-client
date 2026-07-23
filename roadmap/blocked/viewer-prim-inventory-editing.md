@@ -14,5 +14,10 @@ The object **contents** tab of the edit floater
 virtualized list, [[viewer-ui-virtualized-list]]), add (drag-in), remove, and
 rename them, and drop scripts / notecards into an object.
 
+Include the "Save Back to Object Contents" quick-save action
+(`Tools.SaveToObjectInventory`, Build ▸ Object): write an item opened from
+an object's contents straight back into that object (main-menu survey
+2026-07-23).
+
 Reference (Firestorm, read-only): `llpanelcontents`, `llsidepaneltaskinfo`;
 messages `RequestTaskInventory`, `UpdateTaskInventory`, `RemoveTaskInventory`.

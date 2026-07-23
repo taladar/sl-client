@@ -14,6 +14,11 @@ The "About Land" floater, first half: view and edit parcel **general** info
 the **objects** tab (object counts, owners, return). This is the floater shell
 plus the tabs that read and write parcel identity and land use.
 
+Include the lightweight read-only **Location Profile** ("About this
+location", World ▸ Location Profile / `World.PlaceProfile`) panel: the
+place-profile view of the same parcel data without edit affordances
+(main-menu survey 2026-07-23).
+
 Reference (Firestorm, read-only): `llfloaterland`, `llpanelland`; the
 `ParcelPropertiesUpdate` message.
 

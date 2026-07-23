@@ -29,6 +29,10 @@ two):
   nearby speaker.
 - **Mouselook crosshairs** show/hide; **hover-tips** master + per-kind
   toggles (land, all objects).
+- **Hide all UI** (`View.ToggleUI`) — blank the whole interface for
+  screenshots/machinima; and **Show HUD Attachments**
+  (`View.ShowHUDAttachments`) — temporarily hide worn HUDs (main-menu
+  survey 2026-07-23).
 
 Reference (Firestorm, read-only): `menu_viewer.xml` (Advanced), the named
 settings (`FSAlwaysFly`, `LimitSelectDistance`,
