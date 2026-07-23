@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 26 |
+| ideas | 27 |
 | ready | 164 |
 | blocked | 121 |
 | in-progress | 7 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 569 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **918** |
+| **total** | **919** |
 
-## ideas (26)
+## ideas (27)
 
 ### viewer
 
@@ -38,6 +38,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-cultural-color-meanings`](ideas/viewer-i18n-cultural-color-meanings.md)
   — Culturally-aware UI colour semantics (blocked by `viewer-ui-skin-tokens`
   (done))
+- [`viewer-i18n-target-languages`](ideas/viewer-i18n-target-languages.md) —
+  Which UI translations to ship — target-language tiers
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
