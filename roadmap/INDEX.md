@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 31 |
-| ready | 187 |
+| ready | 189 |
 | blocked | 133 |
 | in-progress | 7 |
 | bugs | 11 |
-| done | 572 |
+| done | 577 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **962** |
+| **total** | **969** |
 
 ## ideas (31)
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (187)
+## ready (189)
 
 ### protocol
 
@@ -107,6 +107,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-about-landmark-floater`](ready/viewer-about-landmark-floater.md) —
   About Landmark floater — full detail view
+- [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
+  — Ingest the account hover height (AgentPreferences) into the plant
 - [`viewer-ambient-occlusion`](ready/viewer-ambient-occlusion.md) — Screen-space
   ambient occlusion
 - [`viewer-animation-explorer`](ready/viewer-animation-explorer.md) — Animation
@@ -252,6 +254,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
+- [`viewer-input-spacenav-avatar-motion`](ready/viewer-input-spacenav-avatar-motion.md)
+  — SpaceNavigator drives avatar walking / turning outside flycam
 - [`viewer-input-spacenav-settings-ui`](ready/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
@@ -925,19 +929,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
+  — Animesh surrounded by an almost-transparent box shell
+- [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
+  — Clouds wrong in front of the sun, and touch the water at the horizon
+- [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
+  — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-p29-2`](bugs/viewer-p29-2-drive-its-animations.md) — Drive its
-  animations
-- [`viewer-r18`](bugs/viewer-r18-cloud-layer-horizon-plume-fixed-one-quadrant-clustering.md)
-  — Cloud layer — horizon plume fixed, one-quadrant clustering still broken
-- [`viewer-r23`](bugs/viewer-r23-avatar-stands-too-low-feet-sink-into-the-ground.md)
-  — Avatar stands too low — feet sink into the ground
-- [`viewer-r25`](bugs/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
-  — Prims that should be transparent render opaque
-- [`viewer-r28`](bugs/viewer-r28-text-caret-invisible-until-typing.md) —
-  Text-field caret nearly invisible — color, blink, focus cues
+- [`viewer-pillows-inside-out-geometry`](bugs/viewer-pillows-inside-out-geometry.md)
+  — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-r25a`](bugs/viewer-r25a-transparency-lost-after-lod-cycle.md) — Prim
+  transparency lost again after a LoD / derender cycle
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -951,7 +955,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (572)
+## done (577)
 
 ### protocol
 
@@ -1352,6 +1356,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   animation
 - [`viewer-p29-1`](done/viewer-p29-1-control-avatar-skeleton.md) —
   Control-avatar skeleton
+- [`viewer-p29-2`](done/viewer-p29-2-drive-its-animations.md) — Drive its
+  animations
 - [`viewer-p3-1`](done/viewer-p3-1-types-lod.md) — Types & LOD
 - [`viewer-p3-2`](done/viewer-p3-2-profile-ring.md) — Profile ring
 - [`viewer-p3-3`](done/viewer-p3-3-extrusion-path.md) — Extrusion path
@@ -1447,6 +1453,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Linden system hair shows on mesh-hair avatars
 - [`viewer-r17`](done/viewer-r17-shoe-height-heel-offset-not-applied-to-avatar-placement.md)
   — Shoe height / heel offset not applied to avatar placement
+- [`viewer-r18`](done/viewer-r18-cloud-layer-horizon-plume-fixed-one-quadrant-clustering.md)
+  — Cloud layer — horizon plume fixed, one-quadrant clustering still broken
 - [`viewer-r19`](done/viewer-r19-eep-environment-never-ingested-on-aditi-one-shot-no-retry.md)
   — EEP environment never ingested on aditi (one-shot, no retry)
 - [`viewer-r2`](done/viewer-r2-fix-rigid-eyeball-placement-was-p15-5.md) — Fix
@@ -1457,11 +1465,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Large flat dark-blue plane across the scene (water / water fog?)
 - [`viewer-r22i`](done/viewer-r22i-local-probe-reflection-rotated.md) — Local
   reflection probes reflect the world rotated 90° about X
+- [`viewer-r23`](done/viewer-r23-avatar-stands-too-low-feet-sink-into-the-ground.md)
+  — Avatar stands too low — feet sink into the ground
 - [`viewer-r24`](done/viewer-r24-neighbour-region-avatars-get-no-coarse-dot-child-circuit-coa.md)
   — Neighbour-region avatars get no coarse dot — child-circuit
   CoarseLocationUpdate was dropped
+- [`viewer-r25`](done/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
+  — Prims that should be transparent render opaque
 - [`viewer-r26`](done/viewer-r26-slab-allocator-use-after-free-spam.md) —
   bevy_render slab-allocator "use-after-free / unallocated key" log spam
+- [`viewer-r28`](done/viewer-r28-text-caret-invisible-until-typing.md) —
+  Text-field caret nearly invisible — color, blink, focus cues
 - [`viewer-r2b`](done/viewer-r2b-broader-static-tga-bake-layers.md) — Broader
   static-TGA bake layers
 - [`viewer-r3`](done/viewer-r3-system-eyes-teeth-show-through-a-bom-head.md) —

@@ -55,9 +55,9 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, Glow, SkyMaterial, SkyParams,
-    SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams, TextureKey, Uuid,
-    to_bevy_image,
+    CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyMaterial,
+    SkyParams, SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams, TextureKey,
+    Uuid, to_bevy_image,
 };
 
 use crate::camera::ViewerCamera;
@@ -951,19 +951,7 @@ pub(crate) fn apply_cloud_textures(
                 decoded.width, decoded.height, decoded.components
             );
         }
-        // The cloud shader tiles the noise: `cloud_scale` magnifies the UVs and the
-        // `cloud_pos_density` / scroll offsets push them well outside `[0, 1]`, so the
-        // texture must wrap. Bevy's default sampler is clamp-to-edge (which would smear
-        // the black edge texel across the whole layer — the reference samples with
-        // `GL_REPEAT`), so give the cloud image a repeating sampler.
-        let mut image = to_bevy_image(decoded);
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            address_mode_w: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::linear()
-        });
-        let handle = images.add(image);
+        let handle = images.add(cloud_noise_image(decoded));
         if let Some(mut material) = materials.get_mut(&state.material) {
             // Both noise slots share the id until the day cycle (P22.6) drives a
             // separate next-frame texture and the blend factor between them.
@@ -971,6 +959,44 @@ pub(crate) fn apply_cloud_textures(
             material.cloud_noise_next = handle;
         }
     }
+}
+
+/// Upload a decoded cloud-noise texture: **linear**, and tiling (R18).
+///
+/// Both halves are load-bearing. The noise is *data*, not colour: `clouds.wgsl`
+/// ports `cloudsF.glsl`, whose density term is `cloudNoise(uv).x - 0.5` on the
+/// raw byte values — the reference binds the noise as a plain `GL_RGBA8`
+/// texture (`llvosky.cpp` even calls `setExplicitFormat(GL_RGBA8, GL_RGBA)`)
+/// and its shader has no `srgb_to_linear`. Uploading through `to_bevy_image`
+/// (which is `Rgba8UnormSrgb`-only, the same trap the normal-map uploaders
+/// document) had the GPU sRGB-decode every sample, pushing a mid-gray byte 128
+/// down to 0.216: with the default cloud texture only ~9% of texels cleared the
+/// `alpha1 > 0` density threshold instead of ~46%, and the survivors clustered
+/// in a few isolated blobs — the "clouds in one quadrant, rest empty" defect.
+///
+/// The sampler must repeat because `cloud_scale` magnifies the UVs and the
+/// scroll offsets push them well outside `[0, 1]` (the reference samples with
+/// `GL_REPEAT`); Bevy's default clamp-to-edge would smear the edge texel across
+/// the whole layer.
+fn cloud_noise_image(decoded: &DecodedTexture) -> Image {
+    let mut image = Image::new(
+        Extent3d {
+            width: decoded.width,
+            height: decoded.height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        decoded.pixels.to_vec(),
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
 }
 
 /// Startup: build the star-quad mesh, spawn the star field (with its material,

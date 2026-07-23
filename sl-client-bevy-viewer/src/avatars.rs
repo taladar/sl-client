@@ -42,12 +42,13 @@ use bevy::prelude::*;
 use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
-    BodyPhysics, CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, MAX_FACES,
-    MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
-    ResolvedParams, ScopedObjectId, SkeletalDeformations, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, TextureEntry, TextureKey, Uuid, VolumeDeformations, avatar_texture,
-    composite_region, decode_texture_entry, joint_position_overrides, pcode, to_bevy_base_mesh,
-    to_bevy_image, to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
+    BodyPhysics, BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel,
+    JointOverrides, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
+    RUNTIME_MORPH_PARAMS, RegionHandle, ResolvedParams, ScopedObjectId, SkeletalDeformations,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, Uuid,
+    VolumeDeformations, avatar_texture, composite_region, decode_texture_entry,
+    joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
+    to_bevy_runtime_morph_targets,
 };
 
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
@@ -578,14 +579,16 @@ pub(crate) struct AvatarState {
     /// rigged-mesh body is rigged to. Resolved and folded into the skeletal
     /// recurrence alongside [`deformations`](Self::deformations).
     volume_deformations: HashMap<AgentKey, VolumeDeformations>,
-    /// The extra vertical plant height each avatar gains from its worn shoes'
-    /// heel / platform height (R17), in Second Life Z-up metres: the reference
-    /// viewer's `computeBodySize` folds the shoe's downward foot-bone offset into
-    /// `mPelvisToFoot`, raising the avatar so its shod feet rest on the ground.
-    /// Added to the fixed pelvis rest height when planting the body root
-    /// ([`body_root_transform`]). Absent (treated as `0`) until an appearance
-    /// resolves the shoe params, or for a sphere-only avatar.
-    pelvis_lift: HashMap<AgentKey, f32>,
+    /// Each avatar's resolved **root drop** (R23): how far below the reported
+    /// wire Z its body-root entity is planted, in Second Life Z-up metres —
+    /// [`root_drop_from_metrics`] of the shape's `computeBodySize` quantities
+    /// (the wire Z is the physics-capsule *centre*, so the drop is half the
+    /// shape-scaled body height, corrected for the pelvis sitting above the
+    /// root and any hover). Shoe heel / platform offsets (R17) fold in through
+    /// the foot term of those metrics, as in the reference. Absent (the rest
+    /// shape's [`AvatarBody::rest_root_drop`] applies) until an appearance
+    /// resolves, or for a sphere-only avatar.
+    root_drops: HashMap<AgentKey, f32>,
     /// R22b diagnostic: every agent the session has *ever* surfaced a full avatar
     /// object (`pcode` 47) for, so the [`log_avatar_interest`]-gated census can
     /// tell a "the simulator never streamed this avatar" case (agent absent here)
@@ -627,9 +630,12 @@ pub(crate) struct AvatarBody {
     /// Each joint's parent index (`None` for a root), parallel to
     /// [`joint_locals`](Self::joint_locals).
     joint_parents: Vec<Option<usize>>,
-    /// The pelvis rest height (Second Life Z, metres) used to plant the body
-    /// vertically so its pelvis sits at the reported object position.
-    pelvis_height: f32,
+    /// The rest shape's root drop (Second Life Z, metres): how far below the
+    /// reported wire Z (the physics-capsule centre) the body root is planted
+    /// until the avatar's own appearance resolves (R23). From
+    /// [`root_drop_from_metrics`] of the rest-skeleton `computeBodySize`
+    /// quantities, with no hover.
+    rest_root_drop: f32,
     /// Each attachment point's raw numeric id mapped to the joint it hangs from
     /// and its fixed local offset node (P16.1/P16.2). Built from the
     /// `avatar_lad.xml` `<attachment_point>` table; a HUD point (whose `mScreen`
@@ -802,7 +808,14 @@ pub(crate) fn setup_avatar_body(
         joint_is_volume: (0..skeleton.len())
             .map(|index| skeleton.is_collision_volume(index))
             .collect(),
-        pelvis_height: library.pelvis_height(),
+        // The rest-shape drop; a malformed skeleton (missing chain joints)
+        // falls back to the old pelvis-rest-height plant rather than none.
+        rest_root_drop: skeleton
+            .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
+            .map_or_else(
+                || library.pelvis_height(),
+                |metrics| root_drop_from_metrics(&metrics, 0.0),
+            ),
         attachment_points: library
             .attachment_points()
             .into_iter()
@@ -833,26 +846,53 @@ pub(crate) fn setup_avatar_body(
 
 /// The world [`Transform`] of a rigged avatar body root: the object's position
 /// and orientation carried into Bevy's Y-up world by the Second Life → Bevy
-/// basis change, lowered by the pelvis rest height so the pelvis sits at the
-/// reported object position (Second Life reports an avatar near its pelvis).
+/// basis change, lowered by `root_drop` (R23).
 ///
-/// `shoe_lift` (R17) is the extra height the worn shoes' heel / platform add to
-/// the pelvis-to-foot distance: subtracting it too raises the whole body so its
-/// shod feet still rest on the ground rather than sinking in.
-fn body_root_transform(object: &Object, pelvis_height: f32, shoe_lift: f32) -> Transform {
+/// The wire position of an avatar is **not** its pelvis: OpenSim reports the
+/// physics-capsule *centre* (`ScenePresence`'s `ground + 0.5 · AvatarHeight`),
+/// and the reference viewer assumes the same
+/// (`LLVOAvatar::updateCharacter`'s `root_pos.z -= 0.5·mBodySize.z −
+/// mPelvisToFoot`, "correct for the fact that the pelvis is not necessarily
+/// the center of the agent's physical representation"). `root_drop` is the
+/// per-avatar [`root_drop_from_metrics`] of the shape's `computeBodySize`
+/// quantities — half the shape-scaled body height, corrected for the pelvis
+/// joint sitting `pelvis_local_z` above this root and lifted by any hover.
+fn body_root_transform(object: &Object, root_drop: f32) -> Transform {
     let translation = sl_to_bevy_vec(&object.motion.position);
     Transform {
         // Per-component subtract to avoid the `arithmetic_side_effects` lint on
         // the glam `Vec3` operator.
-        translation: Vec3::new(
-            translation.x,
-            translation.y - pelvis_height - shoe_lift,
-            translation.z,
-        ),
+        translation: Vec3::new(translation.x, translation.y - root_drop, translation.z),
         rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
         scale: Vec3::ONE,
     }
 }
+
+/// How far below an avatar's reported wire Z (the physics-capsule centre) its
+/// body-root entity is planted (R23), in Second Life Z-up metres.
+///
+/// The reference (`LLVOAvatar::updateCharacter`) places its `mRoot` — whose
+/// pelvis is zeroed under it, so `mRoot` *is* the pelvis — at
+/// `reported_z − (0.5·mBodySize.z − mPelvisToFoot) + hover`. Our skeleton
+/// instance keeps `mPelvis` at its local rest offset above the body root, so
+/// the root sits a further `pelvis_local_z` below the pelvis:
+///
+/// `drop = 0.5·body_size_z − pelvis_to_foot + pelvis_local_z − hover`
+///
+/// Net effect matches the reference exactly: the soles land at
+/// `reported_z − 0.5·body_size_z + hover` (the `pelvis_to_foot` term cancels
+/// out of the sole height). `hover` is the shape's `Hover` visual param
+/// ([`AVATAR_HOVER_PARAM`]); the region-side hover preference
+/// (`getHoverOffset()`, the `AgentPreferences` capability) is not ingested
+/// yet and is omitted.
+fn root_drop_from_metrics(metrics: &BodySizeMetrics, hover: f32) -> f32 {
+    0.5 * metrics.body_size_z - metrics.pelvis_to_foot + metrics.pelvis_local_z - hover
+}
+
+/// The `Hover` visual param id (`avatar_lad.xml` id 11001, the reference's
+/// `AVATAR_HOVER`): a transmitted shape slider that raises / lowers the whole
+/// avatar relative to the ground, added to the root plant (R23).
+const AVATAR_HOVER_PARAM: i32 = 11001;
 
 /// A debug affordance (env `SL_VIEWER_VOLUME_FOCUS`): aim the fly-camera at the
 /// avatar whose shape displaces its **collision volumes** the most (P34.3 / P34.4),
@@ -1041,28 +1081,6 @@ fn volume_morph_gain() -> f32 {
         .filter(|gain| gain.is_finite())
         .unwrap_or(1.0)
 }
-
-/// The extra vertical plant height (R17), in Second Life Z-up metres, a set of
-/// resolved skeletal deformations gives an avatar from its worn shoes: the
-/// reference viewer's `computeBodySize` folds the shoe params' downward foot-bone
-/// offset into `mPelvisToFoot` (the `Shoe_Heels` id 197 / `Shoe_Platform` id 502
-/// `param_skeleton`s offset `mFootLeft` / `mFootRight` by a negative Z, scaled by
-/// the ankle), raising the avatar so its shod feet rest on the ground.
-///
-/// Taken from the left foot (the sides are symmetric); a shoe only ever raises the
-/// avatar, so a non-negative result is used and any spurious lowering is ignored.
-fn shoe_lift(deform: &SkeletalDeformations) -> f32 {
-    let foot_offset_z = deform.offset(FOOT_JOINT)[2];
-    let ankle_scale_z = 1.0 + deform.scale(ANKLE_JOINT)[2];
-    (-foot_offset_z * ankle_scale_z).max(0.0)
-}
-
-/// The skeleton bone the shoe heel / platform params offset downward (R17).
-const FOOT_JOINT: &str = "mFootLeft";
-
-/// The skeleton bone whose scale the shoe foot offset is measured through (R17),
-/// matching the reference viewer's `mPelvisToFoot` `- foot.z * ankle_scale.z`.
-const ANKLE_JOINT: &str = "mAnkleLeft";
 
 /// Spawn one base part's render entity into a skeleton instance: a `SkinnedMesh`
 /// under the body root for a skinned part, or a plain mesh parented to a single
@@ -1484,10 +1502,14 @@ impl AvatarState {
         collider_material: Handle<StandardMaterial>,
         commands: &mut Commands,
     ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
-        let shoe_lift = self.pelvis_lift.get(&agent).copied().unwrap_or(0.0);
+        let root_drop = self
+            .root_drops
+            .get(&agent)
+            .copied()
+            .unwrap_or(body.rest_root_drop);
         let root = commands
             .spawn((
-                body_root_transform(object, body.pelvis_height, shoe_lift),
+                body_root_transform(object, root_drop),
                 Visibility::default(),
                 AvatarAnchor,
             ))
@@ -1612,8 +1634,12 @@ impl AvatarState {
             // orientation transform, a sphere just its translation.
             let transform = match body {
                 Some(body) => {
-                    let shoe_lift = self.pelvis_lift.get(&agent).copied().unwrap_or(0.0);
-                    body_root_transform(object, body.pelvis_height, shoe_lift)
+                    let root_drop = self
+                        .root_drops
+                        .get(&agent)
+                        .copied()
+                        .unwrap_or(body.rest_root_drop);
+                    body_root_transform(object, root_drop)
                 }
                 None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
             };
@@ -3115,6 +3141,8 @@ pub(crate) fn apply_avatar_appearance(
     let mut runtime_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
     let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
+    // The per-avatar root drop resolved from the shape (R23).
+    let mut root_drops: HashMap<AgentKey, f32> = HashMap::new();
     // The shape's collision-volume displacements per avatar (P34.3).
     let mut volumes: HashMap<AgentKey, VolumeDeformations> = HashMap::new();
     // The ingested body-physics configuration per avatar (P34.1).
@@ -3169,6 +3197,15 @@ pub(crate) fn apply_avatar_appearance(
                     .skeleton()
                     .deformed_local_transforms_with(&deform, &volume, &overrides),
             );
+            // The shape's root plant (R23): the `computeBodySize` quantities of
+            // the deformed (and override-posed) chain, lifted by the shape's
+            // `Hover` param, decide how far below the wire Z (the capsule
+            // centre) the body root sits. Worn-shoe foot offsets (R17) fold in
+            // through the metrics' foot term.
+            if let Some(metrics) = library.skeleton().body_size_metrics(&deform, &overrides) {
+                let hover = resolved.weight(AVATAR_HOVER_PARAM).unwrap_or(0.0);
+                root_drops.insert(agent, root_drop_from_metrics(&metrics, hover));
+            }
             if log_geometry {
                 world_matrices.insert(
                     agent,
@@ -3185,21 +3222,31 @@ pub(crate) fn apply_avatar_appearance(
         }
     }
     // Record each avatar's resolved deformations so the animation driver (P18.3)
-    // can re-run the skeletal recurrence with the playing motion folded in, and
-    // fold the worn shoes' heel / platform height into the body's plant height
-    // (R17): the shoe raises the pelvis-to-foot distance, so an already-spawned
-    // (possibly stationary) body is re-planted straight away rather than waiting
-    // for its next position update.
+    // can re-run the skeletal recurrence with the playing motion folded in.
     for (agent, deform) in deformations {
-        let lift = shoe_lift(&deform);
-        let previous = state.pelvis_lift.insert(agent, lift).unwrap_or(0.0);
-        if (lift - previous).abs() > f32::EPSILON
+        let _prev = state.deformations.insert(agent, deform);
+    }
+    // Re-plant each avatar whose resolved root drop changed (R23): the shape
+    // (height sliders, hover, worn shoes, a mesh body's joint overrides) moves
+    // the plant, so an already-spawned (possibly stationary) body is re-planted
+    // straight away rather than waiting for its next position update. The rest
+    // drop is the previous value for an avatar whose appearance resolves for
+    // the first time — the drop its body was spawned with.
+    let rest_drop = library
+        .skeleton()
+        .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
+        .map_or_else(
+            || library.pelvis_height(),
+            |metrics| root_drop_from_metrics(&metrics, 0.0),
+        );
+    for (agent, drop) in root_drops {
+        let previous = state.root_drops.insert(agent, drop).unwrap_or(rest_drop);
+        if (drop - previous).abs() > f32::EPSILON
             && let Some(entities) = state.objects.get(&agent)
             && let Ok(mut transform) = anchors.get_mut(entities.anchor)
         {
-            transform.translation.y -= lift - previous;
+            transform.translation.y -= drop - previous;
         }
-        let _prev = state.deformations.insert(agent, deform);
     }
     // …and its resolved collision-volume displacements, which the same per-frame
     // recurrence folds into the volume joints a rigged mesh body rides (P34.3).
@@ -3868,9 +3915,9 @@ pub(crate) fn position_name_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        AvatarState, BakeAlpha, PROVISIONAL_ID_CHARS, body_root_transform, classify_bake_alpha,
-        coarse_translation, invisible_body_slots, provisional_label, should_refetch_bakes,
-        used_baked_slots, visible_body_bakes,
+        AvatarState, BakeAlpha, BodySizeMetrics, PROVISIONAL_ID_CHARS, body_root_transform,
+        classify_bake_alpha, coarse_translation, invisible_body_slots, provisional_label,
+        root_drop_from_metrics, should_refetch_bakes, used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
@@ -3995,24 +4042,24 @@ mod tests {
     }
 
     /// A body root maps the object position through the Second Life → Bevy axis
-    /// swap and lowers it by the pelvis rest height, so the skeleton's pelvis
-    /// (at that height) lands back at the reported position; with an identity
-    /// facing rotation, the root carries just the basis change.
+    /// swap and lowers it by the resolved root drop (R23) — the wire Z is the
+    /// physics-capsule centre, not the pelvis; with an identity facing
+    /// rotation, the root carries just the basis change.
     #[test]
-    fn body_root_plants_pelvis_at_the_object_position() {
-        let pelvis_height = 1.067;
+    fn body_root_plants_the_capsule_centre_at_the_object_position() {
+        // The rest-shape drop: 0.5·1.707 − 0.979 + 1.067 ≈ 0.94.
+        let root_drop = 0.9415;
         let object = avatar_object_at(Vector {
             x: 10.0,
             y: 20.0,
             z: 30.0,
         });
-        // No worn shoes, so no extra plant height (R17).
-        let transform = body_root_transform(&object, pelvis_height, 0.0);
+        let transform = body_root_transform(&object, root_drop);
         // Second Life (10, 20, 30) → Bevy (10, 30, -20), then lowered in Y by the
-        // pelvis height.
+        // root drop.
         assert_eq!(
             transform.translation,
-            Vec3::new(10.0, 30.0 - pelvis_height, -20.0)
+            Vec3::new(10.0, 30.0 - root_drop, -20.0)
         );
         // An identity object rotation leaves only the basis change at the root.
         assert!(
@@ -4022,34 +4069,36 @@ mod tests {
         );
     }
 
-    /// A worn shoe raises the avatar (R17): a `Shoe_Heels`-style `param_skeleton`
-    /// offsetting `mFootLeft` / `mFootRight` downward at full weight yields a
-    /// positive plant lift equal to that downward offset, while no shoe yields
-    /// none.
+    /// The root drop places the soles at `reported_z − 0.5·body_size_z + hover`
+    /// (R23): with the pelvis `pelvis_local_z` above the root and the soles
+    /// `pelvis_to_foot` below the pelvis, the sole height under the drop is
+    /// independent of `pelvis_to_foot` — the reference's cancellation — and a
+    /// positive hover raises the plant.
     #[test]
-    fn shoe_offset_lifts_the_body() -> Result<(), Box<dyn core::error::Error>> {
-        use sl_client_bevy::{SkeletalDeformations, VisualParams};
-        // A transmitted shoe-heel param (id 0) offsetting the foot bones down by
-        // 0.08 m at full weight, mirroring `avatar_lad.xml`'s `Shoe_Heels`.
-        let lad = r#"<?xml version="1.0"?>
-<linden_avatar version="2.0">
-  <skeleton file_name="avatar_skeleton.xml">
-    <param id="0" group="0" name="Shoe_Heels" value_min="0" value_max="1" value_default="0">
-      <param_skeleton>
-        <bone name="mFootLeft" scale="0 0 0" offset="0 0 -0.08"/>
-        <bone name="mFootRight" scale="0 0 0" offset="0 0 -0.08"/>
-      </param_skeleton>
-    </param>
-  </skeleton>
-</linden_avatar>"#;
-        let params = VisualParams::from_xml(lad)?;
-        // Full heel → planted 0.08 m higher.
-        let full = SkeletalDeformations::from_appearance(&params, &[255]);
-        assert!((super::shoe_lift(&full) - 0.08).abs() < 1.0e-4);
-        // No heel → no lift.
-        let none = SkeletalDeformations::from_appearance(&params, &[0]);
-        assert!(super::shoe_lift(&none).abs() < 1.0e-6);
-        Ok(())
+    fn root_drop_matches_the_reference_sole_height() {
+        let metrics = BodySizeMetrics {
+            pelvis_to_foot: 0.979,
+            body_size_z: 1.707,
+            pelvis_local_z: 1.067,
+        };
+        let drop = root_drop_from_metrics(&metrics, 0.0);
+        // Sole (SL Z) for a report at z: `z − drop` is the root; the pelvis sits
+        // `pelvis_local_z` above it and the sole `pelvis_to_foot` below that.
+        let sole = -drop + metrics.pelvis_local_z - metrics.pelvis_to_foot;
+        assert!((sole - (-0.5 * metrics.body_size_z)).abs() < 1.0e-6);
+        // A worn shoe grows both `pelvis_to_foot` and `body_size_z` by its lift
+        // (the reference folds the foot offset into both), which *raises* the
+        // root by half the lift.
+        let shod = BodySizeMetrics {
+            pelvis_to_foot: 0.979 + 0.08,
+            body_size_z: 1.707 + 0.08,
+            pelvis_local_z: 1.067,
+        };
+        let shod_drop = root_drop_from_metrics(&shod, 0.0);
+        assert!((drop - shod_drop - 0.04).abs() < 1.0e-6);
+        // Hover lifts the whole body directly.
+        let hovered = root_drop_from_metrics(&metrics, 0.25);
+        assert!((drop - hovered - 0.25).abs() < 1.0e-6);
     }
 
     /// Each body region keys its visibility off its own baked slot — the head

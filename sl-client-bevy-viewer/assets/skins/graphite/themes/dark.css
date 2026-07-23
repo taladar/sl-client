@@ -23,4 +23,7 @@
   --control-bg: #14181f;
   --text-primary: #f4f7fb;
   --accent: #7cc9ff;
+  /* The caret follows the brighter text (R28); the selections fall through to
+   * Graphite's. */
+  --caret: #f4f7fb;
 }

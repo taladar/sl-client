@@ -60,6 +60,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::UiSystems;
 // `CssPropertyRegistry`, `RegisterComponentPropertiesExt` and
 // `ReflectStructPropertyRefExt` all arrive through the prelude
@@ -205,6 +206,7 @@ impl Plugin for ViewerSkinPlugin {
         // `PropertyRegistry` / `CssPropertyRegistry` resources exist to extend.
         app.add_plugins(FlairPlugin);
         register_logical_properties(app);
+        register_caret_properties(app);
         app.init_resource::<SkinSelection>()
             .add_systems(
                 Startup,
@@ -220,6 +222,9 @@ impl Plugin for ViewerSkinPlugin {
                     // Tag each focusable widget so the skin's focus-ring rule
                     // reaches it (`viewer-ui-focus-ring-visible`).
                     stamp_focus_ring_class,
+                    // Tag each editable text field so the skin's caret /
+                    // selection / focused-field rules reach it (R28).
+                    stamp_text_field_class,
                 ),
             )
             .add_systems(
@@ -273,6 +278,95 @@ fn stamp_focus_ring_class(
             }
         }
     }
+}
+
+/// The CSS class the scaffold tags every editable text field with (R28), so the
+/// skin's caret / selection colour rule (`.sk-text-field`) and its any-focus
+/// ring (`.sk-text-field:focus`) reach every editor. See
+/// [`stamp_text_field_class`].
+const TEXT_FIELD_CLASS: &str = "sk-text-field";
+
+/// Tag every editable text field with [`TEXT_FIELD_CLASS`] (R28), the caret /
+/// selection counterpart of [`stamp_focus_ring_class`]: keying off
+/// `Added<EditableText>` covers every editor, present and future, with no
+/// per-widget wiring — the caret colours and the focused-field ring come from
+/// the one `common.css` rule pair. The class is merged into whatever
+/// [`ClassList`] the field already carries (a search field keeps its
+/// `sk-search-field`), or a fresh list is inserted when it has none.
+fn stamp_text_field_class(
+    mut commands: Commands,
+    mut fields: Query<(Entity, Option<&mut ClassList>), Added<EditableText>>,
+) {
+    for (entity, class_list) in &mut fields {
+        match class_list {
+            Some(mut list) => {
+                if !list.contains(TEXT_FIELD_CLASS) {
+                    list.add(TEXT_FIELD_CLASS);
+                }
+            }
+            None => {
+                commands
+                    .entity(entity)
+                    .insert(ClassList::new_with_classes([TEXT_FIELD_CLASS]));
+            }
+        }
+    }
+}
+
+/// The skin-driven text-caret and selection colours of one editable text field
+/// (R28), written by the `caret-color` / `selection-color` /
+/// `unfocused-selection-color` CSS properties (the `.sk-text-field` rule in
+/// `common.css`, whose values are the `--caret` / `--selection` /
+/// `--selection-unfocused` role tokens) and folded into the field's
+/// [`bevy::text::TextCursorStyle`] by
+/// [`crate::ui_text_input::drive_caret_blink`].
+///
+/// This component exists because `TextCursorStyle` itself is not reflectable,
+/// so `bevy_flair` cannot drive it directly — the same shim pattern as the
+/// logical box components above. Bevy's default caret colour is a
+/// light-theme slate that is invisible on our near-black field backgrounds,
+/// which was the heart of R28; the defaults here are the visible fallback for
+/// a field the skin has not styled (the reference default: the text colour).
+#[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
+#[properties(auto_insert_remove)]
+#[reflect(Default)]
+pub(crate) struct SkinTextCaret {
+    /// The caret (text cursor) colour.
+    pub(crate) caret: Color,
+    /// The background colour of selected text while the field is focused.
+    pub(crate) selection: Color,
+    /// The background colour of selected text while the field is unfocused.
+    pub(crate) selection_unfocused: Color,
+}
+
+impl Default for SkinTextCaret {
+    /// Visible-on-dark fallbacks for an unskinned field: a white caret (the
+    /// field text colour) and translucent blue-grey selections.
+    fn default() -> Self {
+        Self {
+            caret: Color::WHITE,
+            selection: Color::srgba(0.30, 0.55, 0.90, 0.45),
+            selection_unfocused: Color::srgba(0.45, 0.52, 0.62, 0.35),
+        }
+    }
+}
+
+/// Register the text-caret CSS properties (R28) on the `bevy_flair` registry,
+/// mapping `caret-color` (the standard CSS property) and the two selection
+/// colours onto [`SkinTextCaret`]'s fields. Runs in `build`, before the CSS
+/// asset loader snapshots the registry at plugin `finish`.
+fn register_caret_properties(app: &mut App) {
+    app.register_component_properties::<SkinTextCaret>();
+    let css = app.world().resource::<CssPropertyRegistry>();
+    css.register_property("caret-color", SkinTextCaret::property_field_ref("caret"));
+    css.register_property(
+        "selection-color",
+        SkinTextCaret::property_field_ref("selection"),
+    );
+    css.register_property(
+        "unfocused-selection-color",
+        SkinTextCaret::property_field_ref("selection_unfocused"),
+    );
 }
 
 // ---------------------------------------------------------------------------

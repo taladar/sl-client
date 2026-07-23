@@ -47,7 +47,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::text::{EditableText, TextCursorStyle};
+use bevy::text::EditableText;
 
 use crate::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column};
 use crate::ui_font::UiFont;
@@ -213,8 +213,8 @@ pub(crate) fn setup_text_demo(
                 // [`crate::ui_font`].
                 UiFont::Sans.at(DEMO_FONT_SIZE),
                 TextColor(Color::WHITE),
-                // Draw the caret and selection rectangles.
-                TextCursorStyle::default(),
+                // The caret / selection style is installed by the shared
+                // `install_caret_style` (R28) — no bare default here.
                 // Reachable by `Tab` as well as by clicking, via the scaffold's
                 // tab navigation — ahead of its demo buttons, which take 1 and 2.
                 // `EditableText` lets `Tab` bubble up to the navigation observer

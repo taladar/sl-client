@@ -20,6 +20,13 @@
   --text-muted: #cbd5e2;
   --text-disabled: #737d8f;
 
+  /* Text editing (R28). The caret matches the primary text, the reference
+   * default ("use same color as text for the cursor"); the selections are
+   * translucent so the selected glyphs stay legible, the unfocused one dimmer. */
+  --caret: #e6ebf2;
+  --selection: #4d7fbf73;
+  --selection-unfocused: #73849959;
+
   /* Controls */
   --control-bg: #2a2f3a;
   --control-bg-hover: #353c4a;

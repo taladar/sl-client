@@ -150,6 +150,33 @@
   background-color: var(--control-border);
 }
 
+/* An editable text field (single- or multi-line). Every editor is tagged
+ * `sk-text-field` by the scaffold (src/skin.rs stamp_text_field_class), the way
+ * every focusable is tagged `sk-focusable`, so this one rule routes the caret
+ * and selection colours of every field — chat input, search boxes, the build
+ * window's numeric cells — through the skin (R28). The reference derives its
+ * caret from the theme the same way (`cursor_color` / `TextCursorColor` in
+ * colors.xml); Bevy's built-in default is a light-theme slate that vanishes on
+ * our dark field backgrounds, which is the bug this rule fixes. */
+.sk-text-field {
+  caret-color: var(--caret);
+  selection-color: var(--selection);
+  unfocused-selection-color: var(--selection-unfocused);
+}
+
+/* A focused text field shows the focus ring however focus arrived — mouse or
+ * keyboard — where every other widget rings only on :focus-visible (Tab). The
+ * reference lights a focused editor's keyboard-focus border highlight
+ * unconditionally (`mBorder->setKeyboardFocusHighlight`), and R28 found the
+ * caret alone too subtle a cue for "am I typing here?". Same outline mechanism
+ * as `.sk-focusable:focus-visible`, so it never reflows the field; the base
+ * `.sk-focusable` rule's zero width is what it collapses back to on blur. */
+.sk-text-field:focus {
+  outline-color: var(--focus-ring);
+  outline-width: 2px;
+  outline-offset: 1px;
+}
+
 /* The reusable search box (viewer-ui-search-field) — a single-line text input,
  * so it takes the skin's control surface, like the other editable fields. Used by
  * the menu-bar filter and the inventory filter. */

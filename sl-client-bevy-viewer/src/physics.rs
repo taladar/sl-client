@@ -68,7 +68,7 @@
 //! shared [`MotionState`] + [`advance_motion`] step drive both the object and avatar
 //! paths; they differ only in that ground floor. Avatars stay kinematic
 //! (sim-authoritative); the predicted motion is applied to the anchor as a
-//! translation delta so the pelvis / shoe render offset is preserved.
+//! translation delta so the root-drop render offset (R23) is preserved.
 //!
 //! No `sl-client-tokio` counterpart is needed: like the render materials and the
 //! other viewer-only simulations (sky, water, particles), the physics world is a
@@ -1101,7 +1101,7 @@ impl AvatarMotion {
 /// [`drive_avatar_motion`]: the shared dead-reckoning prediction plus the avatar's
 /// ground-floor height and whether its anchor carries the object rotation. Unlike
 /// the object path, this driver moves the anchor by the *delta* between successive
-/// predictions, so the pelvis / shoe vertical render offset (owned by
+/// predictions, so the root-drop vertical render offset (R23, owned by
 /// [`apply_object`](crate::avatars) and refreshed by the appearance path) is left
 /// untouched.
 #[derive(Component)]
@@ -1176,7 +1176,7 @@ impl AvatarInterp {
 /// floor** ([`avatar_ground_floor`]) so a laggy avatar does not sink under the
 /// terrain. The avatar stays kinematic (sim-authoritative); the predicted motion is
 /// applied to the anchor as a translation *delta* (plus, for a rigged body, the
-/// predicted orientation), leaving the pelvis / shoe render offset intact.
+/// predicted orientation), leaving the root-drop render offset intact.
 pub(crate) fn drive_avatar_motion(
     time: Res<Time>,
     liveness: Res<CircuitLiveness>,
@@ -1265,7 +1265,7 @@ pub(crate) fn drive_avatar_motion(
 
         // Apply the Second Life-space position change as a Bevy translation delta
         // (the basis change is linear, so the delta converts directly), so the
-        // pelvis / shoe vertical render offset baked into the anchor is preserved.
+        // root-drop vertical render offset (R23) baked into the anchor is preserved.
         let [prev_x, prev_y, prev_z] = previous;
         let [next_x, next_y, next_z] = interp.motion.position;
         let delta = sl_to_bevy_vec(&Vector {

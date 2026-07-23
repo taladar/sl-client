@@ -2,7 +2,7 @@
 id: viewer-p29-2
 title: Drive its animations
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Phase 29 — Animesh
 ---
 
@@ -154,6 +154,32 @@ each signalled part through `animesh_root` and **merge all parts of a
 linkset** into the root's control avatar; spawn the control avatar early
 when *any* part of an animated linkset has an animation. Stop pruning
 `playing` by tracked-object liveness.
+
+### Fix implemented (2026-07-23) — verified live
+
+Both defects fixed along the triaged fix direction, mirroring Firestorm:
+
+- **`ControlAvatarState.playing` now keys by the signalled *part*** (the
+  `ObjectAnimation` sender), documented as such, and is **persistent**: it
+  survives the part being untracked (`prune_control_avatars` no longer
+  touches it; the reference's session-lifetime
+  `LLObjectSignaledAnimationMap`), with a `MAX_SIGNALLED_PARTS` (4096)
+  safety cap that, only when exceeded, drops never-tracked parts. The
+  early-arrival buffer therefore survives arbitrary arrival order.
+- **Part → root resolution + linkset merge**: `drive_control_avatars`
+  resolves every signalled part up its linkset via `animesh_root` (bulk
+  full-key→scoped lookup `ObjectState::scoped_by_full_keys`, one pass) and
+  merges all parts' sets into the root's control avatar before blending —
+  the reference's whole-linkset `updateAnimations` merge. A child-keyed
+  animation now drives its flagged root.
+- **Early spawn keys on the linkset, not the root**:
+  `spawn_animesh_control_avatars` spawns a control avatar for every root
+  any of whose parts is signalled, resolved the same way.
+
+**Verified live on aditi (2026-07-23): the Mario animeshes animate.** One
+follow-up filed from the same session: each Mario sits inside an
+almost-transparent box shell ([[viewer-animesh-transparent-box-shell]]),
+likely the root prim's own transparent geometry vs. the reference's cull.
 
 ### Local OpenSim repro (removes the aditi dependency)
 

@@ -27,9 +27,9 @@ use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    BakeRegion, CAP_UPLOAD_BAKED_TEXTURE, Command, SlCapabilities, SlCommand, SlEvent,
-    SlSessionEvent, TextureEntry, TextureFace, TextureKey, Uuid, Vector, avatar_texture,
-    encode_texture_entry,
+    BakeRegion, CAP_UPLOAD_BAKED_TEXTURE, Command, JointOverrides, ResolvedParams,
+    SkeletalDeformations, SlCapabilities, SlCommand, SlEvent, SlSessionEvent, TextureEntry,
+    TextureFace, TextureKey, Uuid, Vector, avatar_texture, encode_texture_entry,
 };
 use sl_texture::encode_j2c;
 
@@ -45,13 +45,43 @@ const UPLOAD_TIMEOUT_SECS: f32 = 30.0;
 /// fixed strictly-positive serial is enough (0 would reset the sequence).
 const PUBLISH_SERIAL: u32 = 1;
 
-/// The advertised avatar bounding box (metres) — a plausible human size. Not
-/// load-bearing for the bake exchange; a real box is a shape-fidelity follow-up.
+/// The fallback advertised avatar bounding box (metres), used only in
+/// placeholder-sphere mode (no character assets to compute a real height
+/// from). The X/Y are the reference's `DEFAULT_AGENT_DEPTH` / `_WIDTH` —
+/// `computeBodySize` never measures those ("TODO -- measure the real depth
+/// and width") — and the real path keeps them while replacing Z.
+///
+/// The advertised Z is **load-bearing** (R23): OpenSim's `SetSize` takes the
+/// client's word for the avatar height, sizes the physics capsule with it, and
+/// reports the avatar's wire Z as the capsule *centre* — so a Z that disagrees
+/// with the height the viewer renders (`body_size_metrics` of the same shape)
+/// plants the avatar off the ground by half the difference. A fixed `1.9` here
+/// floated the own avatar by a few centimetres.
 const AVATAR_SIZE: Vector = Vector {
     x: 0.45,
     y: 0.6,
     z: 1.9,
 };
+
+/// The advertised avatar bounding box for the published shape: the reference's
+/// `mBodySize` — depth / width fixed ([`AVATAR_SIZE`]), height the
+/// `computeBodySize` body size of exactly the `visual_params` being published,
+/// so the simulator's capsule height matches the height this viewer renders
+/// the avatar at (R23). Firestorm on OpenSim advertises plain `mBodySize` too
+/// (its Havok hover adjustment is Second Life-only). Worn-mesh joint overrides
+/// are not folded in here — the publish happens at login, before any rigged
+/// mesh resolves; the reference's later corrective re-sends are a follow-up.
+fn advertised_size(library: &AvatarAssetLibrary, visual_params: &[u8]) -> Vector {
+    let resolved = ResolvedParams::from_appearance(library.params(), visual_params);
+    let deform = SkeletalDeformations::from_resolved(library.params(), &resolved);
+    library
+        .skeleton()
+        .body_size_metrics(&deform, &JointOverrides::default())
+        .map_or(AVATAR_SIZE, |metrics| Vector {
+            z: metrics.body_size_z,
+            ..AVATAR_SIZE
+        })
+}
 
 /// The number of neutral visual parameters advertised (a full modern set); the
 /// simulator accepts any length, and the exact count is not load-bearing.
@@ -115,6 +145,7 @@ fn neutral_visual_params() -> Vec<u8> {
 fn publish_appearance(
     uploaded: &HashMap<usize, TextureKey>,
     visual_params: Vec<u8>,
+    size: Vector,
     writer: &mut MessageWriter<SlCommand>,
 ) {
     if uploaded.is_empty() {
@@ -135,7 +166,7 @@ fn publish_appearance(
     let entry = TextureEntry { faces };
     writer.write(SlCommand(Command::SetAppearance {
         serial: PUBLISH_SERIAL,
-        size: AVATAR_SIZE,
+        size,
         texture_entry: encode_texture_entry(&entry),
         visual_params,
         wearable_cache,
@@ -229,14 +260,18 @@ pub(crate) fn drive_bake_publish(
                 }
             }
             // The queue is drained and nothing is in flight: publish the
-            // appearance with the avatar's real worn shape (R12), or a neutral
-            // fallback if the character assets are absent (placeholder-sphere mode).
-            let visual_params = library
-                .as_ref()
-                .map_or_else(neutral_visual_params, |library| {
-                    inputs.visual_params(library.params())
-                });
-            publish_appearance(&publish.uploaded, visual_params, &mut writer);
+            // appearance with the avatar's real worn shape (R12) and the body
+            // size that shape computes to (R23), or neutral fallbacks if the
+            // character assets are absent (placeholder-sphere mode).
+            let (visual_params, size) = match library.as_ref() {
+                Some(library) => {
+                    let visual_params = inputs.visual_params(library.params());
+                    let size = advertised_size(library, &visual_params);
+                    (visual_params, size)
+                }
+                None => (neutral_visual_params(), AVATAR_SIZE),
+            };
+            publish_appearance(&publish.uploaded, visual_params, size, &mut writer);
             publish.stage = PublishStage::Done;
         }
         PublishStage::Done => {}

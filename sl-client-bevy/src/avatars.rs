@@ -343,6 +343,28 @@ impl AnimationPose {
     }
 }
 
+/// The reference viewer's `computeBodySize` quantities for one avatar shape
+/// (Second Life Z-up metres), from [`BevySkeleton::body_size_metrics`] — what
+/// the viewer needs to place the body root from an avatar's wire position
+/// (the physics-capsule centre, R23).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodySizeMetrics {
+    /// The reference's `mPelvisToFoot`: the vertical distance from the pelvis
+    /// joint down to the sole (it includes the foot-below-ankle segment).
+    /// ≈ 0.979 m at rest.
+    pub pelvis_to_foot: f32,
+    /// The reference's `mBodySize.z`: sole to (approximate) top of head —
+    /// the avatar height the simulator's physics capsule is sized by.
+    /// ≈ 1.707 m at rest.
+    pub body_size_z: f32,
+    /// The pelvis joint's current local (root-relative) Z — where the skeleton
+    /// instance's `mPelvis` sits above the body-root entity (1.067 m at rest).
+    /// The reference zeroes its pelvis under `mRoot` instead
+    /// (`llavatarappearance.cpp` `buildSkeleton`), so a consumer placing a root
+    /// *below* an un-zeroed pelvis must subtract this.
+    pub pelvis_local_z: f32,
+}
+
 impl BevySkeleton {
     /// Builds the Bevy skeleton data from a parsed [`Skeleton`].
     ///
@@ -708,6 +730,80 @@ impl BevySkeleton {
     #[must_use]
     pub fn find(&self, name: &str) -> Option<usize> {
         self.lookup.get(name).copied()
+    }
+
+    /// The avatar's body-size quantities under `deform` and `overrides` — a port
+    /// of the reference viewer's `LLAvatarAppearance::computeBodySize`
+    /// (`llavatarappearance.cpp`), which the viewer needs to plant the avatar
+    /// root: the wire position of an avatar is its physics-capsule **centre**
+    /// (OpenSim's `ScenePresence` reports `ground + 0.5 · AvatarHeight`), so the
+    /// sole height is `reported_z − 0.5 · body_size_z` and the pelvis sits
+    /// `pelvis_to_foot` above that (R23).
+    ///
+    /// Each term uses the joint chain's **current** local position and scale the
+    /// way [`deformed_world_matrices`](Self::deformed_world_matrices) resolves
+    /// them — rest + appearance deformation, with a rig position override
+    /// replacing the position (and pinning the scale when the rig locks it) — so
+    /// the result tracks the shape sliders (a short avatar's correction is half
+    /// its *scaled* height), worn-shoe foot offsets (`Shoe_Heels` /
+    /// `Shoe_Platform` push `mFoot*` down, growing both quantities), and a mesh
+    /// body's repositioned skeleton, exactly as the reference's does.
+    ///
+    /// `None` when any joint of the reference formula's chain is missing (a
+    /// malformed skeleton).
+    #[must_use]
+    pub fn body_size_metrics(
+        &self,
+        deform: &SkeletalDeformations,
+        overrides: &JointOverrides,
+    ) -> Option<BodySizeMetrics> {
+        // A chain joint's current local position/scale Z, resolved exactly like
+        // `deformed_world_matrices`: an override replaces the position (and pins
+        // the scale when locked); otherwise the appearance deformation shifts /
+        // scales the rest transform.
+        let joint = |name: &str| -> Option<(f32, f32)> {
+            let index = self.find(name)?;
+            let local = self.locals.get(index)?;
+            let override_pos = overrides.position(index);
+            let position_z = match override_pos {
+                Some(position) => position.z,
+                None => local.translation.z + deform.offset(name)[2],
+            };
+            let scale_z = if override_pos.is_some() && overrides.lock_scale() {
+                local.scale.z
+            } else {
+                local.scale.z + deform.scale(name)[2]
+            };
+            Some((position_z, scale_z))
+        };
+        let (pelvis_z, pelvis_scale) = joint("mPelvis")?;
+        let (torso_z, torso_scale) = joint("mTorso")?;
+        let (chest_z, chest_scale) = joint("mChest")?;
+        let (neck_z, neck_scale) = joint("mNeck")?;
+        let (head_z, head_scale) = joint("mHead")?;
+        let (skull_z, _skull_scale) = joint("mSkull")?;
+        let (hip_z, hip_scale) = joint("mHipLeft")?;
+        let (knee_z, knee_scale) = joint("mKneeLeft")?;
+        let (ankle_z, ankle_scale) = joint("mAnkleLeft")?;
+        let (foot_z, _foot_scale) = joint("mFootLeft")?;
+        // The reference formula verbatim, including its sign quirk on the hip
+        // term (the hip offset is *added* where the rest of the leg chain is
+        // subtracted) and the √2 skull approximation "to get to the top of the
+        // head". Each segment is scaled by its *parent's* local scale — the
+        // `scaleChildOffset` semantics of the recurrence above.
+        let pelvis_to_foot =
+            hip_z * pelvis_scale - knee_z * hip_scale - ankle_z * knee_scale - foot_z * ankle_scale;
+        let body_size_z = pelvis_to_foot
+            + std::f32::consts::SQRT_2 * skull_z * head_scale
+            + head_z * neck_scale
+            + neck_z * chest_scale
+            + chest_z * torso_scale
+            + torso_z * pelvis_scale;
+        Some(BodySizeMetrics {
+            pelvis_to_foot,
+            body_size_z,
+            pelvis_local_z: pelvis_z,
+        })
     }
 
     /// The canonical name of the joint at `index` (including any appended
@@ -1316,6 +1412,125 @@ mod tests {
             assert!(rest.scale.abs_diff_eq(moved.scale, 1e-4));
             assert!(rest.rotation.abs_diff_eq(moved.rotation, 1e-4));
         }
+        Ok(())
+    }
+
+    /// A skeleton carrying the full `computeBodySize` joint chain (spine to
+    /// skull plus the left leg to the foot) at the real `avatar_skeleton.xml`
+    /// rest positions, so the reference quantities (`mPelvisToFoot` ≈ 0.979,
+    /// `mBodySize.z` ≈ 1.707) can be asserted.
+    const BODY_CHAIN_SKELETON: &str = r#"<?xml version="1.0"?>
+<linden_skeleton num_bones="10" num_collision_volumes="0" version="2.0">
+  <bone connected="false" end="0.000 0.000 0.084" group="Torso" name="mPelvis" pivot="0.000000 0.000000 1.067015" pos="0.000 0.000 1.067" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+    <bone connected="true" end="-0.015 0.000 0.205" group="Torso" name="mTorso" pivot="0.000000 0.000000 0.084073" pos="0.000 0.000 0.084" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+      <bone connected="true" end="-0.010 0.000 0.250" group="Torso" name="mChest" pivot="-0.015368 0.000000 0.204877" pos="-0.015 0.000 0.205" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+        <bone connected="true" end="0.000 0.000 0.076" group="Torso" name="mNeck" pivot="-0.009507 0.000000 0.251108" pos="-0.010 0.000 0.251" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+          <bone connected="true" end="0.000 0.000 0.079" group="Torso" name="mHead" pivot="0.000000 -0.000000 0.075630" pos="0.000 -0.000 0.076" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+            <bone connected="true" end="0.000 0.000 0.033" group="Torso" name="mSkull" pivot="0.000000 0.000000 0.079000" pos="0.000 0.000 0.079" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base"/>
+          </bone>
+        </bone>
+      </bone>
+    </bone>
+    <bone connected="false" end="-0.001 -0.046 -0.491" group="Leg" name="mHipLeft" pivot="0.033757 0.126765 -0.040998" pos="0.034 0.127 -0.041" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+      <bone connected="true" end="-0.029 0.001 -0.468" group="Leg" name="mKneeLeft" pivot="-0.000887 -0.045568 -0.491053" pos="-0.001 -0.046 -0.491" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+        <bone connected="true" end="0.112 0.000 -0.061" group="Leg" name="mAnkleLeft" pivot="-0.028887 0.001378 -0.468449" pos="-0.029 0.001 -0.468" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base">
+          <bone connected="true" end="0.105 0.000 0.000" group="Leg" name="mFootLeft" pivot="0.111956 -0.000000 -0.060620" pos="0.112 -0.000 -0.061" rot="0.000000 0.000000 0.000000" scale="1.000 1.000 1.000" support="base"/>
+        </bone>
+      </bone>
+    </bone>
+  </bone>
+</linden_skeleton>"#;
+
+    #[test]
+    fn body_size_metrics_match_the_reference_rest_values() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(BODY_CHAIN_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let metrics = bevy
+            .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
+            .ok_or("chain complete")?;
+        // The reference rest quantities (`llavatarappearance.cpp`
+        // `computeBodySize` on the stock skeleton): `mPelvisToFoot` ≈ 0.979 m,
+        // `mBodySize.z` ≈ 1.707 m, and the pelvis rests 1.067 m above the root.
+        assert!(
+            (metrics.pelvis_to_foot - 0.979).abs() < 2.0e-3,
+            "pelvis_to_foot {}",
+            metrics.pelvis_to_foot
+        );
+        assert!(
+            (metrics.body_size_z - 1.707).abs() < 2.0e-3,
+            "body_size_z {}",
+            metrics.body_size_z
+        );
+        assert!((metrics.pelvis_local_z - 1.067).abs() < 1.0e-3);
+        Ok(())
+    }
+
+    #[test]
+    fn a_shoe_foot_offset_grows_both_body_metrics() -> Result<(), TestError> {
+        // A `Shoe_Heels`-style transmitted param offsetting the foot bone down
+        // 0.08 m at full weight: the reference folds it into `mPelvisToFoot`
+        // (via `- foot.z * ankle_scale.z`), and `mBodySize.z` inherits it.
+        let lad = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="0" group="0" name="Shoe_Heels" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mFootLeft" scale="0 0 0" offset="0 0 -0.08"/>
+        <bone name="mFootRight" scale="0 0 0" offset="0 0 -0.08"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+</linden_avatar>"#;
+        let skeleton = Skeleton::from_xml(BODY_CHAIN_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let params = VisualParams::from_xml(lad)?;
+        let overrides = JointOverrides::default();
+        let rest = bevy
+            .body_size_metrics(&SkeletalDeformations::default(), &overrides)
+            .ok_or("rest metrics")?;
+        let shod = bevy
+            .body_size_metrics(
+                &SkeletalDeformations::from_appearance(&params, &[255]),
+                &overrides,
+            )
+            .ok_or("shod metrics")?;
+        assert!((shod.pelvis_to_foot - rest.pelvis_to_foot - 0.08).abs() < 1.0e-4);
+        assert!((shod.body_size_z - rest.body_size_z - 0.08).abs() < 1.0e-4);
+        Ok(())
+    }
+
+    #[test]
+    fn a_parent_scale_stretches_its_segment_in_the_body_metrics() -> Result<(), TestError> {
+        // A height-style skeletal param scaling `mKneeLeft` up 10% along Z: the
+        // ankle segment hangs off the knee, so `mPelvisToFoot` grows by 10% of
+        // the ankle offset (`- ankle.z * knee_scale.z`), and `mBodySize.z`
+        // inherits it — the `scaleChildOffset` semantics.
+        let lad = r#"<?xml version="1.0"?>
+<linden_avatar version="2.0">
+  <skeleton file_name="avatar_skeleton.xml">
+    <param id="0" group="0" name="Leg_Length" value_min="0" value_max="1" value_default="0">
+      <param_skeleton>
+        <bone name="mKneeLeft" scale="0 0 0.1" offset="0 0 0"/>
+      </param_skeleton>
+    </param>
+  </skeleton>
+</linden_avatar>"#;
+        let skeleton = Skeleton::from_xml(BODY_CHAIN_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let params = VisualParams::from_xml(lad)?;
+        let overrides = JointOverrides::default();
+        let rest = bevy
+            .body_size_metrics(&SkeletalDeformations::default(), &overrides)
+            .ok_or("rest metrics")?;
+        let tall = bevy
+            .body_size_metrics(
+                &SkeletalDeformations::from_appearance(&params, &[255]),
+                &overrides,
+            )
+            .ok_or("tall metrics")?;
+        // ankle.z ≈ −0.468, so the −ankle.z·knee_scale term grows by 0.0468.
+        assert!((tall.pelvis_to_foot - rest.pelvis_to_foot - 0.0468).abs() < 1.0e-3);
+        assert!((tall.body_size_z - rest.body_size_z - 0.0468).abs() < 1.0e-3);
         Ok(())
     }
 

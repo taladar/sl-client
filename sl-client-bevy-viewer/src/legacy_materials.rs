@@ -92,6 +92,13 @@ pub(crate) struct LegacyMaterialManager {
 }
 
 impl LegacyMaterialManager {
+    /// The decoded legacy material for `id`, if its `RenderMaterials` fetch has
+    /// succeeded — a read-only lookup for the pick diagnostic (R25), which uses
+    /// it to tell a fetched-but-opaque material from a missing fetch.
+    pub(crate) fn decoded_material(&self, id: &Uuid) -> Option<&LegacyMaterial> {
+        self.decoded.get(id)
+    }
+
     /// Register a face material handle against its legacy material id: park the
     /// handle until the material arrives and queue the id for fetch if it is not
     /// already known / requested.
@@ -163,6 +170,11 @@ fn roughness_from_glossiness(glossiness: u8) -> f32 {
 fn reflectance_from_environment(environment_intensity: u8) -> f32 {
     f32::from(environment_intensity) / 255.0
 }
+
+/// The tint alpha at or above which a face counts as opaque for the legacy
+/// alpha-mode override — the reference viewer's `blinn_phong_transparent`
+/// threshold (`te->getColor().mV[3] < 0.999f`, `llvovolume.cpp`).
+const OPAQUE_TINT_ALPHA: f32 = 0.999;
 
 /// The [`AlphaMode`] a face's `LLMaterial` diffuse alpha mode forces — the
 /// authoritative per-face alpha property (the "alpha mode" control in the reference
@@ -301,8 +313,20 @@ pub(crate) fn apply_legacy_materials(
 pub(crate) fn apply_legacy_scalars(standard: &mut StandardMaterial, material: &LegacyMaterial) {
     standard.reflectance = reflectance_from_environment(material.environment_intensity);
     standard.perceptual_roughness = roughness_from_glossiness(material.specular_exponent);
-    standard.alpha_mode =
-        legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
+    // A translucent TE tint wins over the material's diffuse alpha mode (R25): the
+    // reference viewer ORs `te->getColor().mV[3] < 0.999f` into `is_alpha` and
+    // registers the alpha pass *before* the material-pass dispatch
+    // (`llvovolume.cpp` `getDrawInfo`), so a tinted-transparent face stays in the
+    // blend pass for *every* material mode — the material's mode only decides the
+    // pass when the tint is opaque. On this legacy path `base_color` still holds
+    // the TE tint (only the PBR path replaces it), so its alpha is that tint's.
+    // Without this guard the common "transparent prim that also carries a
+    // shiny/bump material" content (whose `LLMaterial` defaults to alpha mode
+    // `NONE`) was forced opaque the moment its material arrived.
+    if standard.base_color.alpha() >= OPAQUE_TINT_ALPHA {
+        standard.alpha_mode =
+            legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
+    }
     // A material that carries no normal map clears any it had previously.
     if material.normal_map.uuid().is_nil() {
         standard.normal_map_texture = None;
@@ -399,5 +423,63 @@ mod tests {
             AlphaMode::Blend
         ));
         assert!(matches!(legacy_alpha_override(3, 0), AlphaMode::Opaque));
+    }
+
+    /// A [`LegacyMaterial`] whose alpha fields are `diffuse_alpha_mode` /
+    /// `alpha_mask_cutoff` and everything else the wire default.
+    fn material_with_alpha(diffuse_alpha_mode: u8, alpha_mask_cutoff: u8) -> LegacyMaterial {
+        LegacyMaterial {
+            normal_map: TextureKey::from(Uuid::nil()),
+            normal_offset: (0.0, 0.0),
+            normal_repeat: (1.0, 1.0),
+            normal_rotation: 0.0,
+            specular_map: TextureKey::from(Uuid::nil()),
+            specular_offset: (0.0, 0.0),
+            specular_repeat: (1.0, 1.0),
+            specular_rotation: 0.0,
+            specular_color: [255, 255, 255, 255],
+            specular_exponent: 51,
+            environment_intensity: 0,
+            diffuse_alpha_mode,
+            alpha_mask_cutoff,
+        }
+    }
+
+    #[test]
+    fn translucent_tint_wins_over_the_material_alpha_mode() {
+        // R25: a translucent TE tint keeps the face in the blend pass whatever
+        // the material's diffuse alpha mode says — the reference ORs
+        // `color.a < 0.999` into `is_alpha` before the material-pass dispatch,
+        // and the common tinted-transparent-plus-shiny content carries a
+        // default (`NONE`) material that would otherwise force it opaque.
+        let mut standard = StandardMaterial {
+            base_color: bevy::color::Color::srgba(1.0, 1.0, 1.0, 0.5),
+            alpha_mode: AlphaMode::Blend,
+            ..StandardMaterial::default()
+        };
+        apply_legacy_scalars(&mut standard, &material_with_alpha(0, 0));
+        assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
+        // EMISSIVE would also have forced opaque; the tint still wins.
+        apply_legacy_scalars(&mut standard, &material_with_alpha(3, 0));
+        assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
+    }
+
+    #[test]
+    fn opaque_tint_takes_the_material_alpha_mode() {
+        // With an opaque tint the material's mode is authoritative, in both
+        // directions: NONE forces an alpha-textured face opaque, BLEND forces a
+        // previously-opaque face into the transparent path.
+        let mut standard = StandardMaterial {
+            base_color: bevy::color::Color::srgba(1.0, 1.0, 1.0, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            ..StandardMaterial::default()
+        };
+        apply_legacy_scalars(&mut standard, &material_with_alpha(0, 0));
+        assert!(matches!(standard.alpha_mode, AlphaMode::Opaque));
+        apply_legacy_scalars(
+            &mut standard,
+            &material_with_alpha(DIFFUSE_ALPHA_MODE_BLEND, 0),
+        );
+        assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
     }
 }

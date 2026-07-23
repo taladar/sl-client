@@ -25,7 +25,6 @@ use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
 
-use crate::input_context::InputContext;
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use sl_cef::{KeyInput, MouseButton as MediaMouseButton, SurfaceConfig};
@@ -423,12 +422,16 @@ fn resize_browser_surfaces(
 
 /// Mirror `bevy_input_focus` onto the engine: the view under focus gets
 /// engine focus, the one that lost it gives it up.
+///
+/// Deliberately no `InputContext` parameter: this system also runs in the
+/// gallery, which has no input-context resource — an unused `Res<InputContext>`
+/// here failed Bevy's parameter validation and panicked the gallery at startup
+/// (found during the R28 caret verification).
 fn sync_browser_focus(
     focus: Res<InputFocus>,
     mut last: ResMut<FocusedBrowserView>,
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
-    _context: Res<InputContext>,
 ) {
     let current = focus.get().filter(|entity| views.contains(*entity));
     if current == last.0 {

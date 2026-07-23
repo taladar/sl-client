@@ -50,3 +50,13 @@ Shape of the check:
   do not read a discrepancy there as a failure of the lift.
 - Flat ground only. A slope would confound the plant height with the terrain
   probe.
+
+**Update (2026-07-23, [[viewer-r23]]):** the `pelvis_lift` mechanism this
+task describes is gone — the shoe's foot offset now folds into the
+`computeBodySize` port (`BevySkeleton::body_size_metrics`), as in the
+reference: both `pelvis_to_foot` and `body_size_z` grow by the lift, so the
+root rises by **half** the lift (the old additive term was full-lift and in
+the wrong direction — subtracted, i.e. lowering). The check itself stands,
+now on the R23 plant: log the resolved metrics for a shod avatar (a zero
+foot-offset delta on an avatar in heels is the failure to catch) and A/B the
+plant against Firestorm.

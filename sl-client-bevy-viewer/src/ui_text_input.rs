@@ -81,13 +81,19 @@
 //! Reference (Firestorm, read-only): `lllineeditor`, `lltexteditor`,
 //! `lltextvalidate` (`LLTextValidate::validate*`), `llpreeditor` (the IME model).
 
+use std::time::Duration;
+
+use bevy::input::keyboard::KeyboardInput;
+use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::{
     EditableText, EditableTextFilter, EditableTextSystems, FontCx, LayoutCx, TextCursorStyle,
+    TextEdit,
 };
 use bevy::ui::UiSystems;
 
+use crate::skin::SkinTextCaret;
 use crate::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -461,7 +467,8 @@ pub(crate) fn spawn_text_input(
         editor,
         font.at(spec.font_size),
         TextColor(FIELD_TEXT_COLOR),
-        TextCursorStyle::default(),
+        // No `TextCursorStyle` here: [`install_caret_style`] installs the shared
+        // skin-driven caret + blink machinery on every editor (R28).
         TabIndex(spec.tab_index),
         node,
         TextMayClip {
@@ -492,26 +499,330 @@ pub(crate) fn spawn_text_input(
     field.id()
 }
 
-/// The plugin for the widget's runtime half: the numeric structural validator.
+// ---------------------------------------------------------------------------
+// Caret visibility (R28): skin-driven colour, reference blink envelope,
+// overwrite mode.
+// ---------------------------------------------------------------------------
+
+/// How long the caret stays solid after focus arrives or a keystroke lands,
+/// before it starts flashing — the reference viewer's `CURSOR_FLASH_DELAY`
+/// (`lllineeditor.cpp` / `lltextbase.cpp`).
+const CURSOR_FLASH_DELAY_SECS: f64 = 1.0;
+
+/// The caret's flash period once it is flashing: a 1 Hz square wave, half on /
+/// half off, as the reference draws it.
+const CURSOR_BLINK_PERIOD_SECS: f64 = 1.0;
+
+/// The `EditableText::cursor_blink_period` every field is pinned to: long
+/// enough that Bevy's own caret blink (visible for the first half of the
+/// period, on a timer this code cannot read) never hides the caret, leaving the
+/// envelope entirely to [`drive_caret_blink`] — which reproduces the
+/// reference's solid-then-flash behaviour instead of Bevy's immediate flash.
+const CARET_HOLD_PERIOD: Duration = Duration::from_secs(3600);
+
+/// The caret width, relative to the font size, in **insert** mode — Bevy's
+/// default thin bar.
+const INSERT_CARET_WIDTH: f32 = 0.2;
+
+/// The caret width, relative to the font size, in **overwrite** mode: roughly a
+/// glyph advance, so the caret reads as a block covering the next glyph (the
+/// reference's Insert-key block caret, "at least a space wide").
+const OVERWRITE_CARET_WIDTH: f32 = 0.55;
+
+/// The opacity of the block caret in overwrite mode: translucent, so the glyph
+/// it covers stays legible. (The reference re-renders the covered glyph in the
+/// inverted text colour instead; `bevy_ui` draws the caret as a plain rectangle
+/// over the glyph, so translucency is the closest available reading.)
+const OVERWRITE_CARET_ALPHA: f32 = 0.6;
+
+/// Whether text entry is in **overwrite** mode (R28): toggled globally by the
+/// Insert key, like the reference's `gKeyboard->toggleInsertMode()`
+/// (`LL_KIM_INSERT` / `LL_KIM_OVERWRITE`). In overwrite mode the caret is a
+/// block over the next glyph and typing replaces instead of inserting.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub(crate) struct OverwriteMode(pub(crate) bool);
+
+/// The per-field caret blink state (R28), installed alongside the shared
+/// [`TextCursorStyle`] by [`install_caret_style`] and driven by
+/// [`drive_caret_blink`].
+#[derive(Component, Default)]
+pub(crate) struct CaretBlink {
+    /// Elapsed seconds at the last activity (focus gained, or a keystroke while
+    /// focused) — the caret holds solid for [`CURSOR_FLASH_DELAY_SECS`] after
+    /// this before flashing.
+    last_activity: f64,
+    /// The editor's layout generation last seen, so an edit arriving through a
+    /// non-keyboard path (IME commit, programmatic insert) also re-solidifies
+    /// the caret.
+    last_generation: Option<parley::Generation>,
+}
+
+impl std::fmt::Debug for CaretBlink {
+    /// Manual, because `parley::Generation` is not `Debug`; the generation is
+    /// shown only by presence.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaretBlink")
+            .field("last_activity", &self.last_activity)
+            .field("last_generation", &self.last_generation.map(|_gen| "…"))
+            .finish()
+    }
+}
+
+/// The shared caret / selection style every editable field starts from (R28):
+/// the caret in the field's text colour (the reference default — the line
+/// editor draws its cursor "the same color as text"), selections in the
+/// fallback [`SkinTextCaret`] colours. [`drive_caret_blink`] re-derives all of
+/// it every frame from the skin (`.sk-text-field` → [`SkinTextCaret`]) once one
+/// applies; this initial value is what an unskinned first frame shows.
+fn viewer_caret_style(text_color: Color) -> TextCursorStyle {
+    let fallback = SkinTextCaret::default();
+    TextCursorStyle {
+        color: text_color,
+        selection_color: fallback.selection,
+        unfocused_selection_color: fallback.selection_unfocused,
+        selected_text_color: None,
+    }
+}
+
+/// Install the caret machinery on every newly-spawned editable field (R28):
+/// the shared [`TextCursorStyle`] (visible on our dark fields, where Bevy's
+/// light-theme slate default was effectively invisible — the heart of R28), the
+/// [`CaretBlink`] state, the blink-hold period, and the current overwrite-mode
+/// caret width. Keyed off `Added<EditableText>` so every editor, present and
+/// future, gets a visible caret with no per-site wiring.
+fn install_caret_style(
+    mut commands: Commands,
+    overwrite: Res<OverwriteMode>,
+    mut fields: Query<(Entity, &mut EditableText, Option<&TextColor>), Added<EditableText>>,
+) {
+    for (entity, mut editable, text_color) in &mut fields {
+        editable.cursor_blink_period = CARET_HOLD_PERIOD;
+        editable.cursor_width = if overwrite.0 {
+            OVERWRITE_CARET_WIDTH
+        } else {
+            INSERT_CARET_WIDTH
+        };
+        let text_color = text_color.map_or(Color::WHITE, |color| color.0);
+        commands
+            .entity(entity)
+            .insert((viewer_caret_style(text_color), CaretBlink::default()));
+    }
+}
+
+/// Toggle [`OverwriteMode`] on the Insert key (R28) and reshape every field's
+/// caret to match: a thin bar in insert mode, a block roughly a glyph wide in
+/// overwrite mode. The mode is global, like the reference's keyboard insert
+/// mode — but, also like the reference (whose `LLLineEditor` handles
+/// `KEY_INSERT` and calls `toggleInsertMode`), the key only toggles it while a
+/// text field holds focus, so Insert aimed at an embedded web page (routed to
+/// CEF by [`crate::media_keys`]) does not flip text entry behind its back.
+fn toggle_overwrite_mode(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    focus: Res<InputFocus>,
+    mut overwrite: ResMut<OverwriteMode>,
+    mut fields: Query<&mut EditableText>,
+) {
+    if !keyboard.just_pressed(KeyCode::Insert) {
+        return;
+    }
+    if !focus.get().is_some_and(|entity| fields.contains(entity)) {
+        return;
+    }
+    overwrite.0 = !overwrite.0;
+    let width = if overwrite.0 {
+        OVERWRITE_CARET_WIDTH
+    } else {
+        INSERT_CARET_WIDTH
+    };
+    for mut editable in &mut fields {
+        editable.cursor_width = width;
+    }
+}
+
+/// Make typing replace instead of insert while [`OverwriteMode`] is on (R28):
+/// rewrite each field's queued [`TextEdit::Insert`]s to delete the grapheme
+/// after the caret first, before `bevy_text`'s `apply_text_edits` drains the
+/// queue. At the end of a line (or of the text) the insert is left alone — the
+/// reference's overwrite never eats a newline; a non-collapsed selection is
+/// also left alone (the insert already replaces it), as is a composing IME
+/// (whose preedit belongs to the IME).
+fn apply_overwrite_edits(overwrite: Res<OverwriteMode>, mut fields: Query<&mut EditableText>) {
+    if !overwrite.0 {
+        return;
+    }
+    for mut editable in &mut fields {
+        // The read runs through `as_ref` so an untouched field is not marked
+        // changed; the queue is only written when a rewrite happened.
+        if let Some(rewritten) = overwrite_rewritten_edits(editable.as_ref()) {
+            editable.pending_edits = rewritten;
+        }
+    }
+}
+
+/// The rewritten edit queue of one field under overwrite mode — each queued
+/// insert preceded by a [`TextEdit::Delete`] of the grapheme it replaces — or
+/// `None` when the queue needs no rewrite: nothing queued, no insert queued, a
+/// composing IME (the preedit belongs to the IME), or a non-collapsed selection
+/// (the insert already replaces it). The per-field body of
+/// [`apply_overwrite_edits`], split out so a headless test can drive it.
+fn overwrite_rewritten_edits(field: &EditableText) -> Option<Vec<TextEdit>> {
+    if field.pending_edits.is_empty()
+        || field.is_composing()
+        || !field.editor.raw_selection().is_collapsed()
+        || !field
+            .pending_edits
+            .iter()
+            .any(|edit| matches!(edit, TextEdit::Insert(_)))
+    {
+        return None;
+    }
+    // How many deletes may run before the caret would reach the end of the
+    // current line: one per queued insert, at most. Counted in chars (a
+    // conservative stand-in for graphemes — `TextEdit::Delete` removes one
+    // grapheme, which is at least one char, so the budget can only run out
+    // early, never eat past the line end — the reference's overwrite never
+    // swallows a newline either).
+    let index = field.editor.raw_selection().focus().index();
+    let mut budget = field.editor.raw_text().get(index..).map_or(0, |rest| {
+        rest.split('\n').next().unwrap_or("").chars().count()
+    });
+    if budget == 0 {
+        return None;
+    }
+    let mut rewritten: Vec<TextEdit> =
+        Vec::with_capacity(field.pending_edits.len().saturating_add(1));
+    for edit in &field.pending_edits {
+        if matches!(edit, TextEdit::Insert(_)) && budget > 0 {
+            budget = budget.saturating_sub(1);
+            rewritten.push(TextEdit::Delete);
+        }
+        rewritten.push(edit.clone());
+    }
+    Some(rewritten)
+}
+
+/// Whether the caret is drawn `since_activity` seconds after the last focus /
+/// keystroke (R28): solid for [`CURSOR_FLASH_DELAY_SECS`], then a 1 Hz square
+/// wave — the reference's envelope.
+fn caret_visible(since_activity: f64) -> bool {
+    since_activity < CURSOR_FLASH_DELAY_SECS
+        || (since_activity - CURSOR_FLASH_DELAY_SECS).rem_euclid(CURSOR_BLINK_PERIOD_SECS)
+            < CURSOR_BLINK_PERIOD_SECS / 2.0
+}
+
+/// Drive every field's caret colour and blink envelope (R28), replacing Bevy's
+/// own immediate-flash blink (disarmed by [`CARET_HOLD_PERIOD`]) with the
+/// reference's: **solid** for [`CURSOR_FLASH_DELAY_SECS`] after focus or a
+/// keystroke — so the caret is unmistakable the moment a field is clicked, and
+/// stays solid while typing — then a 1 Hz half-on / half-off flash. The colours
+/// come from the skin's [`SkinTextCaret`] (`caret-color` /
+/// `selection-color` / `unfocused-selection-color` on `.sk-text-field`) when
+/// one applies, else from the field's own text colour — the reference default.
+#[expect(
+    clippy::type_complexity,
+    reason = "the per-field query joins the editor, the two optional colour sources, and the \
+              two components this system writes; splitting it would hide that they move \
+              together"
+)]
+fn drive_caret_blink(
+    time: Res<Time>,
+    focus: Res<InputFocus>,
+    overwrite: Res<OverwriteMode>,
+    mut keystrokes: MessageReader<KeyboardInput>,
+    mut fields: Query<(
+        Entity,
+        &EditableText,
+        Option<&SkinTextCaret>,
+        Option<&TextColor>,
+        &mut TextCursorStyle,
+        &mut CaretBlink,
+    )>,
+) {
+    let now = time.elapsed_secs_f64();
+    let key_pressed = keystrokes.read().any(|input| input.state.is_pressed());
+    for (entity, editable, skin, text_color, mut style, mut blink) in &mut fields {
+        let focused = focus.get() == Some(entity);
+        // Re-solidify on focus arrival, on any keystroke while focused, and on
+        // any editor-layout change (IME commit, programmatic edit).
+        if focused && (focus.is_changed() || key_pressed) {
+            blink.last_activity = now;
+        }
+        let generation = editable.editor.generation();
+        if blink.last_generation != Some(generation) {
+            blink.last_generation = Some(generation);
+            blink.last_activity = now;
+        }
+        // An unfocused field's caret is not drawn at all (`bevy_ui` zeroes its
+        // geometry), so holding it "visible" keeps the style static — no
+        // twice-a-second writes on idle fields.
+        let visible = !focused || caret_visible(now - blink.last_activity);
+        let fallback = SkinTextCaret::default();
+        let base = skin.map_or_else(
+            || text_color.map_or(Color::WHITE, |color| color.0),
+            |skin| skin.caret,
+        );
+        let caret = if !visible {
+            base.with_alpha(0.0)
+        } else if overwrite.0 {
+            // The block caret sits *over* the next glyph; translucency keeps it
+            // legible (the reference inverts the glyph instead).
+            base.with_alpha(base.alpha() * OVERWRITE_CARET_ALPHA)
+        } else {
+            base
+        };
+        let target = TextCursorStyle {
+            color: caret,
+            selection_color: skin.map_or(fallback.selection, |skin| skin.selection),
+            unfocused_selection_color: skin.map_or(fallback.selection_unfocused, |skin| {
+                skin.selection_unfocused
+            }),
+            selected_text_color: None,
+        };
+        // Write only on change, so idle fields do not churn change detection.
+        if *style != target {
+            *style = target;
+        }
+    }
+}
+
+/// The plugin for the widget's runtime half: the numeric structural validator
+/// plus the caret machinery (R28) — the skin-driven caret style installer, the
+/// reference blink envelope, and overwrite mode.
 ///
-/// A no-op where there are no numeric fields, so adding it is always safe — the
-/// gallery and the viewer both add it. The character-set half needs no system
-/// (`bevy_text` applies the [`EditableTextFilter`] itself); this plugin is only
-/// the whole-string prevalidate the per-character filter cannot express.
+/// A no-op where there are no editable fields, so adding it is always safe —
+/// the gallery and the viewer both add it. The character-set half of numeric
+/// validation needs no system (`bevy_text` applies the [`EditableTextFilter`]
+/// itself); the validator here is only the whole-string prevalidate the
+/// per-character filter cannot express.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct TextInputPlugin;
 
 impl Plugin for TextInputPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<OverwriteMode>();
+        // `InputFocus` normally arrives with `bevy_input_focus`'s plugin, but
+        // an app without it (the gallery) must not fail the caret systems'
+        // parameter validation — `init_resource` is a no-op when it exists.
+        app.init_resource::<InputFocus>();
+        app.add_systems(Update, (install_caret_style, toggle_overwrite_mode));
         app.add_systems(
             PostUpdate,
-            enforce_numeric_intermediate
-                // After `bevy_text` applies the frame's edits, but before the
-                // editable-text glyph layout (`UiSystems::PostLayout`), so a
-                // reverted buffer is what gets laid out and the rejected keystroke
-                // never reaches the screen.
-                .after(EditableTextSystems)
-                .before(UiSystems::PostLayout),
+            (
+                // Before `bevy_text` drains the queued edits, so an overwrite
+                // rewrite still reaches this frame's `apply_text_edits`.
+                apply_overwrite_edits.before(EditableTextSystems),
+                enforce_numeric_intermediate
+                    // After `bevy_text` applies the frame's edits, but before the
+                    // editable-text glyph layout (`UiSystems::PostLayout`), so a
+                    // reverted buffer is what gets laid out and the rejected keystroke
+                    // never reaches the screen.
+                    .after(EditableTextSystems)
+                    .before(UiSystems::PostLayout),
+                // After the frame's edits, so the keystroke-hold reads the
+                // fresh editor generation; the caret rectangle itself is
+                // extracted for rendering later still.
+                drive_caret_blink.after(EditableTextSystems),
+            ),
         );
     }
 }
@@ -902,15 +1213,125 @@ pub(crate) fn apply_text_input_demo_visibility(
 #[cfg(test)]
 mod tests {
     use super::{
-        NumericField, TextInputKind, TextInputSpec, TextInputValue, accepts_float_intermediate,
-        accepts_integer_intermediate, accepts_unsigned_integer, reconcile_numeric_field,
+        CURSOR_FLASH_DELAY_SECS, NumericField, TextInputKind, TextInputSpec, TextInputValue,
+        accepts_float_intermediate, accepts_integer_intermediate, accepts_unsigned_integer,
+        caret_visible, overwrite_rewritten_edits, reconcile_numeric_field,
     };
-    use bevy::text::{EditableText, FontCx, LayoutCx};
+    use bevy::text::{EditableText, FontCx, LayoutCx, TextEdit};
     use pretty_assertions::assert_eq;
 
     /// A boxed error so a test can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// A field holding `text` with a collapsed caret at byte `index` and an
+    /// empty edit queue — the starting state of the overwrite-rewrite tests.
+    fn field_with_caret(text: &str, index: usize) -> EditableText {
+        let mut font_cx = FontCx::default();
+        let mut layout_cx = LayoutCx::default();
+        let mut editable = EditableText::new(text);
+        editable.pending_edits.clear();
+        {
+            let mut driver = editable.editor.driver(&mut font_cx, &mut layout_cx);
+            driver.refresh_layout();
+            driver.move_to_text_start();
+            // Step the caret right until it reaches the requested byte index
+            // (bounded by the text length so a bad index cannot spin).
+            let mut steps = 0_usize;
+            while driver.editor.raw_selection().focus().index() < index && steps < text.len() {
+                driver.move_right();
+                steps = steps.saturating_add(1);
+            }
+        }
+        editable
+    }
+
+    /// Overwrite mode replaces: a queued insert mid-line gains a preceding
+    /// delete of the grapheme it covers (R28).
+    #[test]
+    fn overwrite_rewrites_a_mid_line_insert_to_delete_then_insert() {
+        let mut field = field_with_caret("abc", 1);
+        field.pending_edits.push(TextEdit::Insert("X".into()));
+        let rewritten = overwrite_rewritten_edits(&field);
+        assert_eq!(
+            rewritten,
+            Some(vec![TextEdit::Delete, TextEdit::Insert("X".into())])
+        );
+    }
+
+    /// At the end of the text (and of a line) overwrite falls back to plain
+    /// insertion — it never eats past the line end (R28).
+    #[test]
+    fn overwrite_at_text_end_inserts_plainly() {
+        let mut field = field_with_caret("abc", 3);
+        field.pending_edits.push(TextEdit::Insert("X".into()));
+        assert_eq!(overwrite_rewritten_edits(&field), None);
+    }
+
+    /// At a line end (before a newline) overwrite also inserts plainly rather
+    /// than deleting the newline (R28).
+    #[test]
+    fn overwrite_before_a_newline_inserts_plainly() -> Result<(), TestError> {
+        let mut field = field_with_caret("ab\ncd", 2);
+        // The caret walker steps visually; confirm it landed before the '\n'.
+        let index = field.editor.raw_selection().focus().index();
+        if index != 2 {
+            return Err(format!("caret landed at {index}, wanted 2").into());
+        }
+        field.pending_edits.push(TextEdit::Insert("X".into()));
+        assert_eq!(overwrite_rewritten_edits(&field), None);
+        Ok(())
+    }
+
+    /// A queue with no insert (navigation, backspace) is left untouched by
+    /// overwrite mode (R28).
+    #[test]
+    fn overwrite_leaves_non_insert_edits_alone() {
+        let mut field = field_with_caret("abc", 1);
+        field.pending_edits.push(TextEdit::Backspace);
+        field.pending_edits.push(TextEdit::Left(false));
+        assert_eq!(overwrite_rewritten_edits(&field), None);
+    }
+
+    /// Several inserts queued in one frame each overwrite one grapheme, until
+    /// the line-end budget runs out (R28).
+    #[test]
+    fn overwrite_budget_stops_at_the_line_end() {
+        let mut field = field_with_caret("abc", 1);
+        field.pending_edits.push(TextEdit::Insert("X".into()));
+        field.pending_edits.push(TextEdit::Insert("Y".into()));
+        field.pending_edits.push(TextEdit::Insert("Z".into()));
+        // Two chars remain on the line after the caret, so only the first two
+        // inserts gain a delete.
+        let rewritten = overwrite_rewritten_edits(&field);
+        assert_eq!(
+            rewritten,
+            Some(vec![
+                TextEdit::Delete,
+                TextEdit::Insert("X".into()),
+                TextEdit::Delete,
+                TextEdit::Insert("Y".into()),
+                TextEdit::Insert("Z".into()),
+            ])
+        );
+    }
+
+    /// The caret blink envelope is the reference's (R28): solid for the flash
+    /// delay after activity, then a 1 Hz half-on / half-off square wave.
+    #[test]
+    fn caret_blink_envelope_matches_the_reference() {
+        // Solid through the whole flash delay — this is the "solid while
+        // typing" hold, since every keystroke resets the clock.
+        assert!(caret_visible(0.0));
+        assert!(caret_visible(CURSOR_FLASH_DELAY_SECS - 0.01));
+        // Then on for the first half-period…
+        assert!(caret_visible(CURSOR_FLASH_DELAY_SECS + 0.25));
+        // …off for the second…
+        assert!(!caret_visible(CURSOR_FLASH_DELAY_SECS + 0.75));
+        // …and periodic thereafter.
+        assert!(caret_visible(CURSOR_FLASH_DELAY_SECS + 1.25));
+        assert!(!caret_visible(CURSOR_FLASH_DELAY_SECS + 1.75));
+    }
 
     /// The float validator accepts every intermediate state a decimal is typed
     /// through and rejects the structurally impossible ones — the arrangement

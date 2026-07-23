@@ -60,7 +60,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::text::{EditableText, TextCursorStyle};
+use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 
 use crate::ui::{LogicalPadding, LogicalRect, column, row};
@@ -863,7 +863,8 @@ fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx) -> 
             editor,
             cx.font(UiFont::Sans),
             TextColor(Color::WHITE),
-            TextCursorStyle::default(),
+            // The caret / selection style is installed by the shared
+            // `install_caret_style` (R28) — no bare default here.
             // An editor showing three lines of a longer text clips the rest, and
             // scrolls the caret into view rather than growing without bound —
             // so its text is legitimately sliced at the boundary and it claims

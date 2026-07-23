@@ -62,6 +62,7 @@ use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::hud::{HudState, is_hud_point};
+use crate::legacy_materials::LegacyMaterialManager;
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
@@ -555,6 +556,26 @@ impl ObjectState {
             .map(|tracked| tracked.entity)
     }
 
+    /// The region-scoped ids of the tracked objects whose full [`ObjectKey`] is
+    /// in `keys`, in one pass over the object table. The bulk counterpart of
+    /// [`entity_of`](Self::entity_of), for the animesh drivers (P29.2): an
+    /// `ObjectAnimation` names the linkset **part** holding the animations by
+    /// full key, and every signalled part must resolve each frame — a per-key
+    /// scan would be quadratic.
+    pub(crate) fn scoped_by_full_keys(
+        &self,
+        keys: &HashSet<ObjectKey>,
+    ) -> HashMap<ObjectKey, ScopedObjectId> {
+        if keys.is_empty() {
+            return HashMap::new();
+        }
+        self.objects
+            .iter()
+            .filter(|(_scoped, tracked)| keys.contains(&tracked.full_key))
+            .map(|(&scoped, tracked)| (tracked.full_key, scoped))
+            .collect()
+    }
+
     /// Everything the object context menu needs to know about a picked object
     /// ([`crate::object_menu`]), resolved by walking the linkset parent chain up
     /// to its root: the picked prim itself (the touch / sit target), the linkset
@@ -958,6 +979,9 @@ pub(crate) fn pick_object(
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    face_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    materials: Res<Assets<StandardMaterial>>,
+    legacy: Res<LegacyMaterialManager>,
     textures: Res<TextureManager>,
     mesh_manager: Res<MeshManager>,
     state: Res<ObjectState>,
@@ -1007,6 +1031,36 @@ pub(crate) fn pick_object(
             tf.glow,
             tf.material_id,
         );
+        // The face's *resolved* render alpha state plus the fetched legacy
+        // material's alpha fields (R25): together they pin an opaque-vs-blend
+        // divergence to the TE tint, the legacy override, or a missing
+        // `RenderMaterials` fetch.
+        if let Ok(material) = face_materials.get(*entity)
+            && let Some(standard) = materials.get(&material.0)
+        {
+            warn!(
+                "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={}",
+                standard.alpha_mode,
+                standard.base_color.alpha(),
+                standard.unlit,
+            );
+        }
+        if let Some(material_id) = tf.material_id {
+            match legacy.decoded_material(&material_id) {
+                Some(fetched) => warn!(
+                    "pick face legacy material {material_id}: diffuse_alpha_mode={} \
+                     alpha_mask_cutoff={} normal_map={} specular_map={}",
+                    fetched.diffuse_alpha_mode,
+                    fetched.alpha_mask_cutoff,
+                    fetched.normal_map.uuid(),
+                    fetched.specular_map.uuid(),
+                ),
+                None => warn!(
+                    "pick face legacy material {material_id}: not fetched/decoded \
+                     (RenderMaterials fetch missing or still in flight)"
+                ),
+            }
+        }
         // The live level-of-detail of the face's diffuse texture (P21.1): its
         // current discard level should *fall* (toward 0 = full resolution) as the
         // camera moves toward the face. Aim and press the pick key while walking in
@@ -2752,10 +2806,19 @@ const MAX_LINKSET_DEPTH: usize = 32;
 
 /// The animesh linkset root that `scoped` belongs to (P29): walk its parent chain
 /// up to the object carrying the animated-object flag and return that root's full
-/// [`ObjectKey`] (the id `ObjectAnimation` names its control avatar by) and scene
-/// entity (the control-avatar skeleton parents to it so it follows the object).
-/// `None` if the chain reaches no animated-object root (not an animesh).
-fn animesh_root(state: &ObjectState, scoped: ScopedObjectId) -> Option<(ObjectKey, Entity)> {
+/// [`ObjectKey`] (the key its control avatar is filed under) and scene entity
+/// (the control-avatar skeleton parents to it so it follows the object). `None`
+/// if the chain reaches no animated-object root (not an animesh).
+///
+/// This walk is also how a signalled animation finds its control avatar
+/// (P29.2): the sim keys `ObjectAnimation` by the linkset **part** holding the
+/// animations (the prim the script runs in) — often a *child*, not the flagged
+/// root — and the reference merges every part's signalled set into the root's
+/// control avatar (`LLControlAvatar::updateAnimations` over the whole linkset).
+pub(crate) fn animesh_root(
+    state: &ObjectState,
+    scoped: ScopedObjectId,
+) -> Option<(ObjectKey, Entity)> {
     let mut current = scoped;
     for _ in 0..MAX_LINKSET_DEPTH {
         let tracked = state.objects.get(&current)?;
@@ -3020,15 +3083,22 @@ pub(crate) fn apply_rigged_attachments(
     }
 }
 
-/// Spawn a control avatar (P29) for every tracked animesh root that already has an
-/// animation playing, as soon as the animation arrives — rather than waiting for
-/// its rigged mesh to bind (`apply_rigged_attachments`), which can be many seconds
-/// later once the mesh's finest LOD decodes. The reference viewer creates an
-/// `LLControlAvatar` when the object is detected as animated, not when its geometry
-/// loads; spawning early means an `ObjectAnimation` that arrives before the mesh
-/// decode is captured and posed the moment the mesh binds, instead of being lost in
-/// the gap. The skeleton is invisible until a mesh binds to it, so this only
-/// materialises for animesh we are actually animating (gated on `is_playing`).
+/// Spawn a control avatar (P29) for every tracked animesh root any part of whose
+/// linkset has an animation playing, as soon as the animation arrives — rather
+/// than waiting for its rigged mesh to bind (`apply_rigged_attachments`), which
+/// can be many seconds later once the mesh's finest LOD decodes. The reference
+/// viewer creates an `LLControlAvatar` when the object is detected as animated,
+/// not when its geometry loads; spawning early means an `ObjectAnimation` that
+/// arrives before the mesh decode is captured and posed the moment the mesh
+/// binds, instead of being lost in the gap. The skeleton is invisible until a
+/// mesh binds to it, so this only materialises for animesh we are actually
+/// animating.
+///
+/// Each signalled **part** resolves to its flagged root through
+/// [`animesh_root`] (P29.2): the sim keys `ObjectAnimation` by the prim holding
+/// the animations, which is often a plain (un-flagged) linkset child — keying
+/// the spawn on the root itself being signalled left every such animesh
+/// permanently un-posed.
 pub(crate) fn spawn_animesh_control_avatars(
     state: Res<ObjectState>,
     mut control: ResMut<ControlAvatarState>,
@@ -3038,11 +3108,11 @@ pub(crate) fn spawn_animesh_control_avatars(
     let Some(body) = body else {
         return;
     };
-    let roots: Vec<(ObjectKey, Entity)> = state
-        .objects
+    let parts = control.signalled_parts();
+    let scoped_by_full = state.scoped_by_full_keys(&parts);
+    let roots: HashSet<(ObjectKey, Entity)> = scoped_by_full
         .values()
-        .filter(|tracked| tracked.animated && control.is_playing(tracked.full_key))
-        .map(|tracked| (tracked.full_key, tracked.entity))
+        .filter_map(|&scoped| animesh_root(&state, scoped))
         .collect();
     for (key, entity) in roots {
         let _spawned = control.ensure_spawned(key, entity, &body, &mut commands);
@@ -3052,8 +3122,17 @@ pub(crate) fn spawn_animesh_control_avatars(
 /// Drop the control avatar of every animesh (P29) whose root object is no longer
 /// tracked — removed, or its region left. The skeleton entities parent under the
 /// object entity, so Bevy's recursive despawn already took them with the object;
-/// this only clears the stale [`ControlAvatarState`] bookkeeping (and its playback
-/// clock), so a re-rez rebuilds a fresh control avatar.
+/// this only clears the stale [`ControlAvatarState`] bookkeeping, so a re-rez
+/// rebuilds a fresh control avatar.
+///
+/// The **signalled-animation sets are deliberately not pruned here** (P29.2):
+/// an `ObjectAnimation` routinely arrives before its part's first
+/// `ObjectUpdate` (and for a part we may never track at all), and pruning the
+/// set by tracked-object liveness destroyed that early-arrival buffer the same
+/// frame it was folded — the event cursor had advanced, so the animation was
+/// gone for good. The reference keeps its signalled map for the session and
+/// re-reads it whenever a control avatar is (re)built; only a safety cap
+/// bounds ours ([`ControlAvatarState::bound_signalled`]).
 pub(crate) fn prune_control_avatars(
     state: Res<ObjectState>,
     mut control: ResMut<ControlAvatarState>,
@@ -3064,6 +3143,7 @@ pub(crate) fn prune_control_avatars(
         .map(|tracked| tracked.full_key)
         .collect();
     control.retain(|object| live.contains(&object));
+    control.bound_signalled(|part| live.contains(&part));
 }
 
 /// Spawn one skinned child entity per non-empty submesh of a decoded rigged mesh

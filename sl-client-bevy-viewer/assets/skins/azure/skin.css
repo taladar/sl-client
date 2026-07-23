@@ -20,6 +20,11 @@
   --text-muted: #b9d4ee;
   --text-disabled: #6f89a4;
 
+  /* Text editing (R28): caret = primary text, translucent selections. */
+  --caret: #eaf3ff;
+  --selection: #3f8fd973;
+  --selection-unfocused: #6f89a459;
+
   /* Controls */
   --control-bg: #173a5c;
   --control-bg-hover: #1f4e79;

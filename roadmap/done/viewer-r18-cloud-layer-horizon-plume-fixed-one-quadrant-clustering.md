@@ -2,7 +2,7 @@
 id: viewer-r18
 title: Cloud layer — horizon plume fixed, one-quadrant clustering still broken
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
@@ -75,3 +75,15 @@ uploaded sRGB; the reference samples it raw.**
   `to_bevy_image`-is-sRGB-only trap already documented for normal maps. The
   redundant repeat-sampler override in `apply_cloud_textures` can fold into
   that uploader.
+
+**Fixed (2026-07-23).** `apply_cloud_textures` now uploads through a new
+`cloud_noise_image` uploader (`sl-client-bevy-viewer/src/sky.rs`), modelled
+on `water_normal_image`: `TextureFormat::Rgba8Unorm` (the noise is data,
+sampled raw like the reference's plain `GL_RGBA8` bind) plus the repeat
+sampler folded in — the standalone sampler override in the system is gone.
+No shader change; `clouds.wgsl` already treated the sample as raw data.
+Verified live on both grids (2026-07-23): clouds spread across the whole
+sky instead of clustering in one quadrant. Two finer residuals reported in
+the same session — something wrong where clouds cross the sun, and clouds
+touching the water at the horizon — are filed as
+[[viewer-clouds-sun-occlusion-horizon-contact]].

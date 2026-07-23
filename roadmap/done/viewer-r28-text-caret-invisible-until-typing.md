@@ -2,7 +2,7 @@
 id: viewer-r28
 title: Text-field caret nearly invisible — color, blink, focus cues
 topic: viewer
-status: bugs
+status: done
 origin: text-caret research (2026-07-23, user report)
 refs:
   [
@@ -82,3 +82,57 @@ until you start typing.
 Verify with the gallery binary (fastest UI loop) across both skins:
 caret visible immediately on click into every field kind, blinks when
 idle, solid while typing, block caret in overwrite mode.
+
+## Implemented (2026-07-23)
+
+- **Skin-routed caret + selection colours.** New reflectable shim
+  `SkinTextCaret` (`src/skin.rs`, the same pattern as the logical box
+  components — `TextCursorStyle` itself is not reflectable), registered as
+  the `caret-color` / `selection-color` / `unfocused-selection-color` CSS
+  properties. `common.css` routes them on a new `.sk-text-field` class
+  through new `--caret` / `--selection` / `--selection-unfocused` role
+  tokens (defined in both skins + the dark overlay; caret = the text
+  colour, the reference default). `stamp_text_field_class` tags every
+  `Added<EditableText>` — no per-widget wiring, like the focus-ring stamp.
+- **One shared caret style, no bare defaults.** `install_caret_style`
+  (`src/ui_text_input.rs`) installs the style + blink state on every
+  editor spawn; the three explicit `TextCursorStyle::default()`
+  attachments are gone. Unskinned fallback: the field's own `TextColor`.
+- **Reference blink envelope.** Bevy's immediate-flash blink is disarmed
+  (`cursor_blink_period` pinned long) and `drive_caret_blink` reproduces
+  the reference: solid `CURSOR_FLASH_DELAY` (1 s) after focus arrival or
+  any keystroke (also on editor-generation change, so IME commits and
+  programmatic edits hold it solid too), then a 1 Hz half-on/half-off
+  flash. Envelope unit-tested.
+- **Focus cue for click-focus.** `.sk-text-field:focus` in `common.css`
+  shows the skin's focus ring on a text field for *any* focus source
+  (other widgets keep `:focus-visible`-only), mirroring the reference's
+  unconditional `setKeyboardFocusHighlight` border.
+- **Overwrite mode.** Insert toggles a global `OverwriteMode` — only while
+  a text field holds focus, like the reference's `LLLineEditor` handling
+  `KEY_INSERT` (and so Insert aimed at an embedded CEF page never flips
+  it). Typing overwrites: `apply_overwrite_edits` rewrites queued
+  `TextEdit::Insert`s to `Delete` + insert before `apply_text_edits`
+  drains them, with a line-end budget so it never eats a newline (plain
+  insert at line/text end, IME preedit and selections left alone;
+  unit-tested). The caret becomes a block ~a glyph wide
+  (`EditableText::cursor_width`), drawn translucent so the covered glyph
+  stays legible — an approximation of the reference's inverted-glyph
+  block, which `bevy_ui`'s plain-rectangle caret cannot draw. Upstream
+  overwrite support in `bevy_text` remains the eventual faithful path.
+
+Verified in the gallery (2026-07-23): caret visible on click in both
+skins, focus ring on mouse focus, solid-then-blink envelope, overwrite
+block caret. One channel is moot for now: `unfocused-selection-color`
+never paints, because Bevy's text-input widgets drop the selection
+entirely when a field loses focus (the reference dims it instead) — the
+token stays wired for when upstream preserves an unfocused selection.
+The verification also caught (and fixed) a pre-existing gallery-startup
+panic: `browser_widget::sync_browser_focus` demanded the viewer-only
+`InputContext` resource through an unused parameter, so the gallery had
+crashed at launch since the CEF web-media commit.
+
+Remaining (deliberately out of scope, small): the reference suppresses the
+blink while the *application window* is unfocused and for read-only
+fields; IME preedit *overwriting* (rather than inserting) needs an
+IME-aware editor hook Bevy does not expose.

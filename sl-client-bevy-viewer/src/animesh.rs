@@ -66,27 +66,46 @@ struct ControlAvatar {
 }
 
 /// Viewer-side animesh bookkeeping (P29): the control avatar per animated object,
-/// plus its animation playback state — which animations each object is playing,
-/// their timing / activation order, and the per-joint pose the driver blended this
-/// frame for [`pose_control_avatars`] to write.
+/// plus its animation playback state — which animations each signalled part is
+/// playing, their timing / activation order, and the per-joint pose the driver
+/// blended this frame for [`pose_control_avatars`] to write.
 ///
-/// Keyed by the animesh root object's full [`ObjectKey`] — the id `ObjectAnimation`
-/// names — so a signalled animation set resolves directly to its control avatar.
-/// The playback half mirrors
-/// [`AnimationPlayback`](crate::animations::AnimationPlayback) but per object.
+/// **Two different keys (P29.2).** The control avatars and poses are keyed by
+/// the animesh **root**'s full [`ObjectKey`] (the flagged animated object the
+/// skeleton hangs off). The signalled animations are keyed by the **part** the
+/// sim named in `ObjectAnimation.Sender.ID` — the linkset prim holding the
+/// animations (the one the script runs in), which is *often a child, not the
+/// root*. The drivers resolve each signalled part up its linkset
+/// ([`crate::objects::animesh_root`]) and merge every part's set into the
+/// root's control avatar, exactly as the reference's
+/// `LLControlAvatar::updateAnimations` merges the signalled maps of every
+/// volume in the linkset. The playback half mirrors
+/// [`AnimationPlayback`](crate::animations::AnimationPlayback) but per part.
 #[derive(Resource, Default)]
 pub(crate) struct ControlAvatarState {
     /// The control avatar per animesh root object.
     avatars: HashMap<ObjectKey, ControlAvatar>,
-    /// Each object's currently-playing animations, keyed by animation id.
+    /// The currently-playing animations per **signalled part** (the
+    /// `ObjectAnimation` sender), keyed by animation id. Persistent across the
+    /// part being untracked: an `ObjectAnimation` routinely arrives *before*
+    /// the part's first `ObjectUpdate`, and the reference keeps its signalled
+    /// map for the whole session (`LLObjectSignaledAnimationMap`) — see
+    /// [`bound_signalled`](Self::bound_signalled) for the safety cap.
     playing: HashMap<ObjectKey, HashMap<Uuid, PlayState>>,
     /// The next activation-recency stamp to hand out (see
     /// [`AnimationPlayback`](crate::animations::AnimationPlayback)).
     next_order: u64,
-    /// Each object's resolved per-joint pose this frame (only objects with a
+    /// Each root object's resolved per-joint pose this frame (only roots with a
     /// drivable animation and a spawned control avatar appear).
     poses: HashMap<ObjectKey, AnimationPose>,
 }
+
+/// The signalled-part cap: above this many parts with live animation sets, the
+/// never-tracked ones are dropped ([`ControlAvatarState::bound_signalled`]). Far
+/// above any real region's animesh count — a memory backstop for a long session
+/// wandering many regions, since a part that is never tracked also never sends
+/// the stop that would empty its set.
+const MAX_SIGNALLED_PARTS: usize = 4096;
 
 impl ControlAvatarState {
     /// Ensure a control avatar exists for the animesh root `object` (whose scene
@@ -133,13 +152,14 @@ impl ControlAvatarState {
         (root, joints)
     }
 
-    /// Whether an animation set is currently playing on `object` (an
-    /// `ObjectAnimation` for it has been folded into the playback clock). Used to
-    /// spawn a control avatar early — as soon as an animesh has an animation —
-    /// rather than waiting for its mesh to bind, so an animation that arrives before
-    /// the (much later) mesh decode is not lost (P29).
-    pub(crate) fn is_playing(&self, object: ObjectKey) -> bool {
-        self.playing.contains_key(&object)
+    /// The parts with a live signalled animation set (the `ObjectAnimation`
+    /// senders). Used to spawn a control avatar early — as soon as any part of
+    /// an animesh linkset has an animation — rather than waiting for its mesh
+    /// to bind, so an animation that arrives before the (much later) mesh
+    /// decode is not lost (P29); the caller resolves each part to its flagged
+    /// root ([`crate::objects::animesh_root`]).
+    pub(crate) fn signalled_parts(&self) -> std::collections::HashSet<ObjectKey> {
+        self.playing.keys().copied().collect()
     }
 
     /// Record the joint position overrides that rigged `mesh` imposes on `object`'s
@@ -183,14 +203,27 @@ impl ControlAvatarState {
         effective
     }
 
-    /// Drop the control avatar and playback state for every animesh object that is
-    /// no longer live (`keep(object)` is `false`). The skeleton entities despawn
-    /// with their object entity (Bevy's recursive hierarchy despawn), so only the
-    /// bookkeeping is dropped here.
+    /// Drop the control avatar and pose for every animesh root that is no longer
+    /// live (`keep(object)` is `false`). The skeleton entities despawn with
+    /// their object entity (Bevy's recursive hierarchy despawn), so only the
+    /// bookkeeping is dropped here. The signalled-animation sets are **not**
+    /// touched (P29.2): they key by part, arrive before tracking, and must
+    /// survive it — see [`bound_signalled`](Self::bound_signalled).
     pub(crate) fn retain(&mut self, keep: impl Fn(ObjectKey) -> bool) {
         self.avatars.retain(|&object, _| keep(object));
-        self.playing.retain(|&object, _| keep(object));
         self.poses.retain(|&object, _| keep(object));
+    }
+
+    /// The memory backstop on the persistent signalled-animation map: once more
+    /// than [`MAX_SIGNALLED_PARTS`] parts hold a set, drop the ones that are not
+    /// currently tracked (`keep(part)` is `false`) — the never-streamed
+    /// attachments of hidden avatars are the bulk of those. A no-op below the
+    /// cap, so the ordinary early-arrival buffer is never disturbed.
+    pub(crate) fn bound_signalled(&mut self, keep: impl Fn(ObjectKey) -> bool) {
+        if self.playing.len() <= MAX_SIGNALLED_PARTS {
+            return;
+        }
+        self.playing.retain(|&part, _| keep(part));
     }
 }
 
@@ -213,25 +246,33 @@ pub(crate) fn ingest_object_animations(
 }
 
 /// Resolve each animesh control avatar's per-joint animation pose from the motions
-/// its object is playing (P29.2), the animesh mirror of
+/// its linkset is playing (P29.2), the animesh mirror of
 /// [`drive_avatar_skeletons`](crate::animations::drive_avatar_skeletons).
 ///
-/// Each frame it folds the latest `ObjectAnimation` updates into the per-object
-/// playback clock, drops fully-eased-out motions, then blends each object's
-/// playing motions into an [`AnimationPose`] against the standard skeleton (a
-/// control avatar has no visual-param shape, so joint names resolve through the
-/// shared [`AvatarBody::joint_index`]). An object with no spawned control avatar or
-/// no drivable motion is omitted, so it keeps its bind-pose rest.
+/// Each frame it folds the latest `ObjectAnimation` updates into the
+/// per-**part** playback clock (the sim keys the message by the linkset prim
+/// holding the animations, not the flagged root), drops fully-eased-out
+/// motions, resolves every signalled part up its linkset to the animesh root
+/// ([`crate::objects::animesh_root`]) — merging the sets of all parts of one
+/// linkset, as the reference's `LLControlAvatar::updateAnimations` does — then
+/// blends each root's motions into an [`AnimationPose`] against the standard
+/// skeleton (a control avatar has no visual-param shape, so joint names resolve
+/// through the shared [`AvatarBody::joint_index`]). A root with no spawned
+/// control avatar or no drivable motion is omitted, so it keeps its bind-pose
+/// rest.
 pub(crate) fn drive_control_avatars(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
+    state: Res<crate::objects::ObjectState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
 ) {
     let now = time.elapsed_secs();
     let control = control.as_mut();
-    // Reconcile the playback clock with each authoritative animation set.
+    // Reconcile the playback clock with each authoritative animation set. The
+    // key is the *sender part*, kept even while the part is untracked — the
+    // message routinely precedes the part's first `ObjectUpdate`.
     for event in events.read() {
         if let SlSessionEvent::ObjectAnimation {
             object_id,
@@ -246,8 +287,8 @@ pub(crate) fn drive_control_avatars(
             reconcile_playing(entry, &mut control.next_order, &pairs, now);
         }
     }
-    // Drop fully-eased-out motions; forget objects whose set emptied.
-    control.playing.retain(|_object, anims| {
+    // Drop fully-eased-out motions; forget parts whose set emptied.
+    control.playing.retain(|_part, anims| {
         retain_active(anims, now, &manager);
         !anims.is_empty()
     });
@@ -256,14 +297,35 @@ pub(crate) fn drive_control_avatars(
         control.poses.clear();
         return;
     };
+    // Resolve each signalled part to its animesh root and merge the linkset's
+    // sets. A part that is untracked, or whose chain reaches no flagged root,
+    // contributes nothing (its set stays buffered for when tracking catches up).
+    let parts: std::collections::HashSet<ObjectKey> = control.playing.keys().copied().collect();
+    let scoped_by_full = state.scoped_by_full_keys(&parts);
+    let mut merged: HashMap<ObjectKey, HashMap<Uuid, PlayState>> = HashMap::new();
+    for (&part, anims) in &control.playing {
+        let Some(&scoped) = scoped_by_full.get(&part) else {
+            continue;
+        };
+        let Some((root, _entity)) = crate::objects::animesh_root(&state, scoped) else {
+            continue;
+        };
+        let entry = merged.entry(root).or_default();
+        for (&anim, play) in anims {
+            // Two parts of one linkset playing the same animation id is
+            // degenerate; the first part wins, matching the reference's map
+            // merge.
+            let _prev = entry.entry(anim).or_insert(*play);
+        }
+    }
     let mut poses: HashMap<ObjectKey, AnimationPose> = HashMap::new();
-    for (&object, anims) in &control.playing {
-        // Only an object with a spawned control avatar can be posed.
-        if !control.avatars.contains_key(&object) {
+    for (&root, anims) in &merged {
+        // Only a root with a spawned control avatar can be posed.
+        if !control.avatars.contains_key(&root) {
             continue;
         }
         if let Some(pose) = resolve_pose(anims, now, &manager, |name| body.joint_index(name)) {
-            let _prev = poses.insert(object, pose);
+            let _prev = poses.insert(root, pose);
         }
     }
     // Edge-triggered logging: an object starting / stopping being posed is the live

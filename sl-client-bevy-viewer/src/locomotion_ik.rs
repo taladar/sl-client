@@ -58,11 +58,14 @@
 //! avatar's root**, where the reference aims it at the ground's *absolute* height. This
 //! is the same correction expressed in a different frame, not a weaker one: the
 //! reference's skeleton root sits at the **pelvis** (`root_pos.z = ground +
-//! mPelvisToFoot`), whereas this viewer's sits at the **sole** — so aiming our ankle at
-//! the absolute ground would drive it 6.7 cm too low and bury the foot. As a bonus, a
-//! difference of two ground samples cancels out any error in the simulator-reported
-//! avatar position, instead of absorbing it into the legs as a permanent crouch. See
-//! [`plant_foot`].
+//! mPelvisToFoot`), whereas this viewer's body root hangs the whole skeleton — pelvis at
+//! its local rest offset — below the reported capsule-centre Z by the resolved root drop
+//! (`avatars::root_drop_from_metrics`, R23), so the root is *near* the sole but not the
+//! reference's frame, and aiming our ankle at the absolute ground would drive it too low
+//! and bury the foot. As a bonus, a difference of two ground samples is insensitive to
+//! the absolute root placement — it survived the R23 re-plant unchanged — and cancels
+//! out any error in the simulator-reported avatar position, instead of absorbing it into
+//! the legs as a permanent crouch. See [`plant_foot`].
 //!
 //! # A standing leg is a near-singular IK chain
 //!

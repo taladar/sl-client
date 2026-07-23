@@ -2,7 +2,7 @@
 id: viewer-r23
 title: Avatar stands too low — feet sink into the ground
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
@@ -54,3 +54,49 @@ the foot-IK's relative-displacement design (`locomotion_ik.rs`, the
 "deliberate deviation" note) is insensitive to absolute root error and
 survives this fix unchanged — but its comment describing the root placement
 should be updated with it. `shoe_lift` (R17) stays a separate additive term.
+
+**Fixed (2026-07-23).** `BevySkeleton::body_size_metrics`
+(`sl-client-bevy/src/avatars.rs`) ports `computeBodySize` verbatim —
+`pelvis_to_foot` and `body_size_z` from the deformed chain's current local
+positions and scales, with rig joint-position overrides (and their scale
+lock) resolved exactly as `deformed_world_matrices` does; unit tests pin the
+rest values (0.979 / 1.707) with a real-valued chain fixture. The viewer
+plants the body root at `reported_z − root_drop` with
+`root_drop = 0.5·body_size_z − pelvis_to_foot + pelvis_local_z − hover`
+(`root_drop_from_metrics`, `avatars.rs`), the hover being the transmitted
+`Hover` shape param (id 11001); soles land at the reference's
+`reported_z − 0.5·body_size_z + hover`. The per-agent drop is resolved in
+`apply_avatar_appearance` and re-plants a standing body by delta, replacing
+the R17 `pelvis_lift` mechanism entirely.
+
+Deliberate deviations from the plan above, both toward reference fidelity:
+
+- **`shoe_lift` did *not* stay a separate additive term** — the reference
+  has no such term: the shoe params' `mFoot*` offset flows into the metrics'
+  foot term (both quantities grow by the lift, so the root rises by *half*
+  of it), which the old additive term double-counted (and in the wrong
+  direction: it lowered the root). A unit test pins the folded behaviour;
+  [[viewer-r17a]] remains the live visual check.
+- **The un-rigged fallback (placeholder sphere) was left at the reported
+  position** — under the corrected reading the wire Z is the capsule
+  *centre*, which is exactly where a whole-avatar stand-in sphere belongs;
+  the "needs the same model" note assumed the old pelvis reading.
+
+The region-side hover preference (`getHoverOffset()`, the `AgentPreferences`
+capability / `llSetHoverHeight`) is still not ingested — only the shape's
+Hover param is applied.
+
+**Live-check finding (2026-07-23): the first run floated the own avatar a
+few cm above the ground** (terrain and ramp) instead of sinking. Root
+cause: the advertised `AgentSetAppearance` size was a hardcoded `z = 1.9`
+(`bake_publish.rs` `AVATAR_SIZE`), and OpenSim's `SetSize` takes the
+client's word for it — the capsule (and hence the reported capsule-centre
+Z) was sized for a 1.9 m avatar while the render used the true
+`body_size_metrics` height; the avatar floats by half the difference.
+Fixed by advertising `computeBodySize` of exactly the published
+`visual_params` (`advertised_size`), the reference's `mBodySize` (which
+Firestorm also sends hover-less on OpenSim). Residual expectations: on
+SL/aditi no `AgentSetAppearance` publish runs (server bakes), so the
+server-side height comes from the account's real viewer and any
+account-level hover preference — which we do not ingest yet — can still
+show as a small offset there.

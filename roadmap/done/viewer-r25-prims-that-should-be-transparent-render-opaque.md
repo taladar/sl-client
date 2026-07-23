@@ -2,7 +2,7 @@
 id: viewer-r25
 title: Prims that should be transparent render opaque
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
@@ -65,3 +65,17 @@ hypothesis if `color[3] == 255`: the transparency would instead come
 from a `BLEND`-mode legacy material that was never fetched/applied
 (`RenderMaterials` cap fetch failure) — check the fetch logs in that
 case.
+
+**Fixed (2026-07-23).** `apply_legacy_scalars`
+(`sl-client-bevy-viewer/src/legacy_materials.rs`) now applies
+`legacy_alpha_override` only when the face's TE tint is opaque
+(`base_color.alpha() >= 0.999`, the reference's `blinn_phong_transparent`
+threshold) — a translucent tint keeps its `AlphaMode::Blend` for every
+material mode, matching the reference's pre-dispatch `is_alpha` OR. The
+guard wraps the whole override per the note above. Unit-tested (translucent
+tint survives `NONE` and `EMISSIVE`; opaque tint still honours the material
+in both directions). The pick dump (`P`) now also prints the face's
+resolved `alpha_mode` + base-colour alpha and the fetched legacy material's
+`diffuse_alpha_mode` / `alpha_mask_cutoff` / map ids — or a "not
+fetched/decoded" marker — so the runtime confirmation on the two aditi
+repro prims can be read straight off the pick output.
