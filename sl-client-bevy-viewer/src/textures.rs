@@ -742,6 +742,21 @@ pub(crate) fn face_material(
     };
     if has_texture && let Some(image) = prim_textures.images.get(&texture_id) {
         material.base_color_texture = Some(image.clone());
+        // The texture is already uploaded, so resolve its alpha channel **now**
+        // (R25a): this build path never parks the face, so without this the
+        // R22d resolution below ([`apply_prim_textures`]) never runs for it —
+        // a face re-built while its texture was already resident (the prim-LoD
+        // re-tessellation on approach, a shape change, a derender/re-create)
+        // popped back in opaque, losing the alpha-texture transparency its
+        // first build had gained when the texture decoded.
+        let has_alpha = manager
+            .decoded(texture_id)
+            .is_some_and(|decoded| texture_has_alpha(decoded));
+        let has_transparency = has_alpha
+            && manager
+                .decoded(texture_id)
+                .is_some_and(|decoded| texture_has_transparency(decoded));
+        resolve_texture_alpha_mode(&mut material, texture_alpha, has_alpha, has_transparency);
     }
     // Legacy per-face surface flags (P27.4): fullbright / glow / shiny fold onto
     // this material as it is built (bump needs the decoded diffuse and is applied
@@ -777,6 +792,7 @@ pub(crate) fn face_material(
 pub(crate) fn apply_prim_textures(
     mut decoded: MessageReader<TextureDecoded>,
     manager: Res<TextureManager>,
+    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -820,26 +836,52 @@ pub(crate) fn apply_prim_textures(
         for (material_handle, texture_alpha) in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
                 material.base_color_texture = Some(image_handle.clone());
-                // Resolve a texture-alpha face's mode (reference-faithful, R22d): an
-                // ordinary face alpha-*masks* off its texture alpha (an invisible prim
-                // stays cut, solid texels stay solid); a rigged face cannot mask, so
-                // one with genuinely transparent texels alpha-*blends* (hair /
-                // eyelashes render soft, not as a solid card). A texture with no real
-                // transparency stays opaque. A face already blending (a non-opaque
-                // tint) is left blending; a `LLMaterial` mode later wins.
-                if material.alpha_mode == AlphaMode::Opaque {
-                    match texture_alpha {
-                        TextureAlpha::Mask if has_alpha => {
-                            material.alpha_mode = AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF);
-                        }
-                        TextureAlpha::Blend if has_transparency => {
-                            material.alpha_mode = AlphaMode::Blend;
-                        }
-                        _keep_opaque => {}
-                    }
+                // A face whose alpha mode a legacy material has already
+                // overridden keeps it (R25a): `NONE` means opaque in the
+                // reference even over an alpha texture, so the material must
+                // win regardless of whether it or this decode applied last.
+                if !legacy.is_alpha_overridden(material_handle.id()) {
+                    resolve_texture_alpha_mode(
+                        &mut material,
+                        texture_alpha,
+                        has_alpha,
+                        has_transparency,
+                    );
                 }
             }
         }
+    }
+}
+
+/// Resolve a texture-alpha face's mode (reference-faithful, R22d): an ordinary
+/// face alpha-*masks* off its texture alpha (an invisible prim stays cut, solid
+/// texels stay solid); a rigged face cannot mask, so one with genuinely
+/// transparent texels alpha-*blends* (hair / eyelashes render soft, not as a
+/// solid card). A texture with no real transparency stays opaque. A face
+/// already blending (a non-opaque tint) is left blending; a `LLMaterial` mode
+/// later wins.
+///
+/// Shared by both moments a face meets its decoded texture: the parked path
+/// ([`apply_prim_textures`], texture decoded after the face was built) and the
+/// immediate path ([`face_material`], face built while the texture was already
+/// resident — the branch that used to skip this entirely, R25a).
+fn resolve_texture_alpha_mode(
+    material: &mut StandardMaterial,
+    texture_alpha: TextureAlpha,
+    has_alpha: bool,
+    has_transparency: bool,
+) {
+    if material.alpha_mode != AlphaMode::Opaque {
+        return;
+    }
+    match texture_alpha {
+        TextureAlpha::Mask if has_alpha => {
+            material.alpha_mode = AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF);
+        }
+        TextureAlpha::Blend if has_transparency => {
+            material.alpha_mode = AlphaMode::Blend;
+        }
+        _keep_opaque => {}
     }
 }
 
@@ -944,7 +986,11 @@ pub(crate) fn tint_color(color: [u8; 4]) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{face_alpha_mode, texture_has_alpha};
+    use super::{
+        FACE_ALPHA_MASK_CUTOFF, TextureAlpha, face_alpha_mode, resolve_texture_alpha_mode,
+        texture_has_alpha,
+    };
+    use bevy::pbr::StandardMaterial;
     use bevy::prelude::AlphaMode;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
@@ -961,6 +1007,37 @@ mod tests {
             pixels: Bytes::from(vec![0xFF_u8; 4]),
             aux: None,
         }
+    }
+
+    /// The R22d texture-alpha resolution is identical whether the face meets
+    /// its texture on the parked path or is built with it already resident
+    /// (R25a): an opaque ordinary face masks off an alpha texture, an opaque
+    /// rigged face blends off real transparency, an already-blending face is
+    /// left alone, and an alpha-free texture keeps the face opaque.
+    #[test]
+    fn texture_alpha_resolution_upgrades_only_opaque_faces() {
+        let mut face = StandardMaterial {
+            alpha_mode: AlphaMode::Opaque,
+            ..StandardMaterial::default()
+        };
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, true, false);
+        assert_eq!(face.alpha_mode, AlphaMode::Mask(FACE_ALPHA_MASK_CUTOFF));
+        // A rigged face blends when the texture holds real transparency…
+        face.alpha_mode = AlphaMode::Opaque;
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, true, true);
+        assert_eq!(face.alpha_mode, AlphaMode::Blend);
+        // …but not off a merely-present, fully-solid alpha channel.
+        face.alpha_mode = AlphaMode::Opaque;
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Blend, true, false);
+        assert_eq!(face.alpha_mode, AlphaMode::Opaque);
+        // An alpha-free texture never upgrades.
+        face.alpha_mode = AlphaMode::Opaque;
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, false, false);
+        assert_eq!(face.alpha_mode, AlphaMode::Opaque);
+        // A tint-blending face is left blending.
+        face.alpha_mode = AlphaMode::Blend;
+        resolve_texture_alpha_mode(&mut face, TextureAlpha::Mask, true, false);
+        assert_eq!(face.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]

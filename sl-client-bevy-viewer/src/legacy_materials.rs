@@ -89,6 +89,15 @@ pub(crate) struct LegacyMaterialManager {
     images: HashMap<TextureKey, Handle<Image>>,
     /// Face materials parked on a normal-map texture id, applied once it decodes.
     texture_pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    /// Face materials whose `alpha_mode` a legacy material has **overridden**
+    /// (an opaque-tint face whose `LLMaterial` diffuse alpha mode applied): the
+    /// material's mode is authoritative from then on, so the R22d texture-alpha
+    /// resolution must not "upgrade" it when the diffuse texture decodes later
+    /// (`NONE` means opaque in the reference even over an alpha texture — the
+    /// outcome used to depend on which of the two applied last, R25a). Entries
+    /// for despawned faces go stale harmlessly (asset ids are not reused) and
+    /// are dropped with the manager at session end.
+    alpha_overridden: HashSet<AssetId<StandardMaterial>>,
 }
 
 impl LegacyMaterialManager {
@@ -97,6 +106,13 @@ impl LegacyMaterialManager {
     /// it to tell a fetched-but-opaque material from a missing fetch.
     pub(crate) fn decoded_material(&self, id: &Uuid) -> Option<&LegacyMaterial> {
         self.decoded.get(id)
+    }
+
+    /// Whether a legacy material has overridden this face material's alpha
+    /// mode, making that mode authoritative over the R22d texture-alpha
+    /// resolution (see [`Self::alpha_overridden`]).
+    pub(crate) fn is_alpha_overridden(&self, id: AssetId<StandardMaterial>) -> bool {
+        self.alpha_overridden.contains(&id)
     }
 
     /// Register a face material handle against its legacy material id: park the
@@ -193,6 +209,15 @@ fn legacy_alpha_override(diffuse_alpha_mode: u8, alpha_mask_cutoff: u8) -> Alpha
     }
 }
 
+/// Whether the legacy-material diagnostic log is enabled
+/// (`SL_VIEWER_LOG_LEGACY_MATERIALS`, R25a): every face registration and
+/// every scalar apply — with the guard's inputs and outcome — is logged at
+/// `info`, so a transparency divergence across a LoD / derender cycle can be
+/// read off a live session's log.
+fn legacy_log_enabled() -> bool {
+    std::env::var_os("SL_VIEWER_LOG_LEGACY_MATERIALS").is_some()
+}
+
 /// Register each newly-spawned face carrying a legacy `TextureEntry` material id
 /// with the [`LegacyMaterialManager`], skipping any face that already has a PBR
 /// GLTF material (which supersedes the legacy material, as in the reference
@@ -225,7 +250,22 @@ pub(crate) fn register_legacy_materials(
                 .iter()
                 .any(|(index, _id)| usize::from(*index) == face_index)
         {
+            if legacy_log_enabled() {
+                info!(
+                    "legacy: face {face_index} material {material_id} superseded by PBR \
+                     (handle {:?})",
+                    material.0.id()
+                );
+            }
             continue;
+        }
+        if legacy_log_enabled() {
+            info!(
+                "legacy: register face {face_index} material {material_id} tint_a={} \
+                 (handle {:?})",
+                texture_face.color[3],
+                material.0.id()
+            );
         }
         manager.register(material.0.clone(), material_id);
     }
@@ -302,7 +342,11 @@ pub(crate) fn apply_legacy_materials(
     }
 }
 
-/// Write one legacy material's scalar fields onto a face [`StandardMaterial`].
+/// Write one legacy material's scalar fields onto a face [`StandardMaterial`],
+/// returning whether the material's diffuse alpha mode **overrode** the face's
+/// `alpha_mode` — the caller records that ([`LegacyMaterialManager::
+/// alpha_overridden`]) so the R22d texture-alpha resolution leaves the mode
+/// alone from then on, whichever of the two applies last (R25a).
 ///
 /// The pure half of [`apply_legacy_to_face`], split out so it is reachable without
 /// a fetch behind it: everything here is a function of the decoded material, while
@@ -310,7 +354,10 @@ pub(crate) fn apply_legacy_materials(
 /// [`crate::render_scene`]'s legacy-material scene exercise the real mapping with
 /// no capability, no `TextureManager` and no grid — the registry's rule that
 /// construction is separable from transport, applied to this module.
-pub(crate) fn apply_legacy_scalars(standard: &mut StandardMaterial, material: &LegacyMaterial) {
+pub(crate) fn apply_legacy_scalars(
+    standard: &mut StandardMaterial,
+    material: &LegacyMaterial,
+) -> bool {
     standard.reflectance = reflectance_from_environment(material.environment_intensity);
     standard.perceptual_roughness = roughness_from_glossiness(material.specular_exponent);
     // A translucent TE tint wins over the material's diffuse alpha mode (R25): the
@@ -323,7 +370,8 @@ pub(crate) fn apply_legacy_scalars(standard: &mut StandardMaterial, material: &L
     // Without this guard the common "transparent prim that also carries a
     // shiny/bump material" content (whose `LLMaterial` defaults to alpha mode
     // `NONE`) was forced opaque the moment its material arrived.
-    if standard.base_color.alpha() >= OPAQUE_TINT_ALPHA {
+    let overrides_alpha = standard.base_color.alpha() >= OPAQUE_TINT_ALPHA;
+    if overrides_alpha {
         standard.alpha_mode =
             legacy_alpha_override(material.diffuse_alpha_mode, material.alpha_mask_cutoff);
     }
@@ -331,6 +379,7 @@ pub(crate) fn apply_legacy_scalars(standard: &mut StandardMaterial, material: &L
     if material.normal_map.uuid().is_nil() {
         standard.normal_map_texture = None;
     }
+    overrides_alpha
 }
 
 /// Write one legacy material's scalar fields onto a face [`StandardMaterial`] and
@@ -344,7 +393,25 @@ fn apply_legacy_to_face(
     material: &LegacyMaterial,
 ) {
     if let Some(mut standard) = materials.get_mut(handle) {
-        apply_legacy_scalars(&mut standard, material);
+        if apply_legacy_scalars(&mut standard, material) {
+            // The material's alpha mode is authoritative for this face now: the
+            // R22d texture-alpha resolution must not upgrade it later (R25a).
+            let _new = manager.alpha_overridden.insert(handle.id());
+        }
+        if legacy_log_enabled() {
+            info!(
+                "legacy: apply to handle {:?}: base_a={:.3} mode_in={} -> alpha_mode={:?}",
+                handle.id(),
+                standard.base_color.alpha(),
+                material.diffuse_alpha_mode,
+                standard.alpha_mode,
+            );
+        }
+    } else if legacy_log_enabled() {
+        info!(
+            "legacy: apply to handle {:?}: material asset GONE (face despawned?)",
+            handle.id()
+        );
     }
     let normal = material.normal_map;
     if !normal.uuid().is_nil() {
@@ -457,10 +524,18 @@ mod tests {
             alpha_mode: AlphaMode::Blend,
             ..StandardMaterial::default()
         };
-        apply_legacy_scalars(&mut standard, &material_with_alpha(0, 0));
+        // The apply reports NO override (the tint stays authoritative), so the
+        // R22d texture-alpha resolution stays free to act on this face.
+        assert!(!apply_legacy_scalars(
+            &mut standard,
+            &material_with_alpha(0, 0)
+        ));
         assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
         // EMISSIVE would also have forced opaque; the tint still wins.
-        apply_legacy_scalars(&mut standard, &material_with_alpha(3, 0));
+        assert!(!apply_legacy_scalars(
+            &mut standard,
+            &material_with_alpha(3, 0)
+        ));
         assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
     }
 
@@ -474,12 +549,19 @@ mod tests {
             alpha_mode: AlphaMode::Blend,
             ..StandardMaterial::default()
         };
-        apply_legacy_scalars(&mut standard, &material_with_alpha(0, 0));
+        // The apply reports the override, which is what marks the face so the
+        // R22d texture-alpha resolution leaves its mode alone thereafter
+        // (R25a): a `NONE` material over an alpha texture renders opaque in
+        // the reference, whichever of the two applied last.
+        assert!(apply_legacy_scalars(
+            &mut standard,
+            &material_with_alpha(0, 0)
+        ));
         assert!(matches!(standard.alpha_mode, AlphaMode::Opaque));
-        apply_legacy_scalars(
+        assert!(apply_legacy_scalars(
             &mut standard,
             &material_with_alpha(DIFFUSE_ALPHA_MODE_BLEND, 0),
-        );
+        ));
         assert!(matches!(standard.alpha_mode, AlphaMode::Blend));
     }
 }

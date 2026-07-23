@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 31 |
-| ready | 189 |
+| ready | 190 |
 | blocked | 133 |
 | in-progress | 7 |
 | bugs | 11 |
-| done | 577 |
+| done | 578 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **969** |
+| **total** | **971** |
 
 ## ideas (31)
 
@@ -91,7 +91,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (189)
+## ready (190)
 
 ### protocol
 
@@ -322,6 +322,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
   Flood-fill the parcel-overlay grid into per-parcel footprints
+- [`viewer-parcel-icon-hover-tips`](ready/viewer-parcel-icon-hover-tips.md) —
+  Hover-tips over the parcel permission icons in the top bar
 - [`viewer-parcel-join-split`](ready/viewer-parcel-join-split.md) — Parcel join
   / split (blocked by `viewer-input-action-map` (done),
   `viewer-parcel-overlay-decode` (done))
@@ -933,6 +935,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Animesh surrounded by an almost-transparent box shell
 - [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
+- [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
+  — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -940,8 +944,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-pillows-inside-out-geometry`](bugs/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
-- [`viewer-r25a`](bugs/viewer-r25a-transparency-lost-after-lod-cycle.md) — Prim
-  transparency lost again after a LoD / derender cycle
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -955,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (577)
+## done (578)
 
 ### protocol
 
@@ -1472,6 +1474,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   CoarseLocationUpdate was dropped
 - [`viewer-r25`](done/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
   — Prims that should be transparent render opaque
+- [`viewer-r25a`](done/viewer-r25a-transparency-lost-after-lod-cycle.md) — Prim
+  transparency lost again after a LoD / derender cycle
 - [`viewer-r26`](done/viewer-r26-slab-allocator-use-after-free-spam.md) —
   bevy_render slab-allocator "use-after-free / unallocated key" log spam
 - [`viewer-r28`](done/viewer-r28-text-caret-invisible-until-typing.md) —
