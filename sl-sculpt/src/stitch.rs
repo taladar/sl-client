@@ -101,7 +101,10 @@ impl SculptStitch {
 /// sampled geometry rather than post-processing it:
 ///
 /// - `reverse_u` (invert **XOR** mirror) reverses the horizontal (U) sampling
-///   direction, so each grid column reads the mirror-image map column;
+///   direction, so each grid column reads the mirror-image map column — and
+///   also reverses the horizontal *texture* coordinate (the reference's
+///   `ss = 1.f - ss` in `createSide`), so the texture mirrors with the
+///   geometry;
 /// - `mirror` additionally negates the sampled position's X component.
 ///
 /// With a fixed triangle winding these two transforms compose to the four

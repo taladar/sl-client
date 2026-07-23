@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 190 |
 | blocked | 133 |
 | in-progress | 7 |
-| bugs | 11 |
-| done | 578 |
+| bugs | 10 |
+| done | 579 |
 | deferred | 15 |
 | wont-do | 6 |
 | **total** | **971** |
@@ -921,7 +921,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (11)
+## bugs (10)
 
 ### protocol
 
@@ -942,8 +942,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-pillows-inside-out-geometry`](bugs/viewer-pillows-inside-out-geometry.md)
-  — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -957,7 +955,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (578)
+## done (579)
 
 ### protocol
 
@@ -1435,6 +1433,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Decode ParcelOverlay into a 64×64 grid resource
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
+- [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
+  — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
   Profile Web tab — render the feed in the embedded browser
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh

@@ -16,6 +16,17 @@
 //! reference, never a duplicated pair, so per-vertex normals (accumulated from
 //! the incident triangles) are automatically smooth across it.
 //!
+//! **The grid's V axis runs bottom-up through the visible map.** The reference
+//! viewer's JPEG2000 decoder copies rows *bottom-up* into `LLImageRaw` (row 0 =
+//! the visible bottom), and both `sculptGenerateMapVertices` and the
+//! `createSide` triangle winding assume that order; a [`DecodedImage`] is
+//! top-down (row 0 = the visible top), so the grid row's V is flipped at
+//! position-sampling time. UVs keep the *unflipped* grid V — exactly the
+//! reference pairing, where the mesh row built from the visible-bottom map row
+//! carries texture V = 0. Sampling V top-down instead builds every sculpt as
+//! its own mirror image — winding inverted relative to the back-face cull, so
+//! real-convention sculpt content renders inside out (the aditi pillows bug).
+//!
 //! It is a faithful, idiomatic re-implementation of Firestorm
 //! `indra/llmath/llvolume.cpp` — `LLVolume::sculpt` and
 //! `sculptGenerateMapVertices` — reworked to the workspace's restriction lints
@@ -75,10 +86,21 @@ pub fn tessellate(map: &DecodedImage, sculpt_type: u8) -> PrimMesh {
     reason = "re-exported at the crate root, where `tessellate_with` reads clearly"
 )]
 pub fn tessellate_with(map: &DecodedImage, params: SculptParams) -> PrimMesh {
-    match SculptMap::new(map) {
+    let mut mesh = match SculptMap::new(map) {
         Some(sculpt) => build(params.stitch, |u, v| sculpt.sample(u, v, params)),
         None => build(SculptStitch::Sphere, placeholder_position),
+    };
+    // The reference's `createSide` also reverses the horizontal *texture*
+    // coordinate when invert XOR mirror is set (`ss = 1.f - ss`), so the
+    // texture mirrors with the geometry instead of appearing flipped on it.
+    if params.reverse_u() {
+        for face in &mut mesh.faces {
+            for uv in &mut face.uvs {
+                uv[0] = 1.0 - uv[0];
+            }
+        }
     }
+    mesh
 }
 
 /// A borrowed view over a decoded sculpt map's RGBA8 pixels, offering bilinear
@@ -168,7 +190,9 @@ impl<'pixels> SculptMap<'pixels> {
 
 /// Build the stitched grid for `stitch`, taking each vertex position from
 /// `position` (the sculpt sampler, or the placeholder generator), evaluated at
-/// the vertex's normalised `(u, v)` grid coordinates.
+/// the vertex's normalised `(u, 1 - v)` coordinates — the V flip that maps the
+/// bottom-up grid row onto the top-down map (see the module docs); UVs keep
+/// the unflipped grid `(u, v)`.
 ///
 /// Seam and pole vertices are stored once and referenced by every incident quad,
 /// so no seam or pole vertex is duplicated. The result is a single [`PrimFace`]
@@ -273,7 +297,11 @@ impl GridBuilder {
         };
         let v = f32_from_usize(crow) / f32_from_usize(self.cells);
         let index = u32_from_usize(self.positions.len());
-        self.positions.push(position(u, v));
+        // Positions sample at the *flipped* V (the module-level bottom-up
+        // convention: grid row 0 reads the visible bottom of the top-down
+        // map), while the UV keeps the unflipped grid V — the same pairing the
+        // reference's bottom-up `LLImageRaw` rows produce.
+        self.positions.push(position(u, 1.0 - v));
         self.uvs.push([u, v]);
         if let Some(cell) = self.slots.get_mut(slot) {
             *cell = Some(index);
@@ -317,9 +345,10 @@ impl GridBuilder {
     }
 }
 
-/// A procedural sphere position for the degenerate-map placeholder, evaluated at
-/// normalised grid coordinates `(u, v)` (Firestorm's
-/// `sculptGenerateSpherePlaceholder`).
+/// A procedural sphere position for the degenerate-map placeholder (Firestorm's
+/// `sculptGenerateSpherePlaceholder`), evaluated at the flipped-V sampling
+/// coordinates [`build`] passes — so with the fixed grid winding the
+/// placeholder ball faces outward, like every properly sampled sculpt.
 fn placeholder_position(u: f32, v: f32) -> [f32; 3] {
     let theta = core::f32::consts::PI * v;
     let phi = core::f32::consts::TAU * u;
@@ -455,7 +484,7 @@ fn u32_from_usize(value: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{WORKING_SUBDIVISIONS, tessellate, tessellate_with};
+    use super::{WORKING_SUBDIVISIONS, tessellate, tessellate_with, usize_from_f32_floor};
     use crate::stitch::{SculptParams, SculptStitch};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
@@ -489,6 +518,70 @@ mod tests {
 
     /// The number of quad cells per side used by the working grid.
     const N: usize = WORKING_SUBDIVISIONS;
+
+    /// A synthetic sphere sculpt map in the **real content convention**: the
+    /// north pole (`z = +0.5`, blue = 255) on the visible *top* row, longitude
+    /// counter-clockwise (`+X` → `+Y`) across the columns. Real sculpt content
+    /// (authored against the reference viewer) renders outward from exactly
+    /// this orientation.
+    fn sphere_map(width: u32, height: u32) -> DecodedImage {
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            let theta = core::f32::consts::PI * f32::from(u16::try_from(y).unwrap_or(0))
+                / f32::from(u16::try_from(height.saturating_sub(1)).unwrap_or(1));
+            for x in 0..width {
+                let phi = core::f32::consts::TAU * f32::from(u16::try_from(x).unwrap_or(0))
+                    / f32::from(u16::try_from(width).unwrap_or(1));
+                let channel = |value: f32| {
+                    let byte = ((0.5 + 0.5 * value) * 255.0).round().clamp(0.0, 255.0);
+                    u8::try_from(usize_from_f32_floor(byte)).unwrap_or(255)
+                };
+                pixels.extend_from_slice(&[
+                    channel(theta.sin() * phi.cos()),
+                    channel(theta.sin() * phi.sin()),
+                    channel(theta.cos()),
+                    255,
+                ]);
+            }
+        }
+        DecodedImage {
+            width,
+            height,
+            components: 3,
+            discard_level: DiscardLevel::FULL,
+            pixels: Bytes::from(pixels),
+            aux: None,
+        }
+    }
+
+    /// The signed volume enclosed by a face's triangles (`Σ p0 · (p1 × p2) / 6`):
+    /// positive when the winding faces outward from the origin, negative when
+    /// the surface is inside out.
+    fn signed_volume(face: &sl_prim::PrimFace) -> f32 {
+        let mut volume = 0.0_f32;
+        for triangle in face.indices.chunks_exact(3) {
+            let [i0, i1, i2] = match triangle {
+                [i0, i1, i2] => [*i0, *i1, *i2],
+                _short => continue,
+            };
+            let point = |index: u32| {
+                face.positions
+                    .get(usize::try_from(index).unwrap_or(usize::MAX))
+                    .copied()
+                    .unwrap_or([0.0; 3])
+            };
+            let p0 = point(i0);
+            let p1 = point(i1);
+            let p2 = point(i2);
+            let cross = [
+                p1[1] * p2[2] - p1[2] * p2[1],
+                p1[2] * p2[0] - p1[0] * p2[2],
+                p1[0] * p2[1] - p1[1] * p2[0],
+            ];
+            volume += (p0[0] * cross[0] + p0[1] * cross[1] + p0[2] * cross[2]) / 6.0;
+        }
+        volume
+    }
 
     /// The single face of a tessellated sculpt (there is always exactly one).
     fn single_face(mesh: &PrimMesh) -> &sl_prim::PrimFace {
@@ -654,6 +747,84 @@ mod tests {
         let (mirror_min, mirror_max) = x_bounds(single_face(&mirrored));
         assert!((mirror_min + plain_max).abs() < 1.0e-4, "min reflects max");
         assert!((mirror_max + plain_min).abs() < 1.0e-4, "max reflects min");
+    }
+
+    #[test]
+    fn reference_convention_sphere_renders_outward() {
+        // The viewer-pillows-inside-out-geometry regression: a sphere sculpt
+        // map in the real content convention (north pole on the visible top
+        // row) must tessellate with outward-facing winding. Sampling the
+        // top-down map without the V flip builds this exact sphere inside out.
+        let mesh = tessellate(&sphere_map(64, 64), 1);
+        assert_face_integrity(&mesh);
+        let volume = signed_volume(single_face(&mesh));
+        assert!(volume > 0.05, "sphere faces outward (volume {volume})");
+    }
+
+    #[test]
+    fn invert_flag_turns_the_sphere_inside_out() {
+        // Sculpt type 1 | 64 = sphere with the invert flag: deliberately
+        // inside out, so the signed volume goes negative.
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 64);
+        assert_face_integrity(&mesh);
+        let volume = signed_volume(single_face(&mesh));
+        assert!(
+            volume < -0.05,
+            "inverted sphere faces inward (volume {volume})"
+        );
+    }
+
+    #[test]
+    fn mirror_flag_keeps_the_sphere_outward() {
+        // Mirror composes an X negation with a reversed U sweep — two
+        // orientation flips, so the mirrored sphere still faces outward.
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 128);
+        assert_face_integrity(&mesh);
+        let volume = signed_volume(single_face(&mesh));
+        assert!(
+            volume > 0.05,
+            "mirrored sphere faces outward (volume {volume})"
+        );
+    }
+
+    #[test]
+    fn placeholder_sphere_renders_outward() {
+        // The degenerate-map placeholder ball must face outward too.
+        let empty = DecodedImage {
+            width: 0,
+            height: 0,
+            components: 3,
+            discard_level: DiscardLevel::FULL,
+            pixels: Bytes::new(),
+            aux: None,
+        };
+        let mesh = tessellate(&empty, 1);
+        let volume = signed_volume(single_face(&mesh));
+        assert!(volume > 0.05, "placeholder faces outward (volume {volume})");
+    }
+
+    #[test]
+    fn reverse_u_mirrors_the_texture_coordinate() {
+        // The reference's `createSide` reverses the horizontal texture
+        // coordinate when invert XOR mirror is set (`ss = 1.f - ss`); the
+        // plain and inverted tessellations of the same map must carry
+        // mirrored U in their UVs.
+        let map = gradient_map(64, 64);
+        let plain = tessellate(&map, 3);
+        let inverted = tessellate(&map, 3 | 64);
+        let plain_face = single_face(&plain);
+        let inverted_face = single_face(&inverted);
+        assert_eq!(plain_face.uvs.len(), inverted_face.uvs.len());
+        for (plain_uv, inverted_uv) in plain_face.uvs.iter().zip(&inverted_face.uvs) {
+            assert!(
+                ((1.0 - plain_uv[0]) - inverted_uv[0]).abs() < 1.0e-6,
+                "U mirrored: plain {plain_uv:?} vs inverted {inverted_uv:?}"
+            );
+            assert!(
+                (plain_uv[1] - inverted_uv[1]).abs() < 1.0e-6,
+                "V unchanged: plain {plain_uv:?} vs inverted {inverted_uv:?}"
+            );
+        }
     }
 
     #[test]
