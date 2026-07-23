@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 187 |
 | blocked | 133 |
 | in-progress | 7 |
-| bugs | 10 |
+| bugs | 11 |
 | done | 569 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **958** |
+| **total** | **959** |
 
 ## ideas (31)
 
@@ -914,7 +914,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (10)
+## bugs (11)
 
 ### protocol
 
@@ -935,6 +935,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar stands too low — feet sink into the ground
 - [`viewer-r25`](bugs/viewer-r25-prims-that-should-be-transparent-render-opaque.md)
   — Prims that should be transparent render opaque
+- [`viewer-r28`](bugs/viewer-r28-text-caret-invisible-until-typing.md) —
+  Text-field caret nearly invisible — color, blink, focus cues
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
