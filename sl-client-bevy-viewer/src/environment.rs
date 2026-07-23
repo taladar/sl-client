@@ -16,7 +16,11 @@
 //! shadows (P24) consume the stored settings.
 
 use bevy::prelude::*;
-use sl_client_bevy::{Command, EnvironmentSettings, SlCommand, SlEvent, SlSessionEvent};
+use sl_client_bevy::{
+    Command, DayCycleFrame, EnvironmentSettings, SlCommand, SlEvent, SlSessionEvent,
+};
+
+use crate::sky_presets::FixedSky;
 
 /// Where the current [`EnvironmentState::settings`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,11 +44,26 @@ const ENV_RETRY_INTERVAL: f32 = 3.0;
 /// later rendering phases draw from, plus where they came from.
 #[derive(Resource)]
 pub(crate) struct EnvironmentState {
-    /// The active environment settings. Begins at the legacy WindLight default and
-    /// is replaced when the grid answers a [`Command::RequestEnvironment`].
+    /// The active environment settings — what the sky / water / shadow phases
+    /// render. Begins at the legacy WindLight default, is replaced when the
+    /// grid answers a [`Command::RequestEnvironment`], and is *pinned* to a
+    /// single preset frame while a fixed sky is selected
+    /// ([`set_fixed_sky`](Self::set_fixed_sky)).
     pub(crate) settings: EnvironmentSettings,
     /// The provenance of [`Self::settings`].
     pub(crate) source: EnvironmentSource,
+    /// The last **shared** (grid) environment: what [`Self::settings`] shows
+    /// when no fixed sky is selected, and what "Use Shared Environment"
+    /// restores. Kept current by [`ingest_environment`] even while a fixed sky
+    /// is pinned, so un-pinning never renders stale grid settings.
+    shared: EnvironmentSettings,
+    /// The provenance of [`Self::shared`].
+    shared_source: EnvironmentSource,
+    /// The fixed sky pinned by the World ▸ Environment menu, if any — the
+    /// reference viewer's local fixed environment
+    /// (`LLEnvironment::setEnvironment(ENV_LOCAL, …)`), which survives region
+    /// changes until "Use Shared Environment".
+    fixed_sky: Option<FixedSky>,
     /// Whether a region-environment request is still outstanding — the retry loop
     /// keeps re-requesting until the reply is ingested or [`MAX_ENV_ATTEMPTS`] is
     /// reached.
@@ -60,9 +79,66 @@ impl Default for EnvironmentState {
         Self {
             settings: EnvironmentSettings::legacy_windlight_default(),
             source: EnvironmentSource::Default,
+            shared: EnvironmentSettings::legacy_windlight_default(),
+            shared_source: EnvironmentSource::Default,
+            fixed_sky: None,
             req_pending: false,
             req_attempts: 0,
             req_next_retry_at: 0.0,
+        }
+    }
+}
+
+impl EnvironmentState {
+    /// The fixed sky currently pinned by the World ▸ Environment menu, if any
+    /// (drives the menu's check marks).
+    pub(crate) const fn fixed_sky(&self) -> Option<FixedSky> {
+        self.fixed_sky
+    }
+
+    /// Pin the rendered environment to `fixed` — a single-frame day cycle
+    /// holding that preset sky over the shared environment's water — or restore
+    /// the shared (grid) environment with `None`. The reference's World ▸
+    /// Environment ▸ Sunrise / Midday / Sunset / Midnight / "Use Shared
+    /// Environment".
+    pub(crate) fn set_fixed_sky(&mut self, fixed: Option<FixedSky>) {
+        self.fixed_sky = fixed;
+        self.apply();
+    }
+
+    /// Fold a freshly-ingested shared environment in: it becomes the rendered
+    /// settings unless a fixed sky is pinned (in which case it is remembered
+    /// for the next "Use Shared Environment").
+    fn ingest_shared(&mut self, settings: EnvironmentSettings, source: EnvironmentSource) {
+        self.shared = settings;
+        self.shared_source = source;
+        self.apply();
+    }
+
+    /// Recompute the active [`Self::settings`] from the shared environment and
+    /// the pinned fixed sky.
+    fn apply(&mut self) {
+        match self.fixed_sky {
+            None => {
+                self.settings = self.shared.clone();
+                self.source = self.shared_source;
+            }
+            Some(fixed) => {
+                // The shared environment with its sky schedule replaced by one
+                // frame pinned at keyframe 0 on the surface track (the upper
+                // altitude tracks empty out, so every altitude falls back to
+                // it); the water keeps following the shared cycle.
+                let mut pinned = self.shared.clone();
+                let sky = fixed.settings();
+                let name = fixed.frame_name().to_owned();
+                pinned.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
+                    keyframe: 0.0,
+                    name: name.clone(),
+                }]];
+                pinned.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
+                self.settings = pinned;
+                self.source = self.shared_source;
+            }
         }
     }
 }
@@ -139,8 +215,7 @@ pub(crate) fn ingest_environment(
                  {sky_count} sky frame(s), {water_count} water frame(s), cycle {:?}",
                 settings.day_length, settings.day_offset, settings.day_cycle.name,
             );
-            state.settings = (**settings).clone();
-            state.source = source;
+            state.ingest_shared((**settings).clone(), source);
             // The reply landed — stop the request/retry loop for this region.
             state.req_pending = false;
         }

@@ -76,6 +76,19 @@ const MINIMAP_OPEN: &str = "minimap-open";
 /// the check mark on the World ▸ World Map entry.
 const WORLD_MAP_OPEN: &str = "world-map-open";
 
+/// The condition keys that hold while the matching World ▸ Environment fixed
+/// sky is pinned — one per preset, plus the shared-environment default. Each
+/// drives the check mark on its entry.
+const ENV_SUNRISE_ACTIVE: &str = "env-sunrise-active";
+/// See [`ENV_SUNRISE_ACTIVE`].
+const ENV_MIDDAY_ACTIVE: &str = "env-midday-active";
+/// See [`ENV_SUNRISE_ACTIVE`].
+const ENV_SUNSET_ACTIVE: &str = "env-sunset-active";
+/// See [`ENV_SUNRISE_ACTIVE`].
+const ENV_MIDNIGHT_ACTIVE: &str = "env-midnight-active";
+/// See [`ENV_SUNRISE_ACTIVE`].
+const ENV_SHARED_ACTIVE: &str = "env-shared-active";
+
 /// The placeholder shown in a menu that has no wired entries yet — a single
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
@@ -109,8 +122,34 @@ static COMM_MENU: MenuDef = MenuDef {
     )],
 };
 
-/// The World menu — the minimap and world map today; teleport and environment
-/// are future entries.
+/// The World ▸ Environment submenu — the reference viewer's fixed-sky times of
+/// day (its World ▸ Environment ▸ Sunrise / Midday / Sunset / Midnight over
+/// Linden's `A-*` presets) plus the return to the region's shared environment.
+static ENVIRONMENT_MENU: MenuDef = MenuDef {
+    label: "Environment",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Sunrise", "env-fixed-sunrise").checked_when(ENV_SUNRISE_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midday", "env-fixed-midday").checked_when(ENV_MIDDAY_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sunset", "env-fixed-sunset").checked_when(ENV_SUNSET_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midnight", "env-fixed-midnight").checked_when(ENV_MIDNIGHT_ACTIVE),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Use Shared Environment", "env-shared")
+                .checked_when(ENV_SHARED_ACTIVE),
+        ),
+    ],
+};
+
+/// The World menu — the minimap, world map, and environment today; teleport is
+/// a future entry.
 static WORLD_MENU: MenuDef = MenuDef {
     label: "World",
     items: &[
@@ -122,6 +161,8 @@ static WORLD_MENU: MenuDef = MenuDef {
                 .accel("Ctrl+M")
                 .checked_when(WORLD_MAP_OPEN),
         ),
+        MenuItemDef::Separator,
+        MenuItemDef::Submenu(&ENVIRONMENT_MENU),
     ],
 };
 
@@ -227,12 +268,18 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 /// Cheap — one small `Vec` and only written on a real change — and read only
 /// when a menu opens ([`crate::menu`] rebuilds a popup from the conditions that
 /// hold at open time), so nothing here needs to run against an open menu.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the condition recompute reads every toggleable floater's UI resource plus the \
+              environment state; each new checked menu entry adds one parameter"
+)]
 fn update_top_menu_conditions(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    environment: Option<Res<crate::environment::EnvironmentState>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -267,6 +314,19 @@ fn update_top_menu_conditions(
     if world_map_open {
         wanted.push(WORLD_MAP_OPEN);
     }
+    // The Environment submenu's check marks: exactly one of the four presets or
+    // the shared default holds. The gallery has no environment resource, so the
+    // submenu simply shows no check there.
+    if let Some(environment) = &environment {
+        use crate::sky_presets::FixedSky;
+        wanted.push(match environment.fixed_sky() {
+            Some(FixedSky::Sunrise) => ENV_SUNRISE_ACTIVE,
+            Some(FixedSky::Midday) => ENV_MIDDAY_ACTIVE,
+            Some(FixedSky::Sunset) => ENV_SUNSET_ACTIVE,
+            Some(FixedSky::Midnight) => ENV_MIDNIGHT_ACTIVE,
+            None => ENV_SHARED_ACTIVE,
+        });
+    }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
             conditions.0.clone_from(&wanted);
@@ -292,9 +352,19 @@ fn handle_top_menu_actions(
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    use crate::sky_presets::FixedSky;
+    // The World ▸ Environment picks share one shape: pin a fixed sky (or
+    // restore the shared environment) on the environment state.
+    let set_fixed = |environment: &mut Option<ResMut<crate::environment::EnvironmentState>>,
+                     fixed: Option<FixedSky>| {
+        if let Some(environment) = environment {
+            environment.set_fixed_sky(fixed);
+        }
+    };
     for action in actions.read() {
         if action.element != TOP_MENU_ELEMENT {
             continue;
@@ -338,6 +408,11 @@ fn handle_top_menu_actions(
                     shown.0 = !shown.0;
                 }
             }
+            "env-fixed-sunrise" => set_fixed(&mut environment, Some(FixedSky::Sunrise)),
+            "env-fixed-midday" => set_fixed(&mut environment, Some(FixedSky::Midday)),
+            "env-fixed-sunset" => set_fixed(&mut environment, Some(FixedSky::Sunset)),
+            "env-fixed-midnight" => set_fixed(&mut environment, Some(FixedSky::Midnight)),
+            "env-shared" => set_fixed(&mut environment, None),
             _ => {}
         }
     }

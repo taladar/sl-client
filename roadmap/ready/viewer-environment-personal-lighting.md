@@ -28,3 +28,13 @@ Reference (Firestorm, read-only): `llfloaterenvironmentadjust`,
 `floater_adjust_environment.xml`, `llenvironment` (ENV_LOCAL layer).
 
 Builds on: the P22 EEP ingest + sky/water renderers.
+
+**First slice landed (2026-07-23, user request):** the **World ▸
+Environment** menu pins a fixed sky — Sunrise / Midday / Sunset / Midnight
+over the four ported Linden presets (now shared in `sky_presets.rs`) — and
+"Use Shared Environment" restores the grid settings.
+`EnvironmentState` grew the local-override layer skeleton this task needs:
+it keeps the `shared` (grid) environment beside the rendered `settings`,
+re-applies the pin across region changes and late EEP replies, and exposes
+`set_fixed_sky` / `fixed_sky` (the menu check marks). The floater's slider
+surface and the water section remain this task's scope.

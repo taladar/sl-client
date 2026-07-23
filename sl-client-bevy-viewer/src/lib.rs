@@ -117,6 +117,7 @@ mod settings;
 mod settings_binding;
 mod skin;
 mod sky;
+mod sky_presets;
 mod spacenav;
 mod status_bar;
 mod terrain;
