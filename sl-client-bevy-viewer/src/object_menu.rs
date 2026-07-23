@@ -737,7 +737,9 @@ pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Edit",
                 action: "edit",
-                when: Some(UNIMPLEMENTED),
+                // Unconditional, like the reference: editing a no-modify
+                // object still opens the tools (the sim rejects what it must).
+                when: None,
             }),
         },
     ],
@@ -996,11 +998,22 @@ fn capture_object_menu_name(
 /// Only the wired actions are matched; every other slice is a disabled
 /// placeholder that never emits, so the fall-through is the whole of the
 /// not-yet-implemented set and is intentionally silent.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the action \
+              stream, the pie target, the inventory folders a derez needs, the seated state, \
+              the edit-tool / selection state the Edit slice drives, and the command writer"
+)]
 fn handle_object_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<ObjectMenuTarget>,
     inventory: Res<InventoryModel>,
     mut ground_sit: ResMut<SelfGroundSit>,
+    tool: Res<crate::edit_tool::EditToolState>,
+    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    mut panels: Query<&mut crate::ui::UiPanelShown>,
+    mut selection: ResMut<crate::edit_selection::SelectionSet>,
+    state: Res<ObjectState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for action in actions.read() {
@@ -1010,6 +1023,25 @@ fn handle_object_menu_actions(
         let Some(hit) = &target.hit else {
             continue;
         };
+        // Edit (the reference's pie Edit): open the Build Tools floater —
+        // which *is* edit mode — and make the picked object the selection.
+        if action.action == "edit" {
+            if let Some(ui) = &build_tools
+                && let Ok(mut shown) = panels.get_mut(ui.panel())
+            {
+                shown.0 = true;
+            }
+            let (scoped, full) = if tool.edit_linked {
+                (hit.summary.picked_scoped, hit.summary.picked_full)
+            } else {
+                (hit.summary.root_scoped, hit.summary.root_full)
+            };
+            if let Some(entity) = state.entity_by_scoped(&scoped) {
+                selection.clear();
+                selection.insert(scoped, full, entity);
+            }
+            continue;
+        }
         // The derez destinations that need a folder: take (and take-copy) land
         // in the system Objects folder, delete in the Trash — the reference's
         // choices. A missing folder (inventory skeleton not fetched yet) skips
@@ -1291,13 +1323,18 @@ mod tests {
             (Compass::East, "Open"),
             (Compass::NorthEast, "Create"),
             (Compass::SouthWest, "Pay"),
-            (Compass::SouthEast, "Edit"),
         ] {
             assert!(
                 !slot_at(&plain, point)?.enabled,
                 "{name} is a placeholder and must read disabled until it is wired"
             );
         }
+        // Edit is wired (viewer-object-edit-floater-shell) and unconditional,
+        // like the reference: it opens the build tools on any object.
+        assert!(
+            slot_at(&plain, Compass::SouthEast)?.enabled,
+            "Edit is wired and must read enabled with no conditions held"
+        );
         // The proof that the sentinel is what disables them: hold it, and they
         // light up. The live viewer never does this.
         let held = resolve_slots(&OBJECT_PIE, &PieConditions::new([UNIMPLEMENTED]));

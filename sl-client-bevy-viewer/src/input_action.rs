@@ -238,15 +238,20 @@ impl Default for InputBindings {
             .action(KeyCode::KeyF, Action::ToggleFly)
             .action(KeyCode::KeyM, Action::ToggleMouselook);
 
-        // Flycam: the WASD cluster drives the camera; `Space` / `Ctrl` raise and
-        // lower it, `Shift` moves fast. `M` still drops to mouselook.
+        // Flycam: the WASD cluster drives the camera; `E` / `C` (and
+        // `PageUp` / `PageDown`) raise and lower it, `Shift` moves fast. `M`
+        // still drops to mouselook. Deliberately NOT `Space` / `Ctrl`: a bare
+        // modifier as a movement key collides with every chord shortcut —
+        // holding `Ctrl` for `Ctrl+B` would sink the camera.
         let flycam = BindingProfile::default()
             .action(KeyCode::KeyW, Action::MoveForward)
             .action(KeyCode::KeyS, Action::MoveBackward)
             .action(KeyCode::KeyA, Action::MoveLeft)
             .action(KeyCode::KeyD, Action::MoveRight)
-            .action(KeyCode::Space, Action::MoveUp)
-            .action(KeyCode::ControlLeft, Action::MoveDown)
+            .action(KeyCode::KeyE, Action::MoveUp)
+            .action(KeyCode::PageUp, Action::MoveUp)
+            .action(KeyCode::KeyC, Action::MoveDown)
+            .action(KeyCode::PageDown, Action::MoveDown)
             .action(KeyCode::ShiftLeft, Action::Run)
             .action(KeyCode::ShiftRight, Action::Run)
             .action(KeyCode::KeyM, Action::ToggleMouselook);
@@ -377,30 +382,48 @@ mod tests {
         }
     }
 
-    /// The same physical key means different things in different modes: `W` walks
-    /// the avatar in third-person but is still forward-motion (the flycam consumer
-    /// reads the same action), while `Space` raises the flycam only in flycam mode.
+    /// The same physical key means different things in different modes: the
+    /// arrow keys drive the avatar in third-person but are unbound in flycam
+    /// (which keeps the WASD cluster only), while `E` raises in both.
     #[test]
     fn a_key_resolves_per_mode() {
-        // `Space` is bound only in the flycam profile.
+        // `ArrowUp` is bound only in the avatar profile.
         let mut app = action_app(InputContext::World);
-        press(&mut app, KeyCode::Space);
+        *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
+        press(&mut app, KeyCode::ArrowUp);
         assert!(
             !app.world()
                 .resource::<ButtonInput<Action>>()
-                .pressed(Action::MoveUp),
-            "Space does nothing in third-person"
+                .pressed(Action::MoveForward),
+            "ArrowUp does nothing in flycam"
         );
 
         let mut app = action_app(InputContext::World);
         *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
-        press(&mut app, KeyCode::Space);
+        press(&mut app, KeyCode::KeyE);
         assert!(
             app.world()
                 .resource::<ButtonInput<Action>>()
                 .pressed(Action::MoveUp),
-            "Space raises the flycam in flycam mode"
+            "E raises the flycam in flycam mode"
         );
+    }
+
+    /// Bare modifiers are never movement keys: holding `Ctrl` (a chord
+    /// modifier — `Ctrl+B` opens the build tools) must not sink the flycam,
+    /// and `Space` is likewise unbound there.
+    #[test]
+    fn flycam_has_no_bare_modifier_movement() {
+        for key in [KeyCode::ControlLeft, KeyCode::Space] {
+            let mut app = action_app(InputContext::World);
+            *app.world_mut().resource_mut::<InputMode>() = InputMode::Flycam;
+            press(&mut app, key);
+            let actions = app.world().resource::<ButtonInput<Action>>();
+            assert!(
+                !actions.pressed(Action::MoveDown) && !actions.pressed(Action::MoveUp),
+                "{key:?} must not move the flycam"
+            );
+        }
     }
 
     /// A focused UI takes every action away, so typing never drives the avatar or

@@ -2,7 +2,7 @@
 id: viewer-object-selection-core
 title: Object selection core (select set + protocol)
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-object-selection
 blocked_by: [viewer-ui-widget-scaffold]
 ---
@@ -32,3 +32,23 @@ Reference (Firestorm, read-only): `llselectmgr`, `lltoolmgr`, `lltoolselect`,
 
 Builds on: the `objects.rs` lifecycle. Supersedes the MVP "object selection /
 interaction" non-goal.
+
+## Done
+
+`sl-client-bevy-viewer/src/edit_selection.rs`. The [`SelectionSet`] resource
+(ordered nodes, the primary last; per-node `ObjectProperties` folded in from
+the reply events) is the shared state; while the build tool
+([[viewer-object-edit-floater-shell]]) is active, a left click selects
+(root-by-default, picked prim in edit-linked-parts mode, Shift/Ctrl toggles,
+applied on mouse-up with the reference's 5 px slop) and an empty-world drag
+sweeps an inclusive rubber-band rectangle over the projected bounds of
+in-world volume objects, tentative-highlighting during the sweep. The wire
+side diffs the set into batched `ObjectSelect` / `ObjectDeselect`
+(`Command::RequestObjectProperties` / `DeselectObjects`), ingests
+`ObjectProperties`, applies simulator-forced `ForceObjectSelect`, and prunes
+killed objects. The highlight is a translucent unlit overlay child per face
+mesh (committed yellow / tentative blue) — deliberately simpler than the
+reference's silhouette edges. `Escape` deselects; the touch pick stands down
+via a run condition while the tool is active. A new `ObjectSlMotion`
+component on every object entity mirrors the wire-frame position / rotation /
+scale for all the editing surfaces.

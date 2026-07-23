@@ -2,7 +2,7 @@
 id: viewer-build-display-options
 title: Build-mode display/overlay toggles
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-object-selection-core]
 refs: [viewer-render-type-toggles, viewer-highlight-transparent]

@@ -2,7 +2,7 @@
 id: viewer-build-selection-filters
 title: Build-tool selection filters
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-object-selection-core]
 refs: [viewer-transform-gizmos]

@@ -2,7 +2,7 @@
 id: viewer-object-inspect
 title: Inspect objects floater (linkset breakdown)
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-object-selection-core]
 refs: [viewer-area-search]

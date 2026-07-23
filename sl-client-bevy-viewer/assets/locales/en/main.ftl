@@ -381,3 +381,29 @@ worldmap-layer-events = Events
 worldmap-layer-mature-events = Moderate Events
 worldmap-layer-adult-events = Adult Events
 worldmap-layer-region-names = Region Names
+
+# Build tools (the object edit floater, viewer-object-edit-floater-shell).
+build-tools-floater-title = Build Tools
+build-tool-move = Move
+build-tool-rotate = Rotate
+build-tool-stretch = Stretch
+build-toggle-snap = Snap to grid
+build-toggle-local-frame = Local axes
+build-toggle-edit-linked = Edit linked parts
+build-toggle-stretch-both = Stretch both sides
+build-grid-unit-label = Grid unit (m)
+build-position-label = Position
+build-rotation-label = Rotation
+build-size-label = Size
+build-tab-object = Object
+build-tab-features = Features
+build-tab-texture = Texture
+build-tab-content = Content
+build-tab-placeholder = Not implemented yet
+build-selection-none = Nothing selected
+build-selection-count = { $count ->
+    [one] { $count } object selected
+   *[other] { $count } objects selected
+}
+build-selection-no-modify = no modify
+bottom-toolbar-build = Build

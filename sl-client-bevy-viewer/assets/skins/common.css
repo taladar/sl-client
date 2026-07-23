@@ -239,3 +239,17 @@
 .sk-loss {
   color: var(--loss);
 }
+
+/* The Build Tools floater (viewer-object-edit-floater-shell): its labels,
+ * values and placeholder text recolour with the skin's text role tokens. */
+.sk-build-label {
+  color: var(--text-muted);
+}
+
+.sk-build-value {
+  color: var(--text-primary);
+}
+
+.sk-build-placeholder {
+  color: var(--text-disabled);
+}

@@ -167,6 +167,9 @@ enum ToolbarTarget {
     Minimap,
     /// The world-map floater ([`crate::world_map`]).
     WorldMap,
+    /// The Build Tools floater ([`crate::edit_tool`]) — opening it enters edit
+    /// mode with nothing selected yet.
+    BuildTools,
     /// A floater that has not landed yet — the button is a disabled placeholder
     /// until its own task wires a real target here.
     Unlanded,
@@ -233,6 +236,11 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
         action: "toggle-minimap",
         label_key: "bottom-toolbar-minimap",
         target: ToolbarTarget::Minimap,
+    },
+    ToolbarButtonDef {
+        action: "toggle-build-tools",
+        label_key: "bottom-toolbar-build",
+        target: ToolbarTarget::BuildTools,
     },
     ToolbarButtonDef {
         action: "toggle-people",
@@ -477,12 +485,19 @@ fn build_button_box(
 /// added to [`TOOLBAR_BUTTONS`] before its handler simply falls through here — the
 /// same harmless dispatch the top menu bar relies on. A `match` will earn its keep
 /// once a second target is wired; today it is one equality check.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the action \
+              stream plus one read-model per toolbar-toggleable floater; each newly wired \
+              button adds one parameter"
+)]
 fn handle_toolbar_actions(
     mut actions: MessageReader<UiAction>,
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
     world_map: Option<Res<WorldMapUi>>,
+    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
@@ -514,6 +529,12 @@ fn handle_toolbar_actions(
         {
             shown.0 = !shown.0;
         }
+        if action.action == "toggle-build-tools"
+            && let Some(ui) = &build_tools
+            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        {
+            shown.0 = !shown.0;
+        }
         if action.action == "toggle-nearby-chat"
             && let Some(bar) = nearby_chat.as_deref_mut()
         {
@@ -524,12 +545,18 @@ fn handle_toolbar_actions(
 
 /// Resolve whether a button's target floater is currently open, or `None` when the
 /// target is unlanded (so it stays disabled).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the resolver takes one read-model per toolbar-toggleable floater; each newly \
+              wired button adds one parameter"
+)]
 fn resolve_target_open(
     target: ToolbarTarget,
     inventory: Option<&InventoryUi>,
     conversations: Option<&ConversationsUi>,
     minimap: Option<&MinimapUi>,
     world_map: Option<&WorldMapUi>,
+    build_tools: Option<&crate::edit_tool::BuildToolsUi>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
@@ -545,6 +572,9 @@ fn resolve_target_open(
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::WorldMap => world_map
+            .and_then(|ui| panels.get(ui.panel()).ok())
+            .map(|shown| shown.0),
+        ToolbarTarget::BuildTools => build_tools
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::Unlanded => None,
@@ -565,6 +595,7 @@ fn update_toolbar_button_states(
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
     world_map: Option<Res<WorldMapUi>>,
+    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
     time: Res<Time>,
@@ -576,6 +607,7 @@ fn update_toolbar_button_states(
     let conversations = conversations.as_deref();
     let minimap = minimap.as_deref();
     let world_map = world_map.as_deref();
+    let build_tools = build_tools.as_deref();
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button flashes while the window is closed and an IM /
     // group / conference has unread lines — the reference's toolbar attention cue
@@ -591,6 +623,7 @@ fn update_toolbar_button_states(
             conversations,
             minimap,
             world_map,
+            build_tools,
             nearby_chat,
             &panels,
         ) {
@@ -718,7 +751,8 @@ mod tests {
                 "toggle-conversations",
                 "toggle-inventory",
                 "toggle-map",
-                "toggle-minimap"
+                "toggle-minimap",
+                "toggle-build-tools"
             ]
         );
         assert!(

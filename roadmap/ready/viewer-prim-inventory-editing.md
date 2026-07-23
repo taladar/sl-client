@@ -2,7 +2,7 @@
 id: viewer-prim-inventory-editing
 title: Prim inventory (contents) editing
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-object-edit-floater-shell, viewer-ui-virtualized-list]
 ---

@@ -2,7 +2,7 @@
 id: viewer-object-weights
 title: Object weights / land impact floater
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-object-selection-core]
 refs: [api-g15, viewer-mesh-cost-estimate]

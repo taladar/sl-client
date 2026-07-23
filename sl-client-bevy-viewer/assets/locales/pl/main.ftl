@@ -147,3 +147,30 @@ worldmap-layer-events = Wydarzenia
 worldmap-layer-mature-events = Wydarzenia umiarkowane
 worldmap-layer-adult-events = Wydarzenia dla dorosłych
 worldmap-layer-region-names = Nazwy regionów
+
+# Build tools (the object edit floater).
+build-tools-floater-title = Narzędzia budowania
+build-tool-move = Przesuń
+build-tool-rotate = Obróć
+build-tool-stretch = Rozciągnij
+build-toggle-snap = Przyciągaj do siatki
+build-toggle-local-frame = Osie lokalne
+build-toggle-edit-linked = Edytuj połączone części
+build-toggle-stretch-both = Rozciągaj obie strony
+build-grid-unit-label = Jednostka siatki (m)
+build-position-label = Pozycja
+build-rotation-label = Obrót
+build-size-label = Rozmiar
+build-tab-object = Obiekt
+build-tab-features = Cechy
+build-tab-texture = Tekstura
+build-tab-content = Zawartość
+build-tab-placeholder = Jeszcze nie zaimplementowane
+build-selection-none = Nic nie zaznaczono
+build-selection-count = { $count ->
+    [one] { $count } zaznaczony obiekt
+    [few] { $count } zaznaczone obiekty
+   *[many] { $count } zaznaczonych obiektów
+}
+build-selection-no-modify = bez modyfikacji
+bottom-toolbar-build = Buduj

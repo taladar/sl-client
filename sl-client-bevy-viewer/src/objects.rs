@@ -45,7 +45,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
     JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
-    PrimShapeFloat, PrimShapeParams, Priority, ScopedObjectId, SculptOrMeshKey, SlEvent,
+    PrimShapeFloat, PrimShapeParams, Priority, Rotation, ScopedObjectId, SculptOrMeshKey, SlEvent,
     SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace,
     TextureKey, TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry,
     grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
@@ -221,6 +221,32 @@ pub(crate) struct PrimFaceEntity {
 /// under the crosshair — the ground truth for debugging a texture-mapping bug.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct FaceTextureDebug(pub(crate) TextureFace);
+
+/// The object's last-received Second Life transform, mirrored onto its entity
+/// for the object-editing surfaces (the selection set, the build floater's
+/// numeric fields, and the transform gizmos — `viewer-object-selection-core` /
+/// `viewer-transform-gizmos`).
+///
+/// These are the wire-space values an edit round-trips: a **root**'s position /
+/// rotation are region-local, a linkset **child**'s are parent-relative —
+/// exactly the frame `MultipleObjectUpdate` expects them back in. Refreshed on
+/// every object update (including a local echo applied by the edit tools), so
+/// readers never re-derive Second Life values from the Bevy transform.
+#[derive(Component, Debug, Clone)]
+pub(crate) struct ObjectSlMotion {
+    /// The position, in region-local metres (root) or parent-relative metres
+    /// (linkset child).
+    pub(crate) position: Vector,
+    /// The orientation, in the same frame as [`position`](Self::position).
+    pub(crate) rotation: Rotation,
+    /// The object's size in metres per axis.
+    pub(crate) scale: Vector,
+    /// Whether this object is a linkset root (no parent object).
+    pub(crate) is_root: bool,
+    /// Whether this object is worn on an avatar (attachments are edited through
+    /// the attachment path, not the world gizmos).
+    pub(crate) attachment: bool,
+}
 
 /// Tags a worn **rigged** submesh with the tracked worn object its geometry
 /// belongs to.
@@ -540,6 +566,37 @@ impl ObjectState {
     /// same [`ObjectKey`] the `GetObjectPhysicsData` capability reply uses.
     pub(crate) fn full_key(&self, scoped: &ScopedObjectId) -> Option<ObjectKey> {
         self.objects.get(scoped).map(|tracked| tracked.full_key)
+    }
+
+    /// The entity of the object with region-scoped id `scoped`, or [`None`] if
+    /// this viewer does not track it. Used by the object-selection core
+    /// (`viewer-object-selection-core`) to resolve a simulator-forced selection
+    /// (`ForceObjectSelect`) onto scene entities.
+    pub(crate) fn entity_by_scoped(&self, scoped: &ScopedObjectId) -> Option<Entity> {
+        self.objects.get(scoped).map(|tracked| tracked.entity)
+    }
+
+    /// The geometry-holder child entity of the object with region-scoped id
+    /// `scoped` — the entity carrying the object's Second Life scale — or
+    /// [`None`] if untracked. The transform gizmos (`viewer-transform-gizmos`)
+    /// write a live scale edit there so the resize shows before the simulator
+    /// echoes it.
+    pub(crate) fn geometry_of(&self, scoped: &ScopedObjectId) -> Option<Entity> {
+        self.objects.get(scoped).map(|tracked| tracked.geometry)
+    }
+
+    /// The **parent object's** entity of the linked part with region-scoped id
+    /// `scoped`, or [`None`] for a root / attachment / untracked parent. The
+    /// transform gizmos fold a linked part's world-space edit back into its
+    /// parent's frame through this entity's global transform.
+    pub(crate) fn parent_entity_of(&self, scoped: &ScopedObjectId) -> Option<Entity> {
+        let tracked = self.objects.get(scoped)?;
+        if tracked.is_root || tracked.attachment_point.is_some() {
+            return None;
+        }
+        self.objects
+            .get(&tracked.parent)
+            .map(|parent| parent.entity)
     }
 
     /// The entity of the object with grid-wide key `key`, or [`None`] if this viewer does
@@ -2132,6 +2189,15 @@ fn apply_object(
         ],
         shape: object.shape,
     };
+    // The Second Life transform mirror the object-editing surfaces read (and
+    // the frame an edit sends back over `MultipleObjectUpdate`).
+    let sl_motion = ObjectSlMotion {
+        position: object.motion.position.clone(),
+        rotation: object.motion.rotation.clone(),
+        scale: object.scale.clone(),
+        is_root,
+        attachment: attachment_point.is_some(),
+    };
 
     if let Some(existing) = state.objects.get_mut(&scoped) {
         // A known object: re-place it and refresh its classification (a
@@ -2145,6 +2211,7 @@ fn apply_object(
                 category,
             },
             debug_info,
+            sl_motion,
         ));
         commands
             .entity(existing.geometry)
@@ -2227,6 +2294,7 @@ fn apply_object(
                 category,
             },
             debug_info,
+            sl_motion,
             transform,
             // The per-face child meshes carry `Visibility` (required by
             // `Mesh3d`); the object entity needs it too so Bevy's visibility

@@ -147,3 +147,32 @@ worldmap-layer-events = الأحداث
 worldmap-layer-mature-events = أحداث متوسطة
 worldmap-layer-adult-events = أحداث للبالغين
 worldmap-layer-region-names = أسماء المناطق
+
+# Build tools (the object edit floater).
+build-tools-floater-title = أدوات البناء
+build-tool-move = تحريك
+build-tool-rotate = تدوير
+build-tool-stretch = تمديد
+build-toggle-snap = محاذاة إلى الشبكة
+build-toggle-local-frame = محاور محلية
+build-toggle-edit-linked = تحرير الأجزاء المرتبطة
+build-toggle-stretch-both = تمديد الجانبين
+build-grid-unit-label = وحدة الشبكة (م)
+build-position-label = الموضع
+build-rotation-label = الدوران
+build-size-label = الحجم
+build-tab-object = الكائن
+build-tab-features = الميزات
+build-tab-texture = النسيج
+build-tab-content = المحتوى
+build-tab-placeholder = غير منفذ بعد
+build-selection-none = لا شيء محدد
+build-selection-count = { $count ->
+    [zero] لا كائنات محددة
+    [one] كائن واحد محدد
+    [two] كائنان محددان
+    [few] { $count } كائنات محددة
+   *[other] { $count } كائنًا محددًا
+}
+build-selection-no-modify = غير قابل للتعديل
+bottom-toolbar-build = بناء

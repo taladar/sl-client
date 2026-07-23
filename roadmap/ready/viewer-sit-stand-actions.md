@@ -2,7 +2,7 @@
 id: viewer-sit-stand-actions
 title: Sit / stand actions
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-sit-stand
 blocked_by: [viewer-object-selection-core]
 ---

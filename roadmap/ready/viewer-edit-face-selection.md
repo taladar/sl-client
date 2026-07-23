@@ -2,7 +2,7 @@
 id: viewer-edit-face-selection
 title: Select Face tool — per-face selection for texture edits
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07-22) — was only a passing mention inside
   viewer-prim-texture-editing
 blocked_by: [viewer-object-selection-core]

@@ -191,11 +191,12 @@ pub(crate) fn setup_hud_screen(
             HudCamera,
             Camera3d::default(),
             Camera {
-                // After the world camera (order 0), and without clearing what it
+                // After the world camera (order 0) and the edit-gizmo overlay
+                // (order 1, [`crate::gizmos`]), and without clearing what they
                 // drew: the HUD is composited over the finished frame, exactly where
                 // the reference viewer draws it — `render_hud_attachments` runs in
                 // `render_ui`, *after* `renderFinalize`'s tonemap and post effects.
-                order: 1,
+                order: 2,
                 clear_color: ClearColorConfig::None,
                 ..default()
             },

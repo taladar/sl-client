@@ -139,3 +139,26 @@ worldmap-layer-events = イベント
 worldmap-layer-mature-events = 中程度のイベント
 worldmap-layer-adult-events = アダルトイベント
 worldmap-layer-region-names = リージョン名
+
+# Build tools (the object edit floater).
+build-tools-floater-title = 制作ツール
+build-tool-move = 移動
+build-tool-rotate = 回転
+build-tool-stretch = 拡縮
+build-toggle-snap = グリッドにスナップ
+build-toggle-local-frame = ローカル軸
+build-toggle-edit-linked = リンク部分を編集
+build-toggle-stretch-both = 両側に伸縮
+build-grid-unit-label = グリッド単位 (m)
+build-position-label = 位置
+build-rotation-label = 回転
+build-size-label = サイズ
+build-tab-object = オブジェクト
+build-tab-features = 特徴
+build-tab-texture = テクスチャ
+build-tab-content = コンテンツ
+build-tab-placeholder = 未実装
+build-selection-none = 何も選択されていません
+build-selection-count = { $count } 個のオブジェクトを選択中
+build-selection-no-modify = 編集不可
+bottom-toolbar-build = 制作

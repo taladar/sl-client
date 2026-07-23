@@ -2,7 +2,7 @@
 id: viewer-object-rezzing
 title: Object rezzing from inventory
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-object-selection-core, viewer-inventory-context-actions]
 ---

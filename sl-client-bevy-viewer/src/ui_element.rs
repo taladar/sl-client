@@ -458,6 +458,12 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_text_input::spawn_unsigned_specimen,
     },
     UiElement {
+        id: "build-tools",
+        summary: "The Build Tools panel shape (viewer-object-edit-floater-shell): the tool-mode \
+                  buttons, a snap toggle row, and a numeric transform row of float fields.",
+        spawn: crate::edit_tool::spawn_build_tools_specimen,
+    },
+    UiElement {
         id: "search-field",
         summary: "The reusable search-field widget (`crate::ui_search`): a single-line field in a \
                   bordered box with a leading search glyph, a placeholder shown while empty, and a \

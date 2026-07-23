@@ -2,7 +2,7 @@
 id: viewer-prim-parameter-editing
 title: Prim parameter editing
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-object-edit-floater-shell]
 ---

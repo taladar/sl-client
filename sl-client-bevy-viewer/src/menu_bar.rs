@@ -76,6 +76,9 @@ const MINIMAP_OPEN: &str = "minimap-open";
 /// the check mark on the World ▸ World Map entry.
 const WORLD_MAP_OPEN: &str = "world-map-open";
 
+/// Condition key: the Build Tools floater (`crate::edit_tool`) is open.
+const BUILD_TOOLS_OPEN: &str = "build-tools-open";
+
 /// The condition keys that hold while the matching World ▸ Environment fixed
 /// sky is pinned — one per preset, plus the shared-environment default. Each
 /// drives the check mark on its entry.
@@ -166,10 +169,15 @@ static WORLD_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Build menu — a name for future build / edit entries.
+/// The Build menu — the build tool (`crate::edit_tool`); the grid options /
+/// undo / selection-filter entries are future tasks.
 static BUILD_MENU: MenuDef = MenuDef {
     label: "Build",
-    items: PLACEHOLDER_ITEMS,
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Build Tools", "toggle-build-tools")
+            .accel("Ctrl+B")
+            .checked_when(BUILD_TOOLS_OPEN),
+    )],
 };
 
 /// The Content menu — the in-viewer web browser today; search / marketplace
@@ -279,6 +287,7 @@ fn update_top_menu_conditions(
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
@@ -298,6 +307,9 @@ fn update_top_menu_conditions(
     let world_map_open = world_map
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let build_tools_open = build_tools
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -313,6 +325,9 @@ fn update_top_menu_conditions(
     }
     if world_map_open {
         wanted.push(WORLD_MAP_OPEN);
+    }
+    if build_tools_open {
+        wanted.push(BUILD_TOOLS_OPEN);
     }
     // The Environment submenu's check marks: exactly one of the four presets or
     // the shared default holds. The gallery has no environment resource, so the
@@ -352,6 +367,7 @@ fn handle_top_menu_actions(
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
@@ -403,6 +419,13 @@ fn handle_top_menu_actions(
             }
             "toggle-world-map" => {
                 if let Some(ui) = &world_map
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-build-tools" => {
+                if let Some(ui) = &build_tools
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;

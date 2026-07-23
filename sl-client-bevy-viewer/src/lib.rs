@@ -50,6 +50,9 @@ mod chat_input;
 mod conversations;
 mod coords;
 mod diagnostics;
+mod edit_math;
+mod edit_selection;
+mod edit_tool;
 mod emoji_complete;
 mod emoji_picker;
 mod environment;
@@ -58,6 +61,7 @@ mod floater;
 mod floater_persist;
 mod flycam_ui;
 pub mod gallery;
+mod gizmos;
 mod ground;
 mod groups;
 mod hand_pose;
@@ -208,6 +212,8 @@ use crate::diagnostics::{
     PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
     update_pipeline_overlay,
 };
+use crate::edit_selection::EditSelectionPlugin;
+use crate::edit_tool::EditToolPlugin;
 use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
@@ -215,6 +221,7 @@ use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
+use crate::gizmos::EditGizmoPlugin;
 use crate::groups::GroupsPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
@@ -825,6 +832,16 @@ fn run_session(
     // reference land entry set and its dispatch, opened by right-clicking bare
     // terrain (the shared resolver lives with the avatar menu).
     .add_plugins(LandMenuPlugin)
+    // The build tool (viewer-object-edit-floater-shell): the Build Tools
+    // floater, the edit-mode switch, and the numeric transform fields.
+    .add_plugins(EditToolPlugin)
+    // The object selection core (viewer-object-selection-core): click /
+    // rubber-band selection, the selection set + highlight, and the
+    // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.
+    .add_plugins(EditSelectionPlugin)
+    // The transform gizmos (viewer-transform-gizmos): move / rotate / stretch
+    // manipulators over the selection, sending MultipleObjectUpdate edits.
+    .add_plugins(EditGizmoPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
@@ -1305,8 +1322,10 @@ fn run_session(
             // HUD-camera pick, HUD before world. The cursor is free to click with
             // in every camera mode except mouselook (which grabs it), so no
             // free-cursor toggle is needed any more — the reference's model, where
-            // third-person clicks the world directly.
-            pick_and_touch,
+            // third-person clicks the world directly. While the build tool is
+            // active the left click belongs to selection (viewer-object-
+            // selection-core), so the touch pick stands down.
+            pick_and_touch.run_if(crate::edit_tool::edit_tool_inactive),
             // On-screen render priority (P20.2): re-rank the queued texture / mesh
             // fetches by the pixel area each object covers, so what the camera
             // looks at loads first. Throttled internally. It also picks each plain

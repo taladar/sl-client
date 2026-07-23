@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 31 |
-| ready | 190 |
-| blocked | 133 |
+| ideas | 32 |
+| ready | 204 |
+| blocked | 117 |
 | in-progress | 7 |
-| bugs | 10 |
-| done | 579 |
+| bugs | 11 |
+| done | 582 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **971** |
+| **total** | **974** |
 
-## ideas (31)
+## ideas (32)
 
 ### viewer
 
@@ -32,6 +32,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
   Selection-beam customization
+- [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
+  — Rethink the flycam mode's key bindings
 - [`viewer-hdri-environment`](ideas/viewer-hdri-environment.md) — HDRI
   environment override
 - [`viewer-help-onboarding-misc`](ideas/viewer-help-onboarding-misc.md) —
@@ -91,7 +93,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (190)
+## ready (204)
 
 ### protocol
 
@@ -130,6 +132,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-area-search`](ready/viewer-area-search.md) — Area search — find
   objects in the region (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
+- [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
+  alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
+  (done))
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
@@ -150,6 +155,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   beacon — beam + off-screen direction arrow
 - [`viewer-block-list`](ready/viewer-block-list.md) — Block / mute list UI
   (blocked by `viewer-social-people-panel` (done), `viewer-ui-virtualized-list`
+  (done))
+- [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
+  Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
+  (done))
+- [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
+  Grid-options floater + snap-XY / selection-grid (blocked by
+  `viewer-transform-gizmos` (done))
+- [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
+  Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
 - [`viewer-bumps-floater`](ready/viewer-bumps-floater.md) — Bumps, pushes & hits
   floater (blocked by `viewer-ui-widget-scaffold` (done))
@@ -209,6 +223,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-draw-distance-stepping`](ready/viewer-draw-distance-stepping.md) —
   Progressive draw-distance ramp after teleport
+- [`viewer-edit-face-selection`](ready/viewer-edit-face-selection.md) — Select
+  Face tool — per-face selection for texture edits (blocked by
+  `viewer-object-selection-core` (done))
+- [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
+  Permission-aware editing (grey out what perms forbid) (blocked by
+  `viewer-object-selection-core` (done))
 - [`viewer-environment-fixed-editor`](ready/viewer-environment-fixed-editor.md)
   — Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -296,17 +316,24 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
+- [`viewer-object-inspect`](ready/viewer-object-inspect.md) — Inspect objects
+  floater (linkset breakdown) (blocked by `viewer-object-selection-core` (done))
 - [`viewer-object-menu-custom-verbs`](ready/viewer-object-menu-custom-verbs.md)
   — Custom touch/sit text + click-action default verb
 - [`viewer-object-pie-buy-take-chain`](ready/viewer-object-pie-buy-take-chain.md)
   — Object pie Buy slices + the reference Buy/Take autohide chain
 - [`viewer-object-pie-enable-fidelity`](ready/viewer-object-pie-enable-fidelity.md)
   — Reference-faithful object pie enable predicates + mute naming
-- [`viewer-object-selection-core`](ready/viewer-object-selection-core.md) —
-  Object selection core (select set + protocol) (blocked by
-  `viewer-ui-widget-scaffold` (done))
+- [`viewer-object-pie-multi-select-take`](ready/viewer-object-pie-multi-select-take.md)
+  — Object pie multi-selection take slices (blocked by
+  `viewer-object-selection-core` (done))
+- [`viewer-object-rezzing`](ready/viewer-object-rezzing.md) — Object rezzing
+  from inventory (blocked by `viewer-object-selection-core` (done),
+  `viewer-inventory-context-actions` (done))
 - [`viewer-object-target-omega-spin`](ready/viewer-object-target-omega-spin.md)
   — Client-side llTargetOmega spin for non-physical prims
+- [`viewer-object-weights`](ready/viewer-object-weights.md) — Object weights /
+  land impact floater (blocked by `viewer-object-selection-core` (done))
 - [`viewer-occlusion-culling`](ready/viewer-occlusion-culling.md) — Occlusion
   culling
 - [`viewer-os-portals-linux`](ready/viewer-os-portals-linux.md) — Linux
@@ -360,6 +387,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-floater`](ready/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))
+- [`viewer-prim-creation`](ready/viewer-prim-creation.md) — Prim / Linden tree /
+  grass creation (the Create tool) (blocked by
+  `viewer-object-edit-floater-shell` (done))
+- [`viewer-prim-inventory-editing`](ready/viewer-prim-inventory-editing.md) —
+  Prim inventory (contents) editing (blocked by
+  `viewer-object-edit-floater-shell` (done), `viewer-ui-virtualized-list`
+  (done))
+- [`viewer-prim-linking`](ready/viewer-prim-linking.md) — Prim linking &
+  unlinking (blocked by `viewer-object-selection-core` (done),
+  `viewer-input-action-map` (done))
+- [`viewer-prim-parameter-editing`](ready/viewer-prim-parameter-editing.md) —
+  Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
@@ -415,6 +454,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-search-floater`](ready/viewer-search-floater.md) — Search floater —
   directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
+  actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
 - [`viewer-snapshot-floater`](ready/viewer-snapshot-floater.md) — Snapshot
@@ -538,7 +579,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (133)
+## blocked (117)
 
 ### viewer
 
@@ -550,8 +591,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-appearance-editor-clothing`](blocked/viewer-appearance-editor-clothing.md)
   — Clothing-layer editors — params, fabric textures, tint (blocked by
   `viewer-appearance-editor-shell`)
-- [`viewer-attachment-align`](blocked/viewer-attachment-align.md) — Attachment
-  alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`)
 - [`viewer-auto-reject-offers`](blocked/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites`)
@@ -564,15 +603,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-build-display-options`](blocked/viewer-build-display-options.md) —
-  Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`)
-- [`viewer-build-grid-options`](blocked/viewer-build-grid-options.md) —
-  Grid-options floater + snap-XY / selection-grid (blocked by
-  `viewer-transform-gizmos`)
-- [`viewer-build-selection-filters`](blocked/viewer-build-selection-filters.md)
-  — Build-tool selection filters (blocked by `viewer-object-selection-core`)
 - [`viewer-build-undo-redo`](blocked/viewer-build-undo-redo.md) — Object-edit
-  undo/redo stack (blocked by `viewer-transform-gizmos`,
+  undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing`)
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
@@ -590,9 +622,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](blocked/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host`)
-- [`viewer-edit-face-selection`](blocked/viewer-edit-face-selection.md) — Select
-  Face tool — per-face selection for texture edits (blocked by
-  `viewer-object-selection-core`)
 - [`viewer-environment-day-cycle-editor`](blocked/viewer-environment-day-cycle-editor.md)
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
@@ -686,7 +715,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-fs-bridge-protocol`)
 - [`viewer-name-tags-click-select`](blocked/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar (blocked by
-  `viewer-name-tags-billboard-render`, `viewer-object-selection-core`)
+  `viewer-name-tags-billboard-render`, `viewer-object-selection-core` (done))
 - [`viewer-name-tags-complexity-distance`](blocked/viewer-name-tags-complexity-distance.md)
   — Name tags — complexity & distance lines (blocked by
   `viewer-name-tags-billboard-render`, `viewer-avatar-complexity-limit`)
@@ -700,19 +729,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-editor-widget`, `viewer-notecard-format` (done))
 - [`viewer-notification-history`](blocked/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`)
-- [`viewer-object-edit-floater-shell`](blocked/viewer-object-edit-floater-shell.md)
-  — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`,
-  `viewer-ui-floater-basic` (done))
-- [`viewer-object-inspect`](blocked/viewer-object-inspect.md) — Inspect objects
-  floater (linkset breakdown) (blocked by `viewer-object-selection-core`)
-- [`viewer-object-pie-multi-select-take`](blocked/viewer-object-pie-multi-select-take.md)
-  — Object pie multi-selection take slices (blocked by
-  `viewer-object-selection-core`)
-- [`viewer-object-rezzing`](blocked/viewer-object-rezzing.md) — Object rezzing
-  from inventory (blocked by `viewer-object-selection-core`,
-  `viewer-inventory-context-actions` (done))
-- [`viewer-object-weights`](blocked/viewer-object-weights.md) — Object weights /
-  land impact floater (blocked by `viewer-object-selection-core`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
@@ -757,19 +773,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
 - [`viewer-preferences-network-cache-tab`](blocked/viewer-preferences-network-cache-tab.md)
   — Preferences — network & cache tab (blocked by `viewer-preferences-floater`)
-- [`viewer-prim-creation`](blocked/viewer-prim-creation.md) — Prim creation
-  (blocked by `viewer-object-edit-floater-shell`)
-- [`viewer-prim-inventory-editing`](blocked/viewer-prim-inventory-editing.md) —
-  Prim inventory (contents) editing (blocked by
-  `viewer-object-edit-floater-shell`, `viewer-ui-virtualized-list` (done))
-- [`viewer-prim-linking`](blocked/viewer-prim-linking.md) — Prim linking &
-  unlinking (blocked by `viewer-object-selection-core`,
-  `viewer-input-action-map` (done))
-- [`viewer-prim-parameter-editing`](blocked/viewer-prim-parameter-editing.md) —
-  Prim parameter editing (blocked by `viewer-object-edit-floater-shell`)
 - [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
-  texture / material editing (blocked by `viewer-object-edit-floater-shell`,
-  `viewer-edit-face-selection`)
+  texture / material editing (blocked by `viewer-object-edit-floater-shell`
+  (done), `viewer-edit-face-selection`)
 - [`viewer-profile-image-editing`](blocked/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker`)
@@ -834,8 +840,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   recovery (blocked by `viewer-lsl-editor-widget`)
 - [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
   backup — export / import (blocked by `viewer-preferences-floater`)
-- [`viewer-sit-stand-actions`](blocked/viewer-sit-stand-actions.md) — Sit /
-  stand actions (blocked by `viewer-object-selection-core`)
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
@@ -854,9 +858,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug`)
-- [`viewer-transform-gizmos`](blocked/viewer-transform-gizmos.md) — Position /
-  rotation / scale gizmos (blocked by `viewer-object-selection-core`,
-  `viewer-input-action-map` (done))
 - [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
   `viewer-ui-settings-binding` (done))
@@ -921,7 +922,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (10)
+## bugs (11)
 
 ### protocol
 
@@ -944,6 +945,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
+- [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
+  — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -955,7 +958,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (579)
+## done (582)
 
 ### protocol
 
@@ -1249,6 +1252,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-context-menu`](done/viewer-object-context-menu.md) — Object
   hover / context menu entries (blocked by `viewer-ui-radial-menu` (done),
   `viewer-ui-context-menu` (done))
+- [`viewer-object-edit-floater-shell`](done/viewer-object-edit-floater-shell.md)
+  — Object edit-floater / tool shell (blocked by `viewer-object-selection-core`
+  (done), `viewer-ui-floater-basic` (done))
+- [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
+  Object selection core (select set + protocol) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the
@@ -1521,6 +1530,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](done/viewer-social-profiles.md) — Avatar profiles —
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
+  rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
+  `viewer-input-action-map` (done))
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based

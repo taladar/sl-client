@@ -2,7 +2,7 @@
 id: viewer-attachment-align
 title: Attachment alignment tool (avatar align)
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-object-edit-floater-shell]
 ---

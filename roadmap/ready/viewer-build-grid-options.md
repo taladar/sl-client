@@ -2,7 +2,7 @@
 id: viewer-build-grid-options
 title: Grid-options floater + snap-XY / selection-grid
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-transform-gizmos]
 ---

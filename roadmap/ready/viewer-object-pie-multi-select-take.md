@@ -2,7 +2,7 @@
 id: viewer-object-pie-multi-select-take
 title: Object pie multi-selection take slices
 topic: viewer
-status: blocked
+status: ready
 origin: follow-up from viewer-object-context-menu (2026-07-21)
 blocked_by: [viewer-object-selection-core]
 refs: [viewer-object-context-menu]

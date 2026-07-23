@@ -89,6 +89,10 @@ pub(crate) fn pick_and_touch(
     mut writer: MessageWriter<SlCommand>,
     mut media_clicks: MessageWriter<MediaWorldClick>,
 ) {
+    // While the build tool is active a left click *selects* rather than
+    // touches; that arbitration lives in the registration —
+    // `pick_and_touch.run_if(edit_tool_inactive)` — because this system is at
+    // Bevy's system-parameter limit.
     // A plain left-click touches; an `Alt`-held left-click is the camera focus /
     // orbit gesture (`crate::camera::focus_on_object`), not a touch, so ignore it.
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
