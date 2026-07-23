@@ -15,6 +15,11 @@ camera adjustment, then releasing on stand. Sitting on an object needs a
 **picked object** ([[viewer-object-selection-core]]). The sit request is
 permission- and target-aware (scripted sit targets, unsit on teleport).
 
+Also honour `ForceMouselook` on the `AvatarSitResponse` `SitTransform`
+(decoded, [[protocol-38]]): when a scripted sit target forces mouselook,
+drop the camera into mouselook on sit and restore it on stand
+(script-interface survey 2026-07-23).
+
 Sit state is already modelled (`SitState` in `sl-proto`); this task is the
 viewer action + UI (the stand button, the sit context action) and the pose /
 camera handling.

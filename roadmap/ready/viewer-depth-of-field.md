@@ -28,6 +28,11 @@ pulling focus is smooth, and the camera-parameter controls. Relates to
 has — **vignette** (`FSRenderVignette`: amount / power / multiplier, a shader
 with no stock UI) — is worth folding in here rather than its own task.
 
+Also itemize the FS focus conveniences (main-menu survey 2026-07-23):
+**Focus Lock** (World ▸ Photo and Video, Alt+Shift+X — pin the focus
+distance so recomposing doesn't refocus) and the **DoF focus crosshair**
+toggle (draw the current focus point on screen).
+
 Reference (Firestorm, read-only): the deferred DoF post pass,
 `RenderDepthOfField` and the `Camera*` settings.
 
