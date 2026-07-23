@@ -5,7 +5,7 @@ use sl_types::map::{RegionCoordinates, RegionName};
 use sl_types::money::LindenAmount;
 use sl_wire::ParcelFlags;
 use sl_wire::{Direction, GlobalCoordinates};
-use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
+use sl_wire::{RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
 use crate::types::LandArea;
@@ -435,6 +435,13 @@ pub struct ParcelOverlayInfo {
     pub sequence_id: i32,
     /// The packed overlay bytes: per-square ownership colour and edge/flag bits.
     pub data: Vec<u8>,
+    /// The region this chunk describes: the same overlay stream arrives on the
+    /// root circuit and (on grids that push it to child agents) each neighbour
+    /// child circuit, so the source circuit's region tags the chunk — like
+    /// `CoarseLocationUpdate`'s region tagging. [`RegionHandle`]`(0)` when the
+    /// source circuit is not (yet) associated with a region; a consumer should
+    /// attribute such a chunk to its current region.
+    pub region_handle: RegionHandle,
 }
 
 /// Side length, in metres, of one parcel-overlay grid square. The overlay

@@ -2,7 +2,7 @@
 id: viewer-minimap-parcel-overlay
 title: Parcel fills & property lines on the minimap
 topic: viewer
-status: blocked
+status: done
 origin: user request (2026-07); fleshed out from Firestorm research 2026-07-22
 blocked_by: [viewer-minimap, viewer-parcel-overlay-decode]
 refs: [viewer-minimap-object-layer]
@@ -59,3 +59,27 @@ contrast), `llviewerparcelmgr` (collision bitmap).
 
 Deps: [[viewer-minimap]] (the surface),
 [[viewer-parcel-overlay-decode]] (the decoded grid — done).
+
+## Done (2026-07-23)
+
+`render_parcel_region` in `minimap_math.rs` (unit-tested port of the
+Catznip rasteriser: north/east border lines, per-4 m-cell for-sale
+pale-yellow / auction violet fills, south/west property lines in white)
+drawn into its own 64–512 pow-2 raster in `minimap.rs`, regenerated on
+overlay change-detection (`SlParcelOverlay` `is_changed`), toggle
+changes, or a >3 m centre move — not the object layer's timer.
+Settings `MiniMapShowPropertyLines` / `MiniMapForSaleParcels` (both on;
+the property-lines master also gates the tooltip's parcel section).
+
+Follow-up (same day): overlay chunks are now tagged with their source
+region in `sl-proto` (root *and* child circuits — the child dispatcher
+previously dropped them) and `SlParcelOverlay` holds one grid **per
+region**, so neighbour regions draw their own property lines once
+their circuit delivers an overlay (Second Life pushes it on child
+establishment; OpenSim only on parcel changes — until then a neighbour
+draws its full four-edge border outline instead of just north/east).
+
+Gaps, pending data sources: the collision ("banned from here") fill
+has no client-side bitmap yet — split out to
+[[viewer-minimap-collision-parcels]]; dead-region red lines need a
+region-liveness signal we do not track.

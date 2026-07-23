@@ -109,73 +109,100 @@ impl SlAgentParcel {
     }
 }
 
-/// The current region's reassembled parcel-ownership overlay — the 64×64 grid of
+/// The reassembled parcel-ownership overlays — per region, the 64×64 grid of
 /// per-square ownership colour and boundary/sound flags the simulator pushes as
 /// four [`ParcelOverlay`](sl_proto::Event::ParcelOverlay) chunks.
 ///
-/// The simulator sends the overlay unprompted on region entry (there is no
+/// The simulator sends a region's overlay unprompted on entry (there is no
 /// overlay-request message — the reference viewer relies on the same push) and
 /// re-broadcasts the whole overlay when a parcel is split, joined, or sold, so
-/// this resource stays current simply by folding in each chunk. It is discarded
-/// and rebuilt on every region change, so a consumer never reads a stale
-/// region's overlay: check [`region`](Self::region) /
-/// [`is_complete`](Self::is_complete) before trusting [`grid`](Self::grid).
+/// this resource stays current simply by folding in each chunk. Chunks arrive
+/// on the root circuit *and* on neighbour child circuits, each tagged with its
+/// source region ([`ParcelOverlayInfo::region_handle`]), so neighbour regions
+/// accumulate their own grids (Second Life pushes them on child-agent
+/// establishment; OpenSim only on parcel changes). The **current** region's
+/// grid is discarded and rebuilt on every region change, so a consumer never
+/// reads a stale grid for the region it stands in: check
+/// [`region`](Self::region) / [`is_complete`](Self::is_complete) before
+/// trusting [`grid`](Self::grid).
 ///
-/// Two consumers want this grid: the minimap parcel-colour overlay and the
-/// in-world sound clamp (the `sound_local` bit) — both read it through
+/// Two consumers want these grids: the minimap parcel-colour overlay (all
+/// regions, via [`grid_of`](Self::grid_of)) and the in-world sound clamp (the
+/// `sound_local` bit) — the current region's grid stays available through
 /// [`grid`](Self::grid).
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SlParcelOverlay {
-    /// The region the current grid describes, or `None` before any chunk has
-    /// arrived. Reset to the destination on each `RegionChanged`.
+    /// The current (root) region, or `None` before the circuit is up. Chunks
+    /// arriving without a region tag are attributed here.
     region: Option<RegionHandle>,
-    /// The reassembled grid, or `None` before the first chunk of the current
-    /// region arrives.
-    grid: Option<ParcelOverlayGrid>,
+    /// The reassembled grid per region.
+    grids: HashMap<RegionHandle, ParcelOverlayGrid>,
 }
 
 impl SlParcelOverlay {
-    /// The region the current grid describes, or `None` before any overlay chunk
-    /// has arrived for the current region.
+    /// The current region the untagged chunks are attributed to, or `None`
+    /// before any region is known.
     #[must_use]
     pub const fn region(&self) -> Option<RegionHandle> {
         self.region
     }
 
-    /// The reassembled overlay grid, or `None` before the first chunk arrives.
-    /// Pair with [`is_complete`](Self::is_complete) to know whether every chunk
-    /// is in.
+    /// The **current** region's reassembled overlay grid, or `None` before its
+    /// first chunk arrives. Pair with [`is_complete`](Self::is_complete) to
+    /// know whether every chunk is in.
     #[must_use]
-    pub const fn grid(&self) -> Option<&ParcelOverlayGrid> {
-        self.grid.as_ref()
+    pub fn grid(&self) -> Option<&ParcelOverlayGrid> {
+        self.grids.get(&self.region?)
     }
 
-    /// Whether a grid exists and every one of its chunks has arrived.
+    /// The reassembled overlay grid of `region` (the current region or a
+    /// neighbour), or `None` before its first chunk arrives.
+    #[must_use]
+    pub fn grid_of(&self, region: RegionHandle) -> Option<&ParcelOverlayGrid> {
+        self.grids.get(&region)
+    }
+
+    /// Whether the current region's grid exists and every one of its chunks
+    /// has arrived.
     #[must_use]
     pub fn is_complete(&self) -> bool {
-        self.grid
-            .as_ref()
-            .is_some_and(ParcelOverlayGrid::is_complete)
+        self.grid().is_some_and(ParcelOverlayGrid::is_complete)
     }
 
-    /// Folds one pushed overlay chunk into the current region's grid, creating
-    /// the grid (sized for a standard 256 m region) on the first chunk. A
-    /// malformed chunk is logged and dropped, leaving the grid intact.
+    /// Folds one pushed overlay chunk into its region's grid, creating the
+    /// grid (sized for a standard 256 m region) on the first chunk. An untagged
+    /// chunk (region handle 0 — the source circuit was not yet associated)
+    /// goes to the current region; a malformed chunk is logged and dropped,
+    /// leaving the grid intact.
     fn ingest(&mut self, info: &ParcelOverlayInfo) {
+        let region = if info.region_handle.0 == 0 {
+            match self.region {
+                Some(region) => region,
+                None => {
+                    tracing::warn!("dropping a parcel-overlay chunk with no attributable region");
+                    return;
+                }
+            }
+        } else {
+            info.region_handle
+        };
         let grid = self
-            .grid
-            .get_or_insert_with(|| ParcelOverlayGrid::new(DEFAULT_GRIDS_PER_EDGE));
+            .grids
+            .entry(region)
+            .or_insert_with(|| ParcelOverlayGrid::new(DEFAULT_GRIDS_PER_EDGE));
         if let Err(error) = grid.ingest_chunk(info.sequence_id, &info.data) {
             tracing::warn!(%error, "dropping malformed parcel-overlay chunk");
         }
     }
 
-    /// Discards the current grid and records the region the next chunks will
-    /// describe, on a region change. The destination re-pushes its overlay on
-    /// entry, so the grid rebuilds from scratch.
+    /// Records the region the next untagged chunks describe on a region
+    /// change, discarding any grid already held for it — the destination
+    /// re-pushes its overlay on entry, so the grid rebuilds from scratch and a
+    /// consumer never reads a stale grid for the region the agent stands in.
+    /// Neighbour grids are kept (their regions re-push on their own churn).
     fn reset_for_region(&mut self, region: RegionHandle) {
         self.region = Some(region);
-        self.grid = None;
+        self.grids.remove(&region);
     }
 }
 
@@ -280,7 +307,8 @@ pub(crate) fn maintain_world(
                 upsert_parcel(&mut commands, &mut index, (**info).clone());
             }
             // Overlay chunks arrive unprompted on region entry (and after any
-            // parcel edit). Fold each into the current region's grid.
+            // parcel edit), on the root and neighbour child circuits alike.
+            // Fold each into its source region's grid.
             SessionEvent::ParcelOverlay(info) => {
                 overlay.ingest(info);
             }
@@ -541,11 +569,68 @@ mod tests {
 
     /// Synthesises the `c`-th overlay chunk of a standard 256 m region: a
     /// 1024-byte southern band whose squares all carry ownership class `class`.
+    /// Untagged (region handle 0), as a root-circuit chunk decodes before the
+    /// circuit associates.
     fn overlay_chunk(sequence_id: i32, class: u8) -> ParcelOverlayInfo {
         ParcelOverlayInfo {
             sequence_id,
             data: vec![class; 1024],
+            region_handle: RegionHandle(0),
         }
+    }
+
+    /// A chunk tagged with its source region, as a neighbour child circuit
+    /// (or an associated root circuit) delivers it.
+    fn overlay_chunk_for(region: RegionHandle, sequence_id: i32, class: u8) -> ParcelOverlayInfo {
+        ParcelOverlayInfo {
+            region_handle: region,
+            ..overlay_chunk(sequence_id, class)
+        }
+    }
+
+    /// Chunks tagged with a neighbour region assemble into that region's own
+    /// grid without touching the current region's, and both stay readable
+    /// through [`SlParcelOverlay::grid_of`].
+    #[test]
+    fn neighbour_overlay_chunks_assemble_per_region() {
+        let mut app = world_app();
+        let home = RegionHandle(0x0000_03e8_0000_03e8);
+        let neighbour = RegionHandle(0x0000_03e9_0000_03e8);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        for sequence in 0..4 {
+            // The home region public, the neighbour self-owned.
+            app.world_mut()
+                .write_message(SlEvent(SessionEvent::ParcelOverlay(overlay_chunk(
+                    sequence, 0x00,
+                ))));
+            app.world_mut()
+                .write_message(SlEvent(SessionEvent::ParcelOverlay(overlay_chunk_for(
+                    neighbour, sequence, 0x03,
+                ))));
+        }
+        app.update();
+        let overlay = app.world().resource::<SlParcelOverlay>();
+        assert_eq!(overlay.region(), Some(home));
+        assert!(overlay.is_complete());
+        assert_eq!(
+            overlay
+                .grid_of(home)
+                .and_then(|grid| grid.cell(0, 0))
+                .map(|cell| cell.ownership),
+            Some(ParcelOwnership::Public)
+        );
+        assert_eq!(
+            overlay
+                .grid_of(neighbour)
+                .and_then(|grid| grid.cell(0, 0))
+                .map(|cell| cell.ownership),
+            Some(ParcelOwnership::SelfOwned)
+        );
     }
 
     /// The four pushed overlay chunks assemble into a complete grid attributed

@@ -68,6 +68,10 @@ const CONVERSATIONS_OPEN: &str = "conversations-open";
 /// the check mark on the Content ▸ Web Browser entry.
 const WEB_BROWSER_OPEN: &str = "web-browser-open";
 
+/// The condition key that holds while the minimap floater is open — drives the
+/// check mark on the World ▸ Mini-Map entry.
+const MINIMAP_OPEN: &str = "minimap-open";
+
 /// The placeholder shown in a menu that has no wired entries yet — a single
 /// disabled line, so the menu still opens and plainly reads as unpopulated. Its
 /// `enabled_when` names a condition the bar never sets, so it is always greyed.
@@ -101,11 +105,13 @@ static COMM_MENU: MenuDef = MenuDef {
     )],
 };
 
-/// The World menu — a name for future world entries (mini-map, world map,
-/// teleport, environment).
+/// The World menu — the minimap today; world map, teleport and environment
+/// are future entries.
 static WORLD_MENU: MenuDef = MenuDef {
     label: "World",
-    items: PLACEHOLDER_ITEMS,
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("Mini-Map", "toggle-minimap").checked_when(MINIMAP_OPEN),
+    )],
 };
 
 /// The Build menu — a name for future build / edit entries.
@@ -214,6 +220,7 @@ fn update_top_menu_conditions(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
+    minimap: Option<Res<crate::minimap::MinimapUi>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -226,6 +233,9 @@ fn update_top_menu_conditions(
     let web_browser_open = web_browser
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let minimap_open = minimap
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -235,6 +245,9 @@ fn update_top_menu_conditions(
     }
     if web_browser_open {
         wanted.push(WEB_BROWSER_OPEN);
+    }
+    if minimap_open {
+        wanted.push(MINIMAP_OPEN);
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
@@ -254,6 +267,7 @@ fn handle_top_menu_actions(
     inventory: Option<Res<InventoryUi>>,
     conversations: Option<Res<ConversationsUi>>,
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
+    minimap: Option<Res<crate::minimap::MinimapUi>>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -281,6 +295,13 @@ fn handle_top_menu_actions(
             }
             "toggle-web-browser" => {
                 if let Some(ui) = &web_browser
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-minimap" => {
+                if let Some(ui) = &minimap
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;

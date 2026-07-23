@@ -102,3 +102,24 @@ animation-stop = إيقاف
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = معرض المخزون
+
+## The minimap floater (minimap.rs).
+
+minimap-floater-title = خريطة مصغّرة
+# Compass labels around the map edge.
+minimap-compass-north = ش
+minimap-compass-north-east = ش‌ق
+minimap-compass-east = ق
+minimap-compass-south-east = ج‌ق
+minimap-compass-south = ج
+minimap-compass-south-west = ج‌غ
+minimap-compass-west = غ
+minimap-compass-north-west = ش‌غ
+minimap-tooltip-avatar = { $name } ({ $distance } م)
+minimap-tooltip-avatar-far = { $name } (> { $distance } م)
+minimap-tooltip-region = المنطقة: { $name }
+minimap-tooltip-parcel = قطعة الأرض: { $name }
+minimap-tooltip-owner = المالك: { $name }
+minimap-tooltip-sale = للبيع: L$ { $price } ({ $area } م²)
+minimap-tooltip-hint-teleport = انقر نقرًا مزدوجًا للانتقال الآني
+minimap-tooltip-hint-map = انقر نقرًا مزدوجًا لفتح خريطة العالم

@@ -197,6 +197,7 @@ impl FromWorld for ViewerSettings {
             account_path: None,
         };
         crate::spacenav::register_settings(&mut settings);
+        crate::minimap::register_settings(&mut settings);
         settings.load_global();
         settings
     }

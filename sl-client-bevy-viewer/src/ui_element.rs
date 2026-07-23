@@ -535,6 +535,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
     },
     UiElement {
+        id: "minimap",
+        summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
+                  avatar dots and the compass labels. The live floater composites a CPU image \
+                  from the world mirror; here it is static so its layout is swept.",
+        spawn: crate::minimap::spawn_minimap_specimen,
+    },
+    UiElement {
         id: "parcel-audio-bar",
         summary: "The parcel streaming-audio cluster (`crate::parcel_audio`): the ♫ marker, a \
                   width-capped now-playing title, play and mute glyph buttons and the volume \

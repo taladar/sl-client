@@ -102,3 +102,24 @@ animation-stop = Zatrzymaj
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Galeria ekwipunku
+
+## The minimap floater (minimap.rs).
+
+minimap-floater-title = Minimapa
+# Compass labels around the map edge (international letters).
+minimap-compass-north = N
+minimap-compass-north-east = NE
+minimap-compass-east = E
+minimap-compass-south-east = SE
+minimap-compass-south = S
+minimap-compass-south-west = SW
+minimap-compass-west = W
+minimap-compass-north-west = NW
+minimap-tooltip-avatar = { $name } ({ $distance } m)
+minimap-tooltip-avatar-far = { $name } (> { $distance } m)
+minimap-tooltip-region = Region: { $name }
+minimap-tooltip-parcel = Działka: { $name }
+minimap-tooltip-owner = Właściciel: { $name }
+minimap-tooltip-sale = Na sprzedaż: L$ { $price } ({ $area } m²)
+minimap-tooltip-hint-teleport = Kliknij dwukrotnie, aby się teleportować
+minimap-tooltip-hint-map = Kliknij dwukrotnie, aby otworzyć mapę świata

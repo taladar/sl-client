@@ -2,7 +2,7 @@
 id: viewer-minimap-object-layer
 title: Minimap object layer — untextured objects, ownership & depth colours
 topic: viewer
-status: blocked
+status: done
 origin: user request (2026-07-22); split from viewer-minimap
 blocked_by: [viewer-minimap]
 refs: [viewer-minimap-parcel-overlay]
@@ -75,3 +75,20 @@ Reference (Firestorm, read-only): `llviewerobjectlist.cpp`
 `renderScaledPointGlobal`, `createObjectImage`).
 
 Deps: [[viewer-minimap]] (the surface and transforms it draws into).
+
+## Done (2026-07-23)
+
+Membership, colours and rasterisation in `minimap_math.rs`
+(`object_on_map`, `object_map_color`, `object_map_radius`,
+`render_object_point` — reference formulas incl. the 1.3 fudge, 16 m
+clamp, 2 m owned/accent floor, ±256 m vertical cull) with unit tests;
+the layer itself in `minimap.rs` (`regen_minimap_layers`): a pow-2
+64–512 raster sized to the widget diagonal, cleared and redrawn at most
+every 0.5 s (or on dirty), drawn centred on its capture-time position.
+Ownership/class come from the `PrimFlags` bits already mirrored per
+object (`ObjectState::minimap_objects` ORs each prim's flags with its
+root's and excludes attachments); above/below water from the per-region
+handshake water height. Settings: `MiniMapObjects` on;
+`NetMapPhysical`/`NetMapScripted`/`NetMapTempOnRez` off;
+`NetMapPhantomOpacity` 100; `MiniMapPrimMaxRadius` 16;
+`MiniMapPrimMaxVertDistance` 256.

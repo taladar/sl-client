@@ -330,3 +330,27 @@ profile-image-none = (no image)
 ## The in-viewer web browser floater (web_floater.rs).
 
 web-floater-title = Web Browser
+
+## The minimap floater (minimap.rs).
+
+minimap-floater-title = Mini-map
+# Compass labels around the map edge.
+minimap-compass-north = N
+minimap-compass-north-east = NE
+minimap-compass-east = E
+minimap-compass-south-east = SE
+minimap-compass-south = S
+minimap-compass-south-west = SW
+minimap-compass-west = W
+minimap-compass-north-west = NW
+# Hover tooltip: an avatar's name and distance in metres.
+minimap-tooltip-avatar = { $name } ({ $distance } m)
+# Hover tooltip: an avatar whose altitude is unknown (beyond draw distance).
+minimap-tooltip-avatar-far = { $name } (> { $distance } m)
+minimap-tooltip-region = Region: { $name }
+minimap-tooltip-parcel = Parcel: { $name }
+minimap-tooltip-owner = Owner: { $name }
+# A for-sale parcel's price and area.
+minimap-tooltip-sale = For sale: L$ { $price } ({ $area } m²)
+minimap-tooltip-hint-teleport = Double-click to teleport
+minimap-tooltip-hint-map = Double-click to open the world map

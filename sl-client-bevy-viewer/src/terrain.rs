@@ -114,6 +114,11 @@ pub(crate) struct TerrainState {
     /// Decoded detail textures by key, so a texture shared by several regions is
     /// decoded once and a repeated delivery is not decoded again.
     decoded: HashMap<TextureKey, Handle<Image>>,
+    /// A monotonically increasing counter bumped whenever height or compositing
+    /// data changes (a patch arrives, a handshake's composition lands), so a
+    /// derived consumer (the minimap's terrain backdrop) can cheaply notice
+    /// staleness without hashing the patch maps.
+    map_revision: u64,
 }
 
 /// Marks a rendered land-patch entity as a **walkable ground surface**, so the
@@ -128,6 +133,36 @@ pub(crate) struct TerrainState {
 pub(crate) struct TerrainSurface;
 
 impl TerrainState {
+    /// The scene origin region (whose south-west corner is Bevy `(0, 0)`), or
+    /// `None` before the first terrain patch arrives.
+    pub(crate) const fn origin(&self) -> Option<RegionHandle> {
+        self.origin
+    }
+
+    /// The terrain-data revision — bumped on every ingested patch and learned
+    /// composition, so a derived map texture knows when to rebuild.
+    pub(crate) const fn map_revision(&self) -> u64 {
+        self.map_revision
+    }
+
+    /// Every decoded land patch of `region`, for compositing a top-down map.
+    pub(crate) fn land_patches_of(
+        &self,
+        region: RegionHandle,
+    ) -> impl Iterator<Item = &TerrainPatch> {
+        self.raw_patches.iter().filter_map(move |(key, patch)| {
+            (key.0 == region && patch.layer.is_land()).then_some(patch)
+        })
+    }
+
+    /// The terrain-compositing parameters of `region`, once its handshake has
+    /// been seen.
+    pub(crate) fn composition_of(&self, region: RegionHandle) -> Option<&TerrainComposition> {
+        self.regions
+            .get(&region)
+            .and_then(|entry| entry.composition.as_ref())
+    }
+
     /// The ground height at region-local metre position (`x`, `y`) in `region`,
     /// read from the nearest decoded land-patch cell, or `None` when that region's
     /// terrain has not been ingested (or the point is off-region / non-finite).
@@ -244,6 +279,7 @@ pub(crate) fn update_terrain(
                 let key = (patch.region_handle, patch.patch_x, patch.patch_y);
                 ensure_region(&mut state, patch.region_handle, &mut images, &mut materials);
                 state.raw_patches.insert(key, (**patch).clone());
+                state.map_revision = state.map_revision.wrapping_add(1);
                 spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
                 // This patch supplies the shared far edge for its west / south
                 // neighbours in the same region, so rebuild them to close seams.
@@ -251,6 +287,7 @@ pub(crate) fn update_terrain(
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
                 learn_composition(&mut state, identity, &mut manager, &mut materials);
+                state.map_revision = state.map_revision.wrapping_add(1);
                 rebuild_region_patches(&state, identity.region_handle, &mut meshes, &mut commands);
             }
             _other => {}

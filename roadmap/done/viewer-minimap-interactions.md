@@ -2,9 +2,9 @@
 id: viewer-minimap-interactions
 title: Minimap interactions — clicks, double-click teleport, context menu
 topic: viewer
-status: blocked
+status: done
 origin: user request (2026-07-22); split from viewer-minimap
-blocked_by: [viewer-minimap, viewer-minimap-avatar-dots]
+blocked_by: []
 refs: [viewer-double-click-teleport, viewer-world-map-tracking-teleport]
 ---
 
@@ -78,3 +78,34 @@ registrar callbacks), `menu_mini_map.xml`, `llfloaterworldmap`
 
 Deps: [[viewer-minimap]] (surface), [[viewer-minimap-avatar-dots]]
 (dot hit-testing for the avatar context items and hover state).
+
+## Done (2026-07-23)
+
+Implemented with the base minimap (`minimap.rs`): SHIFT-drag panning
+(base task), wheel zoom, **double-click** per `NetMapDoubleClickAction`
+(default 2 = teleport via `Command::Teleport` at the clicked point with
+terrain-height arrival and a look-at toward the target; both actions
+place a tracking beacon first unless already tracking — the shared
+`MapTracking` resource the world map will reuse). The tracked target
+(location or avatar) renders as a `MapTrackColor` dot with an
+edge-arrow triangle when off-screen. Context menu (regular menu, not a
+pie): avatar group when a dot is under the cursor (View Profile, Mark
+submenu red/green/blue/purple/light-yellow + clear/clear-all feeding
+the dot colours, More Options ▸ IM / Add Friend / Offer Teleport /
+Block — routed to the shared `OpenConversation` / `OpenAvatarProfile` /
+`Command::*` channels, not reimplemented), Start/Stop Tracking, Zoom
+presets with checks, Show submenu (objects + accents, property lines,
+for-sale), Chat Distance Rings submenu, North/Camera at top, and
+Auto-center with Re-center (enabled only off-centre). A committed test
+pins that every menu action string has a handler arm.
+
+## Follow-ups (split out 2026-07-23)
+
+The reference entries without a live backend moved to their own tasks:
+[[viewer-minimap-menu-avatar-actions]] (the full More Options set),
+[[viewer-minimap-menu-multi-avatar]] (dynamic per-avatar entries +
+contact sets), [[viewer-minimap-menu-cam-face]] (Cam / Face towards),
+[[viewer-minimap-menu-land-items]] (About Land / Place Profile / World
+Map, incl. the double-click world-map action),
+[[viewer-minimap-click-radar-select]] (single-click radar selection).
+RLV gating stays with [[viewer-rlv-enforce-info-hiding]].

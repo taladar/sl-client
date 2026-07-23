@@ -181,9 +181,30 @@ pub(crate) enum MediaPrimSystems {
 /// The media-on-a-prim plugin.
 pub(crate) struct MediaPrimPlugin;
 
+/// The settings section the media-on-a-prim settings register under.
+const MEDIA_SECTION: &[&str] = &["media"];
+
+/// Whether an `auto_play` media face may start unprompted (off by default —
+/// world media makes noise; a user click on the face still starts it).
+const MEDIA_AUTO_PLAY_SETTING: &str = "MediaAutoPlayEnabled";
+
+/// Startup: declare the persisted media settings.
+fn register_media_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.register_in(
+        MEDIA_SECTION,
+        MEDIA_AUTO_PLAY_SETTING,
+        sl_settings::SettingValue::Bool(false),
+        "Start media-on-a-prim faces marked auto-play without a click",
+    );
+}
+
 impl Plugin for MediaPrimPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MediaData>()
+        app.add_systems(Startup, register_media_settings)
+            .init_resource::<MediaData>()
             .init_resource::<MediaFocus>()
             .init_resource::<MediaPrimState>()
             .add_message::<MediaWorldClick>()
@@ -432,6 +453,7 @@ fn drive_media_surfaces(
     cameras: Query<&GlobalTransform, With<ViewerCamera>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
     mut commands: Commands,
 ) {
     *timer += time.delta_secs();
@@ -439,6 +461,13 @@ fn drive_media_surfaces(
         return;
     }
     *timer = 0.0;
+
+    // The auto-play master switch: with it off (the default) only faces the
+    // user explicitly started may hold a surface.
+    let auto_play_enabled = settings
+        .as_ref()
+        .and_then(|settings| settings.store().get_bool(MEDIA_AUTO_PLAY_SETTING).ok())
+        .unwrap_or(false);
 
     let camera_position = cameras
         .single()
@@ -463,7 +492,7 @@ fn drive_media_surfaces(
                 .active
                 .get(&target)
                 .is_some_and(|active| active.user_started);
-            let startable = entry.auto_play || user_started;
+            let startable = (entry.auto_play && auto_play_enabled) || user_started;
             let distance = objects
                 .entity_of(*key)
                 .and_then(|entity| transforms.get(entity).ok())

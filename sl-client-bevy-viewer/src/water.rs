@@ -136,6 +136,14 @@ pub(crate) struct WaterState {
     normal_key: Option<TextureKey>,
 }
 
+impl WaterState {
+    /// The water height learned for `region` from its handshake, if any — the
+    /// minimap's above-/below-water object colour split reads this.
+    pub(crate) fn height_of(&self, region: RegionHandle) -> Option<f32> {
+        self.region_heights.get(&region).copied()
+    }
+}
+
 /// Startup: create the shared water material (on a flat-normal placeholder), spawn
 /// the endless-ocean plane, and register [`WaterState`].
 pub(crate) fn setup_water(

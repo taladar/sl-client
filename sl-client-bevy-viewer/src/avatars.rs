@@ -438,6 +438,20 @@ struct AvatarAssets {
     collider_material: Handle<StandardMaterial>,
 }
 
+/// One nearby avatar as the map surfaces (minimap, radar) consume it — see
+/// [`AvatarState::map_avatars`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MapAvatar {
+    /// The avatar's agent id.
+    pub(crate) agent: AgentKey,
+    /// The world entity whose transform places the avatar.
+    pub(crate) anchor: Entity,
+    /// For a coarse-only avatar, its last coarse altitude in metres (`0` /
+    /// `1020` are the "unknown" sentinels); `None` for a precisely-known
+    /// full-object avatar.
+    pub(crate) coarse_z: Option<f32>,
+}
+
 /// The pair of entities rendering one avatar: its world-space anchor (a
 /// placeholder sphere or the root of a rigged body) and its screen-space
 /// name-tag text node.
@@ -578,12 +592,12 @@ pub(crate) struct AvatarState {
     /// from a "we received it but failed to render it" case (agent present here yet
     /// still a coarse sphere). Never pruned — it is a cumulative diagnostic marker.
     ever_full_object: HashSet<AgentKey>,
-    /// R22b diagnostic: the last coarse (minimap) position `(x, y, z)` seen per
-    /// coarse-only agent — `x`/`y` region-local metres (0..255), `z` already in
-    /// metres (0..1020, the `u8 × 4` coarse scale). A `z` at the 1020 ceiling is the
-    /// simulator's "height unknown / off this region" sentinel, so the census can
-    /// flag a sphere that is really a neighbour-region avatar. Populated only when
-    /// [`log_avatar_interest`] is set.
+    /// The last coarse (minimap) position `(x, y, z)` seen per coarse-only
+    /// agent — `x`/`y` region-local metres (0..255), `z` already in metres
+    /// (0..1020, the `u8 × 4` coarse scale). A `z` at the 1020 ceiling is the
+    /// simulator's "height unknown / off this region" sentinel; a `0` from some
+    /// simulators means the same. Read by the R22b census diagnostic and by the
+    /// minimap's dot layer (the unknown-altitude glyph).
     coarse_pos: HashMap<AgentKey, (u8, u8, u16)>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
@@ -1349,6 +1363,36 @@ impl AvatarState {
         agents
     }
 
+    /// Every nearby avatar as the map surfaces (minimap, radar) consume it:
+    /// full-object avatars first (precise positions from their anchor
+    /// transforms), then the coarse-only dots, deduplicated by agent — the
+    /// reference's `LLWorld::getAvatars` merge. A coarse-only entry carries its
+    /// last coarse altitude so the consumer can detect the "altitude unknown"
+    /// sentinel ([`crate::minimap_math::coarse_altitude_unknown`]).
+    pub(crate) fn map_avatars(&self) -> Vec<MapAvatar> {
+        let mut avatars: Vec<MapAvatar> = self
+            .objects
+            .iter()
+            .map(|(agent, entities)| MapAvatar {
+                agent: *agent,
+                anchor: entities.anchor,
+                coarse_z: None,
+            })
+            .collect();
+        for (agent, entities) in &self.coarse {
+            if !self.objects.contains_key(agent) {
+                avatars.push(MapAvatar {
+                    agent: *agent,
+                    anchor: entities.anchor,
+                    coarse_z: Some(f32::from(
+                        self.coarse_pos.get(agent).map_or(0, |&(_, _, z)| z),
+                    )),
+                });
+            }
+        }
+        avatars
+    }
+
     /// The anchor entity of an agent's in-world presence (a full object
     /// preferred over a coarse dot), if any.
     pub(crate) fn root_entity_of(&self, agent: AgentKey) -> Option<Entity> {
@@ -1815,10 +1859,8 @@ impl AvatarState {
                 continue;
             }
             present.insert(agent);
-            if log_avatar_interest() {
-                self.coarse_pos
-                    .insert(agent, (location.x, location.y, location.z));
-            }
+            self.coarse_pos
+                .insert(agent, (location.x, location.y, location.z));
             let translation = coarse_translation(location, offset_east, offset_north);
             if let Some(existing) = self.coarse.get(&agent) {
                 commands
@@ -1846,6 +1888,7 @@ impl AvatarState {
                 despawn_avatar(entities, commands);
             }
             self.coarse_region.remove(&agent);
+            self.coarse_pos.remove(&agent);
         }
     }
 

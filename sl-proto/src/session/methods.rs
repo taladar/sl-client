@@ -1573,6 +1573,22 @@ impl Session {
                 let event = self.coarse_location_event(from, update);
                 self.events.push_back(event);
             }
+            // A neighbour region's parcel overlay, pushed to the child agent
+            // (Second Life pushes it on child establishment; OpenSim on parcel
+            // changes). Tagged with this circuit's region, like the root arm,
+            // so the minimap can draw neighbour property lines.
+            AnyMessage::ParcelOverlay(overlay) => {
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+                    .unwrap_or(RegionHandle(0));
+                self.events
+                    .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
+                        sequence_id: overlay.parcel_data.sequence_id,
+                        data: overlay.parcel_data.data.clone(),
+                        region_handle,
+                    }));
+            }
             // A neighbour region streams its avatars' and animated objects'
             // animation state on this child circuit, just like the object stream —
             // without handling them here a neighbour-region avatar or animesh stays
@@ -2301,10 +2317,15 @@ impl Session {
                     .push_back(Event::ParcelProperties(Box::new(parcel)));
             }
             AnyMessage::ParcelOverlay(overlay) => {
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+                    .unwrap_or(RegionHandle(0));
                 self.events
                     .push_back(Event::ParcelOverlay(ParcelOverlayInfo {
                         sequence_id: overlay.parcel_data.sequence_id,
                         data: overlay.parcel_data.data.clone(),
+                        region_handle,
                     }));
             }
             // A scripted parcel-media control (`llParcelMediaCommandList`): the

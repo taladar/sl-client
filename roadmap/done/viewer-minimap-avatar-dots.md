@@ -2,7 +2,7 @@
 id: viewer-minimap-avatar-dots
 title: Minimap avatar dots — colours, height cues, hover, chat rings
 topic: viewer
-status: blocked
+status: done
 origin: user request (2026-07-22); split from viewer-minimap
 blocked_by: [viewer-minimap]
 refs: [viewer-avatar-radar, viewer-name-tags-display-names]
@@ -77,3 +77,31 @@ contact-sets (`lggcontactsets`).
 
 Deps: [[viewer-minimap]] (surface/transforms). The context-menu actions
 on a hovered avatar live in [[viewer-minimap-interactions]].
+
+## Done (2026-07-23)
+
+Shared provider `AvatarState::map_avatars()` (full-object avatars first,
+coarse-only dots deduplicated after, each coarse entry carrying its raw
+coarse altitude — `avatars.rs` now always records `coarse_pos`), the
+same source a future [[viewer-avatar-radar]] consumes. Dots draw into
+the composited surface: level disc / up chevron / down chevron by the
+±7 m camera-relative band, a hollow ring for the unknown-altitude
+sentinel (coarse z 0 or ≥1020 with the camera itself high; below that a
+sentinel reads as "far above", per the reference). Radius
+`max(0.75 × ppm, 3.5 px)`. Colours: base red, friends green (live
+`FriendsModel`), self yellow (distinct outlined marker at the avatar
+position), Lindens blue (legacy-name " Linden" suffix), context-menu
+marks override. Hover: closest dot within `dot radius ×
+MinimapPickScale` (3.0), faint pick-radius circle at the cursor,
+tooltip = name + distance in metres ("> far clip" for unknown
+altitude); with no dot, region name + (property lines on) parcel
+name/owner/price/area + the double-click hint. Chat rings around the
+self marker (`MiniMapChatRing` off; per-ring whisper/say/shout toggles
+on) at the `SimulatorFeatures` extras ranges (defaults 10/20/100) via
+the new `ChatRanges` resource.
+
+Not carried over (each needs a feature we don't have yet): contact-set
+colours (no contact sets), muted grey (no mute-list mirror), the
+people-panel selection highlight ring (no selection channel), display
+names in the tooltip (legacy names until
+[[viewer-name-tags-display-names]]).

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 25 |
+| ideas | 26 |
 | ready | 164 |
 | blocked | 121 |
 | in-progress | 7 |
 | bugs | 10 |
-| done | 564 |
+| done | 569 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **912** |
+| **total** | **918** |
 
-## ideas (25)
+## ideas (26)
 
 ### viewer
 
@@ -42,6 +42,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mesh from disk
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
   preprocessor (FS-compatible)
+- [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
+  — Minimap collision-parcel ("banned from here") fill
 - [`viewer-object-export-import`](ideas/viewer-object-export-import.md) — Object
   backup export / import (glTF-based)
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
@@ -239,9 +241,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
-- [`viewer-minimap`](ready/viewer-minimap.md) — Minimap (net map) — floater,
-  surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
-  (done))
+- [`viewer-minimap-menu-cam-face`](ready/viewer-minimap-menu-cam-face.md) —
+  Minimap context menu — Cam / Face towards avatar
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -585,18 +586,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing`)
 - [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
-- [`viewer-minimap-avatar-dots`](blocked/viewer-minimap-avatar-dots.md) —
-  Minimap avatar dots — colours, height cues, hover, chat rings (blocked by
-  `viewer-minimap`)
-- [`viewer-minimap-interactions`](blocked/viewer-minimap-interactions.md) —
-  Minimap interactions — clicks, double-click teleport, context menu (blocked by
-  `viewer-minimap`, `viewer-minimap-avatar-dots`)
-- [`viewer-minimap-object-layer`](blocked/viewer-minimap-object-layer.md) —
-  Minimap object layer — untextured objects, ownership & depth colours (blocked
-  by `viewer-minimap`)
-- [`viewer-minimap-parcel-overlay`](blocked/viewer-minimap-parcel-overlay.md) —
-  Parcel fills & property lines on the minimap (blocked by `viewer-minimap`,
-  `viewer-parcel-overlay-decode` (done))
+- [`viewer-minimap-click-radar-select`](blocked/viewer-minimap-click-radar-select.md)
+  — Minimap single-click selects the avatar in the radar (blocked by
+  `viewer-avatar-radar`)
+- [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
+  — Minimap context menu — remaining avatar actions (More Options) (blocked by
+  `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
+- [`viewer-minimap-menu-land-items`](blocked/viewer-minimap-menu-land-items.md)
+  — Minimap context menu — About Land / Place Profile / World Map (blocked by
+  `viewer-parcel-options-general`, `viewer-world-map-floater`)
+- [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
+  — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
+  `viewer-contact-sets`)
 - [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-media-prim-browser`)
@@ -727,7 +728,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-enforce-info-hiding`](blocked/viewer-rlv-enforce-info-hiding.md)
   — RLV — information hiding / anonymisation layer (blocked by
   `viewer-rlv-restriction-state`, `viewer-name-tags-decorations`,
-  `viewer-minimap`)
+  `viewer-minimap` (done))
 - [`viewer-rlv-enforce-receive-side`](blocked/viewer-rlv-enforce-receive-side.md)
   — RLV — receive-side chat/IM filters and redirect (blocked by
   `viewer-rlv-restriction-state`)
@@ -860,7 +861,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (564)
+## done (569)
 
 ### protocol
 
@@ -1132,6 +1133,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
   pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
+- [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
+  surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-minimap-avatar-dots`](done/viewer-minimap-avatar-dots.md) — Minimap
+  avatar dots — colours, height cues, hover, chat rings (blocked by
+  `viewer-minimap` (done))
+- [`viewer-minimap-interactions`](done/viewer-minimap-interactions.md) — Minimap
+  interactions — clicks, double-click teleport, context menu
+- [`viewer-minimap-object-layer`](done/viewer-minimap-object-layer.md) — Minimap
+  object layer — untextured objects, ownership & depth colours (blocked by
+  `viewer-minimap` (done))
+- [`viewer-minimap-parcel-overlay`](done/viewer-minimap-parcel-overlay.md) —
+  Parcel fills & property lines on the minimap (blocked by `viewer-minimap`
+  (done), `viewer-parcel-overlay-decode` (done))
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

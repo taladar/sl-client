@@ -2,7 +2,7 @@
 id: viewer-minimap
 title: Minimap (net map) — floater, surface, zoom, rotation, frustum
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); fleshed out from Firestorm research 2026-07-22
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-beacons-control, viewer-avatar-radar, viewer-world-map-floater]
@@ -102,3 +102,38 @@ Builds on: `CoarseLocationUpdate` handling in `avatars.rs` (incl. the
 `sl-map-tools` tiles via [[viewer-world-map-floater]].
 
 Deps: [[viewer-ui-widget-scaffold]] (the panel / floater).
+
+## Done (2026-07-23)
+
+Implemented as `sl-client-bevy-viewer/src/minimap.rs` (floater, systems,
+context menu) over the pure, unit-tested `minimap_math.rs` (transforms,
+rasterisers, compass placement — ported from the reference formulas).
+The surface is composited into **one CPU image** per change (camera pose,
+pan/zoom, layer regen, dots, cursor), with rotation baked into the
+world↔surface transform exactly as the reference bakes it into
+`globalPosToView`. Floater: resizable 200×200 (min 64×64), close only
+(Vintage-style free-floating window, spawns top-right, no minimize —
+our floater scaffold always has a title bar, which matches the Vintage
+variant), rect/visibility persisted by the floater-persist scaffold.
+Opened from World ▸ Mini-Map and the bottom-toolbar Mini-map button
+(previously an unlanded placeholder). Settings under `[minimap]`
+(`MiniMapScale` 128 clamped 32–4096 and persisted debounced,
+`MiniMapRotate` on, `MiniMapAutoCenter` on with 0.5 px snap + re-center
+action, `MiniMapOpacity` 0.66 as the surface tint). Compass: eight
+labels (Fluent keys, localized in en/pl/ja/ar) projected onto the rect
+edge per frame with the reference's corner-angle algorithm; diagonals
+hide below the 0.07 threshold. Zoom: wheel ×1.04 per notch toward the
+cursor when auto-center is off; presets 1024/256/128/32 in the context
+menu. Frustum wedge from the live projection (FOV × aspect, far-clip
+radius); fixed-up under rotation, camera-rotated when north-up.
+Mouse-transparent in mouselook. Gallery specimen + `ui_test` sweep via
+the `minimap` element registration.
+
+Deviations (deliberate, revisit with their own tasks): the terrain
+backdrop is shaded from our terrain mirror (heights + splat weights +
+hillshade + water tint) on **all** grids — the reference's OpenSim
+world-map-tile path waits for [[viewer-world-map-floater]]'s shared
+tile fetcher; compositing the real detail textures (SL sim-surface
+lookalike) is a possible upgrade. Dead/unreachable-region tint is not
+implemented (we hold no region liveness signal); neighbours use the
+0.8 grey tint.

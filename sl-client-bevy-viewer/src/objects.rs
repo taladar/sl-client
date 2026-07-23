@@ -620,6 +620,37 @@ impl ObjectState {
             .find(|tracked| tracked.full_key == key)
             .map(|tracked| tracked.update_flags)
     }
+
+    /// Every tracked in-world (non-attachment) prim for the minimap's object
+    /// layer: its entity (for the transform), its own `PrimFlags` bits, and its
+    /// root's flags OR-ed in (the agent-relative you-owner / group-owned bits
+    /// ride the root, exactly as [`pick_summary`](Self::pick_summary) reads
+    /// them). Worn objects — anything whose parent walk reaches an attachment
+    /// point — are excluded, as the reference's map membership excludes them.
+    pub(crate) fn minimap_objects(&self) -> Vec<(Entity, u32)> {
+        let mut out = Vec::with_capacity(self.objects.len());
+        for tracked in self.objects.values() {
+            let mut flags = tracked.update_flags;
+            let mut attachment = tracked.attachment_point.is_some();
+            let mut current = tracked;
+            for _step in 0..MAX_PARENT_WALK {
+                if current.is_root || attachment {
+                    break;
+                }
+                let Some(parent) = self.objects.get(&current.parent) else {
+                    break;
+                };
+                current = parent;
+                flags |= current.update_flags;
+                attachment = current.attachment_point.is_some();
+            }
+            if attachment {
+                continue;
+            }
+            out.push((tracked.entity, flags));
+        }
+        out
+    }
 }
 
 /// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities

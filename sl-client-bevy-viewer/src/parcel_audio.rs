@@ -8,9 +8,10 @@
 //!
 //! # Autoplay policy
 //!
-//! The `MusicStreamEnabled` setting (default on, persisted globally) is the
-//! reference's "play parcel streaming music automatically": when the agent's
-//! parcel resolves to a (new) music URL the stream starts by itself. Pressing
+//! The `MusicStreamEnabled` setting (default **off**, persisted globally —
+//! world audio is distracting unprompted) is the reference's "play parcel
+//! streaming music automatically": when enabled and the agent's parcel
+//! resolves to a (new) music URL the stream starts by itself. Pressing
 //! **stop** remembers the choice *for that URL* — crossing into a parcel with
 //! a different stream re-arms autoplay, exactly so a user fleeing one
 //! parcel's radio is not condemned to silence everywhere else. Disabling the
@@ -158,8 +159,9 @@ fn register_parcel_audio_settings(settings: Option<ResMut<ViewerSettings>>) {
     settings.register_in(
         AUDIO_SECTION,
         MUSIC_ENABLED_SETTING,
-        sl_settings::SettingValue::Bool(true),
-        "Play the parcel's music stream automatically",
+        sl_settings::SettingValue::Bool(false),
+        "Play the parcel's music stream automatically (off by default; the \
+         play button on the audio bar starts a stream on demand)",
     );
     settings.register_in(
         AUDIO_SECTION,
@@ -357,7 +359,7 @@ fn drive_parcel_audio(
     let enabled = settings
         .as_ref()
         .and_then(|settings| settings.store().get_bool(MUSIC_ENABLED_SETTING).ok())
-        .unwrap_or(true);
+        .unwrap_or(false);
     let volume = settings
         .as_ref()
         .and_then(|settings| settings.store().get_f32(MUSIC_VOLUME_SETTING).ok())

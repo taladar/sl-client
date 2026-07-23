@@ -89,6 +89,8 @@ mod menu;
 mod menu_bar;
 mod menu_search;
 mod meshes;
+mod minimap;
+mod minimap_math;
 mod movement;
 mod nearby_chat_bar;
 mod object_menu;
@@ -863,6 +865,9 @@ fn run_session(
     // The in-viewer web browser floater (floater_web_content): navigation
     // toolbar + browser view + status row, opened from Content ▸ Web Browser.
     .add_plugins(crate::web_floater::WebFloaterPlugin)
+    // The minimap ("net map") floater: terrain / object / parcel layers,
+    // avatar dots, frustum wedge, double-click teleport and context menu.
+    .add_plugins(crate::minimap::MinimapPlugin)
     // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
     // driving per-face surfaces, world input routing and the focus model.
     .add_plugins(crate::media_prim::MediaPrimPlugin)

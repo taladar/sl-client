@@ -94,3 +94,24 @@ animation-stop = 停止
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = インベントリギャラリー
+
+## The minimap floater (minimap.rs).
+
+minimap-floater-title = ミニマップ
+# Compass labels around the map edge.
+minimap-compass-north = 北
+minimap-compass-north-east = 北東
+minimap-compass-east = 東
+minimap-compass-south-east = 南東
+minimap-compass-south = 南
+minimap-compass-south-west = 南西
+minimap-compass-west = 西
+minimap-compass-north-west = 北西
+minimap-tooltip-avatar = { $name }（{ $distance } m）
+minimap-tooltip-avatar-far = { $name }（> { $distance } m）
+minimap-tooltip-region = リージョン: { $name }
+minimap-tooltip-parcel = 区画: { $name }
+minimap-tooltip-owner = 所有者: { $name }
+minimap-tooltip-sale = 売り出し中: L$ { $price }（{ $area } m²）
+minimap-tooltip-hint-teleport = ダブルクリックでテレポート
+minimap-tooltip-hint-map = ダブルクリックで世界地図を開く

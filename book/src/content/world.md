@@ -262,7 +262,10 @@ None of these has a reply; the client just acts on them.
 >   `ParcelCategory`, `LandingType`, plus the by-id `ParcelDetails` and
 >   per-owner `ParcelObjectOwner`); request via
 >   `Command::RequestParcelProperties`, receive `Event::ParcelProperties` /
->   `ParcelOverlay` / `ParcelDwell`.
+>   `ParcelOverlay` / `ParcelDwell`. Overlay chunks are tagged with their
+>   source circuit's region (`ParcelOverlayInfo::region_handle`) — the same
+>   stream arrives on the root and neighbour child circuits, so a consumer
+>   (the minimap) can assemble one grid per region.
 > - Parcel management (`JoinParcels`, `DivideParcel`,
 >   `RequestParcelObjectOwners`, `BuyParcelPass`, `DisableParcelObjects`,
 >   `RequestParcelInfo`) maps to the UDP encoders in
