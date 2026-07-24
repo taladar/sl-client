@@ -50,6 +50,7 @@ mod chat_input;
 mod conversations;
 mod coords;
 mod diagnostics;
+mod edit_link;
 mod edit_math;
 mod edit_params;
 mod edit_selection;
@@ -853,6 +854,10 @@ fn run_session(
     // The transform gizmos (viewer-transform-gizmos): move / rotate / stretch
     // manipulators over the selection, sending MultipleObjectUpdate edits.
     .add_plugins(EditGizmoPlugin)
+    // Prim linking / unlinking (viewer-prim-linking): Ctrl+L / Ctrl+Shift+L
+    // and the Build menu, sending ObjectLink / ObjectDelink with the
+    // last-selected object as the linkset root.
+    .add_plugins(crate::edit_link::EditLinkPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The

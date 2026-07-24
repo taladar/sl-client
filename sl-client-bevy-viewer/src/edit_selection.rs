@@ -107,6 +107,19 @@ pub(crate) struct SelectedNode {
     pub(crate) properties: Option<Box<ObjectProperties>>,
 }
 
+impl SelectedNode {
+    /// This node's region-scoped id — what the link / unlink commands address.
+    pub(crate) const fn scoped(&self) -> ScopedObjectId {
+        self.scoped
+    }
+
+    /// The extended properties the simulator returned for this node, or `None`
+    /// until its `ObjectProperties` reply lands.
+    pub(crate) fn properties(&self) -> Option<&ObjectProperties> {
+        self.properties.as_deref()
+    }
+}
+
 /// The maintained selection set — the shared state the edit floater, the
 /// numeric fields, the transform gizmos, and the future linking / per-aspect
 /// editors all read. See the [module documentation](self).

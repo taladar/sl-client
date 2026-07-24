@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 116 |
 | in-progress | 7 |
 | bugs | 11 |
-| done | 584 |
+| done | 585 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **975** |
+| **total** | **976** |
 
 ## ideas (32)
 
@@ -226,6 +226,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-draw-distance-stepping`](ready/viewer-draw-distance-stepping.md) —
   Progressive draw-distance ramp after teleport
+- [`viewer-edit-attachment-behavior`](ready/viewer-edit-attachment-behavior.md)
+  — Edit tools & widgets on worn attachments (blocked by
+  `viewer-object-selection-core` (done), `viewer-transform-gizmos` (done))
 - [`viewer-edit-face-selection`](ready/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))
@@ -397,9 +400,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Prim inventory (contents) editing (blocked by
   `viewer-object-edit-floater-shell` (done), `viewer-ui-virtualized-list`
   (done))
-- [`viewer-prim-linking`](ready/viewer-prim-linking.md) — Prim linking &
-  unlinking (blocked by `viewer-object-selection-core` (done),
-  `viewer-input-action-map` (done))
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
@@ -956,7 +956,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (584)
+## done (585)
 
 ### protocol
 
@@ -1442,6 +1442,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-prim-linking`](done/viewer-prim-linking.md) — Prim linking &
+  unlinking (blocked by `viewer-object-selection-core` (done),
+  `viewer-input-action-map` (done))
 - [`viewer-prim-parameter-editing`](done/viewer-prim-parameter-editing.md) —
   Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —

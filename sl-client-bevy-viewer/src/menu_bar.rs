@@ -79,6 +79,12 @@ const WORLD_MAP_OPEN: &str = "world-map-open";
 /// Condition key: the Build Tools floater (`crate::edit_tool`) is open.
 const BUILD_TOOLS_OPEN: &str = "build-tools-open";
 
+/// Condition key: the current selection can be **linked** (`crate::edit_link`).
+const CAN_LINK: &str = "can-link";
+
+/// Condition key: the current selection can be **unlinked** (`crate::edit_link`).
+const CAN_UNLINK: &str = "can-unlink";
+
 /// The condition keys that hold while the matching World ▸ Environment fixed
 /// sky is pinned — one per preset, plus the shared-environment default. Each
 /// drives the check mark on its entry.
@@ -169,15 +175,29 @@ static WORLD_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Build menu — the build tool (`crate::edit_tool`); the grid options /
-/// undo / selection-filter entries are future tasks.
+/// The Build menu — the build tool (`crate::edit_tool`) and prim
+/// linking / unlinking (`crate::edit_link`); the grid options / undo /
+/// selection-filter entries are future tasks.
 static BUILD_MENU: MenuDef = MenuDef {
     label: "Build",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Build Tools", "toggle-build-tools")
-            .accel("Ctrl+B")
-            .checked_when(BUILD_TOOLS_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Build Tools", "toggle-build-tools")
+                .accel("Ctrl+B")
+                .checked_when(BUILD_TOOLS_OPEN),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Link", crate::edit_link::LINK_ACTION)
+                .accel("Ctrl+L")
+                .enabled_when(CAN_LINK),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Unlink", crate::edit_link::UNLINK_ACTION)
+                .accel("Ctrl+Shift+L")
+                .enabled_when(CAN_UNLINK),
+        ),
+    ],
 };
 
 /// The Content menu — the in-viewer web browser today; search / marketplace
@@ -289,6 +309,8 @@ fn update_top_menu_conditions(
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
+    selection: Res<crate::edit_selection::SelectionSet>,
+    edit_tool: Res<crate::edit_tool::EditToolState>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -328,6 +350,13 @@ fn update_top_menu_conditions(
     }
     if build_tools_open {
         wanted.push(BUILD_TOOLS_OPEN);
+    }
+    // The Build ▸ Link / Unlink enable gates, from the current selection.
+    if crate::edit_link::can_link(&selection, &edit_tool) {
+        wanted.push(CAN_LINK);
+    }
+    if crate::edit_link::can_unlink(&selection) {
+        wanted.push(CAN_UNLINK);
     }
     // The Environment submenu's check marks: exactly one of the four presets or
     // the shared default holds. The gallery has no environment resource, so the

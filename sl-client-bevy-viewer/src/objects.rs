@@ -608,6 +608,44 @@ impl ObjectState {
             .map(|parent| parent.entity)
     }
 
+    /// Every prim of the in-world linkset rooted at `root`: the root itself
+    /// followed by every tracked child prim whose parent is it (attachments
+    /// excluded — they hang off an avatar, not a linkset root). An untracked or
+    /// non-root `root` yields the object alone if present, else nothing.
+    ///
+    /// Second Life linksets are one level deep — a child's parent is always the
+    /// linkset root — so a single pass over the object table finds the whole
+    /// set. Used by prim unlinking (`viewer-prim-linking`): the reference sends
+    /// an `ObjectDelink` naming **every** prim of the set (`SEND_INDIVIDUALS`)
+    /// to break it fully apart; naming only the root would leave the simulator
+    /// re-linking the orphaned children into a new set (OpenSim's
+    /// `SceneGraph::DelinkObjects`).
+    pub(crate) fn linkset_members(&self, root: &ScopedObjectId) -> Vec<ScopedObjectId> {
+        let mut members = Vec::new();
+        if !self.objects.contains_key(root) {
+            return members;
+        }
+        members.push(*root);
+        for (scoped, tracked) in &self.objects {
+            if scoped != root
+                && !tracked.is_root
+                && tracked.attachment_point.is_none()
+                && tracked.parent == *root
+            {
+                members.push(*scoped);
+            }
+        }
+        members
+    }
+
+    /// The number of prims in the linkset rooted at `root` — the reference's
+    /// per-linkset prim count. Drives the link-limit guard
+    /// (`viewer-prim-linking`): a Second Life linkset may hold at most 255
+    /// children, so the summed prim count of a link operation is capped.
+    pub(crate) fn linkset_prim_count(&self, root: &ScopedObjectId) -> usize {
+        self.linkset_members(root).len()
+    }
+
     /// The entity of the object with grid-wide key `key`, or [`None`] if this viewer does
     /// not have it. The reverse of [`full_key`](Self::full_key), used by the point-at
     /// receive path (P31.15) to resolve another avatar's point-at effect — whose target is
