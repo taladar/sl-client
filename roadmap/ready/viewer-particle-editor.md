@@ -2,7 +2,7 @@
 id: viewer-particle-editor
 title: Particle-system editor
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-texture-picker, viewer-ui-color-picker]
 refs: [viewer-prim-parameter-editing]

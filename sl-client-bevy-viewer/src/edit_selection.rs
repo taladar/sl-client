@@ -40,24 +40,30 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::input_focus::InputFocus;
 use bevy::light::NotShadowCaster;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Command, ObjectKey, ObjectProperties, ScopedObjectId, SlCommand, SlEvent, SlSessionEvent,
+    Command, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId, SlCommand, SlEvent,
+    SlSessionEvent, texture_face_uv_transform,
 };
 
 use crate::camera::ViewerCamera;
 use crate::edit_math::rect_selects;
-use crate::edit_tool::EditToolState;
+use crate::edit_tool::{EditTool, EditToolState};
 use crate::gizmos::GizmoInteraction;
 use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::object_menu::ObjectPicker;
-use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject};
+use crate::objects::{
+    FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
+};
 use crate::ui::UiRoot;
 
 /// How far (logical pixels) the cursor may wander between press and release
@@ -114,6 +120,12 @@ pub(crate) struct SelectedNode {
     /// permission masks, owner, creator, names — or `None` until the
     /// `ObjectProperties` reply lands.
     pub(crate) properties: Option<Box<ObjectProperties>>,
+    /// The **selected faces** of this object, for the Select Face tool
+    /// ([`EditTool::SelectFace`]) and the Texture tab that edits them: `None`
+    /// means the whole object (every face) — the default for an ordinary
+    /// object selection — and `Some(set)` means exactly those Linden face
+    /// indices (the reference's per-`LLSelectNode` texture-entry flags).
+    pub(crate) faces: Option<HashSet<PrimFaceId>>,
 }
 
 impl SelectedNode {
@@ -161,7 +173,110 @@ impl SelectionSet {
             full,
             entity,
             properties: None,
+            faces: None,
         });
+    }
+
+    /// The Select Face tool's **plain click**: replace the whole selection with
+    /// exactly this one object and its one face (the reference's
+    /// `deselectAll()` + `selectObjectOnly(obj, face)`).
+    pub(crate) fn select_only_face(
+        &mut self,
+        scoped: ScopedObjectId,
+        full: ObjectKey,
+        entity: Entity,
+        face: PrimFaceId,
+    ) {
+        let mut faces = HashSet::new();
+        faces.insert(face);
+        // Keep the object's existing node (its `ObjectProperties` intact) when it
+        // was already selected — only its face set changes — so re-picking a face
+        // on the same object does not blank the floater (see [`select_only`]).
+        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
+            let mut node = self.selected.remove(index);
+            node.faces = Some(faces);
+            self.selected.clear();
+            self.selected.push(node);
+        } else {
+            self.selected.clear();
+            self.selected.push(SelectedNode {
+                scoped,
+                full,
+                entity,
+                properties: None,
+                faces: Some(faces),
+            });
+        }
+    }
+
+    /// Select exactly `scoped`, dropping every other object — the plain-click
+    /// replace of the object-selection tool. Crucially, if the object was
+    /// **already** selected it keeps its existing node (its `ObjectProperties`
+    /// name / owner / permissions intact), so re-clicking the same object does
+    /// not blank the build floater; a re-select of an already-synced object is
+    /// not re-requested on the wire, so a fresh `properties: None` node would
+    /// stay blank forever.
+    pub(crate) fn select_only(&mut self, scoped: ScopedObjectId, full: ObjectKey, entity: Entity) {
+        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
+            let node = self.selected.remove(index);
+            self.selected.clear();
+            self.selected.push(node);
+        } else {
+            self.selected.clear();
+            self.insert(scoped, full, entity);
+        }
+    }
+
+    /// The Select Face tool's **Shift-click**: extend / toggle a face in the set
+    /// (the reference's `addAsIndividual` / `remove`). If the object is not
+    /// selected it is added with just this face; if the object is selected but
+    /// this face is not in its set the face is added; if the face is already in
+    /// the set it is removed — and if that empties the set the object drops out
+    /// of the selection (cleaner than the reference's known no-op-on-last bug).
+    pub(crate) fn toggle_face(
+        &mut self,
+        scoped: ScopedObjectId,
+        full: ObjectKey,
+        entity: Entity,
+        face: PrimFaceId,
+    ) {
+        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
+            let emptied = {
+                let Some(node) = self.selected.get_mut(index) else {
+                    return;
+                };
+                let set = node.faces.get_or_insert_with(HashSet::new);
+                if !set.remove(&face) {
+                    set.insert(face);
+                }
+                set.is_empty()
+            };
+            if emptied {
+                self.selected.remove(index);
+            } else {
+                // Promote the touched object to primary (the last-clicked object
+                // is the alignment reference the Texture tab reads).
+                let node = self.selected.remove(index);
+                self.selected.push(node);
+            }
+            return;
+        }
+        let mut faces = HashSet::new();
+        faces.insert(face);
+        self.selected.push(SelectedNode {
+            scoped,
+            full,
+            entity,
+            properties: None,
+            faces: Some(faces),
+        });
+    }
+
+    /// The **primary** selection's selected faces: `None` for the whole object
+    /// (every face), else the chosen Linden face indices. The Texture tab reads
+    /// this to decide which faces an `ObjectImage` edit hits.
+    pub(crate) fn primary_faces(&self) -> Option<&HashSet<PrimFaceId>> {
+        self.selected.last().and_then(|node| node.faces.as_ref())
     }
 
     /// Remove an object from the selection (a no-op if absent).
@@ -196,6 +311,8 @@ impl SelectionSet {
                     full,
                     entity,
                     properties: None,
+                    // Promoting to the whole linkset drops any per-face selection.
+                    faces: None,
                 }
             } else {
                 // Root known but not resolvable to a scene entity: leave as-is.
@@ -434,6 +551,7 @@ impl Plugin for EditSelectionPlugin {
             .init_resource::<RubberBandNode>()
             .init_resource::<WireSelection>()
             .init_resource::<HighlightAssets>()
+            .init_resource::<FaceCursorAssets>()
             .add_systems(
                 Update,
                 (
@@ -442,6 +560,7 @@ impl Plugin for EditSelectionPlugin {
                     ingest_selection_events,
                     sync_selection_wire,
                     apply_selection_highlight,
+                    apply_face_cursor_highlight,
                 )
                     .chain(),
             );
@@ -463,6 +582,11 @@ struct SelectPointer<'w, 's> {
     pickables: Query<'w, 's, &'static Pickable>,
     /// Node sizes, for the UI-occlusion guard.
     node_sizes: Query<'w, 's, &'static ComputedNode>,
+    /// The per-frame UI-claim flag: a widget that consumes a press (a combo
+    /// dropdown closing on a pick) sets this, and the world pick then skips it —
+    /// the reliable path where the despawning widget leaves a stale hover-map
+    /// entry the occlusion guard alone would miss.
+    ui_claim: Res<'w, crate::hud_pick::UiPointerClaim>,
     /// The window, for the cursor position.
     windows: Query<'w, 's, &'static Window>,
     /// The world camera, to build pick rays and project candidate bounds.
@@ -511,13 +635,56 @@ fn handle_select_pointer(
     let buttons = &pointer.buttons;
     let alt = keyboard.pressed(KeyCode::AltLeft) || keyboard.pressed(KeyCode::AltRight);
 
+    // -- Select Face tool: pick a per-face texture-entry selection. -----------
+    // A distinct mode (the reference's `LLToolFace`): a click resolves to one
+    // prim face rather than sweeping a rubber band or driving a gizmo, so it
+    // bypasses the object-selection gesture machinery entirely.
+    if tool.tool == EditTool::SelectFace {
+        if buttons.just_pressed(MouseButton::Left) && !alt {
+            let over_ui = pointer_over_blocking_ui(
+                &pointer.hover_map,
+                &pointer.pickables,
+                &pointer.node_sizes,
+            );
+            if gizmo.claims_pointer() || over_ui || pointer.ui_claim.is_claimed() {
+                return;
+            }
+            let Some(cursor) = window.cursor_position() else {
+                return;
+            };
+            let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+                return;
+            };
+            let exclude: HashSet<Entity> = pointer
+                .layers
+                .iter()
+                .filter(|(_entity, layers)| {
+                    on_hud_layer(Some(layers)) || crate::gizmos::on_gizmo_layer(Some(layers))
+                })
+                .map(|(entity, _layers)| entity)
+                .collect();
+            let shift =
+                keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+            handle_face_pick(
+                ray,
+                shift,
+                &mut ray_cast,
+                &picker,
+                &state,
+                &exclude,
+                &mut selection,
+            );
+        }
+        return;
+    }
+
     // -- Press: classify what the gesture starts on. --------------------------
     if buttons.just_pressed(MouseButton::Left) && !alt {
         // A press over UI, over a gizmo handle, or with no cursor is not a
         // selection gesture.
-        if gizmo.claims_pointer()
-            || pointer_over_blocking_ui(&pointer.hover_map, &pointer.pickables, &pointer.node_sizes)
-        {
+        let over_ui =
+            pointer_over_blocking_ui(&pointer.hover_map, &pointer.pickables, &pointer.node_sizes);
+        if gizmo.claims_pointer() || over_ui || pointer.ui_claim.is_claimed() {
             return;
         }
         let Some(cursor) = window.cursor_position() else {
@@ -620,8 +787,7 @@ fn handle_select_pointer(
                     selection.insert(scoped, full, entity);
                 }
             } else {
-                selection.selected.clear();
-                selection.insert(scoped, full, entity);
+                selection.select_only(scoped, full, entity);
             }
         }
         None => {
@@ -632,6 +798,49 @@ fn handle_select_pointer(
                 selection.clear();
             }
         }
+    }
+}
+
+/// The Select Face tool's click resolution (the reference's `LLToolFace`
+/// `pickCallback`): pick the prim face under `ray` and fold it into the per-face
+/// selection — plain click replaces the whole selection with that one face,
+/// `shift` extends / toggles it. A click on empty world deselects (plain click
+/// only). A worn attachment or a hit with no face index is ignored. The picked
+/// **prim** (not its linkset root) is what carries the face, matching the
+/// reference, whose face selection is always per-object.
+fn handle_face_pick(
+    ray: Ray3d,
+    shift: bool,
+    ray_cast: &mut MeshRayCast,
+    picker: &ObjectPicker,
+    state: &ObjectState,
+    exclude: &HashSet<Entity>,
+    selection: &mut SelectionSet,
+) {
+    let Some(hit) = picker.pick(ray, ray_cast, exclude) else {
+        // Empty world: a plain click clears the selection; shift leaves it.
+        if !shift {
+            selection.clear();
+        }
+        return;
+    };
+    if hit.summary.attachment {
+        return;
+    }
+    // A negative face index is the reference's "no face" sentinel.
+    let Ok(face_index) = u16::try_from(hit.surface.face_index) else {
+        return;
+    };
+    let face = PrimFaceId::new(face_index);
+    let scoped = hit.summary.picked_scoped;
+    let full = hit.summary.picked_full;
+    let Some(entity) = state.entity_by_scoped(&scoped) else {
+        return;
+    };
+    if shift {
+        selection.toggle_face(scoped, full, entity, face);
+    } else {
+        selection.select_only_face(scoped, full, entity, face);
     }
 }
 
@@ -867,7 +1076,10 @@ fn apply_selection_highlight(
     // outline (primary, then root, then child) wins over a tentative one when
     // both apply.
     let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
-    if tool.active {
+    // In Select Face mode the per-face grid cursor ([`apply_face_cursor_highlight`])
+    // is the highlight; the whole-object silhouette outline is suppressed so the
+    // two do not stack.
+    if tool.active && tool.tool != EditTool::SelectFace {
         let primary_entity = selection.primary().map(|node| node.entity);
         for node in selection.iter() {
             // The last-selected object's own root prim reads as the primary
@@ -971,6 +1183,225 @@ fn collect_faces(
         if let Ok(list) = children.get(entity) {
             for child in list.iter() {
                 stack.push((child, is_child));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Select Face tool's per-face grid cursor.
+// ---------------------------------------------------------------------------
+
+/// The face-cursor grid texture's size, in texels (one crisp cell — it is drawn
+/// at the face's own texture repeats, so one tile is enough).
+const FACE_CURSOR_TEXELS: u32 = 128;
+
+/// Half the width, in texels, of the cursor's white lines (border frame, circle
+/// ring, and crosshair). The border sits at the tile edges, so adjacent repeats'
+/// borders meet at each integer UV as one hairline.
+const FACE_CURSOR_LINE: f32 = 1.5;
+
+/// The face cursor's depth bias, pulling the coplanar grid overlay in front of
+/// the face it sits on so it never z-fights the surface it marks.
+const FACE_CURSOR_DEPTH_BIAS: f32 = 8.0;
+
+/// The shared face-cursor grid texture — a white cell marker (a border frame, an
+/// inscribed circle, and a centred crosshair) on a transparent tile, wrapped
+/// `Repeat` so, drawn with a face's own UV transform, it marks every texture
+/// repeat: the reference's white "select face" overlay, whose circle and cross
+/// make it obvious when a face shows only part of a texture (the cell centre and
+/// bounds shift with the placement).
+#[derive(Resource, Debug)]
+struct FaceCursorAssets {
+    /// The repeat-wrapped marker image.
+    grid: Handle<Image>,
+}
+
+impl FromWorld for FaceCursorAssets {
+    /// Build the marker tile once: an opaque-white border frame, inscribed circle
+    /// ring, and centred crosshair on a transparent field, with a `Repeat`
+    /// sampler.
+    fn from_world(world: &mut World) -> Self {
+        let size = FACE_CURSOR_TEXELS;
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_precision_loss,
+            reason = "the tile size is a small power of two, exact as f32"
+        )]
+        let dim = size as f32;
+        let half = dim * 0.5;
+        // The circle sits just inside the border, its ring the same width as the
+        // other lines.
+        let radius = half - FACE_CURSOR_LINE * 3.0;
+        let texels = usize::try_from(size).unwrap_or(0);
+        let mut data = Vec::with_capacity(texels.saturating_mul(texels).saturating_mul(4));
+        for y in 0..size {
+            for x in 0..size {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_precision_loss,
+                    reason = "texel coordinates are small non-negative integers, exact as f32"
+                )]
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                // The border frame: within a line-width of any tile edge.
+                let edge = fx < FACE_CURSOR_LINE
+                    || fy < FACE_CURSOR_LINE
+                    || fx > dim - FACE_CURSOR_LINE
+                    || fy > dim - FACE_CURSOR_LINE;
+                // The centred crosshair: a horizontal and a vertical line.
+                let cross =
+                    (fx - half).abs() < FACE_CURSOR_LINE || (fy - half).abs() < FACE_CURSOR_LINE;
+                // The inscribed circle ring.
+                let dist = ((fx - half).powi(2) + (fy - half).powi(2)).sqrt();
+                let circle = (dist - radius).abs() < FACE_CURSOR_LINE;
+                // White line texels are opaque; elsewhere transparent so the face's
+                // own texture shows through inside each repeat cell.
+                let alpha = if edge || cross || circle { 255 } else { 0 };
+                data.extend_from_slice(&[255, 255, 255, alpha]);
+            }
+        }
+        let mut image = Image::new(
+            Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            data,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        // Wrap the tile so a face's repeat count draws that many grid cells.
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            ..ImageSamplerDescriptor::linear()
+        });
+        let grid = world.resource_mut::<Assets<Image>>().add(image);
+        Self { grid }
+    }
+}
+
+/// A per-face grid-cursor overlay child on a selected face (Select Face tool):
+/// the face's own mesh drawn with the white repeat grid.
+#[derive(Component, Debug)]
+struct FaceCursorOverlay;
+
+/// The face-mesh data the cursor overlay reads: the shared mesh handle, the
+/// face's Linden index (to test membership in the selected-face set), and its
+/// decoded texture placement (whose UV transform the grid follows so the grid
+/// lines land on the texture's repeat boundaries).
+type CursorFaceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Mesh3d,
+        &'static PrimFaceEntity,
+        &'static FaceTextureDebug,
+    ),
+>;
+
+/// Draw the white repeat-grid cursor on the selected faces while the Select Face
+/// tool is active: each chosen face gets an overlay child sharing its mesh, drawn
+/// with the grid texture under the face's own UV transform so the grid outlines
+/// every texture repeat. A node with no explicit face set (`faces == None`)
+/// cursors all of its own faces. Reconciled every frame like the silhouette
+/// overlays, so a face rebuilt by a texture edit / LOD swap regains its cursor.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
+              selection state, the grid asset, the hierarchy / scene / face / overlay queries, and \
+              the material store the reconcile spawns into"
+)]
+fn apply_face_cursor_highlight(
+    tool: Res<EditToolState>,
+    selection: Res<SelectionSet>,
+    assets: Res<FaceCursorAssets>,
+    children: Query<&Children>,
+    scene: Query<(), With<SceneObject>>,
+    cursor_faces: CursorFaceQuery,
+    overlays: Query<(Entity, &ChildOf), With<FaceCursorOverlay>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    // The desired cursor set: face entity → its texture placement.
+    let mut desired: HashMap<Entity, FaceTextureDebug> = HashMap::new();
+    if tool.active && tool.tool == EditTool::SelectFace {
+        for node in selection.iter() {
+            collect_own_face_ids(
+                node.entity,
+                node.faces.as_ref(),
+                &children,
+                &scene,
+                &cursor_faces,
+                &mut desired,
+            );
+        }
+    }
+    // Despawn cursors whose face left the set, keep the rest.
+    for (overlay, child_of) in overlays.iter() {
+        if desired.remove(&child_of.parent()).is_none() {
+            commands.entity(overlay).despawn();
+        }
+    }
+    // Spawn the missing cursors: the face's mesh, the grid material carrying the
+    // face's own UV transform, pulled in front of the face by a depth bias.
+    for (face, FaceTextureDebug(texture_face)) in desired {
+        let Ok((mesh, _marker, _debug)) = cursor_faces.get(face) else {
+            continue;
+        };
+        let material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(assets.grid.clone()),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            // The grid follows the face's texture placement (repeats / offset /
+            // rotation), so its lines fall on each repeat's boundary.
+            uv_transform: texture_face_uv_transform(&texture_face),
+            // The face is single-sided; the cursor shows on either side so it is
+            // visible however the face is wound.
+            cull_mode: None,
+            double_sided: true,
+            depth_bias: FACE_CURSOR_DEPTH_BIAS,
+            ..Default::default()
+        });
+        commands.spawn((
+            Mesh3d(mesh.0.clone()),
+            MeshMaterial3d(material),
+            NotShadowCaster,
+            FaceCursorOverlay,
+            ChildOf(face),
+        ));
+    }
+}
+
+/// Collect the object's **own** face entities (not its linkset children's) whose
+/// Linden index is in `wanted` — or all of them when `wanted` is `None` (the
+/// whole object) — into `desired`, each with its decoded texture placement. The
+/// walk stops at any descendant carrying its own [`SceneObject`], so a
+/// face-selected prim never cursors a sibling prim's faces.
+fn collect_own_face_ids(
+    root: Entity,
+    wanted: Option<&HashSet<PrimFaceId>>,
+    children: &Query<&Children>,
+    scene: &Query<(), With<SceneObject>>,
+    cursor_faces: &CursorFaceQuery,
+    desired: &mut HashMap<Entity, FaceTextureDebug>,
+) {
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        // Do not descend into a linkset child object.
+        if entity != root && scene.contains(entity) {
+            continue;
+        }
+        if let Ok((_mesh, marker, debug)) = cursor_faces.get(entity)
+            && wanted.is_none_or(|set| set.contains(&marker.face_id))
+        {
+            desired.insert(entity, *debug);
+        }
+        if let Ok(list) = children.get(entity) {
+            for child in list.iter() {
+                stack.push(child);
             }
         }
     }

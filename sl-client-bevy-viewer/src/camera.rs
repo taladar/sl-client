@@ -648,9 +648,17 @@ pub(crate) fn orbit_third_person(
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     wheel: Res<AccumulatedMouseScroll>,
+    hover_map: Res<bevy::picking::hover::HoverMap>,
+    pickables: Query<&Pickable>,
+    node_sizes: Query<&ComputedNode>,
     mut cameras: Query<&mut CameraRig, With<ViewerCamera>>,
 ) {
-    let scroll = scroll_notches(&wheel);
+    // A wheel scroll over a blocking UI panel (a floater's scrolling list) scrolls
+    // that panel, not the camera — `InputContext` is focus-based, so hovering a
+    // list does not leave the world context, and without this the wheel would
+    // both scroll the list and zoom the camera.
+    let over_ui = crate::hud_pick::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
+    let scroll = if over_ui { 0.0 } else { scroll_notches(&wheel) };
     if *mode != CameraMode::ThirdPerson || !context.is_world() {
         return;
     }

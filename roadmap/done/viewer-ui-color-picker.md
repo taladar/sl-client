@@ -2,7 +2,7 @@
 id: viewer-ui-color-picker
 title: Color picker floater + swatch widget
 topic: viewer
-status: ready
+status: done
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-ui-texture-picker, viewer-prim-texture-editing, viewer-contact-sets]

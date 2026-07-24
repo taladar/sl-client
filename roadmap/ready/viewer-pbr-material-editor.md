@@ -2,7 +2,7 @@
 id: viewer-pbr-material-editor
 title: PBR / GLTF material editor
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-texture-picker, viewer-ui-color-picker]
 refs: [viewer-prim-texture-editing, viewer-image-upload]

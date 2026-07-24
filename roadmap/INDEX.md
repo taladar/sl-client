@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 32 |
-| ready | 204 |
-| blocked | 116 |
-| in-progress | 7 |
+| ready | 209 |
+| blocked | 111 |
+| in-progress | 8 |
 | bugs | 11 |
-| done | 585 |
-| deferred | 15 |
+| done | 590 |
+| deferred | 16 |
 | wont-do | 6 |
-| **total** | **976** |
+| **total** | **983** |
 
 ## ideas (32)
 
@@ -93,7 +93,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (204)
+## ready (209)
 
 ### protocol
 
@@ -162,9 +162,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
   Grid-options floater + snap-XY / selection-grid (blocked by
   `viewer-transform-gizmos` (done))
+- [`viewer-build-numeric-field-spinners`](ready/viewer-build-numeric-field-spinners.md)
+  — Build-window numeric fields — up/down arrow spinners
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
   Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
+- [`viewer-build-systems-gate-on-build-mode`](ready/viewer-build-systems-gate-on-build-mode.md)
+  — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-undo-redo`](ready/viewer-build-undo-redo.md) — Object-edit
   undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing` (done))
@@ -229,9 +233,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-attachment-behavior`](ready/viewer-edit-attachment-behavior.md)
   — Edit tools & widgets on worn attachments (blocked by
   `viewer-object-selection-core` (done), `viewer-transform-gizmos` (done))
-- [`viewer-edit-face-selection`](ready/viewer-edit-face-selection.md) — Select
-  Face tool — per-face selection for texture edits (blocked by
-  `viewer-object-selection-core` (done))
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
@@ -296,10 +297,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-secondary-window`](ready/viewer-inventory-secondary-window.md)
   — Secondary inventory windows
+- [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
+  Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
+  (done))
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
+- [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
+  file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
+  (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
@@ -363,11 +370,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-options-general`](ready/viewer-parcel-options-general.md) —
   About Land floater — general / covenant / objects (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-particle-editor`](ready/viewer-particle-editor.md) — Particle-system
+  editor (blocked by `viewer-ui-texture-picker` (done), `viewer-ui-color-picker`
+  (done))
 - [`viewer-particle-pick-mute`](ready/viewer-particle-pick-mute.md) — Particle
   picking + the muted-particle-source pie
 - [`viewer-pathfinding-floaters`](ready/viewer-pathfinding-floaters.md) —
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-pbr-material-editor`](ready/viewer-pbr-material-editor.md) — PBR /
+  GLTF material editor (blocked by `viewer-ui-texture-picker` (done),
+  `viewer-ui-color-picker` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
@@ -400,6 +413,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Prim inventory (contents) editing (blocked by
   `viewer-object-edit-floater-shell` (done), `viewer-ui-virtualized-list`
   (done))
+- [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
+  Profile floater — set the profile / pick / classified images (blocked by
+  `viewer-ui-texture-picker` (done))
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
@@ -483,22 +499,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done))
-- [`viewer-ui-color-picker`](ready/viewer-ui-color-picker.md) — Color picker
-  floater + swatch widget (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-combo-widget`](ready/viewer-ui-combo-widget.md) — Reusable combo /
-  dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
+  — Color picker — SV square, hue strip, palette & eyedropper (blocked by
+  `viewer-ui-color-picker` (done))
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
+  — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
+  `viewer-ui-settings-binding` (done))
 - [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
   — Text-field↔settings two-way binding (blocked by
   `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-texture-picker`](ready/viewer-ui-texture-picker.md) — Texture
-  picker floater — choose a texture from inventory (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -580,7 +595,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (116)
+## blocked (111)
 
 ### viewer
 
@@ -627,6 +642,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-face-materials-pbr`](blocked/viewer-face-materials-pbr.md) — Texture
+  tab — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
+  `viewer-prim-texture-editing`, `viewer-ui-texture-picker` (done))
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -668,10 +686,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-inventory-sound-anim-preview`](blocked/viewer-inventory-sound-anim-preview.md)
   — Inventory sound & animation preview (blocked by `viewer-audio-backend`)
-- [`viewer-inventory-thumbnails`](blocked/viewer-inventory-thumbnails.md) —
-  Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`)
-- [`viewer-local-textures`](blocked/viewer-local-textures.md) — Local textures —
-  file-backed textures with live reload (blocked by `viewer-ui-texture-picker`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -735,12 +749,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-options-access-media`](blocked/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general`)
-- [`viewer-particle-editor`](blocked/viewer-particle-editor.md) —
-  Particle-system editor (blocked by `viewer-ui-texture-picker`,
-  `viewer-ui-color-picker`)
-- [`viewer-pbr-material-editor`](blocked/viewer-pbr-material-editor.md) — PBR /
-  GLTF material editor (blocked by `viewer-ui-texture-picker`,
-  `viewer-ui-color-picker`)
 - [`viewer-permission-active-grants`](blocked/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog`)
@@ -762,7 +770,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-preferences-floater`)
 - [`viewer-preferences-colors-skins-tab`](blocked/viewer-preferences-colors-skins-tab.md)
   — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`,
-  `viewer-ui-color-picker`)
+  `viewer-ui-color-picker` (done))
 - [`viewer-preferences-debug-settings-editor`](blocked/viewer-preferences-debug-settings-editor.md)
   — Raw debug-settings editor (blocked by `viewer-preferences-floater`)
 - [`viewer-preferences-general-tab`](blocked/viewer-preferences-general-tab.md)
@@ -771,12 +779,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
 - [`viewer-preferences-network-cache-tab`](blocked/viewer-preferences-network-cache-tab.md)
   — Preferences — network & cache tab (blocked by `viewer-preferences-floater`)
-- [`viewer-prim-texture-editing`](blocked/viewer-prim-texture-editing.md) — Prim
-  texture / material editing (blocked by `viewer-object-edit-floater-shell`
-  (done), `viewer-edit-face-selection`)
-- [`viewer-profile-image-editing`](blocked/viewer-profile-image-editing.md) —
-  Profile floater — set the profile / pick / classified images (blocked by
-  `viewer-ui-texture-picker`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
@@ -856,9 +858,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug`)
-- [`viewer-ui-settings-binding-combo`](blocked/viewer-ui-settings-binding-combo.md)
-  — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget`,
-  `viewer-ui-settings-binding` (done))
+- [`viewer-texture-drag-drop`](blocked/viewer-texture-drag-drop.md) — Drag &
+  drop a texture onto the build Texture tab / an object face (blocked by
+  `viewer-prim-texture-editing`, `viewer-ui-texture-picker` (done))
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
@@ -901,12 +903,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (7)
+## in-progress (8)
 
 ### viewer
 
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
+- [`viewer-prim-texture-editing`](in-progress/viewer-prim-texture-editing.md) —
+  Prim texture / material editing (blocked by `viewer-object-edit-floater-shell`
+  (done), `viewer-edit-face-selection` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -956,7 +961,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (585)
+## done (590)
 
 ### protocol
 
@@ -1126,6 +1131,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
+- [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
+  Face tool — per-face selection for texture edits (blocked by
+  `viewer-object-selection-core` (done))
 - [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —
   Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
   `viewer-ui-text-input-widget` (done))
@@ -1533,11 +1541,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](done/viewer-social-profiles.md) — Avatar profiles —
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
+  — Texture picker — inventory folder tree navigation (blocked by
+  `viewer-ui-texture-picker` (done))
 - [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker
+  floater + swatch widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-combo-widget`](done/viewer-ui-combo-widget.md) — Reusable combo /
+  dropdown widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-context-menu`](done/viewer-ui-context-menu.md) — Line-based
   context menu widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-floater-basic`](done/viewer-ui-floater-basic.md) — Floater window
@@ -1602,6 +1617,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-ui-text-input-widget`](done/viewer-ui-text-input-widget.md) —
   Reusable text-input widget (EditableText + IME preedit) (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-texture-picker`](done/viewer-ui-texture-picker.md) — Texture
+  picker floater — choose a texture from inventory (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-virtualized-list`](done/viewer-ui-virtualized-list.md) —
   Virtualized (windowed-recycling) list (blocked by `viewer-ui-widget-scaffold`
@@ -2147,7 +2165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (15)
+## deferred (16)
 
 ### protocol
 
@@ -2162,6 +2180,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
+- [`viewer-build-ui-firestorm-audit`](deferred/viewer-build-ui-firestorm-audit.md)
+  — Systematic side-by-side audit of the whole build UI vs Firestorm
 - [`viewer-destination-guide`](deferred/viewer-destination-guide.md) —
   Destination guide floater (blocked by `viewer-media-prim-browser`)
 - [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)

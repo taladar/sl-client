@@ -625,13 +625,15 @@ impl Translated {
 ///
 /// Re-resolves **all** labels when the bundle changes (it just loaded, or a
 /// locale switch rebuilt it) or the locale changes (the pseudolocale flip, which
-/// does not rebuild the bundle); otherwise only labels added since last frame, so
-/// a panel spawned after the bundle loaded still localizes without a full sweep.
+/// does not rebuild the bundle); otherwise only labels whose [`Translated`]
+/// changed since last frame — added with a panel spawned after the bundle loaded,
+/// **or rebound to a new key** (a combo whose value text follows the selection) —
+/// so either localizes without a full sweep.
 fn apply_translations(
     translator: Translator,
     localization: Res<Localization>,
     locale: Res<UiLocale>,
-    fresh: Query<Entity, Added<Translated>>,
+    rebound: Query<Entity, Changed<Translated>>,
     mut labels: Query<(&Translated, &mut Text)>,
 ) {
     if localization.is_changed() || locale.is_changed() {
@@ -643,7 +645,7 @@ fn apply_translations(
         }
         return;
     }
-    for entity in &fresh {
+    for entity in &rebound {
         if let Ok((label, mut text)) = labels.get_mut(entity) {
             let next = translator.get(&label.key);
             if text.0 != next {

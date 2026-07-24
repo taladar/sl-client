@@ -54,6 +54,8 @@ mod edit_link;
 mod edit_math;
 mod edit_params;
 mod edit_selection;
+mod edit_texture;
+mod edit_texture_align;
 mod edit_tool;
 mod emoji_complete;
 mod emoji_picker;
@@ -132,6 +134,8 @@ mod textures;
 mod tonemap;
 mod typing;
 mod ui;
+mod ui_color_picker;
+mod ui_combo;
 mod ui_element;
 mod ui_font;
 mod ui_pseudoloc;
@@ -142,6 +146,7 @@ mod ui_tab;
 mod ui_test;
 mod ui_text;
 mod ui_text_input;
+mod ui_texture_picker;
 mod underwater_fog;
 mod virtual_list;
 mod water;
@@ -790,6 +795,17 @@ fn run_session(
     // group's selection, so a click and an external write (the Build Tools
     // floater's tool sync) drive the same visual path.
     .add_plugins(crate::ui_radio::RadioWidgetPlugin)
+    // The reusable combo / dropdown widget (viewer-ui-combo-widget): the closed
+    // value reconcile, the ComboChanged message, and the outside-press dismiss.
+    .add_plugins(crate::ui_combo::ComboWidgetPlugin)
+    // The reusable colour-picker floater + swatch (viewer-ui-color-picker): the
+    // OpenColorPicker / ColorPicked messages, the RGB-slider floater, and the
+    // swatch fill reconcile.
+    .add_plugins(crate::ui_color_picker::ColorPickerPlugin)
+    // The reusable texture-picker floater + swatch (viewer-ui-texture-picker):
+    // the OpenTexturePicker / TexturePicked messages, the inventory thumbnail
+    // grid floater, and the swatch thumbnail reconcile.
+    .add_plugins(crate::ui_texture_picker::TexturePickerPlugin)
     // The reusable text-input widget's runtime half (viewer-ui-text-input-widget):
     // the whole-string numeric validator that reverts a field to its last valid
     // value when an edit makes it structurally invalid (a second '.', a misplaced
@@ -847,6 +863,10 @@ fn run_session(
     // name / description / flag / shape editors and the Features-tab
     // material / flexi / light editors.
     .add_plugins(crate::edit_params::EditParamsPlugin)
+    // The Texture tab (viewer-prim-texture-editing) + Select Face tool
+    // (viewer-edit-face-selection): per-face colour / transparency / glow /
+    // bump / shiny / mapping and texture repeats / offset / rotation.
+    .add_plugins(crate::edit_texture::EditTexturePlugin)
     // The object selection core (viewer-object-selection-core): click /
     // rubber-band selection, the selection set + highlight, and the
     // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.
@@ -1192,6 +1212,10 @@ fn run_session(
             // face-spawning systems so a face's PBR material is seen.
             (
                 apply_prim_textures,
+                // Patch faces parked on an already-decoded texture (a build-tool
+                // live-preview pre-fetch, then a commit re-tessellation), which the
+                // decode-event-driven `apply_prim_textures` alone would strand.
+                crate::textures::patch_parked_decoded_textures,
                 update_material_caps,
                 register_pbr_materials,
                 poll_materials,

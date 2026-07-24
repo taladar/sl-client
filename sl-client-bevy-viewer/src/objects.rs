@@ -356,6 +356,16 @@ struct TrackedObject {
     /// rig joint positions must NOT override the wearer's skeleton (R1), matching
     /// the reference viewer's `!vo->isAnimatedObject()` filter.
     animated: bool,
+    /// The object's last-received raw `TextureEntry` bytes, retained so the build
+    /// floater's Texture tab ([`crate::edit_texture`]) can read the current
+    /// per-face placement and re-send a modified entry (`ObjectImage`). A
+    /// non-empty full update overwrites it; a terse (motion-only) update, which
+    /// carries no texture entry, leaves it untouched.
+    texture_entry: Vec<u8>,
+    /// The object's last-received legacy media URL, round-tripped on an
+    /// `ObjectImage` send so a texture edit does not clear it (the wire message
+    /// carries the whole media-URL field, so omitting it would blank it).
+    media_url: Option<String>,
 }
 
 /// The `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag (`llprimitive.h`): the object
@@ -823,6 +833,24 @@ impl ObjectState {
             update_flags: tracked.update_flags,
             extra: &tracked.extra,
         })
+    }
+
+    /// The object's last-received raw `TextureEntry` bytes, for the Texture-tab
+    /// editor ([`crate::edit_texture`]) to decode the current per-face placement
+    /// and re-send a modified entry. `None` if untracked, an empty slice if the
+    /// object has not carried a texture entry yet.
+    pub(crate) fn texture_entry_of(&self, scoped: &ScopedObjectId) -> Option<&[u8]> {
+        self.objects
+            .get(scoped)
+            .map(|tracked| tracked.texture_entry.as_slice())
+    }
+
+    /// The object's last-received legacy media URL, round-tripped on an
+    /// `ObjectImage` send so a Texture-tab edit does not clear it.
+    pub(crate) fn media_url_of(&self, scoped: &ScopedObjectId) -> Option<String> {
+        self.objects
+            .get(scoped)
+            .and_then(|tracked| tracked.media_url.clone())
     }
 
     /// Every tracked in-world (non-attachment) prim for the minimap's object
@@ -2369,11 +2397,20 @@ fn apply_object(
         // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
         // physical (or moved by this terse update) is driven kinematically.
         apply_physics(existing.entity, object, commands);
-        if existing.shape != shape {
-            // A genuine shape (or category) change: drop the old face meshes and
-            // re-tessellate. A category change is subsumed here, since the
-            // fingerprint covers pcode and the sculpt/mesh key.
-            debug!("object {scoped} shape changed; re-tessellating");
+        // A texture-only change (same shape, a new `TextureEntry` from a retexture
+        // in-world or the sim's echo of the build floater's `ObjectImage` send)
+        // re-tessellates too: the per-face materials (tint / repeats / offset /
+        // rotation / glow / shiny / fullbright) and the planar-texgen UVs are baked
+        // at build time, so rebuilding the faces is what makes a texture edit show.
+        // Guarded on a non-empty incoming entry, since a terse motion update carries
+        // none and must not be read as "cleared to empty".
+        let texture_changed =
+            !object.texture_entry.is_empty() && object.texture_entry != existing.texture_entry;
+        if existing.shape != shape || texture_changed {
+            // A genuine shape (or category) change, or a texture change: drop the
+            // old face meshes and re-tessellate. A category change is subsumed
+            // here, since the fingerprint covers pcode and the sculpt/mesh key.
+            debug!("object {scoped} shape/texture changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
             let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain) =
                 build_object_geometry(
@@ -2428,6 +2465,14 @@ fn apply_object(
         existing.update_flags = object.update_flags;
         existing.material = object.material;
         existing.extra = object.extra.clone();
+        // Retain the current texture entry / media URL for the Texture-tab editor.
+        // A terse (motion-only) update carries neither, so both are refreshed only
+        // when a full update brings a texture entry — keeping the last known media
+        // URL rather than letting a terse update blank it.
+        if !object.texture_entry.is_empty() {
+            existing.texture_entry.clone_from(&object.texture_entry);
+            existing.media_url = object.media_url.as_ref().map(url::Url::to_string);
+        }
         return;
     }
 
@@ -2526,6 +2571,8 @@ fn apply_object(
             tree_rebuild,
             tree_tier: INITIAL_TREE_TIER,
             animated: is_animated_object(object),
+            texture_entry: object.texture_entry.clone(),
+            media_url: object.media_url.as_ref().map(url::Url::to_string),
         },
     );
     debug!(

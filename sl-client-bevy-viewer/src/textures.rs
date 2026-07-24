@@ -466,6 +466,24 @@ impl TextureManager {
         self.decoded.get(&id)
     }
 
+    /// Classify a diffuse texture for a consumer that paints it onto a material
+    /// directly (the build tool's live texture preview, [`crate::edit_texture`]),
+    /// uploading a fresh Bevy image when ready. Distinguishes a genuinely
+    /// **absent** texture (a nil / null-sentinel id — the material should clear
+    /// its `base_color_texture` and show the flat tint) from one that simply has
+    /// not **decoded** yet (keep the old image and wait), which a bare
+    /// `Option<Handle>` would conflate. Reads the decode store the preview pane
+    /// uses, so a freshly-picked texture no face yet carries still resolves.
+    pub(crate) fn diffuse_image(&self, id: TextureKey, images: &mut Assets<Image>) -> DiffuseImage {
+        if is_absent_texture(id) {
+            DiffuseImage::Absent
+        } else if let Some(decoded) = self.decoded.get(&id) {
+            DiffuseImage::Ready(images.add(build_prim_image(decoded)))
+        } else {
+            DiffuseImage::Pending
+        }
+    }
+
     /// A snapshot of a texture's level-of-detail state for the crosshair pick tool
     /// (P21.1 diagnostics): the currently decoded discard level and pixel
     /// dimensions, its learned native (discard-0) size (only for a LOD-managed
@@ -650,6 +668,20 @@ pub(crate) struct PrimTextures {
     /// despawned face's material is not kept alive; ids that no longer resolve are
     /// pruned when the texture is refreshed.
     materials: HashMap<TextureKey, Vec<AssetId<StandardMaterial>>>,
+}
+
+/// The state of a face's diffuse image — see [`TextureManager::diffuse_image`].
+#[derive(Debug, Clone)]
+pub(crate) enum DiffuseImage {
+    /// The face carries no texture (a nil / null-sentinel id); a material should
+    /// clear its `base_color_texture` and show the flat tint.
+    Absent,
+    /// The texture exists but has not decoded yet — keep the current image and
+    /// try again once it lands.
+    Pending,
+    /// The decoded image, uploaded as a fresh Bevy image ready to paint onto a
+    /// material.
+    Ready(Handle<Image>),
 }
 
 /// How a face treats a diffuse texture that carries its **own** alpha channel,
@@ -840,6 +872,55 @@ pub(crate) fn apply_prim_textures(
                 // overridden keeps it (R25a): `NONE` means opaque in the
                 // reference even over an alpha texture, so the material must
                 // win regardless of whether it or this decode applied last.
+                if !legacy.is_alpha_overridden(material_handle.id()) {
+                    resolve_texture_alpha_mode(
+                        &mut material,
+                        texture_alpha,
+                        has_alpha,
+                        has_transparency,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Patch prim faces parked on a texture that is **already decoded** — the
+/// [`apply_prim_textures`] event only fires when a texture *decodes*, so a face
+/// that parks **after** its texture was decoded (e.g. the build tool pre-fetched
+/// it for a live preview, then a commit re-tessellated the face) would never be
+/// filled and would render as a flat solid tint. This runs after
+/// [`apply_prim_textures`] and drains any such stranded parked faces.
+pub(crate) fn patch_parked_decoded_textures(
+    manager: Res<TextureManager>,
+    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let ready: Vec<TextureKey> = prim_textures
+        .pending
+        .keys()
+        .copied()
+        .filter(|id| !prim_textures.images.contains_key(id) && manager.decoded(*id).is_some())
+        .collect();
+    for id in ready {
+        let Some(parked) = prim_textures.pending.remove(&id) else {
+            continue;
+        };
+        let has_alpha = manager
+            .decoded(id)
+            .is_some_and(|decoded| texture_has_alpha(decoded));
+        let has_transparency = has_alpha
+            && manager
+                .decoded(id)
+                .is_some_and(|decoded| texture_has_transparency(decoded));
+        let Some(image_handle) = prim_image(&manager, &mut prim_textures, &mut images, id) else {
+            continue;
+        };
+        for (material_handle, texture_alpha) in parked {
+            if let Some(mut material) = materials.get_mut(&material_handle) {
+                material.base_color_texture = Some(image_handle.clone());
                 if !legacy.is_alpha_overridden(material_handle.id()) {
                     resolve_texture_alpha_mode(
                         &mut material,

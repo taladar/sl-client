@@ -2,7 +2,7 @@
 id: viewer-ui-texture-picker
 title: Texture picker floater — choose a texture from inventory
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-22), noticed while live-testing
   viewer-social-profiles (profile pictures cannot be set)
 blocked_by: [viewer-ui-widget-scaffold]

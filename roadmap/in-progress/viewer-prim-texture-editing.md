@@ -2,7 +2,7 @@
 id: viewer-prim-texture-editing
 title: Prim texture / material editing
 topic: viewer
-status: blocked
+status: in-progress
 origin: reference-viewer feature-cluster survey (2026-07)
 blocked_by: [viewer-object-edit-floater-shell, viewer-edit-face-selection]
 ---

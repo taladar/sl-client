@@ -2,7 +2,7 @@
 id: viewer-inventory-thumbnails
 title: Inventory thumbnails — view & edit
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-texture-picker]
 refs: [viewer-inventory-gallery]

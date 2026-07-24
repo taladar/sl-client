@@ -2,7 +2,7 @@
 id: viewer-ui-settings-binding-combo
 title: Combo↔settings two-way binding
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-ui-settings-binding — deferred as an extension point
   until a combo widget exists (2026-07)
 blocked_by: [viewer-ui-combo-widget, viewer-ui-settings-binding]

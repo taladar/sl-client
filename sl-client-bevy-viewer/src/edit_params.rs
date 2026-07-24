@@ -882,7 +882,7 @@ enum ParamAction {
 
 /// The skin class greying a gated-off widget's text
 /// (`--text-disabled`-driven; see `assets/skins/common.css`).
-const DISABLED_CLASS: &str = "sk-build-disabled";
+pub(crate) const DISABLED_CLASS: &str = "sk-build-disabled";
 
 /// What a cycle button shows when there is nothing to show a value for.
 const NO_VALUE: &str = "—";
@@ -2217,7 +2217,7 @@ type InfoQuery<'w, 's> = Query<
 >;
 
 /// Add or remove the greyed-out skin class on a widget text.
-fn set_disabled_class(class_list: &mut ClassList, disabled: bool) {
+pub(crate) fn set_disabled_class(class_list: &mut ClassList, disabled: bool) {
     if disabled {
         if !class_list.contains(DISABLED_CLASS) {
             class_list.add(DISABLED_CLASS);

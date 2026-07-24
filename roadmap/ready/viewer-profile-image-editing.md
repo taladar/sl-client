@@ -2,7 +2,7 @@
 id: viewer-profile-image-editing
 title: Profile floater — set the profile / pick / classified images
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07-22), while live-testing viewer-social-profiles
 blocked_by: [viewer-ui-texture-picker]
 refs: [viewer-social-profiles]

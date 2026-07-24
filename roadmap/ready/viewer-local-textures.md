@@ -2,7 +2,7 @@
 id: viewer-local-textures
 title: Local textures — file-backed textures with live reload
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-texture-picker]
 refs: [viewer-local-mesh]

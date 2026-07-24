@@ -46,6 +46,38 @@ use crate::hud::{HudCamera, on_hud_layer};
 use crate::media_prim::MediaWorldClick;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
+/// A flag a UI element sets when it **consumes** a pointer press this frame, so a
+/// world-pick system (the build-tool selection, the HUD / world touch) skips its
+/// own handling of the same press. It is the reliable companion to
+/// [`pointer_over_blocking_ui`], which reads the pointer hover-map: a widget that
+/// **despawns itself** while handling a press (a combo dropdown closing on a pick)
+/// leaves a stale hover-map entry that the block test then misses, so the widget
+/// claims the press directly instead. Reset every frame by
+/// [`reset_ui_pointer_claim`] before the picking observers run.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct UiPointerClaim {
+    /// Whether a UI element has claimed this frame's press.
+    claimed: bool,
+}
+
+impl UiPointerClaim {
+    /// Claim this frame's press for the UI (a world pick then ignores it).
+    pub(crate) const fn claim(&mut self) {
+        self.claimed = true;
+    }
+
+    /// Whether the UI has claimed this frame's press.
+    pub(crate) const fn is_claimed(&self) -> bool {
+        self.claimed
+    }
+}
+
+/// Clear the per-frame [`UiPointerClaim`] at the start of the frame, before the
+/// picking observers that set it run.
+pub(crate) fn reset_ui_pointer_claim(mut claim: ResMut<UiPointerClaim>) {
+    claim.claimed = false;
+}
+
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
 

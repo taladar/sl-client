@@ -34,6 +34,7 @@ use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
+use crate::edit_params::set_disabled_class;
 use crate::edit_selection::SelectionSet;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -84,12 +85,22 @@ pub(crate) enum EditTool {
     Rotate,
     /// The scale gizmo (face + corner handles).
     Stretch,
+    /// The **Select Face** tool (the reference's `LLToolFace`, its
+    /// `radio select face`): no transform gizmo — a click picks a prim face into
+    /// the per-face texture-entry selection the Texture tab
+    /// ([`crate::edit_texture`]) edits, `Shift`-click builds a multi-face set.
+    SelectFace,
 }
 
 /// The tool-mode radio options, in the order they appear in the floater (the
 /// reference's `move` / `rotate` / `stretch`). The one place the index↔tool
 /// mapping lives, so [`spawn_build_floater`] and the two sync systems agree.
-const BUILD_TOOLS: [EditTool; 3] = [EditTool::Move, EditTool::Rotate, EditTool::Stretch];
+const BUILD_TOOLS: [EditTool; 4] = [
+    EditTool::Move,
+    EditTool::Rotate,
+    EditTool::Stretch,
+    EditTool::SelectFace,
+];
 
 impl EditTool {
     /// This tool's index into [`BUILD_TOOLS`] — the radio option it selects.
@@ -276,6 +287,11 @@ struct BuildNumericField {
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildGridUnitField;
 
+/// Marks a transform-row label (Position / Rotation / Size), greyed while nothing
+/// is selected — the label counterpart to the nine gated [`BuildNumericField`]s.
+#[derive(Component, Debug, Clone, Copy)]
+struct BuildTransformLabel;
+
 /// Marks the tool-mode radio group, so the sync systems can find it to mirror
 /// its selection into [`EditToolState::tool`] and back.
 #[derive(Component, Debug, Clone, Copy)]
@@ -323,6 +339,9 @@ pub(crate) struct BuildTabPages {
     pub(crate) object: Entity,
     /// The **Features** tab page.
     pub(crate) features: Entity,
+    /// The **Texture** tab page (the per-face texture / colour editor,
+    /// [`crate::edit_texture`]).
+    pub(crate) texture: Entity,
 }
 
 /// The plugin wiring the build tool into the viewer.
@@ -413,10 +432,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     // one focus stop, arrow keys move the selection. The labels are the existing
     // `build-tool-*` Fluent keys; the selection is mirrored to and from
     // `EditToolState::tool` by the two sync systems.
-    let tool_labels: [String; 3] = [
+    let tool_labels: [String; 4] = [
         "build-tool-move".to_owned(),
         "build-tool-rotate".to_owned(),
         "build-tool-stretch".to_owned(),
+        "build-tool-select-face".to_owned(),
     ];
     let tool_radio = spawn_radio_group(
         &mut commands,
@@ -534,10 +554,10 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
                 ChildOf(*panel),
             ))
             .id();
-        // The not-yet-implemented tabs carry a placeholder line; the General
-        // / Object / Features pages get their editors from the shell below
-        // and the parameter-tab module ([`crate::edit_params`]).
-        if index >= 3 {
+        // The not-yet-implemented tabs carry a placeholder line; the General /
+        // Object / Features pages get their editors from the parameter-tab module
+        // ([`crate::edit_params`]) and the Texture page from [`crate::edit_texture`].
+        if index >= 4 {
             commands.spawn((
                 Text::default(),
                 Translated::new("build-tab-placeholder"),
@@ -577,7 +597,8 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
                 ChildOf(object_page),
             ))
             .id();
-        spawn_row_label(&mut commands, transform_row, key);
+        let label = spawn_row_label(&mut commands, transform_row, key);
+        commands.entity(label).insert(BuildTransformLabel);
         for axis in 0_usize..3_usize {
             let element = match group {
                 FieldGroup::Position => "build-pos",
@@ -608,6 +629,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         general: tab_pages.first().copied().unwrap_or(content),
         object: tab_pages.get(1).copied().unwrap_or(content),
         features: tab_pages.get(2).copied().unwrap_or(content),
+        texture: tab_pages.get(3).copied().unwrap_or(content),
     });
     commands.insert_resource(BuildToolsUi {
         panel: handle.root,
@@ -806,7 +828,13 @@ fn promote_selection_when_whole_linkset(
     objects: Res<ObjectState>,
     mut selection: ResMut<SelectionSet>,
 ) {
-    if !tool.is_changed() || tool.edit_linked || selection.is_empty() {
+    // Never in Select Face mode: it selects individual prim faces, so promoting
+    // to whole linkset roots would throw the per-face selection away.
+    if !tool.is_changed()
+        || tool.edit_linked
+        || tool.tool == EditTool::SelectFace
+        || selection.is_empty()
+    {
         return;
     }
     selection.promote_to_roots(&objects);
@@ -836,20 +864,26 @@ fn sync_link_part_nav(
 }
 
 /// Spawn a translated row label.
-pub(crate) fn spawn_row_label(commands: &mut Commands, parent: Entity, key: &'static str) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        Node {
-            min_width: Val::Px(64.0),
-            ..Default::default()
-        },
-        ChildOf(parent),
-    ));
+pub(crate) fn spawn_row_label(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+) -> Entity {
+    commands
+        .spawn((
+            Text::default(),
+            Translated::new(key),
+            UiFont::Sans.at(TOOL_FONT_SIZE),
+            // A skinless fallback; the skin recolours via the class token.
+            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            ClassList::new_with_classes([LABEL_CLASS]),
+            Node {
+                min_width: Val::Px(64.0),
+                ..Default::default()
+            },
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// `Ctrl+B` toggles the Build Tools floater (the reference's Build shortcut),
@@ -1123,8 +1157,8 @@ fn group_values(motion: &ObjectSlMotion, group: FieldGroup) -> [f32; 3] {
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the UI handles, \
-              the tool / selection / focus state, the motion mirror, the field queries, and the \
-              text-layout contexts a programmatic field rewrite needs"
+              the tool / selection / focus state, the motion mirror, the field queries, the \
+              text-layout contexts, plus the gate's transform-label query and last-state guard"
 )]
 fn sync_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
@@ -1136,6 +1170,9 @@ fn sync_numeric_fields(
     mut editors: Query<&mut EditableText>,
     mut font_cx: ResMut<FontCx>,
     mut layout_cx: ResMut<LayoutCx>,
+    mut transform_labels: Query<&mut ClassList, With<BuildTransformLabel>>,
+    mut last_enabled: Local<Option<bool>>,
+    mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1146,6 +1183,28 @@ fn sync_numeric_fields(
     let primary_motion = selection
         .primary()
         .and_then(|node| motions.get(node.entity).ok());
+    // Gate the transform fields: with nothing selected the reference greys and
+    // disables them (they have no value to edit). Applied only on the transition,
+    // so a stable state does not churn archetypes every frame.
+    let enabled = selection.primary().is_some();
+    if *last_enabled != Some(enabled) {
+        *last_enabled = Some(enabled);
+        for field in ui.fields {
+            if enabled {
+                commands
+                    .entity(field)
+                    .remove::<bevy::ui::InteractionDisabled>()
+                    .insert(Pickable::default());
+            } else {
+                commands
+                    .entity(field)
+                    .insert((bevy::ui::InteractionDisabled, Pickable::IGNORE));
+            }
+        }
+        for mut class_list in &mut transform_labels {
+            set_disabled_class(&mut class_list, !enabled);
+        }
+    }
     for field in ui.fields {
         if focus.get() == Some(field) {
             continue;
@@ -1346,7 +1405,12 @@ pub(crate) fn spawn_build_tools_specimen(
     // The tool-mode radio group — the same widget the live floater builds, so
     // the swept specimen matches. Literal labels (not Fluent keys) because the
     // gallery / harness supply their own sampled strings.
-    let tool_labels: [String; 3] = [cx.text("Move"), cx.text("Rotate"), cx.text("Stretch")];
+    let tool_labels: [String; 4] = [
+        cx.text("Move"),
+        cx.text("Rotate"),
+        cx.text("Stretch"),
+        cx.text("Select Face"),
+    ];
     spawn_radio_group(
         commands,
         root,

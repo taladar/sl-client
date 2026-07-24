@@ -539,6 +539,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_radio::spawn_radio_column,
     },
     UiElement {
+        id: "combo-box",
+        summary: "A combo / dropdown (`crate::ui_combo`): a bordered value button that opens a \
+                  popover list of options and emits the chosen one. The Texture tab's bumpiness / \
+                  shininess / mapping controls are live consumers; swept closed here.",
+        spawn: crate::ui_combo::spawn_combo_element,
+    },
+    UiElement {
         id: "menu-bar",
         summary: "A closed menu bar (`crate::menu`): a strip of pull-down buttons whose drop-downs \
                   open on click — command / check / disabled entries, separators, accelerators and \

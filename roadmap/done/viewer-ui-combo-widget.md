@@ -2,7 +2,7 @@
 id: viewer-ui-combo-widget
 title: Reusable combo / dropdown widget
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-ui-settings-binding — the third `control_name` widget
   had no composite to bind to (2026-07)
 blocked_by: [viewer-ui-widget-scaffold]

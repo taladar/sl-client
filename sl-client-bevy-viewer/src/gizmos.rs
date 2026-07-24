@@ -1204,7 +1204,12 @@ fn maintain_gizmo_rig(
     if interaction.drag.is_some() {
         return;
     }
-    let want = (tool.active && !selection.is_empty()).then_some(tool.effective_tool());
+    // The Select Face tool ([`crate::edit_tool::EditTool::SelectFace`]) drives no
+    // transform gizmo — it picks per-face texture-entry selections instead — so it
+    // never rigs.
+    let want = (tool.active && !selection.is_empty())
+        .then_some(tool.effective_tool())
+        .filter(|effective| *effective != EditTool::SelectFace);
     let up_to_date = match (built.current, want) {
         (None, None) => true,
         (Some((_root, current)), Some(target)) => current == target,
@@ -1249,6 +1254,9 @@ fn spawn_rig(commands: &mut Commands, assets: &GizmoAssets, tool: EditTool) -> E
         ));
     };
     match tool {
+        // The Select Face tool rigs no handles (the caller never asks for it, but
+        // the match stays exhaustive).
+        EditTool::SelectFace => {}
         EditTool::Move => {
             for axis in GizmoAxis::ALL {
                 let material = assets.axis.get(axis.index()).unwrap_or(&assets.corner);

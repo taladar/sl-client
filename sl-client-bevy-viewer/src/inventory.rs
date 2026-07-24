@@ -312,6 +312,13 @@ impl InventoryModel {
             .find(|root| !self.library_folders.contains(root))
     }
 
+    /// Every root folder — the agent's "My Inventory" first, then the Library
+    /// root(s) — for a view that shows the whole tree (the texture picker's
+    /// folder tree, [`crate::ui_texture_picker`]).
+    pub(crate) fn roots(&self) -> &[InventoryFolderKey] {
+        &self.roots
+    }
+
     /// The legacy worn-wearables set, for the wear / take-off wiring.
     pub(crate) fn worn_wearables(&self) -> &[Wearable] {
         &self.wearables
@@ -364,6 +371,13 @@ impl InventoryModel {
     /// face of [`items_of`](Self::items_of), for the folder deep-copy walk.
     pub(crate) fn loaded_items_of(&self, folder: InventoryFolderKey) -> &[ItemInfo] {
         self.items_of(folder)
+    }
+
+    /// Every **loaded** item across the whole inventory — agent **and** library,
+    /// every fetched folder — for a picker that lists items regardless of where
+    /// they sit (the texture picker's grid).
+    pub(crate) fn all_loaded_items(&self) -> impl Iterator<Item = &ItemInfo> {
+        self.items.values().flatten()
     }
 
     /// The child folders of `folder` — the crate-facing face of
@@ -1851,7 +1865,10 @@ fn request_worn_source(model: &mut InventoryModel, commands: &mut MessageWriter<
 /// (the Library stays lazy) — the Worn tab's way of locating each worn item's
 /// place in the hierarchy. Each folder is requested at most once and the
 /// session's fetcher serves repeats from its disk cache, so this converges.
-fn request_all_agent_folders(model: &mut InventoryModel, commands: &mut MessageWriter<SlCommand>) {
+pub(crate) fn request_all_agent_folders(
+    model: &mut InventoryModel,
+    commands: &mut MessageWriter<SlCommand>,
+) {
     let wanted: Vec<InventoryFolderKey> = model
         .folders
         .keys()
