@@ -41,6 +41,7 @@ use crate::input_context::InputContext;
 use crate::objects::{ObjectSlMotion, ObjectState, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, fill_tab_container, spawn_tab_container,
 };
@@ -52,12 +53,6 @@ pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
 
 /// The width of a numeric transform field, in `"0"`-glyph advances.
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
-
-/// A tool button's background while its tool is active.
-const TOOL_ACTIVE_COLOR: Color = Color::srgba(0.25, 0.45, 0.7, 1.0);
-
-/// A tool button's background while inactive.
-const TOOL_IDLE_COLOR: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
 
 /// The toggle-row check glyph while on.
 pub(crate) const CHECKED_GLYPH: &str = "☑";
@@ -89,6 +84,21 @@ pub(crate) enum EditTool {
     Rotate,
     /// The scale gizmo (face + corner handles).
     Stretch,
+}
+
+/// The tool-mode radio options, in the order they appear in the floater (the
+/// reference's `move` / `rotate` / `stretch`). The one place the index↔tool
+/// mapping lives, so [`spawn_build_floater`] and the two sync systems agree.
+const BUILD_TOOLS: [EditTool; 3] = [EditTool::Move, EditTool::Rotate, EditTool::Stretch];
+
+impl EditTool {
+    /// This tool's index into [`BUILD_TOOLS`] — the radio option it selects.
+    fn radio_index(self) -> usize {
+        BUILD_TOOLS
+            .iter()
+            .position(|&tool| tool == self)
+            .unwrap_or(0)
+    }
 }
 
 /// The grid frame the gizmos align to and snap in.
@@ -266,9 +276,10 @@ struct BuildNumericField {
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildGridUnitField;
 
-/// Marks a tool button with the tool it selects.
+/// Marks the tool-mode radio group, so the sync systems can find it to mirror
+/// its selection into [`EditToolState::tool`] and back.
 #[derive(Component, Debug, Clone, Copy)]
-struct BuildToolButton(EditTool);
+struct BuildToolRadio;
 
 /// Marks a toggle row's check glyph.
 #[derive(Component, Debug, Clone, Copy)]
@@ -335,7 +346,8 @@ impl Plugin for EditToolPlugin {
                     toggle_build_floater_on_ctrl_b,
                     mirror_floater_into_state,
                     apply_tool_modifier_override,
-                    update_tool_button_visuals,
+                    sync_build_tool_from_radio,
+                    sync_radio_from_build_tool,
                     update_toggle_glyphs,
                     sync_tab_pages,
                     update_selection_summary,
@@ -395,24 +407,29 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         ))
         .id();
 
-    // Tool row: Move / Rotate / Stretch.
-    let tool_row = commands
-        .spawn((
-            Node {
-                flex_wrap: FlexWrap::Wrap,
-                row_gap: Val::Px(6.0),
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(content),
-        ))
-        .id();
-    for (tool, key, tab_index) in [
-        (EditTool::Move, "build-tool-move", 1),
-        (EditTool::Rotate, "build-tool-rotate", 2),
-        (EditTool::Stretch, "build-tool-stretch", 3),
-    ] {
-        spawn_tool_button(&mut commands, tool_row, tool, key, tab_index);
-    }
+    // Tool row: Move / Rotate / Stretch, as the reference's `move_radio_group` —
+    // one focus stop, arrow keys move the selection. The labels are the existing
+    // `build-tool-*` Fluent keys; the selection is mirrored to and from
+    // `EditToolState::tool` by the two sync systems.
+    let tool_labels: [String; 3] = [
+        "build-tool-move".to_owned(),
+        "build-tool-rotate".to_owned(),
+        "build-tool-stretch".to_owned(),
+    ];
+    let tool_radio = spawn_radio_group(
+        &mut commands,
+        content,
+        &RadioSpec {
+            element: "build-tool",
+            labels: &tool_labels,
+            active: EditTool::default().radio_index(),
+            tab_index: 1,
+            font_size: TOOL_FONT_SIZE,
+            layout: RadioLayout::Row,
+            translate_labels: true,
+        },
+    );
+    commands.entity(tool_radio).insert(BuildToolRadio);
 
     // Toggle rows.
     for (toggle, key, tab_index) in [
@@ -595,50 +612,6 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     });
 }
 
-/// Spawn one tool button (Move / Rotate / Stretch).
-fn spawn_tool_button(
-    commands: &mut Commands,
-    parent: Entity,
-    tool: EditTool,
-    label_key: &'static str,
-    tab_index: i32,
-) {
-    let button = commands
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(tab_index),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..row(Val::ZERO)
-            },
-            BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-            BackgroundColor(TOOL_IDLE_COLOR),
-            BuildToolButton(tool),
-            Pickable::default(),
-            Name::new(format!("build-tools:{label_key}")),
-            ChildOf(parent),
-        ))
-        .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(TOOL_FONT_SIZE),
-        // A skinless fallback; the skin recolours via the class token.
-        TextColor(Color::WHITE),
-        ClassList::new_with_classes([VALUE_CLASS]),
-        Pickable::IGNORE,
-        ChildOf(button),
-    ));
-    commands.entity(button).observe(
-        move |press: On<Pointer<Press>>, mut state: ResMut<EditToolState>| {
-            if press.button == PointerButton::Primary {
-                state.tool = tool;
-            }
-        },
-    );
-}
-
 /// Spawn one toggle row (check glyph + label) flipping a [`BuildToggle`].
 fn spawn_toggle_row(
     commands: &mut Commands,
@@ -749,22 +722,44 @@ fn mirror_floater_into_state(
     }
 }
 
-/// Tint the active tool's button.
-fn update_tool_button_visuals(
+/// Mirror the tool-mode radio group's selection into [`EditToolState::tool`]
+/// when the user picks an option (a click or an arrow key). The radio widget
+/// owns the visual; this only carries the choice into the resting tool.
+///
+/// Reflects the *resting* tool, not the effective one: a held `Ctrl` /
+/// `Ctrl+Shift` chord is a transient [`EditToolState::held_override`] preview
+/// ([`apply_tool_modifier_override`]) and deliberately does not move the radio
+/// dot, exactly as the reference's radio stays on the committed tool.
+fn sync_build_tool_from_radio(
+    radios: Query<&RadioSelection, (With<BuildToolRadio>, Changed<RadioSelection>)>,
+    mut state: ResMut<EditToolState>,
+) {
+    for selection in &radios {
+        if let Some(&tool) = BUILD_TOOLS.get(selection.active)
+            && state.tool != tool
+        {
+            state.tool = tool;
+        }
+    }
+}
+
+/// Mirror [`EditToolState::tool`] back onto the radio group if the resting tool
+/// changes from somewhere other than the group (a future shortcut, a test),
+/// keeping the dot in step. The radio widget's own reconcile then follows the
+/// selection write. Guarded on a real difference, so the click path — which
+/// already moved the selection — does not loop.
+fn sync_radio_from_build_tool(
     state: Res<EditToolState>,
-    mut buttons: Query<(&BuildToolButton, &mut BackgroundColor)>,
+    mut radios: Query<&mut RadioSelection, With<BuildToolRadio>>,
 ) {
     if !state.is_changed() {
         return;
     }
-    // The lit button follows the *effective* tool, so a held `Ctrl` /
-    // `Ctrl+Shift` chord is visible in the floater too.
-    for (button, mut background) in &mut buttons {
-        background.0 = if button.0 == state.effective_tool() {
-            TOOL_ACTIVE_COLOR
-        } else {
-            TOOL_IDLE_COLOR
-        };
+    let index = state.tool.radio_index();
+    for mut selection in &mut radios {
+        if selection.active != index {
+            selection.active = index;
+        }
     }
 }
 
@@ -1107,40 +1102,23 @@ pub(crate) fn spawn_build_tools_specimen(
             ChildOf(parent),
         ))
         .id();
-    let tools = commands
-        .spawn((
-            Node {
-                // Wraps rather than overflowing in a narrow window — the
-                // row-level half of the content-driven convention.
-                flex_wrap: FlexWrap::Wrap,
-                row_gap: Val::Px(6.0),
-                ..row(Val::Px(6.0))
-            },
-            ChildOf(root),
-        ))
-        .id();
-    for label in ["Move", "Rotate", "Stretch"] {
-        commands
-            .spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    ..Default::default()
-                },
-                BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
-                BackgroundColor(if label == "Move" {
-                    TOOL_ACTIVE_COLOR
-                } else {
-                    TOOL_IDLE_COLOR
-                }),
-                ChildOf(tools),
-            ))
-            .with_child((
-                Text::new(cx.text(label)),
-                cx.font(UiFont::Sans),
-                TextColor(Color::WHITE),
-            ));
-    }
+    // The tool-mode radio group — the same widget the live floater builds, so
+    // the swept specimen matches. Literal labels (not Fluent keys) because the
+    // gallery / harness supply their own sampled strings.
+    let tool_labels: [String; 3] = [cx.text("Move"), cx.text("Rotate"), cx.text("Stretch")];
+    spawn_radio_group(
+        commands,
+        root,
+        &RadioSpec {
+            element: "build-tool",
+            labels: &tool_labels,
+            active: 0,
+            tab_index: 1,
+            font_size: cx.font_size,
+            layout: RadioLayout::Row,
+            translate_labels: false,
+        },
+    );
     let toggle = commands
         .spawn((
             Node {

@@ -460,7 +460,7 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
     UiElement {
         id: "build-tools",
         summary: "The Build Tools panel shape (viewer-object-edit-floater-shell): the tool-mode \
-                  buttons, a snap toggle row, and a numeric transform row of float fields.",
+                  radio group, a snap toggle row, and a numeric transform row of float fields.",
         spawn: crate::edit_tool::spawn_build_tools_specimen,
     },
     UiElement {
@@ -523,6 +523,20 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   placement the reference viewer cannot express, usable for LTR too, not only as \
                   an RTL mirror.",
         spawn: crate::ui_tab::spawn_tabs_inline_end,
+    },
+    UiElement {
+        id: "radio-group-row",
+        summary: "A radio-button group flowing along the inline axis (`crate::ui_radio`): \
+                  mutually-exclusive options with a filled-dot indicator, one selected, the group \
+                  the single focus stop. The Build Tools mode switch is a live consumer; here the \
+                  horizontal layout is swept, wrapping and mirroring under RTL.",
+        spawn: crate::ui_radio::spawn_radio_row,
+    },
+    UiElement {
+        id: "radio-group-column",
+        summary: "The radio-button group stacked down the block axis — the reference viewer's usual \
+                  radio shape. Same widget as `radio-group-row`, the vertical layout swept.",
+        spawn: crate::ui_radio::spawn_radio_column,
     },
     UiElement {
         id: "menu-bar",

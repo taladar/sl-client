@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 116 |
 | in-progress | 7 |
 | bugs | 11 |
-| done | 583 |
+| done | 584 |
 | deferred | 15 |
 | wont-do | 6 |
-| **total** | **974** |
+| **total** | **975** |
 
 ## ideas (32)
 
@@ -956,7 +956,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (583)
+## done (584)
 
 ### protocol
 
@@ -1562,6 +1562,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-ui-menu-bar` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-radio-widget`](done/viewer-ui-radio-widget.md) — Reusable
+  radio-button widget (grouping container) (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-search-field`](done/viewer-ui-search-field.md) — Reusable
   search-field widget (single-line field + clear button) (blocked by
   `viewer-ui-text-input-widget` (done))

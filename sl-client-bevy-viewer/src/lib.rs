@@ -134,6 +134,7 @@ mod ui;
 mod ui_element;
 mod ui_font;
 mod ui_pseudoloc;
+mod ui_radio;
 mod ui_search;
 mod ui_tab;
 #[cfg(test)]
@@ -783,6 +784,11 @@ fn run_session(
     // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
     // resizable strip's persisted / dragged width onto its node.
     .add_plugins(TabWidgetPlugin)
+    // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
+    // each option's `Checked` marker and indicator glyph reconciled to the
+    // group's selection, so a click and an external write (the Build Tools
+    // floater's tool sync) drive the same visual path.
+    .add_plugins(crate::ui_radio::RadioWidgetPlugin)
     // The reusable text-input widget's runtime half (viewer-ui-text-input-widget):
     // the whole-string numeric validator that reverts a field to its last valid
     // value when an edit makes it structurally invalid (a second '.', a misplaced

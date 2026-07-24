@@ -240,6 +240,9 @@ pub fn run() {
         // The tab widget's runtime half: a resizable strip's width reaching layout
         // (the divider demo) and each tab's corners tracking the direction.
         .add_plugins(crate::ui_tab::TabWidgetPlugin)
+        // The radio widget's runtime half: reconciles each option's indicator and
+        // `Checked` marker so the radio specimens respond to clicks in the gallery.
+        .add_plugins(crate::ui_radio::RadioWidgetPlugin)
         // The text-input widget's runtime half: the numeric fields' whole-string
         // validator, so a bad arrangement reverts in the gallery too.
         .add_plugins(crate::ui_text_input::TextInputPlugin)
