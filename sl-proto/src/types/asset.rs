@@ -396,7 +396,10 @@ impl InventoryType {
             Self::Gesture => 20,
             Self::Mesh => 22,
             Self::Settings => 25,
-            Self::Material => 57,
+            // `IT_MATERIAL` is 26 — the *inventory*-type code, distinct from the
+            // *asset*-type `AT_MATERIAL` (57, [`AssetType::Material`]). They do
+            // not share a number, unlike most types.
+            Self::Material => 26,
             Self::Other(code) => code,
         }
     }
@@ -421,7 +424,8 @@ impl InventoryType {
             20 => Self::Gesture,
             22 => Self::Mesh,
             25 => Self::Settings,
-            57 => Self::Material,
+            // `IT_MATERIAL` (26), *not* the asset-type 57 ([`AssetType::Material`]).
+            26 => Self::Material,
             other => Self::Other(other),
         }
     }
@@ -601,9 +605,24 @@ pub struct Asset {
 
 #[cfg(test)]
 mod tests {
-    use super::{ImageCodec, Texture, TextureKey};
+    use super::{AssetType, ImageCodec, InventoryType, Texture, TextureKey};
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
+
+    /// A render material's **inventory** type is `IT_MATERIAL` (26), which is a
+    /// different number from its **asset** type `AT_MATERIAL` (57). Conflating
+    /// them (decoding an item's `inv_type` 26 with the 57 table) misclassifies
+    /// every material item as [`InventoryType::Other`], hiding its icon and
+    /// leaving the material picker empty — a real bug this pins.
+    #[test]
+    fn material_inventory_and_asset_codes_differ() {
+        assert_eq!(InventoryType::Material.to_code(), 26);
+        assert_eq!(InventoryType::from_code(26), InventoryType::Material);
+        assert_eq!(AssetType::Material.to_code(), 57);
+        assert_eq!(AssetType::from_code(57), AssetType::Material);
+        // The asset-type number must not decode as the Material inventory type.
+        assert_eq!(InventoryType::from_code(57), InventoryType::Other(57));
+    }
 
     /// A [`TextureKey`] is a transparent wrapper over the wire `Uuid`: wrapping a
     /// raw id and reading it back is the identity, so a [`Texture`] keyed by a

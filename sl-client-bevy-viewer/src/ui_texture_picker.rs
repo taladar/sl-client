@@ -16,6 +16,13 @@
 //!   Default** quick choices, and **OK / Cancel**. A name **search** collapses
 //!   the tree to a flat match list. The tree keeps its **own** expansion state,
 //!   so browsing here does not disturb the main inventory floater.
+//! - The picker has a [`PickerKind`] (the reference's `LLTextureCtrl`
+//!   `EPickInventoryType`): opened in **material** mode (via a
+//!   [`spawn_material_swatch`] swatch) it browses GLTF render-material items
+//!   instead of textures, retitles to *Pick: Material*, hides the texture-only
+//!   Blank / Default quick choices, and returns the chosen material id in the
+//!   same [`TexturePicked`] reply. The material preview is a follow-up
+//!   (`viewer-material-swatch-sphere-preview`); the pane is blank in that mode.
 //! - Selecting a texture emits a **non-final** [`TexturePicked`] so the consumer
 //!   can live-preview it on the object; **OK** emits the final choice and
 //!   **Cancel** emits the original (revert), mirroring the colour picker.
@@ -103,10 +110,31 @@ const FOLDER_COLOR: Color = Color::srgb(0.82, 0.86, 0.95);
 /// The skin class for value text.
 const VALUE_CLASS: &str = "sk-build-value";
 
+/// What a picker open browses: **textures** (the default — the reference's
+/// `LLTextureCtrl` `PICK_TEXTURE`) or **materials** (GLTF render materials, the
+/// reference's `PICK_MATERIAL`). It drives the inventory filter, the floater
+/// title, and which quick choices show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PickerKind {
+    /// Browse texture / snapshot items.
+    #[default]
+    Texture,
+    /// Browse GLTF render-material items ([`InventoryType::Material`]).
+    Material,
+}
+
 /// A reusable texture swatch's current value; this module paints the swatch's
 /// thumbnail from it, and a consumer reads / writes it.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct TextureSwatchValue(pub(crate) TextureKey);
+
+/// Marks a swatch as a **material** picker and carries its current material
+/// asset id. A swatch with this component opens the picker in
+/// [`PickerKind::Material`] seeded with the id (rather than in texture mode from
+/// its [`TextureSwatchValue`], which for a material swatch paints the material's
+/// base-colour stand-in thumbnail).
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct MaterialSwatchValue(pub(crate) Uuid);
 
 /// Spawn a texture swatch under `parent`: a bordered button showing `initial`'s
 /// thumbnail that opens the picker on click. The returned entity is the
@@ -139,19 +167,47 @@ pub(crate) fn spawn_texture_swatch(
         .id()
 }
 
-/// Request the picker for the clicked swatch.
+/// Spawn a **material** swatch under `parent`: visually identical to a
+/// [`spawn_texture_swatch`] swatch (it paints a texture thumbnail — a material's
+/// base-colour stand-in), but clicking it opens the picker in
+/// [`PickerKind::Material`] seeded with `initial_material`. Carries both a
+/// [`TextureSwatchValue`] (the thumbnail the consumer keeps current) and a
+/// [`MaterialSwatchValue`] (the material asset id the pick opens on / returns).
+pub(crate) fn spawn_material_swatch(
+    commands: &mut Commands,
+    parent: Entity,
+    element: &'static str,
+    tab_index: i32,
+    initial_texture: TextureKey,
+    initial_material: Uuid,
+) -> Entity {
+    let swatch = spawn_texture_swatch(commands, parent, element, tab_index, initial_texture);
+    commands
+        .entity(swatch)
+        .insert(MaterialSwatchValue(initial_material));
+    swatch
+}
+
+/// Request the picker for the clicked swatch — in material mode (seeded with the
+/// current material id) when the swatch carries a [`MaterialSwatchValue`], else
+/// in texture mode from its [`TextureSwatchValue`].
 fn open_picker_from_swatch(
     press: On<Pointer<Press>>,
-    swatches: Query<&TextureSwatchValue>,
+    swatches: Query<(&TextureSwatchValue, Option<&MaterialSwatchValue>)>,
     mut opens: MessageWriter<OpenTexturePicker>,
 ) {
     if press.button != PointerButton::Primary {
         return;
     }
-    if let Ok(value) = swatches.get(press.entity) {
+    if let Ok((texture, material)) = swatches.get(press.entity) {
+        let (kind, current) = match material {
+            Some(material) => (PickerKind::Material, TextureKey::from(material.0)),
+            None => (PickerKind::Texture, texture.0),
+        };
         opens.write(OpenTexturePicker {
             requester: press.entity,
-            current: value.0,
+            current,
+            kind,
         });
     }
 }
@@ -161,8 +217,10 @@ fn open_picker_from_swatch(
 pub(crate) struct OpenTexturePicker {
     /// The swatch (or other widget) the reply is tagged back to.
     pub(crate) requester: Entity,
-    /// The texture to open on.
+    /// The texture (or, in material mode, material id) to open on.
     pub(crate) current: TextureKey,
+    /// Whether to browse textures or materials.
+    pub(crate) kind: PickerKind,
 }
 
 /// The chosen texture, tagged back to the [`requester`](Self::requester). Emitted
@@ -185,9 +243,11 @@ pub(crate) struct TexturePicked {
 struct TexturePickerState {
     /// The widget that opened it.
     requester: Option<Entity>,
-    /// The texture it opened on (for Cancel's revert).
+    /// What this open browses (textures or materials).
+    kind: PickerKind,
+    /// The texture (or material id) it opened on (for Cancel's revert).
     original: TextureKey,
-    /// The currently-selected texture.
+    /// The currently-selected texture (or material id).
     selected: TextureKey,
     /// The active search filter (lower-cased); when non-empty the tree collapses
     /// to a flat match list.
@@ -213,6 +273,7 @@ impl Default for TexturePickerState {
     fn default() -> Self {
         Self {
             requester: None,
+            kind: PickerKind::Texture,
             original: TextureKey::from(Uuid::nil()),
             selected: TextureKey::from(Uuid::nil()),
             filter: String::new(),
@@ -229,6 +290,8 @@ impl Default for TexturePickerState {
 struct TexturePickerUi {
     /// The floater root.
     panel: Entity,
+    /// The floater title text (retitled per [`PickerKind`] on open).
+    title_text: Entity,
     /// The search text field.
     search: Entity,
     /// The scrolling tree container.
@@ -237,6 +300,10 @@ struct TexturePickerUi {
     preview: Entity,
     /// The shown / total count read-out.
     count: Entity,
+    /// The **Blank** quick choice (a texture UUID; hidden in material mode).
+    blank_button: Entity,
+    /// The **Default** quick choice (a texture UUID; hidden in material mode).
+    default_button: Entity,
 }
 
 /// Thumbnail nodes (the preview / swatches) awaiting their texture decode.
@@ -467,13 +534,13 @@ fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>
         PickerButton::None,
         "texture-picker-none",
     );
-    spawn_picker_button(
+    let blank_button = spawn_picker_button(
         &mut commands,
         quick,
         PickerButton::Blank,
         "texture-picker-blank",
     );
-    spawn_picker_button(
+    let default_button = spawn_picker_button(
         &mut commands,
         quick,
         PickerButton::Default,
@@ -506,20 +573,23 @@ fn spawn_texture_picker_floater(mut commands: Commands, root: Option<Res<UiRoot>
 
     commands.insert_resource(TexturePickerUi {
         panel: handle.root,
+        title_text: handle.title_text,
         search,
         tree,
         preview,
         count,
+        blank_button,
+        default_button,
     });
 }
 
-/// Spawn a picker button.
+/// Spawn a picker button, returning its entity.
 fn spawn_picker_button(
     commands: &mut Commands,
     parent: Entity,
     which: PickerButton,
     label_key: &'static str,
-) {
+) -> Entity {
     let button = commands
         .spawn((
             Button,
@@ -547,10 +617,13 @@ fn spawn_picker_button(
         Pickable::IGNORE,
         ChildOf(button),
     ));
+    button
 }
 
 /// Handle an [`OpenTexturePicker`]: seed the state and show the floater, marking
-/// the tree for a rebuild.
+/// the tree for a rebuild, and adapt the floater to the requested [`PickerKind`]
+/// — retitle it, hide the texture-only quick choices in material mode, and clear
+/// the preview pane (a material is not a texture the preview can decode).
 ///
 /// It deliberately does **not** bulk-fetch the inventory: a real Second Life
 /// inventory is hundreds of thousands of items. The tree fetches a folder's
@@ -560,6 +633,8 @@ fn handle_open_texture_picker(
     ui: Option<Res<TexturePickerUi>>,
     mut state: ResMut<TexturePickerState>,
     mut panels: Query<&mut UiPanelShown>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
@@ -568,9 +643,37 @@ fn handle_open_texture_picker(
         return;
     };
     state.requester = Some(open.requester);
+    state.kind = open.kind;
     state.original = open.current;
     state.selected = open.current;
     state.dirty = true;
+    // Retitle for the active kind.
+    let title_key = match open.kind {
+        PickerKind::Texture => "texture-picker-title",
+        PickerKind::Material => "texture-picker-title-material",
+    };
+    if let Ok(mut title) = commands.get_entity(ui.title_text) {
+        title.insert(Translated::new(title_key));
+    }
+    // Blank / Default are texture UUIDs — meaningless as a material, so hidden in
+    // material mode (None still clears).
+    let quick_display = match open.kind {
+        PickerKind::Texture => Display::Flex,
+        PickerKind::Material => Display::None,
+    };
+    for button in [ui.blank_button, ui.default_button] {
+        if let Ok(mut node) = nodes.get_mut(button) {
+            node.display = quick_display;
+        }
+    }
+    // A material id is not a texture; clear the preview pane (the material-swatch
+    // sphere-preview task fills it) so it never shows a stale texture.
+    if open.kind == PickerKind::Material
+        && let Ok(mut preview) = commands.get_entity(ui.preview)
+    {
+        preview.remove::<ImageNode>();
+        preview.insert(BackgroundColor(EMPTY_FILL));
+    }
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
         shown.0 = true;
     }
@@ -646,7 +749,7 @@ fn build_tree_rows(inventory: &InventoryModel, state: &TexturePickerState) -> Ve
         let mut seen: HashMap<TextureKey, ()> = HashMap::new();
         let mut items: Vec<(String, TextureKey)> = inventory
             .all_loaded_items()
-            .filter(|item| is_texture(item.inv_type))
+            .filter(|item| item_matches(item.inv_type, state.kind))
             .filter(|item| item.name.to_lowercase().contains(&state.filter))
             .filter_map(|item| {
                 let key = TextureKey::from(item.asset_id);
@@ -699,11 +802,11 @@ fn emit_folder(
     for child in children {
         emit_folder(inventory, state, child, depth.saturating_add(1), rows);
     }
-    // Texture items, by name.
+    // Matching items (textures or materials, per the picker kind), by name.
     let mut items: Vec<(String, TextureKey)> = inventory
         .loaded_items_of(folder)
         .iter()
-        .filter(|item| is_texture(item.inv_type))
+        .filter(|item| item_matches(item.inv_type, state.kind))
         .map(|item| (item.name.clone(), TextureKey::from(item.asset_id)))
         .collect();
     items.sort_by_key(|(name, _key)| name.to_lowercase());
@@ -716,9 +819,16 @@ fn emit_folder(
     }
 }
 
-/// Whether an inventory type is a texture the picker lists.
-const fn is_texture(inv_type: InventoryType) -> bool {
-    matches!(inv_type, InventoryType::Texture | InventoryType::Snapshot)
+/// Whether an inventory type is one the picker lists for the active [`PickerKind`]
+/// — texture / snapshot items in texture mode, GLTF render materials in material
+/// mode.
+const fn item_matches(inv_type: InventoryType, kind: PickerKind) -> bool {
+    match kind {
+        PickerKind::Texture => {
+            matches!(inv_type, InventoryType::Texture | InventoryType::Snapshot)
+        }
+        PickerKind::Material => matches!(inv_type, InventoryType::Material),
+    }
 }
 
 /// Rebuild the tree rows when marked dirty **and** the tree's structure actually
@@ -763,7 +873,7 @@ fn rebuild_tree(
     let shown = total.min(MAX_ROWS);
     if let Some(slice) = rows.get(..shown) {
         for row_data in slice {
-            spawn_tree_row(&mut commands, ui.tree, row_data);
+            spawn_tree_row(&mut commands, ui.tree, row_data, state.kind);
         }
     }
     if let Ok(mut text) = counts.get_mut(ui.count) {
@@ -792,9 +902,14 @@ fn paint_tree_selection(
     }
 }
 
-/// Spawn one tree row (a folder or an item). The selection highlight is applied
-/// by [`paint_tree_selection`], not here, so a selection change never respawns.
-fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow) {
+/// Spawn one tree row (a folder or an item). The item glyph follows `kind` (a
+/// material icon in material mode). The selection highlight is applied by
+/// [`paint_tree_selection`], not here, so a selection change never respawns.
+fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow, kind: PickerKind) {
+    let item_icon_type = match kind {
+        PickerKind::Texture => InventoryType::Texture,
+        PickerKind::Material => InventoryType::Material,
+    };
     let (depth, glyph, label, colour) = match row_data {
         TreeRow::Folder {
             depth,
@@ -812,7 +927,7 @@ fn spawn_tree_row(commands: &mut Commands, tree: Entity, row_data: &TreeRow) {
         }
         TreeRow::Item { depth, name, .. } => (
             *depth,
-            String::from(item_icon(InventoryType::Texture)),
+            String::from(item_icon(item_icon_type)),
             name.clone(),
             TEXT_COLOR,
         ),
@@ -959,6 +1074,8 @@ fn select_texture(
 }
 
 /// Request the selected texture's decode for the preview pane (once per change).
+/// Skipped in material mode: a material id is not a texture, so decoding it would
+/// issue a bogus fetch (the preview was cleared on open, pending the sphere task).
 fn request_preview_texture(
     ui: Option<Res<TexturePickerUi>>,
     state: Res<TexturePickerState>,
@@ -968,7 +1085,7 @@ fn request_preview_texture(
     let Some(ui) = ui else {
         return;
     };
-    if !state.is_changed() {
+    if !state.is_changed() || state.kind == PickerKind::Material {
         return;
     }
     textures.request_boosted(state.selected, AVATAR_BOOST_PRIORITY);
@@ -1131,5 +1248,32 @@ fn close_picker(
         && let Ok(mut shown) = panels.get_mut(ui.panel)
     {
         shown.0 = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PickerKind, item_matches};
+    use sl_client_bevy::InventoryType;
+
+    /// Texture mode lists texture and snapshot items and nothing else — a
+    /// material must not leak into a texture pick.
+    #[test]
+    fn texture_kind_lists_textures_and_snapshots_only() {
+        assert!(item_matches(InventoryType::Texture, PickerKind::Texture));
+        assert!(item_matches(InventoryType::Snapshot, PickerKind::Texture));
+        assert!(!item_matches(InventoryType::Material, PickerKind::Texture));
+        assert!(!item_matches(InventoryType::Object, PickerKind::Texture));
+        assert!(!item_matches(InventoryType::Notecard, PickerKind::Texture));
+    }
+
+    /// Material mode lists only render-material items — not textures, snapshots,
+    /// or anything else.
+    #[test]
+    fn material_kind_lists_materials_only() {
+        assert!(item_matches(InventoryType::Material, PickerKind::Material));
+        assert!(!item_matches(InventoryType::Texture, PickerKind::Material));
+        assert!(!item_matches(InventoryType::Snapshot, PickerKind::Material));
+        assert!(!item_matches(InventoryType::Object, PickerKind::Material));
     }
 }

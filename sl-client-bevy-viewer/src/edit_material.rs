@@ -60,7 +60,10 @@ use crate::objects::ObjectState;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
+use crate::ui_texture_picker::{
+    MaterialSwatchValue, TexturePicked, TextureSwatchValue, spawn_material_swatch,
+    spawn_texture_swatch,
+};
 use crate::web_floater::set_editor_text;
 
 /// The width, in `"0"`-glyph advances, of a material-channel numeric field
@@ -647,12 +650,16 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
     // New / Save buttons (the reference's material picker + Edit/Save).
     let pbr_row = spawn_row(commands, page, "build-tex-pbr-material-label");
     commands.entity(pbr_row).insert(ShowWhen::PbrMaterialId);
-    let pbr_swatch = spawn_texture_swatch(
+    // A material swatch: it opens the *material* picker (not the texture picker)
+    // seeded with the current render-material id, while still painting the
+    // material's base-colour texture as its thumbnail stand-in.
+    let pbr_swatch = spawn_material_swatch(
         commands,
         pbr_row,
         "build-tex-pbr-material",
         *tab_index,
         TextureKey::from(Uuid::nil()),
+        Uuid::nil(),
     );
     *tab_index = tab_index.saturating_add(1);
     let new_button = spawn_action_button(commands, pbr_row, "build-pbr-new", *tab_index);
@@ -1141,6 +1148,8 @@ struct MatWidgets<'w, 's> {
     combos: Query<'w, 's, &'static mut ComboSelection>,
     /// The texture-swatch values (normal / specular / PBR channels).
     texture_swatches: Query<'w, 's, &'static mut TextureSwatchValue>,
+    /// The render-material swatch's material id (what its picker opens on).
+    material_swatches: Query<'w, 's, &'static mut MaterialSwatchValue>,
     /// The colour swatch values (specular / PBR tints).
     color_swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The double-sided toggle glyph text.
@@ -1300,6 +1309,12 @@ fn sync_material_widgets(
         ui.pbr_swatch,
         texture_id_of(effective.base_color_texture),
     );
+    // The render-material swatch's picker opens on the current material id.
+    set_material_swatch(
+        &mut widgets.material_swatches,
+        ui.pbr_swatch,
+        shown.pbr_material.unwrap_or_else(Uuid::nil),
+    );
     set_texture_swatch(
         &mut widgets.texture_swatches,
         ui.pbr_base_swatch,
@@ -1376,6 +1391,19 @@ fn set_texture_swatch(
     swatches: &mut Query<&mut TextureSwatchValue>,
     entity: Entity,
     value: TextureKey,
+) {
+    if let Ok(mut swatch) = swatches.get_mut(entity)
+        && swatch.0 != value
+    {
+        swatch.0 = value;
+    }
+}
+
+/// Set a material swatch's material id if it differs (what its picker opens on).
+fn set_material_swatch(
+    swatches: &mut Query<&mut MaterialSwatchValue>,
+    entity: Entity,
+    value: Uuid,
 ) {
     if let Ok(mut swatch) = swatches.get_mut(entity)
         && swatch.0 != value

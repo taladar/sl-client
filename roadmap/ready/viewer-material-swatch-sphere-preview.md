@@ -26,5 +26,14 @@ changes. Likely a
 small dedicated camera + sphere + light on an isolated render layer, mirroring
 the HUD/portrait render-to-texture setups already in the viewer.
 
+Also fill the **material picker's preview pane** with the rendered sphere. When
+[[viewer-inventory-materials-not-shown]] gave [[viewer-ui-texture-picker]] a
+[`PickerKind::Material`] mode, the picker's single preview pane was left
+**blank** in material mode (`handle_open_texture_picker` clears it and
+`request_preview_texture` skips it — a material id is not a texture the pane can
+decode). This task should render the *selected* material on the sphere and show
+that image in the pane, so the picker previews a material the same way it
+previews a texture.
+
 Reference (Firestorm, read-only): `LLTextureCtrl` material-preview draw,
 `llmaterialeditor` preview, `llfloatermaterialeditor`.

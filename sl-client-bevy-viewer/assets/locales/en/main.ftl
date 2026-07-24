@@ -570,6 +570,7 @@ color-picker-original = Original
 color-picker-ok = OK
 color-picker-cancel = Cancel
 texture-picker-title = Pick: Texture
+texture-picker-title-material = Pick: Material
 texture-picker-search = Search
 texture-picker-none = None
 texture-picker-blank = Blank

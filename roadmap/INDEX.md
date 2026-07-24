@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 211 |
 | blocked | 109 |
 | in-progress | 7 |
-| bugs | 12 |
-| done | 592 |
+| bugs | 11 |
+| done | 593 |
 | deferred | 16 |
 | wont-do | 6 |
 | **total** | **985** |
@@ -921,7 +921,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (12)
+## bugs (11)
 
 ### protocol
 
@@ -939,8 +939,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
-- [`viewer-inventory-materials-not-shown`](bugs/viewer-inventory-materials-not-shown.md)
-  — Material inventory items are not shown in the inventory window
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -959,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (592)
+## done (593)
 
 ### protocol
 
@@ -1188,6 +1186,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-give-via-profile`](done/viewer-inventory-give-via-profile.md)
   — Give inventory by dropping onto a profile (blocked by
   `viewer-social-profiles` (done))
+- [`viewer-inventory-materials-not-shown`](done/viewer-inventory-materials-not-shown.md)
+  — Material inventory items are not shown in the inventory window
 - [`viewer-inventory-multi-select-actions`](done/viewer-inventory-multi-select-actions.md)
   — Multi-selection context actions + drag
 - [`viewer-inventory-new-wearables`](done/viewer-inventory-new-wearables.md) —
