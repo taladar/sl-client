@@ -6,9 +6,10 @@ use base64::Engine as _;
 use pretty_assertions::assert_eq;
 
 use super::{
-    GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate, RenderMaterialEntry,
-    build_gltf_material_override, build_modify_material_params_request,
-    build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
+    FaceMaterialPut, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
+    RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
+    build_render_materials_put_request, build_render_materials_request,
+    build_render_materials_response, parse_gltf_material_override,
     parse_modify_material_params_request, parse_render_materials_response, read_binary_value,
     write_binary_value,
 };
@@ -185,5 +186,81 @@ fn render_materials_response_round_trip() -> Result<(), String> {
     assert_eq!(entries.len(), 1);
     let decoded = entries.first().ok_or("no entry")?;
     assert_eq!(decoded, &entry);
+    Ok(())
+}
+
+/// A `RenderMaterials` PUT body carries `FullMaterialsPerFace` with the face,
+/// local id and the material's LLSD map (and omits `Material` for a cleared
+/// face) — decoded straight from the zipped binary the builder emits.
+#[test]
+fn render_materials_put_round_trip() -> Result<(), String> {
+    let material = LegacyMaterial {
+        normal_map: TextureKey::from(Uuid::from_u128(0x1234)),
+        normal_offset: (0.5, -0.25),
+        normal_repeat: (2.0, 4.0),
+        normal_rotation: 1.5,
+        specular_map: TextureKey::from(Uuid::from_u128(0x5678)),
+        specular_offset: (0.1, 0.2),
+        specular_repeat: (1.0, 1.0),
+        specular_rotation: 0.0,
+        specular_color: [10, 20, 30, 255],
+        specular_exponent: 51,
+        environment_intensity: 7,
+        diffuse_alpha_mode: 2,
+        alpha_mask_cutoff: 128,
+    };
+    let updates = vec![
+        FaceMaterialPut {
+            local_id: 0x0089_aabb,
+            face: 3,
+            material: Some(material),
+        },
+        FaceMaterialPut {
+            local_id: 0x0089_aabb,
+            face: 4,
+            material: None,
+        },
+    ];
+    let body = build_render_materials_put_request(&updates);
+    assert!(body.contains("<key>Zipped</key>"));
+
+    // Decode the zipped binary and confirm the FullMaterialsPerFace structure.
+    let root = crate::llsd::parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?;
+    let Llsd::Map(map) = root else {
+        return Err("root not a map".to_owned());
+    };
+    let Some(Llsd::Binary(zipped)) = map.get("Zipped") else {
+        return Err("no Zipped binary".to_owned());
+    };
+    let unzipped = miniz_oxide::inflate::decompress_to_vec_zlib(zipped)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut reader = Reader::new(&unzipped);
+    let value = read_binary_value(&mut reader).ok_or("decode failed")?;
+    let Llsd::Map(top) = value else {
+        return Err("payload not a map".to_owned());
+    };
+    let Some(Llsd::Array(faces)) = top.get("FullMaterialsPerFace") else {
+        return Err("no FullMaterialsPerFace".to_owned());
+    };
+    assert_eq!(faces.len(), 2);
+    let Some(Llsd::Map(first)) = faces.first() else {
+        return Err("first face not a map".to_owned());
+    };
+    assert_eq!(first.get("Face"), Some(&Llsd::Integer(3)));
+    assert_eq!(first.get("ID"), Some(&Llsd::Integer(0x0089_aabb)));
+    let Some(Llsd::Map(material_map)) = first.get("Material") else {
+        return Err("first face has no Material".to_owned());
+    };
+    assert_eq!(material_map.get("SpecExp"), Some(&Llsd::Integer(51)));
+    assert_eq!(
+        material_map.get("DiffuseAlphaMode"),
+        Some(&Llsd::Integer(2))
+    );
+    // The cleared face omits Material entirely.
+    let Some(Llsd::Map(second)) = faces.get(1) else {
+        return Err("second face not a map".to_owned());
+    };
+    assert_eq!(second.get("Face"), Some(&Llsd::Integer(4)));
+    assert!(!second.contains_key("Material"));
     Ok(())
 }

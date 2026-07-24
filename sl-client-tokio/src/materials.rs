@@ -2,7 +2,8 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_MODIFY_MATERIAL_PARAMS, Event, Llsd, Uuid, build_render_materials_request, parse_llsd_xml,
+    CAP_MODIFY_MATERIAL_PARAMS, Event, FaceMaterialPut, Llsd, Uuid,
+    build_render_materials_put_request, build_render_materials_request, parse_llsd_xml,
     parse_render_materials_response,
 };
 use tokio::sync::mpsc;
@@ -32,6 +33,24 @@ pub(crate) async fn fetch_render_materials(
         Err(_error) => Vec::new(),
     };
     events.send(Event::RenderMaterials(materials)).await.ok();
+}
+
+/// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on
+/// object faces (the zipped `FullMaterialsPerFace` form). Fire-and-forget: the
+/// simulator assigns the material id and echoes it on the affected faces'
+/// `TextureEntry`, so there is no reply to forward.
+pub(crate) async fn set_render_materials(
+    cap_url: String,
+    updates: Vec<FaceMaterialPut>,
+    http: ReqwestClient,
+) {
+    let body = build_render_materials_put_request(&updates);
+    http.put(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+        .ok();
 }
 
 /// POSTs a `ModifyMaterialParams` request, forwarding the `{ success, message }`

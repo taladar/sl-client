@@ -184,7 +184,7 @@ use crate::http::{
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
 use crate::lsl_syntax_cache::LslSyntaxCache;
-use crate::materials::{fetch_render_materials, post_modify_material_params};
+use crate::materials::{fetch_render_materials, post_modify_material_params, set_render_materials};
 use crate::media::{fetch_object_media, post_object_media};
 use crate::upload::{run_caps_upload, run_report_screenshot_upload, run_script_upload};
 use crate::voice::{post_voice_cap, post_voice_signaling};
@@ -1690,6 +1690,11 @@ impl Client {
                         Some(Command::RequestRenderMaterials { material_ids }) => {
                             if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
                                 tokio::spawn(fetch_render_materials(url, material_ids, http.clone(), events.clone()));
+                            }
+                        }
+                        Some(Command::SetRenderMaterials { updates }) => {
+                            if let Some(url) = caps.get(CAP_RENDER_MATERIALS).cloned() {
+                                tokio::spawn(set_render_materials(url, updates, http.clone()));
                             }
                         }
                         Some(Command::ModifyMaterialParams { updates }) => {

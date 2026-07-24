@@ -202,6 +202,10 @@ pub(crate) struct MaterialManager {
     images: HashMap<(TextureKey, bool), Handle<Image>>,
     /// Material-slot patches parked on a texture id, applied once it decodes.
     texture_pending: HashMap<TextureKey, Vec<PbrTexturePatch>>,
+    /// Face keys whose override was set locally by the build tool
+    /// ([`apply_local_override`](Self::apply_local_override)) and still need a
+    /// recompose — so an edit shows immediately, before the simulator echoes it.
+    local_recompose: Vec<FaceKey>,
 }
 
 impl MaterialManager {
@@ -221,7 +225,28 @@ impl MaterialManager {
             pending_cap: HashSet::new(),
             images: HashMap::new(),
             texture_pending: HashMap::new(),
+            local_recompose: Vec::new(),
         }
+    }
+
+    /// Apply a build-tool edit to a face's override locally — set (or clear) the
+    /// override and queue the face for recompose — so the edit is visible at once
+    /// (the swatch, and the prim once its base material has decoded) without
+    /// waiting for the simulator's echo. The echo later re-applies the same
+    /// override idempotently.
+    pub(crate) fn apply_local_override(
+        &mut self,
+        scoped: ScopedObjectId,
+        face: u8,
+        over: &MaterialOverride,
+    ) {
+        let key = (scoped, face);
+        if over.is_empty() {
+            let _removed = self.overrides.remove(&key);
+        } else {
+            let _prev = self.overrides.insert(key, *over);
+        }
+        self.local_recompose.push(key);
     }
 
     /// Register a PBR face material (its base material id, handle, and the face's
@@ -246,6 +271,24 @@ impl MaterialManager {
             },
         );
         self.request(id);
+    }
+
+    /// The decoded GLTF material for `id`, if its `ViewerAsset` fetch/decode has
+    /// succeeded — a read-only lookup for the Texture tab's PBR channel display
+    /// ([`crate::edit_material`]).
+    pub(crate) fn decoded_material(&self, id: AssetKey) -> Option<&GltfMaterial> {
+        self.decoded.get(&id)
+    }
+
+    /// The per-face GLTF override layered on the base material, if the face has
+    /// one — the starting point the Texture tab's PBR transform editor amends
+    /// before re-sending ([`crate::edit_material`]).
+    pub(crate) fn face_override(
+        &self,
+        scoped: ScopedObjectId,
+        face: u8,
+    ) -> Option<MaterialOverride> {
+        self.overrides.get(&(scoped, face)).copied()
     }
 
     /// Spawn a background fetch+decode of material `id` if it is not already
@@ -529,6 +572,24 @@ pub(crate) fn apply_material_overrides(
             let _removed = manager.overrides.remove(&key);
             recompose_face(&mut manager, &mut textures, &mut materials, key);
         }
+    }
+}
+
+/// Recompose the faces the build tool edited locally
+/// ([`MaterialManager::apply_local_override`]) so an override edit shows
+/// immediately (the prim, once its base material has decoded), independent of the
+/// simulator's echo.
+pub(crate) fn drive_local_overrides(
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if manager.local_recompose.is_empty() {
+        return;
+    }
+    let keys = core::mem::take(&mut manager.local_recompose);
+    for key in keys {
+        recompose_face(&mut manager, &mut textures, &mut materials, key);
     }
 }
 

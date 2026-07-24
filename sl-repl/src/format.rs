@@ -794,6 +794,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetObjectMedia { .. } => "set_object_media",
         Command::NavigateObjectMedia { .. } => "navigate_object_media",
         Command::RequestRenderMaterials { .. } => "request_render_materials",
+        Command::SetRenderMaterials { .. } => "set_render_materials",
         Command::ModifyMaterialParams { .. } => "modify_material_params",
         Command::RequestVoiceAccount { .. } => "request_voice_account",
         Command::RequestParcelVoiceInfo => "request_parcel_voice_info",

@@ -70,6 +70,23 @@ pub struct RenderMaterialEntry {
     pub material: LegacyMaterial,
 }
 
+/// A single per-face legacy-material assignment for a `RenderMaterials`
+/// capability **PUT**: applies (or clears) a [`LegacyMaterial`] on one face of an
+/// object, addressed by the object's **region-local** id (as the OpenSim
+/// `MaterialsModule` / reference `LLMaterialMgr::put` expects). The simulator
+/// computes and assigns the resulting 16-byte material id and echoes it back on
+/// the face's `TextureEntry` — the caller never hashes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceMaterialPut {
+    /// The region-local id of the object to modify.
+    pub local_id: u32,
+    /// The target face index.
+    pub face: u8,
+    /// The material to apply, or `None` to clear the face's material (the
+    /// reference's `LLMaterialMgr::remove`, sending a null `Material`).
+    pub material: Option<LegacyMaterial>,
+}
+
 /// A single per-face material assignment for a `ModifyMaterialParams` request:
 /// applies a GLTF override (`gltf_json`, opaque), a stored material `asset_id`,
 /// or both to one face of an object. `side` is the face index, or `-1` for all

@@ -55,6 +55,7 @@ use crate::ui::row;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
+use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
 use crate::web_floater::set_editor_text;
@@ -65,6 +66,159 @@ const TEX_TAB_INDEX: i32 = 400;
 
 /// The width, in `"0"`-glyph advances, of a Texture-tab numeric field.
 const TEX_FIELD_GLYPHS: f32 = 7.0;
+
+// ---------------------------------------------------------------------------
+// Material mode / channel selection (the reference's `combobox matmedia` +
+// `radio_material_type` + `radio_pbr_type`, `llpanelface.cpp`).
+// ---------------------------------------------------------------------------
+
+/// The `matmedia` combo index for the legacy **Material** (Blinn-Phong) mode —
+/// diffuse texture plus optional normal / specular maps.
+pub(crate) const MATMEDIA_MATERIAL: usize = 0;
+/// The `matmedia` combo index for the **PBR** (GLTF) render-material mode.
+pub(crate) const MATMEDIA_PBR: usize = 1;
+
+/// The `radio_material_type` index for the diffuse **Texture** channel.
+pub(crate) const MATTYPE_DIFFUSE: usize = 0;
+/// The `radio_material_type` index for the **Bumpiness** (normal-map) channel.
+pub(crate) const MATTYPE_NORMAL: usize = 1;
+/// The `radio_material_type` index for the **Shininess** (specular-map) channel.
+pub(crate) const MATTYPE_SPECULAR: usize = 2;
+
+/// The `radio_pbr_type` index for the whole render **material** (the material-id
+/// swatch — assign or clear a stored GLTF material asset).
+pub(crate) const PBRTYPE_RENDER_MATERIAL: usize = 0;
+/// The `radio_pbr_type` index for the PBR **base-colour** channel transform.
+pub(crate) const PBRTYPE_BASE_COLOR: usize = 1;
+/// The `radio_pbr_type` index for the PBR **metallic-roughness** channel
+/// transform.
+pub(crate) const PBRTYPE_METALLIC: usize = 2;
+/// The `radio_pbr_type` index for the PBR **emissive** channel transform.
+pub(crate) const PBRTYPE_EMISSIVE: usize = 3;
+/// The `radio_pbr_type` index for the PBR **normal** channel transform.
+pub(crate) const PBRTYPE_NORMAL: usize = 4;
+
+/// The current material mode / channel the Texture tab edits — the resolved
+/// `(matmedia, material-type, pbr-type)` selection, mirrored from the three
+/// selector widgets each frame so the visibility system and the channel editors
+/// read one place. Mirrors the reference's `mComboMatMedia` /
+/// `mRadioMaterialType` / `mRadioPbrType` current indices.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MatModeState {
+    /// The `matmedia` selection ([`MATMEDIA_MATERIAL`] / [`MATMEDIA_PBR`]).
+    pub(crate) matmedia: usize,
+    /// The Material-mode map channel ([`MATTYPE_DIFFUSE`] / [`MATTYPE_NORMAL`] /
+    /// [`MATTYPE_SPECULAR`]).
+    pub(crate) mat_type: usize,
+    /// The PBR-mode channel ([`PBRTYPE_RENDER_MATERIAL`] …).
+    pub(crate) pbr_type: usize,
+}
+
+impl Default for MatModeState {
+    /// The tab opens in Material / Diffuse mode with the render-material PBR
+    /// channel pre-selected, exactly as the reference initialises its selectors.
+    fn default() -> Self {
+        Self {
+            matmedia: MATMEDIA_MATERIAL,
+            mat_type: MATTYPE_DIFFUSE,
+            pbr_type: PBRTYPE_RENDER_MATERIAL,
+        }
+    }
+}
+
+/// The active PBR texture channel a transform edits, or the whole material when
+/// the render-material channel is selected — the resolved form of
+/// [`MatModeState::pbr_type`] the PBR display path keys by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PbrChannel {
+    /// The complete render material (its asset id), not a single texture.
+    Material,
+    /// The base-colour texture.
+    BaseColor,
+    /// The metallic-roughness texture.
+    MetallicRoughness,
+    /// The emissive texture.
+    Emissive,
+    /// The normal texture.
+    Normal,
+}
+
+impl MatModeState {
+    /// Whether the Material (Blinn-Phong) mode is active.
+    pub(crate) const fn is_material(self) -> bool {
+        self.matmedia == MATMEDIA_MATERIAL
+    }
+
+    /// Whether the PBR (GLTF) mode is active.
+    pub(crate) const fn is_pbr(self) -> bool {
+        self.matmedia == MATMEDIA_PBR
+    }
+
+    /// The active PBR channel for the current `pbr_type` selection.
+    pub(crate) const fn pbr_channel(self) -> PbrChannel {
+        match self.pbr_type {
+            PBRTYPE_BASE_COLOR => PbrChannel::BaseColor,
+            PBRTYPE_METALLIC => PbrChannel::MetallicRoughness,
+            PBRTYPE_EMISSIVE => PbrChannel::Emissive,
+            PBRTYPE_NORMAL => PbrChannel::Normal,
+            _material => PbrChannel::Material,
+        }
+    }
+}
+
+/// When a mode-dependent Texture-tab control is shown: a single visibility system
+/// ([`apply_material_mode_visibility`]) sets each tagged control's `Node.display`
+/// from the current [`MatModeState`], mirroring the reference
+/// `LLPanelFace::updateVisibility`.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShowWhen {
+    /// Material mode, diffuse (Texture) channel: the diffuse swatch, colour,
+    /// transparency, alpha mode / mask cutoff and the diffuse transforms.
+    MaterialDiffuse,
+    /// Material mode, normal (Bumpiness) channel: the normal swatch, bumpiness
+    /// combo and the normal-map transforms.
+    MaterialNormal,
+    /// Material mode, specular (Shininess) channel: the specular swatch,
+    /// shininess combo, glossiness / environment / specular colour and the
+    /// specular-map transforms.
+    MaterialSpecular,
+    /// Material mode, any channel: the glow / full-bright / mapping / align
+    /// controls (`TextureEntry`-level, shared across the map channels).
+    MaterialAny,
+    /// PBR mode, any channel: the per-channel PBR transforms.
+    PbrAny,
+    /// PBR mode, the Complete-material channel: the render-material swatch, the
+    /// New / Save buttons, and the material-level alpha mode / cutoff /
+    /// double-sided controls.
+    PbrMaterialId,
+    /// PBR mode, the Base-colour channel: its texture swatch + tint.
+    PbrBaseColor,
+    /// PBR mode, the Metallic-roughness channel: its texture swatch + the
+    /// metallic / roughness factors.
+    PbrMetallic,
+    /// PBR mode, the Emissive channel: its texture swatch + tint.
+    PbrEmissive,
+    /// PBR mode, the Normal channel: its texture swatch.
+    PbrNormal,
+}
+
+impl ShowWhen {
+    /// Whether a control tagged with this rule is shown in `state`.
+    pub(crate) const fn matches(self, state: MatModeState) -> bool {
+        match self {
+            Self::MaterialDiffuse => state.is_material() && state.mat_type == MATTYPE_DIFFUSE,
+            Self::MaterialNormal => state.is_material() && state.mat_type == MATTYPE_NORMAL,
+            Self::MaterialSpecular => state.is_material() && state.mat_type == MATTYPE_SPECULAR,
+            Self::MaterialAny => state.is_material(),
+            Self::PbrAny => state.is_pbr(),
+            Self::PbrMaterialId => state.is_pbr() && state.pbr_type == PBRTYPE_RENDER_MATERIAL,
+            Self::PbrBaseColor => state.is_pbr() && state.pbr_type == PBRTYPE_BASE_COLOR,
+            Self::PbrMetallic => state.is_pbr() && state.pbr_type == PBRTYPE_METALLIC,
+            Self::PbrEmissive => state.is_pbr() && state.pbr_type == PBRTYPE_EMISSIVE,
+            Self::PbrNormal => state.is_pbr() && state.pbr_type == PBRTYPE_NORMAL,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // The editable per-face attributes.
@@ -155,20 +309,37 @@ impl TexField {
     }
 }
 
-/// The nine-plus-one field rows, in the order they appear in the tab; each
-/// tuple is a label key and the fields on its row.
-const TEX_FIELD_ROWS: &[(&str, &[TexField])] = &[
-    ("build-tex-transparency-label", &[TexField::Transparency]),
-    ("build-tex-glow-label", &[TexField::Glow]),
+/// The diffuse field rows, in the order they appear in the tab; each tuple is a
+/// label key, the fields on its row, and the material mode the row shows in.
+/// Transparency and the diffuse transforms belong to the diffuse (Texture)
+/// channel; glow is a `TextureEntry`-level attribute shown across the Material
+/// channels.
+const TEX_FIELD_ROWS: &[(&str, &[TexField], ShowWhen)] = &[
+    (
+        "build-tex-transparency-label",
+        &[TexField::Transparency],
+        ShowWhen::MaterialDiffuse,
+    ),
+    (
+        "build-tex-glow-label",
+        &[TexField::Glow],
+        ShowWhen::MaterialAny,
+    ),
     (
         "build-tex-repeats-label",
         &[TexField::RepeatU, TexField::RepeatV],
+        ShowWhen::MaterialDiffuse,
     ),
     (
         "build-tex-offset-label",
         &[TexField::OffsetU, TexField::OffsetV],
+        ShowWhen::MaterialDiffuse,
     ),
-    ("build-tex-rotation-label", &[TexField::Rotation]),
+    (
+        "build-tex-rotation-label",
+        &[TexField::Rotation],
+        ShowWhen::MaterialDiffuse,
+    ),
 ];
 
 /// A Texture-tab boolean toggle and the packed bit it flips.
@@ -369,6 +540,8 @@ impl Plugin for EditTexturePlugin {
         app.init_resource::<TexShownSnapshot>()
             .init_resource::<TexFieldFocus>()
             .init_resource::<TexturePreview>()
+            .init_resource::<MatModeState>()
+            .init_resource::<MatModeSelected>()
             .add_systems(
                 Startup,
                 spawn_texture_tab
@@ -378,6 +551,9 @@ impl Plugin for EditTexturePlugin {
             .add_systems(
                 Update,
                 (
+                    auto_select_material_mode,
+                    read_material_mode,
+                    apply_material_mode_visibility,
                     sync_texture_widgets,
                     commit_texture_fields,
                     apply_tex_combo_changes,
@@ -402,9 +578,17 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     // The selected-face summary.
     spawn_info_row(&mut commands, page, TexInfo::Faces, "build-tex-faces-all");
 
+    // The material-mode / channel selectors (the reference's `combobox matmedia`
+    // + `radio_material_type` + `radio_pbr_type`): which of the legacy diffuse /
+    // normal / specular maps or the PBR render material the tab edits.
+    let selectors = spawn_mode_selectors(&mut commands, page, &mut tab_index);
+
     // The diffuse texture swatch (opens the texture picker) and the colour swatch
-    // (opens the colour picker).
+    // (opens the colour picker) — the Material / Texture channel.
     let texture_row = spawn_row(&mut commands, page, "build-tex-texture-id-label");
+    commands
+        .entity(texture_row)
+        .insert(ShowWhen::MaterialDiffuse);
     let texture_swatch = spawn_texture_swatch(
         &mut commands,
         texture_row,
@@ -416,6 +600,7 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     tab_index = tab_index.saturating_add(1);
 
     let color_row = spawn_row(&mut commands, page, "build-tex-color-label");
+    commands.entity(color_row).insert(ShowWhen::MaterialDiffuse);
     let color_swatch = spawn_color_swatch(
         &mut commands,
         color_row,
@@ -427,47 +612,343 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
     tab_index = tab_index.saturating_add(1);
 
     // Transparency / glow / repeats / offset / rotation numeric rows.
-    for (label_key, fields) in TEX_FIELD_ROWS {
-        let row_entity = spawn_row(&mut commands, page, label_key);
-        for &field in *fields {
-            spawn_tex_field(&mut commands, row_entity, field, &mut tab_index);
-        }
+    for (label_key, fields, show_when) in TEX_FIELD_ROWS {
+        spawn_tex_field_row(
+            &mut commands,
+            page,
+            label_key,
+            fields,
+            *show_when,
+            &mut tab_index,
+        );
     }
 
-    // Full-bright toggle.
-    spawn_tex_toggle(
+    // Full-bright toggle (a `TextureEntry`-level attribute, shown across the
+    // Material channels).
+    let fullbright = spawn_tex_toggle(
         &mut commands,
         page,
         TexToggle::Fullbright,
         "build-tex-fullbright",
         &mut tab_index,
     );
+    commands.entity(fullbright).insert(ShowWhen::MaterialAny);
 
     // Bumpiness / shininess / mapping combo boxes (the reference's `combobox
-    // bumpiness` / `combobox shininess` / `combobox texgen`).
-    for (cycle, label_key) in [
-        (TexCycle::Bump, "build-tex-bump-label"),
-        (TexCycle::Shininess, "build-tex-shiny-label"),
-        (TexCycle::TexGen, "build-tex-mapping-label"),
+    // bumpiness` (normal channel) / `combobox shininess` (specular channel) /
+    // `combobox texgen` (shared)).
+    for (cycle, label_key, show_when) in [
+        (
+            TexCycle::Bump,
+            "build-tex-bump-label",
+            ShowWhen::MaterialNormal,
+        ),
+        (
+            TexCycle::Shininess,
+            "build-tex-shiny-label",
+            ShowWhen::MaterialSpecular,
+        ),
+        (
+            TexCycle::TexGen,
+            "build-tex-mapping-label",
+            ShowWhen::MaterialAny,
+        ),
     ] {
         let row_entity = spawn_row(&mut commands, page, label_key);
+        commands.entity(row_entity).insert(show_when);
         spawn_tex_combo(&mut commands, row_entity, cycle, &mut tab_index);
     }
 
     // Align planar faces (the reference's `checkbox planar align`, offered as a
     // one-shot action button that aligns the selected faces to the primary face).
-    spawn_align_button(&mut commands, page, &mut tab_index);
+    let align = spawn_align_button(&mut commands, page, &mut tab_index);
+    commands.entity(align).insert(ShowWhen::MaterialAny);
+
+    // The Blinn-Phong normal / specular channels and the PBR channels
+    // ([`crate::edit_material`]) share this page and the mode selectors.
+    crate::edit_material::spawn_material_channels(&mut commands, page, &mut tab_index);
 
     commands.insert_resource(BuildTextureUi {
         page,
         color_swatch,
         texture_swatch,
+        matmedia_combo: selectors.matmedia_combo,
+        mat_type_radio: selectors.mat_type_radio,
+        pbr_type_radio: selectors.pbr_type_radio,
     });
+}
+
+/// The three material-mode selector entities the mode systems read / write.
+struct ModeSelectors {
+    /// The `matmedia` combo (Material / PBR).
+    matmedia_combo: Entity,
+    /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
+    mat_type_radio: Entity,
+    /// The `radio_pbr_type` group (Material / Base / Metallic / Emissive /
+    /// Normal).
+    pbr_type_radio: Entity,
+}
+
+/// Spawn the matmedia combo, the material-type radio and the pbr-type radio,
+/// returning their entities. The radios each carry their own [`ShowWhen`] so the
+/// material-type radio hides in PBR mode and the pbr-type radio hides in Material
+/// mode, mirroring the reference `updateVisibility`.
+fn spawn_mode_selectors(
+    commands: &mut Commands,
+    page: Entity,
+    tab_index: &mut i32,
+) -> ModeSelectors {
+    // matmedia combo (Material / PBR).
+    let matmedia_row = spawn_row(commands, page, "build-tex-matmedia-label");
+    let matmedia_labels = [
+        "build-tex-matmedia-material".to_owned(),
+        "build-tex-matmedia-pbr".to_owned(),
+    ];
+    let matmedia_combo = spawn_combo(
+        commands,
+        matmedia_row,
+        &ComboSpec {
+            element: "build-tex-matmedia",
+            labels: &matmedia_labels,
+            active: MATMEDIA_MATERIAL,
+            tab_index: *tab_index,
+            font_size: TOOL_FONT_SIZE,
+            translate_labels: true,
+        },
+    );
+    commands.entity(matmedia_combo).insert(TexControl);
+    *tab_index = tab_index.saturating_add(1);
+
+    // material-type radio (Texture / Bumpiness / Shininess).
+    let mat_type_row = spawn_row(commands, page, "build-tex-mattype-label");
+    commands.entity(mat_type_row).insert(ShowWhen::MaterialAny);
+    let mat_type_labels = [
+        "build-tex-mattype-diffuse".to_owned(),
+        "build-tex-mattype-normal".to_owned(),
+        "build-tex-mattype-specular".to_owned(),
+    ];
+    let mat_type_radio = spawn_radio_group(
+        commands,
+        mat_type_row,
+        &RadioSpec {
+            element: "build-tex-mattype",
+            labels: &mat_type_labels,
+            active: MATTYPE_DIFFUSE,
+            tab_index: *tab_index,
+            font_size: TOOL_FONT_SIZE,
+            layout: RadioLayout::Row,
+            translate_labels: true,
+        },
+    );
+    commands.entity(mat_type_radio).insert(TexControl);
+    *tab_index = tab_index.saturating_add(1);
+
+    // pbr-type radio (Material / Base / Metallic / Emissive / Normal).
+    let pbr_type_row = spawn_row(commands, page, "build-tex-pbrtype-label");
+    commands.entity(pbr_type_row).insert(ShowWhen::PbrAny);
+    let pbr_type_labels = [
+        "build-tex-pbrtype-material".to_owned(),
+        "build-tex-pbrtype-base".to_owned(),
+        "build-tex-pbrtype-metallic".to_owned(),
+        "build-tex-pbrtype-emissive".to_owned(),
+        "build-tex-pbrtype-normal".to_owned(),
+    ];
+    let pbr_type_radio = spawn_radio_group(
+        commands,
+        pbr_type_row,
+        &RadioSpec {
+            element: "build-tex-pbrtype",
+            labels: &pbr_type_labels,
+            active: PBRTYPE_RENDER_MATERIAL,
+            tab_index: *tab_index,
+            font_size: TOOL_FONT_SIZE,
+            layout: RadioLayout::Row,
+            translate_labels: true,
+        },
+    );
+    commands.entity(pbr_type_radio).insert(TexControl);
+    *tab_index = tab_index.saturating_add(1);
+
+    ModeSelectors {
+        matmedia_combo,
+        mat_type_radio,
+        pbr_type_radio,
+    }
+}
+
+/// Spawn a labelled numeric-field row tagged with the mode it shows in.
+fn spawn_tex_field_row(
+    commands: &mut Commands,
+    page: Entity,
+    label_key: &'static str,
+    fields: &[TexField],
+    show_when: ShowWhen,
+    tab_index: &mut i32,
+) {
+    let row_entity = spawn_row(commands, page, label_key);
+    commands.entity(row_entity).insert(show_when);
+    for &field in fields {
+        spawn_tex_field(commands, row_entity, field, tab_index);
+    }
+}
+
+/// Tracks the object the material-mode auto-select last applied to, so the mode
+/// is re-derived only when the selected object changes (the reference's
+/// `prev_obj_id` guard) — never every frame, which would fight the user's manual
+/// matmedia / channel picks.
+#[derive(Resource, Debug, Default)]
+struct MatModeSelected {
+    /// The primary object the auto-select last ran for.
+    last_object: Option<ScopedObjectId>,
+}
+
+/// Auto-select the material mode when the primary selection changes: choose the
+/// PBR matmedia entry for a face that carries a GLTF render material, otherwise
+/// the Material (Blinn-Phong) entry — the reference `LLPanelFace::updateUI`
+/// behaviour where a PBR'd object opens in PBR mode and everything else in
+/// Material mode. Only runs on an object change, so the user's later manual
+/// matmedia pick stands.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
+              selection state, the UI handles, the per-object guard, the render-material + \
+              hierarchy / scene queries the PBR test walks, and the combo the mode writes"
+)]
+fn auto_select_material_mode(
+    tool: Res<EditToolState>,
+    selection: Res<SelectionSet>,
+    ui: Option<Res<BuildTextureUi>>,
+    mut selected: ResMut<MatModeSelected>,
+    render_materials: Query<&crate::materials::ObjectRenderMaterials>,
+    children: Query<&Children>,
+    scene: Query<(), With<crate::objects::SceneObject>>,
+    mut combos: Query<&mut ComboSelection>,
+) {
+    if !tool.active {
+        selected.last_object = None;
+        return;
+    }
+    let Some(ui) = ui else {
+        return;
+    };
+    let Some(primary) = selection.primary() else {
+        selected.last_object = None;
+        return;
+    };
+    if selected.last_object == Some(primary.scoped) {
+        return;
+    }
+    selected.last_object = Some(primary.scoped);
+    let face_id = primary_face_index(&selection);
+    let has_pbr = face_has_render_material(
+        primary.entity,
+        face_id,
+        &render_materials,
+        &children,
+        &scene,
+    );
+    let want = if has_pbr {
+        MATMEDIA_PBR
+    } else {
+        MATMEDIA_MATERIAL
+    };
+    if let Ok(mut combo) = combos.get_mut(ui.matmedia_combo) {
+        combo.active = want;
+    }
+}
+
+/// The lowest selected face index of the primary selection (face 0 for a
+/// whole-object selection) — the face the tab represents.
+pub(crate) fn primary_face_index(selection: &SelectionSet) -> u8 {
+    let index = selection
+        .primary_faces()
+        .and_then(|set| set.iter().map(|face| face.get()).min())
+        .unwrap_or(0);
+    u8::try_from(index).unwrap_or(0)
+}
+
+/// Whether face `face_id` of the object rooted at `root` carries a GLTF render
+/// material — walked from the object's [`crate::materials::ObjectRenderMaterials`]
+/// holder(s), stopping at any linkset-child scene object.
+fn face_has_render_material(
+    root: Entity,
+    face_id: u8,
+    render_materials: &Query<&crate::materials::ObjectRenderMaterials>,
+    children: &Query<&Children>,
+    scene: &Query<(), With<crate::objects::SceneObject>>,
+) -> bool {
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        if entity != root && scene.get(entity).is_ok() {
+            continue;
+        }
+        if let Ok(holder) = render_materials.get(entity)
+            && holder.faces.iter().any(|(face, _id)| *face == face_id)
+        {
+            return true;
+        }
+        if let Ok(list) = children.get(entity) {
+            for child in list.iter() {
+                stack.push(child);
+            }
+        }
+    }
+    false
+}
+
+/// Mirror the three selector widgets' current values into [`MatModeState`] each
+/// frame, writing only on a real change so the visibility system reacts once per
+/// mode switch.
+fn read_material_mode(
+    ui: Option<Res<BuildTextureUi>>,
+    combos: Query<&ComboSelection>,
+    radios: Query<&RadioSelection>,
+    mut mode: ResMut<MatModeState>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let matmedia = combos
+        .get(ui.matmedia_combo)
+        .map_or(MATMEDIA_MATERIAL, |combo| combo.active);
+    let mat_type = radios
+        .get(ui.mat_type_radio)
+        .map_or(MATTYPE_DIFFUSE, |radio| radio.active);
+    let pbr_type = radios
+        .get(ui.pbr_type_radio)
+        .map_or(PBRTYPE_RENDER_MATERIAL, |radio| radio.active);
+    mode.set_if_neq(MatModeState {
+        matmedia,
+        mat_type,
+        pbr_type,
+    });
+}
+
+/// Show or hide each mode-tagged Texture-tab control by setting its `Node.display`
+/// from the current [`MatModeState`] — the reference `updateVisibility`. Runs only
+/// when the mode changes.
+fn apply_material_mode_visibility(
+    mode: Res<MatModeState>,
+    mut controls: Query<(&ShowWhen, &mut Node)>,
+) {
+    if !mode.is_changed() {
+        return;
+    }
+    for (show_when, mut node) in &mut controls {
+        let display = if show_when.matches(*mode) {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+    }
 }
 
 /// The Texture-tab widget handles the sync / reply systems address.
 #[derive(Resource, Debug, Clone, Copy)]
-struct BuildTextureUi {
+pub(crate) struct BuildTextureUi {
     /// The Texture page container, walked to grey every label / value when the
     /// panel gates off.
     page: Entity,
@@ -475,10 +956,21 @@ struct BuildTextureUi {
     color_swatch: Entity,
     /// The diffuse-texture swatch (the texture picker's requester).
     texture_swatch: Entity,
+    /// The `matmedia` combo (Material / PBR) — read for the mode, written by the
+    /// per-object auto-select.
+    pub(crate) matmedia_combo: Entity,
+    /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
+    pub(crate) mat_type_radio: Entity,
+    /// The `radio_pbr_type` group.
+    pub(crate) pbr_type_radio: Entity,
 }
 
 /// Spawn a labelled row container and return it.
-fn spawn_row(commands: &mut Commands, parent: Entity, label_key: &'static str) -> Entity {
+pub(crate) fn spawn_row(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+) -> Entity {
     let row_entity = commands
         .spawn((
             Node {
@@ -511,14 +1003,15 @@ fn spawn_tex_field(commands: &mut Commands, parent: Entity, field: TexField, tab
     commands.entity(entity).insert((field, TexControl));
 }
 
-/// Spawn one Texture-tab toggle row (check glyph + label).
+/// Spawn one Texture-tab toggle row (check glyph + label); returns the toggle
+/// row so the caller can tag it (e.g. with a [`ShowWhen`]).
 fn spawn_tex_toggle(
     commands: &mut Commands,
     parent: Entity,
     toggle: TexToggle,
     label_key: &'static str,
     tab_index: &mut i32,
-) {
+) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
     let toggle_row = commands
@@ -555,6 +1048,7 @@ fn spawn_tex_toggle(
         ChildOf(toggle_row),
     ));
     commands.entity(toggle_row).observe(handle_tex_toggle_press);
+    toggle_row
 }
 
 /// Spawn one Texture-tab combo box for `cycle`, its options the cycle's value
@@ -580,8 +1074,9 @@ fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab
     commands.entity(combo).insert((TexCombo(cycle), TexControl));
 }
 
-/// Spawn the Align-planar-faces action button.
-fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i32) {
+/// Spawn the Align-planar-faces action button; returns the button entity so the
+/// caller can tag it (e.g. with a [`ShowWhen`]).
+fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i32) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
     let button = commands
@@ -612,6 +1107,7 @@ fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i
         ChildOf(button),
     ));
     commands.entity(button).observe(handle_tex_align_press);
+    button
 }
 
 /// Spawn one read-only info row.
@@ -631,7 +1127,7 @@ fn spawn_info_row(commands: &mut Commands, parent: Entity, info: TexInfo, label_
 /// object's decoded entry indexed by its lowest selected face (or face 0 for a
 /// whole-object selection), plus a signature of the selected-face set so the
 /// snapshot changes when the selection does.
-fn representative_face(
+pub(crate) fn representative_face(
     selection: &SelectionSet,
     objects: &ObjectState,
 ) -> Option<(ScopedObjectId, TextureFace, u64)> {
@@ -1377,7 +1873,10 @@ fn apply_to_selection(
 
 /// The Linden face indices a selection node's edit hits: its chosen faces, or
 /// every face (0..`face_count`) when the whole object is selected.
-fn node_face_indices(node: &crate::edit_selection::SelectedNode, face_count: usize) -> Vec<usize> {
+pub(crate) fn node_face_indices(
+    node: &crate::edit_selection::SelectedNode,
+    face_count: usize,
+) -> Vec<usize> {
     match &node.faces {
         Some(set) => set
             .iter()
@@ -1466,7 +1965,7 @@ const fn round_to_i64(value: f32) -> i64 {
 }
 
 /// Parse one committed field value.
-fn parse_tex_value(kind: TextInputKind, text: &str) -> Option<f32> {
+pub(crate) fn parse_tex_value(kind: TextInputKind, text: &str) -> Option<f32> {
     match kind.parse(text.trim())? {
         TextInputValue::Float(value) => {
             #[expect(

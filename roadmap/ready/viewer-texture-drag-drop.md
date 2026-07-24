@@ -2,7 +2,7 @@
 id: viewer-texture-drag-drop
 title: Drag & drop a texture onto the build Texture tab / an object face
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07-24) while reviewing the build-tool texture editor
 blocked_by: [viewer-prim-texture-editing, viewer-ui-texture-picker]
 refs: [viewer-inventory-context-actions]

@@ -101,8 +101,9 @@ pub use login::{
 };
 pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
 pub use material::{
-    GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
-    RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
+    FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
+    MaterialOverrideUpdate, RenderMaterialEntry, build_gltf_material_override,
+    build_modify_material_params_request, build_render_materials_put_request,
     build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
     parse_modify_material_params_request, parse_render_materials_response,
 };

@@ -26,11 +26,13 @@
 //! ```
 
 pub mod decode;
+pub mod encode;
 pub mod error;
 pub mod overrides;
 pub mod types;
 
 pub use decode::{parse_gltf_material_document, parse_material_asset};
+pub use encode::{encode_material_asset, encode_override_gltf_json};
 pub use error::MaterialError;
 pub use overrides::{
     MaterialOverride, TextureOverride, TextureTransformOverride, parse_material_override,

@@ -37,6 +37,24 @@ pub(crate) fn run_render_materials_fetch(
     asset_tx.send(SessionEvent::RenderMaterials(materials)).ok();
 }
 
+/// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on
+/// object faces (the zipped `FullMaterialsPerFace` form). Fire-and-forget: the
+/// simulator assigns the material id and echoes it on the affected faces'
+/// `TextureEntry` (an `ObjectImage` update), so there is no reply to forward.
+pub(crate) fn run_set_render_materials(cap_url: &str, body: String) {
+    let Ok(http) = ReqwestBlockingClient::builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        return;
+    };
+    http.put(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .ok();
+}
+
 /// POSTs a `ModifyMaterialParams` request and forwards the `{ success, message }`
 /// reply to `caps_tx` tagged [`CAP_MODIFY_MATERIAL_PARAMS`], for the session to
 /// surface as a [`SlSessionEvent::MaterialParamsResult`].

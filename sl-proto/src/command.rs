@@ -12,21 +12,21 @@ use crate::{
     ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
     EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
-    FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate,
-    GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
-    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryCursor,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
-    LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
-    ProposalVoteId, QueryId, RegionCoordinates, RegionHandle, RegionInfoUpdate, Reliability,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
-    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
-    TransactionId, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
+    FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
+    GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
+    InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType,
+    Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType,
+    MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle,
+    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
+    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
     VoiceProvisionRequest, Wearable,
 };
 
@@ -2100,6 +2100,16 @@ pub enum Command {
     RequestRenderMaterials {
         /// The material ids to fetch.
         material_ids: Vec<Uuid>,
+    },
+    /// Set (or clear) legacy (normal/specular) Blinn-Phong materials on object
+    /// faces over the `RenderMaterials` capability **PUT** (the OpenSim-supported
+    /// path, the reference's `LLMaterialMgr::put`). Each update addresses a face
+    /// by the object's region-local id; the simulator assigns the resulting
+    /// material id and echoes it on the face's `TextureEntry` (arriving as an
+    /// `ObjectImage` update), so no reply event is emitted for this command.
+    SetRenderMaterials {
+        /// The per-face legacy-material assignments to apply.
+        updates: Vec<FaceMaterialPut>,
     },
     /// Set GLTF (PBR) materials on object faces over the `ModifyMaterialParams`
     /// capability. Each update applies an opaque `gltf_json` override and/or a

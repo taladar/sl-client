@@ -38,7 +38,8 @@ use sl_proto::{
     build_modify_material_params_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_voice_info_request,
     build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    build_remote_parcel_request, build_render_materials_put_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_upload_baked_texture_request,
@@ -61,20 +62,21 @@ pub use sl_proto::{
     DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, Direction,
     DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings,
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
-    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
-    LandImpact, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
-    LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
+    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
+    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
+    LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
@@ -171,8 +173,8 @@ pub use sl_asset::{
 pub use sl_material::{
     GltfAlphaMode, GltfMaterial, GltfTexture, GltfTextureTransform,
     MaterialError as GltfMaterialError, MaterialOverride, TextureOverride,
-    TextureTransformOverride, parse_gltf_material_document, parse_material_asset,
-    parse_material_override,
+    TextureTransformOverride, encode_material_asset, encode_override_gltf_json,
+    parse_gltf_material_document, parse_material_asset, parse_material_override,
 };
 
 // The pure prim-tessellation geometry (no store/fetcher — a prim is tessellated
@@ -323,7 +325,9 @@ use crate::inventory::{
 };
 use crate::inventory_cache::InventoryCache;
 use crate::lsl_syntax_cache::LslSyntaxCache;
-use crate::materials::{run_modify_material_params, run_render_materials_fetch};
+use crate::materials::{
+    run_modify_material_params, run_render_materials_fetch, run_set_render_materials,
+};
 use crate::media::{run_object_media_fetch, run_object_media_post};
 use crate::upload::{
     emit_upload_failure, emit_upload_unavailable, run_caps_upload, run_report_screenshot_upload,
@@ -2776,6 +2780,16 @@ fn advance_running(
                     let ids = material_ids.clone();
                     std::thread::spawn(move || {
                         run_render_materials_fetch(&url, ids, &asset_tx);
+                    });
+                }
+            }
+            Command::SetRenderMaterials { updates } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
+                {
+                    let body = build_render_materials_put_request(updates);
+                    std::thread::spawn(move || {
+                        run_set_render_materials(&url, body);
                     });
                 }
             }

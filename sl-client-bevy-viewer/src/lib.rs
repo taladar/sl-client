@@ -51,6 +51,7 @@ mod conversations;
 mod coords;
 mod diagnostics;
 mod edit_link;
+mod edit_material;
 mod edit_math;
 mod edit_params;
 mod edit_selection;
@@ -867,6 +868,9 @@ fn run_session(
     // (viewer-edit-face-selection): per-face colour / transparency / glow /
     // bump / shiny / mapping and texture repeats / offset / rotation.
     .add_plugins(crate::edit_texture::EditTexturePlugin)
+    // The Blinn-Phong normal / specular maps + PBR (GLTF) material channels of
+    // the Texture tab (viewer-face-materials-pbr).
+    .add_plugins(crate::edit_material::EditMaterialPlugin)
     // The object selection core (viewer-object-selection-core): click /
     // rubber-band selection, the selection set + highlight, and the
     // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.
@@ -1220,6 +1224,7 @@ fn run_session(
                 register_pbr_materials,
                 poll_materials,
                 apply_material_overrides,
+                crate::materials::drive_local_overrides,
                 apply_pbr_textures,
                 // The legacy (normal/specular) render-material pipeline (P27.3):
                 // register each face carrying a `TextureEntry` material id, batch

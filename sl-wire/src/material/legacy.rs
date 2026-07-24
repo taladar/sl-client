@@ -1,6 +1,6 @@
 //! Legacy `RenderMaterials` capability: zipped binary-LLSD material codec.
 
-use super::{LegacyMaterial, RenderMaterialEntry};
+use super::{FaceMaterialPut, LegacyMaterial, RenderMaterialEntry};
 use crate::WireError;
 use crate::endian;
 use crate::field::Reader;
@@ -36,6 +36,53 @@ pub fn build_render_materials_request(material_ids: &[Uuid]) -> String {
     let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
     format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+}
+
+/// Builds the LLSD-XML body for a `RenderMaterials` capability **PUT** that sets
+/// (or clears) legacy materials on object faces: a `{ "Zipped": <binary> }` map
+/// whose binary is the zlib-compressed binary-LLSD map
+/// `{ "FullMaterialsPerFace": [ { "Face": <te>, "ID": <local id>, "Material":
+/// <map> } ] }` (the reference `LLMaterialMgr::processPutQueue` body). A cleared
+/// face omits the `Material` field, matching `LLMaterial::null`. The simulator
+/// assigns the material id and echoes it on the face's `TextureEntry`.
+#[must_use]
+pub fn build_render_materials_put_request(updates: &[FaceMaterialPut]) -> String {
+    let faces = Llsd::Array(updates.iter().map(face_material_put_to_llsd).collect());
+    let mut map = HashMap::new();
+    map.insert("FullMaterialsPerFace".to_owned(), faces);
+    let mut binary = Vec::new();
+    write_binary_value(&Llsd::Map(map), &mut binary);
+    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
+    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+}
+
+/// Encodes one `{ "Face", "ID", "Material" }` PUT entry; a cleared face omits
+/// `Material` (the reference sends a null material for a removal).
+fn face_material_put_to_llsd(update: &FaceMaterialPut) -> Llsd {
+    let mut map = HashMap::new();
+    map.insert("Face".to_owned(), Llsd::Integer(i32::from(update.face)));
+    map.insert(
+        "ID".to_owned(),
+        Llsd::Integer(local_id_as_i32(update.local_id)),
+    );
+    if let Some(material) = &update.material {
+        map.insert("Material".to_owned(), legacy_material_to_llsd(material));
+    }
+    Llsd::Map(map)
+}
+
+/// Narrows a region-local object id to the `LLSD::Integer` the cap carries,
+/// wrapping through the two's-complement bit pattern (the reference stores the
+/// same `U32` in a signed `LLSD::Integer`).
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_wrap,
+    reason = "the local id is a u32 stored verbatim in a signed LLSD integer, matching the \
+              reference's static_cast<LLSD::Integer>(getLocalID())"
+)]
+const fn local_id_as_i32(local_id: u32) -> i32 {
+    local_id as i32
 }
 
 /// Parses a `RenderMaterials` capability POST response (a

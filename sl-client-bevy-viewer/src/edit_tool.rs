@@ -874,11 +874,22 @@ pub(crate) fn spawn_row_label(
             Text::default(),
             Translated::new(key),
             UiFont::Sans.at(TOOL_FONT_SIZE),
+            // Keep the label on one line: as a flex item it would otherwise shrink
+            // below its content width and wrap, and the text measure then computes
+            // the wrong row height so it overlaps the row below (a longer label
+            // like "Material type" made this visible). `flex_shrink: 0` holds its
+            // width — the value widget wraps to the next line instead (the rows
+            // are `flex_wrap: Wrap`).
+            TextLayout {
+                linebreak: LineBreak::NoWrap,
+                ..Default::default()
+            },
             // A skinless fallback; the skin recolours via the class token.
             TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
             ClassList::new_with_classes([LABEL_CLASS]),
             Node {
                 min_width: Val::Px(64.0),
+                flex_shrink: 0.0,
                 ..Default::default()
             },
             ChildOf(parent),

@@ -34,12 +34,12 @@ pub use gltf::{
     parse_gltf_material_override, parse_modify_material_params_request,
 };
 pub use legacy::{
-    build_render_materials_request, build_render_materials_response,
-    parse_render_materials_response,
+    build_render_materials_put_request, build_render_materials_request,
+    build_render_materials_response, parse_render_materials_response,
 };
 #[cfg(test)]
 pub(crate) use legacy::{read_binary_value, write_binary_value};
 pub use types::{
-    GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
-    RenderMaterialEntry,
+    FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
+    MaterialOverrideUpdate, RenderMaterialEntry,
 };

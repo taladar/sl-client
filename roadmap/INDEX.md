@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 32 |
-| ready | 209 |
-| blocked | 111 |
-| in-progress | 8 |
-| bugs | 11 |
-| done | 590 |
+| ready | 211 |
+| blocked | 109 |
+| in-progress | 7 |
+| bugs | 12 |
+| done | 592 |
 | deferred | 16 |
 | wont-do | 6 |
-| **total** | **983** |
+| **total** | **985** |
 
 ## ideas (32)
 
@@ -93,7 +93,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (209)
+## ready (211)
 
 ### protocol
 
@@ -314,6 +314,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
+- [`viewer-material-swatch-sphere-preview`](ready/viewer-material-swatch-sphere-preview.md)
+  — Render a material-on-a-sphere preview for the PBR material swatch
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -488,6 +490,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
+  a texture onto the build Texture tab / an object face (blocked by
+  `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-texture-preview-floater`](ready/viewer-texture-preview-floater.md) —
   Texture preview floater — full reference feature set
 - [`viewer-texture-vram-budget`](ready/viewer-texture-vram-budget.md) — Texture
@@ -595,7 +600,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (111)
+## blocked (109)
 
 ### viewer
 
@@ -642,9 +647,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
-- [`viewer-face-materials-pbr`](blocked/viewer-face-materials-pbr.md) — Texture
-  tab — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
-  `viewer-prim-texture-editing`, `viewer-ui-texture-picker` (done))
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
@@ -704,7 +706,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Model-preview floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-mesh-gltf-import`, `viewer-mesh-lod-decimation`,
   `viewer-mesh-physics-vhacd`, `viewer-mesh-upload-sequence`,
-  `viewer-prim-texture-editing`)
+  `viewer-prim-texture-editing` (done))
 - [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
 - [`viewer-minimap-click-radar-select`](blocked/viewer-minimap-click-radar-select.md)
@@ -858,9 +860,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug`)
-- [`viewer-texture-drag-drop`](blocked/viewer-texture-drag-drop.md) — Drag &
-  drop a texture onto the build Texture tab / an object face (blocked by
-  `viewer-prim-texture-editing`, `viewer-ui-texture-picker` (done))
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
@@ -903,15 +902,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (8)
+## in-progress (7)
 
 ### viewer
 
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
-- [`viewer-prim-texture-editing`](in-progress/viewer-prim-texture-editing.md) —
-  Prim texture / material editing (blocked by `viewer-object-edit-floater-shell`
-  (done), `viewer-edit-face-selection` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -925,7 +921,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (11)
+## bugs (12)
 
 ### protocol
 
@@ -943,6 +939,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
+- [`viewer-inventory-materials-not-shown`](bugs/viewer-inventory-materials-not-shown.md)
+  — Material inventory items are not shown in the inventory window
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -961,7 +959,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (590)
+## done (592)
 
 ### protocol
 
@@ -1142,6 +1140,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-face-materials-pbr`](done/viewer-face-materials-pbr.md) — Texture tab
+  — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
+  `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
 - [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
@@ -1455,6 +1456,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-prim-parameter-editing`](done/viewer-prim-parameter-editing.md) —
   Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
+- [`viewer-prim-texture-editing`](done/viewer-prim-texture-editing.md) — Prim
+  texture / material editing (blocked by `viewer-object-edit-floater-shell`
+  (done), `viewer-edit-face-selection` (done))
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
   Profile Web tab — render the feed in the embedded browser
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
