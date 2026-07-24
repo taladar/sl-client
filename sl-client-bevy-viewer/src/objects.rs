@@ -609,33 +609,60 @@ impl ObjectState {
     }
 
     /// Every prim of the in-world linkset rooted at `root`: the root itself
-    /// followed by every tracked child prim whose parent is it (attachments
-    /// excluded — they hang off an avatar, not a linkset root). An untracked or
-    /// non-root `root` yields the object alone if present, else nothing.
+    /// first, then every tracked child prim whose parent is it in a **stable**
+    /// order (by region-local id — attachments excluded, as they hang off an
+    /// avatar, not a linkset root). An untracked or non-root `root` yields the
+    /// object alone if present, else nothing.
     ///
     /// Second Life linksets are one level deep — a child's parent is always the
     /// linkset root — so a single pass over the object table finds the whole
-    /// set. Used by prim unlinking (`viewer-prim-linking`): the reference sends
-    /// an `ObjectDelink` naming **every** prim of the set (`SEND_INDIVIDUALS`)
-    /// to break it fully apart; naming only the root would leave the simulator
-    /// re-linking the orphaned children into a new set (OpenSim's
-    /// `SceneGraph::DelinkObjects`).
+    /// set. The child order is the local-id sort, not the simulator's true link
+    /// order (the wire carries no per-child link position; even the reference
+    /// notes its child order "is not always the same as sim's idea of link
+    /// order"), but it is stable frame to frame, which the prim-navigation
+    /// buttons ([`crate::edit_tool`]) and link-number read-out rely on.
+    ///
+    /// Used by prim unlinking (`viewer-prim-linking`): a whole-linkset unlink
+    /// sends an `ObjectDelink` naming **every** prim of the set
+    /// (`SEND_INDIVIDUALS`) to break it fully apart; naming only the root would
+    /// leave the simulator re-linking the orphaned children into a new set
+    /// (OpenSim's `SceneGraph::DelinkObjects`).
     pub(crate) fn linkset_members(&self, root: &ScopedObjectId) -> Vec<ScopedObjectId> {
         let mut members = Vec::new();
         if !self.objects.contains_key(root) {
             return members;
         }
         members.push(*root);
-        for (scoped, tracked) in &self.objects {
-            if scoped != root
-                && !tracked.is_root
-                && tracked.attachment_point.is_none()
-                && tracked.parent == *root
-            {
-                members.push(*scoped);
-            }
-        }
+        let mut children: Vec<ScopedObjectId> = self
+            .objects
+            .iter()
+            .filter(|(scoped, tracked)| {
+                *scoped != root
+                    && !tracked.is_root
+                    && tracked.attachment_point.is_none()
+                    && tracked.parent == *root
+            })
+            .map(|(scoped, _tracked)| *scoped)
+            .collect();
+        children.sort_by_key(|scoped| scoped.id);
+        members.extend(children);
         members
+    }
+
+    /// The scoped id of the linkset **root** that the object `scoped` belongs to
+    /// — the object itself when it is a root, its parent when it is a linked
+    /// child, or `None` when untracked or a worn attachment. The edit surfaces
+    /// resolve a picked linked part back to its linkset this way.
+    pub(crate) fn linkset_root_of(&self, scoped: &ScopedObjectId) -> Option<ScopedObjectId> {
+        let tracked = self.objects.get(scoped)?;
+        if tracked.attachment_point.is_some() {
+            return None;
+        }
+        if tracked.is_root {
+            Some(*scoped)
+        } else {
+            Some(tracked.parent)
+        }
     }
 
     /// The number of prims in the linkset rooted at `root` — the reference's

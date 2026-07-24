@@ -349,6 +349,8 @@ impl Plugin for EditToolPlugin {
                     sync_build_tool_from_radio,
                     sync_radio_from_build_tool,
                     update_toggle_glyphs,
+                    promote_selection_when_whole_linkset,
+                    sync_link_part_nav,
                     sync_tab_pages,
                     update_selection_summary,
                     sync_numeric_fields,
@@ -440,6 +442,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     ] {
         spawn_toggle_row(&mut commands, content, toggle, key, tab_index);
     }
+
+    // Linked-part navigation row (the reference's prev_part_btn / next_part_btn):
+    // shown only in edit-linked-parts mode ([`sync_link_part_nav`]), it cycles
+    // the selection through the linkset's prims.
+    spawn_link_part_nav(&mut commands, content);
 
     // Grid unit row.
     let grid_row = commands
@@ -663,6 +670,171 @@ fn spawn_toggle_row(
     );
 }
 
+/// The direction a linked-part navigation button cycles the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkPartDir {
+    /// Select the previous prim in the linkset's member order.
+    Prev,
+    /// Select the next prim in the linkset's member order.
+    Next,
+}
+
+/// Marks the linked-part navigation row, so [`sync_link_part_nav`] shows it only
+/// in edit-linked-parts mode.
+#[derive(Component, Debug, Clone, Copy)]
+struct LinkPartNavRow;
+
+/// Spawn the linked-part navigation row — a label and prev / next buttons that
+/// cycle the selection through the current linkset's prims (the reference's
+/// `prev_part_btn` / `next_part_btn`). Hidden by default; [`sync_link_part_nav`]
+/// reveals it in edit-linked-parts mode.
+fn spawn_link_part_nav(commands: &mut Commands, parent: Entity) {
+    let nav_row = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                // Hidden until edit-linked-parts mode (sync_link_part_nav).
+                display: Display::None,
+                ..row(Val::Px(6.0))
+            },
+            LinkPartNavRow,
+            Name::new("build-tools:link-part-nav"),
+            ChildOf(parent),
+        ))
+        .id();
+    spawn_row_label(commands, nav_row, "build-link-part-label");
+    for (dir, glyph, name, tab_index) in [
+        (LinkPartDir::Prev, "◀", "prev", 9_i32),
+        (LinkPartDir::Next, "▶", "next", 10_i32),
+    ] {
+        let button = commands
+            .spawn((
+                bevy::ui_widgets::Button,
+                bevy::input_focus::tab_navigation::TabIndex(tab_index),
+                Node {
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+                    ..Default::default()
+                },
+                Pickable::default(),
+                Name::new(format!("build-tools:link-part-{name}")),
+                ChildOf(nav_row),
+            ))
+            .id();
+        commands.spawn((
+            Text::new(glyph),
+            UiFont::Sans.at(TOOL_FONT_SIZE),
+            // A skinless fallback; the skin recolours via the class token.
+            TextColor(Color::WHITE),
+            ClassList::new_with_classes([VALUE_CLASS]),
+            Pickable::IGNORE,
+            ChildOf(button),
+        ));
+        commands.entity(button).observe(
+            move |press: On<Pointer<Press>>,
+                  mut selection: ResMut<SelectionSet>,
+                  tool: Res<EditToolState>,
+                  objects: Res<ObjectState>| {
+                if press.button == PointerButton::Primary {
+                    cycle_link_part(dir, &mut selection, &tool, &objects);
+                }
+            },
+        );
+    }
+}
+
+/// Cycle the selection to the previous / next prim of the current linkset.
+///
+/// Only in edit-linked-parts mode and only for a single-part selection: resolve
+/// the selected part's linkset, step one place in its stable member order
+/// (wrapping), and replace the selection with that one part — the reference's
+/// linked-part cycling (`LLToolsSelectNextPartFace`). A no-op outside
+/// edit-linked mode, for a lone prim (no other parts), or an untracked target.
+fn cycle_link_part(
+    dir: LinkPartDir,
+    selection: &mut SelectionSet,
+    tool: &EditToolState,
+    objects: &ObjectState,
+) {
+    if !tool.edit_linked {
+        return;
+    }
+    let Some(current) = selection.primary().map(|node| node.scoped) else {
+        return;
+    };
+    let Some(root) = objects.linkset_root_of(&current) else {
+        return;
+    };
+    let members = objects.linkset_members(&root);
+    let len = members.len();
+    if len < 2 {
+        return;
+    }
+    let Some(index) = members.iter().position(|member| *member == current) else {
+        return;
+    };
+    let next = match dir {
+        LinkPartDir::Next => {
+            let stepped = index.saturating_add(1);
+            if stepped >= len { 0 } else { stepped }
+        }
+        LinkPartDir::Prev => {
+            if index == 0 {
+                len.saturating_sub(1)
+            } else {
+                index.saturating_sub(1)
+            }
+        }
+    };
+    let Some(target) = members.get(next).copied() else {
+        return;
+    };
+    let (Some(full), Some(entity)) = (objects.full_key(&target), objects.entity_by_scoped(&target))
+    else {
+        return;
+    };
+    selection.clear();
+    selection.insert(target, full, entity);
+}
+
+/// When *Edit Linked Parts* is switched off (whole-linkset mode), promote any
+/// selected linked part up to its linkset root — the reference's
+/// `promoteSelectionToRoot`. Runs whenever the tool state changes; a no-op when
+/// the selection already holds only roots, so the frequent edit-state churn
+/// (held modifiers, snap, grid) costs nothing.
+fn promote_selection_when_whole_linkset(
+    tool: Res<EditToolState>,
+    objects: Res<ObjectState>,
+    mut selection: ResMut<SelectionSet>,
+) {
+    if !tool.is_changed() || tool.edit_linked || selection.is_empty() {
+        return;
+    }
+    selection.promote_to_roots(&objects);
+}
+
+/// Show the linked-part navigation row only in edit-linked-parts mode.
+fn sync_link_part_nav(
+    tool: Res<EditToolState>,
+    rows: Query<Entity, With<LinkPartNavRow>>,
+    mut nodes: Query<&mut Node>,
+) {
+    if !tool.is_changed() {
+        return;
+    }
+    let display = if tool.edit_linked {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for row in &rows {
+        if let Ok(mut node) = nodes.get_mut(row)
+            && node.display != display
+        {
+            node.display = display;
+        }
+    }
+}
+
 /// Spawn a translated row label.
 pub(crate) fn spawn_row_label(commands: &mut Commands, parent: Entity, key: &'static str) {
     commands.spawn((
@@ -805,12 +977,18 @@ fn sync_tab_pages(
     }
 }
 
-/// Rewrite the selection-summary line: how many objects are selected, the
-/// primary's name (from its `ObjectProperties` reply), and a no-modify warning
-/// when the primary is not modifiable by the agent.
+/// Rewrite the selection-summary line: how many objects are selected and how
+/// many prims that spans (the reference's `status_selectcount`), the primary's
+/// name (from its `ObjectProperties` reply), and — in edit-linked-parts mode
+/// with one part selected — that part's position in its linkset (the
+/// reference's `link_number` read-out, approximate: the wire carries no true
+/// link position, so we number by our stable member order). Closes with a
+/// no-modify warning when the primary is not modifiable.
 fn update_selection_summary(
     ui: Option<Res<BuildToolsUi>>,
     selection: Res<SelectionSet>,
+    tool: Res<EditToolState>,
+    objects: Res<ObjectState>,
     translator: Translator,
     mut texts: Query<&mut Text>,
 ) {
@@ -828,6 +1006,31 @@ fn update_selection_summary(
             "build-selection-count",
             &TransArgs::new().int("count", count),
         );
+        // The prim count across the distinct linksets the selection touches —
+        // "how many prims are in the selected linkset(s)".
+        let prims = selection_prim_count(&selection, &objects);
+        if prims > 0 {
+            let prims = i64::try_from(prims).unwrap_or(i64::MAX);
+            line.push_str(" — ");
+            line.push_str(&translator.format(
+                "build-selection-prims",
+                &TransArgs::new().int("count", prims),
+            ));
+        }
+        // Edit-linked-parts, one part selected: that part's Second Life link
+        // number (the reference's `link_number` read-out).
+        if tool.edit_linked
+            && selection.len() == 1
+            && let Some(number) = selection
+                .primary()
+                .and_then(|primary| link_number(primary.scoped, &objects))
+        {
+            line.push_str(" — ");
+            line.push_str(&translator.format(
+                "build-selection-link",
+                &TransArgs::new().int("number", i64::from(number)),
+            ));
+        }
         if let Some(properties) = selection
             .primary()
             .and_then(|primary| primary.properties.as_ref())
@@ -846,6 +1049,44 @@ fn update_selection_summary(
     if text.0 != want {
         text.0 = want;
     }
+}
+
+/// The total prim count across the distinct linksets the selection touches —
+/// each selected object resolved to its linkset root, deduplicated, and its
+/// prim count summed. This is "how many prims are in the selected linkset(s)"
+/// for the build summary, robust to whether the selection holds whole-linkset
+/// roots or individual linked parts.
+fn selection_prim_count(selection: &SelectionSet, objects: &ObjectState) -> usize {
+    let mut roots: Vec<sl_client_bevy::ScopedObjectId> = Vec::new();
+    for node in selection.iter() {
+        if let Some(root) = objects.linkset_root_of(&node.scoped)
+            && !roots.contains(&root)
+        {
+            roots.push(root);
+        }
+    }
+    roots
+        .iter()
+        .map(|root| objects.linkset_prim_count(root))
+        .sum()
+}
+
+/// The Second Life **link number** of the prim `scoped`, or `None` if untracked
+/// — matching the reference's `link_number` read-out: an unlinked (childless)
+/// prim is **0**, a linkset **root** is **1**, and each child follows in the
+/// stable member order (**2**, 3, …). The child numbering is approximate — the
+/// wire carries no true link position, so it follows our local-id member order
+/// ([`ObjectState::linkset_members`]), the same caveat the reference notes.
+fn link_number(scoped: sl_client_bevy::ScopedObjectId, objects: &ObjectState) -> Option<u32> {
+    let root = objects.linkset_root_of(&scoped)?;
+    let members = objects.linkset_members(&root);
+    // A childless / unlinked solo prim is link 0.
+    if members.len() <= 1 {
+        return Some(0);
+    }
+    let index = members.iter().position(|member| *member == scoped)?;
+    // Root (index 0) → link 1; first child (index 1) → link 2; …
+    u32::try_from(index.saturating_add(1)).ok()
 }
 
 /// Format a metre / degree value the way the fields display it.

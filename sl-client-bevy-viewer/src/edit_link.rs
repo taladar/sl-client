@@ -135,25 +135,52 @@ fn link_selection(
     true
 }
 
+/// The prims to name in the `ObjectDelink` for the current selection.
+///
+/// Mode-aware, matching the reference's `SEND_INDIVIDUALS` (which sends exactly
+/// the selected nodes):
+///
+/// - **Whole-linkset mode** (the default): the selection tracks only linkset
+///   roots, so each is expanded to its full membership — the whole set breaks
+///   apart, as selecting a whole linkset in the reference selects all its prims.
+/// - **Edit-linked-parts mode**: the selection is already individual prims, so
+///   they are sent verbatim — unlinking a **subset** pulls exactly those prims
+///   out (a lone root pops off and the sim re-links the remainder; a lone child
+///   detaches), rather than shattering the whole linkset.
+fn delink_ids(
+    selection: &SelectionSet,
+    tool: &EditToolState,
+    objects: &ObjectState,
+) -> Vec<ScopedObjectId> {
+    let mut local_ids: Vec<ScopedObjectId> = Vec::new();
+    for node in selection.iter() {
+        if tool.edit_linked {
+            if !local_ids.contains(&node.scoped()) {
+                local_ids.push(node.scoped());
+            }
+        } else {
+            for member in objects.linkset_members(&node.scoped()) {
+                if !local_ids.contains(&member) {
+                    local_ids.push(member);
+                }
+            }
+        }
+    }
+    local_ids
+}
+
 /// Send the `ObjectDelink` for the current selection, if it can be unlinked.
-/// Names every prim of each selected linkset so the sets break fully apart, and
-/// leaves the selection in place. Returns whether a delink was sent.
+/// Leaves the selection in place. Returns whether a delink was sent.
 fn unlink_selection(
     selection: &SelectionSet,
+    tool: &EditToolState,
     objects: &ObjectState,
     commands: &mut MessageWriter<SlCommand>,
 ) -> bool {
     if !can_unlink(selection) {
         return false;
     }
-    let mut local_ids: Vec<ScopedObjectId> = Vec::new();
-    for node in selection.iter() {
-        for member in objects.linkset_members(&node.scoped()) {
-            if !local_ids.contains(&member) {
-                local_ids.push(member);
-            }
-        }
-    }
+    let local_ids = delink_ids(selection, tool, objects);
     if local_ids.is_empty() {
         return false;
     }
@@ -220,15 +247,16 @@ fn drive_link_unlink(
         link_selection(&selection, &tool, &objects, &mut commands);
     }
     if do_unlink {
-        unlink_selection(&selection, &objects, &mut commands);
+        unlink_selection(&selection, &tool, &objects, &mut commands);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_LINKSET_PRIMS, can_link, can_unlink, link_order};
+    use super::{MAX_LINKSET_PRIMS, can_link, can_unlink, delink_ids, link_order};
     use crate::edit_selection::SelectionSet;
     use crate::edit_tool::EditToolState;
+    use crate::objects::ObjectState;
     use bevy::prelude::Entity;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{CircuitId, ObjectKey, RegionLocalObjectId, ScopedObjectId, Uuid};
@@ -301,5 +329,26 @@ mod tests {
     #[test]
     fn linkset_limit_is_reference_faithful() {
         assert_eq!(MAX_LINKSET_PRIMS, 256);
+    }
+
+    /// In **edit-linked-parts** mode the delink names exactly the selected
+    /// prims (the subset case), verbatim and de-duplicated — it does not expand
+    /// to the whole linkset, so unlinking a subset pulls out only those prims.
+    #[test]
+    fn edit_linked_delink_sends_the_selected_subset() {
+        let objects = ObjectState::default();
+        let tool = EditToolState {
+            edit_linked: true,
+            ..EditToolState::default()
+        };
+        let mut set = SelectionSet::default();
+        set.insert(scoped(5), full(5), Entity::PLACEHOLDER);
+        set.insert(scoped(7), full(7), Entity::PLACEHOLDER);
+        // Exactly the two selected prims, in selection order (no whole-linkset
+        // expansion — the objects table is untouched in this mode).
+        assert_eq!(
+            delink_ids(&set, &tool, &objects),
+            vec![scoped(5), scoped(7)]
+        );
     }
 }

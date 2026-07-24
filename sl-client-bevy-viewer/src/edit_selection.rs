@@ -76,6 +76,15 @@ const RUBBER_BAND_FILL: Color = Color::srgba(0.4, 0.75, 1.0, 0.10);
 /// `SilhouetteParentColor` (`Yellow`, `1 1 0`).
 const ROOT_OUTLINE: Color = Color::srgba(1.0, 1.0, 0.0, 0.85);
 
+/// The **primary** selection's root outline — the last-selected object, the one
+/// the numeric fields / gizmo follow and the one that becomes the linkset root
+/// on a link. A bright near-white, deliberately distinct from the parent-yellow
+/// of the other selected roots so it reads as "the active one" when several
+/// objects are selected. (The reference draws every root the same yellow and
+/// distinguishes the primary only in the floater; a distinct 3D colour is a
+/// small addition on top, so a builder can see which prim will win a link.)
+const PRIMARY_OUTLINE: Color = Color::srgba(1.0, 1.0, 1.0, 0.95);
+
 /// A selected linkset **child**'s outline colour — the reference's
 /// `SilhouetteChildColor` (`SL-MidBlue`, `0.3 0.6 0.9`).
 const CHILD_OUTLINE: Color = Color::srgba(0.3, 0.6, 0.9, 0.85);
@@ -158,6 +167,61 @@ impl SelectionSet {
     /// Remove an object from the selection (a no-op if absent).
     pub(crate) fn remove(&mut self, scoped: ScopedObjectId) {
         self.selected.retain(|node| node.scoped != scoped);
+    }
+
+    /// Promote every selected linked part to its linkset **root** — whole-linkset
+    /// mode's invariant, the reference's `promoteSelectionToRoot`, run when
+    /// *Edit Linked Parts* is switched off. Each node is resolved to its root
+    /// (via [`ObjectState::linkset_root_of`]); duplicates collapse (two parts of
+    /// one linkset become the single root); and selection order — hence the
+    /// primary = last — is preserved, the last-selected part's root becoming the
+    /// primary root. A root the viewer cannot resolve is kept as-is. Returns
+    /// whether anything changed.
+    ///
+    /// A promoted node drops its part's [`ObjectProperties`]; the wire diff
+    /// ([`sync_selection_wire`]) then selects the root and re-requests them.
+    pub(crate) fn promote_to_roots(&mut self, objects: &ObjectState) -> bool {
+        let mut promoted: Vec<SelectedNode> = Vec::new();
+        for node in &self.selected {
+            let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
+            let promoted_node = if root_scoped == node.scoped {
+                // Already a root (or unresolvable): keep it, properties intact.
+                node.clone()
+            } else if let (Some(full), Some(entity)) = (
+                objects.full_key(&root_scoped),
+                objects.entity_by_scoped(&root_scoped),
+            ) {
+                SelectedNode {
+                    scoped: root_scoped,
+                    full,
+                    entity,
+                    properties: None,
+                }
+            } else {
+                // Root known but not resolvable to a scene entity: leave as-is.
+                node.clone()
+            };
+            // Dedupe with move-to-end, so the last-selected part's root wins the
+            // primary slot (mirrors `insert`'s promote-on-reselect).
+            if let Some(pos) = promoted
+                .iter()
+                .position(|existing| existing.scoped == promoted_node.scoped)
+            {
+                let existing = promoted.remove(pos);
+                promoted.push(existing);
+            } else {
+                promoted.push(promoted_node);
+            }
+        }
+        let changed = promoted.len() != self.selected.len()
+            || promoted
+                .iter()
+                .zip(&self.selected)
+                .any(|(new, old)| new.scoped != old.scoped);
+        if changed {
+            self.selected = promoted;
+        }
+        changed
     }
 
     /// Empty the selection (both committed and tentative).
@@ -273,7 +337,11 @@ struct RubberBandNode {
 /// rubber-band tint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HighlightKind {
-    /// The selected object itself (a linkset root, or the picked part in
+    /// The **primary** selection's root — the last-selected object, which the
+    /// numeric fields / gizmo follow and which becomes the linkset root on a
+    /// link. Drawn distinct from the other selected roots.
+    Primary,
+    /// A (non-primary) selected object's root prim (or the picked part in
     /// edit-linked-parts mode).
     Root,
     /// A linkset child riding along with its selected root.
@@ -293,7 +361,9 @@ struct SelectionHighlightOverlay {
 /// The shared outline materials, one per [`HighlightKind`].
 #[derive(Resource, Debug)]
 struct HighlightAssets {
-    /// The selected root's outline material.
+    /// The primary selection's root outline material.
+    primary: Handle<StandardMaterial>,
+    /// A (non-primary) selected root's outline material.
     root: Handle<StandardMaterial>,
     /// A linkset child's outline material.
     child: Handle<StandardMaterial>,
@@ -305,6 +375,7 @@ impl HighlightAssets {
     /// The material for `kind`.
     fn material(&self, kind: HighlightKind) -> Handle<StandardMaterial> {
         match kind {
+            HighlightKind::Primary => self.primary.clone(),
             HighlightKind::Root => self.root.clone(),
             HighlightKind::Child => self.child.clone(),
             HighlightKind::Pending => self.pending.clone(),
@@ -313,9 +384,9 @@ impl HighlightAssets {
 }
 
 impl FromWorld for HighlightAssets {
-    /// Build the three inverted-hull outline materials once: unlit, front
-    /// faces culled, so only the inflated shell's back-facing rim shows — an
-    /// edge glow, not a fill.
+    /// Build the inverted-hull outline materials once: unlit, front faces
+    /// culled, so only the inflated shell's back-facing rim shows — an edge
+    /// glow, not a fill.
     fn from_world(world: &mut World) -> Self {
         let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
         let mut outline = |color: Color| {
@@ -327,10 +398,12 @@ impl FromWorld for HighlightAssets {
                 ..Default::default()
             })
         };
+        let primary = outline(PRIMARY_OUTLINE);
         let root = outline(ROOT_OUTLINE);
         let child = outline(CHILD_OUTLINE);
         let pending = outline(PENDING_OUTLINE);
         Self {
+            primary,
             root,
             child,
             pending,
@@ -791,14 +864,40 @@ fn apply_selection_highlight(
     mut commands: Commands,
 ) {
     // The desired overlay set: face entity → outline kind. A committed
-    // outline (root, then child) wins over a tentative one when both apply.
+    // outline (primary, then root, then child) wins over a tentative one when
+    // both apply.
     let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
     if tool.active {
+        let primary_entity = selection.primary().map(|node| node.entity);
         for node in selection.iter() {
-            collect_faces(node.entity, &children, &scene, &faces, false, &mut desired);
+            // The last-selected object's own root prim reads as the primary
+            // (the one the fields / gizmo follow and the future link root); the
+            // other selected roots stay parent-yellow.
+            let root_kind = if Some(node.entity) == primary_entity {
+                HighlightKind::Primary
+            } else {
+                HighlightKind::Root
+            };
+            collect_faces(
+                node.entity,
+                &children,
+                &scene,
+                &faces,
+                root_kind,
+                HighlightKind::Child,
+                &mut desired,
+            );
         }
         for (_scoped, entity) in selection.rect_pending() {
-            collect_faces(*entity, &children, &scene, &faces, true, &mut desired);
+            collect_faces(
+                *entity,
+                &children,
+                &scene,
+                &faces,
+                HighlightKind::Pending,
+                HighlightKind::Pending,
+                &mut desired,
+            );
         }
     }
     // Despawn stale overlays, keep matching ones.
@@ -829,17 +928,19 @@ fn apply_selection_highlight(
 }
 
 /// Collect every face-mesh entity under `root` (the object's own faces and its
-/// linkset children's) into `desired`, colouring the selected object's own
-/// faces as [`HighlightKind::Root`] and any linkset child's (a descendant
-/// carrying its own [`SceneObject`]) as [`HighlightKind::Child`] — the
-/// reference's parent / child silhouette split. A committed outline wins over
-/// a tentative ([`HighlightKind::Pending`]) one when both apply.
+/// linkset children's) into `desired`, colouring the selected object's own root
+/// faces as `root_kind` and any linkset child's (a descendant carrying its own
+/// [`SceneObject`]) as `child_kind` — the reference's parent / child silhouette
+/// split, with the primary root distinguished. A stronger outline (primary,
+/// then root, then child) wins over a tentative ([`HighlightKind::Pending`])
+/// one when both apply.
 fn collect_faces(
     root: Entity,
     children: &Query<&Children>,
     scene: &Query<(), With<SceneObject>>,
     faces: &Query<&Mesh3d, With<PrimFaceEntity>>,
-    pending: bool,
+    root_kind: HighlightKind,
+    child_kind: HighlightKind,
     desired: &mut HashMap<Entity, HighlightKind>,
 ) {
     let mut stack = vec![(root, false)];
@@ -850,21 +951,16 @@ fn collect_faces(
             is_child = true;
         }
         if faces.contains(entity) {
-            let kind = if pending {
-                HighlightKind::Pending
-            } else if is_child {
-                HighlightKind::Child
-            } else {
-                HighlightKind::Root
-            };
+            let kind = if is_child { child_kind } else { root_kind };
             desired
                 .entry(entity)
                 .and_modify(|existing| {
-                    // Committed beats pending; root beats child.
+                    // Primary beats root beats child beats pending.
                     let rank = |kind: HighlightKind| match kind {
-                        HighlightKind::Root => 0_u8,
-                        HighlightKind::Child => 1_u8,
-                        HighlightKind::Pending => 2_u8,
+                        HighlightKind::Primary => 0_u8,
+                        HighlightKind::Root => 1_u8,
+                        HighlightKind::Child => 2_u8,
+                        HighlightKind::Pending => 3_u8,
                     };
                     if rank(kind) < rank(*existing) {
                         *existing = kind;
@@ -928,5 +1024,22 @@ mod tests {
     fn wire_selection_starts_empty() {
         let wire = WireSelection::default();
         assert!(wire.synced.is_empty());
+    }
+
+    /// Promoting a selection of already-root (or untracked) objects is a no-op:
+    /// nothing to jump, so the set and its primary are unchanged. (The
+    /// child→root jump needs a populated `ObjectState` and is exercised live.)
+    #[test]
+    fn promote_to_roots_is_a_noop_when_all_roots() {
+        let objects = crate::objects::ObjectState::default();
+        let mut set = SelectionSet::default();
+        set.insert(scoped(1), full(1), Entity::PLACEHOLDER);
+        set.insert(scoped(2), full(2), Entity::PLACEHOLDER);
+        assert!(
+            !set.promote_to_roots(&objects),
+            "no linked parts to promote"
+        );
+        assert_eq!(set.len(), 2);
+        assert_eq!(set.primary().map(|node| node.scoped), Some(scoped(2)));
     }
 }

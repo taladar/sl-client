@@ -406,7 +406,13 @@ build-selection-count = { $count ->
     [one] { $count } object selected
    *[other] { $count } objects selected
 }
+build-selection-prims = { $count ->
+    [one] { $count } prim
+   *[other] { $count } prims
+}
+build-selection-link = link { $number }
 build-selection-no-modify = no modify
+build-link-part-label = Linked part
 
 # Build tools parameter tabs (viewer-prim-parameter-editing).
 build-info-creator = Creator

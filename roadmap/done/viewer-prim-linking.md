@@ -49,11 +49,14 @@ becomes the linkset root. Our [`SelectionSet`] keeps the primary
 (primary first); it never re-sorts, so re-clicking the intended root last is
 enough to change which prim wins. Unit-tested.
 
-**Unlink names every prim.** `unlink_selection` sends an `ObjectDelink` with
-every prim of each selected linkset (`ObjectState::linkset_members`), matching
-the reference's `SEND_INDIVIDUALS`; a root-only delink would leave OpenSim
-re-linking the orphans into a fresh set (`SceneGraph::DelinkObjects`). The
-selection is left in place so a wrongly ordered link is re-linkable at once.
+**Unlink is mode-aware** (`delink_ids`), matching `SEND_INDIVIDUALS` (the
+reference sends exactly the selected nodes). Whole-linkset mode sends every
+prim of each selected linkset (`ObjectState::linkset_members`) so the set
+breaks fully apart — a root-only delink would leave OpenSim re-linking the
+orphans into a fresh set (`SceneGraph::DelinkObjects`). Edit-linked-parts mode
+sends the selected prims verbatim, so unlinking a **subset** pulls out only
+those (a lone root pops off, a lone child detaches). The selection is left in
+place so a wrongly ordered link is re-linkable at once.
 
 **Enable gates** mirror `enableLinkObjects` / `enableUnlinkObjects`: link
 needs whole-linkset (not edit-linked-parts) mode, ≥ 2 roots, and one
@@ -71,3 +74,19 @@ resolves held single keys — chord command accelerators are not that axis. The
 Build menu grew **Link** / **Unlink** entries (greyed via `enabled_when`
 `can-link` / `can-unlink`); both the chords and the menu picks funnel through
 the one `drive_link_unlink` system.
+
+**Selection surfaces** (follow-up round, all in `edit_selection.rs` /
+`edit_tool.rs`): the highlight distinguishes the **primary** (last-selected,
+future link root) with a bright-white outline on top of the reference's
+parent-yellow / child-blue split, so a builder sees which prim will win a link;
+the Build summary shows the selected linkset's **prim count**
+(`selection_prim_count`) and — in edit-linked-parts mode — the selected part's
+Second Life **link number** (`link_number`: unlinked solo = 0, root = 1,
+children = 2+, the reference's `link_number` read-out, child order approximate
+as the wire carries no link position); a **◀ / ▶ linked-part nav** row
+(`cycle_link_part`, the reference's `prev_part_btn` / `next_part_btn`) cycles
+the selection through a linkset's prims in edit-linked mode; and switching
+*Edit Linked Parts* **off** promotes any selected linked part to its linkset
+root (`SelectionSet::promote_to_roots`, the reference's
+`promoteSelectionToRoot`). `ObjectState` gained `linkset_members` (stable
+local-id order), `linkset_prim_count`, and `linkset_root_of` to back these.
