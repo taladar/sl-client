@@ -143,6 +143,7 @@ use sl_wire::messages::{
     ObjectIncludeInSearchObjectDataBlock, ObjectLink, ObjectLinkAgentDataBlock,
     ObjectLinkObjectDataBlock, ObjectMaterial, ObjectMaterialAgentDataBlock,
     ObjectMaterialObjectDataBlock, ObjectName, ObjectNameAgentDataBlock, ObjectNameObjectDataBlock,
+    ObjectOwner, ObjectOwnerAgentDataBlock, ObjectOwnerHeaderDataBlock, ObjectOwnerObjectDataBlock,
     ObjectPermissions, ObjectPermissionsAgentDataBlock, ObjectPermissionsHeaderDataBlock,
     ObjectPermissionsObjectDataBlock, ObjectSaleInfo, ObjectSaleInfoAgentDataBlock,
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
@@ -4908,6 +4909,38 @@ impl Circuit {
                     param_in_use: block.in_use,
                     param_size: u32::try_from(block.data.len()).unwrap_or(u32::MAX),
                     param_data: block.data,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `ObjectOwner` reliably: deed `local_ids` to `group_id`. A
+    /// non-god viewer deeds by sending a **nil owner** with the target group
+    /// and no god-override (the reference's
+    /// `LLSelectMgr::sendOwner(LLUUID::null, group_id)`); the simulator then
+    /// makes the group the owner of each object, which must already be *set*
+    /// to that group and owned by the agent.
+    pub(crate) fn send_object_owner(
+        &mut self,
+        local_ids: &[RegionLocalObjectId],
+        group_id: GroupKey,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::ObjectOwner(ObjectOwner {
+            agent_data: ObjectOwnerAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+            },
+            header_data: ObjectOwnerHeaderDataBlock {
+                r#override: false,
+                owner_id: Uuid::nil(),
+                group_id: group_id.uuid(),
+            },
+            object_data: local_ids
+                .iter()
+                .map(|id| ObjectOwnerObjectDataBlock {
+                    object_local_id: id.0,
                 })
                 .collect(),
         });

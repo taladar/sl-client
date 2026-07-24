@@ -1996,6 +1996,14 @@ fn advance_running(
             } => {
                 session.set_object_group(local_ids, *group_id, now).ok();
             }
+            Command::DeedObjectsToGroup {
+                local_ids,
+                group_id,
+            } => {
+                session
+                    .deed_objects_to_group(local_ids, *group_id, now)
+                    .ok();
+            }
             Command::SetObjectPermissions {
                 local_ids,
                 field,

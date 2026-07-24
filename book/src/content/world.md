@@ -79,6 +79,13 @@ These join the other object-edit commands (material, flags, group, …); the
 simulator confirms each the usual way, by pushing the changed object's
 `ObjectUpdate`.
 
+Ownership follows the same shape: `Command::SetObjectGroup` sets the group an
+object is *set to* (`ObjectGroup`), and `Command::DeedObjectsToGroup` then
+**deeds** it — an `ObjectOwner` with a nil owner and no god-override, after
+which the group owns the object (`Session::deed_objects_to_group`;
+irreversible for a plain resident, and the object must be set to that group
+first).
+
 ## The region handshake
 
 When a [circuit](../comms/circuits.md) to a region comes up, the region

@@ -1595,8 +1595,14 @@ impl AvatarState {
     }
 
     /// Request the legacy name of `agent` once — skipped if it is already cached
-    /// or already in flight.
-    fn request_name(&mut self, agent: AgentKey, commands: &mut MessageWriter<SlCommand>) {
+    /// or already in flight. `pub(crate)` for the build floater's General tab,
+    /// which resolves a selected object's creator / owner through the same
+    /// cache.
+    pub(crate) fn request_name(
+        &mut self,
+        agent: AgentKey,
+        commands: &mut MessageWriter<SlCommand>,
+    ) {
         if self.names.contains_key(&agent) || !self.requested.insert(agent) {
             return;
         }

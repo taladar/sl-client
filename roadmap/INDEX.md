@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 32 |
 | ready | 204 |
-| blocked | 117 |
+| blocked | 116 |
 | in-progress | 7 |
 | bugs | 11 |
-| done | 582 |
+| done | 583 |
 | deferred | 15 |
 | wont-do | 6 |
 | **total** | **974** |
@@ -165,6 +165,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
   Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
+- [`viewer-build-undo-redo`](ready/viewer-build-undo-redo.md) — Object-edit
+  undo/redo stack (blocked by `viewer-transform-gizmos` (done),
+  `viewer-prim-parameter-editing` (done))
 - [`viewer-bumps-floater`](ready/viewer-bumps-floater.md) — Bumps, pushes & hits
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-camera-constraint-plane`](ready/viewer-camera-constraint-plane.md) —
@@ -397,8 +400,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-linking`](ready/viewer-prim-linking.md) — Prim linking &
   unlinking (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))
-- [`viewer-prim-parameter-editing`](ready/viewer-prim-parameter-editing.md) —
-  Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
 - [`viewer-projector-lights-textured`](ready/viewer-projector-lights-textured.md)
   — Projector lights (textured spotlights / gobos)
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
@@ -579,7 +580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (117)
+## blocked (116)
 
 ### viewer
 
@@ -603,9 +604,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-build-undo-redo`](blocked/viewer-build-undo-redo.md) — Object-edit
-  undo/redo stack (blocked by `viewer-transform-gizmos` (done),
-  `viewer-prim-parameter-editing`)
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
@@ -958,7 +956,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (582)
+## done (583)
 
 ### protocol
 
@@ -1444,6 +1442,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-prim-parameter-editing`](done/viewer-prim-parameter-editing.md) —
+  Prim parameter editing (blocked by `viewer-object-edit-floater-shell` (done))
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
   Profile Web tab — render the feed in the embedded browser
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh

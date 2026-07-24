@@ -37,11 +37,11 @@ unit field, a selection summary line (count, primary name, no-modify
 warning), and live numeric Position / Rotation (XYZ Euler degrees) / Size
 fields that mirror the primary selection — including mid-gizmo-drag — and
 commit on Enter / focus loss by sending the same `MultipleObjectUpdate` the
-gizmos send. The per-aspect tab strip (Object / Features / Texture /
-Content) hosts the transform fields on the **Object** tab (the reference's
-`llpanelobject` placement); the other pages are placeholders, as scoped —
-the tab contents are
-[[viewer-prim-parameter-editing]], [[viewer-prim-texture-editing]], and
+gizmos send. The per-aspect tab strip (General / Object / Features /
+Texture / Content, the reference's order) hosts the transform fields on the
+**Object** tab (the reference's `llpanelobject` placement); the General /
+Object / Features contents are [[viewer-prim-parameter-editing]], the
+Texture and Content placeholders are [[viewer-prim-texture-editing]] and
 [[viewer-prim-inventory-editing]]. Text roles are skinnable
 (`.sk-build-label` / `-value` / `-placeholder` in `common.css`); a gallery
 specimen covers the shape in the `ui_test` matrix.

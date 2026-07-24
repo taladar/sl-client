@@ -44,9 +44,9 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
-    JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
-    PrimShapeFloat, PrimShapeParams, Priority, Rotation, ScopedObjectId, SculptOrMeshKey, SlEvent,
-    SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace,
+    JointOverrides, MeshKey, MeshSkin, Object, ObjectExtraParams, ObjectKey, PrimFaceId, PrimLod,
+    PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, Rotation, ScopedObjectId, SculptOrMeshKey,
+    SlEvent, SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace,
     TextureKey, TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry,
     grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
     tessellate_sculpt, tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh,
@@ -307,6 +307,15 @@ struct TrackedObject {
     /// (you-owner, copy) and the touch-handler flag decide which pie slices are
     /// live for this object.
     update_flags: u32,
+    /// The object's physical-material byte (`LL_MCODE_*`), kept for the build
+    /// floater's material editor ([`ObjectState::edit_data`]).
+    material: u8,
+    /// The object's complete last-received extra parameters, kept so an
+    /// `ObjectExtraParams` edit (the build floater's Features tab) can resend
+    /// the **full** set — the message states the object's complete
+    /// extra-parameter state, so a partial send would clear whatever it
+    /// omitted (sculpt, animesh, render materials, …).
+    extra: ObjectExtraParams,
     /// The per-face child entities carrying this object's geometry: one per
     /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
     /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
@@ -699,6 +708,58 @@ impl ObjectState {
             .map(|tracked| tracked.update_flags)
     }
 
+    /// Locally echo an edited `PrimFlags` bit (the build floater's
+    /// physical / temporary / phantom toggles) so the checkbox flips
+    /// immediately; the simulator's own `ObjectUpdate` echo confirms (or
+    /// reverts) it. Display-only: the physics / render systems re-sync from
+    /// the echoed update, not from this.
+    pub(crate) fn apply_local_flag_edit(&mut self, scoped: &ScopedObjectId, bit: u32, on: bool) {
+        if let Some(tracked) = self.objects.get_mut(scoped) {
+            if on {
+                tracked.update_flags |= bit;
+            } else {
+                tracked.update_flags &= !bit;
+            }
+        }
+    }
+
+    /// Locally echo an edited material byte (the build floater's material
+    /// cycle); display-only, confirmed by the simulator's echo.
+    pub(crate) fn apply_local_material_edit(&mut self, scoped: &ScopedObjectId, material: u8) {
+        if let Some(tracked) = self.objects.get_mut(scoped) {
+            tracked.material = material;
+        }
+    }
+
+    /// Locally echo an edited extra-parameter set (the build floater's flexi /
+    /// light editors) so the Features tab reflects the send immediately;
+    /// display-only — the renderers' components re-sync from the simulator's
+    /// echoed update, and the shape fingerprint is deliberately untouched so
+    /// that echo still triggers the re-tessellation it needs.
+    pub(crate) fn apply_local_extra_edit(
+        &mut self,
+        scoped: &ScopedObjectId,
+        extra: ObjectExtraParams,
+    ) {
+        if let Some(tracked) = self.objects.get_mut(scoped) {
+            tracked.extra = extra;
+        }
+    }
+
+    /// Everything the build floater's parameter tabs
+    /// (`viewer-prim-parameter-editing`) read for one selected object: its
+    /// object class, quantized shape, material byte, `PrimFlags` bits, and its
+    /// complete extra parameters (borrowed — clone only what an edit resends).
+    pub(crate) fn edit_data(&self, scoped: &ScopedObjectId) -> Option<ObjectEditData<'_>> {
+        self.objects.get(scoped).map(|tracked| ObjectEditData {
+            pcode: tracked.shape.pcode,
+            shape: tracked.shape.shape,
+            material: tracked.material,
+            update_flags: tracked.update_flags,
+            extra: &tracked.extra,
+        })
+    }
+
     /// Every tracked in-world (non-attachment) prim for the minimap's object
     /// layer: its entity (for the transform), its own `PrimFlags` bits, and its
     /// root's flags OR-ed in (the agent-relative you-owner / group-owned bits
@@ -729,6 +790,24 @@ impl ObjectState {
         }
         out
     }
+}
+
+/// What [`ObjectState::edit_data`] reports for one tracked object — the
+/// last-received wire-side state the build floater's parameter tabs edit.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObjectEditData<'state> {
+    /// The object class byte (`PCode`); only a [`pcode::PRIMITIVE`] is
+    /// shape-editable.
+    pub(crate) pcode: u8,
+    /// The quantized path/profile shape parameters.
+    pub(crate) shape: PrimShapeParams,
+    /// The physical-material byte (`LL_MCODE_*`).
+    pub(crate) material: u8,
+    /// The object's `PrimFlags` bits (physical / temporary / phantom live
+    /// here).
+    pub(crate) update_flags: u32,
+    /// The object's complete extra parameters (flexi, light, sculpt, …).
+    pub(crate) extra: &'state ObjectExtraParams,
 }
 
 /// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities
@@ -2282,6 +2361,8 @@ fn apply_object(
         existing.animated = is_animated_object(object);
         existing.full_key = object.full_id;
         existing.update_flags = object.update_flags;
+        existing.material = object.material;
+        existing.extra = object.extra.clone();
         return;
     }
 
@@ -2366,6 +2447,8 @@ fn apply_object(
             parented,
             attachment_point,
             update_flags: object.update_flags,
+            material: object.material,
+            extra: object.extra.clone(),
             face_entities,
             pending,
             mesh_rebuild: None,

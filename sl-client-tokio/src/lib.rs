@@ -1264,6 +1264,9 @@ impl Client {
                         Some(Command::SetObjectGroup { local_ids, group_id }) => {
                             self.session.set_object_group(&local_ids, group_id, Instant::now())?;
                         }
+                        Some(Command::DeedObjectsToGroup { local_ids, group_id }) => {
+                            self.session.deed_objects_to_group(&local_ids, group_id, Instant::now())?;
+                        }
                         Some(Command::SetObjectPermissions { local_ids, field, set, mask }) => {
                             self.session.set_object_permissions(&local_ids, field, set, mask, Instant::now())?;
                         }

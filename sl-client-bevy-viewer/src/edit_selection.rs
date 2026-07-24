@@ -179,6 +179,37 @@ impl SelectionSet {
         &self.rect_pending
     }
 
+    /// Locally echo an edited name / description onto the **primary** node's
+    /// properties (the build floater's Object tab commit): an `ObjectName` /
+    /// `ObjectDescription` send is not echoed back by the simulator, so the
+    /// floater's own copy is the one the summary and fields re-read.
+    pub(crate) fn set_primary_name_description(
+        &mut self,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) {
+        if let Some(node) = self.selected.last_mut()
+            && let Some(properties) = node.properties.as_mut()
+        {
+            if let Some(name) = name {
+                name.clone_into(&mut properties.name);
+            }
+            if let Some(description) = description {
+                description.clone_into(&mut properties.description);
+            }
+        }
+    }
+
+    /// The **primary** node's mutable properties, for the build floater's
+    /// local echo of a permission / group edit (the simulator does not echo
+    /// an `ObjectPermissions` / `ObjectGroup` back; the floater re-requests
+    /// the properties to confirm).
+    pub(crate) fn primary_properties_mut(&mut self) -> Option<&mut ObjectProperties> {
+        self.selected
+            .last_mut()
+            .and_then(|node| node.properties.as_deref_mut())
+    }
+
     /// Fold an `ObjectProperties` reply onto the node it belongs to (matched
     /// by grid-wide key). Returns whether a node took it.
     fn apply_properties(&mut self, properties: Box<ObjectProperties>) -> bool {

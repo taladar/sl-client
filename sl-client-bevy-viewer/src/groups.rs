@@ -191,6 +191,19 @@ impl GroupsModel {
         self.touch();
     }
 
+    /// The display name of `group`, if the agent is a member. The build
+    /// floater's General tab shows the selected object's group through this
+    /// (an object set to a group the agent is not in falls back to its id).
+    pub(crate) fn group_name(&self, group: GroupKey) -> Option<&str> {
+        self.groups.get(&group).map(String::as_str)
+    }
+
+    /// The agent's group ids, in the map's stable id order — the build
+    /// floater's set-group cycle walks these (with "none" between the wrap).
+    pub(crate) fn group_ids(&self) -> Vec<GroupKey> {
+        self.groups.keys().copied().collect()
+    }
+
     /// Set the active (worn) group, bumping the revision only on a real change.
     fn set_active(&mut self, active: Option<GroupKey>) {
         if self.active != active {

@@ -51,6 +51,7 @@ mod conversations;
 mod coords;
 mod diagnostics;
 mod edit_math;
+mod edit_params;
 mod edit_selection;
 mod edit_tool;
 mod emoji_complete;
@@ -835,6 +836,10 @@ fn run_session(
     // The build tool (viewer-object-edit-floater-shell): the Build Tools
     // floater, the edit-mode switch, and the numeric transform fields.
     .add_plugins(EditToolPlugin)
+    // The parameter tabs (viewer-prim-parameter-editing): the Object-tab
+    // name / description / flag / shape editors and the Features-tab
+    // material / flexi / light editors.
+    .add_plugins(crate::edit_params::EditParamsPlugin)
     // The object selection core (viewer-object-selection-core): click /
     // rubber-band selection, the selection set + highlight, and the
     // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.

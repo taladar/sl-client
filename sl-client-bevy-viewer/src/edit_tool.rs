@@ -19,9 +19,11 @@
 //!   same `MultipleObjectUpdate` ([`Command::UpdateObject`]) the gizmos send.
 //!   Rotations display as the reference viewer's XYZ Euler degrees
 //!   ([`crate::edit_math::rotation_to_euler_deg`]).
-//! - The **tab strip** is shell-only: the four reference tabs are placeholders
-//!   whose contents ship in `viewer-prim-parameter-editing`,
-//!   `viewer-prim-texture-editing`, and `viewer-prim-inventory-editing`.
+//! - The **tab strip** hosts the per-aspect editors: the Object and Features
+//!   pages carry the parameter editors ([`crate::edit_params`],
+//!   `viewer-prim-parameter-editing`); the Texture and Content pages are
+//!   placeholders whose contents ship in `viewer-prim-texture-editing` and
+//!   `viewer-prim-inventory-editing`.
 //!
 //! Reference (Firestorm, read-only): `llfloatertools`.
 
@@ -39,12 +41,14 @@ use crate::input_context::InputContext;
 use crate::objects::{ObjectSlMotion, ObjectState, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
-use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::ui_tab::{
+    DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, fill_tab_container, spawn_tab_container,
+};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::web_floater::set_editor_text;
 
 /// The floater's font size, in logical pixels.
-const TOOL_FONT_SIZE: f32 = 13.0;
+pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
 
 /// The width of a numeric transform field, in `"0"`-glyph advances.
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
@@ -56,21 +60,21 @@ const TOOL_ACTIVE_COLOR: Color = Color::srgba(0.25, 0.45, 0.7, 1.0);
 const TOOL_IDLE_COLOR: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
 
 /// The toggle-row check glyph while on.
-const CHECKED_GLYPH: &str = "☑";
+pub(crate) const CHECKED_GLYPH: &str = "☑";
 
 /// The toggle-row check glyph while off.
-const UNCHECKED_GLYPH: &str = "☐";
+pub(crate) const UNCHECKED_GLYPH: &str = "☐";
 
 /// The default grid unit, in metres — the reference's `GridResolution`.
 const DEFAULT_GRID_UNIT: f32 = 0.5;
 
 /// The skin class for the floater's label / summary text
 /// (`--text-muted`-driven; see `assets/skins/common.css`).
-const LABEL_CLASS: &str = "sk-build-label";
+pub(crate) const LABEL_CLASS: &str = "sk-build-label";
 
 /// The skin class for the floater's value / button text
 /// (`--text-primary`-driven).
-const VALUE_CLASS: &str = "sk-build-value";
+pub(crate) const VALUE_CLASS: &str = "sk-build-value";
 
 /// The skin class for the placeholder tab text (`--text-disabled`-driven).
 const PLACEHOLDER_CLASS: &str = "sk-build-placeholder";
@@ -283,8 +287,9 @@ pub(crate) struct BuildToolsUi {
     summary_text: Entity,
     /// The tab strip.
     tab_strip: Entity,
-    /// The four placeholder tab pages, in tab order.
-    tab_pages: [Entity; 4],
+    /// The five tab pages, in tab order (General / Object / Features /
+    /// Texture / Content).
+    tab_pages: [Entity; 5],
 }
 
 impl BuildToolsUi {
@@ -292,6 +297,21 @@ impl BuildToolsUi {
     pub(crate) const fn panel(&self) -> Entity {
         self.panel
     }
+}
+
+/// The tab-page container entities the per-aspect editors dock into, published
+/// by [`spawn_build_floater`] for the parameter-tab module
+/// ([`crate::edit_params`]) to populate.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct BuildTabPages {
+    /// The **General** tab page (name / description; the reference's
+    /// `llpanelpermissions` — its permission / sale surfaces are their own
+    /// tasks).
+    pub(crate) general: Entity,
+    /// The **Object** tab page (also hosts the transform rows).
+    pub(crate) object: Entity,
+    /// The **Features** tab page.
+    pub(crate) features: Entity,
 }
 
 /// The plugin wiring the build tool into the viewer.
@@ -305,7 +325,9 @@ impl Plugin for EditToolPlugin {
             .init_resource::<BuildFieldFocus>()
             .add_systems(
                 Startup,
-                spawn_build_floater.after(UiScaffoldSystems::SpawnRoot),
+                (spawn_build_floater, crate::edit_params::spawn_param_tabs)
+                    .chain()
+                    .after(UiScaffoldSystems::SpawnRoot),
             )
             .add_systems(
                 Update,
@@ -339,11 +361,15 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
             id: "build-tools",
             title: String::from("Build Tools"),
             position: Vec2::new(60.0, 80.0),
-            default_size: None,
-            min_size: None,
+            // A definite, resizable content area (like the profile floater):
+            // the tab bar and pages track the window and the pages scroll
+            // their overflow, so the parameter editors stay reachable at any
+            // size.
+            default_size: Some(Vec2::new(420.0, 640.0)),
+            min_size: Some(Vec2::new(340.0, 400.0)),
             dock_host: None,
             caps: FloaterCaps {
-                resizable: false,
+                resizable: true,
                 minimizable: true,
                 closable: true,
                 dockable: false,
@@ -357,6 +383,12 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         .spawn((
             Node {
                 padding: UiRect::all(Val::Px(8.0)),
+                // Fill the floater's definite content slot: the fixed rows
+                // above the tabs keep their content height and the tab
+                // container grows into the rest.
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
                 ..column(Val::Px(6.0))
             },
             ChildOf(handle.content),
@@ -429,17 +461,19 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         ))
         .id();
 
-    // The tab shell: the reference's per-aspect editor tabs. The **Object**
-    // tab hosts the transform fields (as the reference's `llpanelobject`
-    // does); the other three are placeholders whose contents are their own
-    // roadmap tasks.
-    let tab_labels: [String; 4] = [
+    // The tab shell: the reference's per-aspect editor tabs, in its order —
+    // General (name / description; permissions are their own tasks), Object
+    // (the transform fields, as the reference's `llpanelobject` places them,
+    // plus the shape editors), Features, and the placeholder Texture /
+    // Content pages whose contents are their own roadmap tasks.
+    let tab_labels: [String; 5] = [
+        "build-tab-general".to_owned(),
         "build-tab-object".to_owned(),
         "build-tab-features".to_owned(),
         "build-tab-texture".to_owned(),
         "build-tab-content".to_owned(),
     ];
-    let tab_strip = spawn_tab_strip(
+    let tabs = spawn_tab_container(
         &mut commands,
         content,
         &TabSpec {
@@ -454,25 +488,32 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
             translate_labels: true,
         },
     );
-    let mut tab_pages = [Entity::PLACEHOLDER; 4];
-    for index in 0_usize..4_usize {
+    // The floater is resizable (a definite content area), so the widget must
+    // track it rather than content-size — the bar widens with the window and
+    // the panels grow and scroll (the profile floater's arrangement).
+    fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    // Inside each container panel, a page wrapper carrying `UiPanelShown`:
+    // the container toggles panels with `Visibility` (they stay laid out),
+    // which alone would leave a hidden page's fields Tab-reachable — the
+    // wrapper's `UiPanelShown` parks their `TabIndex` stops and drops focus
+    // ([`sync_tab_pages`] mirrors the strip's active tab into it).
+    let mut tab_pages = [Entity::PLACEHOLDER; 5];
+    for (index, panel) in tabs.panels.iter().enumerate() {
         let page = commands
             .spawn((
                 Node {
-                    padding: UiRect::all(Val::Px(6.0)),
+                    width: Val::Percent(100.0),
                     ..column(Val::Px(4.0))
                 },
-                // `UiPanelShown` rather than a raw `Display` flip: it also
-                // parks the hidden page's `TabIndex` stops and drops focus,
-                // so a field on a hidden tab is never Tab-reachable.
                 UiPanelShown(index == 0),
                 Name::new(format!("build-tab-page:{index}")),
-                ChildOf(content),
+                ChildOf(*panel),
             ))
             .id();
-        // The not-yet-implemented tabs carry a placeholder line; the Object
-        // tab gets the real transform rows below.
-        if index != 0 {
+        // The not-yet-implemented tabs carry a placeholder line; the General
+        // / Object / Features pages get their editors from the shell below
+        // and the parameter-tab module ([`crate::edit_params`]).
+        if index >= 3 {
             commands.spawn((
                 Text::default(),
                 Translated::new("build-tab-placeholder"),
@@ -487,10 +528,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
             *slot = page;
         }
     }
+    let tab_strip = tabs.strip;
 
     // The three transform rows, inside the Object tab (the reference's
     // `llpanelobject` position / rotation / size spinners).
-    let object_page = tab_pages.first().copied().unwrap_or(content);
+    let object_page = tab_pages.get(1).copied().unwrap_or(content);
     let mut fields = [Entity::PLACEHOLDER; 9];
     for (group_index, (group, key)) in [
         (FieldGroup::Position, "build-position-label"),
@@ -538,6 +580,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         }
     }
 
+    commands.insert_resource(BuildTabPages {
+        general: tab_pages.first().copied().unwrap_or(content),
+        object: tab_pages.get(1).copied().unwrap_or(content),
+        features: tab_pages.get(2).copied().unwrap_or(content),
+    });
     commands.insert_resource(BuildToolsUi {
         panel: handle.root,
         fields,
@@ -644,7 +691,7 @@ fn spawn_toggle_row(
 }
 
 /// Spawn a translated row label.
-fn spawn_row_label(commands: &mut Commands, parent: Entity, key: &'static str) {
+pub(crate) fn spawn_row_label(commands: &mut Commands, parent: Entity, key: &'static str) {
     commands.spawn((
         Text::default(),
         Translated::new(key),

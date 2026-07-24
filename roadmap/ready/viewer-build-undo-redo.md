@@ -2,7 +2,7 @@
 id: viewer-build-undo-redo
 title: Object-edit undo/redo stack
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-transform-gizmos, viewer-prim-parameter-editing]
 refs: [viewer-object-selection-core]

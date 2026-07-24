@@ -253,3 +253,9 @@
 .sk-build-placeholder {
   color: var(--text-disabled);
 }
+
+/* A gated-off (greyed) build-parameter control. Later in the cascade than
+ * .sk-build-label / .sk-build-value so it wins while both classes apply. */
+.sk-build-disabled {
+  color: var(--text-disabled);
+}

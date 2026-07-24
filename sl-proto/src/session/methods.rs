@@ -10867,6 +10867,31 @@ impl Session {
         Ok(())
     }
 
+    /// Deeds the objects `local_ids` to the group `group_id` (an `ObjectOwner`
+    /// with a nil owner and no god-override — the ordinary-resident deed). The
+    /// simulator makes the group the owner; each object must already be *set*
+    /// to that group ([`set_object_group`](Self::set_object_group)), owned by
+    /// the agent, and transferable — deeding is **irreversible** for a plain
+    /// resident.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn deed_objects_to_group(
+        &mut self,
+        local_ids: &[ScopedObjectId],
+        group_id: GroupKey,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let Some((scope, local_ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_object_owner(&local_ids, group_id, now)?;
+        Ok(())
+    }
+
     /// Sets or clears the `mask` permission bits of the `field` mask on the
     /// objects `local_ids` (an `ObjectPermissions`). The `mask` is a typed
     /// [`Permissions`] set (e.g. [`Permissions::COPY`]` | `[`Permissions::MODIFY`]);

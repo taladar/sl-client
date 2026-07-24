@@ -1368,6 +1368,14 @@ pub enum Command {
         /// The group id.
         group_id: GroupKey,
     },
+    /// Deed objects to the group they are set to (`ObjectOwner` with a nil
+    /// owner); irreversible for a plain resident.
+    DeedObjectsToGroup {
+        /// The region-local ids.
+        local_ids: Vec<ScopedObjectId>,
+        /// The group to deed to (the group the objects are set to).
+        group_id: GroupKey,
+    },
     /// Set or clear permission bits on objects (`ObjectPermissions`).
     SetObjectPermissions {
         /// The region-local ids.
