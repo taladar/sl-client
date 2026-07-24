@@ -12,3 +12,9 @@ crate types implement each part of it — lives in [`book/`](book/), an
 ```sh
 cd book && mdbook serve --open
 ```
+
+## License
+
+Licensed under the GNU Lesser General Public License, version 2.1 only
+([LGPL-2.1-only](LICENSE)), matching the license of the Second Life
+reference viewer whose behaviour these crates reimplement.
