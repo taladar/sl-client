@@ -55,6 +55,7 @@ use crate::edit_tool::{
     CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
 };
 use crate::legacy_materials::LegacyMaterialManager;
+use crate::material_preview::MaterialPreview;
 use crate::materials::{MaterialManager, ObjectRenderMaterials};
 use crate::objects::ObjectState;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
@@ -661,6 +662,10 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         TextureKey::from(Uuid::nil()),
         Uuid::nil(),
     );
+    // The render-material swatch previews the material on a lit sphere
+    // ([`crate::material_preview`]) rather than painting a flat texture thumbnail;
+    // it starts empty until a face with a render material is selected.
+    commands.entity(pbr_swatch).insert(MaterialPreview::Empty);
     *tab_index = tab_index.saturating_add(1);
     let new_button = spawn_action_button(commands, pbr_row, "build-pbr-new", *tab_index);
     commands.entity(new_button).insert(PbrNewButton);
@@ -1150,6 +1155,8 @@ struct MatWidgets<'w, 's> {
     texture_swatches: Query<'w, 's, &'static mut TextureSwatchValue>,
     /// The render-material swatch's material id (what its picker opens on).
     material_swatches: Query<'w, 's, &'static mut MaterialSwatchValue>,
+    /// The render-material swatch's sphere preview (the effective material shown).
+    material_previews: Query<'w, 's, &'static mut MaterialPreview>,
     /// The colour swatch values (specular / PBR tints).
     color_swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The double-sided toggle glyph text.
@@ -1298,17 +1305,15 @@ fn sync_material_widgets(
             byte_at(shown.legacy.specular_color, 2),
         ),
     );
-    // PBR swatches. The render-material swatch previews the material by its
-    // base-colour (albedo) texture — the swatch widget can only paint a texture
-    // thumbnail, not a material, so a material id renders blank; the albedo is a
-    // representative stand-in (the reference renders the material on a sphere,
-    // its own follow-up). A material with no albedo texture (factor-only) stays
-    // blank.
-    set_texture_swatch(
-        &mut widgets.texture_swatches,
-        ui.pbr_swatch,
-        texture_id_of(effective.base_color_texture),
-    );
+    // PBR swatches. The render-material swatch previews the assigned material on a
+    // lit sphere ([`crate::material_preview`], the reference's `LLTextureCtrl`
+    // material preview): the effective material (base + override) when the face
+    // carries one, else an empty swatch.
+    let preview = match shown.pbr_material {
+        Some(_) => MaterialPreview::Material(Box::new(effective)),
+        None => MaterialPreview::Empty,
+    };
+    set_material_preview(&mut widgets.material_previews, ui.pbr_swatch, preview);
     // The render-material swatch's picker opens on the current material id.
     set_material_swatch(
         &mut widgets.material_swatches,
@@ -1409,6 +1414,20 @@ fn set_material_swatch(
         && swatch.0 != value
     {
         swatch.0 = value;
+    }
+}
+
+/// Set a swatch's sphere-preview target if it differs (the effective material the
+/// render-material swatch previews).
+fn set_material_preview(
+    previews: &mut Query<&mut MaterialPreview>,
+    entity: Entity,
+    value: MaterialPreview,
+) {
+    if let Ok(mut preview) = previews.get_mut(entity)
+        && *preview != value
+    {
+        *preview = value;
     }
 }
 

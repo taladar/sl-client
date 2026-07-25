@@ -89,6 +89,7 @@ mod local_chat_input;
 mod locomotion;
 mod locomotion_ik;
 mod look_at;
+mod material_preview;
 mod materials;
 mod media_controls;
 mod media_engine;
@@ -871,6 +872,9 @@ fn run_session(
     // The Blinn-Phong normal / specular maps + PBR (GLTF) material channels of
     // the Texture tab (viewer-face-materials-pbr).
     .add_plugins(crate::edit_material::EditMaterialPlugin)
+    // Offscreen material-on-a-sphere previews for the PBR render-material swatch
+    // and the material picker's preview pane (viewer-material-swatch-sphere-preview).
+    .add_plugins(crate::material_preview::MaterialPreviewPlugin)
     // The object selection core (viewer-object-selection-core): click /
     // rubber-band selection, the selection set + highlight, and the
     // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.

@@ -21,8 +21,10 @@
 //!   [`spawn_material_swatch`] swatch) it browses GLTF render-material items
 //!   instead of textures, retitles to *Pick: Material*, hides the texture-only
 //!   Blank / Default quick choices, and returns the chosen material id in the
-//!   same [`TexturePicked`] reply. The material preview is a follow-up
-//!   (`viewer-material-swatch-sphere-preview`); the pane is blank in that mode.
+//!   same [`TexturePicked`] reply. In material mode the preview pane previews the
+//!   *selected* material on a lit sphere ([`crate::material_preview`],
+//!   `viewer-material-swatch-sphere-preview`) via a [`MaterialPreview`] component,
+//!   the same way it previews a texture.
 //! - Selecting a texture emits a **non-final** [`TexturePicked`] so the consumer
 //!   can live-preview it on the object; **OK** emits the final choice and
 //!   **Cancel** emits the original (revert), mirroring the colour picker.
@@ -38,12 +40,15 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::Button;
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{InventoryFolderKey, InventoryType, TextureKey, Uuid, to_bevy_image};
+use sl_client_bevy::{
+    AssetKey, InventoryFolderKey, InventoryType, TextureKey, Uuid, to_bevy_image,
+};
 use std::hash::{Hash, Hasher as _};
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::inventory::{InventoryModel, item_icon, query_folder_page};
+use crate::material_preview::MaterialPreview;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -389,6 +394,7 @@ impl Plugin for TexturePickerPlugin {
                     paint_tree_selection,
                     apply_texture_swatch_thumbnail,
                     request_preview_texture,
+                    sync_material_preview_pane,
                     resolve_texture_previews,
                     scroll_tree,
                 )
@@ -666,8 +672,9 @@ fn handle_open_texture_picker(
             node.display = quick_display;
         }
     }
-    // A material id is not a texture; clear the preview pane (the material-swatch
-    // sphere-preview task fills it) so it never shows a stale texture.
+    // A material id is not a texture; clear any texture thumbnail off the preview
+    // pane so it never shows a stale one — the material-preview sphere then repaints
+    // it ([`sync_material_preview_pane`] binds the pane's [`MaterialPreview`]).
     if open.kind == PickerKind::Material
         && let Ok(mut preview) = commands.get_entity(ui.preview)
     {
@@ -1094,6 +1101,44 @@ fn request_preview_texture(
         .entry(state.selected)
         .or_default()
         .push(ui.preview);
+}
+
+/// Keep the preview pane's [`MaterialPreview`] in step with the picker's selection
+/// while it is open in **material** mode — so the pane previews the selected
+/// material on a lit sphere ([`crate::material_preview`]), the reference's
+/// `LLTextureCtrl` material preview. In texture mode or once the picker is closed
+/// the component is removed, handing the pane back to the texture-preview path.
+fn sync_material_preview_pane(
+    ui: Option<Res<TexturePickerUi>>,
+    state: Res<TexturePickerState>,
+    mut previews: Query<&mut MaterialPreview>,
+    mut commands: Commands,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if !state.is_changed() {
+        return;
+    }
+    if state.requester.is_none() || state.kind != PickerKind::Material {
+        // Closed, or a texture-mode pick: the pane is not a material preview.
+        if let Ok(mut pane) = commands.get_entity(ui.preview) {
+            pane.remove::<MaterialPreview>();
+        }
+        return;
+    }
+    let want = if state.selected.uuid().is_nil() {
+        MaterialPreview::Empty
+    } else {
+        MaterialPreview::Asset(AssetKey::from(state.selected.uuid()))
+    };
+    if let Ok(mut preview) = previews.get_mut(ui.preview) {
+        if *preview != want {
+            *preview = want;
+        }
+    } else if let Ok(mut pane) = commands.get_entity(ui.preview) {
+        pane.insert(want);
+    }
 }
 
 /// Swap thumbnail nodes for their decoded textures as they land (the preview and

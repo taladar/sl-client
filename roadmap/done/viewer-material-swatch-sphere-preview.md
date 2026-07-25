@@ -2,7 +2,7 @@
 id: viewer-material-swatch-sphere-preview
 title: Render a material-on-a-sphere preview for the PBR material swatch
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-24) while testing the PBR material editor
 refs: [viewer-face-materials-pbr, viewer-pbr-material-editor, viewer-ui-texture-picker]
 ---
@@ -37,3 +37,32 @@ previews a texture.
 
 Reference (Firestorm, read-only): `LLTextureCtrl` material-preview draw,
 `llmaterialeditor` preview, `llfloatermaterialeditor`.
+
+## Done (2026-07-25)
+
+New viewer module `material_preview.rs`: a pool of offscreen **studios**, each
+an isolated render layer holding a sphere, a key `DirectionalLight`, and a
+camera rendering into a `RenderTarget::Image` (mirroring the HUD / probe
+render-to-texture setups). A UI node opts in with a `MaterialPreview` component
+(`Empty` / `Material(Box<GltfMaterial>)` / `Asset(AssetKey)`); a driver system
+resolves it, binds a studio, shades the sphere, and points the node's
+`ImageNode` at the studio image. Studios are pooled and rebound as previews come
+and go, so the common case (the swatch + the picker pane) uses two.
+
+- The render-material swatch (`edit_material.rs`) now previews the face's
+  **effective** material (base + override, already folded by
+  `sync_material_widgets`) as `MaterialPreview::Material`, replacing the
+  base-colour-texture stand-in.
+- The material picker's preview pane (`ui_texture_picker.rs`) previews the
+  **selected** material by asset id (`MaterialPreview::Asset`), decoded through
+  the `MaterialManager`; the pane is no longer blank in material mode.
+- Sphere shading reuses the world PBR path via a new
+  `MaterialManager::apply_preview` (scalars + the shared texture-patch queue
+  that `apply_pbr_textures` fills), so a preview looks like the material does in
+  world.
+
+Verified: `cargo clippy`/tests clean (studio-pool bind/reuse + distinct-layer
+unit tests). On-screen fidelity needs PBR material content to render (OpenSim
+serves none; aditi's PBR *maps* still hit the `ViewerAsset`-503 wall noted for
+[[viewer-face-materials-pbr]]) — factor-only materials (base colour / metallic /
+roughness / emissive) do render on the sphere regardless.

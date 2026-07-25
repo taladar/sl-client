@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 32 |
-| ready | 211 |
+| ready | 210 |
 | blocked | 109 |
 | in-progress | 7 |
-| bugs | 11 |
-| done | 593 |
+| bugs | 12 |
+| done | 594 |
 | deferred | 16 |
 | wont-do | 6 |
-| **total** | **985** |
+| **total** | **986** |
 
 ## ideas (32)
 
@@ -93,7 +93,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 
-## ready (211)
+## ready (210)
 
 ### protocol
 
@@ -314,8 +314,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
-- [`viewer-material-swatch-sphere-preview`](ready/viewer-material-swatch-sphere-preview.md)
-  — Render a material-on-a-sphere preview for the PBR material swatch
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -921,7 +919,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (11)
+## bugs (12)
 
 ### protocol
 
@@ -942,6 +940,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-pbr-material-render-unconfirmed`](bugs/viewer-pbr-material-render-unconfirmed.md)
+  — Actually render PBR (GLTF) materials on a face — and on the material preview
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
@@ -957,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (593)
+## done (594)
 
 ### protocol
 
@@ -1237,6 +1237,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
   pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
+- [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
+  — Render a material-on-a-sphere preview for the PBR material swatch
 - [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
   surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
   (done))

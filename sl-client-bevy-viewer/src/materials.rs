@@ -280,6 +280,44 @@ impl MaterialManager {
         self.decoded.get(&id)
     }
 
+    /// Ensure material asset `id` is being fetched + decoded so
+    /// [`decoded_material`](Self::decoded_material) can later return it — the
+    /// material-swatch **sphere preview** ([`crate::material_preview`]) uses this to
+    /// resolve a material chosen by asset id (in the picker) into a
+    /// [`GltfMaterial`]. Idempotent, and parked until the `ViewerAsset` cap is known.
+    pub(crate) fn request_material(&mut self, id: AssetKey) {
+        self.request(id);
+    }
+
+    /// Shade an **arbitrary** [`StandardMaterial`] (a material-preview sphere, not a
+    /// prim face) with an effective [`GltfMaterial`]: write its scalar / factor
+    /// fields and (re)request its texture maps into the shared texture-patch queue,
+    /// which [`apply_pbr_textures`] fills as each map decodes. The preview sphere
+    /// has no per-face UV placement, so the identity affine is used ([`base` and
+    /// `effective` are the same material — the sphere shows the material itself, not
+    /// a face's base + override composition, which the caller has already folded).
+    pub(crate) fn apply_preview(
+        &mut self,
+        textures: &mut TextureManager,
+        materials: &mut Assets<StandardMaterial>,
+        handle: &Handle<StandardMaterial>,
+        material: &GltfMaterial,
+    ) {
+        // Clear every slot first: a reused preview sphere must not keep a prior
+        // material's map. `request_material_textures` only clears a slot the base
+        // *had* and the effective dropped — with base == effective here it never
+        // clears, so a leftover would leak through. Also drop any parked patches
+        // still targeting this handle from the previous material.
+        for slot in PbrSlot::ALL {
+            drop_texture_patches(self, handle, slot);
+            if let Some(mut standard) = materials.get_mut(handle) {
+                slot.clear(&mut standard);
+            }
+        }
+        apply_material_scalars(materials, handle, material, Affine2::IDENTITY);
+        request_material_textures(self, textures, materials, handle, material, material);
+    }
+
     /// The per-face GLTF override layered on the base material, if the face has
     /// one — the starting point the Texture tab's PBR transform editor amends
     /// before re-sending ([`crate::edit_material`]).
