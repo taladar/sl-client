@@ -118,6 +118,7 @@ use std::path::Path;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::bump::{apply_surface_flags, generate_normal_map};
 use crate::coords::sl_to_bevy_rotation;
+use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
 use crate::legacy_materials::{apply_legacy_scalars, build_linear_image};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
@@ -315,7 +316,7 @@ pub(crate) struct SceneAssets<'w> {
     /// The mesh collection the fixture's geometry is added to.
     pub(crate) meshes: ResMut<'w, Assets<Mesh>>,
     /// The material collection.
-    pub(crate) materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub(crate) materials: ResMut<'w, Assets<FaceMaterial>>,
     /// The image collection, for a fixture that needs a texture.
     pub(crate) images: ResMut<'w, Assets<Image>>,
     /// The inverse-bindpose collection a rigged fixture's `SkinnedMesh` binds
@@ -902,7 +903,7 @@ fn spawn_geometry(
     assets: &mut SceneAssets<'_>,
 ) -> Entity {
     let mesh = assets.meshes.add(mesh);
-    let material = assets.materials.add(material);
+    let material = assets.materials.add(inert_face_material(material));
     commands
         .spawn((
             Mesh3d(mesh),
@@ -1118,13 +1119,13 @@ fn prim_textured_tiling(
     // Through the real converter, which is where the address mode is set — a
     // fixture that built the `Image` by hand would be testing the fixture.
     let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
-    let material = assets.materials.add(StandardMaterial {
+    let material = assets.materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(image),
         uv_transform: Affine2::from_scale(Vec2::splat(4.0)),
         perceptual_roughness: 0.9,
         ..default()
-    });
+    }));
     let object = commands
         .spawn((
             Transform::IDENTITY,
@@ -1371,12 +1372,12 @@ fn mesh_cube(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut S
     let image = assets.images.add(to_bevy_image(&uv_reference_texture()));
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         let mesh = assets.meshes.add(to_bevy_mesh(submesh));
-        let material = assets.materials.add(StandardMaterial {
+        let material = assets.materials.add(inert_face_material(StandardMaterial {
             base_color: Color::WHITE,
             base_color_texture: Some(image.clone()),
             perceptual_roughness: 0.9,
             ..default()
-        });
+        }));
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
@@ -1499,7 +1500,9 @@ fn rigged_mesh(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut
             &skin,
         )));
     let mesh = assets.meshes.add(to_bevy_rigged_mesh(&submesh));
-    let material = assets.materials.add(matte(Color::srgb(0.8, 0.7, 0.7)));
+    let material = assets
+        .materials
+        .add(inert_face_material(matte(Color::srgb(0.8, 0.7, 0.7))));
     commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(material),
@@ -1592,7 +1595,9 @@ fn spawn_base_part(
     assets: &mut SceneAssets<'_>,
 ) {
     let mesh = assets.meshes.add(to_bevy_base_mesh(base));
-    let material = assets.materials.add(matte(Color::srgb(0.85, 0.7, 0.6)));
+    let material = assets
+        .materials
+        .add(inert_face_material(matte(Color::srgb(0.85, 0.7, 0.6))));
     let part = commands
         .spawn((
             Mesh3d(mesh),
@@ -1808,7 +1813,9 @@ fn avatar_morphed_body(
         let mesh = assets
             .meshes
             .add(to_bevy_morphed_mesh(&part.mesh, &morphed));
-        let material = assets.materials.add(matte(Color::srgb(0.85, 0.7, 0.6)));
+        let material = assets
+            .materials
+            .add(inert_face_material(matte(Color::srgb(0.85, 0.7, 0.6))));
         let entity = commands
             .spawn((
                 Mesh3d(mesh),
@@ -2486,12 +2493,12 @@ fn texture_anim_flipbook(
         // One material per face, unshared — as the viewer's `face_material` builds
         // them, and as this scene needs: the driver writes each face's own
         // `uv_transform`, so a shared material would have the faces fight over it.
-        let material = assets.materials.add(StandardMaterial {
+        let material = assets.materials.add(inert_face_material(StandardMaterial {
             base_color: Color::WHITE,
             base_color_texture: Some(image.clone()),
             perceptual_roughness: 0.9,
             ..default()
-        });
+        }));
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
@@ -2609,7 +2616,7 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
         if bumped {
             material.normal_map_texture = Some(normal.clone());
         }
-        let material = assets.materials.add(material);
+        let material = assets.materials.add(inert_face_material(material));
         let object = commands
             .spawn((
                 Transform::from_xyz(offset, 0.0, 0.0),
@@ -2695,7 +2702,7 @@ fn legacy_material_face(
         apply_legacy_scalars(&mut standard, &material);
         // What `apply_legacy_normal_maps` drops in once the fetch lands.
         standard.normal_map_texture = Some(normal.clone());
-        let standard = assets.materials.add(standard);
+        let standard = assets.materials.add(inert_face_material(standard));
         let object = commands
             .spawn((
                 Transform::from_xyz(offset, 0.0, 0.0),

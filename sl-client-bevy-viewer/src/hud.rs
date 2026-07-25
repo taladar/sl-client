@@ -44,6 +44,7 @@ use sl_client_bevy::AttachmentPoint;
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
+use crate::face_material::FaceMaterial;
 
 /// The render layer the whole HUD subtree lives on, and which the world (fly)
 /// camera — on the default layer `0` — therefore does not render. P35.2's HUD
@@ -298,14 +299,8 @@ fn anchored_point_offset(offset: Vec3, aspect: f32) -> Vec3 {
 type RelitFaces<'world, 'state> = Query<
     'world,
     'state,
-    (
-        &'static MeshMaterial3d<StandardMaterial>,
-        &'static RenderLayers,
-    ),
-    Or<(
-        Changed<MeshMaterial3d<StandardMaterial>>,
-        Changed<RenderLayers>,
-    )>,
+    (&'static MeshMaterial3d<FaceMaterial>, &'static RenderLayers),
+    Or<(Changed<MeshMaterial3d<FaceMaterial>>, Changed<RenderLayers>)>,
 >;
 
 /// Render every HUD face fullbright (P35.2).
@@ -327,18 +322,15 @@ type RelitFaces<'world, 'state> = Query<
 /// Deviation, deliberately: the reference exempts a face with a **PBR** material
 /// (`isHUDAttachment() && !is_pbr`), leaving it lit. Here that would render it black,
 /// so every HUD face goes fullbright.
-pub(crate) fn apply_hud_fullbright(
-    faces: RelitFaces,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+pub(crate) fn apply_hud_fullbright(faces: RelitFaces, mut materials: ResMut<Assets<FaceMaterial>>) {
     for (face, layers) in &faces {
         if !on_hud_layer(Some(layers)) {
             continue;
         }
         if let Some(mut material) = materials.get_mut(&face.0)
-            && !material.unlit
+            && !material.base.unlit
         {
-            material.unlit = true;
+            material.base.unlit = true;
         }
     }
 }

@@ -50,6 +50,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
 
+use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
@@ -201,7 +202,7 @@ pub(crate) struct BumpManager {
     normals: HashMap<(TextureKey, bool), Handle<Image>>,
     /// Face materials parked on a diffuse texture id, each with whether its bump
     /// code inverts the height field, applied once the texture decodes.
-    pending: HashMap<TextureKey, Vec<(Handle<StandardMaterial>, bool)>>,
+    pending: HashMap<TextureKey, Vec<(Handle<FaceMaterial>, bool)>>,
 }
 
 impl BumpManager {
@@ -241,7 +242,7 @@ pub(crate) fn register_bump_faces(
     mut textures: ResMut<TextureManager>,
     new_faces: Query<
         (
-            &MeshMaterial3d<StandardMaterial>,
+            &MeshMaterial3d<FaceMaterial>,
             &PrimFaceEntity,
             &FaceTextureDebug,
             &ChildOf,
@@ -304,7 +305,7 @@ pub(crate) fn apply_bump_normals(
     mut manager: ResMut<BumpManager>,
     textures: Res<TextureManager>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let ready: Vec<TextureKey> = manager
         .pending
@@ -324,8 +325,8 @@ pub(crate) fn apply_bump_normals(
         );
         for (handle, invert) in parked {
             let image = manager.normal_image(&mut images, id, invert, &decoded);
-            if let Some(mut standard) = materials.get_mut(&handle) {
-                standard.normal_map_texture = Some(image);
+            if let Some(mut material) = materials.get_mut(&handle) {
+                material.base.normal_map_texture = Some(image);
             }
         }
     }

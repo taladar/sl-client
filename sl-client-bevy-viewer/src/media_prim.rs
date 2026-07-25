@@ -35,6 +35,7 @@ use sl_client_bevy::{
 };
 
 use crate::camera::ViewerCamera;
+use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::hud_pick::{pointer_over_blocking_ui, surface_info_from_hit};
 use crate::input_context::InputContext;
 use crate::media_engine::{
@@ -146,9 +147,9 @@ pub(crate) struct ActiveMedia {
     /// The face entity currently wearing the media material.
     pub(crate) face_entity: Entity,
     /// The material handle the face wore before (restored on close).
-    restore: Handle<StandardMaterial>,
+    restore: Handle<FaceMaterial>,
     /// The media material (samples the surface image).
-    pub(crate) material: Handle<StandardMaterial>,
+    pub(crate) material: Handle<FaceMaterial>,
     /// The surface image size the media material was last built against. A
     /// size change re-creates the material and re-inserts the component: a
     /// changed `MeshMaterial3d` is the one path guaranteed to rebind the new
@@ -448,11 +449,11 @@ fn drive_media_surfaces(
     mut surfaces: NonSendMut<MediaSurfaces>,
     objects: Res<ObjectState>,
     faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    mesh_materials: Query<&MeshMaterial3d<FaceMaterial>>,
     transforms: Query<&GlobalTransform>,
     cameras: Query<&GlobalTransform, With<ViewerCamera>>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     mut commands: Commands,
 ) {
@@ -615,9 +616,9 @@ fn start_media_surface(
     engine: &mut MediaEngine,
     surfaces: &mut MediaSurfaces,
     images: &mut Assets<Image>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: &Query<&MeshMaterial3d<StandardMaterial>>,
+    mesh_materials: &Query<&MeshMaterial3d<FaceMaterial>>,
     commands: &mut Commands,
 ) -> bool {
     let url = entry.current_url.as_ref().or(entry.home_url.as_ref());
@@ -683,9 +684,9 @@ fn apply_media_material(
     target: &MediaTarget,
     active: &mut ActiveMedia,
     faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: &Query<&MeshMaterial3d<StandardMaterial>>,
+    mesh_materials: &Query<&MeshMaterial3d<FaceMaterial>>,
     surfaces: &mut MediaSurfaces,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     commands: &mut Commands,
 ) {
     let Some(slot) = surfaces.get_mut(active.surface) else {
@@ -696,14 +697,14 @@ fn apply_media_material(
         .get(entity)
         .map(|(_face, FaceTextureDebug(tf))| texture_face_uv_transform(tf))
         .unwrap_or_default();
-    let material = materials.add(StandardMaterial {
+    let material = materials.add(inert_face_material(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(slot.image.clone()),
         // Media renders fullbright in the reference viewer.
         unlit: true,
         uv_transform,
         ..default()
-    });
+    }));
     slot.touch_materials.push(material.clone());
     let Ok(mut entity_commands) = commands.get_entity(entity) else {
         return;
@@ -895,9 +896,9 @@ fn handle_media_clicks(
     mut surfaces: NonSendMut<MediaSurfaces>,
     objects: Res<ObjectState>,
     faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    mesh_materials: Query<&MeshMaterial3d<StandardMaterial>>,
+    mesh_materials: Query<&MeshMaterial3d<FaceMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut commands: Commands,

@@ -43,6 +43,7 @@ use sl_client_bevy::{
     TextureKey, Uuid,
 };
 
+use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
@@ -76,7 +77,7 @@ pub(crate) struct LegacyMaterialManager {
     /// Face [`StandardMaterial`] handles waiting for a material to arrive, keyed
     /// by the material id they requested; drained by [`apply_legacy_materials`]
     /// once the material decodes.
-    pending_faces: HashMap<Uuid, Vec<Handle<StandardMaterial>>>,
+    pending_faces: HashMap<Uuid, Vec<Handle<FaceMaterial>>>,
     /// Material ids already queued or issued to the capability, so each is
     /// requested only once (the pipeline is eventually consistent — a face that
     /// registers after the material decoded is served straight from `decoded`).
@@ -88,7 +89,7 @@ pub(crate) struct LegacyMaterialManager {
     /// several materials is uploaded once.
     images: HashMap<TextureKey, Handle<Image>>,
     /// Face materials parked on a normal-map texture id, applied once it decodes.
-    texture_pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    texture_pending: HashMap<TextureKey, Vec<Handle<FaceMaterial>>>,
     /// Face materials whose `alpha_mode` a legacy material has **overridden**
     /// (an opaque-tint face whose `LLMaterial` diffuse alpha mode applied): the
     /// material's mode is authoritative from then on, so the R22d texture-alpha
@@ -97,7 +98,7 @@ pub(crate) struct LegacyMaterialManager {
     /// outcome used to depend on which of the two applied last, R25a). Entries
     /// for despawned faces go stale harmlessly (asset ids are not reused) and
     /// are dropped with the manager at session end.
-    alpha_overridden: HashSet<AssetId<StandardMaterial>>,
+    alpha_overridden: HashSet<AssetId<FaceMaterial>>,
 }
 
 impl LegacyMaterialManager {
@@ -111,14 +112,14 @@ impl LegacyMaterialManager {
     /// Whether a legacy material has overridden this face material's alpha
     /// mode, making that mode authoritative over the R22d texture-alpha
     /// resolution (see [`Self::alpha_overridden`]).
-    pub(crate) fn is_alpha_overridden(&self, id: AssetId<StandardMaterial>) -> bool {
+    pub(crate) fn is_alpha_overridden(&self, id: AssetId<FaceMaterial>) -> bool {
         self.alpha_overridden.contains(&id)
     }
 
     /// Register a face material handle against its legacy material id: park the
     /// handle until the material arrives and queue the id for fetch if it is not
     /// already known / requested.
-    fn register(&mut self, handle: Handle<StandardMaterial>, material_id: Uuid) {
+    fn register(&mut self, handle: Handle<FaceMaterial>, material_id: Uuid) {
         self.pending_faces
             .entry(material_id)
             .or_default()
@@ -226,7 +227,7 @@ pub(crate) fn register_legacy_materials(
     mut manager: ResMut<LegacyMaterialManager>,
     new_faces: Query<
         (
-            &MeshMaterial3d<StandardMaterial>,
+            &MeshMaterial3d<FaceMaterial>,
             &PrimFaceEntity,
             &FaceTextureDebug,
             &ChildOf,
@@ -317,7 +318,7 @@ pub(crate) fn receive_legacy_materials(
 pub(crate) fn apply_legacy_materials(
     mut manager: ResMut<LegacyMaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let ready: Vec<Uuid> = manager
         .pending_faces
@@ -388,12 +389,13 @@ pub(crate) fn apply_legacy_scalars(
 fn apply_legacy_to_face(
     manager: &mut LegacyMaterialManager,
     textures: &mut TextureManager,
-    materials: &mut Assets<StandardMaterial>,
-    handle: &Handle<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
+    handle: &Handle<FaceMaterial>,
     material: &LegacyMaterial,
 ) {
-    if let Some(mut standard) = materials.get_mut(handle) {
-        if apply_legacy_scalars(&mut standard, material) {
+    if let Some(mut material_asset) = materials.get_mut(handle) {
+        let standard = &mut material_asset.base;
+        if apply_legacy_scalars(standard, material) {
             // The material's alpha mode is authoritative for this face now: the
             // R22d texture-alpha resolution must not upgrade it later (R25a).
             let _new = manager.alpha_overridden.insert(handle.id());
@@ -432,7 +434,7 @@ pub(crate) fn apply_legacy_normal_maps(
     mut manager: ResMut<LegacyMaterialManager>,
     textures: Res<TextureManager>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let ready: Vec<TextureKey> = manager
         .texture_pending
@@ -447,8 +449,8 @@ pub(crate) fn apply_legacy_normal_maps(
         let handles = manager.texture_pending.remove(&id).unwrap_or_default();
         let image = manager.normal_image(&mut images, id, &decoded);
         for handle in handles {
-            if let Some(mut standard) = materials.get_mut(&handle) {
-                standard.normal_map_texture = Some(image.clone());
+            if let Some(mut material) = materials.get_mut(&handle) {
+                material.base.normal_map_texture = Some(image.clone());
             }
         }
     }

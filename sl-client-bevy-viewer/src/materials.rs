@@ -48,6 +48,7 @@ use sl_client_bevy::{
 use crate::edit_selection::SelectionSet;
 use crate::edit_texture::MatModeState;
 use crate::edit_tool::EditToolState;
+use crate::face_material::FaceMaterial;
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
@@ -162,7 +163,7 @@ impl PbrSlot {
 /// texture to decode.
 struct PbrTexturePatch {
     /// The face material to write the uploaded image into.
-    material: Handle<StandardMaterial>,
+    material: Handle<FaceMaterial>,
     /// The slot the image fills.
     slot: PbrSlot,
 }
@@ -174,7 +175,7 @@ struct FaceSlot {
     /// The base GLTF material asset id this face renders (before any override).
     material_id: AssetKey,
     /// The face's [`StandardMaterial`] handle, re-patched on each recomposition.
-    handle: Handle<StandardMaterial>,
+    handle: Handle<FaceMaterial>,
     /// The face's diffuse (texture-entry) `uv_transform`, captured at registration
     /// before any material composition, so recomposition never double-applies the
     /// base-colour `KHR_texture_transform`.
@@ -280,7 +281,7 @@ impl MaterialManager {
         &mut self,
         key: FaceKey,
         id: AssetKey,
-        handle: Handle<StandardMaterial>,
+        handle: Handle<FaceMaterial>,
         base_uv: Affine2,
     ) {
         if id.uuid().is_nil() {
@@ -311,7 +312,7 @@ impl MaterialManager {
         &mut self,
         key: FaceKey,
         id: AssetKey,
-        handle: &Handle<StandardMaterial>,
+        handle: &Handle<FaceMaterial>,
         base_uv: Affine2,
     ) -> bool {
         if id.uuid().is_nil() {
@@ -359,12 +360,12 @@ impl MaterialManager {
         &mut self,
         key: FaceKey,
         id: AssetKey,
-        handle: &Handle<StandardMaterial>,
+        handle: &Handle<FaceMaterial>,
         base_uv: Affine2,
         texture_face: &TextureFace,
         textures: &mut TextureManager,
         prim_textures: &mut PrimTextures,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
     ) {
         if id.uuid().is_nil() {
             // Revert a face that had no material back to its Blinn-Phong layer.
@@ -434,8 +435,8 @@ impl MaterialManager {
     pub(crate) fn apply_preview(
         &mut self,
         textures: &mut TextureManager,
-        materials: &mut Assets<StandardMaterial>,
-        handle: &Handle<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
+        handle: &Handle<FaceMaterial>,
         material: &GltfMaterial,
     ) {
         // Clear every slot first, dropping any parked patches still targeting this
@@ -446,7 +447,7 @@ impl MaterialManager {
         for slot in PbrSlot::ALL {
             drop_texture_patches(self, handle, slot);
             if let Some(mut standard) = materials.get_mut(handle) {
-                slot.clear(&mut standard);
+                slot.clear(&mut standard.base);
             }
         }
         apply_material_scalars(materials, handle, material, Affine2::IDENTITY);
@@ -614,9 +615,9 @@ pub(crate) fn update_material_caps(
 pub(crate) fn register_pbr_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     new_faces: Query<
-        (&MeshMaterial3d<StandardMaterial>, &PrimFaceEntity, &ChildOf),
+        (&MeshMaterial3d<FaceMaterial>, &PrimFaceEntity, &ChildOf),
         Added<PrimFaceEntity>,
     >,
     holders: Query<&ObjectRenderMaterials>,
@@ -637,7 +638,7 @@ pub(crate) fn register_pbr_materials(
         // composition so recomposition never double-applies a `KHR_texture_transform`.
         let base_uv = materials
             .get(&material.0)
-            .map_or(Affine2::IDENTITY, |standard| standard.uv_transform);
+            .map_or(Affine2::IDENTITY, |standard| standard.base.uv_transform);
         let key = (holder.scoped_id, face_id);
         manager.register(
             key,
@@ -662,9 +663,9 @@ pub(crate) fn register_pbr_materials(
 pub(crate) fn register_changed_render_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     changed: Query<(&ObjectRenderMaterials, &Children), Changed<ObjectRenderMaterials>>,
-    faces: Query<(&MeshMaterial3d<StandardMaterial>, &PrimFaceEntity)>,
+    faces: Query<(&MeshMaterial3d<FaceMaterial>, &PrimFaceEntity)>,
 ) {
     for (holder, children) in &changed {
         for child in children.iter() {
@@ -682,7 +683,7 @@ pub(crate) fn register_changed_render_materials(
             let key = (holder.scoped_id, face_id);
             let base_uv = materials
                 .get(&material.0)
-                .map_or(Affine2::IDENTITY, |standard| standard.uv_transform);
+                .map_or(Affine2::IDENTITY, |standard| standard.base.uv_transform);
             if manager.refresh_face_material(key, AssetKey::from(material_id), &material.0, base_uv)
             {
                 recompose_face(&mut manager, &mut textures, &mut materials, key);
@@ -698,7 +699,7 @@ pub(crate) fn register_changed_render_materials(
 pub(crate) fn poll_materials(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     // Collect finished ids first — the borrow of the task map cannot overlap the
     // mutation of the decoded / unavailable maps.
@@ -745,7 +746,7 @@ pub(crate) fn poll_materials(
 pub(crate) fn apply_material_overrides(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut events: MessageReader<SlEvent>,
 ) {
     for SlEvent(event) in events.read() {
@@ -797,7 +798,7 @@ pub(crate) fn apply_material_overrides(
 pub(crate) fn drive_local_overrides(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     if manager.local_recompose.is_empty() {
         return;
@@ -845,7 +846,7 @@ pub(crate) fn apply_blinn_phong_hide(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     children: Query<&Children>,
     holders: Query<&ObjectRenderMaterials>,
     faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
@@ -977,7 +978,7 @@ fn collect_linkset_pbr_faces(
 fn recompose_face(
     manager: &mut MaterialManager,
     textures: &mut TextureManager,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     key: FaceKey,
 ) {
     // A face whose PBR material is hidden for the Blinn-Phong build-tool preview
@@ -1010,14 +1011,15 @@ fn recompose_face(
 /// emissive, alpha mode + cutoff, and the double-sided / cull-mode pair. The
 /// texture maps are filled in later by [`apply_pbr_textures`].
 fn apply_material_scalars(
-    materials: &mut Assets<StandardMaterial>,
-    handle: &Handle<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
+    handle: &Handle<FaceMaterial>,
     material: &GltfMaterial,
     base_uv: Affine2,
 ) {
-    let Some(mut standard) = materials.get_mut(handle) else {
+    let Some(mut material_asset) = materials.get_mut(handle) else {
         return;
     };
+    let standard = &mut material_asset.base;
     let [r, g, b, a] = material.base_color;
     standard.base_color = Color::linear_rgba(r, g, b, a);
     standard.metallic = material.metallic_factor;
@@ -1064,8 +1066,8 @@ fn apply_material_scalars(
 fn request_material_textures(
     manager: &mut MaterialManager,
     textures: &mut TextureManager,
-    materials: &mut Assets<StandardMaterial>,
-    handle: &Handle<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
+    handle: &Handle<FaceMaterial>,
     effective: &GltfMaterial,
 ) {
     for slot in PbrSlot::ALL {
@@ -1087,7 +1089,7 @@ fn request_material_textures(
             None => {
                 drop_texture_patches(manager, handle, slot);
                 if let Some(mut standard) = materials.get_mut(handle) {
-                    slot.clear(&mut standard);
+                    slot.clear(&mut standard.base);
                 }
             }
         }
@@ -1099,7 +1101,7 @@ fn request_material_textures(
 /// from an earlier composition of the same face.
 fn drop_texture_patches(
     manager: &mut MaterialManager,
-    handle: &Handle<StandardMaterial>,
+    handle: &Handle<FaceMaterial>,
     slot: PbrSlot,
 ) {
     for patches in manager.texture_pending.values_mut() {
@@ -1115,7 +1117,7 @@ pub(crate) fn apply_pbr_textures(
     mut manager: ResMut<MaterialManager>,
     textures: Res<TextureManager>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let ready: Vec<TextureKey> = manager
         .texture_pending
@@ -1130,9 +1132,10 @@ pub(crate) fn apply_pbr_textures(
         let patches = manager.texture_pending.remove(&id).unwrap_or_default();
         for patch in patches {
             let image = manager.slot_image(&mut images, id, patch.slot.is_srgb(), &decoded);
-            let Some(mut standard) = materials.get_mut(&patch.material) else {
+            let Some(mut material_asset) = materials.get_mut(&patch.material) else {
                 continue;
             };
+            let standard = &mut material_asset.base;
             match patch.slot {
                 PbrSlot::BaseColor => standard.base_color_texture = Some(image),
                 PbrSlot::MetallicRoughness => {

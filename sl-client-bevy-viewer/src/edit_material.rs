@@ -54,6 +54,7 @@ use crate::edit_texture::{
 use crate::edit_tool::{
     CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
 };
+use crate::face_material::FaceMaterial;
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::material_preview::MaterialPreview;
 use crate::materials::{MaterialManager, ObjectRenderMaterials};
@@ -1642,12 +1643,12 @@ fn preview_pbr_material_picked(
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     scene: Query<(), With<crate::objects::SceneObject>>,
     children: Query<&Children>,
     faces: Query<(
         &PrimFaceEntity,
-        &MeshMaterial3d<StandardMaterial>,
+        &MeshMaterial3d<FaceMaterial>,
         &FaceTextureDebug,
     )>,
 ) {
@@ -1669,7 +1670,7 @@ fn preview_pbr_material_picked(
                 let base_uv = materials
                     .get(&handle)
                     .map_or(bevy::math::Affine2::IDENTITY, |standard| {
-                        standard.uv_transform
+                        standard.base.uv_transform
                     });
                 let texture_face = *texture_face;
                 manager.preview_face_material(
@@ -1699,7 +1700,7 @@ fn prim_faces_of_node(
     children: &Query<&Children>,
     faces: &Query<(
         &PrimFaceEntity,
-        &MeshMaterial3d<StandardMaterial>,
+        &MeshMaterial3d<FaceMaterial>,
         &FaceTextureDebug,
     )>,
 ) -> Vec<(u8, Entity)> {

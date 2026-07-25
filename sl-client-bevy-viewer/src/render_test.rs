@@ -82,6 +82,7 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry;
 
 use crate::camera::ViewerCamera;
+use crate::face_material::FaceMaterial;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
     SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
@@ -184,6 +185,7 @@ fn headless_app() -> App {
     ));
     app.init_asset::<Mesh>()
         .init_asset::<StandardMaterial>()
+        .init_asset::<FaceMaterial>()
         .init_asset::<Image>()
         .init_asset::<SkinnedMeshInverseBindposes>();
 
@@ -501,7 +503,7 @@ struct Gathered {
     /// Its mesh.
     mesh: Handle<Mesh>,
     /// Its material, if it has one.
-    material: Option<Handle<StandardMaterial>>,
+    material: Option<Handle<FaceMaterial>>,
     /// Where it sits in the world.
     world: Mat4,
     /// Its declared size.
@@ -532,7 +534,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
         Entity,
         &Mesh3d,
         &GlobalTransform,
-        Option<&MeshMaterial3d<StandardMaterial>>,
+        Option<&MeshMaterial3d<FaceMaterial>>,
         Option<&ChildOf>,
         Option<&DeclaredBounds>,
         Option<&WorldScaleGeometry>,
@@ -586,7 +588,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
         .collect();
 
     let meshes = app.world().resource::<Assets<Mesh>>();
-    let materials = app.world().resource::<Assets<StandardMaterial>>();
+    let materials = app.world().resource::<Assets<FaceMaterial>>();
     let images = app.world().resource::<Assets<Image>>();
     gathered
         .into_iter()
@@ -616,8 +618,8 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 .as_ref()
                 .and_then(|material| materials.get(material));
             let textures =
-                material.map_or_else(Vec::new, |material| texture_slots(material, images));
-            let uv_transform = material.map(|material| material.uv_transform);
+                material.map_or_else(Vec::new, |material| texture_slots(&material.base, images));
+            let uv_transform = material.map(|material| material.base.uv_transform);
             Some(Geometry {
                 name: entry.name,
                 group: entry.group,

@@ -61,6 +61,7 @@ mod edit_tool;
 mod emoji_complete;
 mod emoji_picker;
 mod environment;
+mod face_material;
 mod flexi;
 mod floater;
 mod floater_persist;
@@ -1008,6 +1009,10 @@ fn run_session(
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
     .add_plugins(FloaterPersistPlugin)
+    // The custom material every prim/mesh/rigged/avatar/media face renders
+    // through (per-map UV transforms + legacy Blinn-Phong specular; inert where
+    // unused). Registered once here.
+    .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.

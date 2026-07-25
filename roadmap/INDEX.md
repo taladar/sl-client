@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 32 |
 | ready | 210 |
 | blocked | 109 |
-| in-progress | 7 |
+| in-progress | 8 |
 | bugs | 11 |
 | done | 596 |
-| deferred | 16 |
+| deferred | 17 |
 | wont-do | 6 |
-| **total** | **987** |
+| **total** | **989** |
 
 ## ideas (32)
 
@@ -900,10 +900,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (7)
+## in-progress (8)
 
 ### viewer
 
+- [`viewer-custom-face-material-shader`](in-progress/viewer-custom-face-material-shader.md)
+  — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
+  specular
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
@@ -2174,7 +2177,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (16)
+## deferred (17)
 
 ### protocol
 
@@ -2202,6 +2205,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-land-menu-reorder-when-implemented`](deferred/viewer-land-menu-reorder-when-implemented.md)
   — Re-lay the land pie by meaning once most actions are implemented (blocked by
   `viewer-land-context-menu` (done))
+- [`viewer-legacy-material-exact-port`](deferred/viewer-legacy-material-exact-port.md)
+  — Legacy Blinn-Phong material — exact port (lightFunc LUT + reflection-probe
+  environment)
 - [`viewer-navigation-favorites-bars`](deferred/viewer-navigation-favorites-bars.md)
   — Navigation / location bar + favorites bar
 - [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)

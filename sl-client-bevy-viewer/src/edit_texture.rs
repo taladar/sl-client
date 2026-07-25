@@ -48,6 +48,7 @@ use crate::edit_tool::{
     BuildTabPages, CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH,
     VALUE_CLASS, spawn_row_label,
 };
+use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
@@ -1507,9 +1508,9 @@ fn apply_color_picked(
     objects: Res<ObjectState>,
     prim_faces: PrimFaceLookup,
     children: Query<&Children>,
-    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<StandardMaterial>)>,
+    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
     scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1557,8 +1558,8 @@ fn preview_face_tint(
     color: Color,
     children: &Query<&Children>,
     scene: &Query<(), With<crate::objects::SceneObject>>,
-    face_materials: &Query<(&PrimFaceEntity, &MeshMaterial3d<StandardMaterial>)>,
-    materials: &mut Assets<StandardMaterial>,
+    face_materials: &Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
+    materials: &mut Assets<FaceMaterial>,
 ) {
     for node in selection.iter() {
         let wanted = node.faces.as_ref();
@@ -1571,8 +1572,8 @@ fn preview_face_tint(
                 && wanted.is_none_or(|set| set.contains(&marker.face_id))
                 && let Some(mut standard) = materials.get_mut(&material.0)
             {
-                let alpha = standard.base_color.alpha();
-                standard.base_color = color.with_alpha(alpha);
+                let alpha = standard.base.base_color.alpha();
+                standard.base.base_color = color.with_alpha(alpha);
             }
             if let Ok(list) = children.get(entity) {
                 for child in list.iter() {
@@ -1663,9 +1664,9 @@ fn drive_texture_preview(
     textures: Res<crate::textures::TextureManager>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
-    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<StandardMaterial>)>,
+    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
     scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let Some(texture) = preview.texture else {
         return;
@@ -1707,9 +1708,9 @@ fn revert_texture_preview_on_deselect(
     textures: Res<crate::textures::TextureManager>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
-    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<StandardMaterial>)>,
+    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
     scene: Query<(), With<crate::objects::SceneObject>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let Some(object) = preview.object else {
         return;
@@ -1735,7 +1736,7 @@ fn revert_texture_preview_on_deselect(
                 crate::textures::DiffuseImage::Pending => continue,
             };
             if let Some(mut standard) = materials.get_mut(&material.0) {
-                standard.base_color_texture = image;
+                standard.base.base_color_texture = image;
             }
         }
         if let Ok(list) = children.get(entity) {
@@ -1758,8 +1759,8 @@ fn preview_face_texture(
     image: Option<Handle<Image>>,
     children: &Query<&Children>,
     scene: &Query<(), With<crate::objects::SceneObject>>,
-    face_materials: &Query<(&PrimFaceEntity, &MeshMaterial3d<StandardMaterial>)>,
-    materials: &mut Assets<StandardMaterial>,
+    face_materials: &Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
+    materials: &mut Assets<FaceMaterial>,
 ) {
     for node in selection.iter() {
         let wanted = node.faces.as_ref();
@@ -1772,7 +1773,7 @@ fn preview_face_texture(
                 && wanted.is_none_or(|set| set.contains(&marker.face_id))
                 && let Some(mut standard) = materials.get_mut(&material.0)
             {
-                standard.base_color_texture.clone_from(&image);
+                standard.base.base_color_texture.clone_from(&image);
             }
             if let Ok(list) = children.get(entity) {
                 for child in list.iter() {

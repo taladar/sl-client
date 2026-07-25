@@ -31,6 +31,7 @@ use bevy::math::Affine2;
 use bevy::prelude::*;
 use sl_client_bevy::{TextureAnimation, texture_anim_mode, texture_uv_transform};
 
+use crate::face_material::FaceMaterial;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 
 /// The decoded [`TextureAnimation`] (`llSetTextureAnim`) parameters an object is
@@ -240,9 +241,9 @@ pub(crate) fn drive_texture_animations(
     faces: Query<(
         &PrimFaceEntity,
         &FaceTextureDebug,
-        &MeshMaterial3d<StandardMaterial>,
+        &MeshMaterial3d<FaceMaterial>,
     )>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let dt = time.delta_secs();
     for (holder, tex_anim, clock) in &mut holders {
@@ -279,7 +280,7 @@ pub(crate) fn drive_texture_animations(
                 continue;
             }
             if let Some(mut material) = materials.get_mut(&material.0) {
-                material.uv_transform = placement.uv_transform(tf);
+                material.base.uv_transform = placement.uv_transform(tf);
             }
         }
     }
@@ -297,8 +298,8 @@ pub(crate) fn restore_stopped_animations(
     mut stopped: RemovedComponents<ObjectTextureAnimation>,
     mut commands: Commands,
     children: Query<&Children>,
-    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     for holder in stopped.read() {
         // The clock is meaningless without a running animation; drop it so a later
@@ -314,7 +315,7 @@ pub(crate) fn restore_stopped_animations(
                 continue;
             };
             if let Some(mut material) = materials.get_mut(&material.0) {
-                material.uv_transform = sl_client_bevy::texture_face_uv_transform(tf);
+                material.base.uv_transform = sl_client_bevy::texture_face_uv_transform(tf);
             }
         }
     }

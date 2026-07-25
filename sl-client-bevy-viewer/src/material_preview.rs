@@ -35,6 +35,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use sl_client_bevy::{AssetKey, GltfMaterial};
 
+use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::materials::MaterialManager;
 use crate::textures::TextureManager;
 
@@ -101,7 +102,7 @@ struct PreviewStudio {
     /// The image the camera renders into and the previewing node samples.
     image: Handle<Image>,
     /// The sphere's material, re-shaded when the bound preview changes.
-    sphere_material: Handle<StandardMaterial>,
+    sphere_material: Handle<FaceMaterial>,
     /// The camera entity, toggled active only while the studio is bound.
     camera: Entity,
 }
@@ -135,7 +136,7 @@ impl MaterialPreviewStudios {
         owner: Entity,
         commands: &mut Commands,
         images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
         cameras: &mut Query<&mut Camera>,
     ) -> usize {
         if let Some(index) = self.bound.get(&owner) {
@@ -211,7 +212,7 @@ fn setup_material_previews(mut commands: Commands, mut meshes: ResMut<Assets<Mes
 fn create_studio(
     commands: &mut Commands,
     images: &mut Assets<Image>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     sphere_mesh: &Handle<Mesh>,
     layer: usize,
 ) -> PreviewStudio {
@@ -221,7 +222,7 @@ fn create_studio(
         TextureFormat::Rgba8UnormSrgb,
         None,
     ));
-    let sphere_material = materials.add(StandardMaterial::default());
+    let sphere_material = materials.add(inert_face_material(StandardMaterial::default()));
     let layers = RenderLayers::layer(layer);
     // The sphere.
     commands.spawn((
@@ -310,7 +311,7 @@ fn drive_material_previews(
     pool: Option<ResMut<MaterialPreviewStudios>>,
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut cameras: Query<&mut Camera>,
     mut backgrounds: Query<&mut BackgroundColor>,

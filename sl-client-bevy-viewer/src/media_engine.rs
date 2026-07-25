@@ -31,6 +31,8 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_cef::chromium::CefMediaBackend;
 use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, SurfaceStatus};
 
+use crate::face_material::FaceMaterial;
+
 /// System sets ordering the media engine's frame work: consumers that create
 /// or drive surfaces run **after** [`MediaEngineSystems::Pump`], which is when
 /// paints and status changes land.
@@ -99,7 +101,7 @@ pub(crate) struct MediaSlot {
     /// view and nothing watches `AssetEvent<Image>` for materials (see
     /// `crate::textures::PrimTextures::materials`), so each new frame marks
     /// these changed.
-    pub(crate) touch_materials: Vec<Handle<StandardMaterial>>,
+    pub(crate) touch_materials: Vec<Handle<FaceMaterial>>,
     /// The last frame generation mirrored into [`image`](Self::image).
     seen_frame: u64,
     /// Whether a close was requested; the slot is pruned once the engine
@@ -313,7 +315,7 @@ fn pump_media_engine(
     mut engine: NonSendMut<MediaEngine>,
     mut surfaces: NonSendMut<MediaSurfaces>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     if let Some(backend) = engine.backend.as_mut() {
         backend.pump();

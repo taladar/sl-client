@@ -54,6 +54,7 @@ use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::winit::WinitPlugin;
 
 use crate::camera::ViewerCamera;
+use crate::face_material::SlFaceMaterialPlugin;
 use crate::probes::ReflectionProbePlugin;
 use sl_client_bevy::{
     CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
@@ -186,6 +187,7 @@ pub(crate) fn capture(
         // shader or driver it forgot. See `SceneRuntimePlugin` — the material
         // plugins go first, and it fills in whatever they did not register.
         .add_plugins((
+            SlFaceMaterialPlugin,
             TerrainMaterialPlugin,
             SkyMaterialPlugin,
             SunDiscMaterialPlugin,

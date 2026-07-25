@@ -70,6 +70,7 @@ use sl_client_bevy::{
 use tracing::{error, info};
 
 use crate::camera::ViewerCamera;
+use crate::face_material::SlFaceMaterialPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SCENES, SamplerMayClamp, SceneAssets, SceneCx, SceneLighting,
@@ -392,6 +393,7 @@ pub fn run() {
         // written not to care: each registers its own `Assets` collection, and the
         // runtime plugin only fills in the ones nothing has.
         .add_plugins((
+            SlFaceMaterialPlugin,
             TerrainMaterialPlugin,
             SkyMaterialPlugin,
             SunDiscMaterialPlugin,

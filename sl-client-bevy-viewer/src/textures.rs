@@ -37,6 +37,8 @@ use sl_client_bevy::{
     TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
 };
 
+use crate::face_material::{FaceMaterial, inert_face_material};
+
 /// The GLTF material-override "no texture" sentinel (all-`f`, the reference
 /// viewer's `LLGLTFMaterial::GLTF_OVERRIDE_NULL_UUID`): a face carrying it has no
 /// diffuse texture to fetch, so it is treated exactly like the nil id rather than
@@ -658,7 +660,7 @@ pub(crate) struct PrimTextures {
     images: HashMap<TextureKey, Handle<Image>>,
     /// Face materials parked on a texture id, patched with the diffuse image (or
     /// released to their flat tint) once the fetch resolves.
-    pending: HashMap<TextureKey, Vec<(Handle<StandardMaterial>, TextureAlpha)>>,
+    pending: HashMap<TextureKey, Vec<(Handle<FaceMaterial>, TextureAlpha)>>,
     /// Every material that samples each texture, tracked so a level-of-detail
     /// re-upload (P21.1) can mark them changed. A Bevy material's bind group caches
     /// the texture's GPU view and is **not** rebuilt when the [`Image`] behind its
@@ -667,7 +669,7 @@ pub(crate) struct PrimTextures {
     /// the material asset itself is touched. Stored as weak [`AssetId`]s so a
     /// despawned face's material is not kept alive; ids that no longer resolve are
     /// pruned when the texture is refreshed.
-    materials: HashMap<TextureKey, Vec<AssetId<StandardMaterial>>>,
+    materials: HashMap<TextureKey, Vec<AssetId<FaceMaterial>>>,
 }
 
 /// The state of a face's diffuse image — see [`TextureManager::diffuse_image`].
@@ -740,13 +742,13 @@ const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
 /// A face with no texture (nil id) keeps just its flat tint.
 pub(crate) fn face_material(
     face: &TextureFace,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     texture_alpha: TextureAlpha,
-) -> Handle<StandardMaterial> {
-    let handle = materials.add(StandardMaterial::default());
+) -> Handle<FaceMaterial> {
+    let handle = materials.add(FaceMaterial::default());
     compose_face_material(
         &handle,
         face,
@@ -771,9 +773,9 @@ pub(crate) fn face_material(
 /// stable handle (every other system that reads it is unaffected) and only its
 /// composition changes. `face_material` is the fresh-handle wrapper over it.
 pub(crate) fn compose_face_material(
-    handle: &Handle<StandardMaterial>,
+    handle: &Handle<FaceMaterial>,
     face: &TextureFace,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -834,7 +836,10 @@ pub(crate) fn compose_face_material(
     let Some(mut slot) = materials.get_mut(handle) else {
         return;
     };
-    *slot = material;
+    // Write the composed diffuse into the face material's `base`, resetting the
+    // extension to inert (a fresh Blinn-Phong composition carries no per-map
+    // transforms / legacy specular until the legacy pipeline populates it).
+    *slot = inert_face_material(material);
     if has_texture {
         // Track this material so a later level-of-detail re-upload can mark it
         // changed and rebuild its bind group (P21.1) — see `PrimTextures::materials`.
@@ -863,7 +868,7 @@ impl PrimTextures {
     /// Blinn-Phong hide back to PBR ([`crate::materials::apply_blinn_phong_hide`]),
     /// which must not let a still-pending Blinn-Phong diffuse land over the
     /// restored PBR composition.
-    pub(crate) fn drop_pending_material(&mut self, handle: &Handle<StandardMaterial>) {
+    pub(crate) fn drop_pending_material(&mut self, handle: &Handle<FaceMaterial>) {
         for parked in self.pending.values_mut() {
             parked.retain(|(parked_handle, _alpha)| parked_handle != handle);
         }
@@ -880,7 +885,7 @@ pub(crate) fn apply_prim_textures(
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
         // Level-of-detail re-decode (P21.1): a texture already uploaded to the GPU
@@ -920,14 +925,14 @@ pub(crate) fn apply_prim_textures(
         };
         for (material_handle, texture_alpha) in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
-                material.base_color_texture = Some(image_handle.clone());
+                material.base.base_color_texture = Some(image_handle.clone());
                 // A face whose alpha mode a legacy material has already
                 // overridden keeps it (R25a): `NONE` means opaque in the
                 // reference even over an alpha texture, so the material must
                 // win regardless of whether it or this decode applied last.
                 if !legacy.is_alpha_overridden(material_handle.id()) {
                     resolve_texture_alpha_mode(
-                        &mut material,
+                        &mut material.base,
                         texture_alpha,
                         has_alpha,
                         has_transparency,
@@ -949,7 +954,7 @@ pub(crate) fn patch_parked_decoded_textures(
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let ready: Vec<TextureKey> = prim_textures
         .pending
@@ -973,10 +978,10 @@ pub(crate) fn patch_parked_decoded_textures(
         };
         for (material_handle, texture_alpha) in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
-                material.base_color_texture = Some(image_handle.clone());
+                material.base.base_color_texture = Some(image_handle.clone());
                 if !legacy.is_alpha_overridden(material_handle.id()) {
                     resolve_texture_alpha_mode(
-                        &mut material,
+                        &mut material.base,
                         texture_alpha,
                         has_alpha,
                         has_transparency,

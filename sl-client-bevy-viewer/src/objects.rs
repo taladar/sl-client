@@ -60,6 +60,7 @@ use crate::avatars::{
 };
 use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::hud::{HudState, is_hud_point};
 use crate::legacy_materials::LegacyMaterialManager;
@@ -1078,7 +1079,7 @@ pub(crate) fn update_objects(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
@@ -1208,8 +1209,8 @@ pub(crate) fn pick_object(
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     face_debug: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
-    face_materials: Query<&MeshMaterial3d<StandardMaterial>>,
-    materials: Res<Assets<StandardMaterial>>,
+    face_materials: Query<&MeshMaterial3d<FaceMaterial>>,
+    materials: Res<Assets<FaceMaterial>>,
     legacy: Res<LegacyMaterialManager>,
     textures: Res<TextureManager>,
     mesh_manager: Res<MeshManager>,
@@ -1269,9 +1270,9 @@ pub(crate) fn pick_object(
         {
             warn!(
                 "pick face render: alpha_mode={:?} base_color_alpha={:.3} unlit={}",
-                standard.alpha_mode,
-                standard.base_color.alpha(),
-                standard.unlit,
+                standard.base.alpha_mode,
+                standard.base.base_color.alpha(),
+                standard.base.unlit,
             );
         }
         if let Some(material_id) = tf.material_id {
@@ -1543,7 +1544,7 @@ fn build_object_geometry(
     entity: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
@@ -1753,7 +1754,7 @@ fn build_prim_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -1819,7 +1820,7 @@ fn build_flexi_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -1921,7 +1922,7 @@ fn build_sculpt_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -1964,7 +1965,7 @@ fn build_tree_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -1995,7 +1996,7 @@ fn build_tree_faces(
     // showing a solid quad. A fixed cutoff clips the trunk (opaque) cleanly too.
     // Set here so it is not overridden by the tint-based opaque/blend default.
     if let Some(mut tree_material) = materials.get_mut(&material) {
-        tree_material.alpha_mode = AlphaMode::Mask(TREE_ALPHA_CUTOFF);
+        tree_material.base.alpha_mode = AlphaMode::Mask(TREE_ALPHA_CUTOFF);
     }
     let entity = commands
         .spawn((
@@ -2037,7 +2038,7 @@ fn build_grass_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -2063,7 +2064,7 @@ fn build_grass_faces(
     // the soft blade-card edges fade rather than clip. Set here so it is not
     // overridden by the tint-based opaque default.
     if let Some(mut grass_material) = materials.get_mut(&material) {
-        grass_material.alpha_mode = AlphaMode::Blend;
+        grass_material.base.alpha_mode = AlphaMode::Blend;
     }
     let entity = commands
         .spawn((
@@ -2137,7 +2138,7 @@ fn spawn_prim_faces(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -2209,7 +2210,7 @@ fn build_mesh_submeshes(
     parent: Entity,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
@@ -2301,7 +2302,7 @@ fn apply_object(
     object: &Object,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
@@ -2826,7 +2827,7 @@ pub(crate) fn apply_object_meshes(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
@@ -2966,7 +2967,7 @@ pub(crate) fn apply_prim_lod(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
@@ -3021,7 +3022,7 @@ pub(crate) fn apply_tree_lod(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
@@ -3126,7 +3127,7 @@ pub(crate) fn apply_rigged_attachments(
     mesh_manager: Res<MeshManager>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
@@ -3435,7 +3436,7 @@ fn build_rigged_submeshes(
     mesh_key: MeshKey,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    materials: &mut Assets<FaceMaterial>,
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
@@ -3575,7 +3576,7 @@ pub(crate) fn apply_object_sculpts(
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
@@ -3854,22 +3855,24 @@ mod tests {
         use crate::textures::{PrimTextures, TextureManager};
         use bevy::camera::visibility::NoFrustumCulling;
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, ResMut, StandardMaterial, World};
+        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, ResMut, World};
         use sl_client_bevy::{FlexibleData, Priority};
+
+        use crate::face_material::FaceMaterial;
 
         /// The resources [`build_flexi_faces`](super::build_flexi_faces) takes,
         /// as one `SystemState` tuple (named to satisfy `type_complexity`).
         type BuildParams<'w, 's> = (
             Commands<'w, 's>,
             ResMut<'w, Assets<Mesh>>,
-            ResMut<'w, Assets<StandardMaterial>>,
+            ResMut<'w, Assets<FaceMaterial>>,
             ResMut<'w, TextureManager>,
             ResMut<'w, PrimTextures>,
         );
 
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
-        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<FaceMaterial>>();
         world.init_resource::<TextureManager>();
         world.init_resource::<PrimTextures>();
         let parent = world.spawn_empty().id();

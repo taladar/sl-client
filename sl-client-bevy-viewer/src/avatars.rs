@@ -56,6 +56,7 @@ use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{
     metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
+use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::physics::AvatarMotion;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 use crate::ui_font::UiFont;
@@ -423,7 +424,7 @@ struct AvatarAssets {
     /// The shared UV-sphere mesh handle.
     mesh: Handle<Mesh>,
     /// The shared soft-blue material handle.
-    material: Handle<StandardMaterial>,
+    material: Handle<FaceMaterial>,
     /// The shared invisible box mesh used as a rigged body's **pick
     /// collider**. A body's real geometry is skinned, and a [`MeshRayCast`] tests
     /// a skinned mesh against its *bind* pose (not the posed vertices), so it
@@ -436,7 +437,7 @@ struct AvatarAssets {
     /// A translucent material used to **draw** the pick collider when debugging
     /// (`SL_VIEWER_DEBUG_PICK_BOX`); the collider is otherwise material-less and never
     /// rendered.
-    collider_material: Handle<StandardMaterial>,
+    collider_material: Handle<FaceMaterial>,
 }
 
 /// One nearby avatar as the map surfaces (minimap, radar) consume it — see
@@ -620,7 +621,7 @@ const MAX_ATTACHMENT_DEPTH: usize = 32;
 #[derive(Resource, Debug)]
 pub(crate) struct AvatarBody {
     /// The shared skin material for the un-textured body.
-    material: Handle<StandardMaterial>,
+    material: Handle<FaceMaterial>,
     /// One render entry per resolved base part.
     parts: Vec<BodyPart>,
     /// Each joint's local rest transform (Second Life Z-up), parallel to
@@ -769,16 +770,16 @@ pub(crate) fn setup_avatar_body(
     library: Option<Res<AvatarAssetLibrary>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
 ) {
     let Some(library) = library else {
         return;
     };
-    let material = materials.add(StandardMaterial {
+    let material = materials.add(inert_face_material(StandardMaterial {
         base_color: BODY_COLOR,
         ..default()
-    });
+    }));
     let mut parts = Vec::with_capacity(library.parts().len());
     for part in library.parts() {
         let mesh = meshes.add(to_bevy_base_mesh(&part.mesh));
@@ -1094,7 +1095,7 @@ fn spawn_body_part(
     agent: AgentKey,
     joints: &[Entity],
     root: Entity,
-    material: &Handle<StandardMaterial>,
+    material: &Handle<FaceMaterial>,
     commands: &mut Commands,
 ) {
     let marker = AvatarBodyPart {
@@ -1186,15 +1187,15 @@ fn pick_collider_mesh() -> Mesh {
 /// The translucent material the pick collider is drawn with when
 /// `SL_VIEWER_DEBUG_PICK_BOX` is set — a see-through green box so its fit to the
 /// avatar can be eyeballed.
-fn pick_collider_debug_material() -> StandardMaterial {
-    StandardMaterial {
+fn pick_collider_debug_material() -> FaceMaterial {
+    inert_face_material(StandardMaterial {
         base_color: Color::srgba(0.2, 1.0, 0.4, 0.22),
         alpha_mode: AlphaMode::Blend,
         unlit: true,
         double_sided: true,
         cull_mode: None,
         ..default()
-    }
+    })
 }
 
 /// Whether the pick collider should be **drawn** (the `SL_VIEWER_DEBUG_PICK_BOX`
@@ -1276,11 +1277,11 @@ pub(crate) fn fit_avatar_pick_colliders(
 }
 
 /// The placeholder material (opaque soft blue).
-fn placeholder_material() -> StandardMaterial {
-    StandardMaterial {
+fn placeholder_material() -> FaceMaterial {
+    inert_face_material(StandardMaterial {
         base_color: AVATAR_COLOR,
         ..default()
-    }
+    })
 }
 
 /// The coarse (minimap) position of an avatar as a Bevy translation.
@@ -1318,8 +1319,8 @@ impl AvatarState {
     fn asset_handles(
         assets: &mut Option<AvatarAssets>,
         meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+        materials: &mut Assets<FaceMaterial>,
+    ) -> (Handle<Mesh>, Handle<FaceMaterial>) {
         let built = assets.get_or_insert_with(|| AvatarAssets {
             mesh: meshes.add(placeholder_sphere_mesh()),
             material: materials.add(placeholder_material()),
@@ -1335,8 +1336,8 @@ impl AvatarState {
     fn collider_handles(
         assets: &mut Option<AvatarAssets>,
         meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+        materials: &mut Assets<FaceMaterial>,
+    ) -> (Handle<Mesh>, Handle<FaceMaterial>) {
         let built = assets.get_or_insert_with(|| AvatarAssets {
             mesh: meshes.add(placeholder_sphere_mesh()),
             material: materials.add(placeholder_material()),
@@ -1463,7 +1464,7 @@ impl AvatarState {
         translation: Vec3,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
     ) -> AvatarEntities {
         let (mesh, material) = Self::asset_handles(&mut self.assets, meshes, materials);
         let sphere = commands
@@ -1499,7 +1500,7 @@ impl AvatarState {
         object: &Object,
         body: &AvatarBody,
         collider: Handle<Mesh>,
-        collider_material: Handle<StandardMaterial>,
+        collider_material: Handle<FaceMaterial>,
         commands: &mut Commands,
     ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
         let root_drop = self
@@ -1620,7 +1621,7 @@ impl AvatarState {
         body: Option<&AvatarBody>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
         writer: &mut MessageWriter<SlCommand>,
     ) {
         let agent = AgentKey::from(object.full_id.uuid());
@@ -1870,7 +1871,7 @@ impl AvatarState {
         you: Option<usize>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<StandardMaterial>,
+        materials: &mut Assets<FaceMaterial>,
         writer: &mut MessageWriter<SlCommand>,
     ) {
         // The neighbour region's south-west corner relative to the scene origin, in
@@ -2117,7 +2118,7 @@ pub(crate) fn update_avatar_objects(
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut writer: MessageWriter<SlCommand>,
 ) {
     let body = body.as_deref();
@@ -2174,7 +2175,7 @@ pub(crate) fn update_coarse_avatars(
     mut state: ResMut<AvatarState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut writer: MessageWriter<SlCommand>,
 ) {
     let origin = identity.region_handle;
@@ -2428,10 +2429,10 @@ pub(crate) struct AvatarBakeMaterials {
     /// The material draped on each avatar body region, keyed by
     /// `(avatar, baked slot)`; its `base_color_texture` is filled once the bake
     /// decodes.
-    materials: HashMap<(AgentKey, usize), Handle<StandardMaterial>>,
+    materials: HashMap<(AgentKey, usize), Handle<FaceMaterial>>,
     /// Region materials parked on a not-yet-decoded baked texture id, filled by
     /// [`apply_avatar_bake_textures`] once it decodes.
-    pending: HashMap<TextureKey, Vec<Handle<StandardMaterial>>>,
+    pending: HashMap<TextureKey, Vec<Handle<FaceMaterial>>>,
     /// The composited-alpha classification of each decoded baked texture (P14.3),
     /// computed once per id: whether it is opaque, alpha-masked, or wholly carved
     /// away (a worn mesh body's alpha layer). Drives each region material's
@@ -2501,8 +2502,8 @@ impl AvatarBakeMaterials {
         id: TextureKey,
         manager: &TextureManager,
         images: &mut Assets<Image>,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> Handle<StandardMaterial> {
+        materials: &mut Assets<FaceMaterial>,
+    ) -> Handle<FaceMaterial> {
         let handle = self
             .materials
             .entry((agent, slot))
@@ -2511,7 +2512,7 @@ impl AvatarBakeMaterials {
         match self.ensure_bake(id, manager, images) {
             Some((image, alpha)) => {
                 if let Some(mut material) = materials.get_mut(&handle) {
-                    apply_bake_image(&mut material, image, alpha.alpha_mode());
+                    apply_bake_image(&mut material.base, image, alpha.alpha_mode());
                 }
             }
             None => self.pending.entry(id).or_default().push(handle.clone()),
@@ -2532,15 +2533,15 @@ impl AvatarBakeMaterials {
         slot: usize,
         image: Handle<Image>,
         alpha: BakeAlpha,
-        materials: &mut Assets<StandardMaterial>,
-    ) -> Handle<StandardMaterial> {
+        materials: &mut Assets<FaceMaterial>,
+    ) -> Handle<FaceMaterial> {
         let handle = self
             .materials
             .entry((agent, slot))
             .or_insert_with(|| materials.add(baked_region_material()))
             .clone();
         if let Some(mut material) = materials.get_mut(&handle) {
-            apply_bake_image(&mut material, image, alpha.alpha_mode());
+            apply_bake_image(&mut material.base, image, alpha.alpha_mode());
         }
         handle
     }
@@ -2551,14 +2552,14 @@ impl AvatarBakeMaterials {
 /// bake with alpha overrides it; once the bake fills `base_color_texture`,
 /// [`apply_bake_image`] resets the tint to white and sets the region's
 /// [`AlphaMode`] from the bake's composited alpha (P14.3).
-fn baked_region_material() -> StandardMaterial {
-    StandardMaterial {
+fn baked_region_material() -> FaceMaterial {
+    inert_face_material(StandardMaterial {
         base_color: BODY_COLOR,
         perceptual_roughness: 0.9,
         // Single-sided, matching the prim / base-body surfaces: Second Life
         // renders a face only from its front.
         ..default()
-    }
+    })
 }
 
 /// The initial material for a bake-on-mesh face (R22): each BoM face owns its
@@ -2568,8 +2569,8 @@ fn baked_region_material() -> StandardMaterial {
 /// [`BOM_FALLBACK_COLOR`] (matching `IMG_DEFAULT`), multiplied by the face `tint`
 /// alpha and placed by its `uv` transform. A fully-transparent tint is hidden by
 /// visibility, not material, so its base colour is left neutral.
-pub(crate) fn bom_face_material(tint: [u8; 4], uv: Affine2) -> StandardMaterial {
-    StandardMaterial {
+pub(crate) fn bom_face_material(tint: [u8; 4], uv: Affine2) -> FaceMaterial {
+    inert_face_material(StandardMaterial {
         base_color: BOM_FALLBACK_COLOR,
         perceptual_roughness: 0.9,
         uv_transform: uv,
@@ -2581,7 +2582,7 @@ pub(crate) fn bom_face_material(tint: [u8; 4], uv: Affine2) -> StandardMaterial 
             AlphaMode::Opaque
         },
         ..default()
-    }
+    })
 }
 
 /// Drape a decoded baked texture over a region material: set its diffuse image,
@@ -2700,9 +2701,9 @@ pub(crate) fn assign_avatar_bake_materials(
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     manager: Res<TextureManager>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
-    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<FaceMaterial>)>,
 ) {
     // A newly spawned part needs its region material assigned (the bakes can
     // arrive before the body object does).
@@ -2761,7 +2762,7 @@ pub(crate) fn apply_avatar_bake_textures(
     manager: Res<TextureManager>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let mut filled = 0_usize;
     for &TextureDecoded(id) in decoded.read() {
@@ -2775,7 +2776,7 @@ pub(crate) fn apply_avatar_bake_textures(
         };
         for material_handle in parked {
             if let Some(mut material) = materials.get_mut(&material_handle) {
-                apply_bake_image(&mut material, image.clone(), alpha.alpha_mode());
+                apply_bake_image(&mut material.base, image.clone(), alpha.alpha_mode());
                 filled = filled.saturating_add(1);
             }
         }
@@ -2945,8 +2946,8 @@ pub(crate) fn apply_own_local_bake(
     mut local: ResMut<OwnLocalBake>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut parts: Query<(&AvatarBodyPart, &mut MeshMaterial3d<FaceMaterial>)>,
 ) {
     // Nothing to drape until the body assets loaded, the bake inputs are ready,
     // and we know which agent is our own avatar.
@@ -3714,10 +3715,10 @@ pub(crate) fn apply_bom_face_materials(
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     manager: Res<TextureManager>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    parts: Query<(&AvatarBodyPart, &MeshMaterial3d<StandardMaterial>), Without<BomFace>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+    parts: Query<(&AvatarBodyPart, &MeshMaterial3d<FaceMaterial>), Without<BomFace>>,
     mut faces: Query<
-        (&BomFace, &MeshMaterial3d<StandardMaterial>, &mut Visibility),
+        (&BomFace, &MeshMaterial3d<FaceMaterial>, &mut Visibility),
         Without<AvatarBodyPart>,
     >,
     // Diagnostic-only (R22h): the last per-(agent, slot) resolution tally logged,
@@ -3731,7 +3732,7 @@ pub(crate) fn apply_bom_face_materials(
     // baked slot) — used only as the fallback bake source for a classic-slot face on
     // a grid whose bake reached the body region but not `baked_textures` (the
     // OpenSim own-avatar client-side composite).
-    let mut part_materials: HashMap<(AgentKey, usize), Handle<StandardMaterial>> = HashMap::new();
+    let mut part_materials: HashMap<(AgentKey, usize), Handle<FaceMaterial>> = HashMap::new();
     for (part, material) in &parts {
         let _prev =
             part_materials.insert((part.agent, part.region.baked_slot()), material.0.clone());
@@ -3757,9 +3758,9 @@ pub(crate) fn apply_bom_face_materials(
         }
         if let Some(handle) = part_materials.get(&(agent, slot))
             && let Some(material) = materials.get(handle)
-            && let Some(image) = material.base_color_texture.clone()
+            && let Some(image) = material.base.base_color_texture.clone()
         {
-            let has_alpha = !matches!(material.alpha_mode, AlphaMode::Opaque);
+            let has_alpha = !matches!(material.base.alpha_mode, AlphaMode::Opaque);
             let _prev = region_bake.insert((agent, slot), (image, has_alpha));
         }
     }
@@ -3829,10 +3830,10 @@ pub(crate) fn apply_bom_face_materials(
         // the asset modified (rebuilding its bind group), so an unconditional write
         // every frame would needlessly re-upload every BoM face.
         let up_to_date = materials.get(&material.0).is_some_and(|current| {
-            current.base_color_texture == texture
-                && current.base_color == base_color
-                && current.alpha_mode == alpha_mode
-                && current.uv_transform == face.uv
+            current.base.base_color_texture == texture
+                && current.base.base_color == base_color
+                && current.base.alpha_mode == alpha_mode
+                && current.base.uv_transform == face.uv
         });
         if up_to_date {
             continue;
@@ -3840,10 +3841,10 @@ pub(crate) fn apply_bom_face_materials(
         let Some(mut material) = materials.get_mut(&material.0) else {
             continue;
         };
-        material.base_color_texture = texture;
-        material.base_color = base_color;
-        material.alpha_mode = alpha_mode;
-        material.uv_transform = face.uv;
+        material.base.base_color_texture = texture;
+        material.base.base_color = base_color;
+        material.base.alpha_mode = alpha_mode;
+        material.base.uv_transform = face.uv;
         retextured = retextured.saturating_add(1);
     }
     if retextured > 0 {
