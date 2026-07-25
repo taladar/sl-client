@@ -90,11 +90,13 @@ echo — the fix for the "nothing happens on OK" symptom), the override is appli
   sends are no-ops there; the Blinn-Phong `RenderMaterials` PUT does round-trip
   on OpenSim's `MaterialsModule`. Live-verified on aditi: per-channel edits
   round-trip and (with the local-apply) update the swatch + prim immediately.
-- **aditi's `ViewerAsset` 503 wall still applies** — a PBR face's base *maps*
-  often stay grey even when the override took; the swatch UUID / factor / tint /
-  transform values still reflect. (One aditi login also came up in a transient
-  "Connecting…"/no-objects stall unrelated to this code — a fresh login fixed
-  it.)
+- **Correction (2026-07-25):** an earlier claim of an aditi "`ViewerAsset` 503
+  wall" (PBR base *maps* staying grey) was wrong — the cap works; the maps not
+  showing on a prim was the client's assign-to-existing-prim registration gap,
+  fixed in [[viewer-pbr-blinn-phong-build-preview]]. The swatch UUID / factor /
+  tint / transform values reflect regardless. (One aditi login also came up in a
+  transient "Connecting…"/no-objects stall unrelated to this code — a fresh
+  login fixed it.)
 - **The `RenderMaterials` PUT body** is `{Zipped:{FullMaterialsPerFace:[{Face,
   ID(region-local),Material}]}}`; no client-side material-id hashing (the sim
   assigns it). The PBR override JSON writes a full GLTF material where only the

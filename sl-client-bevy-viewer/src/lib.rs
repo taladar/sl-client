@@ -253,8 +253,9 @@ use crate::lights::{LocalLights, drive_local_lights};
 use crate::local_chat_input::LocalChatInputPlugin;
 use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
-    MaterialManager, apply_material_overrides, apply_pbr_textures, poll_materials,
-    register_pbr_materials, update_material_caps,
+    MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_textures,
+    poll_materials, register_changed_render_materials, register_pbr_materials,
+    update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::movement::{AvatarControls, drive_avatar_controls};
@@ -1226,10 +1227,20 @@ fn run_session(
                 crate::textures::patch_parked_decoded_textures,
                 update_material_caps,
                 register_pbr_materials,
+                // A render material assigned to an existing prim (build tool /
+                // in-world retexture) refreshes its holder without re-tessellating
+                // its faces, so register the change here — `register_pbr_materials`
+                // only sees freshly-spawned faces.
+                register_changed_render_materials,
                 poll_materials,
                 apply_material_overrides,
                 crate::materials::drive_local_overrides,
                 apply_pbr_textures,
+                // FIRE-35138: while the build tool's Texture tab is on the
+                // Blinn-Phong mode, render each selected linkset's PBR faces as
+                // Blinn-Phong so they can be judged as edited; restore PBR on
+                // deselect / PBR tab / leaving build mode.
+                apply_blinn_phong_hide,
                 // The legacy (normal/specular) render-material pipeline (P27.3):
                 // register each face carrying a `TextureEntry` material id, batch
                 // the `RenderMaterials` cap requests, fold in the replies, and

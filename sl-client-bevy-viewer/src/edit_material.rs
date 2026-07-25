@@ -57,7 +57,8 @@ use crate::edit_tool::{
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::material_preview::MaterialPreview;
 use crate::materials::{MaterialManager, ObjectRenderMaterials};
-use crate::objects::ObjectState;
+use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
+use crate::textures::{PrimTextures, TextureManager};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -561,6 +562,9 @@ impl Plugin for EditMaterialPlugin {
                 apply_alpha_mode_change,
                 apply_normal_specular_picked,
                 apply_spec_color_picked,
+                // Live-preview a browsed material on the prim (non-final picks),
+                // before the OK that `apply_pbr_material_picked` sends for real.
+                preview_pbr_material_picked,
                 apply_pbr_material_picked,
                 commit_pbr_fields,
                 commit_pbr_scalars,
@@ -1613,6 +1617,117 @@ fn apply_pbr_material_picked(
             .collect();
         if !updates.is_empty() {
             commands.write(SlCommand(Command::ModifyMaterialParams { updates }));
+        }
+    }
+}
+
+/// **Live-preview** the material being browsed in the *Pick: Material* picker on
+/// the selected faces, before OK — the reference viewer previews the highlighted
+/// material on the prim as you scroll the list, and reverts on Cancel. The picker
+/// emits a **non-final** [`TexturePicked`] on each selection (and the original id
+/// on Cancel), so this applies whatever the pick carries as a no-wire preview
+/// ([`MaterialManager::preview_face_material`]); the final OK pick, handled by
+/// [`apply_pbr_material_picked`], is what actually sends the assignment. The nil
+/// id a Cancel carries for a face that had no material reverts it to Blinn-Phong.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection, the \
+              three material resources the preview composes through, and the scene / hierarchy / \
+              face queries the per-face walk reads"
+)]
+fn preview_pbr_material_picked(
+    mut picks: MessageReader<TexturePicked>,
+    ui: Option<Res<BuildMaterialUi>>,
+    selection: Res<SelectionSet>,
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    scene: Query<(), With<crate::objects::SceneObject>>,
+    children: Query<&Children>,
+    faces: Query<(
+        &PrimFaceEntity,
+        &MeshMaterial3d<StandardMaterial>,
+        &FaceTextureDebug,
+    )>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    for pick in picks.read() {
+        if pick.requester != ui.pbr_swatch {
+            continue;
+        }
+        let id = AssetKey::from(pick.texture.uuid());
+        for node in selection.iter() {
+            for (face_id, entity) in prim_faces_of_node(node, &scene, &children, &faces) {
+                let Ok((_face, material, FaceTextureDebug(texture_face))) = faces.get(entity)
+                else {
+                    continue;
+                };
+                let handle = material.0.clone();
+                let base_uv = materials
+                    .get(&handle)
+                    .map_or(bevy::math::Affine2::IDENTITY, |standard| {
+                        standard.uv_transform
+                    });
+                let texture_face = *texture_face;
+                manager.preview_face_material(
+                    (node.scoped, face_id),
+                    id,
+                    &handle,
+                    base_uv,
+                    &texture_face,
+                    &mut textures,
+                    &mut prim_textures,
+                    &mut materials,
+                );
+            }
+        }
+    }
+}
+
+/// Every prim face of a selection node's **own** prim (the walk stops at nested
+/// linkset-child objects, matching the render-material assignment's per-prim
+/// `side` = −1), as `(face index, entity)`, filtered to the node's selected face
+/// set when it has one. Unlike [`pbr_faces_of`] this yields **all** faces, not
+/// only those already carrying a render material — a material can be assigned to a
+/// face that has none, so the live preview must reach those too.
+fn prim_faces_of_node(
+    node: &crate::edit_selection::SelectedNode,
+    scene: &Query<(), With<crate::objects::SceneObject>>,
+    children: &Query<&Children>,
+    faces: &Query<(
+        &PrimFaceEntity,
+        &MeshMaterial3d<StandardMaterial>,
+        &FaceTextureDebug,
+    )>,
+) -> Vec<(u8, Entity)> {
+    let mut out: Vec<(u8, Entity)> = Vec::new();
+    let mut stack = vec![node.entity];
+    while let Some(entity) = stack.pop() {
+        if entity != node.entity && scene.get(entity).is_ok() {
+            continue;
+        }
+        if let Ok((face, _material, _debug)) = faces.get(entity)
+            && let Ok(face_id) = u8::try_from(face.face_id.as_usize())
+        {
+            out.push((face_id, entity));
+        }
+        if let Ok(list) = children.get(entity) {
+            for child in list.iter() {
+                stack.push(child);
+            }
+        }
+    }
+    match &node.faces {
+        None => out,
+        Some(set) => {
+            let chosen: std::collections::HashSet<u16> =
+                set.iter().map(|face| face.get()).collect();
+            out.into_iter()
+                .filter(|(face, _entity)| chosen.contains(&u16::from(*face)))
+                .collect()
         }
     }
 }

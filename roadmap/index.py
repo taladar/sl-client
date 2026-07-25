@@ -129,12 +129,25 @@ def parse_front_matter(text: str):
     block = text[4:end]
     body = text[end + 5 :]
     meta = {}
-    for line in block.splitlines():
+    lines = block.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         key, sep, value = line.partition(":")
         if not sep:
             continue
+        # A bracketed inline list may be wrapped across lines (to keep the file
+        # within the 80-column limit); join the continuation lines until the
+        # closing `]` so the value parses as a list, not a bare string whose
+        # characters would each read as a dangling `[[ref]]`.
+        value = value.strip()
+        if value.startswith("[") and not value.endswith("]"):
+            while index < len(lines) and not value.endswith("]"):
+                value = f"{value} {lines[index].strip()}"
+                index += 1
         meta[key.strip()] = parse_scalar(value)
     return meta, body
 

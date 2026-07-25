@@ -614,10 +614,14 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   `materialcache/` stayed empty. Both grids run the pipeline clean (no
   regression, screenshots normal), and the decoder is unit-tested, but an
   **on-screen PBR render is unconfirmed** — needs reachable PBR content (a
-  provisioned OpenSim material, or an aditi spot with PBR builds). Also note
-  material fetch uses the **ViewerAsset** cap, which the sl-conformance harness
-  notes found persistently **503s on aditi** — so even with content, aditi may
-  not fetch. Worth a follow-up.
+  provisioned OpenSim material, or an aditi spot with PBR builds). Material
+  fetch uses the **ViewerAsset** cap. **(Correction, 2026-07-25:** an earlier
+  note here claimed that cap *persistently* 503s on aditi — that was **wrong**.
+  Out of dozens of runs only one or two textures 503'd once or twice; the cap
+  works and PBR materials fetch + decode fine on aditi. The real reason a PBR
+  material did not render on a prim was a *client* bug — a material assigned to
+  an existing prim never re-registered its faces — fixed in
+  `viewer-pbr-blinn-phong-build-preview`.)
 
 - **Does NOT address R15** (aditi single-colour terrain): that is suspected
   **PBR *terrain*** (a terrain-material path), not prim/mesh **face** materials
@@ -629,10 +633,11 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   **park landing region actually pushes real overrides** (a single primary login
   logged `GLTF material override for object … on 4 / 1 face(s)`), so the
   GenericStreamingMessage→event→decode→apply path is live-exercised end-to-end;
-  but the underlying base **maps still can't be shown** because aditi's
-  `ViewerAsset` 503s (grey untextured buildings), so an on-screen
-  *rendered PBR override* remains unconfirmed — the same ViewerAsset-503 wall as
-  the asset/bake cases. OpenSim still serves no PBR/override content. (b) The
+  the underlying base **maps do fetch** on aditi (the earlier "`ViewerAsset`
+  503 wall" framing was a misdiagnosis of rare transient 503s — see the
+  correction above; the map that actually blocked an on-screen render was the
+  client's assign-to-existing-prim registration gap, now fixed). OpenSim still
+  serves no PBR/override content. (b) The
   override arrives as notation-LLSD (`LLSDSerialize::fromNotation`), which
   needed a brand-new **`sl_llsd::parse_llsd_notation`** (there was only the
   partial `Scan` cursor + binary/xml parsers before) — a full notation→`Llsd`
@@ -657,19 +662,17 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   `main.rs`; a nice contrast to P27.1/P27.2 where the fetch was a per-asset
   `ViewerAsset` `AssetStore`. Legacy uses the cap's **batch** POST instead, so
   the manager is simpler (a material-id→waiting-faces queue, no
-  `AssetStore`/LOD). (b) **The `RenderMaterials` cap WORKS on aditi** — unlike
-  the `ViewerAsset` cap that 503s and left every asset/bake/PBR-map case
-  aditi-partial. So P27.3 got a genuine end-to-end live-confirm the PBR cases
-  never could: a single primary login drove
-  **63 legacy materials requested = 63 received**, scene intact. This is the
-  first Phase-27 case with a clean aditi round-trip of the actual material data
-  (P27.1 had no content, P27.2 confirmed only the override path, base maps still
-  walled by ViewerAsset-503). (c) **PBR supersedes legacy per-face** (reference
-  behaviour): `register_legacy_materials` skips any face already covered by the
-  object's `ObjectRenderMaterials` (P27.1) holder, so the two pipelines never
-  fight over the same `StandardMaterial`. It reads the per-face legacy id
-  straight off the existing `FaceTextureDebug.material_id` (the same "debug"
-  component the P20 face driver reuses) — no new holder component needed. (d)
+  `AssetStore`/LOD). (b) **The `RenderMaterials` cap WORKS on aditi.** So P27.3
+  got a genuine end-to-end live-confirm: a single primary login drove
+  **63 legacy materials requested = 63 received**, scene intact. (The
+  `ViewerAsset` cap works on aditi too — the earlier "503 wall" claim that made
+  the PBR cases look aditi-partial was wrong; see the correction earlier in this
+  file.) (c) **PBR supersedes legacy per-face** (reference behaviour):
+  `register_legacy_materials` skips any face already covered by the object's
+  `ObjectRenderMaterials` (P27.1) holder, so the two pipelines never fight over
+  the same `StandardMaterial`. It reads the per-face legacy id straight off the
+  existing `FaceTextureDebug.material_id` (the same "debug" component the P20
+  face driver reuses) — no new holder component needed. (d)
   **Mapping is normal-map- faithful, specular-scalar-approximate:** normal map →
   `normal_map_texture` (linear); `environment_intensity`→`reflectance`,
   glossiness (specular exponent) →`perceptual_roughness`; alpha mode maps only

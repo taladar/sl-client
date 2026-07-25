@@ -42,12 +42,15 @@ use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
     CAP_VIEWER_ASSET, DecodedTexture, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, MaterialOverride, Priority, ScopedObjectId, SlCapabilities, SlEvent,
-    SlSessionEvent, TextureKey, Uuid, parse_material_asset, parse_material_override,
+    SlSessionEvent, TextureFace, TextureKey, Uuid, parse_material_asset, parse_material_override,
 };
 
-use crate::objects::PrimFaceEntity;
+use crate::edit_selection::SelectionSet;
+use crate::edit_texture::MatModeState;
+use crate::edit_tool::EditToolState;
+use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
-use crate::textures::TextureManager;
+use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
 
 /// A face-material identity: the scoped object id and its Linden face index — the
 /// key both a registered face material and an incoming per-face GLTF override
@@ -125,6 +128,18 @@ impl PbrSlot {
             Self::MetallicRoughness => material.metallic_roughness_texture,
             Self::Normal => material.normal_texture,
             Self::Emissive => material.emissive_texture,
+        }
+    }
+
+    /// The **fetchable** texture this slot names on `material`, or `None` when it
+    /// names none (or a non-fetchable sentinel / nil id). `None` means "clear the
+    /// slot": a PBR render material supersedes the face's Blinn-Phong layer, so a
+    /// slot the material does not define shows the PBR factor alone, never a
+    /// leftover legacy texture.
+    fn fetchable_texture(self, material: &GltfMaterial) -> Option<TextureKey> {
+        match self.texture(material) {
+            Some(GltfTexture { id, .. }) if is_fetchable_texture(id) => Some(id),
+            _ => None,
         }
     }
 
@@ -206,6 +221,14 @@ pub(crate) struct MaterialManager {
     /// ([`apply_local_override`](Self::apply_local_override)) and still need a
     /// recompose — so an edit shows immediately, before the simulator echoes it.
     local_recompose: Vec<FaceKey>,
+    /// Faces whose PBR material is currently **hidden** so they render their
+    /// Blinn-Phong layer instead — the FIRE-35138 build-tool behaviour: a face in
+    /// a selected linkset while the build tool's Texture tab is on the Blinn-Phong
+    /// (Material) mode. A hidden face's PBR (re)composition is suppressed
+    /// ([`recompose_face`] is a no-op for it) so a late-arriving material / override
+    /// / texture map does not overwrite the Blinn-Phong preview; it is restored to
+    /// PBR when it leaves the set. Maintained by [`apply_blinn_phong_hide`].
+    hidden: HashSet<FaceKey>,
 }
 
 impl MaterialManager {
@@ -226,6 +249,7 @@ impl MaterialManager {
             images: HashMap::new(),
             texture_pending: HashMap::new(),
             local_recompose: Vec::new(),
+            hidden: HashSet::new(),
         }
     }
 
@@ -273,6 +297,117 @@ impl MaterialManager {
         self.request(id);
     }
 
+    /// Register or refresh a face's PBR base material on a **material (re)assignment
+    /// to an existing prim** — its object's [`ObjectRenderMaterials`] changed
+    /// without a re-tessellation (the build tool / an in-world retexture), so the
+    /// face entity is not freshly spawned and [`register_pbr_materials`] never sees
+    /// it. Updates the face's base material id, capturing its diffuse UV placement
+    /// **only on first registration** so a later change never re-reads the
+    /// already-composed handle and double-applies a `KHR_texture_transform`; ensures
+    /// the asset is fetched. Returns whether the material actually changed, so the
+    /// caller recomposes only then — a moving prim's per-update
+    /// `ObjectRenderMaterials` refresh then costs a lookup, not a recomposition.
+    fn refresh_face_material(
+        &mut self,
+        key: FaceKey,
+        id: AssetKey,
+        handle: &Handle<StandardMaterial>,
+        base_uv: Affine2,
+    ) -> bool {
+        if id.uuid().is_nil() {
+            return false;
+        }
+        if let Some(slot) = self.face_slots.get_mut(&key) {
+            if slot.material_id == id {
+                return false;
+            }
+            slot.material_id = id;
+        } else {
+            let _prev = self.face_slots.insert(
+                key,
+                FaceSlot {
+                    material_id: id,
+                    handle: handle.clone(),
+                    base_uv,
+                },
+            );
+        }
+        self.request(id);
+        true
+    }
+
+    /// **Live-preview** a render material on a face while the user browses the
+    /// *Pick: Material* picker (the reference's `setGLTFRenderMaterial` preview,
+    /// applied on each picker selection before OK): show `id` on the face now, with
+    /// no wire send. A non-nil `id` composes it as the face's base PBR material
+    /// (registering the face if it had none); the **nil** id — the picker's revert
+    /// of a face that had no material — drops the registration and recomposes the
+    /// face's Blinn-Phong layer, so cancelling the picker restores the prim.
+    ///
+    /// The captured diffuse `base_uv` is used only when the face is newly
+    /// registered (a face already carrying a material keeps its stored placement),
+    /// so re-previewing never double-applies a `KHR_texture_transform`. The eventual
+    /// OK sends the assignment for real; the simulator's echo then reconciles
+    /// idempotently ([`register_changed_render_materials`]).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the preview needs the face key + previewed id, the face's handle / diffuse UV / \
+                  TextureEntry for either composition, and the three material resources it \
+                  composes through"
+    )]
+    pub(crate) fn preview_face_material(
+        &mut self,
+        key: FaceKey,
+        id: AssetKey,
+        handle: &Handle<StandardMaterial>,
+        base_uv: Affine2,
+        texture_face: &TextureFace,
+        textures: &mut TextureManager,
+        prim_textures: &mut PrimTextures,
+        materials: &mut Assets<StandardMaterial>,
+    ) {
+        if id.uuid().is_nil() {
+            // Revert a face that had no material back to its Blinn-Phong layer.
+            let _hidden = self.hidden.remove(&key);
+            let _over = self.overrides.remove(&key);
+            if self.face_slots.remove(&key).is_some() {
+                for slot in PbrSlot::ALL {
+                    drop_texture_patches(self, handle, slot);
+                }
+                compose_face_material(
+                    handle,
+                    texture_face,
+                    materials,
+                    textures,
+                    prim_textures,
+                    MATERIAL_TEXTURE_PRIORITY,
+                    TextureAlpha::Mask,
+                );
+            }
+            return;
+        }
+        match self.face_slots.get_mut(&key) {
+            Some(slot) => {
+                if slot.material_id == id {
+                    return;
+                }
+                slot.material_id = id;
+            }
+            None => {
+                let _prev = self.face_slots.insert(
+                    key,
+                    FaceSlot {
+                        material_id: id,
+                        handle: handle.clone(),
+                        base_uv,
+                    },
+                );
+            }
+        }
+        self.request(id);
+        recompose_face(self, textures, materials, key);
+    }
+
     /// The decoded GLTF material for `id`, if its `ViewerAsset` fetch/decode has
     /// succeeded — a read-only lookup for the Texture tab's PBR channel display
     /// ([`crate::edit_material`]).
@@ -303,11 +438,11 @@ impl MaterialManager {
         handle: &Handle<StandardMaterial>,
         material: &GltfMaterial,
     ) {
-        // Clear every slot first: a reused preview sphere must not keep a prior
-        // material's map. `request_material_textures` only clears a slot the base
-        // *had* and the effective dropped — with base == effective here it never
-        // clears, so a leftover would leak through. Also drop any parked patches
-        // still targeting this handle from the previous material.
+        // Clear every slot first, dropping any parked patches still targeting this
+        // handle from the previous material: `request_material_textures` clears a
+        // slot the material does not name, but for a slot it *does* name it parks a
+        // fresh patch without first dropping a stale one, so a reused preview sphere
+        // would otherwise keep the prior material's map on a re-used slot.
         for slot in PbrSlot::ALL {
             drop_texture_patches(self, handle, slot);
             if let Some(mut standard) = materials.get_mut(handle) {
@@ -315,7 +450,7 @@ impl MaterialManager {
             }
         }
         apply_material_scalars(materials, handle, material, Affine2::IDENTITY);
-        request_material_textures(self, textures, materials, handle, material, material);
+        request_material_textures(self, textures, materials, handle, material);
     }
 
     /// The per-face GLTF override layered on the base material, if the face has
@@ -514,6 +649,48 @@ pub(crate) fn register_pbr_materials(
     }
 }
 
+/// (Re)register a face's PBR material when its object's [`ObjectRenderMaterials`]
+/// **changes** — a render material assigned to (or changed on) an *existing* prim
+/// that does not re-tessellate its faces (the build tool's material assignment, an
+/// in-world retexture). [`register_pbr_materials`] only sees freshly-**spawned**
+/// faces (`Added<PrimFaceEntity>`), so without this a material dropped onto a prim
+/// already in the scene would refresh the holder but never actually render — the
+/// face stayed Blinn-Phong. Recomposes only the faces whose material genuinely
+/// changed ([`refresh_face_material`](MaterialManager::refresh_face_material)
+/// returns `false` for an unchanged echo), so a moving prim's per-update holder
+/// refresh costs a lookup, not a recomposition.
+pub(crate) fn register_changed_render_materials(
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    changed: Query<(&ObjectRenderMaterials, &Children), Changed<ObjectRenderMaterials>>,
+    faces: Query<(&MeshMaterial3d<StandardMaterial>, &PrimFaceEntity)>,
+) {
+    for (holder, children) in &changed {
+        for child in children.iter() {
+            let Ok((material, face)) = faces.get(child) else {
+                continue;
+            };
+            let face_index = face.face_id.as_usize();
+            let Some(&(face_id, material_id)) = holder
+                .faces
+                .iter()
+                .find(|(index, _id)| usize::from(*index) == face_index)
+            else {
+                continue;
+            };
+            let key = (holder.scoped_id, face_id);
+            let base_uv = materials
+                .get(&material.0)
+                .map_or(Affine2::IDENTITY, |standard| standard.uv_transform);
+            if manager.refresh_face_material(key, AssetKey::from(material_id), &material.0, base_uv)
+            {
+                recompose_face(&mut manager, &mut textures, &mut materials, key);
+            }
+        }
+    }
+}
+
 /// Poll the in-flight material fetches; fold each result into the decoded cache
 /// (or mark it unavailable), then recompose every registered face whose base
 /// material just decoded — applying its base scalars, any override, and its
@@ -631,31 +808,201 @@ pub(crate) fn drive_local_overrides(
     }
 }
 
+/// Hide or restore each PBR face's render material for the build tool's
+/// Blinn-Phong editing mode — the Firestorm FIRE-35138 behaviour ("show the
+/// selection in Blinn-Phong"): while the Build Tools floater is open **and** its
+/// Texture tab is on the Material (Blinn-Phong) mode, every PBR face of a
+/// **selected linkset** renders its Blinn-Phong layer instead of its PBR material,
+/// so its diffuse / tint / surface flags can be judged as they are edited; leaving
+/// build mode, switching to the PBR tab, or deselecting restores the PBR material.
+///
+/// This diverges from the reference in one deliberate way ([[sl-client-prefer-maximal-scope]]):
+/// the reference hides only the selected **prims**, but we hide the whole
+/// **linkset** so a multi-prim build (a house's walls + floor + roof) is judged as
+/// a coherent whole rather than one wall in Blinn-Phong beside PBR everything else.
+///
+/// The face keeps its one stable [`StandardMaterial`] handle throughout (so every
+/// other system that reads it is unaffected); only its composition is swapped
+/// between the PBR material ([`recompose_face`]) and the Blinn-Phong material
+/// ([`compose_face_material`]). While a face is in [`hidden`](MaterialManager::hidden)
+/// its PBR (re)composition is suppressed, so a material / override / map that
+/// arrives mid-edit cannot overwrite the preview.
+///
+/// Only recomputed when its inputs change (the tool, the mode, the selection) or a
+/// new face registered, so the linkset walk is not paid every frame.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the tool / mode / \
+              selection state driving the hide, the three material resources it recomposes \
+              through, and the hierarchy / holder / face queries the linkset walk reads"
+)]
+pub(crate) fn apply_blinn_phong_hide(
+    tool: Res<EditToolState>,
+    mode: Res<MatModeState>,
+    selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
+    new_faces: Query<(), Added<PrimFaceEntity>>,
+    mut manager: ResMut<MaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    children: Query<&Children>,
+    holders: Query<&ObjectRenderMaterials>,
+    faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+) {
+    // Recompute only on a real change; a face already hidden stays hidden without
+    // work (its PBR recomposition is suppressed, so nothing un-hides it silently).
+    if !(tool.is_changed() || mode.is_changed() || selection.is_changed() || !new_faces.is_empty())
+    {
+        return;
+    }
+
+    // The PBR faces that should render Blinn-Phong now: every PBR face of a
+    // selected linkset, but only while the build tool is open on the Blinn-Phong
+    // (Material) mode. Keyed like `face_slots`, carrying the face entity so its
+    // `TextureEntry` is read when it is (re)composed as Blinn-Phong.
+    let mut want: HashMap<FaceKey, Entity> = HashMap::new();
+    if tool.active && mode.is_material() {
+        for node in selection.iter() {
+            // Hide the **whole linkset**, not just the selected prim: a Select-Face
+            // (or edit-linked) selection carries the clicked *part*, whose subtree
+            // holds only its own faces — resolve to the linkset root so a sibling
+            // prim of a multi-prim build is previewed in Blinn-Phong too (the whole
+            // house, not one wall). Falls back to the node's own entity when the
+            // root is not resolvable.
+            let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
+            let root_entity = objects
+                .entity_by_scoped(&root_scoped)
+                .unwrap_or(node.entity);
+            collect_linkset_pbr_faces(root_entity, &children, &holders, &faces, &mut want);
+        }
+    }
+    let want_keys: HashSet<FaceKey> = want.keys().copied().collect();
+
+    // Restore PBR on faces that left the set (deselected, mode switched, build
+    // mode closed): drop any Blinn-Phong diffuse still parked on the handle so it
+    // cannot land over the restored PBR composition, then recompose the material.
+    let to_show: Vec<FaceKey> = manager.hidden.difference(&want_keys).copied().collect();
+    for key in to_show {
+        let _present = manager.hidden.remove(&key);
+        if let Some(slot) = manager.face_slots.get(&key) {
+            let handle = slot.handle.clone();
+            prim_textures.drop_pending_material(&handle);
+        }
+        recompose_face(&mut manager, &mut textures, &mut materials, key);
+    }
+
+    // Hide PBR on faces that entered the set: drop any parked PBR map so a late one
+    // cannot land over the Blinn-Phong preview, mark the face hidden (so its PBR
+    // recomposition is suppressed from now on), then compose its Blinn-Phong look.
+    for (key, entity) in want {
+        if manager.hidden.contains(&key) {
+            continue;
+        }
+        let Some(slot) = manager.face_slots.get(&key) else {
+            continue;
+        };
+        let handle = slot.handle.clone();
+        for pbr_slot in PbrSlot::ALL {
+            drop_texture_patches(&mut manager, &handle, pbr_slot);
+        }
+        let _absent = manager.hidden.insert(key);
+        let Ok((_face, FaceTextureDebug(texture_face))) = faces.get(entity) else {
+            continue;
+        };
+        let texture_face = *texture_face;
+        compose_face_material(
+            &handle,
+            &texture_face,
+            &mut materials,
+            &mut textures,
+            &mut prim_textures,
+            MATERIAL_TEXTURE_PRIORITY,
+            TextureAlpha::Mask,
+        );
+    }
+}
+
+/// Walk the linkset rooted at `root`, collecting every PBR face (a face whose
+/// index appears in its geometry holder's [`ObjectRenderMaterials`]) into `out`,
+/// keyed by its scoped-object + face index and carrying the face entity. The whole
+/// subtree is descended (through nested linkset-child objects) so a multi-prim
+/// build's every PBR face is included.
+fn collect_linkset_pbr_faces(
+    root: Entity,
+    children: &Query<&Children>,
+    holders: &Query<&ObjectRenderMaterials>,
+    faces: &Query<(&PrimFaceEntity, &FaceTextureDebug)>,
+    out: &mut HashMap<FaceKey, Entity>,
+) {
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        if let Ok(holder) = holders.get(entity)
+            && let Ok(holder_children) = children.get(entity)
+        {
+            for child in holder_children.iter() {
+                let Ok((face, _debug)) = faces.get(child) else {
+                    continue;
+                };
+                let face_index = face.face_id.as_usize();
+                if let Some(&(face_id, _material_id)) = holder
+                    .faces
+                    .iter()
+                    .find(|(index, _id)| usize::from(*index) == face_index)
+                {
+                    let _prev = out.insert((holder.scoped_id, face_id), child);
+                }
+            }
+        }
+        if let Ok(list) = children.get(entity) {
+            for child in list.iter() {
+                stack.push(child);
+            }
+        }
+    }
+}
+
 /// Recompose one registered face's [`StandardMaterial`]: layer its override (if
-/// any) onto its decoded base material, write the effective scalars / UV
-/// placement, and (re)request its texture maps. A no-op until the base material
-/// has decoded (the face is recomposed again when it does).
+/// any) onto its base material, write the effective scalars / UV placement, and
+/// (re)request its texture maps.
+///
+/// A GLTF render material **supersedes** the face's Blinn-Phong layer (the
+/// reference viewer's `getGLTFRenderMaterial`), so a PBR face never falls back to
+/// its legacy diffuse/normal appearance: while the base asset is still fetching
+/// (or turned out unavailable) the glTF **default** material stands in — neutral
+/// white PBR, exactly as the reference renders a face whose `LLFetchedGLTFMaterial`
+/// has not yet loaded — rather than leaving the Blinn-Phong texture showing
+/// through. The face is recomposed again with the real scalars/maps once the
+/// asset decodes.
 fn recompose_face(
     manager: &mut MaterialManager,
     textures: &mut TextureManager,
     materials: &mut Assets<StandardMaterial>,
     key: FaceKey,
 ) {
+    // A face whose PBR material is hidden for the Blinn-Phong build-tool preview
+    // (FIRE-35138) renders its Blinn-Phong composition; suppress the PBR
+    // (re)composition so a late material / override / map does not overwrite it.
+    if manager.hidden.contains(&key) {
+        return;
+    }
     let Some(slot) = manager.face_slots.get(&key) else {
         return;
     };
     let material_id = slot.material_id;
     let handle = slot.handle.clone();
     let base_uv = slot.base_uv;
-    let Some(base) = manager.decoded.get(&material_id).copied() else {
-        return;
-    };
+    let base = manager
+        .decoded
+        .get(&material_id)
+        .copied()
+        .unwrap_or_default();
     let mut effective = base;
     if let Some(over) = manager.overrides.get(&key) {
         over.apply_to(&mut effective);
     }
     apply_material_scalars(materials, &handle, &effective, base_uv);
-    request_material_textures(manager, textures, materials, &handle, &base, &effective);
+    request_material_textures(manager, textures, materials, &handle, &effective);
 }
 
 /// Write a decoded [`GltfMaterial`]'s scalar / factor fields onto a face's
@@ -703,21 +1050,27 @@ fn apply_material_scalars(
 }
 
 /// Reconcile a face's PBR texture slots to `effective` (the base material with any
-/// override applied), given its `base` material: request each slot the effective
-/// material names, and clear a slot the override *removed* (present on `base` but
-/// not `effective`) so a cleared texture reverts. A slot absent on both `base` and
-/// `effective` is left as the face's diffuse texture (the P27.1 behaviour).
+/// override applied): request each slot the effective material names, and clear
+/// any slot it does **not** name.
+///
+/// A GLTF render material supersedes the face's Blinn-Phong layer entirely (the
+/// reference viewer's `getGLTFRenderMaterial`), so a slot the material does not
+/// define is *cleared* rather than left showing the face's legacy diffuse/normal
+/// texture: a factor-only material renders its base-colour factor, not the
+/// leftover Blinn-Phong texture that was on the shared material before the PBR
+/// composition. (A PBR face that is being shown as Blinn-Phong for editing — the
+/// FIRE-35138 hide — has its PBR recomposition suppressed entirely, so this path
+/// never runs for it; its handle is composed as Blinn-Phong instead.)
 fn request_material_textures(
     manager: &mut MaterialManager,
     textures: &mut TextureManager,
     materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
-    base: &GltfMaterial,
     effective: &GltfMaterial,
 ) {
     for slot in PbrSlot::ALL {
-        match slot.texture(effective) {
-            Some(GltfTexture { id, .. }) if is_fetchable_texture(id) => {
+        match slot.fetchable_texture(effective) {
+            Some(id) => {
                 textures.request_boosted(id, MATERIAL_TEXTURE_PRIORITY);
                 manager
                     .texture_pending
@@ -728,15 +1081,13 @@ fn request_material_textures(
                         slot,
                     });
             }
-            // The effective material clears (or never had) this slot's texture.
-            // Clear the face slot only when the *base* carried one — i.e. an
-            // override removed it — leaving an untouched diffuse texture in place.
-            _ => {
-                if slot.texture(base).is_some() {
-                    drop_texture_patches(manager, handle, slot);
-                    if let Some(mut standard) = materials.get_mut(handle) {
-                        slot.clear(&mut standard);
-                    }
+            // The effective material does not name a (fetchable) texture for this
+            // slot: clear it so the PBR factor stands alone, dropping any parked
+            // patch first so a stale one cannot later re-fill the cleared slot.
+            None => {
+                drop_texture_patches(manager, handle, slot);
+                if let Some(mut standard) = materials.get_mut(handle) {
+                    slot.clear(&mut standard);
                 }
             }
         }
@@ -808,4 +1159,71 @@ fn gltf_uv_transform(transform: &GltfTextureTransform) -> Affine2 {
         transform.rotation,
         Vec2::new(transform.offset[0], transform.offset[1]),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    /// A [`GltfTexture`] naming `id` with the identity `KHR_texture_transform`.
+    fn texture(id: TextureKey) -> GltfTexture {
+        GltfTexture {
+            id,
+            transform: GltfTextureTransform::default(),
+        }
+    }
+
+    #[test]
+    fn factor_only_material_clears_every_slot() {
+        // A PBR material with only factors (no texture maps) names no fetchable
+        // texture in any slot, so every slot is *cleared* rather than left showing
+        // the face's leftover Blinn-Phong diffuse — PBR fully supersedes the
+        // legacy layer (the bug the fix addresses: a factor-only material used to
+        // keep the diffuse texture bleeding through).
+        let material = GltfMaterial::default();
+        for slot in PbrSlot::ALL {
+            assert_eq!(
+                slot.fetchable_texture(&material),
+                None,
+                "{slot:?} of a factor-only material must clear, not keep the diffuse",
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_defined_slot_is_requested() {
+        // A material that names only a base-colour texture requests exactly that
+        // slot; the others clear (so their PBR factors stand, no Blinn-Phong
+        // bleed-through).
+        let id = TextureKey::from(Uuid::from_u128(0x1234));
+        let material = GltfMaterial {
+            base_color_texture: Some(texture(id)),
+            ..GltfMaterial::default()
+        };
+        assert_eq!(PbrSlot::BaseColor.fetchable_texture(&material), Some(id));
+        assert_eq!(
+            PbrSlot::MetallicRoughness.fetchable_texture(&material),
+            None
+        );
+        assert_eq!(PbrSlot::Normal.fetchable_texture(&material), None);
+        assert_eq!(PbrSlot::Emissive.fetchable_texture(&material), None);
+    }
+
+    #[test]
+    fn non_fetchable_slot_ids_clear() {
+        // The nil id and the GLTF override-null sentinel are "no texture" — a slot
+        // an override cleared reverts to its factor, it does not try to fetch the
+        // sentinel or keep a stale map.
+        for cleared in [Uuid::nil(), GLTF_OVERRIDE_NULL_UUID] {
+            let material = GltfMaterial {
+                normal_texture: Some(texture(TextureKey::from(cleared))),
+                emissive_texture: Some(texture(TextureKey::from(cleared))),
+                ..GltfMaterial::default()
+            };
+            assert_eq!(PbrSlot::Normal.fetchable_texture(&material), None);
+            assert_eq!(PbrSlot::Emissive.fetchable_texture(&material), None);
+        }
+    }
 }

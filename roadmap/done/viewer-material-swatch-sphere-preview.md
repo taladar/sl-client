@@ -63,6 +63,7 @@ and go, so the common case (the swatch + the picker pane) uses two.
 
 Verified: `cargo clippy`/tests clean (studio-pool bind/reuse + distinct-layer
 unit tests). On-screen fidelity needs PBR material content to render (OpenSim
-serves none; aditi's PBR *maps* still hit the `ViewerAsset`-503 wall noted for
-[[viewer-face-materials-pbr]]) — factor-only materials (base colour / metallic /
-roughness / emissive) do render on the sphere regardless.
+serves none; aditi carries PBR builds — the "`ViewerAsset`-503 wall" once noted
+here was a misdiagnosis of rare transient 503s, corrected under
+[[viewer-pbr-material-render-unconfirmed]]) — factor-only materials (base colour
+/ metallic / roughness / emissive) render on the sphere regardless.

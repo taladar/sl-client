@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 210 |
 | blocked | 109 |
 | in-progress | 7 |
-| bugs | 12 |
-| done | 594 |
+| bugs | 11 |
+| done | 596 |
 | deferred | 16 |
 | wont-do | 6 |
-| **total** | **986** |
+| **total** | **987** |
 
 ## ideas (32)
 
@@ -919,7 +919,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (12)
+## bugs (11)
 
 ### protocol
 
@@ -940,8 +940,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-pbr-material-render-unconfirmed`](bugs/viewer-pbr-material-render-unconfirmed.md)
-  — Actually render PBR (GLTF) materials on a face — and on the material preview
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
@@ -957,7 +955,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (594)
+## done (596)
 
 ### protocol
 
@@ -1449,6 +1447,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
 - [`viewer-parcel-overlay-decode`](done/viewer-parcel-overlay-decode.md) —
   Decode ParcelOverlay into a 64×64 grid resource
+- [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
+  — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
+  (FIRE-35138)
+- [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
+  — Actually render PBR (GLTF) materials on a face — and on the material preview
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)

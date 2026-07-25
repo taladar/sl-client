@@ -746,6 +746,39 @@ pub(crate) fn face_material(
     priority: Priority,
     texture_alpha: TextureAlpha,
 ) -> Handle<StandardMaterial> {
+    let handle = materials.add(StandardMaterial::default());
+    compose_face_material(
+        &handle,
+        face,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        texture_alpha,
+    );
+    handle
+}
+
+/// Compose the diffuse Blinn-Phong appearance of `face` **onto an existing**
+/// material `handle` — the same mapping [`face_material`] builds into a fresh
+/// handle (tint, UV placement, alpha resolution, the legacy surface flags, and
+/// the diffuse texture, filled now if resident else parked + requested), but
+/// written over whatever the handle already held.
+///
+/// This exists so a PBR face's material can be **reverted to its Blinn-Phong
+/// look** while it is edited on the build tool's Blinn-Phong tab (the FIRE-35138
+/// hide, [`crate::materials::apply_blinn_phong_hide`]): the face keeps its one
+/// stable handle (every other system that reads it is unaffected) and only its
+/// composition changes. `face_material` is the fresh-handle wrapper over it.
+pub(crate) fn compose_face_material(
+    handle: &Handle<StandardMaterial>,
+    face: &TextureFace,
+    materials: &mut Assets<StandardMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+    texture_alpha: TextureAlpha,
+) {
     let texture_id = face.texture_id;
     let has_texture = !is_absent_texture(texture_id);
     let mut material = StandardMaterial {
@@ -794,7 +827,14 @@ pub(crate) fn face_material(
     // this material as it is built (bump needs the decoded diffuse and is applied
     // later by the `bump` pipeline). A face with none of these flags is untouched.
     crate::bump::apply_surface_flags(&mut material, face);
-    let handle = materials.add(material);
+    // Write the composed material over the existing handle (Bevy marks the asset
+    // changed, so a re-composition — e.g. the FIRE-35138 Blinn-Phong revert of a
+    // PBR face — rebuilds its bind group). A handle whose asset was dropped is a
+    // no-op.
+    let Some(mut slot) = materials.get_mut(handle) else {
+        return;
+    };
+    *slot = material;
     if has_texture {
         // Track this material so a later level-of-detail re-upload can mark it
         // changed and rebuild its bind group (P21.1) — see `PrimTextures::materials`.
@@ -814,7 +854,20 @@ pub(crate) fn face_material(
             manager.request_face(texture_id, priority);
         }
     }
-    handle
+}
+
+impl PrimTextures {
+    /// Drop `handle` from every parked-face list, so a diffuse texture that
+    /// decodes later does not paint itself onto a material that has since been
+    /// recomposed as something else — used when a PBR face reverts from its
+    /// Blinn-Phong hide back to PBR ([`crate::materials::apply_blinn_phong_hide`]),
+    /// which must not let a still-pending Blinn-Phong diffuse land over the
+    /// restored PBR composition.
+    pub(crate) fn drop_pending_material(&mut self, handle: &Handle<StandardMaterial>) {
+        for parked in self.pending.values_mut() {
+            parked.retain(|(parked_handle, _alpha)| parked_handle != handle);
+        }
+    }
 }
 
 /// Fill each newly decoded prim texture into the faces parked on it: upload (and
