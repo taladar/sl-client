@@ -2,7 +2,7 @@
 id: viewer-custom-face-material-shader
 title: Custom face material shader — PBR per-map transforms + legacy Blinn-Phong specular
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07-25) — full material fidelity after the FIRE-35138 work
 refs: [viewer-pbr-blinn-phong-build-preview, viewer-face-materials-pbr, viewer-legacy-material-exact-port, viewer-tonemap-auto-exposure, viewer-bevy-material-inplace-reprepare, viewer-perf-texture-anim-pause, viewer-perf-prim-tessellation-cache]
 ---
@@ -81,9 +81,31 @@ New: `sl-client-bevy-viewer/src/face_material.rs` + `face_material.wgsl`
     frame). Watch item: a **one-time, non-reproducible** viewer crash setting a
     specular map on aditi (tracked in the personal memory
     `sl-client-legacy-specular-edit-aditi-crash`, not a roadmap item).
-- **Phase 3** — revert-to-Blinn-Phong on
-  `RemovedComponents<ObjectRenderMaterials>`.
-- **Phase 4** — tonemapper preferences (`RenderTonemapType`/`Mix`/`Exposure`).
+- **Phase 3** ✅ — revert-to-Blinn-Phong on
+  `RemovedComponents<ObjectRenderMaterials>`. `apply_render_materials` removes
+  the holder the moment an object update carries no render material (the
+  material deleted / unset in-world), so `revert_removed_render_materials` reads
+  the removed holders, drops each face's PBR slot + override + parked patches
+  (`MaterialManager::revert_face_to_diffuse`, factored out of the picker's
+  nil-id revert), recomposes its diffuse/Blinn-Phong layer, and **re-registers**
+  the face's legacy `LLMaterial` (its `TextureEntry` `material_id`) so the
+  specular / normal that the PBR material had superseded come back — fetched
+  on-demand since a PBR face's legacy material is never eagerly fetched. The
+  removed component's data is gone by then, so the scoped id is resolved from
+  the geometry holder's parent `SceneObject` and each face index from its
+  `PrimFaceEntity` (an object *despawn* is skipped — the parent lookup fails; a
+  material *swap* is skipped — the live holder query still finds it).
+- **Phase 4** ✅ — tonemapper preferences
+  (`RenderTonemapType`/`Mix`/`Exposure`). `tonemap::register_settings` declares
+  the three under `[render.tonemap]` with the reference defaults (so a Firestorm
+  user's values port straight over), wired into `ViewerSettings::from_world`;
+  `refresh_tonemap_settings` drives each camera's live `SlTonemap` from the
+  store every frame. The `SL_VIEWER_TONEMAP*` / `SL_VIEWER_EXPOSURE` env
+  overrides still **win** over the stored value (a set variable pins its field),
+  so the screenshot harness stays reproducible regardless of saved preferences.
+  Auto-exposure stays deferred ([[viewer-tonemap-auto-exposure]]); the
+  preferences **UI** to bind these is the general preferences-floater work, not
+  this task.
 
 ## Performance (Phase 1.5)
 

@@ -257,7 +257,7 @@ use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
     MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_textures,
     poll_materials, register_changed_render_materials, register_pbr_materials,
-    update_material_caps,
+    revert_removed_render_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::movement::{AvatarControls, drive_avatar_controls};
@@ -1239,6 +1239,10 @@ fn run_session(
                     // its faces, so register the change here — `register_pbr_materials`
                     // only sees freshly-spawned faces.
                     register_changed_render_materials,
+                    // Phase 3: a render material cleared in-world removes the holder,
+                    // so revert each of its faces to Blinn-Phong / diffuse (and bring
+                    // back their legacy specular / normal, no longer superseded).
+                    revert_removed_render_materials,
                     poll_materials,
                     apply_material_overrides,
                     crate::materials::drive_local_overrides,

@@ -60,6 +60,9 @@ use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::{ExtractedView, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
+use sl_settings::SettingValue;
+
+use crate::settings::ViewerSettings;
 use crate::underwater_fog::UnderwaterFogPass;
 
 /// The internal handle the tone-map shader (`tonemap.wgsl`) is loaded under.
@@ -134,6 +137,83 @@ fn tonemap_type_from_env() -> u32 {
     }
 }
 
+/// The environment variable overriding the tone curve (see [`tonemap_type_from_env`]).
+const ENV_TONEMAP_TYPE: &str = "SL_VIEWER_TONEMAP";
+/// The environment variable overriding the tone-curve blend.
+const ENV_TONEMAP_MIX: &str = "SL_VIEWER_TONEMAP_MIX";
+/// The environment variable overriding the exposure.
+const ENV_EXPOSURE: &str = "SL_VIEWER_EXPOSURE";
+
+/// The persisted-file section the tone-mapper settings are grouped under
+/// (`[render.tonemap]`), matching the reference's `Render*` naming.
+const TONEMAP_SECTION: &[&str] = &["render", "tonemap"];
+
+/// The reference `RenderTonemapType` setting name.
+const SETTING_TONEMAP_TYPE: &str = "RenderTonemapType";
+/// The reference `RenderTonemapMix` setting name.
+const SETTING_TONEMAP_MIX: &str = "RenderTonemapMix";
+/// The reference `RenderExposure` setting name.
+const SETTING_EXPOSURE: &str = "RenderExposure";
+
+/// Register the tone-mapper settings on the store with the reference defaults, so
+/// the names exist (and persist) — a user's Firestorm `RenderTonemapType` /
+/// `RenderTonemapMix` / `RenderExposure` port straight over — and the (future)
+/// preferences UI has something to bind to. Called from
+/// [`ViewerSettings`](crate::settings::ViewerSettings)'s `FromWorld`.
+pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        TONEMAP_SECTION,
+        SETTING_TONEMAP_TYPE,
+        SettingValue::U32(TONEMAP_ACES),
+        "Tone curve: 0 Khronos PBR Neutral, 1 ACES (default), 2 none",
+    );
+    settings.register_in(
+        TONEMAP_SECTION,
+        SETTING_TONEMAP_MIX,
+        SettingValue::F32(DEFAULT_TONEMAP_MIX),
+        "How far the tone curve is blended over the merely-exposed colour (0-1)",
+    );
+    settings.register_in(
+        TONEMAP_SECTION,
+        SETTING_EXPOSURE,
+        SettingValue::F32(DEFAULT_EXPOSURE),
+        "Linear scene-colour scale before the tone curve",
+    );
+}
+
+/// Refresh each camera's live [`SlTonemap`] from the settings store each frame
+/// (cheap reads), so a `RenderTonemapType` / `RenderTonemapMix` / `RenderExposure`
+/// changed in the (future) preferences UI takes effect at once — the preferences
+/// counterpart to the environment overrides.
+///
+/// An environment override (`SL_VIEWER_TONEMAP*` / `SL_VIEWER_EXPOSURE`), used by
+/// the screenshot harness to sweep the tone mapper without a config, **wins** over
+/// the stored value: a set variable pins its field and the store no longer drives
+/// it, so a capture is reproducible regardless of the user's saved preferences.
+pub(crate) fn refresh_tonemap_settings(
+    store: Res<ViewerSettings>,
+    mut cameras: Query<&mut SlTonemap>,
+) {
+    let store = store.store();
+    for mut tonemap in &mut cameras {
+        if std::env::var_os(ENV_TONEMAP_TYPE).is_none()
+            && let Ok(value) = store.get_u32(SETTING_TONEMAP_TYPE)
+        {
+            tonemap.tonemap_type = value;
+        }
+        if std::env::var_os(ENV_TONEMAP_MIX).is_none()
+            && let Ok(value) = store.get_f32(SETTING_TONEMAP_MIX)
+        {
+            tonemap.tonemap_mix = value.clamp(0.0, 1.0);
+        }
+        if std::env::var_os(ENV_EXPOSURE).is_none()
+            && let Ok(value) = store.get_f32(SETTING_EXPOSURE)
+        {
+            tonemap.exposure = value;
+        }
+    }
+}
+
 impl SyncComponent for SlTonemap {
     type Target = Self;
 }
@@ -165,7 +245,10 @@ impl Plugin for SlTonemapPlugin {
         app.add_plugins((
             ExtractComponentPlugin::<SlTonemap>::default(),
             UniformComponentPlugin::<SlTonemap>::default(),
-        ));
+        ))
+        // Drive the live camera settings from the preferences store (env overrides
+        // still win, for the screenshot harness).
+        .add_systems(Update, refresh_tonemap_settings);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -325,4 +408,48 @@ fn sl_tonemap_system(
     render_pass.set_render_pipeline(pipeline);
     render_pass.set_bind_group(0, &bind_group, &[tonemap_index.index()]);
     render_pass.draw(0..3, 0..1);
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_settings::{Scope, SettingValue, SettingsStore};
+
+    use super::{
+        DEFAULT_EXPOSURE, DEFAULT_TONEMAP_MIX, SETTING_EXPOSURE, SETTING_TONEMAP_MIX,
+        SETTING_TONEMAP_TYPE, TONEMAP_ACES, register_settings,
+    };
+    use crate::settings::ViewerSettings;
+
+    /// The store defaults `register_settings` declares must match the tone
+    /// mapper's own reference defaults, so a fresh install (no override, no env)
+    /// renders exactly as the shipped [`super::SlTonemap`] default — the two
+    /// default sources must never drift apart.
+    #[test]
+    fn registered_defaults_match_reference() {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        register_settings(&mut settings);
+        let store = settings.store();
+        assert_eq!(store.get_u32(SETTING_TONEMAP_TYPE).ok(), Some(TONEMAP_ACES));
+        assert_eq!(
+            store.get_f32(SETTING_TONEMAP_MIX).ok(),
+            Some(DEFAULT_TONEMAP_MIX)
+        );
+        assert_eq!(store.get_f32(SETTING_EXPOSURE).ok(), Some(DEFAULT_EXPOSURE));
+    }
+
+    /// A user override round-trips through the getters `refresh_tonemap_settings`
+    /// reads — the path a preferences edit reaches the live camera by.
+    #[test]
+    fn overrides_round_trip_through_the_store() {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        register_settings(&mut settings);
+        settings.set(Scope::Global, SETTING_TONEMAP_TYPE, SettingValue::U32(0));
+        settings.set(Scope::Global, SETTING_TONEMAP_MIX, SettingValue::F32(0.25));
+        settings.set(Scope::Global, SETTING_EXPOSURE, SettingValue::F32(1.5));
+        let store = settings.store();
+        assert_eq!(store.get_u32(SETTING_TONEMAP_TYPE).ok(), Some(0));
+        assert_eq!(store.get_f32(SETTING_TONEMAP_MIX).ok(), Some(0.25));
+        assert_eq!(store.get_f32(SETTING_EXPOSURE).ok(), Some(1.5));
+    }
 }

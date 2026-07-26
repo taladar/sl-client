@@ -52,7 +52,7 @@ use crate::face_material::{
     FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
 };
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
+use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
 
@@ -387,22 +387,14 @@ impl MaterialManager {
     ) {
         if id.uuid().is_nil() {
             // Revert a face that had no material back to its Blinn-Phong layer.
-            let _hidden = self.hidden.remove(&key);
-            let _over = self.overrides.remove(&key);
-            if self.face_slots.remove(&key).is_some() {
-                for slot in PbrSlot::ALL {
-                    drop_texture_patches(self, handle, slot);
-                }
-                compose_face_material(
-                    handle,
-                    texture_face,
-                    materials,
-                    textures,
-                    prim_textures,
-                    MATERIAL_TEXTURE_PRIORITY,
-                    TextureAlpha::Mask,
-                );
-            }
+            let _reverted = self.revert_face_to_diffuse(
+                key,
+                handle,
+                texture_face,
+                textures,
+                prim_textures,
+                materials,
+            );
             return;
         }
         match self.face_slots.get_mut(&key) {
@@ -425,6 +417,44 @@ impl MaterialManager {
         }
         self.request(id);
         recompose_face(self, textures, materials, key);
+    }
+
+    /// Drop a face's PBR render material and recompose its Blinn-Phong / diffuse
+    /// layer — the reference viewer reverting a face to its `TextureEntry`
+    /// appearance once its `getGLTFRenderMaterial` is cleared. Clears the face's
+    /// slot, any per-face override, its hidden-for-preview mark, and any parked
+    /// texture patches, then composes its diffuse material. Returns whether the
+    /// face actually had a PBR slot (so the caller re-registers its legacy
+    /// specular/normal material only for a real revert). Used by the picker's
+    /// nil-id revert ([`preview_face_material`]) and Phase 3's in-world clear
+    /// ([`revert_removed_render_materials`]).
+    pub(crate) fn revert_face_to_diffuse(
+        &mut self,
+        key: FaceKey,
+        handle: &Handle<FaceMaterial>,
+        texture_face: &TextureFace,
+        textures: &mut TextureManager,
+        prim_textures: &mut PrimTextures,
+        materials: &mut Assets<FaceMaterial>,
+    ) -> bool {
+        let _hidden = self.hidden.remove(&key);
+        let _over = self.overrides.remove(&key);
+        if self.face_slots.remove(&key).is_none() {
+            return false;
+        }
+        for slot in PbrSlot::ALL {
+            drop_texture_patches(self, handle, slot);
+        }
+        compose_face_material(
+            handle,
+            texture_face,
+            materials,
+            textures,
+            prim_textures,
+            MATERIAL_TEXTURE_PRIORITY,
+            TextureAlpha::Mask,
+        );
+        true
     }
 
     /// The decoded GLTF material for `id`, if its `ViewerAsset` fetch/decode has
@@ -705,6 +735,109 @@ pub(crate) fn register_changed_render_materials(
             if manager.refresh_face_material(key, AssetKey::from(material_id), &material.0, base_uv)
             {
                 recompose_face(&mut manager, &mut textures, &mut materials, key);
+            }
+        }
+    }
+}
+
+/// Revert a face to its Blinn-Phong appearance when its object's PBR render
+/// material is cleared **in-world** (Phase 3): [`apply_render_materials`](crate::objects)
+/// removes the [`ObjectRenderMaterials`] holder the moment an object update
+/// carries no render material (the material deleted / unset with the build tool),
+/// so a `RemovedComponents<ObjectRenderMaterials>` reader drops each of the
+/// holder's faces' PBR slots and recomposes their diffuse / Blinn-Phong layer —
+/// then re-registers each face's legacy `LLMaterial` (its `TextureEntry`
+/// `material_id`, if any) so its specular / normal come back, since the PBR
+/// material no longer supersedes it.
+///
+/// The removed component's data (its `scoped_id` / face list) is gone by the time
+/// this reads, so the object's scoped id is resolved from the geometry holder's
+/// parent [`SceneObject`] and each face's index from its [`PrimFaceEntity`]
+/// (mirroring [`restore_stopped_animations`](crate::texture_anim::restore_stopped_animations),
+/// which likewise reacts to a removed holder without its data).
+///
+/// A holder removed because its **object despawned** is skipped: the parent
+/// [`SceneObject`] lookup fails once the entity is gone, and a re-added holder
+/// (the component removed and re-inserted in one frame) is skipped because the
+/// live query still finds it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the removed-holder \
+              reader, the material / legacy / texture / prim-texture / asset resources it \
+              recomposes through, and the holder / parent / scene / hierarchy / face queries the \
+              scoped-id resolution and face walk read"
+)]
+pub(crate) fn revert_removed_render_materials(
+    mut removed: RemovedComponents<ObjectRenderMaterials>,
+    mut manager: ResMut<MaterialManager>,
+    mut legacy: ResMut<LegacyMaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+    holders: Query<&ObjectRenderMaterials>,
+    parents: Query<&ChildOf>,
+    scene: Query<&SceneObject>,
+    children: Query<&Children>,
+    faces: Query<(
+        &PrimFaceEntity,
+        &FaceTextureDebug,
+        &MeshMaterial3d<FaceMaterial>,
+    )>,
+) {
+    for holder_entity in removed.read() {
+        // A holder whose component was removed and re-added in the same frame (a
+        // material swapped, not cleared) still has a live `ObjectRenderMaterials`;
+        // `register_changed_render_materials` handles it, so skip the revert.
+        if holders.get(holder_entity).is_ok() {
+            continue;
+        }
+        // The geometry holder is a child of the object entity, which carries the
+        // scoped id; the lookup fails (and the holder is skipped) once the object
+        // has despawned.
+        let Ok(child_of) = parents.get(holder_entity) else {
+            continue;
+        };
+        let Ok(scene_object) = scene.get(child_of.parent()) else {
+            continue;
+        };
+        let scoped = scene_object.scoped_id;
+        let Ok(face_entities) = children.get(holder_entity) else {
+            continue;
+        };
+        for &face_entity in face_entities {
+            let Ok((face, FaceTextureDebug(texture_face), material)) = faces.get(face_entity)
+            else {
+                continue;
+            };
+            // A face index always fits in a `u8` (the `TextureEntry` face count), the
+            // width `FaceKey` and the render-material holder index use.
+            let Ok(face_index) = u8::try_from(face.face_id.get()) else {
+                continue;
+            };
+            let key = (scoped, face_index);
+            if !manager.revert_face_to_diffuse(
+                key,
+                &material.0,
+                texture_face,
+                &mut textures,
+                &mut prim_textures,
+                &mut materials,
+            ) {
+                continue;
+            }
+            // The legacy material was superseded (never applied) while the PBR
+            // material rendered; re-register it now so its specular / normal return
+            // (applied on-demand if already cached, else fetched).
+            if let Some(material_id) = texture_face.material_id
+                && !material_id.is_nil()
+            {
+                preview_legacy_material(
+                    &mut legacy,
+                    &mut textures,
+                    &mut materials,
+                    &material.0,
+                    material_id,
+                );
             }
         }
     }

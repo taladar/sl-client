@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 33 |
 | ready | 210 |
 | blocked | 109 |
-| in-progress | 8 |
+| in-progress | 7 |
 | bugs | 11 |
-| done | 596 |
+| done | 597 |
 | deferred | 18 |
 | wont-do | 6 |
 | **total** | **991** |
@@ -902,13 +902,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (8)
+## in-progress (7)
 
 ### viewer
 
-- [`viewer-custom-face-material-shader`](in-progress/viewer-custom-face-material-shader.md)
-  — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
-  specular
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
@@ -960,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (596)
+## done (597)
 
 ### protocol
 
@@ -1130,6 +1127,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
+- [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
+  — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
+  specular
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))
