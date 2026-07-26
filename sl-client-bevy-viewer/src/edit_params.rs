@@ -84,14 +84,9 @@ const FLAGS_TEMPORARY_ON_REZ: u32 = 1 << 29;
 /// `ObjectFlagUpdate` does not silently clear it on objects that carry it.
 const FLAGS_CAST_SHADOWS: u32 = 1 << 1;
 
-/// The agent-relative `FLAGS_OBJECT_MODIFY` bit: this agent may modify.
-const FLAGS_OBJECT_MODIFY: u32 = 1 << 2;
-
-/// The agent-relative `FLAGS_OBJECT_COPY` bit.
-const FLAGS_OBJECT_COPY: u32 = 1 << 3;
-
-/// The agent-relative `FLAGS_OBJECT_MOVE` bit.
-const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
+// The agent-relative permission bits (`FLAGS_OBJECT_MODIFY` / `_COPY` / `_MOVE`)
+// live on [`crate::objects`], shared with the build-tool permission gate.
+use crate::objects::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
 
 /// The agent-relative `FLAGS_OBJECT_TRANSFER` bit.
 const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
@@ -2303,6 +2298,12 @@ fn sync_param_widgets(
 
     let data = current.as_ref();
     let has_selection = data.is_some();
+    // Every parameter edit (shape, flags, name / description, light, flexi, …)
+    // is a **modify**, so the whole Object / Features tab greys when the agent
+    // lacks modify permission on the primary — values still show, only editing
+    // is disabled. Read off the agent-relative `FLAGS_OBJECT_MODIFY`, folded
+    // into every widget gate below.
+    let has_modify = data.is_some_and(|data| data.update_flags & FLAGS_OBJECT_MODIFY != 0);
     let is_prim = data.is_some_and(|data| data.pcode == pcode::PRIMITIVE);
     let float_shape = data.map(|data| PrimShapeFloat::from_params(&data.shape));
     let prim_type = match (float_shape.as_ref(), data) {
@@ -2322,7 +2323,7 @@ fn sync_param_widgets(
             .is_some_and(|shape| matches!(shape.path_curve, PathCurve::Line | PathCurve::Flexible));
     let deed_ok = data.is_some_and(|data| data.group.is_some());
     let enabled_for = |gate: ParamGate| -> bool {
-        match gate {
+        let base = match gate {
             ParamGate::Selection => has_selection,
             ParamGate::ShapeEditable => shape_editable,
             ParamGate::Prim => is_prim,
@@ -2331,7 +2332,9 @@ fn sync_param_widgets(
             ParamGate::LightFields => light_on,
             ParamGate::SpotFields => spot_on,
             ParamGate::Deed => deed_ok,
-        }
+        };
+        // No modify permission greys every editable parameter control.
+        base && has_modify
     };
     // The gated enabled state: a gated-off widget ignores the pointer (no
     // press, no click-to-focus) and reads as disabled to the headless

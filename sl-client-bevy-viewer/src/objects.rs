@@ -412,6 +412,18 @@ const fn worn_base_priority(object: &Object) -> Priority {
 /// guards against a malformed (cyclic) parent link in the object stream.
 const MAX_PARENT_WALK: usize = 8;
 
+/// The agent-relative `FLAGS_OBJECT_MODIFY` bit of `PrimFlags` (`object_flags.h`):
+/// this agent may modify the object. The simulator sets it per-agent, folding in
+/// the object's owner / group / everyone modify permission.
+pub(crate) const FLAGS_OBJECT_MODIFY: u32 = 1 << 2;
+
+/// The agent-relative `FLAGS_OBJECT_COPY` bit: this agent may copy the object.
+pub(crate) const FLAGS_OBJECT_COPY: u32 = 1 << 3;
+
+/// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
+/// rotate) the object — set for the owner and for an "anyone can move" object.
+pub(crate) const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
+
 /// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
 /// itself worn on a HUD point, or it is a linkset child of an object that is (the
 /// reference viewer's `getRootEdit()`-based `LLVOVolume::isHUDAttachment`).
@@ -782,6 +794,56 @@ impl ObjectState {
             .values()
             .find(|tracked| tracked.full_key == key)
             .map(|tracked| tracked.update_flags)
+    }
+
+    /// The agent-relative `UpdateFlags` of `scoped` — its own bits OR-ed with its
+    /// linkset **root's** (the agent-relative modify / move / copy / you-owner
+    /// bits ride the root, exactly as [`pick_summary`](Self::pick_summary) reads
+    /// them), or `None` if untracked. The simulator computes these for *this*
+    /// agent (OpenSim's `GenerateClientFlags`), so they already fold in owner /
+    /// group / everyone permissions and the object's "anyone can move" flag —
+    /// the same signal the reference viewer's `permModify` / `permMove` read.
+    pub(crate) fn agent_flags(&self, scoped: &ScopedObjectId) -> Option<u32> {
+        let picked = self.objects.get(scoped)?;
+        let mut flags = picked.update_flags;
+        let mut attachment = picked.attachment_point.is_some();
+        let mut current = picked;
+        for _step in 0..MAX_PARENT_WALK {
+            if current.is_root || attachment {
+                break;
+            }
+            let Some(parent) = self.objects.get(&current.parent) else {
+                break;
+            };
+            current = parent;
+            flags |= current.update_flags;
+            attachment = current.attachment_point.is_some();
+        }
+        Some(flags)
+    }
+
+    /// Whether this agent may **modify** `scoped` (shape / scale / texture /
+    /// material / name / flags) — the `FLAGS_OBJECT_MODIFY` bit. An untracked
+    /// object reads modifiable (optimistic: the simulator arbitrates), so a
+    /// transient tracking gap never wrongly greys a control.
+    pub(crate) fn agent_can_modify(&self, scoped: &ScopedObjectId) -> bool {
+        self.agent_flags(scoped)
+            .is_none_or(|flags| flags & FLAGS_OBJECT_MODIFY != 0)
+    }
+
+    /// Whether this agent may **move** `scoped` (position / rotation) — modify
+    /// permission, or the `FLAGS_OBJECT_MOVE` bit the simulator sets for the
+    /// owner and for an "anyone can move" object. Untracked reads movable.
+    pub(crate) fn agent_can_move(&self, scoped: &ScopedObjectId) -> bool {
+        self.agent_flags(scoped)
+            .is_none_or(|flags| flags & (FLAGS_OBJECT_MODIFY | FLAGS_OBJECT_MOVE) != 0)
+    }
+
+    /// Whether this agent may **copy** `scoped` — the `FLAGS_OBJECT_COPY` bit.
+    /// Untracked reads copyable.
+    pub(crate) fn agent_can_copy(&self, scoped: &ScopedObjectId) -> bool {
+        self.agent_flags(scoped)
+            .is_none_or(|flags| flags & FLAGS_OBJECT_COPY != 0)
     }
 
     /// Locally echo an edited `PrimFlags` bit (the build floater's

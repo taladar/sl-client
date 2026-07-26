@@ -69,10 +69,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{
-    AgentKey, Command, ObjectTransform, OwnerKey, Permissions, Rotation, ScopedObjectId, SlCommand,
-    SlIdentity, Vector,
-};
+use sl_client_bevy::{Command, ObjectTransform, Rotation, ScopedObjectId, SlCommand, Vector};
 
 use crate::camera::ViewerCamera;
 use crate::chat::LocalChatNotice;
@@ -1104,6 +1101,11 @@ pub(crate) struct GizmoInteraction {
     /// (which checks copy permission before sending the `ObjectDuplicate`) —
     /// kept off the maxed-out [`drive_gizmo_interaction`] parameter list.
     pending_copy: Option<Vec<ScopedObjectId>>,
+    /// A permission-denied notice a blocked manipulator press queued this frame,
+    /// emitted to local chat by [`dispatch_shift_drag_copy`] (same reason as
+    /// [`pending_copy`](Self::pending_copy): the drag system has no free
+    /// parameter slot for a [`LocalChatNotice`] writer).
+    pending_notice: Option<String>,
 }
 
 impl GizmoInteraction {
@@ -1739,6 +1741,20 @@ pub(crate) fn drive_gizmo_interaction(
     if let Some(part) = hovered
         && buttons.just_pressed(MouseButton::Left)
     {
+        // Permission gate (the reference disables the manipulator): a stretch
+        // needs **modify**; a move / rotate needs **move** (modify, or the
+        // object's "anyone can move"). A denied press still claims the pointer
+        // (the handle stays hovered, so it is not a selection click) but starts
+        // no drag and queues a local-chat notice.
+        let needed = if matches!(part, GizmoPart::ScaleFace(..) | GizmoPart::ScaleCorner(..)) {
+            EditPerm::Modify
+        } else {
+            EditPerm::Move
+        };
+        if let Some(name) = selection_lacking(&selection, &state, needed) {
+            interaction.pending_notice = Some(perm_notice(needed, &name));
+            return;
+        }
         let rig_scale = rigs
             .single()
             .map_or(1.0, |transform| transform.scale.x.max(1.0e-3));
@@ -2602,94 +2618,107 @@ fn duplicate_roots(drag: &GizmoDrag) -> Vec<ScopedObjectId> {
     roots
 }
 
-/// Dispatch a queued Shift-drag copy: if every root is copy-permitted, send one
+/// Dispatch the queued gizmo edit side-effects: emit any permission-denied
+/// notice a blocked press left, then, for a Shift-drag copy, send one
 /// `ObjectDuplicate` ([`Command::DuplicateObjects`]) at **zero** offset (the
 /// reference's `selectDuplicate(zero, false)` — the simulator drops an
-/// unselected copy in place, the original having been dragged on); otherwise
-/// leave a no-permission notice in local chat, the reference's
-/// `NoCopyPermsNoObject` alert on a no-copy `selectDuplicate`.
+/// unselected copy in place, the original having been dragged on) when every
+/// root is copy-permitted, else post the reference's `NoCopyPermsNoObject`
+/// no-copy alert to local chat.
 fn dispatch_shift_drag_copy(
     mut interaction: ResMut<GizmoInteraction>,
     selection: Res<SelectionSet>,
-    identity: Res<SlIdentity>,
+    state: Res<ObjectState>,
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<LocalChatNotice>,
 ) {
+    // A manipulator press we lacked permission for queued a notice.
+    if let Some(text) = interaction.pending_notice.take() {
+        notices.write(LocalChatNotice::new(text));
+    }
     let Some(roots) = interaction.pending_copy.take() else {
         return;
     };
     if roots.is_empty() {
         return;
     }
-    match selection_no_copy(&selection, identity.agent_id) {
-        Some(name) => {
-            debug!("gizmos: shift-drag copy blocked, no copy permission on {name:?}");
-            notices.write(LocalChatNotice::new(no_copy_notice(&name)));
+    if let Some(name) = selection_lacking(&selection, &state, EditPerm::Copy) {
+        debug!("gizmos: shift-drag copy blocked, no copy permission on {name:?}");
+        notices.write(LocalChatNotice::new(perm_notice(EditPerm::Copy, &name)));
+        return;
+    }
+    debug!("gizmos: shift-drag copy of {} root(s)", roots.len());
+    commands.write(SlCommand(Command::DuplicateObjects {
+        local_ids: roots,
+        offset: Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        group_id: None,
+    }));
+}
+
+/// The permission a build modification needs — read off the object's
+/// agent-relative `update_flags` ([`ObjectState::agent_can_modify`] etc.), the
+/// signal the reference viewer's `permModify` / `permMove` / `permCopy` use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditPerm {
+    /// Modify the object (scale / shape / texture / material / flags).
+    Modify,
+    /// Move the object (position / rotation) — modify, or the object's
+    /// "anyone can move" flag.
+    Move,
+    /// Copy the object (a Shift-drag duplicate).
+    Copy,
+}
+
+impl EditPerm {
+    /// Whether `state` grants this permission on `scoped`.
+    pub(crate) fn granted(self, state: &ObjectState, scoped: &ScopedObjectId) -> bool {
+        match self {
+            Self::Modify => state.agent_can_modify(scoped),
+            Self::Move => state.agent_can_move(scoped),
+            Self::Copy => state.agent_can_copy(scoped),
         }
-        None => {
-            debug!("gizmos: shift-drag copy of {} root(s)", roots.len());
-            commands.write(SlCommand(Command::DuplicateObjects {
-                local_ids: roots,
-                offset: Vector {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                group_id: None,
-            }));
+    }
+
+    /// The verb for the permission-denied notice.
+    const fn verb(self) -> &'static str {
+        match self {
+            Self::Modify => "modify",
+            Self::Move => "move",
+            Self::Copy => "copy",
         }
     }
 }
 
-/// Whether the selection contains an object the agent **cannot copy** — the
-/// reference's `canDuplicate` check. Returns the offending object's name (for
-/// the notice) on the first non-copyable object, or `None` when every object is
-/// copyable (or its permissions have not arrived yet, so the attempt is left to
-/// the simulator). Copy permission is the owner mask's `COPY` bit when the agent
-/// owns the object, else the everyone mask's — the reference's
-/// `permYouOwner ? owner : everyone` copy test.
-fn selection_no_copy(selection: &SelectionSet, own: Option<AgentKey>) -> Option<String> {
-    for node in selection.iter() {
-        // Unknown permissions (the `ObjectProperties` reply has not landed):
-        // optimistic — let the simulator arbitrate rather than false-block.
-        let properties = node.properties.as_ref()?;
-        if !can_copy(
-            properties.owner,
-            own,
-            properties.permissions.owner,
-            properties.permissions.everyone,
-        ) {
-            return Some(properties.name.clone());
-        }
-    }
-    None
+/// The first selected object the agent lacks `perm` on (by its name, for the
+/// notice), or `None` when the whole selection is permitted. Reads the
+/// agent-relative `update_flags`; an untracked object reads permitted, so a
+/// transient tracking gap never false-blocks (the simulator arbitrates).
+pub(crate) fn selection_lacking(
+    selection: &SelectionSet,
+    state: &ObjectState,
+    perm: EditPerm,
+) -> Option<String> {
+    selection.iter().find_map(|node| {
+        (!perm.granted(state, &node.scoped)).then(|| {
+            node.properties
+                .as_ref()
+                .map_or_else(String::new, |properties| properties.name.clone())
+        })
+    })
 }
 
-/// Whether the agent `own` may copy an object with the given owner and
-/// owner / everyone permission masks — the reference's
-/// `permYouOwner() ? PERM_COPY on owner : PERM_COPY on everyone` copy test: the
-/// owner mask governs the owner, otherwise the everyone mask does.
-fn can_copy(
-    owner: OwnerKey,
-    own: Option<AgentKey>,
-    owner_mask: Permissions,
-    everyone_mask: Permissions,
-) -> bool {
-    let owned_by_me = matches!(owner, OwnerKey::Agent(agent) if Some(agent) == own);
-    let mask = if owned_by_me {
-        owner_mask
-    } else {
-        everyone_mask
-    };
-    mask.contains(Permissions::COPY)
-}
-
-/// The local-chat notice text for a blocked Shift-drag copy.
-fn no_copy_notice(name: &str) -> String {
+/// The local-chat notice text for a build modification blocked for lack of
+/// `perm` (the reference's `NoCopyPermsNoObject`-style alert).
+pub(crate) fn perm_notice(perm: EditPerm, name: &str) -> String {
+    let verb = perm.verb();
     if name.is_empty() {
-        String::from("Build Tools: you do not have permission to copy that object.")
+        format!("Build Tools: you do not have permission to {verb} that object.")
     } else {
-        format!("Build Tools: you do not have permission to copy \u{201c}{name}\u{201d}.")
+        format!("Build Tools: you do not have permission to {verb} \u{201c}{name}\u{201d}.")
     }
 }
 
@@ -2788,12 +2817,11 @@ fn tint_gizmo_handles(
 #[cfg(test)]
 mod tests {
     use super::{
-        GizmoAxis, GizmoPart, arms_duplicate, can_copy, corner_direction, no_copy_notice,
-        ring_axes, sl_world_rotation,
+        EditPerm, GizmoAxis, GizmoPart, arms_duplicate, corner_direction, perm_notice, ring_axes,
+        sl_world_rotation,
     };
     use bevy::math::{Quat, Vec3};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, OwnerKey, Permissions, Uuid};
 
     /// The axis units and indices line up.
     #[test]
@@ -2870,30 +2898,15 @@ mod tests {
         ));
     }
 
-    /// Copy permission reads the owner mask for the agent's own objects and the
-    /// everyone mask for anyone else's — the reference's `permYouOwner` copy
-    /// test — so a no-copy object (or another's owner-only-copy object) blocks.
+    /// The permission-denied notice carries the right verb and names the object
+    /// when known, reading generically otherwise.
     #[test]
-    fn copy_permission_picks_the_right_mask() {
-        let me = AgentKey::from(Uuid::from_u128(1));
-        let other = AgentKey::from(Uuid::from_u128(2));
-        let copy = Permissions::COPY;
-        let none = Permissions::NONE;
-        // My object, owner mask has COPY: copyable.
-        assert!(can_copy(OwnerKey::Agent(me), Some(me), copy, none));
-        // My object, owner mask lacks COPY: blocked (even if everyone had it).
-        assert!(!can_copy(OwnerKey::Agent(me), Some(me), none, copy));
-        // Someone else's object: only the everyone mask counts.
-        assert!(!can_copy(OwnerKey::Agent(other), Some(me), copy, none));
-        assert!(can_copy(OwnerKey::Agent(other), Some(me), none, copy));
-    }
-
-    /// The no-copy notice names the object when known and reads generically
-    /// otherwise.
-    #[test]
-    fn no_copy_notice_mentions_the_object() {
-        assert!(no_copy_notice("Fancy Chair").contains("Fancy Chair"));
-        assert!(no_copy_notice("").contains("that object"));
+    fn perm_notice_verb_and_object() {
+        assert!(perm_notice(EditPerm::Copy, "Fancy Chair").contains("copy"));
+        assert!(perm_notice(EditPerm::Copy, "Fancy Chair").contains("Fancy Chair"));
+        assert!(perm_notice(EditPerm::Modify, "Box").contains("modify"));
+        assert!(perm_notice(EditPerm::Move, "Box").contains("move"));
+        assert!(perm_notice(EditPerm::Modify, "").contains("that object"));
     }
 
     /// Stripping the basis change off a Bevy world rotation recovers the

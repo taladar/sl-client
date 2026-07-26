@@ -1238,10 +1238,15 @@ fn sync_texture_widgets(
         return;
     }
     let current = representative_face(&selection, &objects);
-    // Gate the whole panel on whether anything is selected — the reference greys
-    // and disables every control while the selection is empty. Applied only on the
-    // transition so a stable state does not re-touch every control each frame.
-    let enabled = current.is_some();
+    // Gate the whole panel on selection **and** modify permission — a texture /
+    // colour edit is a modify, so the reference greys and disables every control
+    // while nothing is selected or the primary is not modifiable (values still
+    // show). Applied only on the transition so a stable state does not re-touch
+    // every control each frame.
+    let modify_ok = selection
+        .primary()
+        .is_some_and(|node| objects.agent_can_modify(&node.scoped));
+    let enabled = current.is_some() && modify_ok;
     if snapshot.enabled != Some(enabled) {
         snapshot.enabled = Some(enabled);
         for control in &widgets.controls {

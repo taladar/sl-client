@@ -33,10 +33,12 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 
+use crate::chat::LocalChatNotice;
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
 use crate::edit_params::set_disabled_class;
 use crate::edit_selection::SelectionSet;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::input_context::InputContext;
 use crate::objects::{ObjectSlMotion, ObjectState, SceneObject};
@@ -293,10 +295,11 @@ struct BuildNumericField {
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildGridUnitField;
 
-/// Marks a transform-row label (Position / Rotation / Size), greyed while nothing
-/// is selected — the label counterpart to the nine gated [`BuildNumericField`]s.
+/// Marks a transform-row label (Position / Rotation / Size), carrying its row so
+/// it greys with that row's permission — the label counterpart to the nine gated
+/// [`BuildNumericField`]s.
 #[derive(Component, Debug, Clone, Copy)]
-struct BuildTransformLabel;
+struct BuildTransformLabel(FieldGroup);
 
 /// Marks the tool-mode radio group, so the sync systems can find it to mirror
 /// its selection into [`EditToolState::tool`] and back.
@@ -615,7 +618,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
             ))
             .id();
         let label = spawn_row_label(&mut commands, transform_row, key);
-        commands.entity(label).insert(BuildTransformLabel);
+        commands.entity(label).insert(BuildTransformLabel(group));
         for axis in 0_usize..3_usize {
             let element = match group {
                 FieldGroup::Position => "build-pos",
@@ -1198,8 +1201,9 @@ fn sync_numeric_fields(
     mut editors: Query<&mut EditableText>,
     mut font_cx: ResMut<FontCx>,
     mut layout_cx: ResMut<LayoutCx>,
-    mut transform_labels: Query<&mut ClassList, With<BuildTransformLabel>>,
-    mut last_enabled: Local<Option<bool>>,
+    objects: Res<ObjectState>,
+    mut transform_labels: Query<(&BuildTransformLabel, &mut ClassList)>,
+    mut last_enabled: Local<Option<(bool, bool)>>,
     mut commands: Commands,
 ) {
     let Some(ui) = ui else {
@@ -1211,13 +1215,25 @@ fn sync_numeric_fields(
     let primary_motion = selection
         .primary()
         .and_then(|node| motions.get(node.entity).ok());
-    // Gate the transform fields: with nothing selected the reference greys and
-    // disables them (they have no value to edit). Applied only on the transition,
-    // so a stable state does not churn archetypes every frame.
-    let enabled = selection.primary().is_some();
-    if *last_enabled != Some(enabled) {
-        *last_enabled = Some(enabled);
+    // Gate each transform row by permission: nothing selected greys them all;
+    // a no-move object greys position / rotation; a no-modify object greys size
+    // (the reference disables the spinners you cannot use). Values still show —
+    // only interaction is disabled. Applied only on a transition, so a stable
+    // state does not churn archetypes every frame.
+    let primary = selection.primary();
+    let move_enabled = primary.is_some_and(|node| EditPerm::Move.granted(&objects, &node.scoped));
+    let modify_enabled =
+        primary.is_some_and(|node| EditPerm::Modify.granted(&objects, &node.scoped));
+    let enabled_for = |group: FieldGroup| match group {
+        FieldGroup::Position | FieldGroup::Rotation => move_enabled,
+        FieldGroup::Size => modify_enabled,
+    };
+    if *last_enabled != Some((move_enabled, modify_enabled)) {
+        *last_enabled = Some((move_enabled, modify_enabled));
         for field in ui.fields {
+            let enabled = markers
+                .get(field)
+                .is_ok_and(|marker| enabled_for(marker.group));
             if enabled {
                 commands
                     .entity(field)
@@ -1229,8 +1245,8 @@ fn sync_numeric_fields(
                     .insert((bevy::ui::InteractionDisabled, Pickable::IGNORE));
             }
         }
-        for mut class_list in &mut transform_labels {
-            set_disabled_class(&mut class_list, !enabled);
+        for (label, mut class_list) in &mut transform_labels {
+            set_disabled_class(&mut class_list, !enabled_for(label.0));
         }
     }
     for field in ui.fields {
@@ -1293,6 +1309,7 @@ fn commit_numeric_fields(
     mut motions: Query<(&mut ObjectSlMotion, &SceneObject)>,
     mut transforms: crate::gizmos::EditTransformQuery,
     mut commands: MessageWriter<SlCommand>,
+    mut notices: MessageWriter<crate::chat::LocalChatNotice>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1334,6 +1351,22 @@ fn commit_numeric_fields(
     let Some(primary) = selection.primary() else {
         return;
     };
+    // Permission gate (mirrors the gizmo drags): a size edit needs **modify**;
+    // a position / rotation edit needs **move** (modify, or "anyone can move").
+    // A denied commit changes nothing and posts a local-chat notice; the field
+    // re-syncs to the unchanged value next frame.
+    let needed = match marker.group {
+        FieldGroup::Position | FieldGroup::Rotation => EditPerm::Move,
+        FieldGroup::Size => EditPerm::Modify,
+    };
+    if !needed.granted(&objects, &primary.scoped) {
+        let name = primary
+            .properties
+            .as_ref()
+            .map_or_else(String::new, |properties| properties.name.clone());
+        notices.write(LocalChatNotice::new(perm_notice(needed, &name)));
+        return;
+    }
     // Parse the whole row (all three axes) so a single-axis edit keeps its
     // siblings' displayed values.
     let mut values = [0.0_f32; 3];

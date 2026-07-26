@@ -101,6 +101,11 @@ use crate::ui_font::UiFont;
 /// A field's text colour.
 const FIELD_TEXT_COLOR: Color = Color::WHITE;
 
+/// A **disabled** field's text colour — a muted grey so a field the user cannot
+/// edit (e.g. one greyed for lack of modify permission) reads plainly as
+/// uneditable while its value stays legible, the reference's disabled-field look.
+const FIELD_DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+
 /// A field's recessed background — darker than the surrounding panel, so the
 /// editable area reads as a well the text sits in.
 const FIELD_BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.16);
@@ -785,9 +790,30 @@ fn drive_caret_blink(
     }
 }
 
+/// Grey a text field's font while it is [disabled](bevy::ui::InteractionDisabled),
+/// restoring the normal colour when it is re-enabled — so a field the caller has
+/// disabled (a build control greyed for lack of modify permission, an
+/// unselected-state field) reads plainly as uneditable, not identical to an
+/// active one. Writes only on a real change.
+fn reflect_disabled_text_color(
+    mut fields: Query<(&mut TextColor, Has<bevy::ui::InteractionDisabled>), With<EditableText>>,
+) {
+    for (mut color, disabled) in &mut fields {
+        let want = if disabled {
+            FIELD_DISABLED_TEXT_COLOR
+        } else {
+            FIELD_TEXT_COLOR
+        };
+        if color.0 != want {
+            color.0 = want;
+        }
+    }
+}
+
 /// The plugin for the widget's runtime half: the numeric structural validator
 /// plus the caret machinery (R28) — the skin-driven caret style installer, the
-/// reference blink envelope, and overwrite mode.
+/// reference blink envelope, and overwrite mode — and the disabled-field font
+/// greying.
 ///
 /// A no-op where there are no editable fields, so adding it is always safe —
 /// the gallery and the viewer both add it. The character-set half of numeric
@@ -804,7 +830,14 @@ impl Plugin for TextInputPlugin {
         // an app without it (the gallery) must not fail the caret systems'
         // parameter validation — `init_resource` is a no-op when it exists.
         app.init_resource::<InputFocus>();
-        app.add_systems(Update, (install_caret_style, toggle_overwrite_mode));
+        app.add_systems(
+            Update,
+            (
+                install_caret_style,
+                toggle_overwrite_mode,
+                reflect_disabled_text_color,
+            ),
+        );
         app.add_systems(
             PostUpdate,
             (
