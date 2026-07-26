@@ -46,6 +46,7 @@ use sl_client_bevy::{
     encode_override_gltf_json,
 };
 
+use crate::chat::LocalChatNotice;
 use crate::edit_selection::SelectionSet;
 use crate::edit_texture::{
     MatModeState, PbrChannel, PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value,
@@ -55,6 +56,7 @@ use crate::edit_tool::{
     CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
 };
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
+use crate::gizmos::{EditPerm, perm_notice};
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_scalars, build_linear_image, build_srgb_image,
     preview_legacy_material,
@@ -489,6 +491,15 @@ struct PbrNewButton;
 #[derive(Component, Debug, Clone, Copy)]
 struct PbrSaveButton;
 
+/// Tags every interactive material-channel control (the swatches, combos, numeric
+/// fields, toggles and action buttons) so [`gate_material_controls`] can
+/// pointer-disable them — and grey a disabled text field's font — when the primary
+/// selection is not modifiable, the material-tab counterpart of the Texture tab's
+/// `TexControl`. The row **labels / values** grey through the shared page walk
+/// (`grey_texture_tab`), so this marker drives only the interaction-disable.
+#[derive(Component, Debug, Clone, Copy)]
+struct MatControl;
+
 /// The material-channel widget handles the sync / reply systems address.
 #[derive(Resource, Debug, Clone, Copy)]
 struct BuildMaterialUi {
@@ -564,6 +575,9 @@ impl Plugin for EditMaterialPlugin {
             .add_systems(
                 Update,
                 (
+                    // Enable / disable every material control on the modify gate
+                    // before this frame's sync / edits read them.
+                    gate_material_controls,
                     sync_material_widgets,
                     // End a legacy-material live preview (revert to the real appearance)
                     // when its object is deselected or the Material mode / tool is left,
@@ -615,7 +629,9 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
             translate_labels: true,
         },
     );
-    commands.entity(alpha_combo).insert(AlphaModeCombo);
+    commands
+        .entity(alpha_combo)
+        .insert((AlphaModeCombo, MatControl));
     *tab_index = tab_index.saturating_add(1);
 
     // Normal-map swatch (the reference's `bumpytexture`).
@@ -628,6 +644,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         *tab_index,
         TextureKey::from(Uuid::nil()),
     );
+    commands.entity(normal_swatch).insert(MatControl);
     *tab_index = tab_index.saturating_add(1);
 
     // Specular-map swatch (the reference's `shinytexture`).
@@ -642,6 +659,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         *tab_index,
         TextureKey::from(Uuid::nil()),
     );
+    commands.entity(specular_swatch).insert(MatControl);
     *tab_index = tab_index.saturating_add(1);
 
     // Specular-highlight colour (the reference's `shinycolorswatch`).
@@ -656,6 +674,7 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
         *tab_index,
         Color::WHITE,
     );
+    commands.entity(spec_color_swatch).insert(MatControl);
     *tab_index = tab_index.saturating_add(1);
 
     // The legacy normal / specular transform + scalar rows.
@@ -683,7 +702,9 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
     // The render-material swatch previews the material on a lit sphere
     // ([`crate::material_preview`]) rather than painting a flat texture thumbnail;
     // it starts empty until a face with a render material is selected.
-    commands.entity(pbr_swatch).insert(MaterialPreview::Empty);
+    commands
+        .entity(pbr_swatch)
+        .insert((MaterialPreview::Empty, MatControl));
     *tab_index = tab_index.saturating_add(1);
     let new_button = spawn_action_button(commands, pbr_row, "build-pbr-new", *tab_index);
     commands.entity(new_button).insert(PbrNewButton);
@@ -715,7 +736,9 @@ pub(crate) fn spawn_material_channels(commands: &mut Commands, page: Entity, tab
             translate_labels: true,
         },
     );
-    commands.entity(pbr_alpha_combo).insert(PbrAlphaCombo);
+    commands
+        .entity(pbr_alpha_combo)
+        .insert((PbrAlphaCombo, MatControl));
     *tab_index = tab_index.saturating_add(1);
     spawn_pbr_scalar_row(
         commands,
@@ -841,6 +864,7 @@ fn spawn_pbr_swatch_row(
         *tab_index,
         TextureKey::from(Uuid::nil()),
     );
+    commands.entity(swatch).insert(MatControl);
     *tab_index = tab_index.saturating_add(1);
     swatch
 }
@@ -857,6 +881,7 @@ fn spawn_pbr_tint_row(
     let row = spawn_row(commands, page, label_key);
     commands.entity(row).insert(show_when);
     let swatch = spawn_color_swatch(commands, row, element, *tab_index, Color::WHITE);
+    commands.entity(swatch).insert(MatControl);
     *tab_index = tab_index.saturating_add(1);
     swatch
 }
@@ -884,7 +909,7 @@ fn spawn_pbr_scalar_row(
             ..TextInputSpec::new(field.element(), TextInputKind::Float)
         },
     );
-    commands.entity(entity).insert(field);
+    commands.entity(entity).insert((field, MatControl));
 }
 
 /// Spawn the double-sided toggle row, returning the check-glyph entity.
@@ -906,6 +931,7 @@ fn spawn_double_sided_toggle(
             },
             Pickable::default(),
             DoubleSidedButton,
+            MatControl,
             ShowWhen::PbrMaterialId,
             Name::new("build-pbr:double-sided"),
             ChildOf(page),
@@ -954,6 +980,7 @@ fn spawn_action_button(
             BorderColor::all(Color::srgba(0.4, 0.4, 0.45, 1.0)),
             BackgroundColor(Color::srgba(0.18, 0.18, 0.2, 1.0)),
             Pickable::default(),
+            MatControl,
             Name::new(format!("build-pbr:{label_key}")),
             ChildOf(parent),
         ))
@@ -994,7 +1021,7 @@ fn spawn_legacy_field_row(
                 ..TextInputSpec::new(field.element(), field.input_kind())
             },
         );
-        commands.entity(entity).insert(field);
+        commands.entity(entity).insert((field, MatControl));
     }
 }
 
@@ -1021,7 +1048,7 @@ fn spawn_pbr_field_row(
                 ..TextInputSpec::new(field.element(), TextInputKind::Float)
             },
         );
-        commands.entity(entity).insert(field);
+        commands.entity(entity).insert((field, MatControl));
     }
 }
 
@@ -1179,6 +1206,79 @@ struct MatWidgets<'w, 's> {
     color_swatches: Query<'w, 's, &'static mut ColorSwatchValue>,
     /// The double-sided toggle glyph text.
     double_sided_glyph: Query<'w, 's, &'static mut Text, With<DoubleSidedGlyph>>,
+}
+
+/// Enable or disable every [`MatControl`] material-channel control on the same
+/// gate the Texture tab uses — a modifiable primary selection — pointer-disabling
+/// them (and greying a disabled text field's font, via
+/// [`crate::ui_text_input`]'s `reflect_disabled_text_color`) when the primary is
+/// not modifiable. The row **labels / values** grey through the shared page walk
+/// (`grey_texture_tab`, driven by the Texture tab's own gate on the same
+/// condition), so this system owns only the interaction-disable. Applied on the
+/// enabled/disabled transition, so a stable state does not re-touch every control
+/// each frame; reset when the build tool closes so a reopen re-applies.
+fn gate_material_controls(
+    tool: Res<EditToolState>,
+    selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
+    mut last_enabled: Local<Option<bool>>,
+    controls: Query<Entity, With<MatControl>>,
+    mut commands: Commands,
+) {
+    if !tool.active {
+        *last_enabled = None;
+        return;
+    }
+    // The same gate as [`sync_material_widgets`] / the Texture tab: a texture /
+    // colour / material edit is a modify, so every control greys and disables
+    // while nothing is selected or the primary is not modifiable (values still
+    // show).
+    let modify_ok = selection
+        .primary()
+        .is_some_and(|node| objects.agent_can_modify(&node.scoped));
+    let enabled = representative_face(&selection, &objects).is_some() && modify_ok;
+    if *last_enabled == Some(enabled) {
+        return;
+    }
+    *last_enabled = Some(enabled);
+    for control in &controls {
+        if enabled {
+            commands
+                .entity(control)
+                .remove::<bevy::ui::InteractionDisabled>()
+                .insert(Pickable::default());
+        } else {
+            commands
+                .entity(control)
+                .insert((bevy::ui::InteractionDisabled, Pickable::IGNORE));
+        }
+    }
+}
+
+/// Whether a Material commit may proceed on the current selection, posting the
+/// shared no-modify notice (and returning `false`) when the primary selection is
+/// present but not modifiable — the belt-and-braces backstop behind
+/// [`gate_material_controls`]'s greying, mirroring the transform-field / gizmo
+/// gate ([`EditPerm::Modify`] on the agent-relative `update_flags`, the reference's
+/// greyed-panel notice). Returns `true` when there is no primary — nothing to
+/// commit — so callers still no-op naturally.
+fn material_edit_allowed(
+    selection: &SelectionSet,
+    objects: &ObjectState,
+    notices: &mut MessageWriter<LocalChatNotice>,
+) -> bool {
+    let Some(primary) = selection.primary() else {
+        return true;
+    };
+    if EditPerm::Modify.granted(objects, &primary.scoped) {
+        return true;
+    }
+    let name = primary
+        .properties
+        .as_ref()
+        .map_or_else(String::new, |properties| properties.name.clone());
+    notices.write(LocalChatNotice::new(perm_notice(EditPerm::Modify, &name)));
+    false
 }
 
 /// Populate the material-channel widgets from the primary selection's
@@ -1460,7 +1560,8 @@ fn set_material_preview(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
               selection / object state, the legacy manager, the focus + its blur tracker, the \
-              field query, the per-face lookup, the keyboard, and the command writer"
+              field query, the per-face lookup, the keyboard, the no-modify notice writer, and the \
+              command writer"
 )]
 fn commit_legacy_fields(
     tool: Res<EditToolState>,
@@ -1473,6 +1574,7 @@ fn commit_legacy_fields(
     fields: Query<(Entity, &LegacyField, &EditableText)>,
     prim_faces: PrimFaceLookup,
     mut preview: ResMut<LegacyPreview>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !tool.active {
@@ -1499,6 +1601,9 @@ fn commit_legacy_fields(
     let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
         return;
     };
+    if !material_edit_allowed(&selection, &objects, &mut notices) {
+        return;
+    }
     let edit = move |material: &mut LegacyMaterial| field.apply(material, value);
     preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
     apply_legacy_edit(
@@ -1516,7 +1621,8 @@ fn commit_legacy_fields(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the combo changes + \
               its marker, the UI handle, the selection / object state, the legacy manager, the \
-              per-face lookup, the live-preview state, and the command writer"
+              per-face lookup, the live-preview state, the no-modify notice writer, and the command \
+              writer"
 )]
 fn apply_alpha_mode_change(
     mut changes: MessageReader<ComboChanged>,
@@ -1527,6 +1633,7 @@ fn apply_alpha_mode_change(
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
     mut preview: ResMut<LegacyPreview>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1534,6 +1641,9 @@ fn apply_alpha_mode_change(
     };
     for change in changes.read() {
         if change.combo != ui.alpha_combo || !combos.contains(change.combo) {
+            continue;
+        }
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
             continue;
         }
         let mode = clamp_to_byte(from_usize(change.active)).min(ALPHA_MODE_EMISSIVE);
@@ -1854,7 +1964,7 @@ fn revert_legacy_preview(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the picker replies, \
               the UI handle, the selection / object state, the legacy manager, the per-face lookup, \
-              the live-preview state, and the command writer"
+              the live-preview state, the no-modify notice writer, and the command writer"
 )]
 fn apply_normal_specular_picked(
     mut picks: MessageReader<TexturePicked>,
@@ -1864,6 +1974,7 @@ fn apply_normal_specular_picked(
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
     mut preview: ResMut<LegacyPreview>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1878,6 +1989,9 @@ fn apply_normal_specular_picked(
         } else {
             continue;
         };
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
+            continue;
+        }
         preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, &edit);
         if pick.final_pick {
             apply_legacy_edit(
@@ -1898,7 +2012,8 @@ fn apply_normal_specular_picked(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the colour-picker \
               replies, the UI handle, the selection / object state, the legacy manager, the \
-              per-face lookup, the live-preview state, and the command writer"
+              per-face lookup, the live-preview state, the no-modify notice writer, and the command \
+              writer"
 )]
 fn apply_spec_color_picked(
     mut picks: MessageReader<ColorPicked>,
@@ -1908,6 +2023,7 @@ fn apply_spec_color_picked(
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
     mut preview: ResMut<LegacyPreview>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1915,6 +2031,9 @@ fn apply_spec_color_picked(
     };
     for pick in picks.read() {
         if pick.requester != ui.spec_color_swatch {
+            continue;
+        }
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
             continue;
         }
         let srgba = pick.color.to_srgba();
@@ -1946,6 +2065,8 @@ fn apply_pbr_material_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1953,6 +2074,9 @@ fn apply_pbr_material_picked(
     };
     for pick in picks.read() {
         if pick.requester != ui.pbr_swatch || !pick.final_pick {
+            continue;
+        }
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
             continue;
         }
         let asset_id = pick.texture.uuid();
@@ -2084,13 +2208,14 @@ fn prim_faces_of_node(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the tool / \
-              selection state, the active mode, the material manager, the focus + its blur \
+              selection / object state, the active mode, the material manager, the focus + its blur \
               tracker, the field query, the render-material + hierarchy / scene queries the \
-              per-face material lookup walks, and the command writer"
+              per-face material lookup walks, the no-modify notice writer, and the command writer"
 )]
 fn commit_pbr_fields(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mode: Res<MatModeState>,
     mut material_manager: ResMut<MaterialManager>,
     focus: Res<InputFocus>,
@@ -2100,6 +2225,7 @@ fn commit_pbr_fields(
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !tool.active {
@@ -2126,6 +2252,9 @@ fn commit_pbr_fields(
     let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
         return;
     };
+    if !material_edit_allowed(&selection, &objects, &mut notices) {
+        return;
+    }
     let slots = pbr_channel_slots(mode.pbr_channel());
     let mut updates: Vec<MaterialOverrideUpdate> = Vec::new();
     for node in selection.iter() {
@@ -2314,18 +2443,20 @@ fn apply_pbr_override(
 /// per-channel texture pickers. A nil pick clears the slot's texture.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection + \
-              material manager, the render-material / hierarchy / scene queries the per-face \
-              lookup walks, and the command writer"
+    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection / \
+              object state + material manager, the render-material / hierarchy / scene queries the \
+              per-face lookup walks, the no-modify notice writer, and the command writer"
 )]
 fn apply_pbr_texture_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mut material_manager: ResMut<MaterialManager>,
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -2346,6 +2477,9 @@ fn apply_pbr_texture_picked(
         } else {
             continue;
         };
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
+            continue;
+        }
         let texture = pick.texture;
         apply_pbr_override(
             &selection,
@@ -2371,18 +2505,20 @@ fn apply_pbr_texture_picked(
 /// via an override — the reference material editor's colour swatches.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection + \
-              material manager, the render-material / hierarchy / scene queries, and the command \
-              writer"
+    reason = "a Bevy system's parameters: the picker replies, the UI handles, the selection / \
+              object state + material manager, the render-material / hierarchy / scene queries, the \
+              no-modify notice writer, and the command writer"
 )]
 fn apply_pbr_tint_picked(
     mut picks: MessageReader<ColorPicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mut material_manager: ResMut<MaterialManager>,
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -2390,6 +2526,12 @@ fn apply_pbr_tint_picked(
     };
     for pick in picks.read() {
         if !pick.final_pick {
+            continue;
+        }
+        if pick.requester != ui.pbr_base_tint && pick.requester != ui.pbr_emissive_tint {
+            continue;
+        }
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
             continue;
         }
         if pick.requester == ui.pbr_base_tint {
@@ -2422,18 +2564,20 @@ fn apply_pbr_tint_picked(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters: the combo changes, the tagging query, the UI handles, \
-              the selection + material manager, the render-material / hierarchy / scene queries, \
-              and the command writer"
+              the selection / object state + material manager, the render-material / hierarchy / \
+              scene queries, the no-modify notice writer, and the command writer"
 )]
 fn apply_pbr_alpha_change(
     mut changes: MessageReader<ComboChanged>,
     combos: Query<(), With<PbrAlphaCombo>>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mut material_manager: ResMut<MaterialManager>,
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -2441,6 +2585,9 @@ fn apply_pbr_alpha_change(
     };
     for change in changes.read() {
         if change.combo != ui.pbr_alpha_combo || !combos.contains(change.combo) {
+            continue;
+        }
+        if !material_edit_allowed(&selection, &objects, &mut notices) {
             continue;
         }
         let mode = pbr_alpha_mode(change.active);
@@ -2460,13 +2607,15 @@ fn apply_pbr_alpha_change(
 /// or blur via an override.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters: the tool / selection state, the material manager, the \
-              focus + its blur tracker, the field query, the render-material / hierarchy / scene \
-              queries, the keyboard, and the command writer"
+    reason = "a Bevy system's parameters: the tool / selection / object state, the material \
+              manager, the focus + its blur tracker, the field query, the render-material / \
+              hierarchy / scene queries, the keyboard, the no-modify notice writer, and the command \
+              writer"
 )]
 fn commit_pbr_scalars(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mut material_manager: ResMut<MaterialManager>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -2475,6 +2624,7 @@ fn commit_pbr_scalars(
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !tool.active {
@@ -2501,6 +2651,9 @@ fn commit_pbr_scalars(
     let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
         return;
     };
+    if !material_edit_allowed(&selection, &objects, &mut notices) {
+        return;
+    }
     apply_pbr_override(
         &selection,
         &mut material_manager,
@@ -2516,21 +2669,26 @@ fn commit_pbr_scalars(
 /// face's current effective value, flips it).
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy observer's parameters: the press event, the button tag, the selection + \
-              material manager, the render-material / hierarchy / scene queries, and the command \
-              writer"
+    reason = "a Bevy observer's parameters: the press event, the button tag, the selection / \
+              object state + material manager, the render-material / hierarchy / scene queries, the \
+              no-modify notice writer, and the command writer"
 )]
 fn handle_double_sided_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<DoubleSidedButton>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     mut material_manager: ResMut<MaterialManager>,
     render_materials: Query<&ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
+        return;
+    }
+    if !material_edit_allowed(&selection, &objects, &mut notices) {
         return;
     }
     let (_id, base, over) = representative_pbr(
@@ -2559,9 +2717,14 @@ fn handle_pbr_new_press(
     press: On<Pointer<Press>>,
     buttons: Query<(), With<PbrNewButton>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
+    mut notices: MessageWriter<LocalChatNotice>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary || !buttons.contains(press.entity) {
+        return;
+    }
+    if !material_edit_allowed(&selection, &objects, &mut notices) {
         return;
     }
     let updates: Vec<MaterialOverrideUpdate> = selection

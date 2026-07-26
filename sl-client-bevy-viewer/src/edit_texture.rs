@@ -57,6 +57,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
+use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
 use crate::web_floater::set_editor_text;
@@ -673,7 +674,7 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
         page,
         color_swatch,
         texture_swatch,
-        matmedia_combo: selectors.matmedia_combo,
+        matmedia_strip: selectors.matmedia_strip,
         mat_type_radio: selectors.mat_type_radio,
         pbr_type_radio: selectors.pbr_type_radio,
     });
@@ -681,8 +682,8 @@ fn spawn_texture_tab(mut commands: Commands, pages: Option<Res<BuildTabPages>>) 
 
 /// The three material-mode selector entities the mode systems read / write.
 struct ModeSelectors {
-    /// The `matmedia` combo (Material / PBR).
-    matmedia_combo: Entity,
+    /// The `matmedia` tab strip (Material / PBR).
+    matmedia_strip: Entity,
     /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
     mat_type_radio: Entity,
     /// The `radio_pbr_type` group (Material / Base / Metallic / Emissive /
@@ -690,7 +691,7 @@ struct ModeSelectors {
     pbr_type_radio: Entity,
 }
 
-/// Spawn the matmedia combo, the material-type radio and the pbr-type radio,
+/// Spawn the matmedia tab strip, the material-type radio and the pbr-type radio,
 /// returning their entities. The radios each carry their own [`ShowWhen`] so the
 /// material-type radio hides in PBR mode and the pbr-type radio hides in Material
 /// mode, mirroring the reference `updateVisibility`.
@@ -699,25 +700,33 @@ fn spawn_mode_selectors(
     page: Entity,
     tab_index: &mut i32,
 ) -> ModeSelectors {
-    // matmedia combo (Material / PBR).
-    let matmedia_row = spawn_row(commands, page, "build-tex-matmedia-label");
+    // matmedia mode switch (Material / PBR). The reference presents the material
+    // type as a select box, but here it reads as a tab strip
+    // ([`crate::ui_tab`]) so it matches the build floater's tabbed shell; the
+    // strip's [`TabStrip::active`] replaces the combo's selection index the mode
+    // systems read. Unlike the per-channel editors it carries no [`TexControl`]:
+    // switching mode to *view* an object's Blinn-Phong vs PBR values is
+    // navigation (like the aspect tabs above it), so it stays usable even on a
+    // non-modifiable object whose editors are greyed.
     let matmedia_labels = [
         "build-tex-matmedia-material".to_owned(),
         "build-tex-matmedia-pbr".to_owned(),
     ];
-    let matmedia_combo = spawn_combo(
+    let matmedia_strip = spawn_tab_strip(
         commands,
-        matmedia_row,
-        &ComboSpec {
+        page,
+        &TabSpec {
             element: "build-tex-matmedia",
+            placement: TabPlacement::BlockStart,
             labels: &matmedia_labels,
             active: MATMEDIA_MATERIAL,
             tab_index: *tab_index,
             font_size: TOOL_FONT_SIZE,
+            strip_width: None,
+            ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
         },
     );
-    commands.entity(matmedia_combo).insert(TexControl);
     *tab_index = tab_index.saturating_add(1);
 
     // material-type radio (Texture / Bumpiness / Shininess).
@@ -771,7 +780,7 @@ fn spawn_mode_selectors(
     *tab_index = tab_index.saturating_add(1);
 
     ModeSelectors {
-        matmedia_combo,
+        matmedia_strip,
         mat_type_radio,
         pbr_type_radio,
     }
@@ -823,7 +832,7 @@ fn auto_select_material_mode(
     render_materials: Query<&crate::materials::ObjectRenderMaterials>,
     children: Query<&Children>,
     scene: Query<(), With<crate::objects::SceneObject>>,
-    mut combos: Query<&mut ComboSelection>,
+    mut strips: Query<&mut TabStrip>,
 ) {
     if !tool.active {
         selected.last_object = None;
@@ -853,8 +862,11 @@ fn auto_select_material_mode(
     } else {
         MATMEDIA_MATERIAL
     };
-    if let Ok(mut combo) = combos.get_mut(ui.matmedia_combo) {
-        combo.active = want;
+    // Write the strip's active index directly; the tab widget's
+    // `apply_programmatic_tab_selection` reconciles its highlight (`crate::ui_tab`
+    // owns the click / arrow path, this is the programmatic one).
+    if let Ok(mut strip) = strips.get_mut(ui.matmedia_strip) {
+        strip.active = want;
     }
 }
 
@@ -902,16 +914,16 @@ fn face_has_render_material(
 /// mode switch.
 fn read_material_mode(
     ui: Option<Res<BuildTextureUi>>,
-    combos: Query<&ComboSelection>,
+    strips: Query<&TabStrip>,
     radios: Query<&RadioSelection>,
     mut mode: ResMut<MatModeState>,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    let matmedia = combos
-        .get(ui.matmedia_combo)
-        .map_or(MATMEDIA_MATERIAL, |combo| combo.active);
+    let matmedia = strips
+        .get(ui.matmedia_strip)
+        .map_or(MATMEDIA_MATERIAL, |strip| strip.active);
     let mat_type = radios
         .get(ui.mat_type_radio)
         .map_or(MATTYPE_DIFFUSE, |radio| radio.active);
@@ -957,9 +969,9 @@ pub(crate) struct BuildTextureUi {
     color_swatch: Entity,
     /// The diffuse-texture swatch (the texture picker's requester).
     texture_swatch: Entity,
-    /// The `matmedia` combo (Material / PBR) — read for the mode, written by the
-    /// per-object auto-select.
-    pub(crate) matmedia_combo: Entity,
+    /// The `matmedia` tab strip (Material / PBR) — its [`TabStrip::active`] is
+    /// read for the mode and written by the per-object auto-select.
+    pub(crate) matmedia_strip: Entity,
     /// The `radio_material_type` group (Texture / Bumpiness / Shininess).
     pub(crate) mat_type_radio: Entity,
     /// The `radio_pbr_type` group.

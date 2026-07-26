@@ -560,6 +560,7 @@ impl Plugin for TabWidgetPlugin {
                 (
                     apply_tab_corner_radius,
                     apply_tab_arrow_glyphs,
+                    apply_programmatic_tab_selection,
                     scroll_tabs_with_wheel,
                 ),
             )
@@ -1484,11 +1485,33 @@ fn on_tab_value_change(
     strip.active = picked;
     let element = strip.element;
 
-    for (button, tab, mut background, mut border) in &mut buttons {
+    reconcile_tab_selection(strip_id, picked, &mut buttons, &mut panels, &mut commands);
+
+    actions.write(UiAction {
+        element,
+        action: TAB_SELECTED_ACTION,
+    });
+}
+
+/// Reconcile everything derived from a strip's [`TabStrip::active`] — the
+/// [`Checked`] flags, each tab's highlight [`BackgroundColor`] / [`BorderColor`],
+/// and its panels' [`Visibility`] — to the given `active` index. The single place
+/// these are written, shared by the click / arrow observer
+/// ([`on_tab_value_change`]) and the programmatic-selection system
+/// ([`apply_programmatic_tab_selection`]). Every write is guarded, so a settled
+/// strip is not re-touched.
+fn reconcile_tab_selection(
+    strip_id: Entity,
+    active: usize,
+    buttons: &mut Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
+    panels: &mut Query<(&TabPanel, &mut Visibility)>,
+    commands: &mut Commands,
+) {
+    for (button, tab, mut background, mut border) in buttons.iter_mut() {
         if tab.strip != strip_id {
             continue;
         }
-        let is_active = tab.index == picked;
+        let is_active = tab.index == active;
         let wanted_background = tab_background(is_active);
         if background.0 != wanted_background {
             background.0 = wanted_background;
@@ -1504,11 +1527,11 @@ fn on_tab_value_change(
         }
     }
 
-    for (panel, mut visibility) in &mut panels {
+    for (panel, mut visibility) in panels.iter_mut() {
         if panel.strip != strip_id {
             continue;
         }
-        let wanted = if panel.index == picked {
+        let wanted = if panel.index == active {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -1517,11 +1540,29 @@ fn on_tab_value_change(
             *visibility = wanted;
         }
     }
+}
 
-    actions.write(UiAction {
-        element,
-        action: TAB_SELECTED_ACTION,
-    });
+/// Reconcile a strip's visuals when its [`TabStrip::active`] is set
+/// **programmatically** — a consumer writing `TabStrip::active` directly (the
+/// build floater's material-mode auto-select) rather than through a click / arrow,
+/// which [`on_tab_value_change`] already reconciles. Runs only for the strips that
+/// changed this frame, and every write is guarded, so re-running it right after a
+/// user selection (which also marks the strip changed) is a no-op.
+fn apply_programmatic_tab_selection(
+    strips: Query<(Entity, &TabStrip), Changed<TabStrip>>,
+    mut buttons: Query<(Entity, &TabButton, &mut BackgroundColor, &mut BorderColor)>,
+    mut panels: Query<(&TabPanel, &mut Visibility)>,
+    mut commands: Commands,
+) {
+    for (strip_id, strip) in &strips {
+        reconcile_tab_selection(
+            strip_id,
+            strip.active,
+            &mut buttons,
+            &mut panels,
+            &mut commands,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

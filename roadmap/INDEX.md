@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 33 |
-| ready | 210 |
+| ready | 209 |
 | blocked | 109 |
 | in-progress | 7 |
 | bugs | 12 |
-| done | 600 |
+| done | 601 |
 | deferred | 18 |
 | wont-do | 6 |
 | **total** | **995** |
@@ -95,7 +95,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (210)
+## ready (209)
 
 ### protocol
 
@@ -164,8 +164,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
   Grid-options floater + snap-XY / selection-grid (blocked by
   `viewer-transform-gizmos` (done))
-- [`viewer-build-material-tab-permission-gate`](ready/viewer-build-material-tab-permission-gate.md)
-  — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-numeric-field-spinners`](ready/viewer-build-numeric-field-spinners.md)
   — Build-window numeric fields — up/down arrow spinners
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
@@ -959,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (600)
+## done (601)
 
 ### protocol
 
@@ -1098,6 +1096,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
   — Smooth the avatar's rendered position (dead-reckoning jitter)
+- [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
+  — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
   — Build tools — gate modifications on modify/move permission + grey the
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
