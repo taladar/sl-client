@@ -28,7 +28,7 @@
 
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
-use bevy::math::{Affine2, Vec2, Vec4};
+use bevy::math::{Affine2, Vec4};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial};
 use bevy::prelude::{App, Plugin};
 use bevy::reflect::TypePath;
@@ -59,23 +59,11 @@ pub(crate) const SL_FACE_MODE_LEGACY: u32 = 1;
 pub(crate) const SL_FACE_MODE_PBR: u32 = 0;
 
 /// [`SlFaceParams::map_flags`] bit: re-sample the normal map at [`uv_normal`](SlFaceParams::uv_normal).
-#[expect(
-    dead_code,
-    reason = "wired up in the per-map-transform shader phase (Phase 1)"
-)]
 pub(crate) const MAP_FLAG_NORMAL: u32 = 1 << 0;
 /// [`SlFaceParams::map_flags`] bit: re-sample the metallic-roughness (ORM) map at
 /// [`uv_mr`](SlFaceParams::uv_mr).
-#[expect(
-    dead_code,
-    reason = "wired up in the per-map-transform shader phase (Phase 1)"
-)]
 pub(crate) const MAP_FLAG_MR: u32 = 1 << 1;
 /// [`SlFaceParams::map_flags`] bit: re-sample the emissive map at [`uv_emissive`](SlFaceParams::uv_emissive).
-#[expect(
-    dead_code,
-    reason = "wired up in the per-map-transform shader phase (Phase 1)"
-)]
 pub(crate) const MAP_FLAG_EMISSIVE: u32 = 1 << 2;
 /// [`SlFaceParams::map_flags`] bit: sample the legacy specular map (extension slot)
 /// at [`uv_spec`](SlFaceParams::uv_spec).
@@ -109,10 +97,28 @@ pub(crate) struct SlFaceParams {
     pub(crate) uv_translations_a: Vec4,
     /// `(emissive.x, emissive.y, spec.x, spec.y)`.
     pub(crate) uv_translations_b: Vec4,
+    /// GPU-driven texture animation (P28.2), timing params: `(rate, start, length,
+    /// start_time)`. The shader derives the frame from `globals.time - start_time`,
+    /// so the material's UV is animated **on the GPU** and this data is written
+    /// **once** (on start / re-parameterisation) rather than every frame — avoiding
+    /// a per-frame material re-prepare storm. Inert (`anim_mode == 0`) leaves it
+    /// unused.
+    pub(crate) anim_params: Vec4,
+    /// Texture-animation fall-back placement — the face's **static** texture-entry
+    /// `(rotation, offset_s, offset_t, scale_s)`, used for whichever placement
+    /// components the animation does not drive (the port of the reference viewer's
+    /// per-face fall-back). `scale_t` lives in [`anim_grid`](Self::anim_grid).
+    pub(crate) anim_static: Vec4,
+    /// Texture-animation flip-book grid + `scale_t`: `(size_x, size_y, scale_t,
+    /// unused)`. A non-zero `size_x`/`size_y` pages a `size_x × size_y` sprite grid.
+    pub(crate) anim_grid: Vec4,
     /// Render mode ([`SL_FACE_MODE_PBR`] / [`SL_FACE_MODE_LEGACY`]).
     pub(crate) mode: u32,
     /// Which maps to re-sample at their own UV (the `MAP_FLAG_*` bitset).
     pub(crate) map_flags: u32,
+    /// Texture-animation mode bits (`texture_anim_mode::*`); `0` = no animation. The
+    /// `ON` bit gates the GPU animation path in the shader.
+    pub(crate) anim_mode: u32,
     /// Legacy glossiness `0..=1` (`specular_exponent / 255`), scaled per-texel by
     /// the normal-map alpha in the shader.
     pub(crate) glossiness: f32,
@@ -133,46 +139,112 @@ impl SlFaceParams {
             specular_color: Vec4::ONE,
             uv_translations_a: Vec4::ZERO,
             uv_translations_b: Vec4::ZERO,
+            anim_params: Vec4::ZERO,
+            anim_static: Vec4::ZERO,
+            anim_grid: Vec4::ZERO,
             mode: SL_FACE_MODE_PBR,
             map_flags: 0,
+            anim_mode: 0,
             glossiness: 0.0,
             env_intensity: 0.0,
         }
     }
 
-    /// Write one map slot's UV transform: the 2×2 linear part into `mat` and the
-    /// translation into the two lanes of a packed translation `Vec4`.
-    #[expect(
-        dead_code,
-        reason = "wired up in the per-map-transform shader phase (Phase 1)"
-    )]
-    pub(crate) fn set_transform(mat: &mut Vec4, translation: &mut Vec2, affine: Affine2) {
+    /// Pack an [`Affine2`]'s 2×2 linear part into a `Vec4` (`col0.xy, col1.xy`), the
+    /// shader's `mat2x2` layout.
+    fn matrix_of(affine: Affine2) -> Vec4 {
         let matrix = affine.matrix2;
-        *mat = Vec4::new(
+        Vec4::new(
             matrix.x_axis.x,
             matrix.x_axis.y,
             matrix.y_axis.x,
             matrix.y_axis.y,
+        )
+    }
+
+    /// Set the PBR per-map UV transforms (normal / metallic-roughness / emissive),
+    /// each already composed onto the face's diffuse placement, packing their
+    /// linear parts and translations into the uniform. The specular translation
+    /// (`uv_translations_b.zw`, legacy) is left untouched.
+    pub(crate) fn set_pbr_transforms(&mut self, normal: Affine2, mr: Affine2, emissive: Affine2) {
+        self.uv_normal_mat = Self::matrix_of(normal);
+        self.uv_mr_mat = Self::matrix_of(mr);
+        self.uv_emissive_mat = Self::matrix_of(emissive);
+        self.uv_translations_a = Vec4::new(
+            normal.translation.x,
+            normal.translation.y,
+            mr.translation.x,
+            mr.translation.y,
         );
-        *translation = affine.translation;
+        self.uv_translations_b = Vec4::new(
+            emissive.translation.x,
+            emissive.translation.y,
+            self.uv_translations_b.z,
+            self.uv_translations_b.w,
+        );
+    }
+}
+
+impl Default for SlFaceParams {
+    /// The inert params (the fallback value in the bindless data array).
+    fn default() -> Self {
+        Self::inert()
     }
 }
 
 /// The face material's extension: the per-map UV transforms + legacy specular
-/// scalars ([`SlFaceParams`]) and the legacy specular map (its own binding, since
-/// [`StandardMaterial`] has no specular-map slot). Bindings start at 100 to stay
-/// clear of every `StandardMaterial` binding (0–12, plus its feature-gated ones).
+/// scalars ([`SlFaceParams`]) and the extension's maps (each its own binding,
+/// since `StandardMaterial` has one shared UV transform).
+///
+/// **Bindless.** The extension is declared bindless (mirroring the official
+/// `extended_material_bindless` example) so `ExtendedMaterial<StandardMaterial,
+/// SlFaceExt>` stays bindless — without it, forcing the whole material
+/// non-bindless loses Bevy's cross-material draw-call batching and a busy scene
+/// (thousands of distinct face materials) drops to a crawl. Following the example:
+/// bindless index-table slots start at **50** and the extension's own bindings at
+/// **100**, both clear of every `StandardMaterial` slot/binding. `#[data(50, …)]`
+/// packs the whole extension into the [`SlFaceParams`] data array (via the
+/// [`From`] below); the four maps take slots 51–58.
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+#[data(50, SlFaceParams, binding_array(101))]
+#[bindless(index_table(range(50..59), binding(100)))]
 pub(crate) struct SlFaceExt {
-    /// The per-map transforms and legacy specular scalars.
-    #[uniform(100)]
+    /// The per-map transforms and legacy specular scalars (packed into the bindless
+    /// data array at slot 50 via [`From<&SlFaceExt>`](SlFaceParams)).
     pub(crate) params: SlFaceParams,
     /// The legacy `LLMaterial` specular map (RGB specular colour), or a default
     /// (fallback white) handle when the face carries none. Sampled only when
     /// [`MAP_FLAG_SPEC`] is set.
-    #[texture(101)]
-    #[sampler(102)]
+    #[texture(51)]
+    #[sampler(52)]
     pub(crate) specular_map: Handle<Image>,
+    /// The PBR normal map, sampled at [`uv_normal`](SlFaceParams::uv_normal) when
+    /// [`MAP_FLAG_NORMAL`] is set. The PBR maps live in the extension (not the base
+    /// `StandardMaterial`) so they can be sampled at their own per-map UV transform;
+    /// the base then carries only the base-colour texture and the scalar factors,
+    /// which the extension multiplies its samples by.
+    #[texture(53)]
+    #[sampler(54)]
+    pub(crate) normal_map: Handle<Image>,
+    /// The PBR metallic-roughness (ORM) map, sampled at [`uv_mr`](SlFaceParams::uv_mr)
+    /// when [`MAP_FLAG_MR`] is set (green = roughness, blue = metallic, red =
+    /// occlusion).
+    #[texture(55)]
+    #[sampler(56)]
+    pub(crate) metallic_roughness_map: Handle<Image>,
+    /// The PBR emissive map, sampled at [`uv_emissive`](SlFaceParams::uv_emissive)
+    /// when [`MAP_FLAG_EMISSIVE`] is set.
+    #[texture(57)]
+    #[sampler(58)]
+    pub(crate) emissive_map: Handle<Image>,
+}
+
+impl From<&SlFaceExt> for SlFaceParams {
+    /// The GPU data for the bindless `#[data(50, …)]` array: just the extension's
+    /// [`SlFaceParams`] (the maps are bound separately by index).
+    fn from(extension: &SlFaceExt) -> Self {
+        extension.params
+    }
 }
 
 impl SlFaceExt {
@@ -181,6 +253,9 @@ impl SlFaceExt {
         Self {
             params: SlFaceParams::inert(),
             specular_map: Handle::default(),
+            normal_map: Handle::default(),
+            metallic_roughness_map: Handle::default(),
+            emissive_map: Handle::default(),
         }
     }
 }

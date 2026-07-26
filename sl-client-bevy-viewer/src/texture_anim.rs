@@ -15,21 +15,34 @@
 //! ([`ON`](sl_client_bevy::texture_anim_mode::ON) clear) or is absent, so a prim
 //! whose animation is turned off in-world goes static again.
 //!
-//! **P28.2 driver.** [`drive_texture_animations`] advances every animated object
-//! each frame: it ports the reference viewer's `LLViewerTextureAnim::animateTextures`
-//! to derive the current frame's texture-entry placement (an offset / scale /
-//! rotation, with the un-driven components falling back to the face's static
-//! [`TextureEntry`](sl_client_bevy::TextureEntry) placement) and folds it into each
-//! affected face's `StandardMaterial::uv_transform` — exactly as the reference
-//! viewer replaces a face's UV transform with `mTextureMatrix` while an animation
-//! runs. [`restore_stopped_animations`] resets a face back to its static placement
-//! when the animation is removed. The `ROTATE` / `SCALE` modes spin / grow the
-//! whole texture; the default flipbook mode steps through the sprite grid; a plain
-//! `size` with no grid scrolls the texture across the face.
+//! **P28.2 driver — GPU-side (PERF).** The animation is evaluated **in the
+//! shader** ([`face_material.wgsl`](crate::face_material)'s `sl_animated_uv`, a
+//! port of the reference viewer's `LLViewerTextureAnim::animateTextures`) from
+//! `globals.time`, so the material's UV is derived per-fragment on the GPU. The CPU
+//! driver [`drive_texture_animations`] therefore only writes the animation's
+//! *params* (rate / start / length / grid + the face's static fall-back placement +
+//! a `start_time` seeding the shader clock) into each face's [`SlFaceParams`], and
+//! only **when they change** — so a steadily-running animation dirties **no**
+//! materials per frame. This matters enormously: a busy region has ~1000+ animated
+//! faces (the [`SlFaceParams`](crate::face_material::SlFaceParams) `anim_*` fields
+//! carry the params), and the old per-frame `uv_transform` write forced a full render-world
+//! material re-prepare of every one of them each frame (Bevy recreates a material's
+//! whole bind group on any change), which is the dominant cost the GPU path removes.
+//! [`restore_stopped_animations`] clears the animation on each face when the object's
+//! [`ObjectTextureAnimation`] is removed. The `ROTATE` / `SCALE` modes spin / grow
+//! the whole texture; the default flipbook mode steps through the sprite grid; a
+//! plain `size` with no grid scrolls the texture across the face.
+//!
+//! The Rust [`animate`] / [`AnimatedPlacement`] port is retained (test-gated) as the
+//! **reference** the WGSL is translated from and the tests pin; production no longer
+//! calls it.
 
+#[cfg(test)]
 use bevy::math::Affine2;
 use bevy::prelude::*;
-use sl_client_bevy::{TextureAnimation, texture_anim_mode, texture_uv_transform};
+#[cfg(test)]
+use sl_client_bevy::texture_uv_transform;
+use sl_client_bevy::{TextureAnimation, texture_anim_mode};
 
 use crate::face_material::FaceMaterial;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
@@ -70,27 +83,15 @@ pub(crate) fn running_texture_animation(
     anim.filter(|anim| anim.mode & texture_anim_mode::ON != 0)
 }
 
-/// The per-object clock the P28.2 driver keeps beside an [`ObjectTextureAnimation`]
-/// holder: the seconds elapsed since the current animation started, and the params
-/// it is timing so a re-parameterisation (a fresh `llSetTextureAnim` on the prim)
-/// restarts the clock. The reference viewer's `LLViewerTextureAnim` holds the same
-/// state (`mTimer` / an elapsed accumulator); here the elapsed time is advanced by
-/// [`drive_texture_animations`] each frame rather than read from a wall clock, so a
-/// paused / slow frame never skips animation frames.
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TextureAnimationClock {
-    /// Seconds elapsed since this animation (re)started.
-    elapsed: f32,
-    /// The animation params this clock is timing, compared each frame to detect a
-    /// re-parameterisation (which resets [`elapsed`](Self::elapsed) to zero).
-    anim: TextureAnimation,
-}
-
 /// The current texture-entry placement of an animated face: the offset / scale /
 /// rotation to fold into the face's `uv_transform` this frame, with each component
 /// carrying whether the animation *drives* it (else it falls back to the face's
 /// static [`TextureFace`](sl_client_bevy::TextureFace) value). A port of the local
 /// variables `LLViewerTextureAnim::animateTextures` fills in.
+///
+/// Test-gated: this is the Rust **reference** the shader's `sl_animated_uv` is
+/// translated from and [the tests](self) pin; the GPU path is what production runs.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 struct AnimatedPlacement {
     /// The rotation angle in radians; `None` when the animation does not drive it.
@@ -101,6 +102,7 @@ struct AnimatedPlacement {
     scale: Option<(f32, f32)>,
 }
 
+#[cfg(test)]
 impl AnimatedPlacement {
     /// Resolve this placement against a face's static texture-entry values (the
     /// fall-back for every component the animation does not drive) and build the
@@ -125,6 +127,11 @@ impl AnimatedPlacement {
 /// keeps for `SMOOTH` collapses to the same value. Returns [`None`] only when the
 /// animation is not running ([`ON`](texture_anim_mode::ON) clear), which the driver
 /// treats as "leave the face alone".
+///
+/// Test-gated: the production animation is [`sl_animated_uv`](crate::face_material)
+/// in WGSL, a faithful translation of this; this Rust version is kept to pin the
+/// math in unit tests.
+#[cfg(test)]
 fn animate(anim: &TextureAnimation, elapsed: f32) -> Option<AnimatedPlacement> {
     use texture_anim_mode::{LOOP, ON, PING_PONG, REVERSE, ROTATE, SCALE, SMOOTH};
     let mode = anim.mode;
@@ -220,23 +227,41 @@ fn animate(anim: &TextureAnimation, elapsed: f32) -> Option<AnimatedPlacement> {
     Some(placement)
 }
 
-/// Drive every running texture animation (P28.2): advance each
-/// [`ObjectTextureAnimation`] holder's clock and fold the current frame's
-/// texture-entry placement into each affected face's `uv_transform`.
+/// The face's static texture-entry placement, packed for the GPU animation params:
+/// `anim_static = (rotation, offset_s, offset_t, scale_s)` and `scale_t` in
+/// `anim_grid.z` (the shader's fall-back for whichever placement components the
+/// animation does not drive), together with the flip-book grid `(size_x, size_y)`.
+fn animation_placement(
+    anim: &TextureAnimation,
+    face: &sl_client_bevy::TextureFace,
+) -> (Vec4, Vec4) {
+    let static_placement = Vec4::new(face.rotation, face.offset_s, face.offset_t, face.scale_s);
+    let grid = Vec4::new(
+        f32::from(anim.size_x),
+        f32::from(anim.size_y),
+        face.scale_t,
+        0.0,
+    );
+    (static_placement, grid)
+}
+
+/// Publish every running texture animation's params to its faces (P28.2), for the
+/// **GPU** animation path: the shader ([`face_material.wgsl`](crate::face_material)
+/// `sl_animated_uv`) evaluates the animation from `globals.time` each frame, so this
+/// only writes the per-face [`SlFaceParams`](crate::face_material::SlFaceParams)
+/// `anim_*` fields — and **only when they change** (a fresh `llSetTextureAnim`, a
+/// re-textured face, or a recomposition that wiped them). A steadily-running
+/// animation therefore dirties **no** material here (the read is a non-mutating
+/// [`Assets::get`]), which is the whole point: the old per-frame `uv_transform` write
+/// re-prepared every animated material every frame (Bevy recreates a material's
+/// whole bind group on any change) and dominated frame time on busy regions.
 ///
-/// Mirrors `LLViewerTextureAnim::updateClass` walking every animated object and
-/// `LLVOVolume::animateTextures` folding a per-face texture matrix onto its faces.
-/// The animation *replaces* the face's static placement (the un-driven components
-/// falling back to it), exactly as the reference viewer uses `mTextureMatrix`
-/// instead of the static UV transform while an animation runs.
+/// A rewrite seeds `anim_params.w` (`start_time`) with the current time so the shader
+/// clock starts at zero — matching the reference viewer restarting a
+/// re-parameterised animation from frame zero.
 pub(crate) fn drive_texture_animations(
     time: Res<Time>,
-    mut commands: Commands,
-    mut holders: Query<(
-        Entity,
-        &ObjectTextureAnimation,
-        Option<&mut TextureAnimationClock>,
-    )>,
+    holders: Query<(Entity, &ObjectTextureAnimation)>,
     children: Query<&Children>,
     faces: Query<(
         &PrimFaceEntity,
@@ -245,30 +270,14 @@ pub(crate) fn drive_texture_animations(
     )>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
-    let dt = time.delta_secs();
-    for (holder, tex_anim, clock) in &mut holders {
+    // Seed the shader clock with the SAME wrapped time the shader reads
+    // (`globals.time == Time::elapsed_secs_wrapped()`, wrapping hourly), so the
+    // shader's `globals.time - start_time` is a valid elapsed once the hour-wrap is
+    // unwound (see `sl_animated_uv`).
+    let now = time.elapsed_secs_wrapped();
+    for (holder, tex_anim) in &holders {
         let anim = tex_anim.anim;
-        // Advance (or start) the object's clock, restarting it on a re-parameterised
-        // animation so a fresh `llSetTextureAnim` plays from frame zero.
-        let elapsed = match clock {
-            Some(mut clock) => {
-                if clock.anim != anim {
-                    clock.anim = anim;
-                    clock.elapsed = 0.0;
-                }
-                clock.elapsed += dt;
-                clock.elapsed
-            }
-            None => {
-                commands
-                    .entity(holder)
-                    .insert(TextureAnimationClock { elapsed: 0.0, anim });
-                dt
-            }
-        };
-        let Some(placement) = animate(&anim, elapsed) else {
-            continue;
-        };
+        let mode = u32::from(anim.mode);
         let Ok(face_entities) = children.get(holder) else {
             continue;
         };
@@ -279,8 +288,33 @@ pub(crate) fn drive_texture_animations(
             if !tex_anim.applies_to_face(face.face_id.get()) {
                 continue;
             }
+            let (static_placement, grid) = animation_placement(&anim, tf);
+            // Non-mutating check: is the stored setup already current? A `get` (not
+            // `get_mut`) does not mark the material changed, so an already-set-up face
+            // is not re-prepared — leaving `start_time` (`anim_params.w`) untouched, so
+            // the running animation keeps its phase.
+            let up_to_date = materials.get(&material.0).is_some_and(|material| {
+                let params = &material.extension.params;
+                // Compare the timing as a `Vec3` (rate, start, length) — excluding
+                // `anim_params.w` (`start_time`), which is left as-is for an unchanged
+                // animation so it keeps its phase — and via vector equality so clippy's
+                // `float_cmp` is satisfied (exact equality is what we want: the values
+                // are re-derived from the same source, so a difference means a change).
+                params.anim_mode == mode
+                    && params.anim_params.truncate()
+                        == Vec3::new(anim.rate, anim.start, anim.length)
+                    && params.anim_static == static_placement
+                    && params.anim_grid == grid
+            });
+            if up_to_date {
+                continue;
+            }
             if let Some(mut material) = materials.get_mut(&material.0) {
-                material.base.uv_transform = placement.uv_transform(tf);
+                let params = &mut material.extension.params;
+                params.anim_mode = mode;
+                params.anim_params = Vec4::new(anim.rate, anim.start, anim.length, now);
+                params.anim_static = static_placement;
+                params.anim_grid = grid;
             }
         }
     }
@@ -289,24 +323,21 @@ pub(crate) fn drive_texture_animations(
 /// Restore a face to its static texture-entry placement when its object's animation
 /// stops (P28.2): when [`apply_texture_animation`](crate::objects) removes the
 /// [`ObjectTextureAnimation`] holder (the `ON` bit cleared in-world, or the prim
-/// gone), reset each of the holder's faces' `uv_transform` back to
-/// [`texture_face_uv_transform`](sl_client_bevy::texture_face_uv_transform).
+/// gone), clear the GPU animation on each of the holder's faces so the shader stops
+/// animating and the face reverts to its static texture-entry placement (also reset
+/// `base.uv_transform` to [`texture_face_uv_transform`](sl_client_bevy::texture_face_uv_transform)
+/// for good measure, since the static placement is what the base samples once
+/// `anim_mode` is clear).
 ///
 /// Mirrors `LLVOVolume::animateTextures` writing the texture entry's own
 /// offset / scale / rotation back to the faces once `mTexAnimMode` clears.
 pub(crate) fn restore_stopped_animations(
     mut stopped: RemovedComponents<ObjectTextureAnimation>,
-    mut commands: Commands,
     children: Query<&Children>,
     faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     for holder in stopped.read() {
-        // The clock is meaningless without a running animation; drop it so a later
-        // animation on the same object starts from frame zero.
-        if let Ok(mut holder) = commands.get_entity(holder) {
-            holder.remove::<TextureAnimationClock>();
-        }
         let Ok(face_entities) = children.get(holder) else {
             continue;
         };
@@ -316,6 +347,11 @@ pub(crate) fn restore_stopped_animations(
             };
             if let Some(mut material) = materials.get_mut(&material.0) {
                 material.base.uv_transform = sl_client_bevy::texture_face_uv_transform(tf);
+                let params = &mut material.extension.params;
+                params.anim_mode = 0;
+                params.anim_params = Vec4::ZERO;
+                params.anim_static = Vec4::ZERO;
+                params.anim_grid = Vec4::ZERO;
             }
         }
     }

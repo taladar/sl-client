@@ -147,17 +147,13 @@ impl Projected {
     }
 }
 
-/// Render one registered scene, read the frame back, and project `points` (in
-/// **Bevy world space**) onto it.
-///
-/// Returns `None` when no frame came back — see [the module docs](self): a
-/// machine with no GPU adapter cannot answer these questions and should say so
-/// rather than fail.
-pub(crate) fn capture(
-    scene: &RenderScene,
-    cx: SceneCx,
-    points: &[Vec3],
-) -> Option<(Frame, Projected)> {
+/// Build the headless readback app for `scene`: the viewer's real material
+/// pipelines and scene runtime, a render-to-texture camera at the scene's declared
+/// pose, and a `Readback` that drains each rendered frame into the returned
+/// [`Captured`] cell. The caller drives the `update`s and reads the cell —
+/// [`capture`] reads one frame after a long warm-up, [`capture_over_time`] reads
+/// two at different `globals.time` values.
+fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -250,6 +246,22 @@ pub(crate) fn capture(
         },
     );
 
+    (app, captured)
+}
+
+/// Render one registered scene, read the frame back, and project `points` (in
+/// **Bevy world space**) onto it.
+///
+/// Returns `None` when no frame came back — see [the module docs](self): a
+/// machine with no GPU adapter cannot answer these questions and should say so
+/// rather than fail.
+pub(crate) fn capture(
+    scene: &RenderScene,
+    cx: SceneCx,
+    points: &[Vec3],
+) -> Option<(Frame, Projected)> {
+    let (mut app, captured) = build_readback_app(scene, cx);
+
     // `App::finish`/`cleanup` build the render app; if there is no adapter this is
     // where it gives up, and a machine without a GPU should skip rather than fail.
     app.finish();
@@ -284,9 +296,48 @@ pub(crate) fn capture(
     Some((Frame { pixels }, projected))
 }
 
+/// Render `scene` at two different `globals.time` values and read both frames back,
+/// for verifying **GPU-time-driven** animation. A texture animation now runs
+/// entirely in the shader (`face_material.wgsl`'s `sl_animated_uv` from
+/// `globals.time`), so it is invisible to any CPU-state digest — the only honest
+/// check is that the rendered **pixels** actually differ over time. A fixed manual
+/// timestep makes the two samples land at deterministic clock values regardless of
+/// machine speed.
+///
+/// Returns `None` on a machine with no GPU adapter (like [`capture`]).
+pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Frame, Frame)> {
+    /// The manual per-update timestep: `globals.time` advances by exactly this each
+    /// frame, so the two samples below are reproducible.
+    const STEP: f32 = 1.0 / 30.0;
+    /// Frames before the first read — enough for the scene to spawn, the animation
+    /// driver to publish its params, and a readback to complete (an early cell).
+    const WARMUP: usize = 10;
+    /// Frames between the two reads: ~1.8 s of clock, many flipbook cells later.
+    const BETWEEN: usize = 54;
+
+    let (mut app, captured) = build_readback_app(scene, cx);
+    // Deterministic time: each `update` advances the clock by exactly `STEP`
+    // regardless of wall-clock, so `globals.time` (what the animation shader reads)
+    // is reproducible frame-for-frame.
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        core::time::Duration::from_secs_f32(STEP),
+    ));
+    app.finish();
+    app.cleanup();
+    for _frame in 0..WARMUP {
+        app.update();
+    }
+    let early = captured.0.lock().ok()?.take()?;
+    for _frame in 0..BETWEEN {
+        app.update();
+    }
+    let later = captured.0.lock().ok()?.take()?;
+    Some((Frame { pixels: early }, Frame { pixels: later }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FRAME, Frame, capture};
+    use super::{FRAME, Frame, capture, capture_over_time};
     use crate::render_scene::{SCENES, SceneCx};
     use crate::render_test::TestError;
     use bevy::prelude::*;
@@ -461,6 +512,46 @@ mod tests {
              (yellow at {yellow}, centre {centre}). A reflection of the world-below arriving at \
              the middle of the ball is R22i: the probe is sampling its cube through the Second \
              Life -> Bevy basis change instead of in the world space it was captured in"
+        );
+        Ok(())
+    }
+
+    /// **A texture animation actually moves on screen.**
+    ///
+    /// The flipbook's animation runs entirely in the shader
+    /// (`face_material.wgsl`'s `sl_animated_uv`, evaluated from `globals.time`), so
+    /// its material's CPU state does not change frame to frame — a CPU-state digest
+    /// (`crate::render_test`) cannot see it, and a CPU re-evaluation would only test
+    /// the Rust reference against itself. The one honest check is that the **rendered
+    /// pixels** differ at two different times: render the 4×4 flipbook near the start
+    /// and ~1.8 s later (many cells on, at 8 fps) and require the frame to have
+    /// changed. This is what fails if the WGSL animation is wrong or never runs.
+    #[test]
+    fn a_texture_animation_actually_moves_on_screen() -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "texture-anim-flipbook")
+            .ok_or("the texture-anim-flipbook scene is not registered")?;
+        let Some((early, later)) = capture_over_time(scene, SceneCx::new()) else {
+            // No GPU adapter: skip, like the rest of this pixel tier.
+            return Ok(());
+        };
+        // Deterministic rendering: identical times render identical bytes, so any
+        // difference is the animation. Require a substantial change (thousands of
+        // bytes) so a stray texel could never pass it — a real cell change repaints a
+        // large part of the face.
+        let differing = early
+            .pixels
+            .iter()
+            .zip(&later.pixels)
+            .filter(|(before, after)| before != after)
+            .count();
+        assert!(
+            differing > 1000,
+            "the flipbook rendered near-identically at two different times ({differing} of {} \
+             bytes differ) — its GPU texture animation did not change the frame, so the shader \
+             is not animating what is on screen (or the prim did not render at all)",
+            early.pixels.len(),
         );
         Ok(())
     }

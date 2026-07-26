@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 32 |
+| ideas | 33 |
 | ready | 210 |
 | blocked | 109 |
 | in-progress | 8 |
 | bugs | 11 |
 | done | 596 |
-| deferred | 17 |
+| deferred | 18 |
 | wont-do | 6 |
-| **total** | **989** |
+| **total** | **991** |
 
-## ideas (32)
+## ideas (33)
 
 ### viewer
 
@@ -92,6 +92,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
+- [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
+  — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
 ## ready (210)
 
@@ -2177,7 +2179,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (17)
+## deferred (18)
 
 ### protocol
 
@@ -2192,6 +2194,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
+- [`viewer-bevy-material-inplace-reprepare`](deferred/viewer-bevy-material-inplace-reprepare.md)
+  — Bevy material in-place re-prepare (fast path for buffer-only changes)
 - [`viewer-build-ui-firestorm-audit`](deferred/viewer-build-ui-firestorm-audit.md)
   — Systematic side-by-side audit of the whole build UI vs Firestorm
 - [`viewer-destination-guide`](deferred/viewer-destination-guide.md) —

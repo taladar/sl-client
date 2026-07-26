@@ -553,13 +553,15 @@ pub(crate) const SCENES: &[RenderScene] = &[
     },
     RenderScene {
         id: "texture-anim-flipbook",
-        what: "a prim paging through a 4x4 texture atlas: the first scene whose change over time \
-               is in the material rather than the vertices — its UV transform is rewritten every \
-               frame while its geometry never moves",
-        // A frame every 1/8 s over a 16-frame grid: by 0.5 s it has paged four
-        // frames, and 1.9 s is most of the way through the grid, so the samples
-        // straddle several steps without wrapping back to where they started.
-        timeline: Timeline::at(&[0.0, 0.5, 1.9]),
+        what: "a prim paging through a 4x4 texture atlas: its animation runs entirely in the \
+               shader (sl_animated_uv from globals.time), so nothing changes in CPU state and its \
+               geometry never moves — the animation is verified by pixels in render_readback \
+               (`a_texture_animation_actually_moves_on_screen`), not by a CPU digest",
+        // STATIC for the CPU tier: the animation is GPU-time-driven, so the material
+        // is bit-identical at every CPU sample (the driver publishes its params once,
+        // then the shader pages cells from `globals.time`). The pixel tier renders it
+        // at two times and requires the frame to change.
+        timeline: Timeline::STATIC,
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing(3.0),
         spawn: texture_anim_flipbook,
@@ -2449,11 +2451,13 @@ fn flexi_streamer(
 /// [`SCENES`] `texture-anim-flipbook`: a prim paging through a texture atlas.
 ///
 /// **Dynamic, and dynamic in a way no earlier scene was.** Nothing about this prim's
-/// *geometry* changes: [`drive_texture_animations`] rewrites each face material's
-/// `uv_transform`, and the vertex buffer it samples through is the same one at
-/// every sample. That is why `crate::render_test`'s notion of "did anything happen"
-/// reads the material and the world transform as well as the vertices — a
-/// vertex-only digest reports this scene as frozen while it plays perfectly.
+/// *geometry* changes: the animation runs entirely in the shader
+/// ([`face_material.wgsl`](crate::face_material)'s `sl_animated_uv` from
+/// `globals.time`), and the vertex buffer it samples through is the same one at
+/// every sample. Because the animation is GPU-time-driven, **nothing in CPU state
+/// changes** frame to frame — a CPU digest (`crate::render_test`) cannot see it, so
+/// this scene is `Timeline::STATIC` there and its motion is verified by rendered
+/// pixels in [`crate::render_readback`] instead.
 ///
 /// The animation is a 4×4 flipbook at 8 frames a second: the reference viewer's
 /// `llSetTextureAnim(ANIM_ON | LOOP, ALL_SIDES, 4, 4, 0.0, 0.0, 8.0)`, the form

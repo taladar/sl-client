@@ -48,7 +48,9 @@ use sl_client_bevy::{
 use crate::edit_selection::SelectionSet;
 use crate::edit_texture::MatModeState;
 use crate::edit_tool::EditToolState;
-use crate::face_material::FaceMaterial;
+use crate::face_material::{
+    FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, SL_FACE_MODE_PBR,
+};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
@@ -144,17 +146,32 @@ impl PbrSlot {
         }
     }
 
-    /// Clear this slot's texture on a face [`StandardMaterial`] (the
-    /// metallic-roughness slot also drives occlusion, so both are cleared).
-    fn clear(self, standard: &mut StandardMaterial) {
+    /// The extension `map_flags` bit that gates re-sampling this slot's map, or
+    /// `None` for the base-colour slot (which stays in the base material).
+    const fn flag(self) -> Option<u32> {
         match self {
-            Self::BaseColor => standard.base_color_texture = None,
+            Self::BaseColor => None,
+            Self::MetallicRoughness => Some(MAP_FLAG_MR),
+            Self::Normal => Some(MAP_FLAG_NORMAL),
+            Self::Emissive => Some(MAP_FLAG_EMISSIVE),
+        }
+    }
+
+    /// Clear this slot's texture on a face material. The base-colour texture lives
+    /// on the base [`StandardMaterial`]; the normal / metallic-roughness / emissive
+    /// maps live on the [`SlFaceExt`] extension, so clearing one resets its
+    /// extension handle to the fallback and drops its `map_flags` re-sample bit.
+    fn clear(self, material: &mut FaceMaterial) {
+        match self {
+            Self::BaseColor => material.base.base_color_texture = None,
             Self::MetallicRoughness => {
-                standard.metallic_roughness_texture = None;
-                standard.occlusion_texture = None;
+                material.extension.metallic_roughness_map = Handle::default();
             }
-            Self::Normal => standard.normal_map_texture = None,
-            Self::Emissive => standard.emissive_texture = None,
+            Self::Normal => material.extension.normal_map = Handle::default(),
+            Self::Emissive => material.extension.emissive_map = Handle::default(),
+        }
+        if let Some(flag) = self.flag() {
+            material.extension.params.map_flags &= !flag;
         }
     }
 }
@@ -447,7 +464,7 @@ impl MaterialManager {
         for slot in PbrSlot::ALL {
             drop_texture_patches(self, handle, slot);
             if let Some(mut standard) = materials.get_mut(handle) {
-                slot.clear(&mut standard.base);
+                slot.clear(&mut standard);
             }
         }
         apply_material_scalars(materials, handle, material, Affine2::IDENTITY);
@@ -1006,10 +1023,13 @@ fn recompose_face(
     request_material_textures(manager, textures, materials, &handle, &effective);
 }
 
-/// Write a decoded [`GltfMaterial`]'s scalar / factor fields onto a face's
-/// [`StandardMaterial`]: base colour (linear factor), metallic / roughness,
-/// emissive, alpha mode + cutoff, and the double-sided / cull-mode pair. The
-/// texture maps are filled in later by [`apply_pbr_textures`].
+/// Write a decoded [`GltfMaterial`]'s scalar / factor fields onto a face's base
+/// [`StandardMaterial`] (base colour linear factor, metallic / roughness,
+/// emissive, alpha mode + cutoff, double-sided / cull-mode, and the base-colour UV
+/// transform), and the **per-map UV transforms** onto the face's [`SlFaceExt`]
+/// extension. The base carries only the base-colour texture; the normal /
+/// metallic-roughness / emissive maps are filled into the extension later by
+/// [`apply_pbr_textures`] and sampled at their own transform.
 fn apply_material_scalars(
     materials: &mut Assets<FaceMaterial>,
     handle: &Handle<FaceMaterial>,
@@ -1019,36 +1039,51 @@ fn apply_material_scalars(
     let Some(mut material_asset) = materials.get_mut(handle) else {
         return;
     };
-    let standard = &mut material_asset.base;
-    let [r, g, b, a] = material.base_color;
-    standard.base_color = Color::linear_rgba(r, g, b, a);
-    standard.metallic = material.metallic_factor;
-    standard.perceptual_roughness = material.roughness_factor;
-    let [er, eg, eb] = material.emissive_factor;
-    standard.emissive = LinearRgba::rgb(er, eg, eb);
-    standard.double_sided = material.double_sided;
-    standard.cull_mode = if material.double_sided {
-        None
-    } else {
-        Some(Face::Back)
-    };
-    standard.alpha_mode = match material.alpha_mode {
-        GltfAlphaMode::Opaque => AlphaMode::Opaque,
-        GltfAlphaMode::Mask => AlphaMode::Mask(material.alpha_cutoff),
-        GltfAlphaMode::Blend => AlphaMode::Blend,
-    };
-    // Compose the base-colour texture's `KHR_texture_transform` onto the face's
-    // diffuse (texture-entry) UV placement `base_uv`. Recomposing from the captured
-    // `base_uv` (rather than the live `uv_transform`) keeps a re-application (a
-    // later override) from stacking the transform. Bevy carries a single
-    // `uv_transform` for all maps, so the base-colour transform stands in for every
-    // slot (a documented approximation of the reference's per-slot transforms).
-    // `Mul::mul` (a method, not the `*` operator) keeps clear of the workspace
-    // `arithmetic_side_effects` lint the glam operators trip.
-    standard.uv_transform = match material.base_color_texture {
-        Some(texture) => base_uv.mul(gltf_uv_transform(&texture.transform)),
-        None => base_uv,
-    };
+    {
+        let standard = &mut material_asset.base;
+        let [r, g, b, a] = material.base_color;
+        standard.base_color = Color::linear_rgba(r, g, b, a);
+        standard.metallic = material.metallic_factor;
+        standard.perceptual_roughness = material.roughness_factor;
+        let [er, eg, eb] = material.emissive_factor;
+        standard.emissive = LinearRgba::rgb(er, eg, eb);
+        standard.double_sided = material.double_sided;
+        standard.cull_mode = if material.double_sided {
+            None
+        } else {
+            Some(Face::Back)
+        };
+        standard.alpha_mode = match material.alpha_mode {
+            GltfAlphaMode::Opaque => AlphaMode::Opaque,
+            GltfAlphaMode::Mask => AlphaMode::Mask(material.alpha_cutoff),
+            GltfAlphaMode::Blend => AlphaMode::Blend,
+        };
+        // The base-colour texture stays in the base material, at the face's diffuse
+        // (texture-entry) placement composed with its own `KHR_texture_transform`.
+        // Recomposing from the captured `base_uv` (not the live `uv_transform`)
+        // keeps a re-application (a later override) from stacking the transform.
+        // `Mul::mul` (a method, not `*`) keeps clear of the workspace
+        // `arithmetic_side_effects` lint the glam operators trip.
+        standard.uv_transform = compose_map_uv(base_uv, material.base_color_texture);
+    }
+    // The other three maps live in the extension so each samples at its own per-map
+    // transform (composed onto the same `base_uv`); the shader re-samples them when
+    // their `map_flags` bit is set by `apply_pbr_textures`.
+    let params = &mut material_asset.extension.params;
+    params.mode = SL_FACE_MODE_PBR;
+    params.set_pbr_transforms(
+        compose_map_uv(base_uv, material.normal_texture),
+        compose_map_uv(base_uv, material.metallic_roughness_texture),
+        compose_map_uv(base_uv, material.emissive_texture),
+    );
+}
+
+/// Compose a face's diffuse placement `base_uv` with a PBR map's own
+/// `KHR_texture_transform`, or just `base_uv` when the slot names no texture.
+fn compose_map_uv(base_uv: Affine2, texture: Option<GltfTexture>) -> Affine2 {
+    texture.map_or(base_uv, |texture| {
+        base_uv.mul(gltf_uv_transform(&texture.transform))
+    })
 }
 
 /// Reconcile a face's PBR texture slots to `effective` (the base material with any
@@ -1089,7 +1124,7 @@ fn request_material_textures(
             None => {
                 drop_texture_patches(manager, handle, slot);
                 if let Some(mut standard) = materials.get_mut(handle) {
-                    slot.clear(&mut standard.base);
+                    slot.clear(&mut standard);
                 }
             }
         }
@@ -1135,19 +1170,25 @@ pub(crate) fn apply_pbr_textures(
             let Some(mut material_asset) = materials.get_mut(&patch.material) else {
                 continue;
             };
-            let standard = &mut material_asset.base;
+            // The base-colour texture stays on the base material (sampled at the
+            // base UV transform); the other maps go into the extension so the shader
+            // samples each at its own per-map transform. Setting a map's `map_flags`
+            // bit is what turns that re-sampling on. Second Life packs occlusion into
+            // the metallic-roughness red channel (ORM), which the shader reads.
             match patch.slot {
-                PbrSlot::BaseColor => standard.base_color_texture = Some(image),
+                PbrSlot::BaseColor => material_asset.base.base_color_texture = Some(image),
                 PbrSlot::MetallicRoughness => {
-                    // Second Life packs occlusion into the metallic-roughness
-                    // map's red channel (the ORM convention); Bevy samples the
-                    // occlusion slot's red and the metallic-roughness slot's
-                    // green/blue, so the one image drives both.
-                    standard.metallic_roughness_texture = Some(image.clone());
-                    standard.occlusion_texture = Some(image);
+                    material_asset.extension.metallic_roughness_map = image;
+                    material_asset.extension.params.map_flags |= MAP_FLAG_MR;
                 }
-                PbrSlot::Normal => standard.normal_map_texture = Some(image),
-                PbrSlot::Emissive => standard.emissive_texture = Some(image),
+                PbrSlot::Normal => {
+                    material_asset.extension.normal_map = image;
+                    material_asset.extension.params.map_flags |= MAP_FLAG_NORMAL;
+                }
+                PbrSlot::Emissive => {
+                    material_asset.extension.emissive_map = image;
+                    material_asset.extension.params.map_flags |= MAP_FLAG_EMISSIVE;
+                }
             }
         }
     }

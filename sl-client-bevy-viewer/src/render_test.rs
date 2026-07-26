@@ -1347,56 +1347,68 @@ mod tests {
         );
     }
 
-    /// **The texture-animation fixture really animates, and it animates the way the
-    /// harness could not previously see.**
+    /// **The texture-animation driver configures the face, and its geometry never
+    /// moves.**
     ///
-    /// Two assertions, and the pair is the point. `texture-anim-flipbook` passes
-    /// `every_dynamic_scene_actually_changes_over_its_timeline` — but it would pass
-    /// that check just as happily if [`digest`] had gone on reading only vertices,
-    /// because then *no* scene of this shape could ever fail it. So this pins the
-    /// two halves of why the scene is honest: its material moves, and its geometry
-    /// does not.
+    /// The animation itself now runs in the shader (`face_material.wgsl`'s
+    /// `sl_animated_uv`, paging cells from `globals.time`), so this CPU test cannot
+    /// see it play — that the frame actually changes on screen is
+    /// [`crate::render_readback`]'s `a_texture_animation_actually_moves_on_screen`,
+    /// which renders the flipbook at two times and requires the pixels to differ. A
+    /// CPU re-evaluation would only test the Rust reference against itself, so it is
+    /// deliberately not done here.
     ///
-    /// Measured, not assumed: reverting `digest` to the vertex-only summary it had
-    /// before this scene existed makes the dynamic check report a perfectly working
-    /// flipbook as frozen.
+    /// What *is* CPU-observable — and what this pins — is the other half: the driver
+    /// publishes a running `anim_mode` onto the face (so the shader has an animation
+    /// to run), and the animation is UV-only, so the vertex buffer never moves.
     #[test]
-    fn the_texture_animation_fixture_moves_its_material_and_not_its_vertices()
-    -> Result<(), TestError> {
+    fn the_texture_animation_configures_the_face_without_moving_vertices() -> Result<(), TestError>
+    {
+        use crate::face_material::FaceMaterial;
+
         let scene = SCENES
             .iter()
             .find(|scene| scene.id == "texture-anim-flipbook")
             .ok_or("the texture-anim-flipbook scene is not registered")?;
         let mut app = spawn_scene(SceneCx::new(), scene);
-        advance_to(&mut app, 0.0);
+        advance_to(&mut app, 0.1);
         let before = scene_geometry(&mut app);
         advance_to(&mut app, 1.9);
         let after = scene_geometry(&mut app);
 
-        let uvs = |geometry: &[Geometry]| -> Vec<String> {
-            geometry
-                .iter()
-                .map(|object| format!("{:?}", object.uv_transform))
-                .collect()
-        };
+        // The driver ran: at least one face carries a running texture animation (the
+        // `anim_mode` ON bit), which is exactly what the shader pages from
+        // `globals.time`. A collected handle list, so the immutable `Assets` borrow
+        // does not overlap the `query` state's mutable world borrow.
+        let mut query = app.world_mut().query::<&MeshMaterial3d<FaceMaterial>>();
+        let handles: Vec<_> = query
+            .iter(app.world())
+            .map(|material| material.0.clone())
+            .collect();
+        let materials = app.world().resource::<Assets<FaceMaterial>>();
+        let running = u32::from(sl_client_bevy::texture_anim_mode::ON);
+        let any_animated = handles.iter().any(|handle| {
+            materials
+                .get(handle)
+                .is_some_and(|material| material.extension.params.anim_mode & running != 0)
+        });
+        assert!(
+            any_animated,
+            "no face carries a running `anim_mode`: the driver did not publish the flipbook's GPU \
+             animation params, so the shader has nothing to animate"
+        );
+
         let vertices = |geometry: &[Geometry]| -> Vec<Vec<Vec3>> {
             geometry
                 .iter()
                 .map(|object| object.positions.clone())
                 .collect()
         };
-        assert_ne!(
-            uvs(&before),
-            uvs(&after),
-            "the flipbook's UV transform must move — that is the only thing a texture animation \
-             changes, so if it does not, the driver did not run"
-        );
         assert_eq!(
             vertices(&before),
             vertices(&after),
-            "the flipbook's vertices must NOT move: this scene exists to be the case a \
-             vertex-only notion of `did anything happen` is blind to, and if its geometry moved \
-             it would stop being that case"
+            "the flipbook's vertices must NOT move: its animation is UV-only, so if the geometry \
+             moved something is driving the wrong thing"
         );
         Ok(())
     }
@@ -1627,14 +1639,14 @@ mod tests {
     /// hex digest nobody can interpret.
     ///
     /// It reads more than the vertices, and that is not thoroughness for its own
-    /// sake — it is the fix for a check that was quietly lying. "Did anything
-    /// happen" was a function of the vertex buffer alone, which is true of a
-    /// particle cloud and a flexi chain and of nothing else the viewer animates. A
-    /// texture animation pages a flipbook by rewriting its faces' `uv_transform`
-    /// and never touches a vertex; the sun disc and the star field move by
-    /// `Transform`. Every one of those would have registered as *frozen* — so a
-    /// dead one and a working one would both have passed, which is the exact
-    /// failure the timeline tier exists to catch.
+    /// sake — "did anything happen" as a function of the vertex buffer alone is true
+    /// of a particle cloud and a flexi chain and of little else the viewer animates:
+    /// the sun disc and the star field move by `Transform`, so the digest reads the
+    /// world transform too. (A texture animation used to page a flipbook by rewriting
+    /// its faces' `uv_transform` on the CPU, which is why the material is read here as
+    /// well; that animation now runs on the GPU from `globals.time` and so is
+    /// verified by pixels in [`crate::render_readback`] instead — the `uv_transform`
+    /// read is kept for any future CPU-side material motion.)
     fn digest(geometry: &[Geometry]) -> Vec<String> {
         let mut lines: Vec<String> = geometry
             .iter()

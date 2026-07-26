@@ -4,28 +4,36 @@ title: Pause off-view texture animations, resume phase-exact
 topic: viewer
 status: ideas
 origin: performance survey of the implemented viewer (2026-07-22), user request
-refs: [viewer-profiling, viewer-perf-write-on-change-uploads]
+refs: [viewer-profiling, viewer-perf-write-on-change-uploads, viewer-custom-face-material-shader]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
 Two stacked problems in `drive_texture_animations`
-(`texture_anim.rs:231-286`), plus a user-requested behaviour improvement
-over the reference viewer.
+(`texture_anim.rs`), plus a user-requested behaviour improvement over the
+reference viewer.
 
-## 1. Redundant uploads for stepped flipbooks
+## 1. Redundant uploads for stepped flipbooks — ✅ SUPERSEDED
 
-The system writes `material.uv_transform` through
-`materials.get_mut(&material.0)` **every frame unconditionally**
-(`texture_anim.rs:282`). `get_mut` marks the `StandardMaterial` changed,
-so its GPU uniform re-uploads that frame even when the placement is
-bit-identical — and the common `llSetTextureAnim` modes are *stepped*
-flipbooks whose placement changes only a few times per second. Fix:
-compute the new `Affine2` first and only touch `get_mut` when it differs
-from the current `material.uv_transform`. Collapses stepped animations to
-a handful of uploads per second; no-op for `SMOOTH` ones.
+Fixed more completely than proposed by [[viewer-custom-face-material-shader]]'s
+Phase 1.5: texture animation now runs **on the GPU** (the shader's
+`sl_animated_uv` from `globals.time`), so `drive_texture_animations` no longer
+writes `uv_transform` per frame at all — it writes the animation *params* once
+on change. A running animation (stepped **or** `SMOOTH`) now dirties **zero**
+materials per frame, not "a handful of uploads per second". This whole item is
+subsumed.
 
 ## 2. Off-view faces still driven — pause them, but resume better
+
+Still worth doing, though the motivation is now smaller: the GPU path means an
+off-view animated face costs nothing to *render* (its fragments aren't shaded)
+and nothing to *upload* (no per-frame material write). The remaining CPU cost is
+just the driver's per-frame `Assets::get` change-check over every animated face
+(non-mutating, cheap) — which item 2's visibility gate could still skip. With
+the GPU clock (`globals.time`), resume is automatically phase-exact and instant
+(no `TextureAnimationClock` to keep running), so the resume-latency win is free.
+
+Original item 2 (for reference):
 
 The reference viewer stops animating out-of-view faces: in
 `LLVOVolume::animateTextures` (`llvovolume.cpp:750`) the per-face texture
