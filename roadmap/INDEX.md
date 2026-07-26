@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 33 |
+| ideas | 35 |
 | ready | 209 |
 | blocked | 110 |
 | in-progress | 7 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 602 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **997** |
+| **total** | **999** |
 
-## ideas (33)
+## ideas (35)
 
 ### viewer
 
@@ -68,6 +68,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Flexi prims — settle detection, distance LOD, stop per-frame re-upload
 - [`viewer-perf-frame-churn-cleanups`](ideas/viewer-perf-frame-churn-cleanups.md)
   — Small per-frame churn cleanups (throttles + scratch reuse)
+- [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
+  — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-gpu-particles`](ideas/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
@@ -87,6 +89,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Motion-only fast path for terse object updates
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
   Pause off-view texture animations, resume phase-exact
+- [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
+  — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
