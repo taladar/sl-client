@@ -437,6 +437,37 @@ impl ItemInfo {
             permissions: item.permissions,
         }
     }
+
+    /// Rebuilds a held [`InventoryItem`] from this snapshot — the inverse of
+    /// `from_item`, re-encoding the resolved type classes back
+    /// to their raw wire bytes and splitting the sale-type/price pair. Used to
+    /// feed a snapshot (all the viewer keeps of an inventory item) to
+    /// [`RestoreItem::for_task_drop`](crate::RestoreItem::for_task_drop) when
+    /// dropping the item into an object's task inventory.
+    #[must_use]
+    pub fn to_item(&self) -> InventoryItem {
+        InventoryItem {
+            item_id: self.item_id,
+            folder_id: self.folder_id,
+            name: self.name.clone(),
+            description: self.description.clone(),
+            asset_id: self.asset_id,
+            item_type: i8::try_from(self.asset_type.to_code()).unwrap_or(-1),
+            inv_type: i8::try_from(self.inv_type.to_code()).unwrap_or(-1),
+            flags: self.flags,
+            sale_type: self
+                .sale
+                .as_ref()
+                .map_or(0, |(sale_type, _price)| sale_type.to_code()),
+            sale_price: self.sale.as_ref().map(|(_sale_type, price)| price.clone()),
+            creation_date: self.creation_date,
+            owner: self.owner,
+            last_owner_id: self.last_owner_id,
+            creator_id: self.creator_id,
+            group: self.group,
+            permissions: self.permissions,
+        }
+    }
 }
 
 /// An opaque page token for

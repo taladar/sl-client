@@ -5,7 +5,7 @@ topic: viewer
 status: bugs
 origin: user report (2026-07-26) while testing the Create tool on the local
   OpenSim; Delete works on aditi (SL) but not OpenSim
-refs: [viewer-object-context-menu, viewer-inventory]
+refs: [viewer-object-context-menu, viewer-inventory-folder-tree]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

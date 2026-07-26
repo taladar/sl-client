@@ -50,6 +50,7 @@ mod chat_input;
 mod conversations;
 mod coords;
 mod diagnostics;
+mod edit_contents;
 mod edit_create;
 mod edit_link;
 mod edit_material;
@@ -876,6 +877,10 @@ fn run_session(
     // The Blinn-Phong normal / specular maps + PBR (GLTF) material channels of
     // the Texture tab (viewer-face-materials-pbr).
     .add_plugins(crate::edit_material::EditMaterialPlugin)
+    // The Content tab + standalone Object Contents floater
+    // (viewer-prim-inventory-editing): the prim task-inventory list, its
+    // per-object cache, and the add / remove / rename / copy-out actions.
+    .add_plugins(crate::edit_contents::EditContentsPlugin)
     // Offscreen material-on-a-sphere previews for the PBR render-material swatch
     // and the material picker's preview pane (viewer-material-swatch-sphere-preview).
     .add_plugins(crate::material_preview::MaterialPreviewPlugin)

@@ -420,9 +420,19 @@ pub(crate) const FLAGS_OBJECT_MODIFY: u32 = 1 << 2;
 /// The agent-relative `FLAGS_OBJECT_COPY` bit: this agent may copy the object.
 pub(crate) const FLAGS_OBJECT_COPY: u32 = 1 << 3;
 
+/// The agent-relative `FLAGS_OBJECT_YOU_OWNER` bit: this agent owns the object.
+pub(crate) const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
+
 /// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
 /// rotate) the object — set for the owner and for an "anyone can move" object.
 pub(crate) const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
+
+/// The `FLAGS_ALLOW_INVENTORY_DROP` bit of `PrimFlags` (`object_flags.h`): the
+/// object is set to let **anyone** add inventory to its contents, the reference
+/// viewer's `flagAllowInventoryAdd`. Unlike the modify / copy bits this is a
+/// property of the object itself (not agent-relative), and it is the one
+/// exception to needing modify on the object to drop an item into it.
+pub(crate) const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
 
 /// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
 /// itself worn on a HUD point, or it is a linkset child of an object that is (the
@@ -844,6 +854,26 @@ impl ObjectState {
     pub(crate) fn agent_can_copy(&self, scoped: &ScopedObjectId) -> bool {
         self.agent_flags(scoped)
             .is_none_or(|flags| flags & FLAGS_OBJECT_COPY != 0)
+    }
+
+    /// Whether this agent **owns** `scoped` — the `FLAGS_OBJECT_YOU_OWNER` bit
+    /// (the reference viewer's `permYouOwner`). Unlike the modify / move / copy
+    /// helpers this is **not** optimistic: an untracked object reads *not owned*,
+    /// because ownership is a positive grant that gates owner-only affordances
+    /// (the contents rename / remove menu items), where a wrong "yes" would offer
+    /// an action the simulator then refuses.
+    pub(crate) fn agent_owns(&self, scoped: &ScopedObjectId) -> bool {
+        self.agent_flags(scoped)
+            .is_some_and(|flags| flags & FLAGS_OBJECT_YOU_OWNER != 0)
+    }
+
+    /// Whether `scoped` lets **anyone** add inventory to its contents — the
+    /// `FLAGS_ALLOW_INVENTORY_DROP` bit (the reference's `flagAllowInventoryAdd`),
+    /// the one exception to needing modify on the object to drop an item in.
+    /// Untracked reads *false* (the drop still needs modify then).
+    pub(crate) fn agent_allows_inventory_drop(&self, scoped: &ScopedObjectId) -> bool {
+        self.agent_flags(scoped)
+            .is_some_and(|flags| flags & FLAGS_ALLOW_INVENTORY_DROP != 0)
     }
 
     /// Locally echo an edited `PrimFlags` bit (the build floater's

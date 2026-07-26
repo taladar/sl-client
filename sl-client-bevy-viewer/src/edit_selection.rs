@@ -50,8 +50,8 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Command, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId, SlCommand, SlEvent,
-    SlSessionEvent, texture_face_uv_transform,
+    Command, DeRezDestination, FolderType, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId,
+    SlCommand, SlEvent, SlSessionEvent, TransactionId, Uuid, texture_face_uv_transform,
 };
 
 use crate::camera::ViewerCamera;
@@ -60,6 +60,8 @@ use crate::edit_tool::{EditTool, EditToolState};
 use crate::gizmos::GizmoInteraction;
 use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
+use crate::input_context::InputContext;
+use crate::inventory::InventoryModel;
 use crate::object_menu::ObjectPicker;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
@@ -98,6 +100,16 @@ const CHILD_OUTLINE: Color = Color::srgba(0.3, 0.6, 0.9, 0.85);
 /// The tentative (mid-rubber-band) outline tint — the reference's hover
 /// highlight colour family.
 const PENDING_OUTLINE: Color = Color::srgba(0.35, 0.7, 1.0, 0.6);
+
+/// The drag-drop hover outline for an object you may edit (own / modify) — a
+/// green "accept" glow while an inventory item is dragged over it.
+const DROP_ACCEPT_OUTLINE: Color = Color::srgba(0.3, 1.0, 0.45, 0.85);
+
+/// The drag-drop hover outline for an object you do **not** own but which still
+/// accepts the drop (its "allow anyone to add inventory" flag) — **red**, the
+/// reference's no-modify silhouette colour, so a drop into someone else's object
+/// is unmistakable.
+const DROP_FOREIGN_OUTLINE: Color = Color::srgba(1.0, 0.25, 0.2, 0.9);
 
 /// How far the outline shell is inflated past the face geometry: an
 /// inverted-hull outline (front faces culled, mesh slightly enlarged) reads as
@@ -465,6 +477,12 @@ enum HighlightKind {
     Child,
     /// Tentatively swept by the live rubber band.
     Pending,
+    /// An inventory drag is hovering an object you may add to (own / modify) — a
+    /// green "accept" outline ([`DragHoverHighlight`]).
+    DropAccept,
+    /// An inventory drag is hovering an object you do not own but which accepts
+    /// the drop — a **red** outline.
+    DropForeign,
 }
 
 /// An outline-shell overlay child on one selected (or tentatively swept) face
@@ -486,6 +504,10 @@ struct HighlightAssets {
     child: Handle<StandardMaterial>,
     /// The tentative rubber-band outline material.
     pending: Handle<StandardMaterial>,
+    /// The drag-drop accept (own / modify) outline material.
+    drop_accept: Handle<StandardMaterial>,
+    /// The drag-drop foreign (not-owned, allow-drop) outline material.
+    drop_foreign: Handle<StandardMaterial>,
 }
 
 impl HighlightAssets {
@@ -496,6 +518,8 @@ impl HighlightAssets {
             HighlightKind::Root => self.root.clone(),
             HighlightKind::Child => self.child.clone(),
             HighlightKind::Pending => self.pending.clone(),
+            HighlightKind::DropAccept => self.drop_accept.clone(),
+            HighlightKind::DropForeign => self.drop_foreign.clone(),
         }
     }
 }
@@ -519,13 +543,46 @@ impl FromWorld for HighlightAssets {
         let root = outline(ROOT_OUTLINE);
         let child = outline(CHILD_OUTLINE);
         let pending = outline(PENDING_OUTLINE);
+        let drop_accept = outline(DROP_ACCEPT_OUTLINE);
+        let drop_foreign = outline(DROP_FOREIGN_OUTLINE);
         Self {
             primary,
             root,
             child,
             pending,
+            drop_accept,
+            drop_foreign,
         }
     }
+}
+
+/// The in-world object an inventory drag is currently hovering, if it accepts the
+/// drop — set by [`crate::inventory_drag`] each frame while a drag is active and
+/// consumed by [`apply_drag_hover_highlight`] to draw the accept / foreign
+/// outline (the reference's `highlightObjectAndFamily` during a drag).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct DragHoverHighlight {
+    /// The hovered object's root render entity and whether it is foreign (not
+    /// owned, so the outline is red), or `None` when nothing droppable is hovered.
+    pub(crate) hover: Option<DragHover>,
+}
+
+/// One drag-hover target: the object's root render entity and its ownership tint.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DragHover {
+    /// The hovered object's root render entity (a [`SceneObject`]).
+    pub(crate) root: Entity,
+    /// Whether the object is **foreign** (not owned / not modifiable but accepts
+    /// the drop) — drawn red rather than the green accept colour.
+    pub(crate) foreign: bool,
+}
+
+/// A drag-drop hover outline overlay, kept apart from the selection's
+/// [`SelectionHighlightOverlay`] so the two reconcilers never fight.
+#[derive(Component, Debug)]
+struct DragHoverOverlay {
+    /// Which outline this overlay carries, so a change swaps the material.
+    kind: HighlightKind,
 }
 
 /// The wire-side bookkeeping: which objects have been sent as selected
@@ -552,15 +609,18 @@ impl Plugin for EditSelectionPlugin {
             .init_resource::<WireSelection>()
             .init_resource::<HighlightAssets>()
             .init_resource::<FaceCursorAssets>()
+            .init_resource::<DragHoverHighlight>()
             .add_systems(
                 Update,
                 (
                     handle_select_pointer.after(crate::gizmos::drive_gizmo_interaction),
                     clear_selection_on_escape,
+                    delete_selected_objects,
                     ingest_selection_events,
                     sync_selection_wire,
                     apply_selection_highlight,
                     apply_face_cursor_highlight,
+                    apply_drag_hover_highlight,
                 )
                     .chain(),
             );
@@ -957,6 +1017,51 @@ fn clear_selection_on_escape(
     }
 }
 
+/// **Delete** derezzes the selected in-world objects to the Trash while the build
+/// tool is active and the **world** owns input (the reference's build-mode Delete
+/// accelerator). Gated on [`InputContext::is_world`], so a focused inventory /
+/// contents list (which makes the context `UiWidget`) keeps `Delete` for *its*
+/// selection instead — the three delete handlers never fight over the key. Each
+/// selected part is resolved to its linkset **root** and deduplicated, matching
+/// the object pie's Delete; the simulator arbitrates the permission.
+fn delete_selected_objects(
+    tool: Res<EditToolState>,
+    context: Res<InputContext>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
+    inventory: Res<InventoryModel>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if !tool.active || !context.is_world() || selection.is_empty() {
+        return;
+    }
+    if !keyboard.just_pressed(KeyCode::Delete) {
+        return;
+    }
+    let Some(trash) = inventory.folder_by_type(FolderType::Trash) else {
+        return;
+    };
+    // The selected parts resolved to their linkset roots, deduplicated (derez
+    // acts on whole objects, as the object pie's Delete does).
+    let mut roots: Vec<ScopedObjectId> = Vec::new();
+    for node in selection.iter() {
+        let root = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        return;
+    }
+    commands.write(SlCommand(Command::DerezObjects {
+        local_ids: roots,
+        destination: DeRezDestination::Trash(trash),
+        transaction_id: TransactionId::from(Uuid::new_v4()),
+        group_id: None,
+    }));
+}
+
 /// Fold the session's selection-related events into the set: `ObjectProperties`
 /// replies onto their nodes, a simulator-forced selection into the set, and a
 /// killed object out of it.
@@ -1139,6 +1244,65 @@ fn apply_selection_highlight(
     }
 }
 
+/// Draw the drag-drop hover outline: while an inventory drag hovers an object
+/// that accepts the drop ([`DragHoverHighlight`]), every face of that object (and
+/// its linkset family) gets an outline overlay — green when you may edit it, red
+/// when it is foreign (the reference's `highlightObjectAndFamily` during a drag).
+/// A separate overlay from the selection's, so the two reconcilers never fight.
+fn apply_drag_hover_highlight(
+    hover: Res<DragHoverHighlight>,
+    assets: Res<HighlightAssets>,
+    children: Query<&Children>,
+    scene: Query<(), With<SceneObject>>,
+    faces: Query<&Mesh3d, With<PrimFaceEntity>>,
+    overlays: Query<(Entity, &ChildOf, &DragHoverOverlay)>,
+    mut commands: Commands,
+) {
+    let mut desired: HashMap<Entity, HighlightKind> = HashMap::new();
+    if let Some(target) = hover.hover {
+        let kind = if target.foreign {
+            HighlightKind::DropForeign
+        } else {
+            HighlightKind::DropAccept
+        };
+        // One colour for the whole family (the drop targets this object) — pass
+        // the same kind for the root and its children.
+        collect_faces(
+            target.root,
+            &children,
+            &scene,
+            &faces,
+            kind,
+            kind,
+            &mut desired,
+        );
+    }
+    // Despawn stale overlays, keep matching ones.
+    for (overlay, child_of, marker) in overlays.iter() {
+        match desired.get(&child_of.parent()) {
+            Some(kind) if *kind == marker.kind => {
+                desired.remove(&child_of.parent());
+            }
+            _stale => commands.entity(overlay).despawn(),
+        }
+    }
+    // Spawn the missing ones (the same inflated inverted-hull shell the selection
+    // outline uses).
+    for (face, kind) in desired {
+        let Ok(mesh) = faces.get(face) else {
+            continue;
+        };
+        commands.spawn((
+            Mesh3d(mesh.0.clone()),
+            MeshMaterial3d(assets.material(kind)),
+            Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
+            NotShadowCaster,
+            DragHoverOverlay { kind },
+            ChildOf(face),
+        ));
+    }
+}
+
 /// Collect every face-mesh entity under `root` (the object's own faces and its
 /// linkset children's) into `desired`, colouring the selected object's own root
 /// faces as `root_kind` and any linkset child's (a descendant carrying its own
@@ -1173,6 +1337,11 @@ fn collect_faces(
                         HighlightKind::Root => 1_u8,
                         HighlightKind::Child => 2_u8,
                         HighlightKind::Pending => 3_u8,
+                        // Drag-hover kinds never merge with the selection kinds
+                        // (they are reconciled by a separate system over their own
+                        // overlay), so their relative rank is immaterial.
+                        HighlightKind::DropAccept => 4_u8,
+                        HighlightKind::DropForeign => 5_u8,
                     };
                     if rank(kind) < rank(*existing) {
                         *existing = kind;

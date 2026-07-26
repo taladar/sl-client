@@ -4,7 +4,7 @@ title: Build tools — gate the Material tab on modify permission (grey + notice
 topic: viewer
 status: done
 origin: split from viewer-build-tool-modify-permission-gate (2026-07-26)
-refs: [viewer-build-tool-modify-permission-gate, viewer-prim-material-editing]
+refs: [viewer-build-tool-modify-permission-gate, viewer-face-materials-pbr]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

@@ -167,6 +167,31 @@ build-tab-features = Cechy
 build-tab-texture = Tekstura
 build-tab-content = Zawartość
 build-tab-placeholder = Jeszcze nie zaimplementowane
+
+# Karta Zawartość + okno Zawartość obiektu (viewer-prim-inventory-editing).
+build-content-no-target = Nie wybrano obiektu
+build-content-loading = Wczytywanie zawartości…
+build-content-count = { $count ->
+    [one] { $count } element
+    [few] { $count } elementy
+   *[many] { $count } elementów
+}
+build-content-new-script = Nowy skrypt
+build-content-new-script-name = Nowy skrypt
+build-content-rename = Zmień nazwę
+build-content-remove = Usuń
+build-content-refresh = Odśwież
+build-content-no-modify = Nie masz uprawnień do modyfikowania zawartości tego obiektu.
+build-content-item-no-modify = Tego elementu nie można modyfikować.
+build-content-state-adding = …dodawanie
+build-content-state-deleting = …usuwanie
+build-content-state-refreshing = …odświeżanie
+object-contents-floater-title = Zawartość obiektu
+object-contents-none = Nic do wyświetlenia
+object-contents-copy = Kopiuj do ekwipunku
+object-contents-copy-wear = Kopiuj i załóż
+object-contents-no-folder = Twój ekwipunek nie jest jeszcze gotowy — spróbuj ponownie za chwilę.
+object-contents-wear-note = Skopiowano do ekwipunku; załóż je stamtąd.
 build-selection-none = Nic nie zaznaczono
 build-selection-count = { $count ->
     [one] { $count } zaznaczony obiekt

@@ -43,8 +43,9 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
-    AgentKey, Command, InventoryFolderKey, InventoryType, ItemInfo, Permissions, RestoreItem,
-    RezObjectParams, SaleType, SlCommand, SlIdentity, TransactionId, Uuid, Vector,
+    AgentKey, Command, InventoryFolderKey, InventoryType, ItemInfo, ObjectKey, Permissions,
+    RestoreItem, RezObjectParams, SaleType, ScopedObjectId, SlCommand, SlIdentity, TransactionId,
+    Uuid, Vector,
 };
 
 use crate::avatar_pick::AvatarPicker;
@@ -94,6 +95,18 @@ const AUTO_EXPAND_SECS: f64 = 0.7;
 /// [`AvatarPickTarget`], which the drop resolution also accepts.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AgentDropTarget(pub(crate) AgentKey);
+
+/// A task-inventory drop target: dropping a dragged inventory item on a node
+/// carrying this adds the item to the named object's contents (the Content tab /
+/// Object Contents floater lists, [`crate::edit_contents`]). Kept updated by
+/// [`crate::edit_contents`] with the surface's current target object, or `None`
+/// when the surface shows nothing / the agent may not add to it.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub(crate) struct ContentsDropTarget {
+    /// The object whose contents accept the drop (region-scoped id + grid-wide
+    /// key), or `None` when adding is not currently allowed here.
+    pub(crate) target: Option<(ScopedObjectId, ObjectKey)>,
+}
 
 /// The live drag, while one is in progress.
 #[derive(Debug, Clone)]
@@ -576,24 +589,35 @@ pub(crate) fn on_row_drag_end(
         Query<&ComputedNode>,
         Query<&ChildOf>,
     ),
-    targets: (Query<&AgentDropTarget>, Query<&AvatarPickTarget>),
+    targets: (
+        Query<&AgentDropTarget>,
+        Query<&AvatarPickTarget>,
+        Query<&ContentsDropTarget>,
+    ),
     world: (
         Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
         AvatarPicker,
         MeshRayCast,
     ),
+    resolve: (
+        Res<ButtonInput<KeyCode>>,
+        Query<&crate::objects::SceneObject>,
+        Res<crate::objects::ObjectState>,
+    ),
     outputs: (
         MessageWriter<InventoryUiAction>,
         MessageWriter<SlCommand>,
+        MessageWriter<crate::edit_contents::ContentsMutated>,
         Commands,
     ),
 ) {
     let (view, model, identity, mut worn) = session;
     let (viewports, lists, mut rows) = geometry;
     let (hover_map, pickables, node_sizes, child_of) = occlusion;
-    let (agent_targets, pick_targets) = targets;
+    let (agent_targets, pick_targets, contents_targets) = targets;
     let (camera, picker, mut ray_cast) = world;
-    let (mut actions, mut commands, mut commands_bevy) = outputs;
+    let (keyboard, scene, objects) = resolve;
+    let (mut actions, mut commands, mut contents_mutations, mut commands_bevy) = outputs;
     let Some(ui) = ui else {
         return;
     };
@@ -657,6 +681,42 @@ pub(crate) fn on_row_drag_end(
         return;
     }
 
+    // 2b. Over a contents list that accepts drops (the Build Content tab / the
+    //     Object Contents floater): add each dragged item to that object's task
+    //     inventory (the reference's drop-into-Contents). Folders and no-add
+    //     targets are skipped; a Library source still works (the sim copies).
+    let contents_object = hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .find_map(|hovered| contents_target_at(*hovered, &contents_targets, &child_of));
+    if let Some((scoped, object)) = contents_object {
+        let mut added = Vec::new();
+        for (source, _from_library) in &active.sources {
+            if let MenuTarget::Item(item) = source
+                && let Some(command) =
+                    crate::edit_contents::contents_drop_command(item, scoped, object)
+            {
+                commands.write(SlCommand(command));
+                added.push(crate::edit_contents::PendingAdd {
+                    item_id: item.item_id,
+                    name: item.name.clone(),
+                    icon: crate::inventory::item_icon(item.inv_type),
+                });
+            }
+        }
+        // Reconcile the prim's cached contents against the server so the added
+        // item shows once the simulator confirms it — with a "…adding" phantom
+        // row meanwhile (and not committed before the server confirms).
+        if !added.is_empty() {
+            contents_mutations.write(crate::edit_contents::ContentsMutated {
+                scoped,
+                full: object,
+                added,
+            });
+        }
+        return;
+    }
+
     // 3. Any other blocking UI swallows the drop.
     if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
         return;
@@ -681,17 +741,45 @@ pub(crate) fn on_row_drag_end(
         return;
     }
     let settings = MeshRayCastSettings::default();
-    if let Some((_entity, hit)) = ray_cast.cast_ray(ray, &settings).first() {
+    if let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() {
         let start = bevy_to_sl_vec(camera_transform.translation());
         let end = bevy_to_sl_vec(hit.point);
+        // The in-world object the ray struck, resolved to its task-inventory
+        // target when the agent may add to it (modify, or "allow anyone to add
+        // inventory") — the reference's drop-into-contents (`dad3dUpdateInventory`).
+        let ctrl =
+            keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+        let contents_target = hit_scene_object(entity, &scene, &child_of)
+            .filter(|scoped| {
+                objects.agent_can_modify(scoped) || objects.agent_allows_inventory_drop(scoped)
+            })
+            .and_then(|scoped| objects.full_key(&scoped).map(|full| (scoped, full)));
+        let mut added = Vec::new();
         for (source, from_library) in &active.sources {
-            if let MenuTarget::Item(item) = source
-                && matches!(
-                    item.inv_type,
-                    InventoryType::Object | InventoryType::Attachment
-                )
-                && !from_library
+            let MenuTarget::Item(item) = source else {
+                continue;
+            };
+            // An **object** item dropped on the ground rezzes; onto an object it
+            // rezzes unless Ctrl is held (then it drops into contents, like the
+            // reference). Every other type drops straight into an object's
+            // contents when the target accepts it.
+            let is_object = matches!(
+                item.inv_type,
+                InventoryType::Object | InventoryType::Attachment
+            );
+            let drop_into_contents = contents_target.is_some() && (!is_object || ctrl);
+            if let Some((scoped, full)) = contents_target
+                && drop_into_contents
+                && let Some(command) =
+                    crate::edit_contents::contents_drop_command(item, scoped, full)
             {
+                commands.write(SlCommand(command));
+                added.push(crate::edit_contents::PendingAdd {
+                    item_id: item.item_id,
+                    name: item.name.clone(),
+                    icon: crate::inventory::item_icon(item.inv_type),
+                });
+            } else if is_object && !from_library {
                 commands.write(SlCommand(rez_object_command(
                     item,
                     start.clone(),
@@ -699,6 +787,15 @@ pub(crate) fn on_row_drag_end(
                 )));
                 query_folder_page(item.folder_id, &mut commands);
             }
+        }
+        if !added.is_empty()
+            && let Some((scoped, full)) = contents_target
+        {
+            contents_mutations.write(crate::edit_contents::ContentsMutated {
+                scoped,
+                full,
+                added,
+            });
         }
     }
 }
@@ -809,6 +906,49 @@ fn agent_target_at(
     }
 }
 
+/// The in-world object a picked face-mesh `entity` belongs to: walk up its
+/// parents to the nearest [`SceneObject`] and return its scoped id. `None` for a
+/// hit that is not part of a tracked scene object (terrain, a gizmo, …).
+fn hit_scene_object(
+    entity: Entity,
+    scene: &Query<&crate::objects::SceneObject>,
+    child_of: &Query<&ChildOf>,
+) -> Option<ScopedObjectId> {
+    let mut node = entity;
+    loop {
+        if let Ok(object) = scene.get(node) {
+            return Some(object.scoped_id);
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return None,
+        }
+    }
+}
+
+/// The task-inventory object a hovered UI node drops into, if any: the node's own
+/// (or nearest ancestor's) [`ContentsDropTarget`] whose object is set (adding is
+/// currently allowed). The ancestor walk lets a pooled list row resolve to its
+/// viewport's target.
+fn contents_target_at(
+    hovered: Entity,
+    contents_targets: &Query<&ContentsDropTarget>,
+    child_of: &Query<&ChildOf>,
+) -> Option<(ScopedObjectId, ObjectKey)> {
+    let mut node = hovered;
+    loop {
+        if let Ok(target) = contents_targets.get(node)
+            && let Some(resolved) = target.target
+        {
+            return Some(resolved);
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return None,
+        }
+    }
+}
+
 /// Issue the commands for a drop onto an avatar: wear it on **yourself**
 /// (object → attach, wearable → wear), give it to anyone else.
 fn drop_onto_agent(
@@ -866,10 +1006,125 @@ fn drop_onto_agent(
 pub(crate) struct InventoryDragPlugin;
 
 impl Plugin for InventoryDragPlugin {
-    /// Register the drag state and the per-frame drive system.
+    /// Register the drag state and the per-frame drive systems.
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryDragState>()
-            .add_systems(Update, drive_inventory_drag);
+            .add_systems(Update, (drive_inventory_drag, drive_drag_object_hover));
+    }
+}
+
+/// While an inventory drag is active, outline the in-world object under the
+/// cursor when it would accept the drop — green if you may edit it, **red** if it
+/// is foreign but has "allow anyone to add inventory" set (the reference's
+/// `highlightObjectAndFamily` during a drag). Publishes the target to
+/// [`DragHoverHighlight`], which [`crate::edit_selection`] renders; clears it when
+/// no valid target is under the cursor or no drag is in progress.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the drag state, \
+              the window + camera + ray-cast to find the hovered object, the scene / hierarchy / \
+              object-state to resolve + permission-check it, the keyboard for the Ctrl modifier, \
+              the UI-occlusion guard, and the hover output"
+)]
+fn drive_drag_object_hover(
+    state: Res<InventoryDragState>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
+    mut ray_cast: MeshRayCast,
+    scene: Query<&crate::objects::SceneObject>,
+    child_of: Query<&ChildOf>,
+    objects: Res<crate::objects::ObjectState>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    occlusion: (Res<HoverMap>, Query<&Pickable>, Query<&ComputedNode>),
+    mut hover_out: ResMut<crate::edit_selection::DragHoverHighlight>,
+) {
+    let clear = |hover_out: &mut crate::edit_selection::DragHoverHighlight| {
+        if hover_out.hover.is_some() {
+            hover_out.hover = None;
+        }
+    };
+    let Some(active) = state.active.as_ref() else {
+        clear(&mut hover_out);
+        return;
+    };
+    let (hover_map, pickables, node_sizes) = occlusion;
+    // Over a floater / the list itself, the list-drop path owns the drop — no
+    // world outline.
+    if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
+        clear(&mut hover_out);
+        return;
+    }
+    // Would the current drag drop into an object's contents? Non-object items
+    // always do; an object item only with Ctrl held (else it rezzes).
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let drops_into_contents = active.sources.iter().any(|(source, _library)| {
+        matches!(source, MenuTarget::Item(item)
+            if !matches!(item.inv_type, InventoryType::Object | InventoryType::Attachment) || ctrl)
+    });
+    if !drops_into_contents {
+        clear(&mut hover_out);
+        return;
+    }
+    let Some(cursor) = windows
+        .single()
+        .ok()
+        .and_then(|window| window.cursor_position())
+    else {
+        clear(&mut hover_out);
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera.single() else {
+        clear(&mut hover_out);
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+        clear(&mut hover_out);
+        return;
+    };
+    let settings = MeshRayCastSettings::default();
+    let target = ray_cast
+        .cast_ray(ray, &settings)
+        .first()
+        .cloned()
+        .and_then(|(entity, _hit)| resolve_hover_entity(entity, &scene, &child_of, &objects));
+    let want = target.map(|(root, scoped)| crate::edit_selection::DragHover {
+        root,
+        // Foreign (red) when you cannot modify it — you may only drop via its
+        // "allow anyone to add inventory" flag.
+        foreign: !objects.agent_can_modify(&scoped),
+    });
+    let changed = match (hover_out.hover, want) {
+        (None, None) => false,
+        (Some(a), Some(b)) => a.root != b.root || a.foreign != b.foreign,
+        _differs => true,
+    };
+    if changed {
+        hover_out.hover = want;
+    }
+}
+
+/// Resolve a picked face-mesh `entity` to its object's **root render entity** and
+/// scoped id when the object accepts an inventory drop (you may modify it, or it
+/// allows anyone to add inventory). `None` for terrain, a foreign no-drop object,
+/// or an untracked hit.
+fn resolve_hover_entity(
+    entity: Entity,
+    scene: &Query<&crate::objects::SceneObject>,
+    child_of: &Query<&ChildOf>,
+    objects: &crate::objects::ObjectState,
+) -> Option<(Entity, ScopedObjectId)> {
+    let mut node = entity;
+    loop {
+        if let Ok(object) = scene.get(node) {
+            let scoped = object.scoped_id;
+            return (objects.agent_can_modify(&scoped)
+                || objects.agent_allows_inventory_drop(&scoped))
+            .then_some((node, scoped));
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return None,
+        }
     }
 }
 

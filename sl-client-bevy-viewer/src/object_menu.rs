@@ -680,7 +680,9 @@ pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Open",
                 action: "open",
-                when: Some(UNIMPLEMENTED),
+                // Enabled for any object — the Object Contents floater
+                // (viewer-prim-inventory-editing) lists whatever the prim holds.
+                when: None,
             }),
         },
         PieEntry {
@@ -1015,6 +1017,7 @@ fn handle_object_menu_actions(
     mut selection: ResMut<crate::edit_selection::SelectionSet>,
     state: Res<ObjectState>,
     mut commands: MessageWriter<SlCommand>,
+    mut open_contents: MessageWriter<crate::edit_contents::OpenObjectContents>,
 ) {
     for action in actions.read() {
         if action.element != OBJECT_MENU_ELEMENT {
@@ -1023,6 +1026,16 @@ fn handle_object_menu_actions(
         let Some(hit) = &target.hit else {
             continue;
         };
+        // Open (the reference's pie Open → LLFloaterOpenObject): show the picked
+        // object's contents in the standalone Object Contents floater. Always the
+        // whole object (its root), matching the reference's root-object selection.
+        if action.action == "open" {
+            open_contents.write(crate::edit_contents::OpenObjectContents {
+                scoped: hit.summary.root_scoped,
+                full: hit.summary.root_full,
+            });
+            continue;
+        }
         // Edit (the reference's pie Edit): open the Build Tools floater —
         // which *is* edit mode — and make the picked object the selection.
         if action.action == "edit" {
@@ -1319,11 +1332,7 @@ mod tests {
     #[test]
     fn unimplemented_entries_are_disabled_but_present() -> Result<(), TestError> {
         let plain = resolve_slots(&OBJECT_PIE, &PieConditions::default());
-        for (point, name) in [
-            (Compass::East, "Open"),
-            (Compass::NorthEast, "Create"),
-            (Compass::SouthWest, "Pay"),
-        ] {
+        for (point, name) in [(Compass::NorthEast, "Create"), (Compass::SouthWest, "Pay")] {
             assert!(
                 !slot_at(&plain, point)?.enabled,
                 "{name} is a placeholder and must read disabled until it is wired"
@@ -1335,11 +1344,17 @@ mod tests {
             slot_at(&plain, Compass::SouthEast)?.enabled,
             "Edit is wired and must read enabled with no conditions held"
         );
-        // The proof that the sentinel is what disables them: hold it, and they
-        // light up. The live viewer never does this.
+        // Open is wired (viewer-prim-inventory-editing) and unconditional, like
+        // the reference: it opens the Object Contents floater on any object.
+        assert!(
+            slot_at(&plain, Compass::East)?.enabled,
+            "Open is wired and must read enabled with no conditions held"
+        );
+        // The proof that the sentinel is what disables the remaining placeholders:
+        // hold it, and they light up. The live viewer never does this.
         let held = resolve_slots(&OBJECT_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::East)?.enabled,
+            slot_at(&held, Compass::NorthEast)?.enabled,
             "holding the sentinel proves it is the only thing gating the placeholder"
         );
         // The empty (runtime-filled) Attach HUD sub-pie renders disabled.

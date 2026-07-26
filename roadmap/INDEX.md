@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 33 |
 | ready | 209 |
-| blocked | 109 |
+| blocked | 110 |
 | in-progress | 7 |
 | bugs | 12 |
-| done | 601 |
+| done | 602 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **995** |
+| **total** | **997** |
 
 ## ideas (33)
 
@@ -331,6 +331,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
+- [`viewer-object-contents-copy-refinements`](ready/viewer-object-contents-copy-refinements.md)
+  — Object Contents floater — named copy folder + Copy And Wear (blocked by
+  `viewer-prim-inventory-editing` (done))
 - [`viewer-object-inspect`](ready/viewer-object-inspect.md) — Inspect objects
   floater (linkset breakdown) (blocked by `viewer-object-selection-core` (done))
 - [`viewer-object-menu-custom-verbs`](ready/viewer-object-menu-custom-verbs.md)
@@ -408,10 +411,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-floater`](ready/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))
-- [`viewer-prim-inventory-editing`](ready/viewer-prim-inventory-editing.md) —
-  Prim inventory (contents) editing (blocked by
-  `viewer-object-edit-floater-shell` (done), `viewer-ui-virtualized-list`
-  (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -597,7 +596,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (109)
+## blocked (110)
 
 ### viewer
 
@@ -849,6 +848,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   nearby sound sources (blocked by `viewer-in-world-sounds`)
 - [`viewer-stream-favorites`](blocked/viewer-stream-favorites.md) — Audio-stream
   favorites + now-playing title floater (blocked by `viewer-streaming-audio`)
+- [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
+  — Open a task-inventory item into its editor + Save Back to Object (blocked by
+  `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
 - [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
   Teleport flow — progress screen & arrival (blocked by
   `viewer-ui-notification-host`)
@@ -957,7 +959,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (601)
+## done (602)
 
 ### protocol
 
@@ -1470,6 +1472,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))
+- [`viewer-prim-inventory-editing`](done/viewer-prim-inventory-editing.md) —
+  Prim inventory (contents) editing (blocked by
+  `viewer-object-edit-floater-shell` (done), `viewer-ui-virtualized-list`
+  (done))
 - [`viewer-prim-linking`](done/viewer-prim-linking.md) — Prim linking &
   unlinking (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))

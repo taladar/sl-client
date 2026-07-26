@@ -42,6 +42,7 @@
 //! `llinventorybridge.cpp` (`buildContextMenu` per bridge, the per-type
 //! show / hide / disable), `llinventoryfunctions.cpp` (the operations).
 
+use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, AssetKey, AssetType, AttachmentMode, AttachmentPoint, Command, DetachOrder,
@@ -54,8 +55,11 @@ use std::collections::{HashSet, VecDeque};
 
 use crate::avatar_menu::UNIMPLEMENTED;
 use crate::conversations::{ConversationKey, OpenConversation};
+use crate::edit_contents::focus_within;
+use crate::input_context::InputContext;
 use crate::inventory::{
-    InventoryModel, InventorySelection, InventoryView, RowKey, query_folder_page,
+    InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
+    query_folder_page,
 };
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::ui_element::UiAction;
@@ -2644,6 +2648,7 @@ impl Plugin for InventoryActionsPlugin {
             .add_systems(
                 Update,
                 (
+                    inventory_hotkeys,
                     handle_inventory_menu_actions,
                     handle_inventory_add_actions,
                     handle_share_picks,
@@ -2652,6 +2657,94 @@ impl Plugin for InventoryActionsPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+/// **F2** renames the single selected inventory row and **Delete / Backspace**
+/// moves the selection to the Trash — but only while the inventory list is the
+/// focused widget (the reference's `LLPanelMainInventory` accelerators), so the
+/// same keys over the world (build-mode object delete) or the Content tab hit
+/// their own handlers. Library rows and system folders are never trashed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the keyboard + input \
+              context + focus + hierarchy for the focus gate, the inventory UI + selection + \
+              view + model to resolve the rows, the rename state, and the command channel"
+)]
+fn inventory_hotkeys(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    context: Res<InputContext>,
+    focus: Res<InputFocus>,
+    ui: Option<Res<InventoryUi>>,
+    selection: Res<InventorySelection>,
+    view: Res<InventoryView>,
+    model: Res<InventoryModel>,
+    child_of: Query<&ChildOf>,
+    mut rename: ResMut<InlineRename>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if *context == InputContext::TextEntry {
+        return;
+    }
+    let Some(ui) = ui else {
+        return;
+    };
+    let focused_here = focus
+        .get()
+        .is_some_and(|focused| focus_within(focused, ui.viewport(), &child_of));
+    if !focused_here {
+        return;
+    }
+    // F2: rename the one selected row (an ambiguous multi-selection does not
+    // rename, exactly as the toolbar's create destination falls back).
+    if keyboard.just_pressed(KeyCode::F2)
+        && let Some(key) = selection.single()
+    {
+        rename.pending = Some(key);
+    }
+    // Delete / Backspace: move the selection to the Trash.
+    if keyboard.just_pressed(KeyCode::Delete) || keyboard.just_pressed(KeyCode::Backspace) {
+        let Some(trash) = model.folder_by_type(FolderType::Trash) else {
+            return;
+        };
+        let mut trashed = false;
+        for key in selection.keys_in_view_order(view.rows()) {
+            match key {
+                RowKey::Item(item_key) => {
+                    if let Some(item) = model.find_item(item_key)
+                        && !model.is_library(item.folder_id)
+                    {
+                        commands.write(SlCommand(Command::MoveInventoryItem {
+                            item_id: item.item_id,
+                            folder_id: trash,
+                            new_name: String::new(),
+                        }));
+                        query_folder_page(item.folder_id, &mut commands);
+                        trashed = true;
+                    }
+                }
+                RowKey::Folder(folder_key) => {
+                    // Only a plain user folder with a parent, and never the
+                    // Library — a system folder (its preferred type set) is never
+                    // trashed.
+                    if let Some(info) = model.folder_info(folder_key)
+                        && info.folder_type == FolderType::None
+                        && info.parent_id.is_some()
+                        && !model.is_library(info.folder_id)
+                    {
+                        commands.write(SlCommand(Command::MoveInventoryFolder {
+                            folder_id: info.folder_id,
+                            parent_id: trash,
+                        }));
+                        commands.write(SlCommand(Command::QueryInventoryFolders));
+                        trashed = true;
+                    }
+                }
+            }
+        }
+        if trashed {
+            query_folder_page(trash, &mut commands);
+        }
     }
 }
 

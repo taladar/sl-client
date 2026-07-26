@@ -401,6 +401,30 @@ build-tab-features = Features
 build-tab-texture = Texture
 build-tab-content = Content
 build-tab-placeholder = Not implemented yet
+
+# Content tab + Object Contents floater (viewer-prim-inventory-editing).
+build-content-no-target = No object selected
+build-content-loading = Loading contents…
+build-content-count = { $count ->
+    [one] { $count } item
+   *[other] { $count } items
+}
+build-content-new-script = New Script
+build-content-new-script-name = New Script
+build-content-rename = Rename
+build-content-remove = Remove
+build-content-refresh = Refresh
+build-content-no-modify = You do not have permission to modify this object's contents.
+build-content-item-no-modify = That item is not modifiable.
+build-content-state-adding = …adding
+build-content-state-deleting = …deleting
+build-content-state-refreshing = …refreshing
+object-contents-floater-title = Object Contents
+object-contents-none = Nothing to show
+object-contents-copy = Copy To Inventory
+object-contents-copy-wear = Copy And Wear
+object-contents-no-folder = Your inventory is not ready yet — try again in a moment.
+object-contents-wear-note = Copied to your inventory; wear them from there.
 build-selection-none = Nothing selected
 build-selection-count = { $count ->
     [one] { $count } object selected

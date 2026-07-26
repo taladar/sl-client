@@ -159,6 +159,27 @@ build-tab-features = 特徴
 build-tab-texture = テクスチャ
 build-tab-content = コンテンツ
 build-tab-placeholder = 未実装
+
+# コンテンツタブ + オブジェクトのコンテンツフローター (viewer-prim-inventory-editing)。
+build-content-no-target = オブジェクトが選択されていません
+build-content-loading = コンテンツを読み込み中…
+build-content-count = { $count } 個のアイテム
+build-content-new-script = 新規スクリプト
+build-content-new-script-name = 新規スクリプト
+build-content-rename = 名前変更
+build-content-remove = 削除
+build-content-refresh = 更新
+build-content-no-modify = このオブジェクトのコンテンツを変更する権限がありません。
+build-content-item-no-modify = このアイテムは変更できません。
+build-content-state-adding = …追加中
+build-content-state-deleting = …削除中
+build-content-state-refreshing = …更新中
+object-contents-floater-title = オブジェクトのコンテンツ
+object-contents-none = 表示するものがありません
+object-contents-copy = インベントリにコピー
+object-contents-copy-wear = コピーして着用
+object-contents-no-folder = インベントリの準備ができていません。少し待ってからもう一度お試しください。
+object-contents-wear-note = インベントリにコピーしました。そこから着用してください。
 build-selection-none = 何も選択されていません
 build-selection-count = { $count } 個のオブジェクトを選択中
 build-selection-no-modify = 編集不可

@@ -1636,6 +1636,61 @@ impl RestoreItem {
         })
     }
 
+    /// Builds a [`RestoreItem`] that writes an **existing task-inventory item**
+    /// back to the object it already lives in
+    /// ([`Command::UpdateTaskInventory`](crate::Command::UpdateTaskInventory)),
+    /// optionally renaming / re-describing it — the viewer's object-Contents
+    /// **rename** (`LLTaskInvFVBridge::renameItem`, which re-sends the modified
+    /// item with `TASK_INVENTORY_ITEM_KEY`).
+    ///
+    /// The item is reconstructed from the [`TaskInventoryItem`] the contents
+    /// listing yielded, parented to its holding object
+    /// ([`parent_task`](crate::TaskInventoryItem::parent_task)), and its checksum
+    /// ([`crc`](Self::crc)) recomputed internally exactly as
+    /// [`for_task_drop`](Self::for_task_drop) does. `name` / `description`
+    /// override the item's current values when `Some`; `None` keeps them. Because
+    /// the name and description are **not** folded into the checksum
+    /// (`LLInventoryItem::getCRC32` omits them), a rename never invalidates it.
+    ///
+    /// `transaction_id` correlates the operation (pass a fresh id).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`sl_wire::WireError`] if the item's L$ sale price does not encode.
+    pub fn from_task_item(
+        item: &TaskInventoryItem,
+        name: Option<&str>,
+        description: Option<&str>,
+        transaction_id: Uuid,
+    ) -> Result<Self, sl_wire::WireError> {
+        // A no-sale item carries no price; a for-sale one folds its L$ into the
+        // checksum, so mirror the task item's sale type ↔ price pairing.
+        let sale_price = match item.sale_type {
+            SaleType::NotForSale => None,
+            _sold => Some(item.sale_price.clone()),
+        };
+        let inventory = InventoryItem {
+            item_id: item.item_id,
+            // Overwritten by `for_task_drop` to the object id; the CRC uses that.
+            folder_id: InventoryFolderKey::from(item.parent_task.uuid()),
+            name: name.map_or_else(|| item.name.clone(), String::from),
+            description: description.map_or_else(|| item.description.clone(), String::from),
+            asset_id: item.asset_id.map_or_else(Uuid::nil, |asset| asset.uuid()),
+            item_type: i8::try_from(item.asset_type.to_code()).unwrap_or(0),
+            inv_type: i8::try_from(item.inv_type.to_code()).unwrap_or(0),
+            flags: item.flags,
+            sale_type: item.sale_type.to_code(),
+            sale_price,
+            creation_date: item.creation_date,
+            owner: item.owner,
+            last_owner_id: item.last_owner_id.uuid(),
+            creator_id: item.creator_id,
+            group: item.group,
+            permissions: item.permissions,
+        };
+        Self::for_task_drop(&inventory, item.parent_task, transaction_id)
+    }
+
     /// Builds a [`RestoreItem`] for a **brand-new default script** to rez directly
     /// into the object `object_id` ([`Command::RezScript`](crate::Command::RezScript)) —
     /// the viewer's object-Contents "New Script".
@@ -5016,6 +5071,69 @@ mod caps_serializer_tests {
         assert_eq!(note.inv_type, crate::types::InventoryType::Notecard);
         assert_eq!(note.name, "Readme");
         assert_eq!(note.description, "a note");
+        Ok(())
+    }
+
+    /// [`RestoreItem::from_task_item`] rebuilds a parsed task item into an
+    /// [`UpdateTaskInventory`](crate::Command::UpdateTaskInventory) payload: it is
+    /// parented to the holding prim (`folder_id` == the object id), a name
+    /// override takes effect while the rest is preserved, and — because the
+    /// checksum omits the name — a rename leaves [`crc`](RestoreItem::crc)
+    /// identical to the un-renamed rebuild.
+    #[test]
+    fn from_task_item_rebuilds_and_renames() -> Result<(), sl_wire::WireError> {
+        let prim = Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
+        let item = Uuid::from_u128(0x3333_3333_3333_3333_3333_3333_3333_3333);
+        let creator = Uuid::from_u128(0x4444_4444_4444_4444_4444_4444_4444_4444);
+        let asset = Uuid::from_u128(0x5555_5555_5555_5555_5555_5555_5555_5555);
+        let listing = format!(
+            "\tinv_item\t0\n\t{{\n\
+             \t\titem_id\t{item}\n\
+             \t\tparent_id\t{prim}\n\
+             \t\tpermissions 0\n\t\t{{\n\
+             \t\t\tbase_mask\t7fffffff\n\
+             \t\t\towner_mask\t7fffffff\n\
+             \t\t\tgroup_mask\t00000000\n\
+             \t\t\teveryone_mask\t00000000\n\
+             \t\t\tnext_owner_mask\t0008e000\n\
+             \t\t\tcreator_id\t{creator}\n\
+             \t\t\tlast_owner_id\t{creator}\n\
+             \t\t\tgroup_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\t\towner_id\t{creator}\n\
+             \t\t\tgroup_owned\t0\n\t\t}}\n\
+             \t\tasset_id\t{asset}\n\
+             \t\ttype\tlsltext\n\
+             \t\tinv_type\tscript\n\
+             \t\tflags\t00000000\n\
+             \t\tsale_info\t0\n\t\t{{\n\
+             \t\t\tsale_type\tnot\n\
+             \t\t\tsale_price\t0\n\t\t}}\n\
+             \t\tname\tOld Name|\n\
+             \t\tdesc\t|\n\
+             \t\tcreation_date\t1700000000\n\t}}\n",
+        );
+        let items = super::parse_task_inventory(listing.as_bytes())?;
+        let [task_item] = items.as_slice() else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "item_count",
+                value: items.len().to_string(),
+            });
+        };
+        let txn = Uuid::from_u128(0x9999);
+        let renamed = crate::RestoreItem::from_task_item(task_item, Some("New Name"), None, txn)?;
+        let kept = crate::RestoreItem::from_task_item(task_item, None, None, txn)?;
+
+        assert_eq!(renamed.item_id, InventoryKey::from(item));
+        // Parented to the holding prim, not the source agent folder.
+        assert_eq!(renamed.folder_id, InventoryFolderKey::from(prim));
+        assert_eq!(renamed.name, "New Name");
+        // A `None` description keeps the item's own value.
+        assert_eq!(renamed.description, "");
+        assert_eq!(renamed.creator_id, AgentKey::from(creator));
+        // The name is not part of `LLInventoryItem::getCRC32`, so the rename does
+        // not change the checksum — Second Life accepts it.
+        assert_eq!(renamed.crc, kept.crc);
+        assert_eq!(kept.name, "Old Name");
         Ok(())
     }
 

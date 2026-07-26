@@ -351,6 +351,9 @@ pub(crate) struct BuildTabPages {
     /// The **Texture** tab page (the per-face texture / colour editor,
     /// [`crate::edit_texture`]).
     pub(crate) texture: Entity,
+    /// The **Content** tab page (the prim's task-inventory list / editor,
+    /// [`crate::edit_contents`]).
+    pub(crate) content: Entity,
 }
 
 /// The plugin wiring the build tool into the viewer.
@@ -563,12 +566,29 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     // ([`sync_tab_pages`] mirrors the strip's active tab into it).
     let mut tab_pages = [Entity::PLACEHOLDER; 5];
     for (index, panel) in tabs.panels.iter().enumerate() {
+        // The Content page (index 4) hosts a virtualized list that must **fill**
+        // the panel's height (it scrolls its own overflow), so its page grows
+        // into the panel like the inventory floater's content column. The other
+        // pages are content-sized stacks of rows that the panel itself scrolls,
+        // so they must *not* grow (growing would cap them at the panel height and
+        // clip their overflow instead of letting the panel scroll it).
+        let fills = index == 4;
+        let page_node = if fills {
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                ..column(Val::Px(4.0))
+            }
+        } else {
+            Node {
+                width: Val::Percent(100.0),
+                ..column(Val::Px(4.0))
+            }
+        };
         let page = commands
             .spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    ..column(Val::Px(4.0))
-                },
+                page_node,
                 UiPanelShown(index == 0),
                 Name::new(format!("build-tab-page:{index}")),
                 ChildOf(*panel),
@@ -576,8 +596,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
             .id();
         // The not-yet-implemented tabs carry a placeholder line; the General /
         // Object / Features pages get their editors from the parameter-tab module
-        // ([`crate::edit_params`]) and the Texture page from [`crate::edit_texture`].
-        if index >= 4 {
+        // ([`crate::edit_params`]), the Texture page from [`crate::edit_texture`],
+        // and the Content page from [`crate::edit_contents`]. All five are now
+        // populated, so nothing here gets a placeholder (guard kept for any tab
+        // added ahead of its editor).
+        if index >= 5 {
             commands.spawn((
                 Text::default(),
                 Translated::new("build-tab-placeholder"),
@@ -650,6 +673,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         object: tab_pages.get(1).copied().unwrap_or(content),
         features: tab_pages.get(2).copied().unwrap_or(content),
         texture: tab_pages.get(3).copied().unwrap_or(content),
+        content: tab_pages.get(4).copied().unwrap_or(content),
     });
     commands.insert_resource(BuildToolsUi {
         panel: handle.root,

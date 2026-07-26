@@ -167,6 +167,33 @@ build-tab-features = الميزات
 build-tab-texture = النسيج
 build-tab-content = المحتوى
 build-tab-placeholder = غير منفذ بعد
+
+# علامة تبويب المحتوى + نافذة محتويات الكائن (viewer-prim-inventory-editing).
+build-content-no-target = لم يتم تحديد أي كائن
+build-content-loading = جارٍ تحميل المحتويات…
+build-content-count = { $count ->
+    [zero] لا عناصر
+    [one] عنصر واحد
+    [two] عنصران
+    [few] { $count } عناصر
+   *[other] { $count } عنصرًا
+}
+build-content-new-script = سكربت جديد
+build-content-new-script-name = سكربت جديد
+build-content-rename = إعادة تسمية
+build-content-remove = إزالة
+build-content-refresh = تحديث
+build-content-no-modify = ليس لديك إذن لتعديل محتويات هذا الكائن.
+build-content-item-no-modify = هذا العنصر غير قابل للتعديل.
+build-content-state-adding = …جارٍ الإضافة
+build-content-state-deleting = …جارٍ الحذف
+build-content-state-refreshing = …جارٍ التحديث
+object-contents-floater-title = محتويات الكائن
+object-contents-none = لا شيء لعرضه
+object-contents-copy = نسخ إلى المخزون
+object-contents-copy-wear = نسخ وارتداء
+object-contents-no-folder = مخزونك غير جاهز بعد — حاول مرة أخرى بعد لحظة.
+object-contents-wear-note = تم النسخ إلى مخزونك؛ ارتدها من هناك.
 build-selection-none = لا شيء محدد
 build-selection-count = { $count ->
     [zero] لا كائنات محددة
