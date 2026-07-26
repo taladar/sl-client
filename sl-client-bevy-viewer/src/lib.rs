@@ -50,6 +50,7 @@ mod chat_input;
 mod conversations;
 mod coords;
 mod diagnostics;
+mod edit_create;
 mod edit_link;
 mod edit_material;
 mod edit_math;
@@ -878,6 +879,9 @@ fn run_session(
     // Offscreen material-on-a-sphere previews for the PBR render-material swatch
     // and the material picker's preview pane (viewer-material-swatch-sphere-preview).
     .add_plugins(crate::material_preview::MaterialPreviewPlugin)
+    // The Create tool (viewer-prim-creation): the create panel's base-type
+    // picker and the click-to-rez placer for prims / trees / grass.
+    .add_plugins(crate::edit_create::EditCreatePlugin)
     // The object selection core (viewer-object-selection-core): click /
     // rubber-band selection, the selection set + highlight, and the
     // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.

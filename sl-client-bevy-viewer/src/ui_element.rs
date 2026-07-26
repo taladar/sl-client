@@ -464,6 +464,12 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::edit_tool::spawn_build_tools_specimen,
     },
     UiElement {
+        id: "build-create",
+        summary: "The Create tool panel (viewer-prim-creation): the base-type radio (the seven \
+                  prim volume types plus Tree and Grass), a species combo, and the build hint.",
+        spawn: crate::edit_create::spawn_create_panel_specimen,
+    },
+    UiElement {
         id: "search-field",
         summary: "The reusable search-field widget (`crate::ui_search`): a single-line field in a \
                   bordered box with a leading search glyph, a placeholder shown while empty, and a \

@@ -90,12 +90,18 @@ pub(crate) enum EditTool {
     /// the per-face texture-entry selection the Texture tab
     /// ([`crate::edit_texture`]) edits, `Shift`-click builds a multi-face set.
     SelectFace,
+    /// The **Create** tool (the reference's `LLToolPlacer` / `LLToolCompCreate`):
+    /// no transform gizmo — a click on a surface rezzes the base type picked in
+    /// the create panel ([`crate::edit_create`]) at the ray-cast build point and
+    /// drops into edit on the new object.
+    Create,
 }
 
 /// The tool-mode radio options, in the order they appear in the floater (the
 /// reference's `move` / `rotate` / `stretch`). The one place the index↔tool
 /// mapping lives, so [`spawn_build_floater`] and the two sync systems agree.
-const BUILD_TOOLS: [EditTool; 4] = [
+const BUILD_TOOLS: [EditTool; 5] = [
+    EditTool::Create,
     EditTool::Move,
     EditTool::Rotate,
     EditTool::Stretch,
@@ -432,7 +438,8 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     // one focus stop, arrow keys move the selection. The labels are the existing
     // `build-tool-*` Fluent keys; the selection is mirrored to and from
     // `EditToolState::tool` by the two sync systems.
-    let tool_labels: [String; 4] = [
+    let tool_labels: [String; 5] = [
+        "build-tool-create".to_owned(),
         "build-tool-move".to_owned(),
         "build-tool-rotate".to_owned(),
         "build-tool-stretch".to_owned(),
@@ -505,6 +512,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         ))
         .id();
 
+    // The Create-tool panel (viewer-prim-creation): the base-type picker shown
+    // only while the Create tool is active, in place of the per-aspect tabs. It
+    // sits above the tab shell so, when shown, it reads as the floater's body.
+    crate::edit_create::spawn_create_panel(&mut commands, content);
+
     // The tab shell: the reference's per-aspect editor tabs, in its order —
     // General (name / description; permissions are their own tasks), Object
     // (the transform fields, as the reference's `llpanelobject` places them,
@@ -536,6 +548,11 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     // track it rather than content-size — the bar widens with the window and
     // the panels grow and scroll (the profile floater's arrangement).
     fill_tab_container(&mut commands, TabPlacement::BlockStart, &tabs);
+    // Mark the tab container so the Create tool can hide the tabs while its
+    // panel ([`crate::edit_create`]) stands in for them.
+    commands
+        .entity(tabs.container)
+        .insert(crate::edit_create::BuildTabContainer);
     // Inside each container panel, a page wrapper carrying `UiPanelShown`:
     // the container toggles panels with `Visibility` (they stay laid out),
     // which alone would leave a hidden page's fields Tab-reachable — the
@@ -1416,7 +1433,8 @@ pub(crate) fn spawn_build_tools_specimen(
     // The tool-mode radio group — the same widget the live floater builds, so
     // the swept specimen matches. Literal labels (not Fluent keys) because the
     // gallery / harness supply their own sampled strings.
-    let tool_labels: [String; 4] = [
+    let tool_labels: [String; 5] = [
+        cx.text("Create"),
         cx.text("Move"),
         cx.text("Rotate"),
         cx.text("Stretch"),
