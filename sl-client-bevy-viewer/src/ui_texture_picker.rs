@@ -672,12 +672,15 @@ fn handle_open_texture_picker(
             node.display = quick_display;
         }
     }
-    // A material id is not a texture; clear any texture thumbnail off the preview
-    // pane so it never shows a stale one — the material-preview sphere then repaints
-    // it ([`sync_material_preview_pane`] binds the pane's [`MaterialPreview`]).
-    if open.kind == PickerKind::Material
-        && let Ok(mut preview) = commands.get_entity(ui.preview)
-    {
+    // Clear whatever the pane last showed — a texture thumbnail *or* a material
+    // sphere left from a previous open of the other kind — so it never flashes a
+    // stale preview. The correct preview then repaints for this open: in material
+    // mode [`sync_material_preview_pane`] binds the pane's [`MaterialPreview`]
+    // sphere; in texture mode [`request_preview_texture`] loads the opened-on
+    // texture's thumbnail (a nil / None swatch just stays empty). Without this a
+    // texture-mode open reopened after a material-mode open showed the leftover
+    // sphere until (or unless) a thumbnail decoded over it.
+    if let Ok(mut preview) = commands.get_entity(ui.preview) {
         preview.remove::<ImageNode>();
         preview.insert(BackgroundColor(EMPTY_FILL));
     }

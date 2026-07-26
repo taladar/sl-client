@@ -118,9 +118,9 @@ use std::path::Path;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::bump::{apply_surface_flags, generate_normal_map};
 use crate::coords::sl_to_bevy_rotation;
-use crate::face_material::{FaceMaterial, inert_face_material};
+use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, inert_face_material};
 use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
-use crate::legacy_materials::{apply_legacy_scalars, build_linear_image};
+use crate::legacy_materials::{apply_legacy_scalars, build_linear_image, build_srgb_image};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::particles::{ObjectParticleSystem, ParticleSim, drive_particles, float_to_u8};
 use crate::probes::ObjectReflectionProbe;
@@ -2649,9 +2649,10 @@ fn bump_face(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut Sc
 ///
 /// The pre-PBR materials system, and still most of what is actually built in
 /// Second Life. Two prims, at the two ends of the glossiness ramp, because what
-/// `crate::legacy_materials` does with a legacy material is *map* it — glossiness
-/// onto `perceptual_roughness`, environment intensity onto `reflectance` — and a
-/// single sample cannot show a mapping.
+/// `crate::legacy_materials` does with a legacy material is write it onto the face
+/// material's extension — glossiness / environment intensity / specular colour
+/// driving the analytic Blinn-Phong lobe `face_material.wgsl` adds — and a single
+/// sample cannot show a mapping.
 ///
 /// The normal map is generated rather than fetched: the material's `normal_map` is
 /// a grid asset UUID and there is nothing here to fetch it from, so the scene
@@ -2673,6 +2674,10 @@ fn legacy_material_face(
         // normals.
         normal_map_texture(&decoded),
     )));
+    // A specular map (sRGB, its RGB tinting the highlight), so the scene exercises
+    // the legacy specular-map re-sample path (MAP_FLAG_SPEC) on the GPU — the colour
+    // reference texture stands in for a real one.
+    let specular = assets.images.add(build_srgb_image(&decoded));
 
     for (offset, name, glossiness, environment) in
         [(-1.2_f32, "matte", 20_u8, 10_u8), (1.2, "glossy", 240, 200)]
@@ -2685,7 +2690,10 @@ fn legacy_material_face(
             normal_offset: (0.0, 0.0),
             normal_repeat: (1.0, 1.0),
             normal_rotation: 0.0,
-            specular_map: TextureKey::from(Uuid::nil()),
+            // A non-nil id so `apply_legacy_scalars` keeps the specular slot (the
+            // scene then drops the sRGB map in below, as `apply_legacy_specular_maps`
+            // would once the fetch lands).
+            specular_map: TextureKey::from(Uuid::from_u128(0x5_9EC)),
             specular_offset: (0.0, 0.0),
             specular_repeat: (1.0, 1.0),
             specular_rotation: 0.0,
@@ -2698,15 +2706,21 @@ fn legacy_material_face(
             diffuse_alpha_mode: 0,
             alpha_mask_cutoff: 0,
         };
-        let mut standard = StandardMaterial {
+        let mut face = inert_face_material(StandardMaterial {
             base_color: Color::WHITE,
             base_color_texture: Some(diffuse.clone()),
             ..default()
-        };
-        apply_legacy_scalars(&mut standard, &material);
-        // What `apply_legacy_normal_maps` drops in once the fetch lands.
-        standard.normal_map_texture = Some(normal.clone());
-        let standard = assets.materials.add(inert_face_material(standard));
+        });
+        apply_legacy_scalars(&mut face, &material);
+        // What `apply_legacy_normal_maps` drops into the extension once the fetch
+        // lands (linear map + its re-sample bit).
+        face.extension.normal_map = normal.clone();
+        face.extension.params.map_flags |= MAP_FLAG_NORMAL;
+        // What `apply_legacy_specular_maps` drops into the extension once the fetch
+        // lands (sRGB map + its re-sample bit).
+        face.extension.specular_map = specular.clone();
+        face.extension.params.map_flags |= MAP_FLAG_SPEC;
+        let standard = assets.materials.add(face);
         let object = commands
             .spawn((
                 Transform::from_xyz(offset, 0.0, 0.0),

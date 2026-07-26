@@ -23,6 +23,7 @@
     pbr_bindings,
     mesh_view_bindings::view,
     mesh_view_bindings::globals,
+    mesh_view_bindings::lights,
     mesh_bindings::mesh,
     forward_io::{VertexOutput, FragmentOutput},
 }
@@ -52,6 +53,16 @@ struct SlFaceParams {
 const MAP_FLAG_NORMAL: u32 = 1u;
 const MAP_FLAG_MR: u32 = 2u;
 const MAP_FLAG_EMISSIVE: u32 = 4u;
+const MAP_FLAG_SPEC: u32 = 8u;
+
+// Must match the `SL_FACE_MODE_*` constants in face_material.rs.
+const SL_FACE_MODE_LEGACY: u32 = 1u;
+
+// The reference viewer's `RenderSpecularExponent` (settings.xml default): the scale
+// the legacy glossiness²·specExp Blinn-Phong exponent is built from — see
+// `sl_blinn_phong_specular`.
+const SL_SPECULAR_EXPONENT: f32 = 368.0;
+const SL_PI: f32 = 3.14159265358979;
 
 // Texture-animation mode bits — must match `texture_anim_mode` (sl-proto).
 const ANIM_ON: u32 = 0x01u;
@@ -245,6 +256,93 @@ fn sl_sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
 #endif  // BINDLESS
 }
 
+// Sample the legacy specular map (extension slot 51) at `uv`, returning white when
+// the face carries none (a spec-colour-only material). The RGB is the per-texel
+// specular tint and the alpha the per-texel environment weight, exactly as the
+// reference `getSpecular` / `env_intensity * spec.a` read it.
+fn sl_sample_specular(slot: u32, uv: vec2<f32>) -> vec4<f32> {
+#ifdef BINDLESS
+    return textureSampleBias(
+        bindless_textures_2d[sl_indices[slot].specular_map],
+        bindless_samplers_filtering[sl_indices[slot].specular_map_sampler],
+        uv,
+        view.mip_bias,
+    );
+#else   // BINDLESS
+    return textureSampleBias(sl_spec_tex, sl_spec_samp, uv, view.mip_bias);
+#endif  // BINDLESS
+}
+
+// A per-fragment tangent basis (`mat3x3(T, B, N)`) derived from screen-space
+// derivatives — Christian Schüler's "normal mapping without precomputed tangents"
+// (the cotangent frame). Second Life prim / mesh / avatar face meshes never carry
+// vertex tangents (the geometry pipeline stores only position / normal / UV), so
+// the reference viewer's per-vertex MikkTSpace tangents are unavailable here; this
+// reconstructs an equivalent basis per fragment from the world-position and UV
+// gradients, letting a normal map perturb the shading normal faithfully with no
+// per-mesh tangent-generation cost. `n` is the interpolated geometric world normal,
+// `p` the world position, `uv` the (transformed) UV the normal map is sampled at.
+fn sl_cotangent_frame(n: vec3<f32>, p: vec3<f32>, uv: vec2<f32>) -> mat3x3<f32> {
+    let dp1 = dpdx(p);
+    let dp2 = dpdy(p);
+    let duv1 = dpdx(uv);
+    let duv2 = dpdy(uv);
+    // Solve the linear system for the tangent / bitangent in the plane of `n`.
+    let dp2perp = cross(dp2, n);
+    let dp1perp = cross(n, dp1);
+    let t = dp2perp * duv1.x + dp1perp * duv2.x;
+    let b = dp2perp * duv1.y + dp1perp * duv2.y;
+    // Scale so the larger of T / B has unit length (a degenerate patch keeps a
+    // finite basis rather than exploding).
+    let invmax = inverseSqrt(max(dot(t, t), dot(b, b)));
+    return mat3x3<f32>(t * invmax, b * invmax, n);
+}
+
+// The legacy Blinn-Phong specular highlight (Phase 2): an **analytic normalized
+// Blinn-Phong** lobe added over the matte base of a legacy (pre-PBR) face, the
+// closed form the reference viewer bakes into its `lightFunc` LUT
+// (`pipeline.cpp` `createLUTBuffers`) assembled with the material specular terms
+// (`class3/deferred/materialF.glsl`). It is an approximation, not the exact port:
+// it uses the dominant directional light (the sun) as the reference's sun term
+// does but omits the reflection-probe environment (there is none on the headless
+// path) — the pixel-closer exact port is tracked in `viewer-legacy-material-exact-port`.
+//
+// `n` = the perturbed surface normal (`pbr_input.N`, the normal map already folded
+// in where the face has tangents), `world_pos` the fragment world position,
+// `spec_rgb` the specular tint (map × `specular_color`), `glossiness` the exponent
+// scalar (`specular_exponent / 255`, already modulated by the normal-map alpha).
+fn sl_blinn_phong_specular(
+    n: vec3<f32>, world_pos: vec3<f32>, spec_rgb: vec3<f32>, glossiness: f32,
+) -> vec3<f32> {
+    if glossiness <= 0.0 || lights.n_directional_lights == 0u {
+        return vec3<f32>(0.0);
+    }
+    let light = lights.directional_lights[0];
+    let l = normalize(light.direction_to_light);
+    let v = normalize(view.world_position - world_pos);
+    let h = normalize(l + v);
+    let nl = dot(n, l);
+    let nh = dot(n, h);
+    if nl <= 0.0 || nh <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let nv = max(dot(n, v), 1e-4);
+    let vh = max(dot(v, h), 1e-4);
+    // Normalized Blinn-Phong distribution — the exact closed form the reference's
+    // lightFunc LUT samples: exponent = glossiness²·specExp, then the full
+    // normalization curve `((n+2)(n+4)) / (8π(2^(-n/2) + n))`.
+    let expn = glossiness * glossiness * SL_SPECULAR_EXPONENT;
+    var d = pow(nh, expn);
+    d = d * (((expn + 2.0) * (expn + 4.0)) / (8.0 * SL_PI * (pow(2.0, -expn / 2.0) + expn)));
+    // The reference's Fresnel + geometry assembly (`materialF.glsl`).
+    let fres = pow(1.0 - vh, 5.0) * 0.4 + 0.5;
+    let gtdenom = 2.0 * nh;
+    let gt = max(0.0, min(gtdenom * nv / vh, gtdenom * nl / vh));
+    let lit = min(nl * 6.0, 1.0);
+    let scol = fres * d * gt / (nh * nl);
+    return lit * scol * light.color.rgb * spec_rgb;
+}
+
 @fragment
 fn fragment(
     in: VertexOutput,
@@ -261,6 +359,16 @@ fn fragment(
 #else   // BINDLESS
     let sl = sl_material;
 #endif  // BINDLESS
+
+    // Legacy glossiness is modulated per-texel by the normal-map alpha (the
+    // reference `getNormal`'s `glossiness *= vNt.a`); captured in the normal branch
+    // below and applied to the specular lobe. Unity where the face has no normal map
+    // (or no tangents to sample it with).
+    var gloss_modulator = 1.0;
+    // The legacy specular-map sample (RGB tint, alpha environment weight), sampled at
+    // its own UV in the VERTEX_UVS block below and read by the legacy-specular block
+    // after lighting. White for a spec-colour-only material (or a face with no UVs).
+    var spec_sample = vec4<f32>(1.0);
 
 // The extension maps are sampled from `base_uv`; only reachable when the mesh has
 // UVs. `map_flags` / `anim_mode` are uniforms, so each branch is uniform control
@@ -311,20 +419,29 @@ fn fragment(
             pbr_input.material.emissive.a,
         );
     }
-#ifdef VERTEX_TANGENTS
     if (sl.map_flags & MAP_FLAG_NORMAL) != 0u {
         let uv = sl_uv(sl.uv_normal_mat, sl.uv_translations_a.xy, base_uv);
 #ifdef BINDLESS
-        let nt = textureSampleBias(
+        let ns = textureSampleBias(
             bindless_textures_2d[sl_indices[slot].normal_map],
             bindless_samplers_filtering[sl_indices[slot].normal_map_sampler],
             uv,
             view.mip_bias,
-        ).rgb;
+        );
 #else   // BINDLESS
-        let nt = textureSampleBias(sl_normal_tex, sl_normal_samp, uv, view.mip_bias).rgb;
+        let ns = textureSampleBias(sl_normal_tex, sl_normal_samp, uv, view.mip_bias);
 #endif  // BINDLESS
+        let nt = ns.rgb;
+        // A legacy normal map packs per-texel glossiness in its alpha channel.
+        gloss_modulator = ns.a;
+        // Prefer the mesh's own vertex tangents when it has them; SL face meshes
+        // never do, so fall back to a screen-space cotangent frame (both give
+        // `apply_normal_mapping` the `mat3x3(T, B, N)` it expects).
+#ifdef VERTEX_TANGENTS
         let tbn = pbr_functions::calculate_tbn_mikktspace(pbr_input.world_normal, in.world_tangent);
+#else   // VERTEX_TANGENTS
+        let tbn = sl_cotangent_frame(pbr_input.world_normal, pbr_input.world_position.xyz, uv);
+#endif  // VERTEX_TANGENTS
         let double_sided =
             (pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT) != 0u;
         pbr_input.N = pbr_functions::apply_normal_mapping(
@@ -335,7 +452,12 @@ fn fragment(
             nt,
         );
     }
-#endif // VERTEX_TANGENTS
+    // The legacy specular map (its own per-map transform), read by the
+    // legacy-specular block after lighting. Only a legacy face sets MAP_FLAG_SPEC.
+    if (sl.map_flags & MAP_FLAG_SPEC) != 0u {
+        let uv = sl_uv(sl.uv_spec_mat, sl.uv_translations_b.zw, base_uv);
+        spec_sample = sl_sample_specular(slot, uv);
+    }
 #endif // VERTEX_UVS
 
     // Alpha mask / cutoff, exactly as `StandardMaterial` does.
@@ -343,8 +465,30 @@ fn fragment(
         pbr_functions::alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
     var out: FragmentOutput;
-    // Reuse `StandardMaterial`'s metallic-roughness PBR lighting + post processing.
+    // Reuse `StandardMaterial`'s metallic-roughness PBR lighting (a legacy face's
+    // base is matte — metallic 0, roughness 1, reflectance 0 — so this is just its
+    // diffuse term and the legacy specular is added below, no doubled GGX lobe).
     out.color = apply_pbr_lighting(pbr_input);
+
+    // Legacy Blinn-Phong specular (Phase 2): a legacy face adds the SL specular
+    // highlight — the analytic normalized Blinn-Phong lobe, plus a crude environment
+    // reflection term (no reflection probe on the headless path). Added before fog /
+    // post so the highlight is fogged like the reference's. Inert for a PBR / diffuse
+    // face (`mode != LEGACY`), where the base material is the whole surface.
+    if sl.mode == SL_FACE_MODE_LEGACY {
+        let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
+        let glossiness = sl.glossiness * gloss_modulator;
+        let highlight = sl_blinn_phong_specular(
+            pbr_input.N, pbr_input.world_position.xyz, spec_rgb, glossiness,
+        );
+        // Environment reflection: with no reflection probe headless, approximate the
+        // reference's `applyLegacyEnv` as a spec-tinted ambient term scaled by the
+        // environment weight (`env_intensity * spec.a`).
+        let env = sl.env_intensity * spec_sample.a;
+        let ambient = env * spec_rgb * lights.ambient_color.rgb;
+        out.color = vec4<f32>(out.color.rgb + highlight + ambient, out.color.a);
+    }
+
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

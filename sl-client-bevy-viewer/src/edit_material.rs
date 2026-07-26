@@ -54,12 +54,16 @@ use crate::edit_texture::{
 use crate::edit_tool::{
     CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
 };
-use crate::face_material::FaceMaterial;
-use crate::legacy_materials::LegacyMaterialManager;
+use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
+use crate::legacy_materials::{
+    LegacyMaterialManager, apply_legacy_scalars, build_linear_image, build_srgb_image,
+    preview_legacy_material,
+};
 use crate::material_preview::MaterialPreview;
 use crate::materials::{MaterialManager, ObjectRenderMaterials};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
-use crate::textures::{PrimTextures, TextureManager};
+use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
+use crate::render_priority::TERRAIN_BOOST_PRIORITY;
+use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -555,26 +559,35 @@ impl Plugin for EditMaterialPlugin {
     /// Run the material-channel sync + commit systems (the widgets are spawned by
     /// [`spawn_material_channels`], called from the Texture-tab spawn).
     fn build(&self, app: &mut App) {
-        app.init_resource::<MatShownSnapshot>().add_systems(
-            Update,
-            (
-                sync_material_widgets,
-                commit_legacy_fields,
-                apply_alpha_mode_change,
-                apply_normal_specular_picked,
-                apply_spec_color_picked,
-                // Live-preview a browsed material on the prim (non-final picks),
-                // before the OK that `apply_pbr_material_picked` sends for real.
-                preview_pbr_material_picked,
-                apply_pbr_material_picked,
-                commit_pbr_fields,
-                commit_pbr_scalars,
-                apply_pbr_texture_picked,
-                apply_pbr_tint_picked,
-                apply_pbr_alpha_change,
-            )
-                .chain(),
-        );
+        app.init_resource::<MatShownSnapshot>()
+            .init_resource::<LegacyPreview>()
+            .add_systems(
+                Update,
+                (
+                    sync_material_widgets,
+                    // End a legacy-material live preview (revert to the real appearance)
+                    // when its object is deselected or the Material mode / tool is left,
+                    // before this frame's edits start a new one.
+                    revert_legacy_preview,
+                    commit_legacy_fields,
+                    apply_alpha_mode_change,
+                    apply_normal_specular_picked,
+                    apply_spec_color_picked,
+                    // Paint the live legacy-material preview onto the selected faces
+                    // (after the edit handlers set it this frame).
+                    drive_legacy_preview,
+                    // Live-preview a browsed material on the prim (non-final picks),
+                    // before the OK that `apply_pbr_material_picked` sends for real.
+                    preview_pbr_material_picked,
+                    apply_pbr_material_picked,
+                    commit_pbr_fields,
+                    commit_pbr_scalars,
+                    apply_pbr_texture_picked,
+                    apply_pbr_tint_picked,
+                    apply_pbr_alpha_change,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -1452,12 +1465,14 @@ fn set_material_preview(
 fn commit_legacy_fields(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     legacy_manager: Res<LegacyMaterialManager>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: Local<Option<Entity>>,
     fields: Query<(Entity, &LegacyField, &EditableText)>,
     prim_faces: PrimFaceLookup,
+    mut preview: ResMut<LegacyPreview>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !tool.active {
@@ -1484,23 +1499,34 @@ fn commit_legacy_fields(
     let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
         return;
     };
+    let edit = move |material: &mut LegacyMaterial| field.apply(material, value);
+    preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
     apply_legacy_edit(
         &selection,
         &legacy_manager,
         &prim_faces,
         &mut commands,
-        |material| field.apply(material, value),
+        edit,
     );
 }
 
-/// Apply an alpha-mode combo pick to the selected faces' materials.
+/// Apply an alpha-mode combo pick to the selected faces' materials (previewed live
+/// and sent over the PUT).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the combo changes + \
+              its marker, the UI handle, the selection / object state, the legacy manager, the \
+              per-face lookup, the live-preview state, and the command writer"
+)]
 fn apply_alpha_mode_change(
     mut changes: MessageReader<ComboChanged>,
     combos: Query<(), With<AlphaModeCombo>>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
+    mut preview: ResMut<LegacyPreview>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
@@ -1511,70 +1537,384 @@ fn apply_alpha_mode_change(
             continue;
         }
         let mode = clamp_to_byte(from_usize(change.active)).min(ALPHA_MODE_EMISSIVE);
+        let edit = move |material: &mut LegacyMaterial| material.diffuse_alpha_mode = mode;
+        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
         apply_legacy_edit(
             &selection,
             &legacy_manager,
             &prim_faces,
             &mut commands,
-            |material| material.diffuse_alpha_mode = mode,
+            edit,
         );
     }
 }
 
-/// Apply a normal / specular map pick to the selected faces' materials. Only the
-/// committed (final) pick is sent; a live pick is ignored (a legacy-material PUT
-/// round-trips through the simulator, so there is no in-place preview).
+/// The live in-place preview of a legacy (Blinn-Phong) material edit: the edited
+/// [`LegacyMaterial`] shown on the selected faces while the user browses a bump /
+/// specular map (or edits a legacy field), mirroring the diffuse texture picker's
+/// live preview ([`crate::edit_texture`]). Applied locally the way the reference
+/// viewer applies a material edit for instant feedback — independent of the
+/// `RenderMaterials` PUT round-trip, so the highlight / bump renders at once rather
+/// than only after (and if) the simulator echoes a new material id. The commit still
+/// sends the PUT; the preview reverts to the face's real appearance when the object
+/// is deselected or the Material mode / build tool is left.
+#[derive(Resource, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one leg of the preview's apply/upload progress (scalars applied, each \
+              map requested, all settled); they gate distinct once-only steps of the driver, not a \
+              state that would read better as an enum"
+)]
+struct LegacyPreview {
+    /// The edited material to show, or `None` when not previewing.
+    material: Option<LegacyMaterial>,
+    /// The object being previewed, so the preview reverts if the selection moves
+    /// off it.
+    object: Option<Entity>,
+    /// Whether the matte base + scalar half has been applied — applied once, not
+    /// every frame, to avoid a per-frame material re-prepare.
+    scalars_done: bool,
+    /// The uploaded (linear) normal map, once its texture decodes.
+    normal_image: Option<Handle<Image>>,
+    /// Whether the normal-map texture has been requested — so it is asked for **once**
+    /// (a map that never decodes, e.g. a missing asset, must not be re-fetched every
+    /// frame). Reset when a new edit replaces the preview.
+    normal_requested: bool,
+    /// The uploaded (sRGB) specular map, once its texture decodes.
+    spec_image: Option<Handle<Image>>,
+    /// Whether the specular-map texture has been requested (see [`normal_requested`](Self::normal_requested)).
+    spec_requested: bool,
+    /// Whether the scalars and both maps have settled, after which the driver stops
+    /// touching the materials.
+    settled: bool,
+}
+
+impl LegacyPreview {
+    /// Start (or replace) the preview with `material` on `object`, resetting the
+    /// apply / upload progress so the driver re-applies it.
+    fn set(&mut self, material: LegacyMaterial, object: Option<Entity>) {
+        self.material = Some(material);
+        self.object = object;
+        self.scalars_done = false;
+        self.normal_image = None;
+        self.normal_requested = false;
+        self.spec_image = None;
+        self.spec_requested = false;
+        self.settled = false;
+    }
+
+    /// Stop previewing, returning the object that was being previewed (so the caller
+    /// can revert its faces).
+    fn take_object(&mut self) -> Option<Entity> {
+        self.material = None;
+        self.scalars_done = false;
+        self.normal_image = None;
+        self.normal_requested = false;
+        self.spec_image = None;
+        self.spec_requested = false;
+        self.settled = false;
+        self.object.take()
+    }
+}
+
+/// Build the representative face's edited [`LegacyMaterial`] (its current material,
+/// or the neutral default, with `edit` applied) and show it live on the selected
+/// faces via [`LegacyPreview`] — the same edit the commit sends over the wire, shown
+/// at once.
+fn preview_legacy_edit(
+    preview: &mut LegacyPreview,
+    selection: &SelectionSet,
+    objects: &ObjectState,
+    legacy_manager: &LegacyMaterialManager,
+    edit: impl Fn(&mut LegacyMaterial),
+) {
+    let Some((_scoped, face, _signature)) = representative_face(selection, objects) else {
+        return;
+    };
+    let mut material = legacy_material_of(&face, legacy_manager);
+    edit(&mut material);
+    preview.set(material, selection.primary().map(|node| node.entity));
+}
+
+/// Apply `f` to each selected face's [`FaceMaterial`] handle — the selected faces of
+/// each selected object (a per-face selection restricts to its chosen faces),
+/// stopping the walk at linkset-child objects. The legacy-preview analog of
+/// [`crate::edit_texture`]'s `preview_face_texture` walk.
+fn for_selected_face_materials(
+    selection: &SelectionSet,
+    children: &Query<&Children>,
+    scene: &Query<(), With<SceneObject>>,
+    face_materials: &Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
+    mut f: impl FnMut(&Handle<FaceMaterial>),
+) {
+    for node in selection.iter() {
+        let wanted = node.faces.as_ref();
+        let mut stack = vec![node.entity];
+        while let Some(entity) = stack.pop() {
+            if entity != node.entity && scene.get(entity).is_ok() {
+                continue;
+            }
+            if let Ok((marker, material)) = face_materials.get(entity)
+                && wanted.is_none_or(|set| set.contains(&marker.face_id))
+            {
+                f(&material.0);
+            }
+            if let Ok(list) = children.get(entity) {
+                for child in list.iter() {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+}
+
+/// Resolve one preview map: `true` once nothing more is needed (a nil id, or the map
+/// already uploaded), `false` while its texture is still decoding. Uploads and caches
+/// the image on first decode, in the colour space the slot needs (linear normal /
+/// sRGB specular). The texture is requested **once** (`requested` gates it): a map
+/// that never decodes — a missing asset — otherwise re-issues the fetch every frame
+/// for as long as the picker is open.
+fn resolve_preview_map(
+    cache: &mut Option<Handle<Image>>,
+    requested: &mut bool,
+    id: TextureKey,
+    srgb: bool,
+    textures: &mut TextureManager,
+    images: &mut Assets<Image>,
+) -> bool {
+    if id.uuid().is_nil() || cache.is_some() {
+        return true;
+    }
+    let Some(decoded) = textures.decoded(id).map(std::sync::Arc::clone) else {
+        if !*requested {
+            textures.request_boosted(id, TERRAIN_BOOST_PRIORITY);
+            *requested = true;
+        }
+        return false;
+    };
+    let image = if srgb {
+        build_srgb_image(&decoded)
+    } else {
+        build_linear_image(&decoded)
+    };
+    *cache = Some(images.add(image));
+    true
+}
+
+/// Paint the live legacy-material preview onto the selected faces: the matte base +
+/// scalars (once), then each map as its texture decodes, turning on its re-sample
+/// bit. Settles once the scalars and both maps are applied, after which it is a
+/// no-op — so a held preview does not re-prepare the material every frame.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
+              the selection, the texture store + image assets it uploads maps into, the hierarchy \
+              / face-material queries, and the material store the preview paints into"
+)]
+fn drive_legacy_preview(
+    mut preview: ResMut<LegacyPreview>,
+    selection: Res<SelectionSet>,
+    mut textures: ResMut<TextureManager>,
+    mut images: ResMut<Assets<Image>>,
+    children: Query<&Children>,
+    face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
+    scene: Query<(), With<SceneObject>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    // Reborrow to a plain `&mut` so the two map resolves below can each take a
+    // disjoint pair of fields (`*_image` + `*_requested`) — a borrow the `ResMut`
+    // deref would otherwise widen to the whole resource.
+    let preview = preview.as_mut();
+    if preview.settled {
+        return;
+    }
+    let Some(material) = preview.material.clone() else {
+        return;
+    };
+    if !preview.scalars_done {
+        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
+            if let Some(mut face) = materials.get_mut(handle) {
+                let _override = apply_legacy_scalars(&mut face, &material);
+            }
+        });
+        preview.scalars_done = true;
+    }
+    let normal_ready = resolve_preview_map(
+        &mut preview.normal_image,
+        &mut preview.normal_requested,
+        material.normal_map,
+        false,
+        &mut textures,
+        &mut images,
+    );
+    let spec_ready = resolve_preview_map(
+        &mut preview.spec_image,
+        &mut preview.spec_requested,
+        material.specular_map,
+        true,
+        &mut textures,
+        &mut images,
+    );
+    if let Some(image) = preview.normal_image.clone() {
+        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
+            if let Some(mut face) = materials.get_mut(handle) {
+                face.extension.normal_map = image.clone();
+                face.extension.params.map_flags |= MAP_FLAG_NORMAL;
+            }
+        });
+    }
+    if let Some(image) = preview.spec_image.clone() {
+        for_selected_face_materials(&selection, &children, &scene, &face_materials, |handle| {
+            if let Some(mut face) = materials.get_mut(handle) {
+                face.extension.specular_map = image.clone();
+                face.extension.params.map_flags |= MAP_FLAG_SPEC;
+            }
+        });
+    }
+    preview.settled = normal_ready && spec_ready;
+}
+
+/// Revert the legacy-material preview to the faces' real appearance when it should
+/// end — the object is no longer the primary selection, or the build tool / Material
+/// mode has been left. Recomposes each previewed face from scratch: its diffuse
+/// Blinn-Phong look ([`compose_face_material`]) plus its real cached legacy material,
+/// exactly as the face was composed before the preview.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the preview state, \
+              the tool / mode / selection driving the end-of-preview test, the legacy / texture / \
+              prim-texture stores the revert recomposes through, and the hierarchy / face / \
+              material queries"
+)]
+fn revert_legacy_preview(
+    mut preview: ResMut<LegacyPreview>,
+    tool: Res<EditToolState>,
+    mode: Res<MatModeState>,
+    selection: Res<SelectionSet>,
+    mut legacy_manager: ResMut<LegacyMaterialManager>,
+    mut textures: ResMut<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    children: Query<&Children>,
+    faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
+    scene: Query<(), With<SceneObject>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    let Some(object) = preview.object else {
+        return;
+    };
+    let previewing = tool.active
+        && mode.is_material()
+        && selection.primary().map(|node| node.entity) == Some(object);
+    if previewing {
+        return;
+    }
+    let _cleared = preview.take_object();
+    // Recompose each of the object's own faces (stopping at linkset children) to its
+    // real appearance.
+    let mut stack = vec![object];
+    while let Some(entity) = stack.pop() {
+        if entity != object && scene.get(entity).is_ok() {
+            continue;
+        }
+        if let Ok((FaceTextureDebug(texture_face), material)) = faces.get(entity) {
+            compose_face_material(
+                &material.0,
+                texture_face,
+                &mut materials,
+                &mut textures,
+                &mut prim_textures,
+                TERRAIN_BOOST_PRIORITY,
+                TextureAlpha::Mask,
+            );
+            if let Some(material_id) = texture_face.material_id
+                && !material_id.is_nil()
+            {
+                preview_legacy_material(
+                    &mut legacy_manager,
+                    &mut textures,
+                    &mut materials,
+                    &material.0,
+                    material_id,
+                );
+            }
+        }
+        if let Ok(list) = children.get(entity) {
+            for child in list.iter() {
+                stack.push(child);
+            }
+        }
+    }
+}
+
+/// Apply a normal / specular map pick to the selected faces' materials. A **live**
+/// (non-final) pick previews the edited material on the faces in place (via
+/// [`LegacyPreview`]) so the bump / specular renders at once; the **committed** (OK)
+/// pick previews it and also sends the `RenderMaterials` PUT.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the picker replies, \
+              the UI handle, the selection / object state, the legacy manager, the per-face lookup, \
+              the live-preview state, and the command writer"
+)]
 fn apply_normal_specular_picked(
     mut picks: MessageReader<TexturePicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
+    mut preview: ResMut<LegacyPreview>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
         return;
     };
     for pick in picks.read() {
-        if !pick.final_pick {
-            continue;
-        }
         let texture = pick.texture;
-        if pick.requester == ui.normal_swatch {
-            apply_legacy_edit(
-                &selection,
-                &legacy_manager,
-                &prim_faces,
-                &mut commands,
-                |material| material.normal_map = texture,
-            );
+        let edit: Box<dyn Fn(&mut LegacyMaterial)> = if pick.requester == ui.normal_swatch {
+            Box::new(move |material: &mut LegacyMaterial| material.normal_map = texture)
         } else if pick.requester == ui.specular_swatch {
+            Box::new(move |material: &mut LegacyMaterial| material.specular_map = texture)
+        } else {
+            continue;
+        };
+        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, &edit);
+        if pick.final_pick {
             apply_legacy_edit(
                 &selection,
                 &legacy_manager,
                 &prim_faces,
                 &mut commands,
-                |material| material.specular_map = texture,
+                &edit,
             );
         }
     }
 }
 
-/// Apply a specular-colour pick to the selected faces' materials (final pick
-/// only; RGB, keeping full alpha).
+/// Apply a specular-colour pick to the selected faces' materials (RGB, keeping full
+/// alpha). A live (non-final) pick previews the highlight tint in place; the
+/// committed pick previews it and sends the PUT.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the colour-picker \
+              replies, the UI handle, the selection / object state, the legacy manager, the \
+              per-face lookup, the live-preview state, and the command writer"
+)]
 fn apply_spec_color_picked(
     mut picks: MessageReader<ColorPicked>,
     ui: Option<Res<BuildMaterialUi>>,
     selection: Res<SelectionSet>,
+    objects: Res<ObjectState>,
     legacy_manager: Res<LegacyMaterialManager>,
     prim_faces: PrimFaceLookup,
+    mut preview: ResMut<LegacyPreview>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(ui) = ui else {
         return;
     };
     for pick in picks.read() {
-        if pick.requester != ui.spec_color_swatch || !pick.final_pick {
+        if pick.requester != ui.spec_color_swatch {
             continue;
         }
         let srgba = pick.color.to_srgba();
@@ -1584,13 +1924,17 @@ fn apply_spec_color_picked(
             round_to_byte(srgba.blue * 255.0),
             255,
         ];
-        apply_legacy_edit(
-            &selection,
-            &legacy_manager,
-            &prim_faces,
-            &mut commands,
-            |material| material.specular_color = color,
-        );
+        let edit = move |material: &mut LegacyMaterial| material.specular_color = color;
+        preview_legacy_edit(&mut preview, &selection, &objects, &legacy_manager, edit);
+        if pick.final_pick {
+            apply_legacy_edit(
+                &selection,
+                &legacy_manager,
+                &prim_faces,
+                &mut commands,
+                edit,
+            );
+        }
     }
 }
 

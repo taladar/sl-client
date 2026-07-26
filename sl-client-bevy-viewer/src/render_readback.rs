@@ -337,7 +337,7 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
 
 #[cfg(test)]
 mod tests {
-    use super::{FRAME, Frame, capture, capture_over_time};
+    use super::{FRAME, Frame, WARMUP_FRAMES, build_readback_app, capture, capture_over_time};
     use crate::render_scene::{SCENES, SceneCx};
     use crate::render_test::TestError;
     use bevy::prelude::*;
@@ -553,6 +553,110 @@ mod tests {
              is not animating what is on screen (or the prim did not render at all)",
             early.pixels.len(),
         );
+        Ok(())
+    }
+
+    /// **A legacy Blinn-Phong material with a specular map renders without crashing.**
+    ///
+    /// The `legacy-material-face` scene sets a normal *and* a specular map (the full
+    /// legacy workflow), so rendering it exercises the shader's `MAP_FLAG_SPEC`
+    /// re-sample path and the analytic Blinn-Phong lobe on the GPU — the path that
+    /// only runs once a specular map is actually assigned (the build tool's Material
+    /// tab, or a sim material that carries one). A shader / bind-group fault there
+    /// aborts the render, so simply getting a frame back is the check.
+    #[test]
+    fn a_legacy_specular_material_renders() -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "legacy-material-face")
+            .ok_or("the legacy-material-face scene is not registered")?;
+        let Some((frame, _projected)) = capture(scene, SceneCx::new(), &[]) else {
+            // No GPU adapter: skip, like the rest of this pixel tier.
+            return Ok(());
+        };
+        assert!(
+            !frame.pixels.is_empty(),
+            "the legacy specular scene produced an empty frame — the specular-map render path faulted"
+        );
+        Ok(())
+    }
+
+    /// **Adding a specular map to a live legacy material does not fault the render.**
+    ///
+    /// The build tool's Material tab previews a legacy edit by mutating an
+    /// **already-prepared** face material in place — the case the static
+    /// [`a_legacy_specular_material_renders`] scene does not cover. Bevy frees and
+    /// **fully recreates** an `ExtendedMaterial`'s (bindless) bind group on any
+    /// change, so turning the specular map from the fallback to a real texture at
+    /// runtime re-prepares the material against the live GPU resources. This drives
+    /// exactly that transition (clear the specular map, render, re-add it, render) on
+    /// the legacy scene's materials — which carry a normal map too, so it is the real
+    /// "add a specular map to a bumped face" edit. A bind-group / bindless fault
+    /// aborts the render; getting frames back after the mutation is the check.
+    #[test]
+    fn adding_a_specular_map_at_runtime_does_not_crash() -> Result<(), TestError> {
+        use crate::face_material::{FaceMaterial, MAP_FLAG_SPEC};
+
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "legacy-material-face")
+            .ok_or("the legacy-material-face scene is not registered")?;
+        let (mut app, captured) = build_readback_app(scene, SceneCx::new());
+        app.finish();
+        app.cleanup();
+        for _frame in 0..WARMUP_FRAMES {
+            app.update();
+        }
+        // No GPU adapter (no frame came back): skip, like the rest of this tier.
+        if captured
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .is_none()
+        {
+            return Ok(());
+        }
+
+        // The legacy face materials and their (real) specular map handles.
+        let spec_faces: Vec<(AssetId<FaceMaterial>, Handle<Image>)> = app
+            .world()
+            .resource::<Assets<FaceMaterial>>()
+            .iter()
+            .filter(|(_id, material)| material.extension.params.map_flags & MAP_FLAG_SPEC != 0)
+            .map(|(id, material)| (id, material.extension.specular_map.clone()))
+            .collect();
+        assert!(
+            !spec_faces.is_empty(),
+            "the legacy scene has no specular-mapped face to mutate — the fixture changed"
+        );
+
+        // Real -> fallback: drop the specular map (the live preview clearing it).
+        {
+            let mut materials = app.world_mut().resource_mut::<Assets<FaceMaterial>>();
+            for (id, _handle) in &spec_faces {
+                if let Some(mut material) = materials.get_mut(*id) {
+                    material.extension.specular_map = Handle::default();
+                    material.extension.params.map_flags &= !MAP_FLAG_SPEC;
+                }
+            }
+        }
+        app.update();
+
+        // Fallback -> real: re-add the specular map at runtime (the faulting edit).
+        {
+            let mut materials = app.world_mut().resource_mut::<Assets<FaceMaterial>>();
+            for (id, handle) in &spec_faces {
+                if let Some(mut material) = materials.get_mut(*id) {
+                    material.extension.specular_map = handle.clone();
+                    material.extension.params.map_flags |= MAP_FLAG_SPEC;
+                }
+            }
+        }
+        for _frame in 0..3 {
+            app.update();
+        }
+        // Reaching here without an abort means the runtime re-prepare survived.
         Ok(())
     }
 }

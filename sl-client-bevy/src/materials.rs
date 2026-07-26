@@ -38,9 +38,13 @@ pub(crate) fn run_render_materials_fetch(
 }
 
 /// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on
-/// object faces (the zipped `FullMaterialsPerFace` form). Fire-and-forget: the
-/// simulator assigns the material id and echoes it on the affected faces'
-/// `TextureEntry` (an `ObjectImage` update), so there is no reply to forward.
+/// object faces (the zipped `FullMaterialsPerFace` form). Fire-and-forget for the
+/// **payload**: the simulator assigns the material id and echoes it on the affected
+/// faces' `TextureEntry` (an `ObjectImage` update), so there is no reply to forward
+/// (the reference viewer's `onPutResponse` is likewise a no-op). The response
+/// **status** is still logged, though — a non-2xx (a reverse proxy 500 / 502 / 503,
+/// or a cap that rejected the body) is otherwise silent and is exactly what makes an
+/// edit look like it "did nothing", so it is surfaced at `warn`.
 pub(crate) fn run_set_render_materials(cap_url: &str, body: String) {
     let Ok(http) = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
@@ -48,11 +52,34 @@ pub(crate) fn run_set_render_materials(cap_url: &str, body: String) {
     else {
         return;
     };
-    http.put(cap_url)
+    match http
+        .put(cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
-        .ok();
+    {
+        Ok(response) => {
+            let status = response.status();
+            if status.is_success() {
+                tracing::debug!("RenderMaterials PUT succeeded: {status}");
+            } else {
+                // A short snippet of the error body (the proxy's HTML page, or the
+                // cap's message) — enough to tell a "503 Service Unavailable" apart
+                // from a body the cap rejected, without dumping a whole page.
+                let snippet: String = response
+                    .text()
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(200)
+                    .collect();
+                tracing::warn!("RenderMaterials PUT failed: {status}: {snippet}");
+            }
+        }
+        Err(error) => tracing::warn!("RenderMaterials PUT transport error: {error}"),
+    }
 }
 
 /// POSTs a `ModifyMaterialParams` request and forwards the `{ success, message }`

@@ -248,7 +248,8 @@ use crate::inventory_properties::InventoryPropertiesPlugin;
 use crate::land_menu::LandMenuPlugin;
 use crate::legacy_materials::{
     LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
-    drive_legacy_material_requests, receive_legacy_materials, register_legacy_materials,
+    apply_legacy_specular_maps, drive_legacy_material_requests, receive_legacy_materials,
+    register_legacy_materials,
 };
 use crate::lights::{LocalLights, drive_local_lights};
 use crate::local_chat_input::LocalChatInputPlugin;
@@ -1256,6 +1257,7 @@ fn run_session(
                     receive_legacy_materials,
                     apply_legacy_materials,
                     apply_legacy_normal_maps,
+                    apply_legacy_specular_maps,
                     // The legacy per-face bump / shiny / glow / fullbright flags
                     // (P27.4): register each newly-spawned bumped face and, once its
                     // diffuse texture decodes, generate and assign its normal map

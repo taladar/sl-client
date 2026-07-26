@@ -50,11 +50,11 @@ re-prepared material's bindings are structurally identical to the previous ones
 data buffer in the existing slab slot instead of `free` + `allocate_unprepared`.
 This is a systemic win: it makes **all** per-frame material mutation cheap
 (animation, media, streaming, future effects) and removes the incentive to avoid
-mutating materials at all. It is a `bevy_pbr` core change, so per
-[[sl-client-fork-upstream-for-upstream-bugs]] it means a `[patch.crates-io]`
-fork + an upstream PR (the TODO is already flagged in-tree, so upstream is
-receptive). Larger and riskier than the GPU-animation workaround, hence
-deferred.
+mutating materials at all. It is a `bevy_pbr` core change, so per the
+`sl-client-fork-upstream-for-upstream-bugs` memory (fork upstream for upstream
+bugs) it means a `[patch.crates-io]` fork + an upstream PR (the TODO is already
+flagged in-tree, so upstream is receptive). Larger and riskier than the
+GPU-animation workaround, hence deferred.
 
 Profiling to confirm the win needs render-world timing, which is currently
 blocked — see [[viewer-profiling-logplugin-tracing]].

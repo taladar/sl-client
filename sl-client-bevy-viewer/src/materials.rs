@@ -49,8 +49,9 @@ use crate::edit_selection::SelectionSet;
 use crate::edit_texture::MatModeState;
 use crate::edit_tool::EditToolState;
 use crate::face_material::{
-    FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, SL_FACE_MODE_PBR,
+    FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
 };
+use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
@@ -864,6 +865,7 @@ pub(crate) fn apply_blinn_phong_hide(
     mut textures: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut materials: ResMut<Assets<FaceMaterial>>,
+    mut legacy: ResMut<LegacyMaterialManager>,
     children: Query<&Children>,
     holders: Query<&ObjectRenderMaterials>,
     faces: Query<(&PrimFaceEntity, &FaceTextureDebug)>,
@@ -906,6 +908,10 @@ pub(crate) fn apply_blinn_phong_hide(
         if let Some(slot) = manager.face_slots.get(&key) {
             let handle = slot.handle.clone();
             prim_textures.drop_pending_material(&handle);
+            // Also drop anything the Blinn-Phong preview parked (the on-demand
+            // material fetch and any legacy map still in flight), so nothing lands on
+            // the extension of the now-restored PBR face.
+            legacy.drop_pending_preview(&handle);
         }
         recompose_face(&mut manager, &mut textures, &mut materials, key);
     }
@@ -938,6 +944,21 @@ pub(crate) fn apply_blinn_phong_hide(
             MATERIAL_TEXTURE_PRIORITY,
             TextureAlpha::Mask,
         );
+        // Layer the face's real legacy specular / normal over the Blinn-Phong diffuse
+        // just composed, so the FIRE-35138 preview shows the material as it renders
+        // in-world. Fetched on-demand here (not eagerly for every PBR face): applied
+        // now if already cached, else requested and applied when it arrives.
+        if let Some(material_id) = texture_face.material_id
+            && !material_id.is_nil()
+        {
+            preview_legacy_material(
+                &mut legacy,
+                &mut textures,
+                &mut materials,
+                &handle,
+                material_id,
+            );
+        }
     }
 }
 
@@ -1069,13 +1090,23 @@ fn apply_material_scalars(
     // The other three maps live in the extension so each samples at its own per-map
     // transform (composed onto the same `base_uv`); the shader re-samples them when
     // their `map_flags` bit is set by `apply_pbr_textures`.
-    let params = &mut material_asset.extension.params;
-    params.mode = SL_FACE_MODE_PBR;
-    params.set_pbr_transforms(
-        compose_map_uv(base_uv, material.normal_texture),
-        compose_map_uv(base_uv, material.metallic_roughness_texture),
-        compose_map_uv(base_uv, material.emissive_texture),
-    );
+    {
+        let params = &mut material_asset.extension.params;
+        params.mode = SL_FACE_MODE_PBR;
+        params.set_pbr_transforms(
+            compose_map_uv(base_uv, material.normal_texture),
+            compose_map_uv(base_uv, material.metallic_roughness_texture),
+            compose_map_uv(base_uv, material.emissive_texture),
+        );
+        // Clear any legacy specular state a prior Blinn-Phong composition of this
+        // handle left (the FIRE-35138 hide, reverted): the PBR mode already disables
+        // the specular lobe, but drop the re-sample bit so the shader does not sample
+        // a now-superseded map, and zero the scalars for tidiness.
+        params.map_flags &= !MAP_FLAG_SPEC;
+        params.glossiness = 0.0;
+        params.env_intensity = 0.0;
+    }
+    material_asset.extension.specular_map = Handle::default();
 }
 
 /// Compose a face's diffuse placement `base_uv` with a PBR map's own

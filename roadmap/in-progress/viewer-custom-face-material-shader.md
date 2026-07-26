@@ -50,8 +50,37 @@ New: `sl-client-bevy-viewer/src/face_material.rs` + `face_material.wgsl`
   media_prim / edit_* / hud + test harnesses). Verify screenshots unchanged.
 - **Phase 1** ✅ — PBR per-map UV transforms.
 - **Phase 1.5** ✅ — **GPU-side texture animation** (perf, see below).
-- **Phase 2** — legacy Blinn-Phong specular + BP preview + non-PBR faces (fetch
-  legacy materials for PBR faces too; specular map into the extension slot).
+- **Phase 2** ✅ — legacy Blinn-Phong specular + BP preview + non-PBR faces.
+  `apply_legacy_scalars` now writes the legacy specular workflow onto the
+  extension (mode, specular colour, `glossiness = exponent/255`,
+  `env_intensity`, per-map normal/spec UV transforms) over a matte base instead
+  of the old scalar `reflectance`/`roughness` folds; the specular map uploads
+  (sRGB) into the extension slot and the normal map moves into the extension too
+  (its own transform). The shader adds the analytic **normalized Blinn-Phong**
+  lobe (the exact closed form the reference's `lightFunc` LUT bakes:
+  `n = gloss²·368`, then the `((n+2)(n+4))/(8π(2^(-n/2)+n))` normalization)
+  using the dominant directional light, plus a crude env-reflection ambient
+  term. Legacy materials are now fetched for **PBR** faces too (cache-only,
+  `queue_fetch`), and the FIRE-35138 Blinn-Phong build-preview applies that
+  cached material (fetched **on-demand** when a face enters the preview, not
+  eagerly for every PBR face) so a PBR face shows its real specular/normal while
+  edited. Normal maps (legacy **and** PBR) render via a per-fragment
+  **cotangent frame** derived from screen-space derivatives (Schüler) — SL face
+  meshes carry no vertex tangents, so this reconstructs the tangent basis
+  without the per-mesh MikkTSpace cost, and the perturbed normal drives both the
+  PBR lighting and the specular lobe (plus the per-texel glossiness from the
+  normal-map alpha).
+  - **Build-tool editing (shipped alongside).** The Material tab's normal /
+    specular / colour / scalar edits gained a **live in-place preview**
+    (mirroring the diffuse texture preview): the edited `LegacyMaterial` renders
+    on the selected faces at once (local, independent of the `RenderMaterials`
+    PUT round-trip, which was verified working), reverting on deselect /
+    mode-leave. Also: the texture picker's preview pane is now reset on open (no
+    stale material-sphere), the `RenderMaterials` PUT logs its response status,
+    and a preview map that never decodes is requested once (was re-fetched per
+    frame). Watch item: a **one-time, non-reproducible** viewer crash setting a
+    specular map on aditi (tracked in the personal memory
+    `sl-client-legacy-specular-edit-aditi-crash`, not a roadmap item).
 - **Phase 3** — revert-to-Blinn-Phong on
   `RemovedComponents<ObjectRenderMaterials>`.
 - **Phase 4** — tonemapper preferences (`RenderTonemapType`/`Mix`/`Exposure`).

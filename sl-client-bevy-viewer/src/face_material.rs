@@ -49,10 +49,6 @@ pub(crate) type FaceMaterial = ExtendedMaterial<StandardMaterial, SlFaceExt>;
 
 /// Legacy Blinn-Phong specular mode: the extension adds a specular highlight over
 /// the reused PBR lighting.
-#[expect(
-    dead_code,
-    reason = "wired up in the legacy-specular shader phase (Phase 2)"
-)]
 pub(crate) const SL_FACE_MODE_LEGACY: u32 = 1;
 /// PBR / plain-diffuse mode: no added highlight (the base material is the whole
 /// surface); per-map UV transforms may still apply via [`SlFaceParams::map_flags`].
@@ -67,10 +63,6 @@ pub(crate) const MAP_FLAG_MR: u32 = 1 << 1;
 pub(crate) const MAP_FLAG_EMISSIVE: u32 = 1 << 2;
 /// [`SlFaceParams::map_flags`] bit: sample the legacy specular map (extension slot)
 /// at [`uv_spec`](SlFaceParams::uv_spec).
-#[expect(
-    dead_code,
-    reason = "wired up in the legacy-specular shader phase (Phase 2)"
-)]
 pub(crate) const MAP_FLAG_SPEC: u32 = 1 << 3;
 
 /// The extension's uniform block: the per-map UV transforms (as a packed 2×2
@@ -181,6 +173,47 @@ impl SlFaceParams {
             emissive.translation.y,
             self.uv_translations_b.z,
             self.uv_translations_b.w,
+        );
+    }
+
+    /// Set the **legacy Blinn-Phong** specular workflow: switch to
+    /// [`SL_FACE_MODE_LEGACY`] (the shader adds the analytic normalized Blinn-Phong
+    /// lobe over the matte base), store the specular highlight tint, glossiness
+    /// (`specular_exponent / 255`) and environment intensity
+    /// (`environment_intensity / 255`), and pack the normal- and specular-map UV
+    /// transforms (each built from the map's own offset / repeat / rotation and
+    /// applied to the raw face UV, independent of the diffuse placement — the
+    /// reference viewer's per-channel `xform`). The normal transform reuses the
+    /// [`uv_normal_mat`](Self::uv_normal_mat) slot the PBR path also uses (a legacy
+    /// face is never a PBR face), and the specular transform its own
+    /// [`uv_spec_mat`](Self::uv_spec_mat) slot. The `map_flags` re-sample bits are
+    /// set later, as each map uploads.
+    pub(crate) fn set_legacy(
+        &mut self,
+        specular_color: [f32; 3],
+        glossiness: f32,
+        env_intensity: f32,
+        normal: Affine2,
+        specular: Affine2,
+    ) {
+        self.mode = SL_FACE_MODE_LEGACY;
+        let [r, g, b] = specular_color;
+        self.specular_color = Vec4::new(r, g, b, 1.0);
+        self.glossiness = glossiness;
+        self.env_intensity = env_intensity;
+        self.uv_normal_mat = Self::matrix_of(normal);
+        self.uv_spec_mat = Self::matrix_of(specular);
+        self.uv_translations_a = Vec4::new(
+            normal.translation.x,
+            normal.translation.y,
+            self.uv_translations_a.z,
+            self.uv_translations_a.w,
+        );
+        self.uv_translations_b = Vec4::new(
+            self.uv_translations_b.x,
+            self.uv_translations_b.y,
+            specular.translation.x,
+            specular.translation.y,
         );
     }
 }
