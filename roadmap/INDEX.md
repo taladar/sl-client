@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 33 |
-| ready | 210 |
+| ready | 209 |
 | blocked | 109 |
 | in-progress | 7 |
 | bugs | 12 |
-| done | 598 |
+| done | 599 |
 | deferred | 18 |
 | wont-do | 6 |
 | **total** | **993** |
@@ -95,7 +95,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (210)
+## ready (209)
 
 ### protocol
 
@@ -214,8 +214,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-create-shift-drag-duplicate`](ready/viewer-create-shift-drag-duplicate.md)
-  — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-debug-consoles`](ready/viewer-debug-consoles.md) — Debug consoles —
   texture, debug text, scene stats
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
@@ -959,7 +957,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (598)
+## done (599)
 
 ### protocol
 
@@ -1129,6 +1127,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
+- [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
+  — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
   — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
   specular

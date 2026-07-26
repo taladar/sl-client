@@ -36,13 +36,26 @@
 //!   corner stretch scales about the opposite corner with the reference's
 //!   halved cursor mapping (`0.5 + t/2`).
 //!
+//! - **Shift-drag copy** (the reference's `LLManipTranslate` `MASK_COPY`
+//!   branch, driven by `LLSelectMgr::selectDuplicate`): holding `Shift` while
+//!   starting a **move**-handle drag leaves a copy of the selection behind. On
+//!   the drag's first movement it fires one `ObjectDuplicate`
+//!   ([`Command::DuplicateObjects`]) at **zero** offset for the selected roots
+//!   — the simulator drops an unselected copy in place — and then the original
+//!   is dragged away as normal (the reference keeps the original selected and
+//!   moves it, leaving the copy at the start point). Repeating the gesture lays
+//!   down a row of identical prims. Armed only in whole-object mode, matching
+//!   the reference's block on copy-drag while editing linked parts. A selection
+//!   the agent lacks copy permission on is not duplicated — a no-permission
+//!   notice goes to local chat instead (the reference's `NoCopyPermsNoObject`).
+//!
 //! Deliberate simplifications vs. the reference (`llmaniptranslate` /
 //! `llmaniprotate` / `llmanipscale`): the stretch rig is a fixed-size widget
 //! rather than handles on the selection's bounding box (the drag math is
 //! ratio-based, so behaviour matches); corner drags scale about the selection
-//! pivot, snapping to quarter-factor steps; there is no free-rotate sphere
-//! and no copy-on-drag; and the manipulators read the pointer directly (the
-//! keyboard-only input action map has no pointer axis to consume).
+//! pivot, snapping to quarter-factor steps; there is no free-rotate sphere;
+//! and the manipulators read the pointer directly (the keyboard-only input
+//! action map has no pointer axis to consume).
 //!
 //! Reference (Firestorm, read-only): `llmanip`, `llmaniptranslate`,
 //! `llmaniprotate`, `llmanipscale`, `llselectmgr` (`sendMultipleUpdate`).
@@ -56,9 +69,13 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{Command, ObjectTransform, Rotation, ScopedObjectId, SlCommand, Vector};
+use sl_client_bevy::{
+    AgentKey, Command, ObjectTransform, OwnerKey, Permissions, Rotation, ScopedObjectId, SlCommand,
+    SlIdentity, Vector,
+};
 
 use crate::camera::ViewerCamera;
+use crate::chat::LocalChatNotice;
 use crate::coords::{
     bevy_to_sl_vec, sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation,
     sl_to_bevy_vec,
@@ -968,6 +985,15 @@ struct GizmoDrag {
     /// stretch-both-sides) instead of re-fitting an AABB whose extents would
     /// couple on a rotated object.
     live_box: Option<(Vec3, Vec3)>,
+    /// Whether this is a **Shift-drag copy** (armed at press by a held `Shift`
+    /// on a move handle in whole-object mode): its first movement leaves a copy
+    /// of the selection behind ([`GizmoDrag::duplicate_sent`]), the reference's
+    /// `MASK_COPY` translate branch.
+    duplicate: bool,
+    /// Whether the copy has been fired yet — the copy is left behind exactly
+    /// once, when the drag first moves past the slop, matching the reference's
+    /// `mCopyMadeThisDrag` one-shot.
+    duplicate_sent: bool,
 }
 
 impl GizmoDrag {
@@ -1073,6 +1099,11 @@ pub(crate) struct GizmoInteraction {
     hovered: Option<GizmoPart>,
     /// The live drag, if any.
     drag: Option<GizmoDrag>,
+    /// The linkset roots a Shift-drag copy asked to duplicate this frame, set on
+    /// the drag's first movement and drained by [`dispatch_shift_drag_copy`]
+    /// (which checks copy permission before sending the `ObjectDuplicate`) —
+    /// kept off the maxed-out [`drive_gizmo_interaction`] parameter list.
+    pending_copy: Option<Vec<ScopedObjectId>>,
 }
 
 impl GizmoInteraction {
@@ -1109,6 +1140,7 @@ impl Plugin for EditGizmoPlugin {
                     spawn_gizmo_camera,
                     maintain_gizmo_rig,
                     drive_gizmo_interaction,
+                    dispatch_shift_drag_copy,
                     update_snap_guide_markers,
                     update_gizmo_readout,
                     place_gizmo_rig,
@@ -1647,6 +1679,18 @@ pub(crate) fn drive_gizmo_interaction(
                     &mut motions,
                     &mut transforms,
                 );
+                // Shift-drag copy: on the first movement, queue a copy of the
+                // selection to leave behind (the reference's `MASK_COPY`
+                // translate branch); the original is dragged on. The copy is
+                // dispatched — after a copy-permission check — by
+                // [`dispatch_shift_drag_copy`]. Queued once per drag.
+                if drag.duplicate && !drag.duplicate_sent && drag.moved {
+                    drag.duplicate_sent = true;
+                    let roots = duplicate_roots(&drag);
+                    if !roots.is_empty() {
+                        interaction.pending_copy = Some(roots);
+                    }
+                }
                 // A stretch streams at the reference's 10 Hz.
                 if matches!(
                     drag.part,
@@ -1698,6 +1742,9 @@ pub(crate) fn drive_gizmo_interaction(
         let rig_scale = rigs
             .single()
             .map_or(1.0, |transform| transform.scale.x.max(1.0e-3));
+        // A held `Shift` on a move handle (whole-object mode) arms the
+        // shift-drag copy (the reference's `MASK_COPY`).
+        let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
         interaction.drag = begin_drag(
             part,
             ray,
@@ -1708,6 +1755,7 @@ pub(crate) fn drive_gizmo_interaction(
             &globals,
             &motions,
             rig_scale,
+            shift,
             time.elapsed_secs(),
         );
         // A translate drag with snapping on shows the reference's white
@@ -1812,6 +1860,7 @@ fn begin_drag(
     globals: &Query<&GlobalTransform>,
     motions: &Query<(&mut ObjectSlMotion, &SceneObject)>,
     rig_scale: f32,
+    shift: bool,
     now: f32,
 ) -> Option<GizmoDrag> {
     let pivot_bevy = selection_pivot_bevy(selection, globals)?;
@@ -1877,6 +1926,8 @@ fn begin_drag(
         last_stream: now,
         bbox_ext,
         live_box: None,
+        duplicate: arms_duplicate(part, shift, tool.edit_linked),
+        duplicate_sent: false,
     };
     match part {
         GizmoPart::TranslateAxis(axis) => {
@@ -2525,6 +2576,123 @@ pub(crate) fn write_back_motion(
     }
 }
 
+/// Whether a press arms the **Shift-drag copy**: a held `Shift` on a
+/// **move** handle (translate axis or plane) in whole-object mode — the
+/// reference's `MASK_COPY` translate branch, which it blocks while editing
+/// linked parts (`!selectGetNoIndividual()`).
+const fn arms_duplicate(part: GizmoPart, shift: bool, edit_linked: bool) -> bool {
+    shift
+        && !edit_linked
+        && matches!(
+            part,
+            GizmoPart::TranslateAxis(_) | GizmoPart::TranslatePlane(_)
+        )
+}
+
+/// The linkset roots a Shift-drag copy duplicates: the dragged objects that are
+/// roots (whole-object mode — the only mode the copy arms in — selects roots),
+/// deduplicated. Matches the reference's `SEND_ONLY_ROOTS`.
+fn duplicate_roots(drag: &GizmoDrag) -> Vec<ScopedObjectId> {
+    let mut roots: Vec<ScopedObjectId> = Vec::new();
+    for object in &drag.objects {
+        if object.is_root && !roots.contains(&object.scoped) {
+            roots.push(object.scoped);
+        }
+    }
+    roots
+}
+
+/// Dispatch a queued Shift-drag copy: if every root is copy-permitted, send one
+/// `ObjectDuplicate` ([`Command::DuplicateObjects`]) at **zero** offset (the
+/// reference's `selectDuplicate(zero, false)` — the simulator drops an
+/// unselected copy in place, the original having been dragged on); otherwise
+/// leave a no-permission notice in local chat, the reference's
+/// `NoCopyPermsNoObject` alert on a no-copy `selectDuplicate`.
+fn dispatch_shift_drag_copy(
+    mut interaction: ResMut<GizmoInteraction>,
+    selection: Res<SelectionSet>,
+    identity: Res<SlIdentity>,
+    mut commands: MessageWriter<SlCommand>,
+    mut notices: MessageWriter<LocalChatNotice>,
+) {
+    let Some(roots) = interaction.pending_copy.take() else {
+        return;
+    };
+    if roots.is_empty() {
+        return;
+    }
+    match selection_no_copy(&selection, identity.agent_id) {
+        Some(name) => {
+            debug!("gizmos: shift-drag copy blocked, no copy permission on {name:?}");
+            notices.write(LocalChatNotice::new(no_copy_notice(&name)));
+        }
+        None => {
+            debug!("gizmos: shift-drag copy of {} root(s)", roots.len());
+            commands.write(SlCommand(Command::DuplicateObjects {
+                local_ids: roots,
+                offset: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                group_id: None,
+            }));
+        }
+    }
+}
+
+/// Whether the selection contains an object the agent **cannot copy** — the
+/// reference's `canDuplicate` check. Returns the offending object's name (for
+/// the notice) on the first non-copyable object, or `None` when every object is
+/// copyable (or its permissions have not arrived yet, so the attempt is left to
+/// the simulator). Copy permission is the owner mask's `COPY` bit when the agent
+/// owns the object, else the everyone mask's — the reference's
+/// `permYouOwner ? owner : everyone` copy test.
+fn selection_no_copy(selection: &SelectionSet, own: Option<AgentKey>) -> Option<String> {
+    for node in selection.iter() {
+        // Unknown permissions (the `ObjectProperties` reply has not landed):
+        // optimistic — let the simulator arbitrate rather than false-block.
+        let properties = node.properties.as_ref()?;
+        if !can_copy(
+            properties.owner,
+            own,
+            properties.permissions.owner,
+            properties.permissions.everyone,
+        ) {
+            return Some(properties.name.clone());
+        }
+    }
+    None
+}
+
+/// Whether the agent `own` may copy an object with the given owner and
+/// owner / everyone permission masks — the reference's
+/// `permYouOwner() ? PERM_COPY on owner : PERM_COPY on everyone` copy test: the
+/// owner mask governs the owner, otherwise the everyone mask does.
+fn can_copy(
+    owner: OwnerKey,
+    own: Option<AgentKey>,
+    owner_mask: Permissions,
+    everyone_mask: Permissions,
+) -> bool {
+    let owned_by_me = matches!(owner, OwnerKey::Agent(agent) if Some(agent) == own);
+    let mask = if owned_by_me {
+        owner_mask
+    } else {
+        everyone_mask
+    };
+    mask.contains(Permissions::COPY)
+}
+
+/// The local-chat notice text for a blocked Shift-drag copy.
+fn no_copy_notice(name: &str) -> String {
+    if name.is_empty() {
+        String::from("Build Tools: you do not have permission to copy that object.")
+    } else {
+        format!("Build Tools: you do not have permission to copy \u{201c}{name}\u{201d}.")
+    }
+}
+
 /// Send the drag's final (or streamed) `MultipleObjectUpdate`s: one per
 /// dragged object, with the changed components and the linked-set / uniform
 /// flags the reference sets.
@@ -2619,9 +2787,13 @@ fn tint_gizmo_handles(
 
 #[cfg(test)]
 mod tests {
-    use super::{GizmoAxis, corner_direction, ring_axes, sl_world_rotation};
+    use super::{
+        GizmoAxis, GizmoPart, arms_duplicate, can_copy, corner_direction, no_copy_notice,
+        ring_axes, sl_world_rotation,
+    };
     use bevy::math::{Quat, Vec3};
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{AgentKey, OwnerKey, Permissions, Uuid};
 
     /// The axis units and indices line up.
     #[test]
@@ -2650,6 +2822,78 @@ mod tests {
             let normal = axis.unit();
             assert!(a.cross(b).abs_diff_eq(normal, 1.0e-6), "{axis:?}");
         }
+    }
+
+    /// The Shift-drag copy arms only with `Shift` held, on a **move** handle,
+    /// in whole-object mode — the reference's `MASK_COPY` translate branch,
+    /// blocked for rotate / stretch handles and while editing linked parts.
+    #[test]
+    fn duplicate_arms_only_for_shift_move_whole_object() {
+        // A move handle with Shift in whole-object mode: armed.
+        assert!(arms_duplicate(
+            GizmoPart::TranslateAxis(GizmoAxis::X),
+            true,
+            false
+        ));
+        assert!(arms_duplicate(
+            GizmoPart::TranslatePlane(GizmoAxis::Z),
+            true,
+            false
+        ));
+        // No Shift: never.
+        assert!(!arms_duplicate(
+            GizmoPart::TranslateAxis(GizmoAxis::X),
+            false,
+            false
+        ));
+        // Editing linked parts: blocked (the reference plays an invalid sound).
+        assert!(!arms_duplicate(
+            GizmoPart::TranslateAxis(GizmoAxis::X),
+            true,
+            true
+        ));
+        // Rotate / stretch handles never arm the copy (translate-only).
+        assert!(!arms_duplicate(
+            GizmoPart::RotateRing(GizmoAxis::Y),
+            true,
+            false
+        ));
+        assert!(!arms_duplicate(
+            GizmoPart::ScaleFace(GizmoAxis::Z, true),
+            true,
+            false
+        ));
+        assert!(!arms_duplicate(
+            GizmoPart::ScaleCorner([true, false, true]),
+            true,
+            false
+        ));
+    }
+
+    /// Copy permission reads the owner mask for the agent's own objects and the
+    /// everyone mask for anyone else's — the reference's `permYouOwner` copy
+    /// test — so a no-copy object (or another's owner-only-copy object) blocks.
+    #[test]
+    fn copy_permission_picks_the_right_mask() {
+        let me = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let copy = Permissions::COPY;
+        let none = Permissions::NONE;
+        // My object, owner mask has COPY: copyable.
+        assert!(can_copy(OwnerKey::Agent(me), Some(me), copy, none));
+        // My object, owner mask lacks COPY: blocked (even if everyone had it).
+        assert!(!can_copy(OwnerKey::Agent(me), Some(me), none, copy));
+        // Someone else's object: only the everyone mask counts.
+        assert!(!can_copy(OwnerKey::Agent(other), Some(me), copy, none));
+        assert!(can_copy(OwnerKey::Agent(other), Some(me), none, copy));
+    }
+
+    /// The no-copy notice names the object when known and reads generically
+    /// otherwise.
+    #[test]
+    fn no_copy_notice_mentions_the_object() {
+        assert!(no_copy_notice("Fancy Chair").contains("Fancy Chair"));
+        assert!(no_copy_notice("").contains("that object"));
     }
 
     /// Stripping the basis change off a Bevy world rotation recovers the

@@ -1156,6 +1156,7 @@ fn run_session(
         .add_message::<TextureDecoded>()
         .add_message::<MeshDecoded>()
         .add_message::<WearableAssetFetched>()
+        .add_message::<crate::chat::LocalChatNotice>()
         // The pie-menu widget's `commit_pie_selection` runs every frame and writes a
         // `UiAction`, so the message must be registered here too — it was previously
         // only registered in the gallery / test apps, where the pie menu had been

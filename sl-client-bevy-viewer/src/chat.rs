@@ -62,6 +62,24 @@ const CHAT_BOTTOM_INSET: f32 = 48.0;
 /// in logical pixels.
 const CHAT_OVERLAY_GAP: f32 = 6.0;
 
+/// A client-generated local-chat notice — a line the viewer itself posts to the
+/// overlay (not a `ChatReceived` from the grid), for feedback like a build-tool
+/// no-permission alert. Written by whichever system produced the notice
+/// (e.g. [`crate::gizmos::dispatch_shift_drag_copy`]) and rendered by
+/// [`update_chat_overlay`] alongside received chat.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct LocalChatNotice {
+    /// The already-formatted line to show.
+    text: String,
+}
+
+impl LocalChatNotice {
+    /// A notice carrying `text`.
+    pub(crate) const fn new(text: String) -> Self {
+        Self { text }
+    }
+}
+
 /// A marker component tagging the overlay's column container, so the positioning
 /// system can find and re-anchor it and new lines can be parented to it.
 #[derive(Component, Debug, Clone, Copy)]
@@ -190,31 +208,39 @@ pub(crate) fn position_chat_overlay(
 pub(crate) fn update_chat_overlay(
     mut commands: Commands,
     mut events: MessageReader<SlEvent>,
+    mut notices: MessageReader<LocalChatNotice>,
     mut overlay: ResMut<ChatOverlay>,
     container: Query<Entity, With<ChatOverlayContainer>>,
 ) {
     let Ok(container) = container.single() else {
         return;
     };
+    let spawn_line = |line: String, overlay: &mut ChatOverlay, commands: &mut Commands| {
+        debug!("chat overlay: {line}");
+        let seq = overlay.next_seq;
+        overlay.next_seq = overlay.next_seq.wrapping_add(1);
+        commands.spawn((
+            Text::new(line),
+            UiFont::Sans.at(CHAT_FONT_SIZE),
+            TextColor(Color::WHITE),
+            // Transparent to picks, like its container: a fading chat line must
+            // not block a world click that happens to land on it.
+            Pickable::IGNORE,
+            ChatOverlayLine { age: 0.0, seq },
+            ChildOf(container),
+        ));
+    };
     for event in events.read() {
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
         {
-            let line = format_chat_line(message);
-            debug!("chat overlay: {line}");
-            let seq = overlay.next_seq;
-            overlay.next_seq = overlay.next_seq.wrapping_add(1);
-            commands.spawn((
-                Text::new(line),
-                UiFont::Sans.at(CHAT_FONT_SIZE),
-                TextColor(Color::WHITE),
-                // Transparent to picks, like its container: a fading chat line must
-                // not block a world click that happens to land on it.
-                Pickable::IGNORE,
-                ChatOverlayLine { age: 0.0, seq },
-                ChildOf(container),
-            ));
+            spawn_line(format_chat_line(message), &mut overlay, &mut commands);
         }
+    }
+    // Client-generated notices (build-tool alerts, etc.) render as overlay lines
+    // too, so viewer feedback shares the on-screen local-chat surface.
+    for notice in notices.read() {
+        spawn_line(notice.text.clone(), &mut overlay, &mut commands);
     }
 }
 
