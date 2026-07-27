@@ -1664,3 +1664,38 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
   / torso / leg-thickness slider fattens the volumes as well as the bones. We
   deliberately skipped that in P13.4 because the volumes were not rendered —
   which P17.2 made false. See the `viewer-p34-4` task.
+
+## Interaction-harness conventions
+
+The interaction-test tiers (`viewer-ui-interaction-harness` and the tasks
+built on it, plus `viewer-world-test-harness` and the in-world suites)
+follow these conventions:
+
+- **Two-message injection rule.** Every synthetic gesture is written as
+  *both* a bevy_picking `PointerInput` message *and* the matching raw
+  `bevy_input` messages (`MouseButtonInput`, `MouseWheel`,
+  `KeyboardInput`, cursor position on the `Window`), so observer-based UI
+  code and resource-reading world code see one consistent input state —
+  the same property winit provides live. Never inject only one side.
+- **Interaction contracts are pinned tables**, the same convention as the
+  pie menu's compass-address tables: named node × input kind → expected
+  reaction, committed next to the element. The sweep's default
+  expectation is *inert-and-harmless* — no panic, no undeclared
+  `UiAction` — and `layout_violations` is re-asserted **after** every
+  interaction, so each layout check doubles as a post-interaction
+  regression check.
+- **Registration rules.** Every panel/widget registers in `ELEMENTS`,
+  every floater in `FLOATERS`, every render scene in `SCENES`, and every
+  interactive node carries a `Name` so tests can address it. An
+  unregistered thing is invisible to every sweep.
+- **Assertion seams.** UI reactions are asserted via the `UiAction` /
+  `FloaterCommand` / menu-open message recorders; world reactions via the
+  `SlCommand` recorder; world state is stood up by emitting
+  `SlEvent(SessionEvent)` fixtures — never by touching a live `Session`.
+- **Parallelism rules.** One fresh `App` per test (cargo's default test
+  threads carry the parallelism); exactly **one** `Window` entity per app
+  (the cursor-consuming systems use `windows.single()`); only the GPU
+  readback tier is serial, and it self-skips without an adapter.
+- Planned modules: `ui_interact.rs` (synthetic pointer/keyboard over
+  `LayoutTest`), `world_test.rs` (fixture world), and the `sl-fake-grid`
+  crate (loopback grid).

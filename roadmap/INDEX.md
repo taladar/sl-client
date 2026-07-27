@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 35 |
-| ready | 212 |
-| blocked | 106 |
+| ready | 219 |
+| blocked | 128 |
 | in-progress | 8 |
 | bugs | 12 |
 | done | 610 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **1007** |
+| **total** | **1036** |
 
 ## ideas (35)
 
@@ -99,10 +99,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (212)
+## ready (219)
 
 ### protocol
 
+- [`protocol-sim-caps-framework`](ready/protocol-sim-caps-framework.md) —
+  Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
+  server channels — grid info, map tiles, helper URIs
+- [`protocol-sim-login`](ready/protocol-sim-login.md) — Server-side login
+  surface at full fidelity
+- [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
+  state machines for the higher-level LLUDP flows
 - [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 
@@ -255,6 +263,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
+  registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
@@ -512,6 +522,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
   — Color picker — SV square, hue strip, palette & eyedropper (blocked by
   `viewer-ui-color-picker` (done))
+- [`viewer-ui-interaction-harness`](ready/viewer-ui-interaction-harness.md) —
+  Headless synthetic-pointer input for the UI test harness
 - [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
   Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-skin-tokens` (done))
@@ -540,6 +552,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
+- [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
+  fixture world — SlEvent in, SlCommand out
 
 ### chat
 
@@ -605,7 +619,29 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (106)
+## blocked (128)
+
+### protocol
+
+- [`protocol-sim-caps-agent-comms`](blocked/protocol-sim-caps-agent-comms.md) —
+  Server-side agent-communication caps (blocked by
+  `protocol-sim-caps-framework`)
+- [`protocol-sim-caps-assets`](blocked/protocol-sim-caps-assets.md) —
+  Server-side asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
+  `protocol-sim-caps-framework`)
+- [`protocol-sim-caps-content`](blocked/protocol-sim-caps-content.md) —
+  Server-side content upload/update caps, materials and MOAP (blocked by
+  `protocol-sim-caps-framework`)
+- [`protocol-sim-caps-experiences`](blocked/protocol-sim-caps-experiences.md) —
+  Server-side experience caps (blocked by `protocol-sim-caps-framework`)
+- [`protocol-sim-caps-inventory`](blocked/protocol-sim-caps-inventory.md) —
+  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
+  `protocol-sim-caps-framework`)
+- [`protocol-sim-caps-region-info`](blocked/protocol-sim-caps-region-info.md) —
+  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`)
+- [`protocol-sim-voice-signalling`](blocked/protocol-sim-voice-signalling.md) —
+  Server-side voice provisioning and WebRTC signalling stub (blocked by
+  `protocol-sim-caps-framework`)
 
 ### viewer
 
@@ -623,6 +659,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
   beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
+  — The build floater — reflect, edit, commit (blocked by
+  `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
 - [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
@@ -639,6 +678,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](blocked/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
+  — Gizmo handle drags — press, constrain, stream, release (blocked by
+  `viewer-world-test-harness`)
+- [`viewer-edit-selection-interaction-tests`](blocked/viewer-edit-selection-interaction-tests.md)
+  — Selecting for edit — click, shift-click, rubber band, faces (blocked by
+  `viewer-world-test-harness`)
 - [`viewer-environment-day-cycle-editor`](blocked/viewer-environment-day-cycle-editor.md)
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
@@ -646,12 +691,23 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host`)
+- [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
+  SimSession (blocked by `protocol-sim-caps-framework`)
+- [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
+  The real client stack against the fake grid (blocked by `viewer-fake-grid`)
+- [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
+  — Floater chrome under a real pointer (blocked by
+  `viewer-ui-interaction-harness`, `viewer-floater-registry`)
 - [`viewer-fs-bridge-protocol`](blocked/viewer-fs-bridge-protocol.md) —
   Firestorm LSL bridge — the viewer↔script protocol and what it exposes (blocked
   by `viewer-fs-bridge-lifecycle`)
 - [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
   Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-gesture-runtime`)
+- [`viewer-gpu-interaction-readback`](blocked/viewer-gpu-interaction-readback.md)
+  — Pixel-level reaction spot checks (GPU, serial) (blocked by
+  `viewer-edit-gizmo-interaction-tests`,
+  `viewer-edit-selection-interaction-tests`)
 - [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by
   `viewer-preferences-graphics-tab`)
@@ -723,6 +779,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-media-prim-browser`)
+- [`viewer-movement-camera-input-tests`](blocked/viewer-movement-camera-input-tests.md)
+  — Movement keys and camera modes, headless (blocked by
+  `viewer-world-test-harness`)
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
@@ -843,6 +902,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-snapshot-floater`, `viewer-image-upload`)
 - [`viewer-sound-explorer`](blocked/viewer-sound-explorer.md) — Sound explorer —
   nearby sound sources (blocked by `viewer-in-world-sounds`)
+- [`viewer-spacenav-input-tests`](blocked/viewer-spacenav-input-tests.md) —
+  6-DOF input reactions via the SpacenavInput seam (blocked by
+  `viewer-world-test-harness`)
 - [`viewer-stream-favorites`](blocked/viewer-stream-favorites.md) — Audio-stream
   favorites + now-playing title floater (blocked by `viewer-streaming-audio`)
 - [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
@@ -856,9 +918,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug`)
+- [`viewer-ui-interaction-contracts`](blocked/viewer-ui-interaction-contracts.md)
+  — An interaction contract per registered element, swept like the matrix
+  (blocked by `viewer-ui-interaction-harness`)
+- [`viewer-ui-keyboard-text-harness`](blocked/viewer-ui-keyboard-text-harness.md)
+  — Keyboard focus, bindings and text entry, headless (blocked by
+  `viewer-ui-interaction-harness`)
 - [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
   effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-ui-styling-interaction-tests`](blocked/viewer-ui-styling-interaction-tests.md)
+  — bevy_flair state styling under synthetic hover and focus (blocked by
+  `viewer-ui-interaction-harness`)
+- [`viewer-ui-widget-interaction-suite`](blocked/viewer-ui-widget-interaction-suite.md)
+  — Deep interaction tests for the stateful widgets (blocked by
+  `viewer-ui-interaction-harness`, `viewer-ui-keyboard-text-harness`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -883,6 +957,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-audio-backend`)
 - [`viewer-windlight-bulk-import`](blocked/viewer-windlight-bulk-import.md) —
   Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`)
+- [`viewer-world-drag-drop-reactions`](blocked/viewer-world-drag-drop-reactions.md)
+  — Inventory drag&drop onto the world (blocked by
+  `viewer-ui-interaction-harness`, `viewer-world-test-harness`)
 - [`viewer-world-map-script-destination`](blocked/viewer-world-map-script-destination.md)
   — Script-requested map destination (llMapDestination) (blocked by
   `viewer-world-map-tracking-teleport`)
@@ -890,6 +967,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render`,
   `viewer-teleport-flow-progress`)
+- [`viewer-world-pie-menu-reactions`](blocked/viewer-world-pie-menu-reactions.md)
+  — Right-click reactions per world target class (blocked by
+  `viewer-world-test-harness`)
 
 ### test
 
