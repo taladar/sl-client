@@ -152,6 +152,7 @@ mod ui_pseudoloc;
 mod ui_radio;
 mod ui_search;
 mod ui_tab;
+mod ui_table;
 #[cfg(test)]
 mod ui_test;
 mod ui_text;
@@ -307,6 +308,7 @@ use crate::typing::{TypingState, drive_own_typing};
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
 use crate::ui_tab::TabWidgetPlugin;
+use crate::ui_table::TableWidgetPlugin;
 use crate::ui_text::{
     TextDemoVisible, apply_text_demo_visibility, setup_text_demo, toggle_text_demo,
 };
@@ -803,6 +805,10 @@ fn run_session(
     // The reusable tab widget's runtime half (viewer-ui-tab-widget): reflects a
     // resizable strip's persisted / dragged width onto its node.
     .add_plugins(TabWidgetPlugin)
+    // The reusable table widget's runtime half (viewer-ui-table-widget): column
+    // width sync + resize, locale-ellipsis reveal, sort-arrow drive, and the
+    // per-table sort / column-width settings seed + persist.
+    .add_plugins(TableWidgetPlugin)
     // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
     // each option's `Checked` marker and indicator glyph reconciled to the
     // group's selection, so a click and an external write (the Build Tools

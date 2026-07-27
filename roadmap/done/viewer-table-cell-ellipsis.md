@@ -2,7 +2,7 @@
 id: viewer-table-cell-ellipsis
 title: Truncate overflowing table cells with a locale-aware ellipsis
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-27), reviewing the group profile tables
 refs: [viewer-social-group-profile]
 ---
@@ -21,3 +21,13 @@ the cell's laid-out width, truncate and append the locale ellipsis), and apply
 it to the member columns (name / title / contribution / status) and the notice
 columns (subject / from / date). Audit other fixed-width list cells (friends,
 inventory) for the same treatment.
+
+## Done (2026-07-27)
+
+Subsumed by [[viewer-ui-table-widget]]. The truncation is now a widget cell:
+each `TableColumnKind::Text` cell clips + no-wraps its value and reveals a
+trailing `i18n::LocaleEllipsisMarker` (one shared marker for the tab and table
+widgets) when the value overflows the column — the glyph tracks the locale
+(`…` / CJK `……`). Applied to the group members (name/title/land/status),
+notices (subject/from/date) and roles (name/title/members) cells, and the
+People friends Name column.

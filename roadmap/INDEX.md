@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 35 |
-| ready | 213 |
+| ready | 212 |
 | blocked | 106 |
 | in-progress | 8 |
 | bugs | 12 |
-| done | 608 |
+| done | 610 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **1006** |
+| **total** | **1007** |
 
 ## ideas (35)
 
@@ -99,7 +99,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (213)
+## ready (212)
 
 ### protocol
 
@@ -493,8 +493,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
-- [`viewer-table-cell-ellipsis`](ready/viewer-table-cell-ellipsis.md) — Truncate
-  overflowing table cells with a locale-aware ellipsis
+- [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
+  Remaining table-widget migrations (inventory columns, full friends rights)
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -524,8 +524,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-table-widget`](ready/viewer-ui-table-widget.md) — Reusable table
-  widget (columns / header / virtualized rows / truncation)
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -960,7 +958,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (608)
+## done (610)
 
 ### protocol
 
@@ -1587,6 +1585,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](done/viewer-social-profiles.md) — Avatar profiles —
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
+  overflowing table cells with a locale-aware ellipsis
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
@@ -1647,6 +1647,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-ui-tab-widget`](done/viewer-ui-tab-widget.md) — Reusable tab widget
   (horizontal + vertical) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-table-widget`](done/viewer-ui-table-widget.md) — Reusable table
+  widget (columns / header / virtualized rows / truncation)
 - [`viewer-ui-test-harness`](done/viewer-ui-test-harness.md) — UI test harness —
   headless layout assertions + an isolated gallery (blocked by
   `viewer-ui-widget-scaffold` (done))

@@ -38,6 +38,7 @@
 //! members header shows "loaded N of TOTAL" beside a **Refresh** button that
 //! re-issues the fetch to pull the rest.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -57,6 +58,7 @@ use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
+use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -64,8 +66,13 @@ use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
 };
+use crate::ui_table::{
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSortDefault,
+    TableSortKey, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
+    spawn_table_row,
+};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
 /// The chrome font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -116,8 +123,199 @@ const CONTRIB_COL_WIDTH: f32 = 64.0;
 const STATUS_COL_WIDTH: f32 = 64.0;
 
 /// The roles list's bounded (scrollable) height below the members list, in logical
-/// pixels.
-const ROLES_LIST_HEIGHT: f32 = 120.0;
+/// pixels — a little taller than the old plain list to seat the table's own
+/// column-header row.
+const ROLES_LIST_HEIGHT: f32 = 150.0;
+
+/// The notices list's "From" / "Date" column width, in logical pixels.
+const NOTICE_COL_WIDTH: f32 = 110.0;
+
+/// The `[group_profile]` section the table sort / width settings live under.
+const TABLE_SETTINGS_SECTION: &[&str] = &["group_profile"];
+
+/// The persisted-setting name for the members table's sort order.
+const MEMBERS_SORT_SETTING: &str = "members_sort";
+
+/// The persisted-setting name for the members table's column widths.
+const MEMBERS_WIDTHS_SETTING: &str = "members_widths";
+
+/// The persisted-setting name for the notices table's sort order.
+const NOTICES_SORT_SETTING: &str = "notices_sort";
+
+/// The persisted-setting name for the notices table's column widths.
+const NOTICES_WIDTHS_SETTING: &str = "notices_widths";
+
+/// The roles list's "Title" column width, in logical pixels.
+const ROLE_TITLE_COL_WIDTH: f32 = 110.0;
+
+/// The roles list's "Members" column width, in logical pixels.
+const ROLE_MEMBERS_COL_WIDTH: f32 = 56.0;
+
+/// The persisted-setting name for the roles table's sort order.
+const ROLES_SORT_SETTING: &str = "roles_sort";
+
+/// The persisted-setting name for the roles table's column widths.
+const ROLES_WIDTHS_SETTING: &str = "roles_widths";
+
+/// The members table: a flexible Name over fixed Title / Land / Status columns,
+/// all sortable, defaulting to name-ascending. Column indices match
+/// [`member_column_ordering`].
+const MEMBERS_TABLE: TableSpec = TableSpec {
+    element: "group-members",
+    columns: &[
+        TableColumn {
+            header_key: "group-members-name",
+            token: "name",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-members-title",
+            token: "title",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: TITLE_COL_WIDTH,
+            },
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-members-contribution",
+            token: "land",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: CONTRIB_COL_WIDTH,
+            },
+            align: TableAlign::End,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-members-status",
+            token: "status",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: STATUS_COL_WIDTH,
+            },
+            align: TableAlign::Start,
+            sortable: true,
+        },
+    ],
+    default_sort: &[TableSortDefault {
+        column: 0,
+        ascending: true,
+    }],
+    builtin_sort: true,
+    row_height: ROW_HEIGHT,
+    font_size: FONT_SIZE,
+    header_color: DIM_LABEL_COLOR,
+    cell_color: LABEL_COLOR,
+    column_gap: 4.0,
+    row_padding: 4.0,
+    sort_setting: Some(MEMBERS_SORT_SETTING),
+    widths_setting: Some(MEMBERS_WIDTHS_SETTING),
+};
+
+/// The notices table: a flexible Subject over fixed From / Date columns, all
+/// sortable, defaulting to date-descending (newest first). Column indices match
+/// [`notice_column_ordering`].
+const NOTICES_TABLE: TableSpec = TableSpec {
+    element: "group-notices",
+    columns: &[
+        TableColumn {
+            header_key: "group-notices-subject",
+            token: "subject",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-notices-from",
+            token: "from",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: NOTICE_COL_WIDTH,
+            },
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-notices-date",
+            token: "date",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: NOTICE_COL_WIDTH,
+            },
+            align: TableAlign::Start,
+            sortable: true,
+        },
+    ],
+    default_sort: &[TableSortDefault {
+        column: 2,
+        ascending: false,
+    }],
+    builtin_sort: true,
+    row_height: ROW_HEIGHT,
+    font_size: FONT_SIZE,
+    header_color: DIM_LABEL_COLOR,
+    cell_color: LABEL_COLOR,
+    column_gap: 4.0,
+    row_padding: 4.0,
+    sort_setting: Some(NOTICES_SORT_SETTING),
+    widths_setting: Some(NOTICES_WIDTHS_SETTING),
+};
+
+/// The roles table: a flexible Name over fixed Title / Members columns, all
+/// sortable, defaulting to name-ascending. Column indices match
+/// [`role_column_ordering`].
+const ROLES_TABLE: TableSpec = TableSpec {
+    element: "group-roles",
+    columns: &[
+        TableColumn {
+            header_key: "group-roles-col-name",
+            token: "name",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-roles-col-title",
+            token: "title",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: ROLE_TITLE_COL_WIDTH,
+            },
+            align: TableAlign::Start,
+            sortable: true,
+        },
+        TableColumn {
+            header_key: "group-roles-col-members",
+            token: "members",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: ROLE_MEMBERS_COL_WIDTH,
+            },
+            align: TableAlign::End,
+            sortable: true,
+        },
+    ],
+    default_sort: &[TableSortDefault {
+        column: 0,
+        ascending: true,
+    }],
+    builtin_sort: true,
+    row_height: ROW_HEIGHT,
+    font_size: FONT_SIZE,
+    header_color: DIM_LABEL_COLOR,
+    cell_color: LABEL_COLOR,
+    column_gap: 4.0,
+    row_padding: 4.0,
+    sort_setting: Some(ROLES_SORT_SETTING),
+    widths_setting: Some(ROLES_WIDTHS_SETTING),
+};
 
 /// The named group powers shown in the abilities viewer, each with the Fluent key
 /// for its human-readable label. Only the commonly-set powers from
@@ -256,6 +454,8 @@ pub(crate) struct GroupProfileState {
     members_revision: u64,
     /// Bumped when the notice list changes, so the notices view rebuilds.
     notices_revision: u64,
+    /// Bumped when the role list changes, so the roles view rebuilds.
+    roles_revision: u64,
 }
 
 impl GroupProfileState {
@@ -322,6 +522,9 @@ struct MembersView {
     rows: Vec<MemberRow>,
     /// The state revision this view was last built from.
     built_revision: u64,
+    /// The table sort revision this view was last ordered at, so a header-click
+    /// re-sort rebuilds the order without a data change.
+    built_sort_revision: u64,
 }
 
 /// One member row's render-ready fields.
@@ -342,10 +545,36 @@ struct MemberRow {
 /// The ordered notice projection the virtualized notices list binds to.
 #[derive(Resource, Debug, Default)]
 struct NoticesView {
-    /// The rows in display order (newest first).
+    /// The rows in display order (newest first by default).
     rows: Vec<NoticeRow>,
     /// The state revision this view was last built from.
     built_revision: u64,
+    /// The table sort revision this view was last ordered at.
+    built_sort_revision: u64,
+}
+
+/// The ordered role projection the virtualized roles list binds to.
+#[derive(Resource, Debug, Default)]
+struct RolesView {
+    /// The rows in display order.
+    rows: Vec<RoleRowData>,
+    /// The state revision this view was last built from.
+    built_revision: u64,
+    /// The table sort revision this view was last ordered at.
+    built_sort_revision: u64,
+}
+
+/// One role row's render-ready fields.
+#[derive(Debug, Clone)]
+struct RoleRowData {
+    /// The role id (`None` = the "Everyone" default role).
+    role_id: Option<GroupRoleKey>,
+    /// The role name.
+    name: String,
+    /// The role title (worn over members holding it).
+    title: String,
+    /// The number of members holding the role.
+    members: u32,
 }
 
 /// One notice row's render-ready fields.
@@ -359,6 +588,8 @@ struct NoticeRow {
     from_name: String,
     /// The posted date, formatted.
     date: String,
+    /// The raw posted timestamp, for sorting the Date column.
+    timestamp: u32,
     /// Whether the notice carries an inventory attachment.
     has_attachment: bool,
 }
@@ -383,8 +614,6 @@ struct GroupProfileDirty {
     /// name, counts, fee, a toggled flag, the active title); handled in place by
     /// [`update_general_values`] with no respawn.
     general_values: bool,
-    /// The roles list column.
-    roles: bool,
     /// The Members & Roles lower details area.
     details: bool,
     /// The notice compose area.
@@ -399,7 +628,6 @@ impl GroupProfileDirty {
     const fn mark_all(&mut self) {
         self.general = true;
         self.general_values = true;
-        self.roles = true;
         self.details = true;
         self.compose = true;
         self.notice_body = true;
@@ -455,18 +683,6 @@ struct GeneralHandles {
     title_text: Option<Entity>,
 }
 
-/// A retained role-list row: its container, its label node (updated in place), and
-/// the role id it represents (so the row's captured-id click observer stays valid).
-#[derive(Debug, Clone, Copy)]
-struct RoleRow {
-    /// The role this row represents (`None` = the "Everyone" default role).
-    role_id: Option<GroupRoleKey>,
-    /// The row button entity.
-    row: Entity,
-    /// The row's label text node (name + member count), updated in place.
-    label: Entity,
-}
-
 /// Entity handles for the group profile floater: the shell spawned once at
 /// startup, the persistent list viewports, the rebuild-target containers, and the
 /// per-rebuild field entities the action handlers read.
@@ -478,19 +694,20 @@ pub(crate) struct GroupProfileUi {
     title_text: Entity,
     /// The General tab panel (rebuilt on `general`).
     general_panel: Entity,
+    /// The members table root (carries the widget's [`TableState`] — read for the
+    /// current sort order).
+    members_table: Entity,
     /// The virtualized members list viewport.
     members_viewport: Entity,
     /// The members header line ("loaded N of TOTAL").
     members_count_text: Entity,
-    /// The roles list column container (holds the reconciled role rows).
-    roles_container: Entity,
-    /// The persistent container below the role rows holding the New Role button
-    /// (built once, so it never disturbs the reconciled rows).
+    /// The roles table root (carries the widget's [`TableState`]).
+    roles_table: Entity,
+    /// The virtualized roles list viewport.
+    roles_viewport: Entity,
+    /// The persistent container below the roles table holding the New Role button
+    /// (built once, so it never disturbs the pooled rows).
     roles_new_container: Entity,
-    /// The retained role rows, keyed by role id so each row's click observer (which
-    /// captures that id) stays valid across reconciles. Reconciled in place — never
-    /// mass-despawned — so a multi-packet role reply appends rather than churns.
-    role_rows: Vec<RoleRow>,
     /// Whether the New Role button has been built (once, when the create power is
     /// known).
     roles_new_built: bool,
@@ -508,6 +725,8 @@ pub(crate) struct GroupProfileUi {
     /// for — built once for the hint and rebuilt only on a user-paced selection /
     /// its body arriving.
     notice_body_built: Option<(Option<usize>, bool)>,
+    /// The notices table root (carries the widget's [`TableState`]).
+    notices_table: Entity,
     /// The virtualized notices list viewport.
     notices_viewport: Entity,
     /// The notice body view container (rebuilt on `notice_body`).
@@ -593,10 +812,14 @@ impl Plugin for GroupProfilePlugin {
             .init_resource::<GroupProfileDirty>()
             .init_resource::<MembersView>()
             .init_resource::<NoticesView>()
+            .init_resource::<RolesView>()
             .add_message::<OpenGroupProfile>()
             .add_systems(
                 Startup,
-                spawn_group_profile_floater.after(UiScaffoldSystems::SpawnRoot),
+                (
+                    register_group_profile_settings,
+                    spawn_group_profile_floater.after(UiScaffoldSystems::SpawnRoot),
+                ),
             )
             .add_systems(
                 Update,
@@ -605,8 +828,9 @@ impl Plugin for GroupProfilePlugin {
                     ingest_group_profile_events,
                     sync_members_view,
                     sync_notices_view,
+                    sync_roles_view,
                     build_general_tab,
-                    update_roles_list,
+                    build_roles_new_button,
                     rebuild_details_area,
                     rebuild_compose_area,
                     rebuild_notice_body,
@@ -622,6 +846,8 @@ impl Plugin for GroupProfilePlugin {
                     bind_member_rows,
                     populate_notice_rows,
                     bind_notice_rows,
+                    populate_role_rows,
+                    bind_role_rows,
                 )
                     .chain()
                     .after(layout_virtual_lists),
@@ -632,6 +858,18 @@ impl Plugin for GroupProfilePlugin {
 // ---------------------------------------------------------------------------
 // Spawn.
 // ---------------------------------------------------------------------------
+
+/// Register the members / notices tables' persisted sort-order and column-width
+/// settings, so the account file that loads at login is coerced to the right
+/// types (the widget's seed / persist systems then drive them).
+fn register_group_profile_settings(settings: Option<ResMut<ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    register_table_settings(&mut settings, TABLE_SETTINGS_SECTION, &MEMBERS_TABLE);
+    register_table_settings(&mut settings, TABLE_SETTINGS_SECTION, &NOTICES_TABLE);
+    register_table_settings(&mut settings, TABLE_SETTINGS_SECTION, &ROLES_TABLE);
+}
 
 /// Spawn the (hidden) group profile floater shell: the floater, the three-tab
 /// container, and the persistent list viewports + rebuild-target containers.
@@ -690,25 +928,34 @@ fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     let members_panel = tabs.panels.get(1).copied().unwrap_or(handle.content);
     let notices_panel = tabs.panels.get(2).copied().unwrap_or(handle.content);
 
-    let (members_viewport, members_count_text, roles_container, roles_new_container, details_area) =
-        build_members_scaffold(&mut commands, members_panel);
-    let (notices_viewport, notice_body_area, compose_area) =
+    let (
+        members_table,
+        members_viewport,
+        members_count_text,
+        roles_table,
+        roles_viewport,
+        roles_new_container,
+        details_area,
+    ) = build_members_scaffold(&mut commands, members_panel);
+    let (notices_table, notices_viewport, notice_body_area, compose_area) =
         build_notices_scaffold(&mut commands, notices_panel);
 
     commands.insert_resource(GroupProfileUi {
         panel: handle.root,
         title_text: handle.title_text,
         general_panel,
+        members_table,
         members_viewport,
         members_count_text,
-        roles_container,
+        roles_table,
+        roles_viewport,
         roles_new_container,
-        role_rows: Vec::new(),
         roles_new_built: false,
         details_area,
         details_built: None,
         compose_can_send: None,
         notice_body_built: None,
+        notices_table,
         notices_viewport,
         notice_body_area,
         compose_area,
@@ -724,14 +971,14 @@ fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     });
 }
 
-/// Build the persistent Members & Roles tab skeleton: a members column (header +
-/// virtualized viewport) beside a roles column, over a details area. Returns the
-/// `(members_viewport, members_count_text, roles_container, roles_new_container,
-/// details_area)`.
+/// Build the persistent Members & Roles tab skeleton: a members column (the table
+/// widget's header + virtualized viewport) over a roles table, over a details
+/// area. Returns the `(members_table, members_viewport, members_count_text,
+/// roles_table, roles_viewport, roles_new_container, details_area)`.
 fn build_members_scaffold(
     commands: &mut Commands,
     panel: Entity,
-) -> (Entity, Entity, Entity, Entity, Entity) {
+) -> (Entity, Entity, Entity, Entity, Entity, Entity, Entity) {
     // Vertical stack: members list (grows) over the roles list over the details
     // area — the reference lays the roles list below the members, not beside.
     let members_column = commands
@@ -781,36 +1028,26 @@ fn build_members_scaffold(
         GroupProfileAction::RefreshMembers,
         0,
     );
-    spawn_members_header(commands, members_column);
-    let members_viewport = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                overflow: Overflow::clip(),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            BackgroundColor(LIST_BACKGROUND),
-            VirtualList::new(ROW_HEIGHT),
-            VirtualViewport,
-            Pickable::default(),
-            TabIndex(2),
-            Name::new("group-members-viewport"),
-            ChildOf(members_column),
-        ))
-        .observe(focus_members_viewport)
-        .id();
+    // The members table (widget-owned header + virtualized, sortable, resizable
+    // columns) fills the space below the count line.
+    let members_table = spawn_table(commands, members_column, &MEMBERS_TABLE);
+    let members_viewport = members_table.viewport;
+    commands
+        .entity(members_viewport)
+        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
 
-    // The roles column below the members: a header over a reconciled list of role
-    // buttons, bounded so it scrolls rather than pushing the details area away.
+    // The roles column below the members: the roles table (widget-owned header +
+    // virtualized, sortable, resizable columns), bounded so it scrolls rather than
+    // pushing the details area away.
     let roles_column = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
                 flex_shrink: 0.0,
-                max_height: Val::Px(ROLES_LIST_HEIGHT),
+                // A *definite* height, not just a max: the roles table's virtualized
+                // rows are absolute-positioned and contribute no content height, so a
+                // content-sized container would collapse its viewport to nothing.
+                height: Val::Px(ROLES_LIST_HEIGHT),
                 min_height: Val::Px(0.0),
                 ..column(Val::Px(2.0))
             },
@@ -825,23 +1062,13 @@ fn build_members_scaffold(
         Pickable::IGNORE,
         ChildOf(roles_column),
     ));
-    let roles_container = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                overflow: Overflow::scroll_y(),
-                ..column(Val::Px(2.0))
-            },
-            BackgroundColor(LIST_BACKGROUND),
-            ScrollPosition::default(),
-            Name::new("group-roles-list"),
-            ChildOf(roles_column),
-        ))
-        .id();
-    // The New Role button lives in its own persistent container below the
-    // (reconciled) role rows, so it is built once and never disturbs the rows.
+    let roles_table = spawn_table(commands, roles_column, &ROLES_TABLE);
+    let roles_viewport = roles_table.viewport;
+    commands
+        .entity(roles_viewport)
+        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    // The New Role button lives in its own persistent container below the roles
+    // table, so it is built once and never disturbs the pooled rows.
     let roles_new_container = commands
         .spawn((
             Node {
@@ -870,38 +1097,29 @@ fn build_members_scaffold(
         .id();
 
     (
+        members_table.root,
         members_viewport,
         members_count_text,
-        roles_container,
+        roles_table.root,
+        roles_viewport,
         roles_new_container,
         details_area,
     )
 }
 
-/// Build the persistent Notices tab skeleton: a virtualized notice list, a body
-/// view, and a compose area. Returns `(notices_viewport, notice_body_area,
+/// Build the persistent Notices tab skeleton: the notices table (widget-owned
+/// header + virtualized, sortable, resizable columns), a body view, and a compose
+/// area. Returns `(notices_table, notices_viewport, notice_body_area,
 /// compose_area)`.
-fn build_notices_scaffold(commands: &mut Commands, panel: Entity) -> (Entity, Entity, Entity) {
-    let notices_viewport = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                min_height: Val::Px(80.0),
-                overflow: Overflow::clip(),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            BackgroundColor(LIST_BACKGROUND),
-            VirtualList::new(ROW_HEIGHT),
-            VirtualViewport,
-            Pickable::default(),
-            TabIndex(2),
-            Name::new("group-notices-viewport"),
-            ChildOf(panel),
-        ))
-        .observe(focus_notices_viewport)
-        .id();
+fn build_notices_scaffold(
+    commands: &mut Commands,
+    panel: Entity,
+) -> (Entity, Entity, Entity, Entity) {
+    let notices_table = spawn_table(commands, panel, &NOTICES_TABLE);
+    let notices_viewport = notices_table.viewport;
+    commands
+        .entity(notices_viewport)
+        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
     let notice_body_area = commands
         .spawn((
             Node {
@@ -931,110 +1149,12 @@ fn build_notices_scaffold(commands: &mut Commands, panel: Entity) -> (Entity, En
             ChildOf(panel),
         ))
         .id();
-    (notices_viewport, notice_body_area, compose_area)
-}
-
-/// Spawn the members list table header (Name / Title / Contribution / Status).
-fn spawn_members_header(commands: &mut Commands, parent: Entity) {
-    let header = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_shrink: 0.0,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(4.0)),
-                ..default()
-            },
-            Pickable::IGNORE,
-            ChildOf(parent),
-        ))
-        .id();
-    spawn_header_cell(commands, header, "group-members-name", None);
-    spawn_header_cell(
-        commands,
-        header,
-        "group-members-title",
-        Some(TITLE_COL_WIDTH),
-    );
-    spawn_header_cell(
-        commands,
-        header,
-        "group-members-contribution",
-        Some(CONTRIB_COL_WIDTH),
-    );
-    spawn_header_cell(
-        commands,
-        header,
-        "group-members-status",
-        Some(STATUS_COL_WIDTH),
-    );
-}
-
-/// A members-header cell — a flexible leading Name cell (`width: None`) or a
-/// fixed-width trailing one. Clipped + no-wrap so a long header never wraps to a
-/// second line (which would misalign the table).
-fn spawn_header_cell(
-    commands: &mut Commands,
-    header: Entity,
-    key: &'static str,
-    width: Option<f32>,
-) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        TextLayout {
-            linebreak: LineBreak::NoWrap,
-            ..default()
-        },
-        UiFont::Sans.at(FONT_SIZE),
-        TextColor(DIM_LABEL_COLOR),
-        cell_node(width),
-        Pickable::IGNORE,
-        ChildOf(header),
-    ));
-}
-
-/// The layout node for a table cell — a flexible leading cell (`width: None`) or a
-/// fixed-width trailing one, in both cases clipping overflow so its no-wrap text is
-/// cut off at the cell edge rather than wrapping.
-fn cell_node(width: Option<f32>) -> Node {
-    width.map_or(
-        Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(0.0),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        |width| Node {
-            width: Val::Px(width),
-            flex_shrink: 0.0,
-            overflow: Overflow::clip(),
-            ..default()
-        },
+    (
+        notices_table.root,
+        notices_viewport,
+        notice_body_area,
+        compose_area,
     )
-}
-
-/// Focus the members viewport on click, so the wheel scrolls it.
-fn focus_members_viewport(
-    press: On<Pointer<Press>>,
-    ui: Res<GroupProfileUi>,
-    mut focus: ResMut<InputFocus>,
-) {
-    if press.button == PointerButton::Primary {
-        focus.set(ui.members_viewport, FocusCause::Navigated);
-    }
-}
-
-/// Focus the notices viewport on click, so the wheel scrolls it.
-fn focus_notices_viewport(
-    press: On<Pointer<Press>>,
-    ui: Res<GroupProfileUi>,
-    mut focus: ResMut<InputFocus>,
-) {
-    if press.button == PointerButton::Primary {
-        focus.set(ui.notices_viewport, FocusCause::Navigated);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,9 +1202,10 @@ fn open_group_profile(
         ui.general_handles = GeneralHandles::default();
         ui.charter_field = None;
         ui.fee_field = None;
-        despawn_children(&children, &mut commands, ui.roles_container);
+        // The roles table's pooled rows are the widget's — they rebind to the new
+        // group's roles (RolesView rebuilds on the fetch), so only the once-built
+        // New Role button is torn down here.
         despawn_children(&children, &mut commands, ui.roles_new_container);
-        ui.role_rows.clear();
         ui.roles_new_built = false;
         // The details / compose / notice-body panels self-despawn+rebuild once via
         // their guards; resetting the guards makes them rebuild for the new subject.
@@ -1151,7 +1272,7 @@ fn ingest_group_profile_events(
                 group_id, roles, ..
             } if *group_id == target => {
                 state.roles.clone_from(roles);
-                dirty.roles = true;
+                state.roles_revision = state.roles_revision.wrapping_add(1);
                 dirty.details = true;
             }
             SlSessionEvent::GroupRoleMembers {
@@ -1196,21 +1317,39 @@ fn ingest_group_profile_events(
 // View sync (virtualized lists).
 // ---------------------------------------------------------------------------
 
-/// Rebuild [`MembersView`] when the roster revision advances, keeping the
-/// viewport's item count and the header count in step.
+/// Rebuild [`MembersView`] when the roster **or the table sort** advances,
+/// keeping the viewport's item count and the header count in step, and ordering
+/// by the table widget's current (persisted / clicked) sort.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the state, the \
+              view, the UI handles, the name source, the table-state + list + text queries"
+)]
 fn sync_members_view(
     state: Res<GroupProfileState>,
     mut view: ResMut<MembersView>,
     ui: Option<Res<GroupProfileUi>>,
     avatars: Res<AvatarState>,
     translator: Translator,
+    tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
     mut texts: Query<&mut Text>,
 ) {
-    if view.built_revision == state.members_revision {
+    let Some(ui) = ui else {
+        return;
+    };
+    // The current sort (revision + keys) from the widget; an empty default before
+    // the table exists just leaves the roster in arrival order.
+    let sort = tables
+        .get(ui.members_table)
+        .ok()
+        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+    if view.built_revision == state.members_revision && view.built_sort_revision == sort_revision {
         return;
     }
     view.built_revision = state.members_revision;
+    view.built_sort_revision = sort_revision;
     view.rows = state
         .roster
         .members
@@ -1223,13 +1362,9 @@ fn sync_members_view(
             is_owner: member.is_owner,
         })
         .collect();
-    // Order by resolved name (case-folded), owners' rows are accented in bind.
-    view.rows.sort_by(|left, right| {
-        member_sort_key(left.agent, &avatars).cmp(&member_sort_key(right.agent, &avatars))
-    });
-    let Some(ui) = ui else {
-        return;
-    };
+    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+    view.rows
+        .sort_by(|left, right| compare_members(&keys, left, right, &avatars));
     if let Ok(mut list) = lists.get_mut(ui.members_viewport) {
         list.item_count = view.rows.len();
         list.scroll_to_top();
@@ -1247,6 +1382,51 @@ fn sync_members_view(
     }
 }
 
+/// Order two member rows by the table's full sort-key stack, breaking ties by
+/// resolved name then agent id so the order is stable across rebinds.
+fn compare_members(
+    keys: &[TableSortKey],
+    left: &MemberRow,
+    right: &MemberRow,
+    avatars: &AvatarState,
+) -> Ordering {
+    for key in keys {
+        let base = member_column_ordering(key.column, left, right, avatars);
+        let ord = if key.ascending { base } else { base.reverse() };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    member_sort_key(left.agent, avatars)
+        .cmp(&member_sort_key(right.agent, avatars))
+        .then_with(|| left.agent.to_string().cmp(&right.agent.to_string()))
+}
+
+/// Order two member rows by a single column (before the direction is applied):
+/// name / title / status case-folded, contribution numerically.
+fn member_column_ordering(
+    column: usize,
+    left: &MemberRow,
+    right: &MemberRow,
+    avatars: &AvatarState,
+) -> Ordering {
+    match column {
+        1 => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
+        2 => contribution_value(&left.contribution).cmp(&contribution_value(&right.contribution)),
+        3 => left.status.to_lowercase().cmp(&right.status.to_lowercase()),
+        _name => member_sort_key(left.agent, avatars).cmp(&member_sort_key(right.agent, avatars)),
+    }
+}
+
+/// The numeric value of a contribution cell (the leading integer), for sorting
+/// the Land column numerically rather than lexically.
+fn contribution_value(text: &str) -> i64 {
+    text.split_whitespace()
+        .next()
+        .and_then(|number| number.parse::<i64>().ok())
+        .unwrap_or(0)
+}
+
 /// A member row's sort key: its resolved name lower-cased, falling back to its id.
 fn member_sort_key(agent: AgentKey, avatars: &AvatarState) -> String {
     avatars
@@ -1254,18 +1434,29 @@ fn member_sort_key(agent: AgentKey, avatars: &AvatarState) -> String {
         .map_or_else(|| agent.to_string(), str::to_lowercase)
 }
 
-/// Rebuild [`NoticesView`] when the notice revision advances, keeping the
-/// viewport's item count in step. Newest notices lead the list.
+/// Rebuild [`NoticesView`] when the notice revision **or the table sort**
+/// advances, keeping the viewport's item count in step and ordering by the table
+/// widget's current sort (default: newest first).
 fn sync_notices_view(
     state: Res<GroupProfileState>,
     mut view: ResMut<NoticesView>,
     ui: Option<Res<GroupProfileUi>>,
+    tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if view.built_revision == state.notices_revision {
+    let Some(ui) = ui else {
+        return;
+    };
+    let sort = tables
+        .get(ui.notices_table)
+        .ok()
+        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+    if view.built_revision == state.notices_revision && view.built_sort_revision == sort_revision {
         return;
     }
     view.built_revision = state.notices_revision;
+    view.built_sort_revision = sort_revision;
     let mut rows: Vec<NoticeRow> = state
         .notices
         .iter()
@@ -1275,23 +1466,45 @@ fn sync_notices_view(
             subject: notice.subject.clone(),
             from_name: notice.from_name.clone(),
             date: format_unix_date(i64::from(notice.timestamp)),
+            timestamp: notice.timestamp,
             has_attachment: notice.has_attachment,
         })
         .collect();
-    rows.sort_by(|left, right| {
-        let left_ts = state.notices.get(left.index).map(|notice| notice.timestamp);
-        let right_ts = state
-            .notices
-            .get(right.index)
-            .map(|notice| notice.timestamp);
-        right_ts.cmp(&left_ts)
-    });
+    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+    rows.sort_by(|left, right| compare_notices(&keys, left, right));
     view.rows = rows;
-    if let Some(ui) = ui
-        && let Ok(mut list) = lists.get_mut(ui.notices_viewport)
-    {
+    if let Ok(mut list) = lists.get_mut(ui.notices_viewport) {
         list.item_count = view.rows.len();
         list.scroll_to_top();
+    }
+}
+
+/// Order two notice rows by the table's full sort-key stack, breaking ties by the
+/// timestamp (newest first) so the order is stable.
+fn compare_notices(keys: &[TableSortKey], left: &NoticeRow, right: &NoticeRow) -> Ordering {
+    for key in keys {
+        let base = notice_column_ordering(key.column, left, right);
+        let ord = if key.ascending { base } else { base.reverse() };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    right.timestamp.cmp(&left.timestamp)
+}
+
+/// Order two notice rows by a single column (before the direction is applied):
+/// subject / from case-folded, date by timestamp.
+fn notice_column_ordering(column: usize, left: &NoticeRow, right: &NoticeRow) -> Ordering {
+    match column {
+        0 => left
+            .subject
+            .to_lowercase()
+            .cmp(&right.subject.to_lowercase()),
+        1 => left
+            .from_name
+            .to_lowercase()
+            .cmp(&right.from_name.to_lowercase()),
+        _date => left.timestamp.cmp(&right.timestamp),
     }
 }
 
@@ -1591,125 +1804,204 @@ fn update_general_values(
 // Rebuild: roles list.
 // ---------------------------------------------------------------------------
 
-/// Reconcile the roles column in place when it is dirty: keep a retained row per
-/// role (keyed by role id), spawning rows for new roles, despawning rows for
-/// removed ones, and updating each row's label + selection highlight — never a
-/// mass despawn, so a multi-packet role reply appends instead of churning. The New
-/// Role button is built once.
-fn update_roles_list(
-    mut dirty: ResMut<GroupProfileDirty>,
+/// Rebuild [`RolesView`] when the role list **or the table sort** advances,
+/// keeping the viewport's item count in step and ordering by the roles table's
+/// current sort (default: name ascending).
+fn sync_roles_view(
     state: Res<GroupProfileState>,
-    mut ui: ResMut<GroupProfileUi>,
-    mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut commands: Commands,
+    mut view: ResMut<RolesView>,
+    ui: Option<Res<GroupProfileUi>>,
+    tables: Query<&TableState>,
+    mut lists: Query<&mut VirtualList>,
 ) {
-    if !dirty.roles {
+    let Some(ui) = ui else {
+        return;
+    };
+    let sort = tables
+        .get(ui.roles_table)
+        .ok()
+        .map(|table| (table.sort_revision(), table.sort().keys().to_vec()));
+    let sort_revision = sort.as_ref().map_or(0, |(revision, _keys)| *revision);
+    if view.built_revision == state.roles_revision && view.built_sort_revision == sort_revision {
         return;
     }
-    dirty.roles = false;
-    let container = ui.roles_container;
-    // Drop rows whose role no longer exists (a delete — user-paced, settled).
-    let present: HashSet<Option<GroupRoleKey>> =
-        state.roles.iter().map(|role| role.role_id).collect();
-    let mut kept: Vec<RoleRow> = Vec::with_capacity(ui.role_rows.len());
-    for role_row in std::mem::take(&mut ui.role_rows) {
-        if present.contains(&role_row.role_id) {
-            kept.push(role_row);
-        } else if let Ok(mut entity) = commands.get_entity(role_row.row) {
-            entity.despawn();
+    view.built_revision = state.roles_revision;
+    view.built_sort_revision = sort_revision;
+    view.rows = state
+        .roles
+        .iter()
+        .map(|role| RoleRowData {
+            role_id: role.role_id,
+            name: role.name.clone(),
+            title: role.title.clone(),
+            members: role.members,
+        })
+        .collect();
+    let keys = sort.map(|(_revision, keys)| keys).unwrap_or_default();
+    view.rows
+        .sort_by(|left, right| compare_roles(&keys, left, right));
+    if let Ok(mut list) = lists.get_mut(ui.roles_viewport) {
+        list.item_count = view.rows.len();
+        list.scroll_to_top();
+    }
+}
+
+/// Order two role rows by the table's full sort-key stack, breaking ties by name
+/// (case-folded) so the order is stable.
+fn compare_roles(keys: &[TableSortKey], left: &RoleRowData, right: &RoleRowData) -> Ordering {
+    for key in keys {
+        let base = role_column_ordering(key.column, left, right);
+        let ord = if key.ascending { base } else { base.reverse() };
+        if ord != Ordering::Equal {
+            return ord;
         }
     }
-    ui.role_rows = kept;
-    // Add or update a row per role, in the reply's order.
-    for role in &state.roles {
-        let selected = state.focus == DetailsFocus::Role(role.role_id);
-        let label_text = format!("{} ({})", role.name, role.members);
-        let label_color = TextColor(if selected { ACCENT_COLOR } else { LABEL_COLOR });
-        if let Some(role_row) = ui.role_rows.iter().find(|row| row.role_id == role.role_id) {
-            if let Ok((mut text, mut color)) = texts.get_mut(role_row.label) {
-                if text.0 != label_text {
-                    text.0 = label_text;
-                }
-                if *color != label_color {
-                    *color = label_color;
-                }
+    left.name.to_lowercase().cmp(&right.name.to_lowercase())
+}
+
+/// Order two role rows by a single column (before the direction is applied):
+/// name / title case-folded, members numerically.
+fn role_column_ordering(column: usize, left: &RoleRowData, right: &RoleRowData) -> Ordering {
+    match column {
+        1 => left.title.to_lowercase().cmp(&right.title.to_lowercase()),
+        2 => left.members.cmp(&right.members),
+        _name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    }
+}
+
+/// Build the New Role button once, when the create power is known — its own
+/// build-once system now the roles list is a widget-owned table.
+fn build_roles_new_button(
+    state: Res<GroupProfileState>,
+    ui: Option<ResMut<GroupProfileUi>>,
+    mut commands: Commands,
+) {
+    let Some(mut ui) = ui else {
+        return;
+    };
+    if ui.roles_new_built || !state.has_power(group_powers::ROLE_CREATE) {
+        return;
+    }
+    let new_container = ui.roles_new_container;
+    let row = spawn_button_row(&mut commands, new_container);
+    spawn_action_button(
+        &mut commands,
+        row,
+        "group-role-new",
+        GroupProfileAction::NewRole,
+        0,
+    );
+    ui.roles_new_built = true;
+}
+
+/// The role a pooled row currently presents (its id, `None` = the "Everyone"
+/// default role), or [`Parked`](BoundRole::Parked) when the pool row is hidden.
+#[derive(Component, Debug, Clone, Copy)]
+enum BoundRole {
+    /// The row is hidden (the pool has more rows than the window needs).
+    Parked,
+    /// The row shows the role with this id (`None` = "Everyone").
+    Bound(Option<GroupRoleKey>),
+}
+
+/// Build each newly-pooled role row's cells once, attaching the selection state
+/// and press observer.
+fn populate_role_rows(
+    mut commands: Commands,
+    ui: Option<Res<GroupProfileUi>>,
+    new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    for (row_entity, child_of) in &new_rows {
+        if child_of.parent() != ui.roles_viewport {
+            continue;
+        }
+        spawn_table_row(&mut commands, row_entity, ui.roles_table, &ROLES_TABLE);
+        commands
+            .entity(row_entity)
+            .insert(BoundRole::Parked)
+            .observe(on_role_row_press);
+    }
+}
+
+/// Bind each pooled role row to the [`RoleRowData`] it now points at.
+fn bind_role_rows(
+    view: Res<RolesView>,
+    state: Res<GroupProfileState>,
+    ui: Option<Res<GroupProfileUi>>,
+    mut rows: Query<(
+        Entity,
+        Ref<VirtualRow>,
+        &ChildOf,
+        &TableRowCells,
+        &mut BoundRole,
+    )>,
+    mut backgrounds: Query<&mut BackgroundColor>,
+    mut texts: Query<(&mut Text, &mut TextColor)>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let refresh_all = view.is_changed() || state.is_changed();
+    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+        if child_of.parent() != ui.roles_viewport {
+            continue;
+        }
+        if !refresh_all && !row.is_changed() {
+            continue;
+        }
+        let Some(index) = row.index else {
+            continue;
+        };
+        let Some(role_row) = view.rows.get(index) else {
+            continue;
+        };
+        *bound = BoundRole::Bound(role_row.role_id);
+        let selected = state.focus == DetailsFocus::Role(role_row.role_id);
+        set_row_cell(&mut texts, cells, 0, &role_row.name, selected);
+        set_row_cell(&mut texts, cells, 1, &role_row.title, false);
+        set_row_cell(&mut texts, cells, 2, &role_row.members.to_string(), false);
+        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
+            let wanted = if selected {
+                SELECTED_ROW_BACKGROUND
+            } else {
+                Color::NONE
+            };
+            if background.0 != wanted {
+                background.0 = wanted;
             }
-            if let Ok(mut background) = commands.get_entity(role_row.row) {
-                background.insert(BackgroundColor(if selected {
-                    SELECTED_ROW_BACKGROUND
-                } else {
-                    Color::NONE
-                }));
-            }
-        } else {
-            let role_id = role.role_id;
-            let row = commands
-                .spawn((
-                    Button,
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_shrink: 0.0,
-                        padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    },
-                    BackgroundColor(if selected {
-                        SELECTED_ROW_BACKGROUND
-                    } else {
-                        Color::NONE
-                    }),
-                    Pickable::default(),
-                    Name::new("group-role-row"),
-                    ChildOf(container),
-                ))
-                .observe(
-                    move |press: On<Pointer<Press>>,
-                          mut state: ResMut<GroupProfileState>,
-                          mut dirty: ResMut<GroupProfileDirty>| {
-                        if press.button != PointerButton::Primary {
-                            return;
-                        }
-                        state.focus = DetailsFocus::Role(role_id);
-                        state.role_power_draft = state
-                            .roles
-                            .iter()
-                            .find(|role| role.role_id == role_id)
-                            .map_or(0, |role| role.powers);
-                        dirty.details = true;
-                        dirty.roles = true;
-                    },
-                )
-                .id();
-            let label = commands
-                .spawn((
-                    Text::new(label_text),
-                    UiFont::Sans.at(FONT_SIZE),
-                    label_color,
-                    Pickable::IGNORE,
-                    ChildOf(row),
-                ))
-                .id();
-            ui.role_rows.push(RoleRow {
-                role_id: role.role_id,
-                row,
-                label,
-            });
         }
     }
-    // The New Role button — built once, into its own container.
-    if !ui.roles_new_built && state.has_power(group_powers::ROLE_CREATE) {
-        let new_container = ui.roles_new_container;
-        let row = spawn_button_row(&mut commands, new_container);
-        spawn_action_button(
-            &mut commands,
-            row,
-            "group-role-new",
-            GroupProfileAction::NewRole,
-            0,
-        );
-        ui.roles_new_built = true;
+}
+
+/// Select a role on press, showing its details and seeding its powers draft.
+fn on_role_row_press(
+    press: On<Pointer<Press>>,
+    rows: Query<&BoundRole>,
+    ui: Res<GroupProfileUi>,
+    mut focus: ResMut<InputFocus>,
+    mut state: ResMut<GroupProfileState>,
+    mut dirty: ResMut<GroupProfileDirty>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
     }
+    focus.set(ui.roles_viewport, FocusCause::Navigated);
+    let Ok(bound) = rows.get(press.entity) else {
+        return;
+    };
+    let BoundRole::Bound(role_id) = *bound else {
+        return;
+    };
+    state.focus = DetailsFocus::Role(role_id);
+    state.role_power_draft = state
+        .roles
+        .iter()
+        .find(|role| role.role_id == role_id)
+        .map_or(0, |role| role.powers);
+    dirty.details = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2046,24 +2338,12 @@ fn rebuild_notice_body(
 // Virtualized row pools.
 // ---------------------------------------------------------------------------
 
-/// The persistent inner parts of a pooled member row, updated in place on bind.
-#[derive(Component)]
-struct MemberRowParts {
-    /// The name cell.
-    name: Entity,
-    /// The title cell.
-    title: Entity,
-    /// The contribution cell.
-    contribution: Entity,
-    /// The status cell.
-    status: Entity,
-}
-
 /// The member a pooled row currently presents, or `None` when parked.
 #[derive(Component, Debug, Clone, Copy)]
 struct BoundMember(Option<AgentKey>);
 
-/// Build the inner nodes of each newly-pooled member row once.
+/// Build each newly-pooled member row's cells once (widget-owned columns +
+/// clip + locale ellipsis), attaching the selection state and press observer.
 fn populate_member_rows(
     mut commands: Commands,
     ui: Option<Res<GroupProfileUi>>,
@@ -2076,55 +2356,12 @@ fn populate_member_rows(
         if child_of.parent() != ui.members_viewport {
             continue;
         }
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            Pickable::default(),
-        ));
-        let name = spawn_row_cell(&mut commands, row_entity, None);
-        let title = spawn_row_cell(&mut commands, row_entity, Some(TITLE_COL_WIDTH));
-        let contribution = spawn_row_cell(&mut commands, row_entity, Some(CONTRIB_COL_WIDTH));
-        let status = spawn_row_cell(&mut commands, row_entity, Some(STATUS_COL_WIDTH));
+        spawn_table_row(&mut commands, row_entity, ui.members_table, &MEMBERS_TABLE);
         commands
             .entity(row_entity)
-            .insert((
-                MemberRowParts {
-                    name,
-                    title,
-                    contribution,
-                    status,
-                },
-                BoundMember(None),
-            ))
+            .insert(BoundMember(None))
             .observe(on_member_row_press);
     }
-}
-
-/// A member/notice row text cell — flexible leading (`width: None`) or fixed-width.
-fn spawn_row_cell(commands: &mut Commands, row_entity: Entity, width: Option<f32>) -> Entity {
-    commands
-        .spawn((
-            Text::new(String::new()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            cell_node(width),
-            Pickable::IGNORE,
-            ChildOf(row_entity),
-        ))
-        .id()
 }
 
 /// Bind each pooled member row to the [`MemberRow`] it now points at.
@@ -2137,7 +2374,7 @@ fn bind_member_rows(
         Entity,
         Ref<VirtualRow>,
         &ChildOf,
-        &MemberRowParts,
+        &TableRowCells,
         &mut BoundMember,
     )>,
     mut backgrounds: Query<&mut BackgroundColor>,
@@ -2147,7 +2384,7 @@ fn bind_member_rows(
         return;
     };
     let refresh_all = view.is_changed() || state.is_changed() || avatars.is_changed();
-    for (row_entity, row, child_of, parts, mut bound) in &mut rows {
+    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.members_viewport {
             continue;
         }
@@ -2163,15 +2400,10 @@ fn bind_member_rows(
         bound.0 = Some(member_row.agent);
         let selected = state.focus == DetailsFocus::Member(member_row.agent);
         let name = name_of(member_row.agent, &avatars);
-        set_cell(&mut texts, parts.name, &name, member_row.is_owner);
-        set_cell(&mut texts, parts.title, &member_row.title, false);
-        set_cell(
-            &mut texts,
-            parts.contribution,
-            &member_row.contribution,
-            false,
-        );
-        set_cell(&mut texts, parts.status, &member_row.status, false);
+        set_row_cell(&mut texts, cells, 0, &name, member_row.is_owner);
+        set_row_cell(&mut texts, cells, 1, &member_row.title, false);
+        set_row_cell(&mut texts, cells, 2, &member_row.contribution, false);
+        set_row_cell(&mut texts, cells, 3, &member_row.status, false);
         if let Ok(mut background) = backgrounds.get_mut(row_entity) {
             let wanted = if selected {
                 SELECTED_ROW_BACKGROUND
@@ -2182,6 +2414,22 @@ fn bind_member_rows(
                 background.0 = wanted;
             }
         }
+    }
+}
+
+/// Set the `column`-th cell of a pooled table row's value, accenting owners /
+/// selection — resolves the cell entity from the row's [`TableRowCells`] and
+/// writes it through the widget's [`set_table_cell`].
+fn set_row_cell(
+    texts: &mut Query<(&mut Text, &mut TextColor)>,
+    cells: &TableRowCells,
+    column: usize,
+    value: &str,
+    accent: bool,
+) {
+    if let Some(cell) = cells.cell(column) {
+        let color = if accent { ACCENT_COLOR } else { LABEL_COLOR };
+        set_table_cell(texts, cell, value, color);
     }
 }
 
@@ -2206,25 +2454,14 @@ fn on_member_row_press(
     };
     state.focus = DetailsFocus::Member(member);
     dirty.details = true;
-    dirty.roles = true;
-}
-
-/// The persistent inner parts of a pooled notice row.
-#[derive(Component)]
-struct NoticeRowParts {
-    /// The subject cell.
-    subject: Entity,
-    /// The from-name cell.
-    from: Entity,
-    /// The date cell.
-    date: Entity,
 }
 
 /// The notice index a pooled row currently presents, or `None` when parked.
 #[derive(Component, Debug, Clone, Copy)]
 struct BoundNotice(Option<usize>);
 
-/// Build the inner nodes of each newly-pooled notice row once.
+/// Build each newly-pooled notice row's cells once (widget-owned columns), and
+/// attach the selection state and press observer.
 fn populate_notice_rows(
     mut commands: Commands,
     ui: Option<Res<GroupProfileUi>>,
@@ -2237,33 +2474,10 @@ fn populate_notice_rows(
         if child_of.parent() != ui.notices_viewport {
             continue;
         }
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            Pickable::default(),
-        ));
-        let subject = spawn_row_cell(&mut commands, row_entity, None);
-        let from = spawn_row_cell(&mut commands, row_entity, Some(TITLE_COL_WIDTH));
-        let date = spawn_row_cell(&mut commands, row_entity, Some(110.0));
+        spawn_table_row(&mut commands, row_entity, ui.notices_table, &NOTICES_TABLE);
         commands
             .entity(row_entity)
-            .insert((
-                NoticeRowParts {
-                    subject,
-                    from,
-                    date,
-                },
-                BoundNotice(None),
-            ))
+            .insert(BoundNotice(None))
             .observe(on_notice_row_press);
     }
 }
@@ -2277,7 +2491,7 @@ fn bind_notice_rows(
         Entity,
         Ref<VirtualRow>,
         &ChildOf,
-        &NoticeRowParts,
+        &TableRowCells,
         &mut BoundNotice,
     )>,
     mut backgrounds: Query<&mut BackgroundColor>,
@@ -2287,7 +2501,7 @@ fn bind_notice_rows(
         return;
     };
     let refresh_all = view.is_changed() || state.is_changed();
-    for (row_entity, row, child_of, parts, mut bound) in &mut rows {
+    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.notices_viewport {
             continue;
         }
@@ -2306,9 +2520,9 @@ fn bind_notice_rows(
         } else {
             notice_row.subject.clone()
         };
-        set_cell(&mut texts, parts.subject, &subject, false);
-        set_cell(&mut texts, parts.from, &notice_row.from_name, false);
-        set_cell(&mut texts, parts.date, &notice_row.date, false);
+        set_row_cell(&mut texts, cells, 0, &subject, false);
+        set_row_cell(&mut texts, cells, 1, &notice_row.from_name, false);
+        set_row_cell(&mut texts, cells, 2, &notice_row.date, false);
         let selected = state.selected_notice == Some(notice_row.index);
         if let Ok(mut background) = backgrounds.get_mut(row_entity) {
             let wanted = if selected {
@@ -2452,7 +2666,6 @@ fn on_group_profile_action(
         GroupProfileAction::CloseDetails => {
             state.focus = DetailsFocus::None;
             dirty.details = true;
-            dirty.roles = true;
         }
         GroupProfileAction::EjectMember => {
             if let DetailsFocus::Member(member) = state.focus {
@@ -2525,7 +2738,6 @@ fn on_group_profile_action(
                 state.focus = DetailsFocus::None;
                 sl_commands.write(SlCommand(Command::RequestGroupRoles(target)));
                 dirty.details = true;
-                dirty.roles = true;
             }
         }
         GroupProfileAction::SaveRoleData => {
@@ -2991,24 +3203,6 @@ fn despawn_children(children: &Query<&Children>, commands: &mut Commands, parent
     if let Ok(existing) = children.get(parent) {
         for child in existing.iter().collect::<Vec<_>>() {
             commands.entity(child).despawn();
-        }
-    }
-}
-
-/// Set a row cell's text (only on change) and its owner-accent colour.
-fn set_cell(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
-    cell: Entity,
-    value: &str,
-    accent: bool,
-) {
-    if let Ok((mut text, mut color)) = texts.get_mut(cell) {
-        if text.0 != value {
-            value.clone_into(&mut text.0);
-        }
-        let wanted = TextColor(if accent { ACCENT_COLOR } else { LABEL_COLOR });
-        if *color != wanted {
-            *color = wanted;
         }
     }
 }

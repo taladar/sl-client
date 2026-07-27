@@ -169,6 +169,10 @@ group-members-refresh = Refresh
 
 # The roles column.
 group-roles-header = Roles
+# The roles table column headers.
+group-roles-col-name = Name
+group-roles-col-title = Title
+group-roles-col-members = Members
 group-role-new = New Role…
 # The selected-member / selected-role details area.
 group-details-hint = Select a member or role for details.
@@ -202,6 +206,10 @@ group-power-notices-send = Send group notices
 group-power-notices-receive = Receive group notices
 
 # The Notices tab.
+# The notices table column headers.
+group-notices-subject = Subject
+group-notices-from = From
+group-notices-date = Date
 group-notice-hint = Select a notice to read it.
 group-notice-subject = Subject:
 group-notice-has-attachment = This notice has an attachment.

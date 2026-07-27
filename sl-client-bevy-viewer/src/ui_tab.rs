@@ -108,6 +108,7 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
+use crate::i18n::LocaleEllipsisMarker;
 use crate::ui::{FocusRevealBounds, UiDirection, column, row};
 use crate::ui_element::{ElementCx, TextMayClip, UiAction};
 use crate::ui_font::UiFont;
@@ -438,15 +439,6 @@ pub(crate) struct TabLabelClip {
     /// The `…` marker node, shown only while this label overflows its box.
     pub(crate) ellipsis: Entity,
 }
-
-/// Marks a tab's truncation-ellipsis marker node, so the i18n scaffold
-/// (`crate::i18n::apply_locale_ellipsis`) can rewrite every marker's glyph to
-/// the active locale's `ui-ellipsis` — a single Latin `…` for most locales, the
-/// centred `……` for CJK. The glyph is [`TabSpec::ellipsis`] (defaulting to
-/// [`DEFAULT_ELLIPSIS`]) until the locale bundle resolves it; that is a static
-/// fallback, and the locale's convention is the source of truth once loaded.
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TabEllipsisMarker;
 
 /// A tab button: which strip it belongs to and its index within it. Carried so
 /// the selection observer can find every button of a strip and place it against
@@ -1202,7 +1194,7 @@ fn spawn_tab_ellipsis(
                 ..default()
             },
             Name::new(format!("{}:tab-ellipsis:{index}", spec.element)),
-            TabEllipsisMarker,
+            LocaleEllipsisMarker,
             ChildOf(button),
         ))
         .id()

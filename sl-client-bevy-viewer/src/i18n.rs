@@ -70,12 +70,20 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_pseudoloc::pseudolocalise;
-use crate::ui_tab::TabEllipsisMarker;
 
 /// The key the truncation ellipsis is stored under in every bundle. Read by
-/// [`refresh_locale_ellipsis`] and applied to the tab widget by
+/// [`refresh_locale_ellipsis`] and applied to every [`LocaleEllipsisMarker`] by
 /// [`apply_locale_ellipsis`].
 const ELLIPSIS_KEY: &str = "ui-ellipsis";
+
+/// Marks a text node whose glyph is the **locale truncation ellipsis** — a
+/// clipped strip's trailing `…` (or the centred `……` for CJK). A widget that
+/// truncates (the tab widget's label strip, the table widget's cells) reveals one
+/// on overflow and attaches this so [`apply_locale_ellipsis`] keeps its glyph in
+/// step with the active locale. Owned here because the locale ellipsis is an i18n
+/// concept, not a per-widget one.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct LocaleEllipsisMarker;
 
 /// The truncation ellipsis used before any bundle has loaded, or for a locale
 /// that does not translate [`ELLIPSIS_KEY`] — the Latin single ellipsis, matching
@@ -409,17 +417,19 @@ fn sync_ui_direction(
     }
 }
 
-/// Rewrite every tab widget's truncation-ellipsis marker to the active locale's
+/// Rewrite every tab / table truncation-ellipsis marker to the active locale's
 /// [`ellipsis`](UiLocale::ellipsis), so a CJK locale gets its centred `……` and a
 /// locale switch updates markers already on screen.
 ///
 /// Runs on a locale change (updating every marker) and for markers spawned since
-/// (a strip created after the switch), so both a running switch and a fresh strip
-/// land on the right glyph.
+/// (a strip or table cell created after the switch), so both a running switch and
+/// a fresh marker land on the right glyph. Both the tab widget's
+/// tab-label strips and table cells alike carry a [`LocaleEllipsisMarker`], so one
+/// query drives them all.
 fn apply_locale_ellipsis(
     locale: Res<UiLocale>,
-    fresh: Query<Entity, Added<TabEllipsisMarker>>,
-    mut markers: Query<&mut Text, With<TabEllipsisMarker>>,
+    fresh: Query<Entity, Added<LocaleEllipsisMarker>>,
+    mut markers: Query<&mut Text, With<LocaleEllipsisMarker>>,
 ) {
     if locale.is_changed() {
         for mut text in &mut markers {

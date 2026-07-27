@@ -66,7 +66,11 @@ use crate::settings::{ViewerSettings, load_account_settings};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
+use crate::ui_table::{
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSpec, register_table_settings,
+    spawn_table, spawn_table_row,
+};
+use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
 /// conversation-transcript density so the whole floater reads as one surface.
@@ -240,6 +244,71 @@ const FRIENDS_SORT_SETTING: &str = "friends_sort";
 /// The `[people]` section the friends-sort setting lives under in the account
 /// settings file.
 const PEOPLE_SETTINGS_SECTION: &[&str] = &["people"];
+
+/// The persisted-setting name for the friends-table column widths (the widget's
+/// draggable columns).
+const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
+
+/// The friends list, expressed for the reusable table widget. The Name and Status
+/// columns are widget-owned **text** cells (Name gains the locale ellipsis); the
+/// two permission groups are widget **custom** columns the People code fills with
+/// its rights icon grid and grouped sub-headers. The widget's built-in sort is
+/// **off** — the friends list keeps its bespoke 8-way [`SortState`] and wires its
+/// own header clicks — but the widget still owns the header alignment, column
+/// widths (draggable + persisted), scroll, row pool and selection.
+const FRIENDS_TABLE: TableSpec = TableSpec {
+    element: "people-friends",
+    columns: &[
+        TableColumn {
+            header_key: HEADER_NAME_KEY,
+            token: "name",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: HEADER_STATUS_KEY,
+            token: "status",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed {
+                default: STATUS_COL_WIDTH,
+            },
+            align: TableAlign::Center,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "",
+            token: "they",
+            kind: TableColumnKind::Custom,
+            width: TableColumnWidth::Fixed {
+                default: RIGHT_COL_WIDTH * 3.0,
+            },
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "",
+            token: "you",
+            kind: TableColumnKind::Custom,
+            width: TableColumnWidth::Fixed {
+                default: RIGHT_COL_WIDTH * 3.0,
+            },
+            align: TableAlign::Start,
+            sortable: false,
+        },
+    ],
+    default_sort: &[],
+    builtin_sort: false,
+    row_height: ROW_HEIGHT,
+    font_size: ROW_FONT_SIZE,
+    header_color: HEADER_TEXT_COLOR,
+    cell_color: LABEL_COLOR,
+    column_gap: 4.0,
+    row_padding: 4.0,
+    sort_setting: None,
+    widths_setting: Some(FRIENDS_WIDTHS_SETTING),
+};
 
 /// The sort-direction arrow shown on the primary sort column's header — ascending.
 const SORT_ASCENDING_GLYPH: &str = "\u{25B2}";
@@ -1028,6 +1097,9 @@ pub(crate) struct PeopleUi {
     sub_strip: Entity,
     /// The Friends content column (list + action bar), shown for the Friends tab.
     friends_content: Entity,
+    /// The friends table root (carries the widget's `TableState` — its column
+    /// widths persist; its built-in sort is off, People drives ordering).
+    friends_table: Entity,
     /// The virtualized friends-list viewport (carries [`VirtualList`]).
     friends_viewport: Entity,
     /// The Groups sub-tab content container, shown for the Groups tab. It is
@@ -1288,7 +1360,7 @@ fn spawn_people_tab(
         },
     );
 
-    let (friends_content, friends_viewport, name_arrow, status_arrow) =
+    let (friends_content, friends_table, friends_viewport, name_arrow, status_arrow) =
         spawn_friends_content(&mut commands, pane, &icons);
     let groups_content = spawn_groups_content(&mut commands, pane);
     let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
@@ -1298,6 +1370,7 @@ fn spawn_people_tab(
         pane,
         sub_strip,
         friends_content,
+        friends_table,
         friends_viewport,
         groups_content,
         name_arrow,
@@ -1452,7 +1525,7 @@ fn spawn_friends_content(
     commands: &mut Commands,
     pane: Entity,
     icons: &PeopleIcons,
-) -> (Entity, Entity, Entity, Entity) {
+) -> (Entity, Entity, Entity, Entity, Entity) {
     // The content is a row: the list column takes the width, the action column
     // sits at its trailing edge.
     let content = commands
@@ -1468,7 +1541,8 @@ fn spawn_friends_content(
         ))
         .id();
 
-    // The list column: a fixed table header, then the scrolling list under it.
+    // The list column hosts the table widget (header + scrolling, resizable
+    // columns) and flex-fills beside the action column.
     let list_column = commands
         .spawn((
             Node {
@@ -1481,36 +1555,26 @@ fn spawn_friends_content(
             ChildOf(content),
         ))
         .id();
-    let (name_arrow, status_arrow) = spawn_friends_header(commands, list_column, icons);
-
-    // The virtualized list viewport fills the remaining height and clips + owns
-    // its own scroll, exactly like the inventory viewport.
-    let viewport = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                overflow: Overflow::clip(),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            BackgroundColor(LIST_BACKGROUND),
-            VirtualList::new(ROW_HEIGHT),
-            VirtualViewport,
-            Pickable::default(),
-            TabIndex(2),
-            Name::new("people-friends-viewport"),
-            ChildOf(list_column),
-        ))
-        .observe(
-            |press: On<Pointer<Press>>, ui: Res<PeopleUi>, mut focus: ResMut<InputFocus>| {
-                if press.button == PointerButton::Primary {
-                    focus.set(ui.friends_viewport, FocusCause::Navigated);
-                }
-            },
-        )
-        .id();
+    let table = spawn_table(commands, list_column, &FRIENDS_TABLE);
+    let table_root = table.root;
+    let viewport = table.viewport;
+    commands
+        .entity(viewport)
+        .insert((BackgroundColor(LIST_BACKGROUND), TabIndex(2)));
+    commands
+        .entity(table.header)
+        .insert(BackgroundColor(HEADER_BACKGROUND));
+    // The widget owns the Name / Status header cells (labels) — People adds its own
+    // sort arrow + click that drives its bespoke 8-way sort — and hands over the two
+    // rights groups as empty custom cells for the grouped icon sub-headers.
+    let name_arrow = augment_sortable_header(commands, table.header_cell(0), SortColumn::Name);
+    let status_arrow = augment_sortable_header(commands, table.header_cell(1), SortColumn::Online);
+    if let Some(cell) = table.header_cell(2) {
+        fill_rights_group_header(commands, cell, GROUP_THEY_KEY, false, icons);
+    }
+    if let Some(cell) = table.header_cell(3) {
+        fill_rights_group_header(commands, cell, GROUP_YOU_KEY, true, icons);
+    }
 
     // The trailing action column — one button per [`FriendAction`], stacked and
     // acting on the current selection.
@@ -1536,116 +1600,32 @@ fn spawn_friends_content(
         spawn_action_button(commands, actions, action);
     }
 
-    (content, viewport, name_arrow, status_arrow)
+    (content, table_root, viewport, name_arrow, status_arrow)
 }
 
-/// Spawn the persistent friends-table header row (always shown, even for an empty
-/// list): a clickable "Name" column over the row labels, a fixed "Status" column
-/// over the presence dots, and the two permission groups ("They can …" / "You can
-/// …") over their three rights columns. Every header sorts on click; returns the
-/// `(name_arrow, status_arrow)` sort-direction indicator nodes.
-fn spawn_friends_header(
+/// Add People's own sort control to a widget-built header cell: a click observer
+/// that drives the bespoke [`SortState`] and a trailing sort-direction arrow node
+/// (returned, updated by [`refresh_people`]). Used for the Name / Status columns,
+/// whose ordering the friends list drives itself.
+fn augment_sortable_header(
     commands: &mut Commands,
-    list_column: Entity,
-    icons: &PeopleIcons,
-) -> (Entity, Entity) {
-    let header = commands
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_shrink: 0.0,
-                align_items: AlignItems::FlexEnd,
-                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                column_gap: Val::Px(4.0),
-                ..default()
-            },
-            BackgroundColor(HEADER_BACKGROUND),
-            Name::new("people-friends-header"),
-            ChildOf(list_column),
-        ))
-        .id();
-    let name_arrow = spawn_sortable_header(
-        commands,
-        header,
-        HeaderWidth::Grow,
-        HEADER_NAME_KEY,
-        SortColumn::Name,
-    );
-    let status_arrow = spawn_sortable_header(
-        commands,
-        header,
-        HeaderWidth::Fixed(STATUS_COL_WIDTH),
-        HEADER_STATUS_KEY,
-        SortColumn::Online,
-    );
-    // The two rights groups: a group label above a row of clickable icon column
-    // headers — one group over "They can …", one over "You can …".
-    spawn_rights_group_header(commands, header, GROUP_THEY_KEY, false, icons);
-    spawn_rights_group_header(commands, header, GROUP_YOU_KEY, true, icons);
-    (name_arrow, status_arrow)
-}
-
-/// How a sortable header cell is sized: growing to fill the row (Name) or a fixed
-/// width (Status).
-#[derive(Debug, Clone, Copy)]
-enum HeaderWidth {
-    /// Fill the remaining width.
-    Grow,
-    /// A fixed logical-pixel width.
-    Fixed(f32),
-}
-
-/// Spawn a clickable header cell (`label` + a sort-direction arrow) that sorts by
-/// `column` on click; returns the arrow node (updated from the primary sort).
-fn spawn_sortable_header(
-    commands: &mut Commands,
-    header: Entity,
-    width: HeaderWidth,
-    key: &'static str,
+    cell: Option<Entity>,
     column: SortColumn,
 ) -> Entity {
-    let sizing = match width {
-        HeaderWidth::Grow => Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(0.0),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(2.0),
-            ..default()
-        },
-        HeaderWidth::Fixed(pixels) => Node {
-            width: Val::Px(pixels),
-            flex_shrink: 0.0,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(2.0),
-            ..default()
-        },
+    let Some(cell) = cell else {
+        return Entity::PLACEHOLDER;
     };
-    let cell = commands
-        .spawn((
-            sizing,
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-            Name::new("people-header-sortable"),
-            ChildOf(header),
-        ))
-        .observe(sort_on_press(column))
-        .id();
-    commands.spawn((
-        Text::new(String::new()),
-        UiFont::Sans.at(ROW_FONT_SIZE),
-        TextColor(HEADER_TEXT_COLOR),
-        Translated::new(key),
-        Pickable::IGNORE,
-        ChildOf(cell),
-    ));
+    commands.entity(cell).observe(sort_on_press(column));
     commands
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(ROW_FONT_SIZE),
             TextColor(TAB_ACTIVE_BORDER),
+            Node {
+                flex_shrink: 0.0,
+                margin: UiRect::left(Val::Px(2.0)),
+                ..default()
+            },
             Pickable::IGNORE,
             Name::new("people-header-arrow"),
             ChildOf(cell),
@@ -1663,13 +1643,13 @@ fn sort_on_press(column: SortColumn) -> impl Fn(On<Pointer<Press>>, MessageWrite
     }
 }
 
-/// Spawn one permission-group header — a group label above a row of three
-/// one-letter, clickable column headers (online / map / edit), sized to sit over
-/// the row's matching three rights cells. `received` selects the granted-vs-
-/// received sort column each letter maps to.
-fn spawn_rights_group_header(
+/// Fill a widget custom header cell with one permission-group header — a group
+/// label above a row of three one-letter, clickable column headers (online / map /
+/// edit), sized to sit over the row's matching three rights cells. `received`
+/// selects the granted-vs-received sort column each letter maps to.
+fn fill_rights_group_header(
     commands: &mut Commands,
-    header: Entity,
+    parent: Entity,
     group_key: &'static str,
     received: bool,
     icons: &PeopleIcons,
@@ -1683,7 +1663,7 @@ fn spawn_rights_group_header(
                 ..column(Val::Px(1.0))
             },
             Pickable::IGNORE,
-            ChildOf(header),
+            ChildOf(parent),
         ))
         .id();
     commands.spawn((
@@ -1908,6 +1888,8 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
         SettingValue::String(SortState::default().encode()),
         "Friends-list sort order, most-significant column first (col:dir, …).",
     );
+    // The widget-owned friends column widths (draggable columns).
+    register_table_settings(&mut settings, PEOPLE_SETTINGS_SECTION, &FRIENDS_TABLE);
 }
 
 /// Seed the sort order from the persisted value, once, after the per-avatar
@@ -2096,64 +2078,21 @@ fn populate_friend_rows(
         if child_of.parent() != ui.friends_viewport {
             continue;
         }
-        commands.entity(row_entity).insert((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(ROW_HEIGHT),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(4.0),
-                padding: UiRect::horizontal(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            Pickable::default(),
-        ));
-        // Name first (fills the row), presence dot last in a fixed-width status
-        // cell — aligning under the "Name" / "Status" header columns.
-        let label = commands
-            .spawn((
-                Text::new(String::new()),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(LABEL_COLOR),
-                Node {
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ChildOf(row_entity),
-            ))
-            .id();
-        let status_cell = commands
-            .spawn((
-                Node {
-                    width: Val::Px(STATUS_COL_WIDTH),
-                    flex_shrink: 0.0,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                Pickable::IGNORE,
-                ChildOf(row_entity),
-            ))
-            .id();
-        let presence = commands
-            .spawn((
-                Text::new(String::new()),
-                UiFont::Sans.at(ROW_FONT_SIZE),
-                TextColor(OFFLINE_COLOR),
-                Pickable::IGNORE,
-                ChildOf(status_cell),
-            ))
-            .id();
+        // The widget builds the row node + the Name (text, ellipsis) and Status
+        // (text, centred) cells, plus the two empty custom cells for the rights
+        // groups. People fills the rights cells and binds the two text cells.
+        let cells = spawn_table_row(&mut commands, row_entity, ui.friends_table, &FRIENDS_TABLE);
+        let (Some(label), Some(presence), Some(they_cell), Some(you_cell)) =
+            (cells.cell(0), cells.cell(1), cells.cell(2), cells.cell(3))
+        else {
+            continue;
+        };
         // The two rights groups, in the same order as the header: "They can …"
         // (granted, editable checkboxes) then "You can …" (received, read-only).
         let [they_online, they_map, they_edit] =
-            spawn_row_rights_group(&mut commands, row_entity, false, &ui.icons);
+            spawn_row_rights_group(&mut commands, they_cell, false, &ui.icons);
         let [you_online, you_map, you_edit] =
-            spawn_row_rights_group(&mut commands, row_entity, true, &ui.icons);
+            spawn_row_rights_group(&mut commands, you_cell, true, &ui.icons);
         let rights = [
             they_online,
             they_map,
@@ -2176,15 +2115,16 @@ fn populate_friend_rows(
     }
 }
 
-/// Spawn one row-side permission group (three checkbox cells) and return the three
-/// checkbox [`ImageNode`] entities, in online / map / edit order.
+/// Fill a row's rights custom cell with one permission group (three checkbox
+/// cells) and return the three checkbox [`ImageNode`] entities, in online / map /
+/// edit order.
 ///
 /// A granted (`received == false`) cell is an editable checkbox with a toggle
 /// observer; a received cell is a read-only indicator. The default image is the
 /// empty checkbox — [`bind_friend_rows`] swaps in the ticked one and the tint.
 fn spawn_row_rights_group(
     commands: &mut Commands,
-    row_entity: Entity,
+    parent: Entity,
     received: bool,
     icons: &PeopleIcons,
 ) -> [Entity; 3] {
@@ -2196,7 +2136,7 @@ fn spawn_row_rights_group(
                 ..default()
             },
             Pickable::IGNORE,
-            ChildOf(row_entity),
+            ChildOf(parent),
         ))
         .id();
     let kinds = [RightKind::SeeOnline, RightKind::Map, RightKind::Edit];
