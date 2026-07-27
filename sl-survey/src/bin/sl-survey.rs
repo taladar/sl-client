@@ -685,6 +685,7 @@ impl Survey {
             | Event::AssetReceived(_)
             | Event::AssetTransferFailed { .. }
             | Event::AssetUploaded { .. }
+            | Event::InventoryAssetSaved { .. }
             | Event::AssetUploadFailed { .. }
             | Event::ScriptUploaded { .. }
             | Event::AvatarAppearance(_)

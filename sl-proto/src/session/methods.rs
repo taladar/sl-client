@@ -104,7 +104,7 @@ use sl_wire::{
     parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
     parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features, zero_decode,
 };
-use sl_wire::{Direction, GlobalCoordinates};
+use sl_wire::{Direction, GlobalCoordinates, combine_uuids};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
@@ -114,6 +114,12 @@ use uuid::Uuid;
 /// `UUIDGroupNameRequest`. Each id is 16 bytes; 80 keeps the datagram (plus its
 /// header and block count) comfortably within a typical UDP MTU.
 const UUID_NAMES_PER_REQUEST: usize = 80;
+
+/// The largest asset (in bytes) a [`Session::save_inventory_asset`] inlines into
+/// a single `AssetUploadRequest`; a larger asset sends an empty `AssetData` and
+/// streams over `Xfer`. Kept at the `Xfer` chunk size so it comfortably fits one
+/// reliable UDP packet alongside the message header.
+const ASSET_UPLOAD_INLINE_LIMIT: usize = crate::session::XFER_UPLOAD_CHUNK_SIZE;
 
 /// Splits a slice of [`ScopedObjectId`]s into the single [`CircuitId`] they all
 /// belong to and the bare region-local ids, ready for a batch request (which
@@ -202,6 +208,8 @@ impl Session {
             xfer_downloads: BTreeMap::new(),
             pending_xfer_uploads: BTreeMap::new(),
             xfer_uploads: BTreeMap::new(),
+            secure_session_id: Uuid::nil(),
+            pending_asset_uploads: BTreeMap::new(),
             next_xfer_id: XferId(1),
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
@@ -1255,6 +1263,10 @@ impl Session {
                 );
                 circuit.send_use_circuit_code(now)?;
                 self.circuit = Some(circuit);
+                // Retain the secure session id so a legacy asset upload can
+                // predict its stored asset id (`combine(transaction,
+                // secure_session)`) before the upload completes.
+                self.secure_session_id = success.secure_session_id;
                 // Defer `CompleteAgentMovement` until the region's capabilities have
                 // been fetched (the seed-caps request advertises our animesh support
                 // via the `ObjectAnimation` capability). The simulator gates object
@@ -3086,7 +3098,14 @@ impl Session {
                 // a file we explicitly offered (mirrors the reference viewer's
                 // `expectFileForTransfer` gate), then send the first packet.
                 let filename = trimmed_string(&request.xfer_id.filename);
-                if let Some(data) = self.pending_xfer_uploads.remove(&filename) {
+                // A named-file upload (terrain RAW), or — when the filename is
+                // empty — an asset upload the simulator pulls by its `VFileID`
+                // (the predicted `combine(transaction, secure_session)` id an
+                // oversized [`Session::save_inventory_asset`] registered).
+                let offered = self.pending_xfer_uploads.remove(&filename).or_else(|| {
+                    self.pending_asset_uploads.remove(&request.xfer_id.v_file_id)
+                });
+                if let Some(data) = offered {
                     let xfer_id = XferId(request.xfer_id.id);
                     self.xfer_uploads.insert(
                         xfer_id,
@@ -3100,6 +3119,15 @@ impl Session {
                     );
                     self.send_next_xfer_upload_packet(xfer_id, now)?;
                 }
+            }
+            AnyMessage::AssetUploadComplete(complete) => {
+                // The simulator stored (or rejected) a legacy asset upload — the
+                // completion of a [`Session::save_inventory_asset`]. Surface it so
+                // an editor can confirm its Save landed.
+                self.events.push_back(Event::InventoryAssetSaved {
+                    asset_id: complete.asset_block.uuid,
+                    success: complete.asset_block.success,
+                });
             }
             AnyMessage::ConfirmXferPacket(confirm) => {
                 // The simulator confirmed the packet we last sent for an outbound
@@ -9035,6 +9063,58 @@ impl Session {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
+        self.cache_inventory_item(item.clone());
+        Ok(())
+    }
+
+    /// Saves fresh asset bytes onto an **existing** inventory item over the
+    /// legacy transaction upload path — the reference viewer's
+    /// `LLAgentWearables::saveWearable` shape, used to persist an edited wearable
+    /// (or any asset without a dedicated `Update*AgentInventory` capability)
+    /// back onto its own item without minting a new one.
+    ///
+    /// It sends an `AssetUploadRequest` carrying `transaction_id` (the bytes
+    /// inline when they fit a single packet, else an `Xfer` fallback keyed by the
+    /// predicted asset id), then an `UpdateInventoryItem` carrying the same
+    /// `transaction_id` so the simulator binds the just-stored asset — whose id
+    /// it derives as `combine(transaction_id, secure_session_id)` — to the item.
+    /// The caller generates a fresh `transaction_id`. Completion surfaces as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] on an encode failure.
+    pub fn save_inventory_asset(
+        &mut self,
+        item: &InventoryItem,
+        asset_type: AssetType,
+        data: Vec<u8>,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        // The predicted stored asset id — the `VFileID` an `Xfer` fallback is
+        // matched by, and the id the simulator will bind to the item.
+        let asset_id = combine_uuids(transaction_id.get(), self.secure_session_id);
+        let type_code = i8::try_from(asset_type.to_code()).unwrap_or_default();
+        let callback_id = self.next_inventory_callback();
+        // Inline the bytes when they fit a single reliable packet; otherwise send
+        // an empty `AssetData` and hold the bytes for the simulator's Xfer pull.
+        let inline = data.len() <= ASSET_UPLOAD_INLINE_LIMIT;
+        let inline_data = if inline { data.clone() } else { Vec::new() };
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_asset_upload_request(
+            transaction_id.get(),
+            type_code,
+            false,
+            false,
+            inline_data,
+            now,
+        )?;
+        circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
+        if !inline {
+            let _prev = self.pending_asset_uploads.insert(asset_id, data);
+        }
         self.cache_inventory_item(item.clone());
         Ok(())
     }

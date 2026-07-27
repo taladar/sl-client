@@ -115,6 +115,64 @@ impl OwnBakeInputs {
                 .find_map(|wearable| wearable.params.get(&id).copied())
         })
     }
+
+    /// The worn asset of `wearable_type`, for the appearance editor to seed its
+    /// controls from the currently-worn wearable. The first of that type — the
+    /// passive viewer keys worn assets by type only, so a layered same-type stack
+    /// resolves to its lead layer (a known limitation the editor inherits).
+    #[must_use]
+    pub(crate) fn worn_asset(&self, wearable_type: WearableType) -> Option<&WearableAsset> {
+        self.assets
+            .iter()
+            .find(|asset| asset.wearable_type == wearable_type)
+    }
+
+    /// Live-edit preview: substitute the worn asset of `edited`'s wearable type
+    /// with `edited` (append it if none is worn) so the shape morph
+    /// ([`apply_own_shape_from_wearables`](crate::avatars::apply_own_shape_from_wearables))
+    /// and the bake composite re-derive from the edited wearable. The caller
+    /// follows this with [`request_asset_textures`](Self::request_asset_textures)
+    /// and [`reassemble`](Self::reassemble), then clears the local bake's built
+    /// flag to re-composite.
+    pub(crate) fn set_preview_asset(&mut self, edited: WearableAsset) {
+        if let Some(slot) = self
+            .assets
+            .iter_mut()
+            .find(|asset| asset.wearable_type == edited.wearable_type)
+        {
+            *slot = edited;
+        } else {
+            self.assets.push(edited);
+        }
+    }
+
+    /// Request (boosted) every non-nil layer texture an edited asset references,
+    /// so a just-picked fabric / bodypaint texture decodes for the live bake
+    /// preview. New requests are tracked as pending so the editor can tell when
+    /// the preview is fully textured.
+    pub(crate) fn request_asset_textures(
+        &mut self,
+        asset: &WearableAsset,
+        texture_manager: &mut TextureManager,
+    ) {
+        for id in asset.textures.values().copied().filter(|id| !id.is_nil()) {
+            let key = TextureKey::from(id);
+            if texture_manager.decoded(key).is_none() {
+                let _new = self.pending_textures.insert(key);
+                texture_manager.request_boosted(key, crate::render_priority::AVATAR_BOOST_PRIORITY);
+            }
+        }
+    }
+
+    /// Re-run the per-region layer assembly after a preview edit, so the bake
+    /// composite picks up the substituted asset's textures / tints.
+    pub(crate) fn reassemble(
+        &mut self,
+        texture_manager: &TextureManager,
+        library: Option<&AvatarAssetLibrary>,
+    ) {
+        assemble(self, texture_manager, library);
+    }
 }
 
 /// Announced (once per asset id) when a background wearable-asset fetch finishes,

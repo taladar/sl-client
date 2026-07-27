@@ -75,7 +75,7 @@ pub use skeleton::{
 };
 pub use skin::SkinningPalette;
 pub use volume::{VolumeDeform, VolumeDeformations};
-pub use wearable::{WearableAsset, WearableError};
+pub use wearable::{SaleType, WearableAsset, WearableError, WearablePermissions};
 
 pub use params::{ColorOp, ColorRamp};
 

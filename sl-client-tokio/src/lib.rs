@@ -852,6 +852,9 @@ impl Client {
                         Some(Command::UpdateInventoryItem { item, transaction_id }) => {
                             self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
                         }
+                        Some(Command::SaveInventoryAsset { item, asset_type, transaction_id, data }) => {
+                            self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
+                        }
                         Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
                             self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
                         }

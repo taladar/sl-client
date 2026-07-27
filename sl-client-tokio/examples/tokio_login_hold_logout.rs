@@ -563,6 +563,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::AssetReceived(_)
             | Event::AssetTransferFailed { .. }
             | Event::AssetUploaded { .. }
+            | Event::InventoryAssetSaved { .. }
             | Event::AssetUploadFailed { .. }
             | Event::ScriptUploaded { .. }
             | Event::VoiceAccountProvisioned(_)

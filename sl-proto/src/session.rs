@@ -1117,6 +1117,16 @@ pub struct Session {
     /// next `SendXferPacket`; the final confirmation surfaces
     /// [`Event::XferUploaded`](crate::Event::XferUploaded).
     xfer_uploads: BTreeMap<XferId, XferUpload>,
+    /// The account's secure session id from the login response, used to predict
+    /// a legacy asset upload's stored id (`combine(transaction_id,
+    /// secure_session_id)` — see [`sl_wire::combine_uuids`]). Nil before login.
+    secure_session_id: Uuid,
+    /// Asset bytes offered for a legacy `AssetUploadRequest` upload that was too
+    /// large to inline, keyed by the **predicted asset id** (`VFileID`). When the
+    /// simulator answers with a `RequestXfer` whose `VFileID` matches, the bytes
+    /// move into [`xfer_uploads`](Self::xfer_uploads) and stream. Mirrors the
+    /// reference viewer's `LLAssetStorage::storeAssetData` Xfer fallback.
+    pending_asset_uploads: BTreeMap<Uuid, Vec<u8>>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: XferId,
     /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked

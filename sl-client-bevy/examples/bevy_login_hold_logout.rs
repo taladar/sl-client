@@ -309,6 +309,7 @@ fn on_events(
             | SlSessionEvent::AssetReceived(_)
             | SlSessionEvent::AssetTransferFailed { .. }
             | SlSessionEvent::AssetUploaded { .. }
+            | SlSessionEvent::InventoryAssetSaved { .. }
             | SlSessionEvent::AssetUploadFailed { .. }
             | SlSessionEvent::ScriptUploaded { .. }
             | SlSessionEvent::AvatarAppearance(_)

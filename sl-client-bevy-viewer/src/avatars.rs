@@ -2815,6 +2815,15 @@ pub(crate) struct OwnLocalBake {
     built: bool,
 }
 
+impl OwnLocalBake {
+    /// Force the client-side bake to re-composite on the next
+    /// [`apply_own_local_bake`] — the appearance editor calls this after a live
+    /// texture / tint edit changes the worn bake inputs.
+    pub(crate) const fn invalidate(&mut self) {
+        self.built = false;
+    }
+}
+
 /// Flip an RGBA8 image's rows in place — mirror it about its horizontal axis —
 /// mapping between the top-down decoded-image row order and the OpenGL bottom-up
 /// convention Second Life avatar UVs are authored in (P15.3). A zero dimension,

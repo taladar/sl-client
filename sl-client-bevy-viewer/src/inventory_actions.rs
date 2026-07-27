@@ -86,6 +86,9 @@ pub(crate) const IS_OBJECT: &str = "is-object";
 /// The target is a body wearable (clothing **or** body part) — shows Wear.
 pub(crate) const IS_WEARABLE: &str = "is-wearable";
 
+/// The target is a GLTF (PBR) material asset — shows the material editor's Edit.
+pub(crate) const IS_MATERIAL: &str = "is-material";
+
 /// The target is a clothing **layer** (not a body part) — shows Add / Take Off,
 /// which a body part cannot do (an avatar always wears exactly one of each
 /// part).
@@ -528,8 +531,9 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Edit", "edit-wearable")
                 .visible_when(IS_WEARABLE)
-                .enabled_when(UNIMPLEMENTED),
+                .enabled_when(WORN),
         ),
+        MenuItemDef::Command(MenuCommand::new("Edit", "edit-material").visible_when(IS_MATERIAL)),
         // Object / attachment.
         MenuItemDef::Command(
             MenuCommand::new("Wear", "attach")
@@ -700,6 +704,7 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
         InventoryType::Animation => held.push(IS_ANIMATION),
         InventoryType::Texture | InventoryType::Snapshot => held.push(IS_TEXTURE),
         InventoryType::Settings => held.push(IS_SETTINGS),
+        InventoryType::Material => held.push(IS_MATERIAL),
         _other => {}
     }
     held.push(if facts.in_trash {
@@ -1624,6 +1629,8 @@ fn handle_inventory_menu_actions(
         MessageWriter<crate::inventory_properties::OpenItemPreview>,
         MessageWriter<crate::inventory_properties::OpenItemProperties>,
         MessageWriter<SlCommand>,
+        MessageWriter<crate::edit_wearable::OpenWearableEditor>,
+        MessageWriter<crate::edit_material_asset::OpenMaterialEditor>,
     ),
 ) {
     let (
@@ -1641,6 +1648,8 @@ fn handle_inventory_menu_actions(
         mut previews,
         mut properties,
         mut commands,
+        mut wearable_editor,
+        mut material_editor,
     ) = outputs;
     for action in actions.read() {
         if action.element != INVENTORY_MENU_ELEMENT {
@@ -1670,6 +1679,19 @@ fn handle_inventory_menu_actions(
             "properties" => {
                 if let MenuTarget::Item(item) = &menu_target {
                     properties.write(crate::inventory_properties::OpenItemProperties {
+                        item: item.clone(),
+                    });
+                }
+            }
+            "edit-wearable" => {
+                if let MenuTarget::Item(item) = &menu_target {
+                    wearable_editor
+                        .write(crate::edit_wearable::OpenWearableEditor { item: item.clone() });
+                }
+            }
+            "edit-material" => {
+                if let MenuTarget::Item(item) = &menu_target {
+                    material_editor.write(crate::edit_material_asset::OpenMaterialEditor {
                         item: item.clone(),
                     });
                 }
@@ -2301,6 +2323,16 @@ pub(crate) struct PendingWearableUploads {
     queue: VecDeque<(WearableType, InventoryFolderKey)>,
 }
 
+impl PendingWearableUploads {
+    /// Enqueue a wearable-item creation so its flags are stamped (with `slot`)
+    /// and its `folder` refreshed when the upload reply lands. Shared by the
+    /// New-Clothes / New-Body-Parts creators and the appearance editor's
+    /// Save-As, which both mint a fresh wearable item via `UploadAsset`.
+    pub(crate) fn enqueue(&mut self, slot: WearableType, folder: InventoryFolderKey) {
+        self.queue.push_back((slot, folder));
+    }
+}
+
 /// The wearable slot (and default item name) a create action names.
 pub(crate) fn wearable_slot_of(action: &str) -> Option<(WearableType, &'static str)> {
     match action {
@@ -2327,7 +2359,7 @@ pub(crate) fn wearable_slot_of(action: &str) -> Option<(WearableType, &'static s
 
 /// The `avatar_lad.xml` `wearable` attribute value naming a slot's visual
 /// params (the filter [`default_wearable_asset`] applies).
-const fn wearable_param_group(slot: WearableType) -> &'static str {
+pub(crate) const fn wearable_param_group(slot: WearableType) -> &'static str {
     match slot {
         WearableType::Shape => "shape",
         WearableType::Skin => "skin",
@@ -2475,7 +2507,7 @@ fn dispatch_create(
             expected_upload_cost: 0,
             data: text.into_bytes(),
         }));
-        pending_wearables.queue.push_back((slot, dest));
+        pending_wearables.enqueue(slot, dest);
         return true;
     }
     match action {
@@ -2858,6 +2890,7 @@ mod tests {
             ("Add", "add-wearable"),
             ("Take Off", "take-off"),
             ("Edit", "edit-wearable"),
+            ("Edit", "edit-material"),
             ("Wear", "attach"),
             ("Add", "attach-add"),
             ("Chest (1)", "attach-point-1"),

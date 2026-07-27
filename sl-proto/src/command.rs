@@ -2044,6 +2044,28 @@ pub enum Command {
         /// The new raw asset bytes.
         data: Vec<u8>,
     },
+    /// Save fresh asset bytes onto an **existing** agent-inventory item over the
+    /// legacy UDP transaction path (`AssetUploadRequest` + a bound
+    /// `UpdateInventoryItem`), for asset classes with no dedicated
+    /// `Update*AgentInventory` capability — notably **wearables** (clothing /
+    /// body parts). This is how the appearance editor persists an edited
+    /// wearable back onto its own item without minting a new one (the reference
+    /// viewer's `LLAgentWearables::saveWearable`). The result arrives as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    SaveInventoryAsset {
+        /// The item to rebind, with its metadata (name / permissions / flags) set
+        /// to the desired values; its asset is replaced by `data`.
+        item: Box<InventoryItem>,
+        /// The asset class being stored (its `LLAssetType` code rides the
+        /// `AssetUploadRequest`).
+        asset_type: AssetType,
+        /// A freshly minted transaction id binding the upload to the item; the
+        /// simulator derives the stored asset id as
+        /// `combine(transaction_id, secure_session_id)`.
+        transaction_id: TransactionId,
+        /// The raw asset bytes.
+        data: Vec<u8>,
+    },
     /// Upload new source into an existing script inventory item and have the
     /// **simulator compile it** (the `UpdateScriptAgent` / `UpdateScriptTask`
     /// capability, chosen by `location`). The viewer never compiles locally — it

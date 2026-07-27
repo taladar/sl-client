@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 35 |
-| ready | 209 |
-| blocked | 109 |
+| ready | 207 |
+| blocked | 107 |
 | in-progress | 8 |
 | bugs | 12 |
-| done | 602 |
+| done | 606 |
 | deferred | 18 |
 | wont-do | 6 |
 | **total** | **999** |
@@ -99,7 +99,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (209)
+## ready (207)
 
 ### protocol
 
@@ -133,8 +133,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   antialiasing (FXAA / SMAA / TAA selection)
 - [`viewer-antialiasing-sharpen-aniso`](ready/viewer-antialiasing-sharpen-aniso.md)
   — CAS sharpening + anisotropic texture sampling
-- [`viewer-appearance-editor-shell`](ready/viewer-appearance-editor-shell.md) —
-  Appearance editor shell — wearable editing mode, params, save
 - [`viewer-area-search`](ready/viewer-area-search.md) — Area search — find
   objects in the region (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -387,9 +385,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pathfinding-floaters`](ready/viewer-pathfinding-floaters.md) —
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-pbr-material-editor`](ready/viewer-pbr-material-editor.md) — PBR /
-  GLTF material editor (blocked by `viewer-ui-texture-picker` (done),
-  `viewer-ui-color-picker` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
@@ -600,18 +595,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (109)
+## blocked (107)
 
 ### viewer
 
 - [`viewer-ambient-wind-sound`](blocked/viewer-ambient-wind-sound.md) — Ambient
   wind sound (blocked by `viewer-audio-backend`)
-- [`viewer-appearance-editor-bodyparts`](blocked/viewer-appearance-editor-bodyparts.md)
-  — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
-  `viewer-appearance-editor-shell`)
-- [`viewer-appearance-editor-clothing`](blocked/viewer-appearance-editor-clothing.md)
-  — Clothing-layer editors — params, fabric textures, tint (blocked by
-  `viewer-appearance-editor-shell`)
 - [`viewer-auto-reject-offers`](blocked/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites`)
@@ -962,7 +951,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (602)
+## done (606)
 
 ### protocol
 
@@ -1090,6 +1079,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
+  — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
+  `viewer-appearance-editor-shell` (done))
+- [`viewer-appearance-editor-clothing`](done/viewer-appearance-editor-clothing.md)
+  — Clothing-layer editors — params, fabric textures, tint (blocked by
+  `viewer-appearance-editor-shell` (done))
+- [`viewer-appearance-editor-shell`](done/viewer-appearance-editor-shell.md) —
+  Appearance editor shell — wearable editing mode, params, save
 - [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
   Attachment context / pie menu entries (worn on self + on others) (blocked by
   `viewer-avatar-context-menu` (done))
@@ -1466,6 +1463,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)
+- [`viewer-pbr-material-editor`](done/viewer-pbr-material-editor.md) — PBR /
+  GLTF material editor (blocked by `viewer-ui-texture-picker` (done),
+  `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)

@@ -54,6 +54,7 @@ mod edit_contents;
 mod edit_create;
 mod edit_link;
 mod edit_material;
+mod edit_material_asset;
 mod edit_math;
 mod edit_notecard;
 mod edit_params;
@@ -62,6 +63,7 @@ mod edit_selection;
 mod edit_texture;
 mod edit_texture_align;
 mod edit_tool;
+mod edit_wearable;
 mod emoji_complete;
 mod emoji_picker;
 mod environment;
@@ -888,6 +890,8 @@ fn run_session(
     // modifiable, and save it back to agent inventory. Embedded items are
     // listed (inline clickable rendering waits on the rich-text widget).
     .add_plugins(crate::edit_notecard::EditNotecardPlugin)
+    .add_plugins(crate::edit_wearable::EditWearablePlugin)
+    .add_plugins(crate::edit_material_asset::EditMaterialAssetPlugin)
     // The LSL script editor floater (viewer-lsl-editor-save-compile): open a
     // script from agent or task inventory, read it, edit its source when
     // modifiable, and save it back — which the simulator compiles, its result

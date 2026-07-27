@@ -2,7 +2,7 @@
 id: viewer-appearance-editor-shell
 title: Appearance editor shell — wearable editing mode, params, save
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-22) — no task covered editing wearables
   (the item context menu's "Edit" entry ships greyed)
 refs: [viewer-inventory-context-actions, viewer-inventory-new-wearables]
@@ -26,3 +26,13 @@ COF. Per-slot editors are their own tasks:
 Reference (Firestorm, read-only): `llfloatercustomize.cpp` (vintage) /
 `llpaneleditwearable.cpp`, `llagentwearables.cpp` (saveWearable),
 `llviewerwearable.cpp`.
+
+**Shipped 2026-07-27.** The appearance-editor floater (`edit_wearable.rs`) is
+the editing mode for every worn wearable: per-slot visual-param sliders, texture
+pickers, a clothing tint swatch, live preview through the existing morph/bake
+pipeline, and Save (in-place) / Save As / Revert. Save writes the edited
+`.wearable` back onto the same item over the re-added legacy UDP transaction
+upload (`Command::SaveInventoryAsset` → `AssetUploadRequest` inline / Xfer for
+large assets, plus a bound `UpdateInventoryItem`); `sl-avatar` gained a
+`WearableAsset::to_text` serializer. Wired to the inventory "Edit" action
+(un-greyed for worn wearables). Verified live on OpenSim.

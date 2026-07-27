@@ -2,7 +2,7 @@
 id: viewer-pbr-material-editor
 title: PBR / GLTF material editor
 topic: viewer
-status: ready
+status: done
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-texture-picker, viewer-ui-color-picker]
 refs: [viewer-prim-texture-editing, viewer-image-upload]
@@ -41,3 +41,13 @@ window rather than the inline Texture-tab section), a real **material picker**
 (folded into [[viewer-inventory-materials-not-shown]]), the
 material-on-a-sphere **preview** ([[viewer-material-swatch-sphere-preview]]),
 and **auto-assigning** a just-Saved material back onto the selected face.
+
+**Shipped 2026-07-27** — the dedicated material-editor floater
+(`edit_material_asset.rs`): a standalone window opened from a new inventory
+"Edit" on a material item, combining the base / metallic-roughness / normal /
+emissive texture pickers, base + emissive tint swatches, metallic / roughness /
+cutoff sliders, and the alpha-mode / double-sided controls, on a live preview
+sphere, saving back over `UpdateMaterialAgentInventory`. Verified live on aditi
+(OpenSim has no PBR materials). The real material *picker* and auto-assigning a
+just-saved material onto a face remain their own follow-ups
+([[viewer-inventory-materials-not-shown]], [[viewer-prim-texture-editing]]).

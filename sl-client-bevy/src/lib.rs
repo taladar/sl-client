@@ -232,11 +232,12 @@ pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BodyPhysics,
     BodyPhysicsState, BoneDeform, CollisionVolume, ColorOp, ColorRamp, HAND_POSE_MORPH_PARAMS,
     Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights, MorphedMesh,
-    PHYSICS_MORPH_PARAMS, ParamError, PartMorphMask, PhysicsDrivenParam, PhysicsMotion,
-    PhysicsMotionConfig, PhysicsSettings, RUNTIME_MORPH_PARAMS, ResolvedParams,
-    SkeletalDeformations, Skeleton, SkeletonError, VisualParam, VisualParams, VolumeDeform,
-    VolumeDeformations, VolumeMorph, WearableAsset, WearableError, combine_layer_color,
-    global_color, global_color_params, hand_pose_morph_param, is_runtime_morph_param,
+    PHYSICS_MORPH_PARAMS, ParamEffect, ParamError, ParamGroup, ParamSex, PartMorphMask,
+    PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings, RUNTIME_MORPH_PARAMS,
+    ResolvedParams, SaleType as WearableSaleType, SkeletalDeformations, Skeleton, SkeletonError,
+    VisualParam, VisualParams, VolumeDeform, VolumeDeformations, VolumeMorph, WearableAsset,
+    WearableError, WearablePermissions, combine_layer_color, global_color, global_color_params,
+    hand_pose_morph_param, is_runtime_morph_param,
 };
 
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
@@ -1211,6 +1212,16 @@ fn advance_running(
             } => {
                 session
                     .update_inventory_item(item, *transaction_id, now)
+                    .ok();
+            }
+            Command::SaveInventoryAsset {
+                item,
+                asset_type,
+                transaction_id,
+                data,
+            } => {
+                session
+                    .save_inventory_asset(item, *asset_type, data.clone(), *transaction_id, now)
                     .ok();
             }
             Command::MoveInventoryItem {

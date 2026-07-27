@@ -1397,6 +1397,19 @@ pub enum Event {
         /// `None` when the upload produced no inventory item (a baked texture).
         new_inventory_item: Option<Uuid>,
     },
+    /// A legacy transaction asset upload finished — the completion of a
+    /// [`Session::save_inventory_asset`](crate::Session::save_inventory_asset)
+    /// (the `AssetUploadComplete` message). Distinct from
+    /// [`AssetUploaded`](Self::AssetUploaded), which reports the modern CAPS
+    /// uploader: this reports the UDP path that saves an edited asset back onto
+    /// its existing inventory item. The item's asset id is bound separately by
+    /// the accompanying `UpdateInventoryItem`, so no inventory-item id is carried.
+    InventoryAssetSaved {
+        /// The stored asset's UUID (`combine(transaction_id, secure_session_id)`).
+        asset_id: Uuid,
+        /// Whether the simulator accepted and stored the asset.
+        success: bool,
+    },
     /// A CAPS asset upload failed: the capability POST returned an error state,
     /// omitted the uploader URL, or the HTTP request failed. Carries a
     /// human-readable reason (the grid's error message when one was supplied).

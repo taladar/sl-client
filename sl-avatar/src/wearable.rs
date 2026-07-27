@@ -194,6 +194,117 @@ impl WearableAsset {
         avatar_texture::layer_wearable_type(slot) == Some(self.wearable_type)
             && self.layer_texture(slot).is_some()
     }
+
+    /// Serialize this asset back into the `LLWearable` text form, mirroring the
+    /// reference viewer's `LLWearable::exportStream`: the version header, the
+    /// name line, the permissions and sale-info blocks from `perms`, then the
+    /// `type`, `parameters`, and `textures` sections. The output round-trips
+    /// through [`parse`](Self::parse) (the appearance editor's Save path authors
+    /// the edited asset with this).
+    ///
+    /// The permissions / sale-info blocks are not retained on parse (a bake does
+    /// not need them), so they are supplied by the caller — the appearance editor
+    /// takes them from the wearable's inventory item, as the reference does.
+    #[must_use]
+    pub fn to_text(&self, perms: &WearablePermissions) -> String {
+        use std::fmt::Write as _;
+        let mut text = String::new();
+        let _written = writeln!(text, "LLWearable version {}", self.version);
+        let _written = writeln!(text, "{}", self.name);
+        let _written = writeln!(text);
+        let _written = writeln!(text, "\tpermissions 0");
+        let _written = writeln!(text, "\t{{");
+        let _written = writeln!(text, "\t\tbase_mask\t{:08x}", perms.base_mask);
+        let _written = writeln!(text, "\t\towner_mask\t{:08x}", perms.owner_mask);
+        let _written = writeln!(text, "\t\tgroup_mask\t{:08x}", perms.group_mask);
+        let _written = writeln!(text, "\t\teveryone_mask\t{:08x}", perms.everyone_mask);
+        let _written = writeln!(text, "\t\tnext_owner_mask\t{:08x}", perms.next_owner_mask);
+        let _written = writeln!(text, "\t\tcreator_id\t{}", perms.creator_id);
+        let _written = writeln!(text, "\t\towner_id\t{}", perms.owner_id);
+        let _written = writeln!(text, "\t\tlast_owner_id\t{}", perms.last_owner_id);
+        let _written = writeln!(text, "\t\tgroup_id\t{}", perms.group_id);
+        let _written = writeln!(text, "\t}}");
+        let _written = writeln!(text, "\tsale_info\t0");
+        let _written = writeln!(text, "\t{{");
+        let _written = writeln!(text, "\t\tsale_type\t{}", perms.sale_type.wire());
+        let _written = writeln!(text, "\t\tsale_price\t{}", perms.sale_price);
+        let _written = writeln!(text, "\t}}");
+        let _written = writeln!(text, "type {}", self.wearable_type.to_code());
+        let _written = writeln!(text, "parameters {}", self.params.len());
+        for (id, weight) in &self.params {
+            let _written = writeln!(text, "{id} {weight}");
+        }
+        let _written = writeln!(text, "textures {}", self.textures.len());
+        for (te, id) in &self.textures {
+            let _written = writeln!(text, "{te} {id}");
+        }
+        text
+    }
+}
+
+/// The permissions and sale-info a [`WearableAsset::to_text`] writes into the
+/// `LLWearable` header blocks. These are not part of the bake-relevant state
+/// [`WearableAsset`] retains, so the appearance editor supplies them from the
+/// wearable's inventory item on Save (the reference viewer's
+/// `LLWearable::exportStream` likewise takes the permissions from the item).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `WearablePermissions` reads clearly"
+)]
+pub struct WearablePermissions {
+    /// The base permission mask.
+    pub base_mask: u32,
+    /// The owner permission mask.
+    pub owner_mask: u32,
+    /// The group permission mask.
+    pub group_mask: u32,
+    /// The everyone permission mask.
+    pub everyone_mask: u32,
+    /// The next-owner permission mask.
+    pub next_owner_mask: u32,
+    /// The asset creator.
+    pub creator_id: Uuid,
+    /// The current owner.
+    pub owner_id: Uuid,
+    /// The previous owner (nil if never transferred).
+    pub last_owner_id: Uuid,
+    /// The group the asset is shared with (nil if none).
+    pub group_id: Uuid,
+    /// How the wearable is offered for sale.
+    pub sale_type: SaleType,
+    /// The sale price in L$ (meaningful only when `sale_type` is not
+    /// [`SaleType::Not`]).
+    pub sale_price: i32,
+}
+
+/// How a wearable is offered for sale — the `sale_type` written into the
+/// `sale_info` block, matching the reference viewer's `LLSaleInfo::EForSale`
+/// keywords.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SaleType {
+    /// Not for sale (`not`).
+    #[default]
+    Not,
+    /// The original object is sold and transfers to the buyer (`orig`).
+    Original,
+    /// A copy is sold (`copy`).
+    Copy,
+    /// The object's contents are sold (`cntn`).
+    Contents,
+}
+
+impl SaleType {
+    /// The wire keyword for this sale type (the `sale_type` value).
+    #[must_use]
+    pub const fn wire(self) -> &'static str {
+        match self {
+            Self::Not => "not",
+            Self::Original => "orig",
+            Self::Copy => "copy",
+            Self::Contents => "cntn",
+        }
+    }
 }
 
 /// The next non-blank line from `lines`, mirroring the reference viewer's
@@ -326,6 +437,62 @@ mod tests {
         assert_eq!(asset.wearable_type, WearableType::Alpha);
         assert_eq!(asset.layer_texture(avatar_texture::HEAD_ALPHA), None);
         assert!(!asset.supplies_layer(avatar_texture::HEAD_ALPHA));
+        Ok(())
+    }
+
+    #[test]
+    fn to_text_round_trips_through_parse() -> Result<(), TestError> {
+        use super::{SaleType, WearablePermissions};
+        let asset = WearableAsset::parse(SKIN)?;
+        let perms = WearablePermissions {
+            base_mask: 0x7fff_ffff,
+            owner_mask: 0x7fff_ffff,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0x0008_e000,
+            creator_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111")?,
+            owner_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111")?,
+            last_owner_id: Uuid::nil(),
+            group_id: Uuid::nil(),
+            sale_type: SaleType::Not,
+            sale_price: 10,
+        };
+        let text = asset.to_text(&perms);
+        let reparsed = WearableAsset::parse(&text)?;
+        assert_eq!(reparsed, asset);
+        Ok(())
+    }
+
+    #[test]
+    fn to_text_preserves_edited_params_and_textures() -> Result<(), TestError> {
+        use super::{SaleType, WearablePermissions};
+        let mut asset = WearableAsset::parse(SKIN)?;
+        // Edit a param weight and add a second texture layer, as the editor would.
+        let _prev = asset.params.insert(108, 0.75);
+        let new_tex = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")?;
+        let _prev = asset.textures.insert(
+            u32::try_from(avatar_texture::UPPER_BODYPAINT).unwrap_or_default(),
+            new_tex,
+        );
+        let perms = WearablePermissions {
+            base_mask: 0x7fff_ffff,
+            owner_mask: 0x7fff_ffff,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0,
+            creator_id: Uuid::nil(),
+            owner_id: Uuid::nil(),
+            last_owner_id: Uuid::nil(),
+            group_id: Uuid::nil(),
+            sale_type: SaleType::Copy,
+            sale_price: 0,
+        };
+        let reparsed = WearableAsset::parse(&asset.to_text(&perms))?;
+        assert_eq!(reparsed.params.get(&108), Some(&0.75));
+        assert_eq!(
+            reparsed.layer_texture(avatar_texture::UPPER_BODYPAINT),
+            Some(new_tex)
+        );
         Ok(())
     }
 
