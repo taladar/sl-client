@@ -2,7 +2,7 @@
 id: viewer-social-group-extras
 title: Group profile extras — land/money, experiences, bans, create/invite
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-social-group-profile]
 ---

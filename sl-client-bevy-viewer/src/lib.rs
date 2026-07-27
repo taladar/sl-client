@@ -75,6 +75,7 @@ mod flycam_ui;
 pub mod gallery;
 mod gizmos;
 mod ground;
+mod group_profile;
 mod groups;
 mod hand_pose;
 mod hud;
@@ -239,6 +240,7 @@ use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::gizmos::EditGizmoPlugin;
+use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
@@ -1032,6 +1034,7 @@ fn run_session(
     // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
     // content slot it fills.
     .add_plugins(GroupsPlugin)
+    .add_plugins(GroupProfilePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

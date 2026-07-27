@@ -31,21 +31,25 @@
 //! picker); a save keeps the existing image ids.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash as _, Hasher as _};
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
+use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarThumb};
 use sl_client_bevy::{
     AgentKey, AvatarClassified, AvatarGroupMembership, AvatarPick, AvatarProperties,
     ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, Command, FriendKey,
-    GlobalCoordinates, LindenAmount, MoneyTransactionType, MuteFlags, MuteType, PickInfo, PickKey,
-    PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
+    GlobalCoordinates, GroupKey, LindenAmount, MoneyTransactionType, MuteFlags, MuteType, PickInfo,
+    PickKey, PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
 };
 
 use crate::avatars::AvatarState;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::group_profile::OpenGroupProfile;
+use crate::groups::GroupsModel;
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
@@ -71,6 +75,25 @@ const DIM_LABEL_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 
 /// A toggle's check glyph colour.
 const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
+
+/// The accent colour for a clickable group name in the 2nd-Life group list.
+const GROUP_LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
+
+/// The 2nd-Life group list's bounded scroll height, in logical pixels.
+const GROUP_LIST_HEIGHT: f32 = 120.0;
+
+/// The group list scrollbar's track thickness, in logical pixels.
+const SCROLLBAR_THICKNESS: f32 = 10.0;
+/// The group list scrollbar's minimum thumb length, in logical pixels.
+const SCROLLBAR_MIN_THUMB: f32 = 24.0;
+/// The group list scrollbar track colour.
+const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
+/// The group list scrollbar thumb colour.
+const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.34, 0.40, 0.52);
+
+/// The longest gap between two clicks on the same group row still counted as a
+/// double-click (which opens the group profile), in seconds.
+const GROUP_DOUBLE_CLICK_SECS: f32 = 0.4;
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -333,6 +356,55 @@ pub(crate) struct ProfileUi {
     classified_desc_field: Option<Entity>,
     /// The new classified's price-for-listing field.
     classified_price_field: Option<Entity>,
+    /// The `own` flag the 2nd Life tab's structure was built for (`None` = not
+    /// built) — that tab is retained and updated in place, never respawned per
+    /// reply.
+    sl_built: Option<bool>,
+    /// Retained value-node handles for the 2nd Life tab.
+    sl_handles: SecondLifeHandles,
+    /// The 2nd Life tab's retained group rows, keyed by group id (reconciled in
+    /// place; a group name resolves in the row, so no respawn).
+    sl_group_rows: Vec<(GroupKey, Entity)>,
+    /// The signature the other five tabs were last built for — each rebuilds only
+    /// when its own content changes (single-source or user-paced), never in the
+    /// reply burst. Indexed by [`ProfileTab::index`].
+    tab_sig: [Option<u64>; 6],
+}
+
+/// Retained handles for the 2nd Life tab. The skeleton (name / key / picture box /
+/// facts + groups + about containers / buttons) is built **once** per subject; the
+/// facts and About are **filled once** when the properties reply lands (so their
+/// translated captions are never re-resolved); the name / partner name / groups
+/// update **in place**.
+#[derive(Debug, Default)]
+struct SecondLifeHandles {
+    /// The avatar name value node (updated when the name resolves).
+    name: Option<Entity>,
+    /// The picture image box (the properties reply requests its texture once).
+    picture: Option<Entity>,
+    /// Whether the picture's texture has been requested.
+    picture_requested: bool,
+    /// The facts column container, filled once when properties arrive.
+    facts: Option<Entity>,
+    /// Whether the facts have been filled.
+    facts_built: bool,
+    /// The partner value node (updated when the partner name resolves).
+    partner: Option<Entity>,
+    /// The groups list container (reconciled in place).
+    groups_container: Option<Entity>,
+    /// The About container (an editable field for own / a read block for another),
+    /// filled once when properties arrive.
+    about: Option<Entity>,
+    /// Whether the About has been filled.
+    about_built: bool,
+    /// The own-profile "show in search" check glyph (updated in place).
+    show_in_search_glyph: Option<Entity>,
+    /// The "no groups" placeholder label, shown while the group list is empty.
+    groups_none: Option<Entity>,
+    /// A signature of the sorted group set the rows were last built for — the rows
+    /// are (re)built only when this changes (a single groups reply → once), so the
+    /// list is not churned per frame while still coming out alphabetically sorted.
+    groups_sig: Option<u64>,
 }
 
 /// A button in the profile floater, naming what it does. One observer
@@ -402,6 +474,7 @@ impl Plugin for AvatarProfilePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProfileState>()
             .init_resource::<ProfileDirty>()
+            .init_resource::<ProfileGroupClick>()
             .add_message::<OpenAvatarProfile>()
             .add_systems(
                 Startup,
@@ -501,6 +574,10 @@ fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
         classified_name_field: None,
         classified_desc_field: None,
         classified_price_field: None,
+        sl_built: None,
+        sl_handles: SecondLifeHandles::default(),
+        sl_group_rows: Vec::new(),
+        tab_sig: [None; 6],
     });
 }
 
@@ -515,14 +592,14 @@ fn open_profile(
     mut state: ResMut<ProfileState>,
     mut dirty: ResMut<ProfileDirty>,
     avatars: Res<AvatarState>,
-    ui: Option<Res<ProfileUi>>,
+    ui: Option<ResMut<ProfileUi>>,
     mut panels: Query<&mut UiPanelShown>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     let Some(open) = opens.read().last().copied() else {
         return;
     };
-    let Some(ui) = ui else {
+    let Some(mut ui) = ui else {
         return;
     };
     let agent = open.agent;
@@ -537,6 +614,11 @@ fn open_profile(
         if avatars.name_of(agent).is_none() {
             sl_commands.write(SlCommand(Command::RequestAvatarNames(vec![agent])));
         }
+        // Invalidate the retained 2nd Life structure and the signature-skip tabs so
+        // each rebuilds for the new subject (a single user-paced teardown, done by
+        // `rebuild_profile_tabs`, never a per-reply respawn).
+        ui.sl_built = None;
+        ui.tab_sig = [None; 6];
     }
     dirty.mark_all();
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
@@ -708,6 +790,7 @@ fn rebuild_profile_tabs(
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     friends: Res<FriendsModel>,
+    groups_model: Res<GroupsModel>,
     mut textures: ResMut<TextureManager>,
     children: Query<&Children>,
     mut texts: Query<&mut Text>,
@@ -750,16 +833,41 @@ fn rebuild_profile_tabs(
         let Some(panel) = ui.tabs.get(tab.index()).copied() else {
             continue;
         };
-        despawn_children(&children, &mut commands, panel);
-        match tab {
-            ProfileTab::SecondLife => build_second_life_tab(
+        // The 2nd Life tab is retained: its skeleton is built once per subject and
+        // its values update in place — it is fed by several near-simultaneous
+        // replies (properties + groups + partner name), so a per-reply respawn is
+        // exactly the same-frame build+teardown that races bevy_flair.
+        if tab == ProfileTab::SecondLife {
+            if ui.sl_built != Some(own) {
+                despawn_children(&children, &mut commands, panel);
+                ui.sl_handles = SecondLifeHandles::default();
+                ui.sl_group_rows.clear();
+                build_second_life_structure(&mut commands, panel, &build, &mut ui);
+                ui.sl_built = Some(own);
+            }
+            update_second_life(
                 &mut commands,
-                panel,
                 &build,
                 &mut state,
                 &mut ui,
                 &mut textures,
-            ),
+                &mut texts,
+                &groups_model,
+            );
+            continue;
+        }
+        // The other five tabs are single-source (properties / notes) or user-paced
+        // (a pick / classified selection): rebuild only when the tab's content
+        // signature actually changes, so the reply burst never respawns them.
+        let sig = tab_signature(tab, &state, own);
+        if ui.tab_sig.get(tab.index()).copied().flatten() == Some(sig) {
+            continue;
+        }
+        if let Some(slot) = ui.tab_sig.get_mut(tab.index()) {
+            *slot = Some(sig);
+        }
+        despawn_children(&children, &mut commands, panel);
+        match tab {
             ProfileTab::Web => build_web_tab(&mut commands, panel, &build, &state, &mut ui),
             ProfileTab::Picks => build_picks_tab(
                 &mut commands,
@@ -786,7 +894,82 @@ fn rebuild_profile_tabs(
                 &mut textures,
             ),
             ProfileTab::Notes => build_notes_tab(&mut commands, panel, &state, &mut ui),
+            ProfileTab::SecondLife => {}
         }
+    }
+}
+
+/// A content signature for a signature-skipped tab: the tab is despawned+rebuilt
+/// only when this changes, so the reply burst never respawns it. Covers everything
+/// the tab renders (so a real change still rebuilds).
+fn tab_signature(tab: ProfileTab, state: &ProfileState, own: bool) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    own.hash(&mut hasher);
+    match tab {
+        ProfileTab::SecondLife => {}
+        ProfileTab::Web => {
+            state
+                .properties
+                .as_ref()
+                .map(|props| props.profile_url.clone())
+                .hash(&mut hasher);
+        }
+        ProfileTab::FirstLife => {
+            if let Some(props) = state.properties.as_ref() {
+                props.fl_about_text.hash(&mut hasher);
+                props.fl_image_id.uuid().hash(&mut hasher);
+            }
+        }
+        ProfileTab::Notes => state.notes.is_some().hash(&mut hasher),
+        ProfileTab::Picks => {
+            state.selected_pick.hash(&mut hasher);
+            for pick in state.picks.iter().flatten() {
+                pick.pick_id.uuid().hash(&mut hasher);
+                pick.name.hash(&mut hasher);
+            }
+            if let Some(pick) = state.selected_pick_entry() {
+                state
+                    .pick_info
+                    .contains_key(&pick.pick_id)
+                    .hash(&mut hasher);
+                state
+                    .pick_use_current
+                    .contains(&pick.pick_id)
+                    .hash(&mut hasher);
+            }
+        }
+        ProfileTab::Classifieds => {
+            state.selected_classified.hash(&mut hasher);
+            hash_classified_draft(state.new_classified.as_ref(), &mut hasher);
+            for classified in state.classifieds.iter().flatten() {
+                classified.classified_id.uuid().hash(&mut hasher);
+                classified.name.hash(&mut hasher);
+            }
+            if let Some(classified) = state.selected_classified_entry() {
+                let id = classified.classified_id;
+                state.classified_info.contains_key(&id).hash(&mut hasher);
+                state.classified_use_current.contains(&id).hash(&mut hasher);
+                hash_classified_draft(state.classified_drafts.get(&id), &mut hasher);
+            }
+        }
+    }
+    hasher.finish()
+}
+
+/// Fold a classified edit draft (category / mature / auto-renew) into the tab
+/// signature so its cycle / toggle edits rebuild the detail.
+fn hash_classified_draft(
+    draft: Option<&ClassifiedDraft>,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+) {
+    match draft {
+        Some(draft) => {
+            true.hash(hasher);
+            draft.category.to_string().hash(hasher);
+            draft.mature.hash(hasher);
+            draft.auto_renew.hash(hasher);
+        }
+        None => false.hash(hasher),
     }
 }
 
@@ -820,24 +1003,24 @@ fn despawn_children(children: &Query<&Children>, commands: &mut Commands, parent
     }
 }
 
-/// Build the 2nd Life tab: name / key / picture / status / account / partner /
-/// groups / about, then the action buttons (other) or Save controls (own).
-fn build_second_life_tab(
+/// Build the 2nd Life tab's fixed skeleton once for `own`: name / key / picture box
+/// / empty facts + groups + about containers / the action or Save buttons. The
+/// facts and About are filled once by [`fill_second_life_from_properties`]; the
+/// name / partner / groups update in place. Nothing here is respawned per reply.
+fn build_second_life_structure(
     commands: &mut Commands,
     panel: Entity,
     build: &BuildContext,
-    state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
 ) {
     ui.about_field = None;
     ui.pay_amount_field = None;
     let name_row = spawn_labeled_row(commands, panel, "profile-name");
-    spawn_value_label(commands, name_row, build.name_of(build.target), LABEL_COLOR);
+    ui.sl_handles.name = Some(spawn_value_node(commands, name_row, LABEL_COLOR));
     let key_row = spawn_labeled_row(commands, panel, "profile-key");
     spawn_value_label(commands, key_row, build.target.to_string(), DIM_LABEL_COLOR);
 
-    // Picture beside the status / account facts, as the reference lays it out.
+    // Picture beside the (initially empty) facts column, as the reference lays out.
     let picture_row = commands
         .spawn((
             Node {
@@ -847,112 +1030,97 @@ fn build_second_life_tab(
             ChildOf(panel),
         ))
         .id();
-    let image_id = state.properties.as_ref().map(|props| props.image_id);
-    spawn_profile_image(commands, picture_row, image_id, state, textures);
-    let facts = commands
-        .spawn((
-            Node {
-                ..column(Val::Px(4.0))
-            },
-            ChildOf(picture_row),
-        ))
-        .id();
-    if let Some(props) = state.properties.clone() {
-        spawn_key_label(
-            commands,
-            facts,
-            online_caption_key(props.flags),
-            LABEL_COLOR,
-        );
-        if !props.born_on.is_empty() {
-            let born_row = spawn_labeled_row(commands, facts, "profile-birthdate");
-            spawn_value_label(commands, born_row, props.born_on.clone(), LABEL_COLOR);
-        }
-        let account_row = spawn_labeled_row(commands, facts, "profile-account");
-        match account_caption(&props.charter_member) {
-            AccountCaption::Key(key) => spawn_key_label(commands, account_row, key, LABEL_COLOR),
-            AccountCaption::Literal(text) => {
-                spawn_value_label(commands, account_row, text, LABEL_COLOR);
-            }
-        }
-        spawn_key_label(
-            commands,
-            facts,
-            payment_caption_key(props.flags),
-            DIM_LABEL_COLOR,
-        );
-        let partner_row = spawn_labeled_row(commands, facts, "profile-partner");
-        match props.partner_id {
-            Some(partner) => {
-                spawn_value_label(commands, partner_row, build.name_of(partner), LABEL_COLOR);
-            }
-            None => spawn_key_label(
-                commands,
-                partner_row,
-                "profile-partner-none",
-                DIM_LABEL_COLOR,
-            ),
-        }
-    } else {
-        spawn_key_label(commands, facts, "profile-loading", DIM_LABEL_COLOR);
-    }
+    ui.sl_handles.picture = Some(spawn_image_box(
+        commands,
+        picture_row,
+        Vec2::splat(PROFILE_IMAGE_EDGE),
+    ));
+    ui.sl_handles.facts = Some(
+        commands
+            .spawn((
+                Node {
+                    ..column(Val::Px(4.0))
+                },
+                ChildOf(picture_row),
+            ))
+            .id(),
+    );
 
-    // Groups.
+    // Groups — a bounded, scrollable, full-width list of clickable group names
+    // (double-click opens the group profile) with a visible scrollbar beside it, so
+    // a long membership list does not push the rest of the tab down
+    // (`viewer-avatar-profile-group-list`).
     spawn_section_label(commands, panel, "profile-groups");
-    let group_list = commands
+    let groups_row = commands
         .spawn((
             Node {
-                max_height: Val::Px(90.0),
-                overflow: Overflow::clip(),
-                ..column(Val::Px(2.0))
+                width: Val::Percent(100.0),
+                max_height: Val::Px(GROUP_LIST_HEIGHT),
+                align_items: AlignItems::Stretch,
+                ..row(Val::Px(0.0))
             },
             ChildOf(panel),
         ))
         .id();
-    match state.groups.as_deref() {
-        Some([]) | None => {
-            spawn_key_label(commands, group_list, "profile-groups-none", DIM_LABEL_COLOR);
-        }
-        Some(groups) => {
-            for group in groups {
-                spawn_value_label(commands, group_list, group.group_name.clone(), LABEL_COLOR);
-            }
-        }
-    }
-
-    // About.
-    spawn_section_label(commands, panel, "profile-about");
-    let about = state
-        .properties
-        .as_ref()
-        .map(|props| props.about_text.clone())
-        .unwrap_or_default();
-    if build.own {
-        ui.about_field = Some(spawn_text_input(
-            commands,
-            panel,
-            &TextInputSpec {
-                initial: about,
-                font_size: PROFILE_FONT_SIZE,
-                visible_lines: 5.0,
-                tab_index: 2,
-                max_characters: Some(510),
-                ..TextInputSpec::new("profile-about", TextInputKind::Multiline)
+    let groups_container = commands
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
+                ..column(Val::Px(1.0))
             },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
+            ScrollPosition::default(),
+            crate::ui_tab::TabViewport { vertical: true },
+            Name::new("profile-groups-list"),
+            ChildOf(groups_row),
+        ))
+        .id();
+    ui.sl_handles.groups_container = Some(groups_container);
+    // A visible vertical scrollbar driving the group list.
+    commands
+        .spawn((
+            Scrollbar {
+                target: groups_container,
+                orientation: ControlOrientation::Vertical,
+                min_thumb_length: SCROLLBAR_MIN_THUMB,
+            },
+            Node {
+                width: Val::Px(SCROLLBAR_THICKNESS),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(SCROLLBAR_TRACK_COLOR),
+            Name::new("profile-groups-scrollbar"),
+            ChildOf(groups_row),
+        ))
+        .with_child((
+            ScrollbarThumb::default(),
+            BackgroundColor(SCROLLBAR_THUMB_COLOR),
         ));
-    } else {
-        spawn_text_block(commands, panel, about);
-    }
+
+    // About — an empty container filled once from properties.
+    spawn_section_label(commands, panel, "profile-about");
+    ui.sl_handles.about = Some(
+        commands
+            .spawn((
+                Node {
+                    ..column(Val::Px(2.0))
+                },
+                ChildOf(panel),
+            ))
+            .id(),
+    );
 
     if build.own {
-        // Show in search + Save / Discard.
-        spawn_check_button(
+        ui.sl_handles.show_in_search_glyph = Some(spawn_check_button(
             commands,
             panel,
             "profile-show-in-search",
             ProfileAction::ToggleShowInSearch,
-            state.show_in_search,
-        );
+            false,
+        ));
         let buttons = spawn_button_row(commands, panel);
         spawn_action_button(
             commands,
@@ -969,7 +1137,6 @@ fn build_second_life_tab(
             4,
         );
     } else {
-        // The reference's action button row.
         let buttons = spawn_button_row(commands, panel);
         spawn_action_button(commands, buttons, "profile-im", ProfileAction::Im, 3);
         spawn_action_button(
@@ -997,14 +1164,10 @@ fn build_second_life_tab(
             );
         }
         spawn_action_button(commands, buttons, "profile-block", ProfileAction::Block, 6);
-        // Placeholders for features this viewer does not have yet.
         spawn_disabled_button(commands, buttons, "profile-find-on-map");
         spawn_disabled_button(commands, buttons, "profile-invite-to-group");
-        // The reference's Share area: the whole floater is the drop target
-        // (`AgentDropTarget` on the root); this hint says so.
         spawn_section_label(commands, panel, "profile-share");
         spawn_key_label(commands, panel, "profile-share-hint", DIM_LABEL_COLOR);
-        // Pay: amount + button.
         let pay_row = spawn_labeled_row(commands, panel, "profile-pay-amount");
         ui.pay_amount_field = Some(spawn_text_input(
             commands,
@@ -1018,6 +1181,207 @@ fn build_second_life_tab(
             },
         ));
         spawn_action_button(commands, pay_row, "profile-pay", ProfileAction::Pay, 8);
+    }
+}
+
+/// Fill the 2nd Life facts + About once, when the properties reply is available —
+/// a single spawn into the persistent containers (never a respawn), so the
+/// translated captions are resolved once and no node is torn down mid-frame.
+fn fill_second_life_from_properties(
+    commands: &mut Commands,
+    build: &BuildContext,
+    state: &mut ProfileState,
+    ui: &mut ProfileUi,
+    textures: &mut TextureManager,
+) {
+    let Some(props) = state.properties.clone() else {
+        return;
+    };
+    // Request the picture texture once.
+    if !ui.sl_handles.picture_requested
+        && let Some(node) = ui.sl_handles.picture
+    {
+        request_ui_texture(commands, Some(props.image_id), node, state, textures);
+        ui.sl_handles.picture_requested = true;
+    }
+    // Facts (once).
+    if !ui.sl_handles.facts_built
+        && let Some(facts) = ui.sl_handles.facts
+    {
+        spawn_key_label(
+            commands,
+            facts,
+            online_caption_key(props.flags),
+            LABEL_COLOR,
+        );
+        if !props.born_on.is_empty() {
+            let born_row = spawn_labeled_row(commands, facts, "profile-birthdate");
+            spawn_value_label(commands, born_row, props.born_on.clone(), LABEL_COLOR);
+        }
+        let account_row = spawn_labeled_row(commands, facts, "profile-account");
+        match account_caption(&props.charter_member) {
+            AccountCaption::Key(key) => spawn_key_label(commands, account_row, key, LABEL_COLOR),
+            AccountCaption::Literal(text) => {
+                spawn_value_label(commands, account_row, text, LABEL_COLOR);
+            }
+        }
+        spawn_key_label(
+            commands,
+            facts,
+            payment_caption_key(props.flags),
+            DIM_LABEL_COLOR,
+        );
+        let partner_row = spawn_labeled_row(commands, facts, "profile-partner");
+        match props.partner_id {
+            Some(partner) => {
+                ui.sl_handles.partner = Some(spawn_value_node(commands, partner_row, LABEL_COLOR));
+                if let Some(node) = ui.sl_handles.partner {
+                    commands
+                        .entity(node)
+                        .insert(Text::new(build.name_of(partner)));
+                }
+            }
+            None => spawn_key_label(
+                commands,
+                partner_row,
+                "profile-partner-none",
+                DIM_LABEL_COLOR,
+            ),
+        }
+        ui.sl_handles.facts_built = true;
+    }
+    // About (once).
+    if !ui.sl_handles.about_built
+        && let Some(about) = ui.sl_handles.about
+    {
+        if build.own {
+            ui.about_field = Some(spawn_text_input(
+                commands,
+                about,
+                &TextInputSpec {
+                    initial: props.about_text.clone(),
+                    font_size: PROFILE_FONT_SIZE,
+                    visible_lines: 5.0,
+                    tab_index: 2,
+                    max_characters: Some(510),
+                    ..TextInputSpec::new("profile-about", TextInputKind::Multiline)
+                },
+            ));
+        } else {
+            spawn_text_block(commands, about, props.about_text.clone());
+        }
+        ui.sl_handles.about_built = true;
+    }
+}
+
+/// Update the 2nd Life tab's in-place values from the state — the name and partner
+/// name (resolve async), fill facts / About once from properties, and reconcile the
+/// group rows. No respawn of built content.
+fn update_second_life(
+    commands: &mut Commands,
+    build: &BuildContext,
+    state: &mut ProfileState,
+    ui: &mut ProfileUi,
+    textures: &mut TextureManager,
+    texts: &mut Query<&mut Text>,
+    groups_model: &GroupsModel,
+) {
+    set_value_node(texts, ui.sl_handles.name, &build.name_of(build.target));
+    fill_second_life_from_properties(commands, build, state, ui, textures);
+    if let Some(partner) = state.properties.as_ref().and_then(|props| props.partner_id) {
+        set_value_node(texts, ui.sl_handles.partner, &build.name_of(partner));
+    }
+    set_check_glyph(
+        texts,
+        ui.sl_handles.show_in_search_glyph,
+        state.show_in_search,
+    );
+    // The **own** profile lists the full membership set (the reference shows your
+    // groups even when none are flagged "show in my profile"); **another** avatar's
+    // profile shows only the groups they list, from `AvatarGroupsReply`. Either way
+    // skip the nil-group-id padding entry the grid sends for a group-less avatar.
+    let nil_group = GroupKey::from(Uuid::nil());
+    let list: Option<Vec<(GroupKey, String)>> = if build.own {
+        Some(
+            groups_model
+                .group_ids()
+                .into_iter()
+                .map(|id| {
+                    (
+                        id,
+                        groups_model.group_name(id).unwrap_or_default().to_owned(),
+                    )
+                })
+                .collect(),
+        )
+    } else {
+        state.groups.as_ref().map(|groups| {
+            groups
+                .iter()
+                .filter(|group| group.group_id != nil_group)
+                .map(|group| (group.group_id, group.group_name.clone()))
+                .collect()
+        })
+    };
+    reconcile_profile_groups(commands, list.as_deref(), ui);
+}
+
+/// Reconcile the 2nd Life group rows in place from the resolved `(id, name)` list
+/// (`None` = not loaded yet): sorted alphabetically, (re)built only when the set
+/// changes (built once for a whole reply), never a per-frame respawn.
+fn reconcile_profile_groups(
+    commands: &mut Commands,
+    groups: Option<&[(GroupKey, String)]>,
+    ui: &mut ProfileUi,
+) {
+    let Some(container) = ui.sl_handles.groups_container else {
+        return;
+    };
+    let Some(groups) = groups else {
+        return;
+    };
+    // Sort alphabetically (case-folded, id tie-break), as the reference does.
+    let mut sorted: Vec<&(GroupKey, String)> = groups.iter().collect();
+    sorted.sort_by(|left, right| {
+        left.1
+            .to_lowercase()
+            .cmp(&right.1.to_lowercase())
+            .then_with(|| left.0.uuid().cmp(&right.0.uuid()))
+    });
+    // Rebuild only when the sorted set changes — a whole reply builds the rows once;
+    // nothing is despawned per frame.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (id, name) in &sorted {
+        id.uuid().hash(&mut hasher);
+        name.hash(&mut hasher);
+    }
+    let sig = hasher.finish();
+    if ui.sl_handles.groups_sig == Some(sig) {
+        return;
+    }
+    ui.sl_handles.groups_sig = Some(sig);
+    for (_, row) in ui.sl_group_rows.drain(..) {
+        if let Ok(mut entity) = commands.get_entity(row) {
+            entity.despawn();
+        }
+    }
+    if let Some(none_label) = ui.sl_handles.groups_none.take()
+        && let Ok(mut entity) = commands.get_entity(none_label)
+    {
+        entity.despawn();
+    }
+    if sorted.is_empty() {
+        ui.sl_handles.groups_none = Some(spawn_key_label_node(
+            commands,
+            container,
+            "profile-groups-none",
+            DIM_LABEL_COLOR,
+        ));
+        return;
+    }
+    for (id, name) in sorted {
+        let row = spawn_profile_group_row(commands, container, *id, name);
+        ui.sl_group_rows.push((*id, row));
     }
 }
 
@@ -1660,15 +2024,51 @@ fn spawn_value_label(commands: &mut Commands, parent: Entity, value: String, col
     ));
 }
 
+/// An empty value label, returning it so a value-update path can set its text in
+/// place ([`set_value_node`]).
+fn spawn_value_node(commands: &mut Commands, parent: Entity, color: Color) -> Entity {
+    commands
+        .spawn((
+            Text::new(String::new()),
+            UiFont::Sans.at(PROFILE_FONT_SIZE),
+            TextColor(color),
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id()
+}
+
+/// Set a retained value node's text in place (only on change).
+fn set_value_node(texts: &mut Query<&mut Text>, node: Option<Entity>, value: &str) {
+    if let Some(node) = node
+        && let Ok(mut text) = texts.get_mut(node)
+        && text.0 != value
+    {
+        value.clone_into(&mut text.0);
+    }
+}
+
 /// A translated label.
 fn spawn_key_label(commands: &mut Commands, parent: Entity, key: &'static str, color: Color) {
-    commands.spawn((
-        Text::default(),
-        Translated::new(key),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(color),
-        ChildOf(parent),
-    ));
+    spawn_key_label_node(commands, parent, key, color);
+}
+
+/// A translated label, returning the node so a caller can remove it later.
+fn spawn_key_label_node(
+    commands: &mut Commands,
+    parent: Entity,
+    key: &'static str,
+    color: Color,
+) -> Entity {
+    commands
+        .spawn((
+            Text::default(),
+            Translated::new(key),
+            UiFont::Sans.at(PROFILE_FONT_SIZE),
+            TextColor(color),
+            ChildOf(parent),
+        ))
+        .id()
 }
 
 /// A wrapped read-only text block (about texts, descriptions).
@@ -1790,14 +2190,15 @@ fn spawn_cycle_button(
         .id()
 }
 
-/// A clickable check-glyph toggle dispatching `action`.
+/// A clickable check-glyph toggle dispatching `action`, returning its glyph text
+/// node so the checked state can be updated in place ([`set_check_glyph`]).
 fn spawn_check_button(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,
     action: ProfileAction,
     on: bool,
-) {
+) -> Entity {
     let host = commands
         .spawn((
             Button,
@@ -1812,13 +2213,15 @@ fn spawn_check_button(
         ))
         .observe(on_profile_action)
         .id();
-    commands.spawn((
-        Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
-        UiFont::Sans.at(PROFILE_FONT_SIZE),
-        TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR }),
-        Pickable::IGNORE,
-        ChildOf(host),
-    ));
+    let glyph = commands
+        .spawn((
+            Text::new(if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH }),
+            UiFont::Sans.at(PROFILE_FONT_SIZE),
+            TextColor(if on { CHECK_COLOR } else { DIM_LABEL_COLOR }),
+            Pickable::IGNORE,
+            ChildOf(host),
+        ))
+        .id();
     commands.spawn((
         Text::default(),
         Translated::new(label_key),
@@ -1827,6 +2230,19 @@ fn spawn_check_button(
         Pickable::IGNORE,
         ChildOf(host),
     ));
+    glyph
+}
+
+/// Set a check-button glyph's checked state in place (no respawn).
+fn set_check_glyph(texts: &mut Query<&mut Text>, glyph: Option<Entity>, on: bool) {
+    if let Some(glyph) = glyph
+        && let Ok(mut text) = texts.get_mut(glyph)
+    {
+        let wanted = if on { CHECKED_GLYPH } else { UNCHECKED_GLYPH };
+        if text.0 != wanted {
+            wanted.clone_into(&mut text.0);
+        }
+    }
 }
 
 /// A profile picture: request the texture and show a placeholder until it
@@ -1891,6 +2307,78 @@ fn request_ui_texture(
     spawn_key_label(commands, node, "profile-loading", DIM_LABEL_COLOR);
     textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
     state.pending_textures.push((key, node));
+}
+
+/// A clickable group row in the 2nd-Life tab's group list, carrying the group it
+/// opens the profile for.
+#[derive(Component, Debug, Clone, Copy)]
+struct ProfileGroupRow(GroupKey);
+
+/// The last group-row press, for detecting a double-click (two presses on the same
+/// group within [`GROUP_DOUBLE_CLICK_SECS`] open its profile). Tracked by group id.
+#[derive(Resource, Debug, Default)]
+struct ProfileGroupClick {
+    /// The group the last press landed on, if any.
+    group: Option<GroupKey>,
+    /// When that press landed, in seconds since startup.
+    time: f32,
+}
+
+/// Spawn one clickable group row — the group name as an accent label that opens
+/// the group profile floater on click (`viewer-avatar-profile-group-list`). A bare
+/// `Text` node, matching the profile's other value labels that lay out correctly
+/// (a `Button` wrapper + an insignia thumbnail collapsed the row to the fixed
+/// thumbnail box — the insignia is deferred to the follow-up).
+fn spawn_profile_group_row(
+    commands: &mut Commands,
+    parent: Entity,
+    group_id: GroupKey,
+    group_name: &str,
+) -> Entity {
+    let name = if group_name.is_empty() {
+        format!("({group_id})")
+    } else {
+        group_name.to_owned()
+    };
+    commands
+        .spawn((
+            Text::new(name),
+            UiFont::Sans.at(PROFILE_FONT_SIZE),
+            TextColor(GROUP_LINK_COLOR),
+            ProfileGroupRow(group_id),
+            Pickable::default(),
+            Name::new("profile-group-row"),
+            ChildOf(parent),
+        ))
+        .observe(on_profile_group_open)
+        .id()
+}
+
+/// Open the group profile floater when a profile group row is **double-clicked**
+/// (two primary presses on the same group within [`GROUP_DOUBLE_CLICK_SECS`]) —
+/// matching the reference's group-list double-click.
+fn on_profile_group_open(
+    press: On<Pointer<Press>>,
+    rows: Query<&ProfileGroupRow>,
+    time: Res<Time>,
+    mut tracker: ResMut<ProfileGroupClick>,
+    mut groups: MessageWriter<OpenGroupProfile>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(row) = rows.get(press.entity) else {
+        return;
+    };
+    let group = row.0;
+    let now = time.elapsed_secs();
+    if tracker.group == Some(group) && now - tracker.time <= GROUP_DOUBLE_CLICK_SECS {
+        groups.write(OpenGroupProfile { group });
+        tracker.group = None;
+    } else {
+        tracker.group = Some(group);
+        tracker.time = now;
+    }
 }
 
 /// The Fluent key for a classified's content type.

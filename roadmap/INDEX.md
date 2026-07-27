@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 35 |
-| ready | 207 |
-| blocked | 107 |
+| ready | 213 |
+| blocked | 106 |
 | in-progress | 8 |
 | bugs | 12 |
-| done | 606 |
+| done | 608 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **999** |
+| **total** | **1006** |
 
 ## ideas (35)
 
@@ -99,7 +99,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (207)
+## ready (213)
 
 ### protocol
 
@@ -211,6 +211,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Collision events to nearby chat
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
   Combat health meter (HealthMessage)
+- [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
+  — Consolidate the per-widget double-click interval constants
 - [`viewer-contact-sets`](ready/viewer-contact-sets.md) — Contact sets — named,
   coloured contact groups (blocked by `viewer-social-people-panel` (done))
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
@@ -253,6 +255,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
+  Detail/property floaters — update values in place, don't rebuild structure
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-generated-chat-notices`](ready/viewer-generated-chat-notices.md) —
@@ -265,6 +269,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `viewer-ui-widget-scaffold` (done))
 - [`viewer-group-chat-snooze`](ready/viewer-group-chat-snooze.md) — Per-group
   chat snooze and group-mute options
+- [`viewer-group-insignia-editing`](ready/viewer-group-insignia-editing.md) —
+  Group profile — set the group insignia
+- [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
+  — Group notices — attach on send, open on receive
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -477,14 +485,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-snapshot-quick-key`](ready/viewer-snapshot-quick-key.md) —
   Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
-- [`viewer-social-group-profile`](ready/viewer-social-group-profile.md) — Group
-  profile floater — general / members / roles / notices (blocked by
-  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
+  profile extras — land/money, experiences, bans, create/invite (blocked by
+  `viewer-social-group-profile` (done))
 - [`viewer-statistics-floater`](ready/viewer-statistics-floater.md) — Statistics
   floater (viewer + sim stats, lag meter) (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-table-cell-ellipsis`](ready/viewer-table-cell-ellipsis.md) — Truncate
+  overflowing table cells with a locale-aware ellipsis
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -514,6 +524,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-table-widget`](ready/viewer-ui-table-widget.md) — Reusable table
+  widget (columns / header / virtualized rows / truncation)
 - [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -595,7 +607,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (107)
+## blocked (106)
 
 ### viewer
 
@@ -831,9 +843,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater`, `viewer-image-upload`)
-- [`viewer-social-group-extras`](blocked/viewer-social-group-extras.md) — Group
-  profile extras — land/money, experiences, bans, create/invite (blocked by
-  `viewer-social-group-profile`)
 - [`viewer-sound-explorer`](blocked/viewer-sound-explorer.md) — Sound explorer —
   nearby sound sources (blocked by `viewer-in-world-sounds`)
 - [`viewer-stream-favorites`](blocked/viewer-stream-favorites.md) — Audio-stream
@@ -951,7 +960,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (606)
+## done (608)
 
 ### protocol
 
@@ -1098,6 +1107,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
   — Smooth the avatar's rendered position (dead-reckoning jitter)
+- [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
+  — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
@@ -1560,6 +1571,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-social-group-profile`](done/viewer-social-group-profile.md) — Group
+  profile floater — general / members / roles / notices (blocked by
+  `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-groups`](done/viewer-social-groups.md) — Groups list (Info /
   IM / Activate / Leave) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))

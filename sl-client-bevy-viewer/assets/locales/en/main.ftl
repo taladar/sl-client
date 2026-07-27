@@ -125,6 +125,89 @@ groups-leave-confirm-prompt = Leave the group "{ $name }"?
 groups-leave-confirm-yes = Leave
 groups-leave-confirm-no = Cancel
 
+## The group profile floater (viewer-social-group-profile) — reached from the
+## Groups list's Info button: General / Members & Roles / Notices.
+
+# The floater title and its three tabs.
+group-profile-title = Group Profile
+group-profile-tab-general = General
+group-profile-tab-members = Members & Roles
+group-profile-tab-notices = Notices
+
+# A "waiting for the reply" placeholder.
+group-profile-loading = (loading)
+# General-tab identity facts.
+group-profile-name = Name:
+group-profile-key = Key:
+group-profile-founder = Founder:
+group-profile-members-roles = Members / Roles:
+group-profile-join-fee = Join fee:
+group-profile-charter = Charter:
+group-profile-no-insignia = (no insignia)
+# General-tab editable identity flags.
+group-profile-open-enrollment = Open enrollment
+group-profile-mature = Mature content
+group-profile-show-in-list = Show in search
+group-profile-save = Save
+# The agent's own membership controls.
+group-profile-my-membership = My membership
+group-profile-receive-notices = Receive notices
+group-profile-list-in-profile = List this group in my profile
+group-profile-active-title = Active title:
+group-profile-join = Join
+group-profile-invite-only = This group is invitation-only.
+
+# The members table column headers.
+group-members-name = Name
+group-members-title = Title
+group-members-contribution = Land
+group-members-status = Status
+# The members count line ({ $loaded } shown of the group's { $total }).
+group-members-count = { $loaded } of { $total } loaded
+# Re-fetch the roster (the first SL fetch is just officers / owners).
+group-members-refresh = Refresh
+
+# The roles column.
+group-roles-header = Roles
+group-role-new = New Role…
+# The selected-member / selected-role details area.
+group-details-hint = Select a member or role for details.
+group-details-close = Close
+group-details-member = Member:
+group-details-roles-of-member = Assigned roles
+group-member-eject = Eject…
+# The selected-role editors.
+group-role-name-label = Name:
+group-role-title-label = Title:
+group-role-desc-label = Description:
+group-role-abilities = Abilities
+group-role-save = Save Role
+group-role-save-powers = Save Abilities
+group-role-delete = Delete Role…
+
+# The named group abilities (roles_constants.h GP_*).
+group-power-member-invite = Invite members to this group
+group-power-member-eject = Eject members from this group
+group-power-member-options = Change open enrollment and the join fee
+group-power-role-create = Create new roles
+group-power-role-delete = Delete roles
+group-power-role-properties = Change a role's name, title and description
+group-power-role-assign-limited = Assign members to assigner's roles
+group-power-role-assign = Assign members to any role
+group-power-role-remove = Remove members from roles
+group-power-role-change-actions = Change a role's abilities
+group-power-change-identity = Change the group's identity
+group-power-land-deed = Deed and buy land for the group
+group-power-notices-send = Send group notices
+group-power-notices-receive = Receive group notices
+
+# The Notices tab.
+group-notice-hint = Select a notice to read it.
+group-notice-subject = Subject:
+group-notice-has-attachment = This notice has an attachment.
+group-notice-compose = Send a notice
+group-notice-send = Send Notice
+
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 # The picker window's title bar.

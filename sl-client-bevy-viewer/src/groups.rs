@@ -15,11 +15,11 @@
 //!
 //! # Scope of this task
 //!
-//! Only the **list** and its **Info / IM / Activate / Leave** actions are built
-//! here. Of those, IM opens the group's chat tab, Activate sets the worn group and
-//! Leave (behind a confirm) leaves it; **Info** is present in the layout but inert
-//! — the group **profile** floater (general / roles / notices, and any role or
-//! membership editing) is a separate, deliberately out-of-scope task.
+//! The **list** and its **Info / IM / Activate / Leave** actions are built here.
+//! IM opens the group's chat tab, Activate sets the worn group and Leave (behind a
+//! confirm) leaves it; **Info** opens the group [profile
+//! floater](crate::group_profile) (general / members / roles / notices), which is
+//! a separate module.
 //!
 //! # Model + ECS mirror
 //!
@@ -54,6 +54,7 @@ use sl_client_bevy::{
 };
 
 use crate::conversations::{ConversationKey, OpenConversation};
+use crate::group_profile::OpenGroupProfile;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::people::PeopleUi;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -94,10 +95,6 @@ const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.30, 0.42, 0.62, 0.55);
 
 /// An action button's background.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
-
-/// An **inert** action button's background — dimmer, so the Info button reads as
-/// present-but-not-yet-wired (its profile floater is a separate task).
-const ACTION_INERT_BACKGROUND: Color = Color::srgb(0.17, 0.20, 0.26);
 
 /// The table header row's background — a recessed strip above the list.
 const HEADER_BACKGROUND: Color = Color::srgb(0.14, 0.17, 0.22);
@@ -164,6 +161,10 @@ const LEAVE_CONFIRM_NO_KEY: &str = "groups-leave-confirm-no";
 pub(crate) struct GroupsModel {
     /// The agent's groups, by group id, mapped to the group's display name.
     groups: BTreeMap<GroupKey, String>,
+    /// Whether the agent accepts notices from each group — retained (unlike the
+    /// display name, which the list needs) for the group profile floater's
+    /// membership toggle, which has no other source for the login-time value.
+    accept_notices: BTreeMap<GroupKey, bool>,
     /// The currently-active (worn) group, if any.
     active: Option<GroupKey>,
     /// Bumped on each mutation; the view compares its last-built value to skip an
@@ -184,11 +185,21 @@ impl GroupsModel {
     /// [`SlSessionEvent::ActiveGroupChanged`]).
     fn apply_memberships(&mut self, memberships: &[GroupMembership]) {
         self.groups.clear();
+        self.accept_notices.clear();
         for membership in memberships {
             self.groups
                 .insert(membership.group_id, membership.group_name.clone());
+            self.accept_notices
+                .insert(membership.group_id, membership.accept_notices);
         }
         self.touch();
+    }
+
+    /// Whether the agent accepts notices from `group`, if the agent is a member —
+    /// the group profile floater's membership toggle seeds from this (the
+    /// login-time value is not otherwise available to a floater opened later).
+    pub(crate) fn accepts_notices(&self, group: GroupKey) -> Option<bool> {
+        self.accept_notices.get(&group).copied()
     }
 
     /// The display name of `group`, if the agent is a member. The build
@@ -216,6 +227,7 @@ impl GroupsModel {
     /// clearing the active marker if it was the active group.
     fn remove(&mut self, group: GroupKey) {
         if self.groups.remove(&group).is_some() {
+            self.accept_notices.remove(&group);
             if self.active == Some(group) {
                 self.active = None;
             }
@@ -287,8 +299,8 @@ struct GroupRow {
 /// A per-group action offered by the action column beside the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GroupAction {
-    /// Open the group's profile — **inert** in this task (the profile floater is a
-    /// separate, out-of-scope job); present so the layout matches the reference.
+    /// Open the group's [profile floater](crate::group_profile) for the selected
+    /// group.
     Info,
     /// Open (and join) the group's IM chat tab.
     Im,
@@ -308,18 +320,13 @@ impl GroupAction {
             Self::Leave => "groups-action-leave",
         }
     }
-
-    /// Whether this action is inert (the Info placeholder) — rendered dimmer and
-    /// wired to no command.
-    const fn is_inert(self) -> bool {
-        matches!(self, Self::Info)
-    }
 }
 
 /// The wire [`Command`] an action produces for `group`, or `None` for the actions
-/// that are not a plain fire-and-forget command: [`GroupAction::Info`] (inert),
-/// and [`GroupAction::Im`] (which opens a conversation tab and starts the session
-/// through separate paths). Pure so the routing is unit-testable.
+/// that are not a plain fire-and-forget command: [`GroupAction::Info`] (which
+/// opens the profile floater via a message) and [`GroupAction::Im`] (which opens a
+/// conversation tab and starts the session through separate paths). Pure so the
+/// routing is unit-testable.
 const fn group_command(action: GroupAction, group: GroupKey) -> Option<Command> {
     match action {
         GroupAction::Info | GroupAction::Im => None,
@@ -602,15 +609,10 @@ fn spawn_groups_header(commands: &mut Commands, list_column: Entity) {
     ));
 }
 
-/// Spawn one action-column button wired to `action`. The inert Info button is
-/// styled dimmer and its observer does nothing (its profile floater is a separate
-/// task); the rest act on the current selection.
+/// Spawn one action-column button wired to `action`, acting on the current
+/// selection: Info opens the profile floater, IM opens the chat tab, Activate
+/// wears the group, and Leave opens a confirm modal.
 fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAction) {
-    let background = if action.is_inert() {
-        ACTION_INERT_BACKGROUND
-    } else {
-        ACTION_BACKGROUND
-    };
     commands
         .spawn((
             Node {
@@ -620,7 +622,7 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAc
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(background),
+            BackgroundColor(ACTION_BACKGROUND),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -640,19 +642,20 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAc
                   selected: Res<SelectedGroup>,
                   mut pending: ResMut<PendingLeaveConfirm>,
                   mut sl: MessageWriter<SlCommand>,
-                  mut open: MessageWriter<OpenConversation>| {
+                  mut open: MessageWriter<OpenConversation>,
+                  mut profile: MessageWriter<OpenGroupProfile>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
-                    return;
-                }
-                // The inert Info button does nothing (yet).
-                if action.is_inert() {
                     return;
                 }
                 let Some(group) = selected.0 else {
                     return;
                 };
                 match action {
+                    // Info opens the subject-bound group profile floater.
+                    GroupAction::Info => {
+                        profile.write(OpenGroupProfile { group });
+                    }
                     // IM opens (and joins) the group's chat tab. Mirrors the
                     // Friends list's IM, which opens a one-to-one tab.
                     GroupAction::Im => open_group_im(group, &mut open, &mut sl),
@@ -661,8 +664,8 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: GroupAc
                     GroupAction::Leave => {
                         pending.0 = Some(group);
                     }
-                    // Activate (and any future direct command) fires immediately.
-                    GroupAction::Info | GroupAction::Activate => {
+                    // Activate fires immediately.
+                    GroupAction::Activate => {
                         if let Some(command) = group_command(action, group) {
                             sl.write(SlCommand(command));
                         }
@@ -1200,8 +1203,8 @@ mod tests {
     }
 
     /// Each action maps to its command: Activate / Leave produce a command, while
-    /// Info (inert) and IM (opens a tab + starts the session elsewhere) produce
-    /// none.
+    /// Info (opens the profile floater via a message) and IM (opens a tab + starts
+    /// the session elsewhere) produce none.
     #[test]
     fn action_command_mapping() {
         let group = GroupKey::from(Uuid::from_u128(7));
@@ -1215,14 +1218,5 @@ mod tests {
             group_command(GroupAction::Leave, group),
             Some(Command::LeaveGroup(_))
         ));
-    }
-
-    /// Only the Info action is inert.
-    #[test]
-    fn only_info_is_inert() {
-        assert!(GroupAction::Info.is_inert());
-        assert!(!GroupAction::Im.is_inert());
-        assert!(!GroupAction::Activate.is_inert());
-        assert!(!GroupAction::Leave.is_inert());
     }
 }
