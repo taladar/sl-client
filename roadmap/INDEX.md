@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 35 |
+| ideas | 56 |
 | ready | 219 |
 | blocked | 128 |
 | in-progress | 8 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 610 |
 | deferred | 18 |
 | wont-do | 6 |
-| **total** | **1036** |
+| **total** | **1057** |
 
-## ideas (35)
+## ideas (56)
 
 ### viewer
 
@@ -98,6 +98,50 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
+
+### server
+
+- [`server-account-service`](ideas/server-account-service.md) — Accounts and
+  identity service
+- [`server-agent-transfer`](ideas/server-agent-transfer.md) — Inter-simulator
+  agent transfer — teleport, crossing, child agents
+- [`server-architecture`](ideas/server-architecture.md) — Grid architecture —
+  topology, service protocol, deployment
+- [`server-asset-service`](ideas/server-asset-service.md) — Asset service —
+  grid-wide content store
+- [`server-bake-service`](ideas/server-bake-service.md) — Server-side appearance
+  bake service
+- [`server-economy-service`](ideas/server-economy-service.md) — Economy service
+  — balances and transactions
+- [`server-estate-service`](ideas/server-estate-service.md) — Estate service —
+  cross-region estate state
+- [`server-experience-service`](ideas/server-experience-service.md) — Experience
+  service — records, permissions, key-value store
+- [`server-friends-service`](ideas/server-friends-service.md) — Friends service
+  — relationships, rights, online fan-out
+- [`server-grid-service`](ideas/server-grid-service.md) — Grid service — region
+  registry and simulator discovery
+- [`server-groups-service`](ideas/server-groups-service.md) — Groups service —
+  membership, roles, notices
+- [`server-inventory-service`](ideas/server-inventory-service.md) — Inventory
+  service — per-agent trees and the library
+- [`server-login-service`](ideas/server-login-service.md) — Standalone login
+  server
+- [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
+  map items
+- [`server-message-routing`](ideas/server-message-routing.md) — Global message
+  routing — IMs, offers, notices across hosts
+- [`server-physics-integration`](ideas/server-physics-integration.md) —
+  Simulator physics integration
+- [`server-presence-service`](ideas/server-presence-service.md) — Presence
+  service — who is online, and where
+- [`server-script-engine`](ideas/server-script-engine.md) — LSL script engine
+- [`server-search-service`](ideas/server-search-service.md) — Search/directory
+  service
+- [`server-simulator-core`](ideas/server-simulator-core.md) — Simulator core —
+  scene authority, persistence, broadcast
+- [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
+  infrastructure — WebRTC media plane
 
 ## ready (219)
 

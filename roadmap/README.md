@@ -51,6 +51,7 @@ roadmap** so existing code comment anchors (e.g. `ROADMAP #23`,
 | `api` | `SL_API_ROAD_MAP.md` | `api-gN`, `api-dfN` |
 | `repl` | `SL_REPL_ROAD_MAP.md` | `repl-<phase><n>` |
 | `aditi` | `KNOWN_ISSUES_ADITI.md` | `aditi-N` |
+| `server` | grid/simulator | `server-<subsystem>` |
 
 ## Task file format
 
