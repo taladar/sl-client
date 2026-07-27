@@ -362,6 +362,18 @@ impl ContentsSelection {
     }
 }
 
+/// How long after a click a second click on the **same** item still counts as a
+/// double-click (the reference's open gesture), in seconds.
+const DOUBLE_CLICK_SECONDS: f32 = 0.4;
+
+/// The most recent contents-row click, so a second click on the same item
+/// within [`DOUBLE_CLICK_SECONDS`] is recognised as a double-click Open.
+#[derive(Resource, Debug, Default)]
+struct ContentsLastClick {
+    /// The item clicked, and the time (seconds since startup) it was clicked.
+    last: Option<(InventoryKey, f32)>,
+}
+
 // ---------------------------------------------------------------------------
 // Pending mutations (per-item optimistic-but-tracked state)
 // ---------------------------------------------------------------------------
@@ -527,6 +539,9 @@ struct ContentsRowParts {
 enum ContentsAction {
     /// Re-fetch the current prim's inventory (invalidate + fetch).
     Refresh,
+    /// Open the selected item in its editor (double-click) — the reference's
+    /// `LLTaskInvFVBridge::openItem`. Only notecards have an editor today.
+    Open,
     /// Create a fresh default script in the prim.
     NewScript,
     /// Rename the selected item.
@@ -554,6 +569,7 @@ impl Plugin for EditContentsPlugin {
         app.init_resource::<TaskInventoryCache>()
             .init_resource::<ContentsViews>()
             .init_resource::<ContentsSelection>()
+            .init_resource::<ContentsLastClick>()
             .init_resource::<PendingMutations>()
             .init_resource::<OpenObjectFloaterState>()
             .init_resource::<ContentsRename>()
@@ -1204,7 +1220,10 @@ fn populate_new_contents_rows(
                 move |press: On<Pointer<Press>>,
                       rows: Query<&VirtualRow>,
                       views: Res<ContentsViews>,
+                      time: Res<Time>,
                       mut selection: ResMut<ContentsSelection>,
+                      mut last_click: ResMut<ContentsLastClick>,
+                      mut requests: MessageWriter<ContentsActionRequest>,
                       mut focus: ResMut<InputFocus>| {
                     if press.button != PointerButton::Primary {
                         return;
@@ -1213,9 +1232,25 @@ fn populate_new_contents_rows(
                         && let Some(index) = row.index
                         && let Some(display) = views.view(surface).rows.get(index)
                     {
-                        selection.set(surface, Some(display.item_id));
+                        let item = display.item_id;
+                        selection.set(surface, Some(item));
                         // Clicking the list focuses it so the wheel scrolls it.
                         focus.set(press.entity, FocusCause::Navigated);
+                        // A second primary click on the same item within the
+                        // double-click window opens it (the reference's openItem).
+                        let now = time.elapsed_secs();
+                        let double = last_click.last.is_some_and(|(prev, at)| {
+                            prev == item && now - at < DOUBLE_CLICK_SECONDS
+                        });
+                        if double {
+                            last_click.last = None;
+                            requests.write(ContentsActionRequest {
+                                surface,
+                                action: ContentsAction::Open,
+                            });
+                        } else {
+                            last_click.last = Some((item, now));
+                        }
                     }
                 },
             );
@@ -1512,6 +1547,7 @@ fn run_contents_actions(
     translator: Translator,
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<LocalChatNotice>,
+    mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
 ) {
     for request in requests.read() {
         let view = views.view(request.surface);
@@ -1521,6 +1557,43 @@ fn run_contents_actions(
         match request.action {
             ContentsAction::Refresh => {
                 reconcile_after_mutation(&mut cache, &mut commands, scoped, full);
+            }
+            ContentsAction::Open => {
+                let Some(item_id) = selection.get(request.surface) else {
+                    continue;
+                };
+                let Some(item) = cache
+                    .get(&full)
+                    .and_then(|entry| entry.items.iter().find(|it| it.item_id == item_id))
+                else {
+                    continue;
+                };
+                // Only notecards have an editor today; other types no-op (the
+                // reference opens each type in its own preview/editor).
+                if item.inv_type != InventoryType::Notecard {
+                    continue;
+                }
+                // A redacted (nil) asset id means the grid withheld it — the item
+                // cannot be fetched, so there is nothing to open.
+                let Some(asset_id) = item.asset_id else {
+                    notices.write(LocalChatNotice::new(
+                        translator.get("build-content-no-modify"),
+                    ));
+                    continue;
+                };
+                // Editable needs BOTH the object's modify and the item's own
+                // modify bit (the reference's two-level rule); otherwise the
+                // notecard opens read-only.
+                let editable = view.perms.can_modify && item_modifiable(item);
+                notecard_opens.write(crate::edit_notecard::OpenNotecard {
+                    name: item.name.clone(),
+                    asset_id: asset_id.uuid(),
+                    editable,
+                    source: crate::edit_notecard::NotecardSource::Task {
+                        task_id: full,
+                        item_id,
+                    },
+                });
             }
             ContentsAction::NewScript => {
                 if !view.perms.can_add() {

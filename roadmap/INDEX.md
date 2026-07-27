@@ -13,8 +13,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 35 |
 | ready | 209 |
-| blocked | 110 |
-| in-progress | 7 |
+| blocked | 109 |
+| in-progress | 8 |
 | bugs | 12 |
 | done | 602 |
 | deferred | 18 |
@@ -600,7 +600,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (110)
+## blocked (109)
 
 ### viewer
 
@@ -738,9 +738,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-name-tags-billboard-render`)
 - [`viewer-name-tags-preferences`](blocked/viewer-name-tags-preferences.md) —
   Name tags — preference toggles (blocked by `viewer-preferences-floater`)
-- [`viewer-notecard-editor`](blocked/viewer-notecard-editor.md) — Notecard
-  viewer & editor (rich text with embedded items) (blocked by
-  `viewer-lsl-editor-widget`, `viewer-notecard-format` (done))
 - [`viewer-notification-history`](blocked/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
@@ -905,12 +902,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (7)
+## in-progress (8)
 
 ### viewer
 
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
+- [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
+  viewer & editor (rich text with embedded items)
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)

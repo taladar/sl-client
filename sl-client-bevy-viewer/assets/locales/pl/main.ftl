@@ -99,6 +99,17 @@ landmark-teleport = Teleportuj
 animation-play-inworld = Odtwórz w świecie
 animation-stop = Zatrzymaj
 
+## The notecard viewer & editor floater (viewer-notecard-editor).
+
+notecard-save = Zapisz
+notecard-readonly-note = Nie masz uprawnień do modyfikacji tej notatki.
+notecard-embedded-header = Osadzone przedmioty:
+notecard-status-loading = Ładowanie…
+notecard-status-saving = Zapisywanie…
+notecard-status-saved = Zapisano.
+notecard-status-save-failed = Zapis nie powiódł się.
+notecard-status-decode-failed = Nie można odczytać tej notatki.
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Galeria ekwipunku

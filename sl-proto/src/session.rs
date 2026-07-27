@@ -145,6 +145,12 @@ pub const CAP_UPDATE_GESTURE_AGENT_INVENTORY: &str = "UpdateGestureAgentInventor
 /// the `item_id`.
 pub const CAP_UPDATE_NOTECARD_AGENT_INVENTORY: &str = "UpdateNotecardAgentInventory";
 
+/// The HTTP capability for replacing the asset of a **notecard** inside an
+/// in-world object's task inventory (`UpdateNotecardTaskInventory`). Two-step
+/// uploader carrying `task_id`/`item_id` (no compile target — a notecard is not
+/// compiled).
+pub const CAP_UPDATE_NOTECARD_TASK_INVENTORY: &str = "UpdateNotecardTaskInventory";
+
 /// The HTTP capability for replacing the source of an existing **script**
 /// inventory item in the agent's own inventory (`UpdateScriptAgent`). Two-step
 /// uploader carrying the `item_id` and a compile `target`; the completion reply
@@ -499,6 +505,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPLOAD_BAKED_TEXTURE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,

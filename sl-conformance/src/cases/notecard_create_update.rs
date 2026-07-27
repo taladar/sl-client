@@ -28,8 +28,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sl_client_tokio::{
-    AssetCacheLimits, AssetKey, AssetType, Command, Event, InventoryKey, InventoryType,
-    NewInventoryItem, ReqwestAssetFetcher, Throttle, UpdatableAssetType, Uuid, WearableType,
+    AssetCacheLimits, AssetKey, AssetType, AssetUpdateLocation, Command, Event, InventoryKey,
+    InventoryType, NewInventoryItem, ReqwestAssetFetcher, Throttle, UpdatableAssetType, Uuid,
+    WearableType,
 };
 
 use crate::context::{TestContext, TestFailure};
@@ -145,7 +146,7 @@ impl GridTest for NotecardCreateUpdate {
             let update_start = Instant::now();
             session
                 .send(Command::UpdateInventoryAsset {
-                    item_id,
+                    location: AssetUpdateLocation::AgentInventory { item_id },
                     asset_type: UpdatableAssetType::Notecard,
                     data: body,
                 })

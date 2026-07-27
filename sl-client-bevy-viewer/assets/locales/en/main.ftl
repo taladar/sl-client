@@ -224,6 +224,17 @@ landmark-teleport = Teleport
 animation-play-inworld = Play in world
 animation-stop = Stop
 
+## The notecard viewer & editor floater (viewer-notecard-editor).
+
+notecard-save = Save
+notecard-readonly-note = You do not have permission to modify this notecard.
+notecard-embedded-header = Embedded items:
+notecard-status-loading = Loading…
+notecard-status-saving = Saving…
+notecard-status-saved = Saved.
+notecard-status-save-failed = Save failed.
+notecard-status-decode-failed = This notecard could not be read.
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Inventory Gallery

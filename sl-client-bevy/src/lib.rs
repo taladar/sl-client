@@ -42,10 +42,10 @@ use sl_proto::{
     build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, chat_session_request_body, display_names_query,
-    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
-    group_experiences_query, parse_login_response,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
+    display_names_query, experience_id_query, experience_info_query, find_experience_query,
+    forget_experience_query, group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -53,18 +53,18 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, AssetKey, AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarProperties, Camera,
-    CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSource, ChatSourceType,
-    ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId, ClassifiedCategory,
-    ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
-    CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind, CreateGroupParams,
-    DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, Direction,
-    DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings,
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, ExperienceInfo,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
-    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
-    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    AnyMessage, AssetKey, AssetUpdateLocation, AttachmentMode, AttachmentPoint, AvatarAppearance,
+    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick,
+    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
+    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
+    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
+    ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
+    Diagnostic, Direction, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
+    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo,
+    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
+    FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
+    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
     GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
     GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
     GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
@@ -2670,19 +2670,27 @@ fn advance_running(
                 }
             }
             Command::UpdateInventoryAsset {
-                item_id,
+                location,
                 asset_type,
                 data,
             } => {
-                // `UpdatableAssetType::cap` is total — scripts (which need the
-                // compile-aware `UploadScript`) are excluded from this type by
-                // construction.
-                let cap = asset_type.cap();
+                // `UpdatableAssetType::cap` / `task_cap` are total — scripts
+                // (which need the compile-aware `UploadScript`) are excluded from
+                // this type by construction. The location picks the agent vs task
+                // capability and the metadata body shape.
+                let (cap, body) = match location {
+                    AssetUpdateLocation::AgentInventory { item_id } => {
+                        (asset_type.cap(), build_update_item_asset_request(*item_id))
+                    }
+                    AssetUpdateLocation::TaskInventory { task_id, item_id } => (
+                        asset_type.task_cap(),
+                        build_update_task_item_asset_request(*task_id, *item_id),
+                    ),
+                };
                 if let Some(caps) = caps.as_ref()
                     && let Some(url) = caps.map.get(cap).cloned()
                 {
                     let asset_tx = caps.asset_tx.clone();
-                    let body = build_update_item_asset_request(*item_id);
                     let data = data.clone();
                     std::thread::spawn(move || {
                         let event = run_caps_upload(&url, body, data);

@@ -166,6 +166,22 @@ pub fn build_update_item_asset_request(item_id: InventoryKey) -> String {
     format!("<llsd><map><key>item_id</key><uuid>{item_id}</uuid></map></llsd>")
 }
 
+/// Builds the LLSD-XML metadata body for the first step of an
+/// `Update*TaskInventory` capability upload (replacing the asset of an item
+/// living inside an in-world object's **task inventory** — e.g. a notecard via
+/// `UpdateNotecardTaskInventory`): a map carrying the holding object's `task_id`
+/// and the `item_id` within it. Unlike the script-task body it carries no
+/// compile `target` or `is_script_running`, matching the reference's
+/// `LLBufferedAssetUploadInfo` task path for non-script assets. The simulator
+/// replies with an `uploader` URL (see [`parse_asset_upload_response`]).
+#[must_use]
+pub fn build_update_task_item_asset_request(task_id: ObjectKey, item_id: InventoryKey) -> String {
+    format!(
+        "<llsd><map><key>task_id</key><uuid>{task_id}</uuid>\
+         <key>item_id</key><uuid>{item_id}</uuid></map></llsd>"
+    )
+}
+
 /// Builds the LLSD-XML metadata body for the first step of an `UpdateScriptAgent`
 /// capability upload (replacing an **agent-inventory** script item's source and
 /// compiling it): a map carrying the `item_id` and the compile `target`

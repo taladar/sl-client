@@ -1,6 +1,6 @@
 //! Assets, textures, and transfer value types.
 
-use sl_types::key::TextureKey;
+use sl_types::key::{InventoryKey, ObjectKey, TextureKey};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -281,9 +281,9 @@ pub enum UpdatableAssetType {
 }
 
 impl UpdatableAssetType {
-    /// The capability that updates an existing inventory item's asset for this
-    /// class. Unlike [`AssetType::update_item_cap`] this is **total** — every
-    /// [`UpdatableAssetType`] has an update capability.
+    /// The capability that updates an existing **agent-inventory** item's asset
+    /// for this class. Unlike [`AssetType::update_item_cap`] this is **total** —
+    /// every [`UpdatableAssetType`] has an agent-inventory update capability.
     #[must_use]
     pub const fn cap(self) -> &'static str {
         match self {
@@ -293,6 +293,50 @@ impl UpdatableAssetType {
             Self::Material => "UpdateMaterialAgentInventory",
         }
     }
+
+    /// The capability that updates the asset of an item of this class living
+    /// inside an in-world object's **task inventory** — the `Update*TaskInventory`
+    /// sibling of [`cap`](Self::cap), selected when an
+    /// [`AssetUpdateLocation::TaskInventory`] save is dispatched.
+    ///
+    /// The names follow the grid's `Update{Class}TaskInventory` convention. Only
+    /// [`Notecard`](Self::Notecard) is exercised and requested today (the
+    /// notecard editor's Save Back to Object); the rest are provided for
+    /// completeness and resolve at runtime only if the grid grants the cap.
+    #[must_use]
+    pub const fn task_cap(self) -> &'static str {
+        match self {
+            Self::Gesture => "UpdateGestureTaskInventory",
+            Self::Notecard => "UpdateNotecardTaskInventory",
+            Self::Settings => "UpdateSettingsTaskInventory",
+            Self::Material => "UpdateMaterialTaskInventory",
+        }
+    }
+}
+
+/// **Where** an inventory item whose asset is being replaced
+/// ([`Command::UpdateInventoryAsset`](crate::Command::UpdateInventoryAsset))
+/// lives — the agent's own inventory, or an in-world object's task inventory —
+/// mirroring [`ScriptUploadLocation`](crate::ScriptUploadLocation) for the
+/// generic (non-script) asset-update path. The location selects the capability
+/// ([`UpdatableAssetType::cap`] vs [`task_cap`](UpdatableAssetType::task_cap))
+/// and the shape of the uploader's metadata body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetUpdateLocation {
+    /// An item in the agent's own inventory — the body carries just the
+    /// `item_id`.
+    AgentInventory {
+        /// The inventory item whose asset is being replaced.
+        item_id: InventoryKey,
+    },
+    /// An item inside an in-world object's task inventory — the body carries the
+    /// holding object's `task_id` and the `item_id` within it.
+    TaskInventory {
+        /// The object (task) holding the item.
+        task_id: ObjectKey,
+        /// The item within that object's inventory.
+        item_id: InventoryKey,
+    },
 }
 
 impl From<UpdatableAssetType> for AssetType {

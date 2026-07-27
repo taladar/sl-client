@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use sl_proto::AgentKey;
 use sl_proto::AnimationKey;
 use sl_proto::AssetKey;
+use sl_proto::AssetUpdateLocation;
 use sl_proto::ChatChannel;
 use sl_proto::ChatSessionKind;
 use sl_proto::CircuitId;
@@ -4969,7 +4970,9 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "<item_id> <asset_type-code> data=<hex>",
             build: |args, ctx| {
                 Ok(Command::UpdateInventoryAsset {
-                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    location: AssetUpdateLocation::AgentInventory {
+                        item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    },
                     asset_type: enum_arg(args, ctx, "asset_type", 1, parse_updatable_asset_type)?,
                     data: args.bytes_or_empty(ctx, "data", 100)?,
                 })

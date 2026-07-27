@@ -40,6 +40,7 @@
 //! stream, reimplemented idiomatically rather than copied.
 
 pub mod decode;
+pub mod edit;
 pub mod encode;
 pub mod item;
 pub mod types;

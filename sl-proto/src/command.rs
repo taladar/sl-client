@@ -8,8 +8,8 @@ use crate::j2c::DiscardLevel;
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
-    AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind, ChatType,
-    ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
+    AssetUpdateLocation, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
+    ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
     EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
     FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
@@ -2026,16 +2026,20 @@ pub enum Command {
         data: Vec<u8>,
     },
     /// Replace the asset of an existing inventory item over the matching
-    /// `Update*AgentInventory` capability (gesture / notecard / script /
-    /// settings, selected by `asset_type`). The result arrives as
+    /// `Update*{Agent,Task}Inventory` capability (gesture / notecard / settings /
+    /// material, selected by `asset_type`; agent-inventory vs an in-world
+    /// object's task inventory, selected by `location`). The result arrives as
     /// [`Event::AssetUploaded`](crate::Event::AssetUploaded) or [`Event::AssetUploadFailed`](crate::Event::AssetUploadFailed).
     UpdateInventoryAsset {
-        /// The inventory item whose asset is being replaced.
-        item_id: InventoryKey,
+        /// Where the item lives — agent inventory (the `item_id` only) or an
+        /// object's task inventory (a `task_id` + `item_id`) — selecting the
+        /// agent vs task capability and the uploader's metadata body.
+        location: AssetUpdateLocation,
         /// The item's asset class, narrowed to the classes the generic
-        /// `Update*AgentInventory` path serves (selects the capability via
-        /// [`UpdatableAssetType::cap`]). Scripts are excluded by construction —
-        /// use [`Command::UploadScript`] so compile results are surfaced.
+        /// `Update*Inventory` path serves (selects the capability via
+        /// [`UpdatableAssetType::cap`] / [`UpdatableAssetType::task_cap`]).
+        /// Scripts are excluded by construction — use [`Command::UploadScript`]
+        /// so compile results are surfaced.
         asset_type: UpdatableAssetType,
         /// The new raw asset bytes.
         data: Vec<u8>,

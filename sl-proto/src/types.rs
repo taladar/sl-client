@@ -391,8 +391,8 @@ pub use appearance::{
     WearableType, avatar_texture,
 };
 pub use asset::{
-    Asset, AssetType, ImageCodec, InventoryType, NotUpdatableAssetType, Texture, TransferStatus,
-    UpdatableAssetType,
+    Asset, AssetType, AssetUpdateLocation, ImageCodec, InventoryType, NotUpdatableAssetType,
+    Texture, TransferStatus, UpdatableAssetType,
 };
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,

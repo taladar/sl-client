@@ -89,8 +89,9 @@ pub use llsd::{
     build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
     build_update_avatar_appearance_request, build_update_item_asset_request,
     build_update_script_agent_request, build_update_script_task_request,
-    build_upload_baked_texture_request, parse_asset_upload_response, parse_event_queue_response,
-    parse_llsd_binary, parse_llsd_binary_prefix, parse_llsd_xml, parse_seed_response,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    parse_asset_upload_response, parse_event_queue_response, parse_llsd_binary,
+    parse_llsd_binary_prefix, parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
     BuddyListEntry, Credential, HomeLocation, LoginFailure, LoginParseError, LoginRejectKind,
@@ -183,9 +184,9 @@ mod test {
         Writer, build_group_notice_bucket, build_new_file_agent_inventory_request,
         build_object_media_get_request, build_object_media_navigate_request,
         build_object_media_update_request, build_update_item_asset_request,
-        build_update_script_agent_request, build_update_script_task_request, combine_uuids,
-        encode_datagram, message_name, parse_asset_upload_response, parse_datagram, parse_llsd_xml,
-        zero_decode, zero_encode,
+        build_update_script_agent_request, build_update_script_task_request,
+        build_update_task_item_asset_request, combine_uuids, encode_datagram, message_name,
+        parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode, zero_encode,
     };
 
     #[test]
@@ -467,6 +468,18 @@ mod test {
         let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x17e3));
         let body = build_update_item_asset_request(item);
         assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
+    }
+
+    #[test]
+    fn update_task_item_asset_request_carries_task_and_item() {
+        let task = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7a5c));
+        let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x17e3));
+        let body = build_update_task_item_asset_request(task, item);
+        assert!(body.contains(&format!("<key>task_id</key><uuid>{task}</uuid>")));
+        assert!(body.contains(&format!("<key>item_id</key><uuid>{item}</uuid>")));
+        // A notecard task update carries no compile target (unlike a script).
+        assert!(!body.contains("<key>target</key>"));
+        assert!(!body.contains("is_script_running"));
     }
 
     #[test]

@@ -91,6 +91,17 @@ landmark-teleport = テレポート
 animation-play-inworld = ワールドで再生
 animation-stop = 停止
 
+## The notecard viewer & editor floater (viewer-notecard-editor).
+
+notecard-save = 保存
+notecard-readonly-note = このノートカードを編集する権限がありません。
+notecard-embedded-header = 埋め込みアイテム:
+notecard-status-loading = 読み込み中…
+notecard-status-saving = 保存中…
+notecard-status-saved = 保存しました。
+notecard-status-save-failed = 保存に失敗しました。
+notecard-status-decode-failed = このノートカードを読み取れませんでした。
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = インベントリギャラリー

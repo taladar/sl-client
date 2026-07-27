@@ -39,30 +39,30 @@ use sl_proto::{
     build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, chat_session_request_body, display_names_query,
-    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
-    group_experiences_query, parse_login_response,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
+    display_names_query, experience_id_query, experience_info_query, find_experience_query,
+    forget_experience_query, group_experiences_query, parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
 // alone.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, Asset, AssetKey, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified,
-    AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera, CameraError,
-    ChatAudible, ChatChannel, ChatLifecycleView, ChatLogConfig, ChatMessage, ChatSessionInfo,
-    ChatSessionKind, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode,
-    CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, Color, ColorAlpha, Command, ControlFlags, ConversationKind,
-    CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic,
-    DirFindFlags, Direction, DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate,
-    Distance, EconomyData, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateInfo, Event, ExperienceInfo, ExperienceKey, ExperiencePermission,
-    ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState,
-    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
-    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
-    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    AnyMessage, Asset, AssetKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint,
+    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties, Camera,
+    CameraError, ChatAudible, ChatChannel, ChatLifecycleView, ChatLogConfig, ChatMessage,
+    ChatSessionInfo, ChatSessionKind, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
+    Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey,
+    ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, Color, ColorAlpha, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
+    DetachOrder, Diagnostic, DirFindFlags, Direction, DiscardLevel, DisconnectReason, DisplayName,
+    DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings, EstateAccessDelta,
+    EstateAccessKind, EstateCovenant, EstateInfo, Event, ExperienceInfo, ExperienceKey,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
+    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
+    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey,
+    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
     ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCacheConfig,
@@ -1626,13 +1626,21 @@ impl Client {
                                 }).await.ok();
                             }
                         }
-                        Some(Command::UpdateInventoryAsset { item_id, asset_type, data }) => {
-                            // `UpdatableAssetType::cap` is total — scripts (which
-                            // need the compile-aware `UploadScript`) are excluded
-                            // from this type by construction.
-                            let cap = asset_type.cap();
+                        Some(Command::UpdateInventoryAsset { location, asset_type, data }) => {
+                            // `UpdatableAssetType::cap` / `task_cap` are total —
+                            // scripts (which need the compile-aware `UploadScript`)
+                            // are excluded from this type by construction. The
+                            // location picks the agent vs task cap and body shape.
+                            let (cap, body) = match location {
+                                AssetUpdateLocation::AgentInventory { item_id } => {
+                                    (asset_type.cap(), build_update_item_asset_request(item_id))
+                                }
+                                AssetUpdateLocation::TaskInventory { task_id, item_id } => (
+                                    asset_type.task_cap(),
+                                    build_update_task_item_asset_request(task_id, item_id),
+                                ),
+                            };
                             if let Some(url) = caps.get(cap).cloned() {
-                                let body = build_update_item_asset_request(item_id);
                                 tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
                             } else {
                                 events.send(Event::AssetUploadFailed {

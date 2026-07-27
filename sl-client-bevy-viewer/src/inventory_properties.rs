@@ -214,8 +214,8 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
         price_field: None,
     });
 
-    // Notecard.
-    let notecard = spawn_preview_floater(&mut commands, root.0, "preview-notecard", "Notecard");
+    // Notecards open in their own editor floater (`crate::edit_notecard`), not
+    // here.
     // Texture.
     let texture = spawn_preview_floater(&mut commands, root.0, "preview-texture", "Texture");
     // Landmark.
@@ -223,7 +223,6 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
     // Animation.
     let animation = spawn_preview_floater(&mut commands, root.0, "preview-animation", "Animation");
     commands.insert_resource(PreviewUi {
-        notecard,
         texture,
         landmark,
         animation,
@@ -280,8 +279,6 @@ struct PreviewFloater {
 /// The preview floaters' entities.
 #[derive(Resource)]
 struct PreviewUi {
-    /// The notecard reader.
-    notecard: PreviewFloater,
     /// The texture / snapshot preview.
     texture: PreviewFloater,
     /// The About Landmark floater.
@@ -853,8 +850,6 @@ const fn civil_from_days(days: i64) -> (i64, u8, u8) {
 /// The previews' in-flight fetches.
 #[derive(Resource, Debug, Default)]
 struct PreviewState {
-    /// The notecard asset awaited (`FetchAsset` sent).
-    pending_notecard: Option<Uuid>,
     /// The landmark asset awaited.
     pending_landmark: Option<Uuid>,
     /// The texture awaited from the texture pipeline, with the node to give
@@ -881,6 +876,7 @@ fn open_previews(
     mut texts: Query<&mut Text>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -889,26 +885,15 @@ fn open_previews(
         let item = &open.item;
         match item.inv_type {
             InventoryType::Notecard => {
-                reset_preview(
-                    &ui.notecard,
-                    &item.name,
-                    &children,
-                    &mut texts,
-                    &mut commands,
-                );
-                spawn_preview_text(
-                    &mut commands,
-                    ui.notecard.content,
-                    "(loading)".to_owned(),
-                    NotecardText,
-                );
-                state.pending_notecard = Some(item.asset_id);
-                sl_commands.write(SlCommand(Command::FetchAsset {
-                    asset_id: AssetKey::from(item.asset_id),
-                    asset_type: AssetType::Notecard,
-                    byte_range: None,
-                }));
-                show(&mut panels, ui.notecard.panel);
+                // The notecard editor floater owns this type (read / edit / save).
+                notecard_opens.write(crate::edit_notecard::OpenNotecard {
+                    name: item.name.clone(),
+                    asset_id: item.asset_id,
+                    editable: item.permissions.owner.contains(Permissions::MODIFY),
+                    source: crate::edit_notecard::NotecardSource::Agent {
+                        item_id: item.item_id,
+                    },
+                });
             }
             InventoryType::Texture | InventoryType::Snapshot => {
                 reset_preview(
@@ -1027,10 +1012,6 @@ fn open_previews(
     }
 }
 
-/// The marker on the notecard preview's text node.
-#[derive(Component)]
-struct NotecardText;
-
 /// The marker on the landmark preview's text node.
 #[derive(Component)]
 struct LandmarkText;
@@ -1122,27 +1103,16 @@ fn spawn_text_button(
         .id()
 }
 
-/// Fold fetched notecard / landmark assets into their previews.
+/// Fold fetched landmark assets into the About Landmark preview.
 fn ingest_preview_assets(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<PreviewState>,
-    mut notecard_texts: Query<&mut Text, (With<NotecardText>, Without<LandmarkText>)>,
-    mut landmark_texts: Query<&mut Text, (With<LandmarkText>, Without<NotecardText>)>,
+    mut landmark_texts: Query<&mut Text, With<LandmarkText>>,
 ) {
     for event in events.read() {
         let SlSessionEvent::AssetReceived(asset) = &event.0 else {
             continue;
         };
-        if state.pending_notecard == Some(asset.id) {
-            state.pending_notecard = None;
-            let text = match sl_notecard::Notecard::decode(&asset.data) {
-                Ok(notecard) => notecard.text,
-                Err(error) => format!("(failed to decode notecard: {error})"),
-            };
-            for mut node in &mut notecard_texts {
-                node.0.clone_from(&text);
-            }
-        }
         if state.pending_landmark == Some(asset.id) {
             state.pending_landmark = None;
             let text = String::from_utf8_lossy(&asset.data).into_owned();

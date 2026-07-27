@@ -99,6 +99,17 @@ landmark-teleport = الانتقال الآني
 animation-play-inworld = تشغيل في العالم
 animation-stop = إيقاف
 
+## The notecard viewer & editor floater (viewer-notecard-editor).
+
+notecard-save = حفظ
+notecard-readonly-note = ليس لديك إذن لتعديل هذه الملاحظة.
+notecard-embedded-header = العناصر المضمَّنة:
+notecard-status-loading = جارٍ التحميل…
+notecard-status-saving = جارٍ الحفظ…
+notecard-status-saved = تم الحفظ.
+notecard-status-save-failed = فشل الحفظ.
+notecard-status-decode-failed = تعذَّرت قراءة هذه الملاحظة.
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = معرض المخزون

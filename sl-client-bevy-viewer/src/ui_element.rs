@@ -470,6 +470,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::edit_create::spawn_create_panel_specimen,
     },
     UiElement {
+        id: "notecard-editor",
+        summary: "The notecard editor's content (viewer-notecard-editor): an editable multi-line \
+                  body, a listed embedded item, and a Save button. The live floater \
+                  (`crate::edit_notecard`) fetches and saves the asset; here it is static so its \
+                  layout is swept.",
+        spawn: crate::edit_notecard::spawn_notecard_editor_specimen,
+    },
+    UiElement {
         id: "search-field",
         summary: "The reusable search-field widget (`crate::ui_search`): a single-line field in a \
                   bordered box with a leading search glyph, a placeholder shown while empty, and a \
