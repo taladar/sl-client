@@ -102,6 +102,19 @@ notecard-status-saved = 保存しました。
 notecard-status-save-failed = 保存に失敗しました。
 notecard-status-decode-failed = このノートカードを読み取れませんでした。
 
+## The LSL script editor floater (viewer-lsl-editor-save-compile).
+
+script-save = 保存してコンパイル
+script-readonly-note = このスクリプトを編集する権限がありません。
+script-running = 実行中
+script-status-loading = 読み込み中…
+script-status-saving = 保存とコンパイル中…
+script-status-saved = 保存しました。
+script-status-compile-failed = コンパイルに失敗しました。
+script-status-save-failed = 保存に失敗しました。
+script-error-at = { $line } 行、{ $column } 列: { $message }
+script-error-nopos = { $message }
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = インベントリギャラリー

@@ -110,6 +110,19 @@ notecard-status-saved = Zapisano.
 notecard-status-save-failed = Zapis nie powiódł się.
 notecard-status-decode-failed = Nie można odczytać tej notatki.
 
+## The LSL script editor floater (viewer-lsl-editor-save-compile).
+
+script-save = Zapisz i skompiluj
+script-readonly-note = Nie masz uprawnień do modyfikacji tego skryptu.
+script-running = Uruchomiony
+script-status-loading = Ładowanie…
+script-status-saving = Zapisywanie i kompilowanie…
+script-status-saved = Zapisano.
+script-status-compile-failed = Kompilacja nie powiodła się.
+script-status-save-failed = Zapis nie powiódł się.
+script-error-at = Wiersz { $line }, kolumna { $column }: { $message }
+script-error-nopos = { $message }
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Galeria ekwipunku

@@ -95,6 +95,7 @@ pub(crate) const fn previewable(inv_type: InventoryType) -> bool {
     matches!(
         inv_type,
         InventoryType::Notecard
+            | InventoryType::Script
             | InventoryType::Texture
             | InventoryType::Snapshot
             | InventoryType::Landmark
@@ -877,6 +878,7 @@ fn open_previews(
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
     mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::edit_script::OpenScript>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -893,6 +895,21 @@ fn open_previews(
                     source: crate::edit_notecard::NotecardSource::Agent {
                         item_id: item.item_id,
                     },
+                });
+            }
+            InventoryType::Script => {
+                // The script editor floater owns this type (read / edit / save →
+                // compile). The compile backend follows the item's language flag.
+                script_opens.write(crate::edit_script::OpenScript {
+                    name: item.name.clone(),
+                    asset_id: item.asset_id,
+                    editable: item.permissions.owner.contains(Permissions::MODIFY),
+                    source: crate::edit_script::ScriptSource::Agent {
+                        item_id: item.item_id,
+                    },
+                    target: crate::edit_script::target_for(
+                        sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
+                    ),
                 });
             }
             InventoryType::Texture | InventoryType::Snapshot => {

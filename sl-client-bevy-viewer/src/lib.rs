@@ -57,6 +57,7 @@ mod edit_material;
 mod edit_math;
 mod edit_notecard;
 mod edit_params;
+mod edit_script;
 mod edit_selection;
 mod edit_texture;
 mod edit_texture_align;
@@ -887,6 +888,12 @@ fn run_session(
     // modifiable, and save it back to agent inventory. Embedded items are
     // listed (inline clickable rendering waits on the rich-text widget).
     .add_plugins(crate::edit_notecard::EditNotecardPlugin)
+    // The LSL script editor floater (viewer-lsl-editor-save-compile): open a
+    // script from agent or task inventory, read it, edit its source when
+    // modifiable, and save it back — which the simulator compiles, its result
+    // surfaced as a status line and a diagnostics list (syntax highlighting
+    // waits on the rich-text widget).
+    .add_plugins(crate::edit_script::EditScriptPlugin)
     // Offscreen material-on-a-sphere previews for the PBR render-material swatch
     // and the material picker's preview pane (viewer-material-swatch-sphere-preview).
     .add_plugins(crate::material_preview::MaterialPreviewPlugin)

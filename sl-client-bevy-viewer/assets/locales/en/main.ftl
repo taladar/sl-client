@@ -235,6 +235,19 @@ notecard-status-saved = Saved.
 notecard-status-save-failed = Save failed.
 notecard-status-decode-failed = This notecard could not be read.
 
+## The LSL script editor floater (viewer-lsl-editor-save-compile).
+
+script-save = Save & Compile
+script-readonly-note = You do not have permission to modify this script.
+script-running = Running
+script-status-loading = Loading…
+script-status-saving = Saving & compiling…
+script-status-saved = Saved.
+script-status-compile-failed = Compilation failed.
+script-status-save-failed = Save failed.
+script-error-at = Line { $line }, column { $column }: { $message }
+script-error-nopos = { $message }
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = Inventory Gallery

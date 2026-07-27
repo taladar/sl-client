@@ -1548,6 +1548,7 @@ fn run_contents_actions(
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<LocalChatNotice>,
     mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::edit_script::OpenScript>,
 ) {
     for request in requests.read() {
         let view = views.view(request.surface);
@@ -1568,9 +1569,12 @@ fn run_contents_actions(
                 else {
                     continue;
                 };
-                // Only notecards have an editor today; other types no-op (the
-                // reference opens each type in its own preview/editor).
-                if item.inv_type != InventoryType::Notecard {
+                // Notecards and scripts have an editor today; other types no-op
+                // (the reference opens each type in its own preview/editor).
+                if !matches!(
+                    item.inv_type,
+                    InventoryType::Notecard | InventoryType::Script
+                ) {
                     continue;
                 }
                 // A redacted (nil) asset id means the grid withheld it — the item
@@ -1583,17 +1587,32 @@ fn run_contents_actions(
                 };
                 // Editable needs BOTH the object's modify and the item's own
                 // modify bit (the reference's two-level rule); otherwise the
-                // notecard opens read-only.
+                // item opens read-only.
                 let editable = view.perms.can_modify && item_modifiable(item);
-                notecard_opens.write(crate::edit_notecard::OpenNotecard {
-                    name: item.name.clone(),
-                    asset_id: asset_id.uuid(),
-                    editable,
-                    source: crate::edit_notecard::NotecardSource::Task {
-                        task_id: full,
-                        item_id,
-                    },
-                });
+                if item.inv_type == InventoryType::Script {
+                    script_opens.write(crate::edit_script::OpenScript {
+                        name: item.name.clone(),
+                        asset_id: asset_id.uuid(),
+                        editable,
+                        source: crate::edit_script::ScriptSource::Task {
+                            task_id: full,
+                            item_id,
+                        },
+                        target: crate::edit_script::target_for(
+                            sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
+                        ),
+                    });
+                } else {
+                    notecard_opens.write(crate::edit_notecard::OpenNotecard {
+                        name: item.name.clone(),
+                        asset_id: asset_id.uuid(),
+                        editable,
+                        source: crate::edit_notecard::NotecardSource::Task {
+                            task_id: full,
+                            item_id,
+                        },
+                    });
+                }
             }
             ContentsAction::NewScript => {
                 if !view.perms.can_add() {

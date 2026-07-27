@@ -110,6 +110,19 @@ notecard-status-saved = تم الحفظ.
 notecard-status-save-failed = فشل الحفظ.
 notecard-status-decode-failed = تعذَّرت قراءة هذه الملاحظة.
 
+## The LSL script editor floater (viewer-lsl-editor-save-compile).
+
+script-save = حفظ وترجمة
+script-readonly-note = ليس لديك إذن لتعديل هذا النص البرمجي.
+script-running = قيد التشغيل
+script-status-loading = جارٍ التحميل…
+script-status-saving = جارٍ الحفظ والترجمة…
+script-status-saved = تم الحفظ.
+script-status-compile-failed = فشلت الترجمة.
+script-status-save-failed = فشل الحفظ.
+script-error-at = السطر { $line }، العمود { $column }: { $message }
+script-error-nopos = { $message }
+
 ## The inventory gallery (viewer-inventory-gallery).
 
 inventory-gallery-title = معرض المخزون
