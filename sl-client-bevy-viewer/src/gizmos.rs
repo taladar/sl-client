@@ -1457,19 +1457,42 @@ fn grid_frame_rotation(
 ) -> Quat {
     match tool.frame {
         GridFrame::World | GridFrame::Reference => Quat::IDENTITY,
-        GridFrame::Local => selection
-            .primary()
-            .and_then(|node| globals.get(node.entity).ok())
-            .map_or(Quat::IDENTITY, |global| {
-                sl_world_rotation(global.rotation())
-            }),
+        GridFrame::Local => local_frame_rotation(selection, globals),
     }
 }
 
-// (The stretch box is aligned to the GRID frame — world axes in world mode,
-// the primary's axes in local mode — like every other manipulator; a face
-// drag changes the box on that axis alone, with the display box carried in
-// [`GizmoDrag::live_box`] during the drag.)
+/// The primary selection's own world rotation (Second Life space), the
+/// `GridFrame::Local` frame — identity when nothing tracked is selected.
+fn local_frame_rotation(selection: &SelectionSet, globals: &Query<&GlobalTransform>) -> Quat {
+    selection
+        .primary()
+        .and_then(|node| globals.get(node.entity).ok())
+        .map_or(Quat::IDENTITY, |global| {
+            sl_world_rotation(global.rotation())
+        })
+}
+
+/// The frame the *current effective tool* manipulates in. Move and rotate honour
+/// the World / Local / Reference grid setting ([`grid_frame_rotation`]); **stretch
+/// always uses the selection's local frame**, whatever the grid setting.
+///
+/// The reference scale manipulator (`LLManipScale`) mounts its bounding box on
+/// the object's own axes and ignores the grid toggle, so World and Local grid
+/// modes render an identical stretch box — verified against Firestorm. Keeping
+/// the drag on the same frame as the drawn box (both go through this helper) is
+/// what makes a face drag change the box on the dragged axis alone; the live
+/// display box is carried in [`GizmoDrag::live_box`] during the drag.
+fn manipulation_frame(
+    tool: &EditToolState,
+    selection: &SelectionSet,
+    globals: &Query<&GlobalTransform>,
+) -> Quat {
+    if tool.effective_tool() == EditTool::Stretch {
+        local_frame_rotation(selection, globals)
+    } else {
+        grid_frame_rotation(tool, selection, globals)
+    }
+}
 
 /// A Bevy world rotation as the equivalent Second Life world rotation (strip
 /// the basis change off the left).
@@ -1502,7 +1525,9 @@ fn place_gizmo_rig(
     let Some(pivot) = selection_pivot_bevy(&selection, &globals) else {
         return;
     };
-    let frame = grid_frame_rotation(&tool, &selection, &globals);
+    // Move / rotate follow the grid frame; stretch is always object-local (so its
+    // box aligns with the object's axes in World mode too, like the reference).
+    let frame = manipulation_frame(&tool, &selection, &globals);
     let Ok((camera_transform, projection)) = cameras.single() else {
         return;
     };
@@ -1881,7 +1906,9 @@ fn begin_drag(
 ) -> Option<GizmoDrag> {
     let pivot_bevy = selection_pivot_bevy(selection, globals)?;
     let pivot = sl_vec3(bevy_to_sl_vec(pivot_bevy));
-    let frame = grid_frame_rotation(tool, selection, globals);
+    // The drag must run in the SAME frame as the drawn rig: stretch object-local,
+    // move / rotate the grid frame ([`manipulation_frame`]).
+    let frame = manipulation_frame(tool, selection, globals);
     let ray_origin = sl_vec3(bevy_to_sl_vec(ray.origin));
     let ray_dir = sl_vec3(bevy_to_sl_vec(*ray.direction));
     let camera_forward = sl_vec3(bevy_to_sl_vec(*camera_transform.forward()));
