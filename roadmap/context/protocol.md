@@ -221,3 +221,30 @@ items an existing crate would own, not protocol wiring. The **experience
 key-value store (#34)** is out for a different reason: it has no client
 capability at all (the viewer never accesses it — see #34's entry), so there is
 no client wire protocol to own.
+
+## Server protocol surface (sim side) — conventions
+
+The `protocol-sim-*` tasks extend Tier F toward a complete simulator
+protocol surface (consumed today by the mock grid / loopback tests,
+usable later by a real simulator). Conventions:
+
+- **Inverse pairing.** Every client-direction
+  `build_*_request`/`parse_*_response` pair in sl-wire gains its
+  server-direction `parse_*_request`/`build_*_response` inverse, sans-I/O,
+  verified by round-tripping against the client functions in-memory.
+- **`SimCaps` dispatch + coverage table.** Server-side capability
+  handlers hang off a `SimCaps` registry (cap name → handler) integrated
+  with `SimSession`; a committed coverage table over
+  `REQUESTED_CAPABILITIES` tracks which caps have server-side support
+  (pinned-table convention — updating it is a deliberate edit).
+- **Flow mirroring.** For every high-level flow the client `Session`
+  implements above individual messages (asset upload via Xfer, Transfer
+  downloads, UDP inventory serving, teleport, …), `SimSession` gains the
+  mirroring server-side state machine, proven by in-memory
+  `Session` ↔ `SimSession` loopback tests
+  (`sl-proto/tests/sim_session.rs` is the template), with its own
+  committed flow-coverage table.
+- **Boundary unchanged.** Protocol surface is in scope; the
+  world-authority grid — persistence, physics, multi-client broadcast,
+  socket/event-loop I/O — remains the consumer's job (the `sl-fake-grid`
+  test crate is one such consumer).
