@@ -53,11 +53,9 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
 use crate::environment::EnvironmentState;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use crate::group_profile::OpenGroupProfile;
 use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -65,6 +63,7 @@ use crate::status_bar::AgentRegionPosition;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
+use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -91,9 +90,6 @@ const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
 /// A disabled control's text colour (matching the disabled text field / combo).
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
-
-/// A clickable name's colour (owner / group links).
-const LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -737,10 +733,6 @@ enum AboutLandAction {
     AddAllowed,
     /// Open the avatar picker to add to the ban list.
     AddBanned,
-    /// Open the owner's avatar / group profile.
-    OpenOwner,
-    /// Open the parcel group's profile.
-    OpenGroup,
 }
 
 /// A marker carrying which pick a texture swatch button opens.
@@ -925,16 +917,17 @@ fn build_general_tab(commands: &mut Commands, panel: Entity) -> GeneralHandles {
     let rating_row = spawn_labeled_row(commands, panel, "about-land-rating");
     handles.rating = Some(spawn_value_node(commands, rating_row));
     let owner_row = spawn_labeled_row(commands, panel, "about-land-owner");
-    handles.owner = Some(spawn_link_button(
+    handles.owner = Some(spawn_name_link(
         commands,
         owner_row,
-        AboutLandAction::OpenOwner,
+        NameLinkSpec::new("about-land-loading", "about-land-none")
+            .with_group_suffix("about-land-group-owned"),
     ));
     let group_row = spawn_labeled_row(commands, panel, "about-land-group");
-    handles.group = Some(spawn_link_button(
+    handles.group = Some(spawn_name_link(
         commands,
         group_row,
-        AboutLandAction::OpenGroup,
+        NameLinkSpec::new("about-land-loading", "about-land-none"),
     ));
     let area_row = spawn_labeled_row(commands, panel, "about-land-area");
     handles.area = Some(spawn_value_node(commands, area_row));
@@ -1404,7 +1397,6 @@ fn open_about_land(
                 });
             if let Some(parcel) = parcel {
                 state.bind(parcel, &identity);
-                request_names_for_parcel(&state, &mut commands);
                 if let Some(scoped) = state.scoped(&identity) {
                     request_tab_data(scoped, &mut commands);
                 }
@@ -1503,7 +1495,6 @@ fn ingest_about_land_events(
                 // The awaited point / id resolve: bind this parcel as the subject
                 // and fetch the rest of its tab data.
                 state.bind((**parcel).clone(), &identity);
-                request_names_for_parcel(&state, &mut commands);
                 if let Some(scoped) = state.scoped(&identity) {
                     request_tab_data(scoped, &mut commands);
                 }
@@ -1512,7 +1503,6 @@ fn ingest_about_land_events(
             SlSessionEvent::ParcelProperties(parcel) if Some(parcel.local_id) == state.target => {
                 state.parcel = Some((**parcel).clone());
                 state.seed_draft();
-                request_names_for_parcel(&state, &mut commands);
                 dirty.general_values = true;
                 dirty.objects_values = true;
                 dirty.editable_values = true;
@@ -1605,28 +1595,6 @@ fn decode_covenant(asset: &Asset) -> String {
             warn!("failed to decode covenant notecard {}: {error}", asset.id);
             String::new()
         }
-    }
-}
-
-/// Request the parcel owner's / group's display name — an avatar name for an
-/// agent owner, a group name for a group owner or the parcel's set group (a
-/// group-owned parcel shows both, and the agent may not be a member).
-fn request_names_for_parcel(state: &AboutLandState, commands: &mut MessageWriter<SlCommand>) {
-    let Some(parcel) = &state.parcel else {
-        return;
-    };
-    let mut groups: Vec<sl_client_bevy::GroupKey> = Vec::new();
-    match parcel.owner {
-        OwnerKey::Agent(owner) => request_name(owner, commands),
-        OwnerKey::Group(group) => groups.push(group),
-    }
-    if let Some(group) = parcel.group
-        && !groups.contains(&group)
-    {
-        groups.push(group);
-    }
-    if !groups.is_empty() {
-        commands.write(SlCommand(Command::RequestGroupNames(groups)));
     }
 }
 
@@ -1750,20 +1718,14 @@ fn update_control_enable(
 }
 
 /// Refresh the General tab's read-only values in place.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the General values format from the parcel plus the region / avatar / group name \
-              sources and the translator"
-)]
 fn update_general_tab(
     mut dirty: ResMut<AboutLandDirty>,
     ui: Option<Res<AboutLandUi>>,
     state: Res<AboutLandState>,
-    avatars: Res<AvatarState>,
-    groups: Res<GroupsModel>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
+    mut links: Query<&mut NameLink>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1789,15 +1751,17 @@ fn update_general_tab(
         handles.rating,
         &maturity_text(region.map(|r| r.maturity), &translator),
     );
-    set_value_node(
-        texts,
+    // The parcel owner is always present in the reply (an agent or a deeded
+    // group); the widget annotates a group owner with "(group owned)".
+    set_name_link(
+        &mut links,
         handles.owner,
-        &owner_text(parcel, &avatars, &groups, &translator),
+        NameTarget::from_option(true, Some(parcel.owner)),
     );
-    set_value_node(
-        texts,
+    set_name_link(
+        &mut links,
         handles.group,
-        &group_text(parcel, &groups, &translator),
+        NameTarget::from_option(true, parcel.group),
     );
     set_value_node(texts, handles.area, &parcel.area.to_string());
     set_value_node(
@@ -2359,8 +2323,8 @@ fn on_about_land_check(
 /// Dispatch a floater button press.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the dispatcher fans out to every button kind, reading the edit fields, the agent \
-              position, and the parcel owner / group to route each"
+    reason = "the dispatcher fans out to every button kind, reading the edit fields and the agent \
+              position to route each"
 )]
 fn on_about_land_action(
     press: On<Pointer<Press>>,
@@ -2373,8 +2337,6 @@ fn on_about_land_action(
     mut sl_commands: MessageWriter<SlCommand>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
     mut texture_pickers: MessageWriter<OpenTexturePicker>,
-    mut avatar_profiles: MessageWriter<OpenAvatarProfile>,
-    mut group_profiles: MessageWriter<OpenGroupProfile>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2382,11 +2344,8 @@ fn on_about_land_action(
     let Ok(action) = actions.get(press.entity) else {
         return;
     };
-    // Owner / group links and the owners refresh are reads; the rest write.
-    let is_read = matches!(
-        action,
-        AboutLandAction::RefreshOwners | AboutLandAction::OpenOwner | AboutLandAction::OpenGroup
-    );
+    // The owners refresh is a read; the rest write.
+    let is_read = matches!(action, AboutLandAction::RefreshOwners);
     if !is_read && !state.can_edit {
         return;
     }
@@ -2438,23 +2397,6 @@ fn on_about_land_action(
             pickers.write(OpenAvatarPicker {
                 requester: "about-land-ban",
             });
-        }
-        AboutLandAction::OpenOwner => {
-            if let Some(parcel) = &state.parcel {
-                match parcel.owner {
-                    OwnerKey::Agent(agent) => {
-                        avatar_profiles.write(OpenAvatarProfile { agent });
-                    }
-                    OwnerKey::Group(group) => {
-                        group_profiles.write(OpenGroupProfile { group });
-                    }
-                }
-            }
-        }
-        AboutLandAction::OpenGroup => {
-            if let Some(group) = state.parcel.as_ref().and_then(|parcel| parcel.group) {
-                group_profiles.write(OpenGroupProfile { group });
-            }
         }
     }
 }
@@ -2763,34 +2705,6 @@ fn maturity_text(maturity: Option<Maturity>, translator: &Translator) -> String 
     translator.get(key)
 }
 
-/// The owner display text.
-fn owner_text(
-    parcel: &ParcelInfo,
-    avatars: &AvatarState,
-    groups: &GroupsModel,
-    translator: &Translator,
-) -> String {
-    match parcel.owner {
-        OwnerKey::Agent(agent) => name_of(agent, avatars),
-        OwnerKey::Group(group) => {
-            let name = groups
-                .group_name(group)
-                .map_or_else(|| format!("({group})"), str::to_owned);
-            format!("{name} {}", translator.get("about-land-group-owned"))
-        }
-    }
-}
-
-/// The group display text.
-fn group_text(parcel: &ParcelInfo, groups: &GroupsModel, translator: &Translator) -> String {
-    match parcel.group {
-        Some(group) => groups
-            .group_name(group)
-            .map_or_else(|| format!("({group})"), str::to_owned),
-        None => translator.get("about-land-none"),
-    }
-}
-
 /// The sale-state display text.
 fn sale_text(parcel: &ParcelInfo, translator: &Translator) -> String {
     match &parcel.sale_price {
@@ -3026,30 +2940,6 @@ fn spawn_disabled_value(commands: &mut Commands, parent: Entity) -> Entity {
             TextColor(DISABLED_COLOR),
             Pickable::IGNORE,
             ChildOf(parent),
-        ))
-        .id()
-}
-
-/// A clickable name link button dispatching `action`, returning the value node
-/// the caller updates with the name.
-fn spawn_link_button(commands: &mut Commands, parent: Entity, action: AboutLandAction) -> Entity {
-    let button = commands
-        .spawn((
-            Button,
-            action,
-            Node::default(),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .observe(on_about_land_action)
-        .id();
-    commands
-        .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LINK_COLOR),
-            Pickable::IGNORE,
-            ChildOf(button),
         ))
         .id()
 }

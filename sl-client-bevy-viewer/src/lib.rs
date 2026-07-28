@@ -150,6 +150,7 @@ mod ui_color_picker;
 mod ui_combo;
 mod ui_element;
 mod ui_font;
+mod ui_name_link;
 mod ui_pseudoloc;
 mod ui_radio;
 mod ui_search;
@@ -813,6 +814,10 @@ fn run_session(
     // width sync + resize, locale-ellipsis reveal, sort-arrow drive, and the
     // per-table sort / column-width settings seed + persist.
     .add_plugins(TableWidgetPlugin)
+    // The reusable clickable name-link widget (viewer-clickable-name-widgets):
+    // resolves an avatar / group / owner name against the caches, keeps the
+    // label + link tint in step, and opens the right profile on click.
+    .add_plugins(crate::ui_name_link::NameLinkPlugin)
     // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
     // each option's `Checked` marker and indicator glyph reconciled to the
     // group's selection, so a click and an external write (the Build Tools

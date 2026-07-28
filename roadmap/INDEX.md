@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 121 |
 | in-progress | 10 |
 | bugs | 12 |
-| done | 615 |
+| done | 616 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1062** |
+| **total** | **1063** |
 
 ## ideas (56)
 
@@ -245,6 +245,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
   action commands (`cmd …`)
+- [`viewer-chat-clickable-sender-names`](ready/viewer-chat-clickable-sender-names.md)
+  — Clickable sender names in the chat / conversations transcript
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
@@ -259,8 +261,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
   the chat display windows
-- [`viewer-clickable-name-widgets`](ready/viewer-clickable-name-widgets.md) —
-  Reusable clickable avatar-name / group-name widgets
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
@@ -1076,7 +1076,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (615)
+## done (616)
 
 ### protocol
 
@@ -1262,6 +1262,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
+- [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
+  Reusable clickable avatar-name / group-name widgets
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)

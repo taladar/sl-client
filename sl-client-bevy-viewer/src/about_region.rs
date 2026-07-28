@@ -55,7 +55,6 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::groups::GroupsModel;
@@ -64,6 +63,7 @@ use crate::inventory_properties::format_unix_date;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
+use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -90,9 +90,6 @@ const CHECK_COLOR: Color = Color::srgb(0.55, 0.85, 0.60);
 
 /// A disabled control's text colour (matching the disabled text field / combo).
 const DISABLED_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
-
-/// A clickable name's colour (owner links).
-const LINK_COLOR: Color = Color::srgb(0.52, 0.68, 0.95);
 
 /// An action button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -713,15 +710,6 @@ struct TerrainSwatch {
     slot: usize,
 }
 
-/// A clickable owner-name node: pressing it opens the named agent's profile. The
-/// resolved agent is kept in step by the tab-refresh systems, so a click always
-/// targets the current owner (or does nothing when unset).
-#[derive(Component, Debug, Clone, Copy, Default)]
-struct OwnerLink {
-    /// The agent to open, or `None` when the owner is unset.
-    agent: Option<AgentKey>,
-}
-
 // ---------------------------------------------------------------------------
 // Plugin.
 // ---------------------------------------------------------------------------
@@ -875,7 +863,11 @@ fn build_region_tab(commands: &mut Commands, panel: Entity) -> RegionHandles {
     let type_row = spawn_labeled_row(commands, panel, "about-region-type");
     handles.region_type = Some(spawn_value_node(commands, type_row));
     let owner_row = spawn_labeled_row(commands, panel, "about-region-owner");
-    handles.owner = Some(spawn_owner_link(commands, owner_row));
+    handles.owner = Some(spawn_name_link(
+        commands,
+        owner_row,
+        NameLinkSpec::new("about-region-loading", "about-region-none"),
+    ));
     let grid_row = spawn_labeled_row(commands, panel, "about-region-grid-position");
     handles.grid_position = Some(spawn_value_node(commands, grid_row));
 
@@ -1106,7 +1098,11 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity) -> EstateHandles {
     let name_row = spawn_labeled_row(commands, panel, "about-region-estate");
     handles.name = Some(spawn_value_node(commands, name_row));
     let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner");
-    handles.owner = Some(spawn_owner_link(commands, owner_row));
+    handles.owner = Some(spawn_name_link(
+        commands,
+        owner_row,
+        NameLinkSpec::new("about-region-loading", "about-region-none"),
+    ));
     let email_row = spawn_labeled_row(commands, panel, "about-region-abuse-email");
     handles.abuse_email = Some(spawn_value_node(commands, email_row));
     spawn_note(commands, panel, "about-region-estate-note");
@@ -1197,7 +1193,11 @@ fn build_covenant_tab(commands: &mut Commands, panel: Entity) -> CovenantHandles
     let estate_row = spawn_labeled_row(commands, panel, "about-region-estate");
     handles.estate = Some(spawn_value_node(commands, estate_row));
     let owner_row = spawn_labeled_row(commands, panel, "about-region-estate-owner");
-    handles.estate_owner = Some(spawn_owner_link(commands, owner_row));
+    handles.estate_owner = Some(spawn_name_link(
+        commands,
+        owner_row,
+        NameLinkSpec::new("about-region-loading", "about-region-none"),
+    ));
     handles.text = Some(spawn_value_block(commands, panel));
     let ts_row = spawn_labeled_row(commands, panel, "about-region-last-modified");
     handles.timestamp = Some(spawn_value_node(commands, ts_row));
@@ -1699,11 +1699,10 @@ fn update_control_enable(
 fn update_region_tab(
     mut dirty: ResMut<AboutRegionDirty>,
     ui: Option<Res<AboutRegionUi>>,
-    avatars: Res<AvatarState>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut links: Query<&mut OwnerLink>,
+    mut links: Query<&mut NameLink>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1720,13 +1719,12 @@ fn update_region_tab(
         handles.region_type,
         &product_text(region.map(|region| region.product), &translator),
     );
-    let none = translator.get("about-region-none");
     let owner = region.and_then(|region| region.owner()).map(AgentKey::from);
-    let owner_text = match region {
-        None => translator.get("about-region-loading"),
-        Some(_region) => owner.map_or_else(|| none.clone(), |agent| name_of(agent, &avatars)),
-    };
-    set_owner_link(&mut texts, &mut links, handles.owner, &owner_text, owner);
+    set_name_link(
+        &mut links,
+        handles.owner,
+        NameTarget::from_option(region.is_some(), owner),
+    );
     set_value_node(
         &mut texts,
         handles.grid_position,
@@ -1791,10 +1789,9 @@ fn update_estate_tab(
     mut dirty: ResMut<AboutRegionDirty>,
     ui: Option<Res<AboutRegionUi>>,
     state: Res<AboutRegionState>,
-    avatars: Res<AvatarState>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut links: Query<&mut OwnerLink>,
+    mut links: Query<&mut NameLink>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1804,7 +1801,6 @@ fn update_estate_tab(
     }
     dirty.estate_values = false;
     let handles = &ui.estate;
-    let none = translator.get("about-region-none");
     let loading = translator.get("about-region-loading");
     // The `getinfo` reply ([`EstateInfo`]) needs estate-manager rights, so a
     // plain resident never receives it; fall back to the covenant reply
@@ -1837,43 +1833,35 @@ fn update_estate_tab(
         handles.name,
         &estate_name.unwrap_or_else(|| loading.clone()),
     );
-    let owner_text = match (&state.estate, &state.covenant) {
-        (None, None) => loading.clone(),
-        _known => estate_owner.map_or_else(|| none.clone(), |agent| name_of(agent, &avatars)),
-    };
-    set_owner_link(
-        &mut texts,
+    // A known estate (either reply arrived) resolves to the owner or `(none)`;
+    // before any reply it is `(loading)`.
+    let estate_known = state.estate.is_some() || state.covenant.is_some();
+    set_name_link(
         &mut links,
         handles.owner,
-        &owner_text,
-        estate_owner,
+        NameTarget::from_option(estate_known, estate_owner),
     );
     // The abuse email only comes from `getinfo`; show `(none)` once we know the
     // estate but got no email, and only `(loading)` before any estate reply.
+    let none = translator.get("about-region-none");
     let abuse_email = match &state.estate {
         Some(estate) if !estate.abuse_email.is_empty() => estate.abuse_email.clone(),
         Some(_estate) => none.clone(),
-        None if state.covenant.is_some() => none.clone(),
+        None if state.covenant.is_some() => none,
         None => loading.clone(),
     };
     set_value_node(&mut texts, handles.abuse_email, &abuse_email);
 }
 
 /// Refresh the Covenant tab's read-only values in place.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the covenant values format from the estate covenant plus the region identity, avatar \
-              names, and the translator"
-)]
 fn update_covenant_tab(
     mut dirty: ResMut<AboutRegionDirty>,
     ui: Option<Res<AboutRegionUi>>,
     state: Res<AboutRegionState>,
-    avatars: Res<AvatarState>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
     translator: Translator,
     mut texts: Query<(&mut Text, &mut TextColor)>,
-    mut links: Query<&mut OwnerLink>,
+    mut links: Query<&mut NameLink>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1884,24 +1872,22 @@ fn update_covenant_tab(
     dirty.covenant_values = false;
     let handles = &ui.covenant;
     let region = regions.iter().next().map(|region| &region.0);
-    let none = translator.get("about-region-none");
     if let Some(covenant) = &state.covenant {
         set_value_node(&mut texts, handles.estate, &covenant.estate_name);
         let owner =
             (!covenant.estate_owner_id.is_nil()).then(|| AgentKey::from(covenant.estate_owner_id));
-        let owner_text = owner.map_or_else(|| none.clone(), |agent| name_of(agent, &avatars));
-        set_owner_link(
-            &mut texts,
-            &mut links,
-            handles.estate_owner,
-            &owner_text,
-            owner,
-        );
         set_value_node(
             &mut texts,
             handles.timestamp,
             &format_unix_date(i64::from(covenant.covenant_timestamp)),
         );
+        set_name_link(
+            &mut links,
+            handles.estate_owner,
+            NameTarget::from_option(true, owner),
+        );
+    } else {
+        set_name_link::<AgentKey>(&mut links, handles.estate_owner, NameTarget::Loading);
     }
     set_value_node(
         &mut texts,
@@ -2192,22 +2178,6 @@ fn bind_access_rows(
 // ---------------------------------------------------------------------------
 // Edit observers / handlers.
 // ---------------------------------------------------------------------------
-
-/// Open the clicked owner link's agent profile.
-fn on_owner_link(
-    press: On<Pointer<Press>>,
-    links: Query<&OwnerLink>,
-    mut profiles: MessageWriter<OpenAvatarProfile>,
-) {
-    if press.button != PointerButton::Primary {
-        return;
-    }
-    if let Ok(link) = links.get(press.entity)
-        && let Some(agent) = link.agent
-    {
-        profiles.write(OpenAvatarProfile { agent });
-    }
-}
 
 /// Toggle a checkbox, flipping its backing draft field.
 fn on_about_region_check(
@@ -2641,38 +2611,6 @@ fn set_value_node(
     }
 }
 
-/// Set an owner link's name text, its stored agent, and its colour (a link tint
-/// when clickable, plain when unset) in place.
-fn set_owner_link(
-    texts: &mut Query<(&mut Text, &mut TextColor)>,
-    links: &mut Query<&mut OwnerLink>,
-    node: Option<Entity>,
-    value: &str,
-    agent: Option<AgentKey>,
-) {
-    let Some(node) = node else {
-        return;
-    };
-    if let Ok((mut text, mut color)) = texts.get_mut(node) {
-        if text.0 != value {
-            value.clone_into(&mut text.0);
-        }
-        let wanted = TextColor(if agent.is_some() {
-            LINK_COLOR
-        } else {
-            LABEL_COLOR
-        });
-        if *color != wanted {
-            *color = wanted;
-        }
-    }
-    if let Ok(mut link) = links.get_mut(node)
-        && link.agent != agent
-    {
-        link.agent = agent;
-    }
-}
-
 /// Set a table cell's text in place.
 fn set_cell(
     texts: &mut Query<(&mut Text, &mut TextColor)>,
@@ -2816,23 +2754,6 @@ fn spawn_value_node(commands: &mut Commands, parent: Entity) -> Entity {
             Pickable::IGNORE,
             ChildOf(parent),
         ))
-        .id()
-}
-
-/// An empty clickable owner-name node: it carries [`OwnerLink`] and opens the
-/// current owner's profile on press. Updated in place by [`set_owner_link`].
-fn spawn_owner_link(commands: &mut Commands, parent: Entity) -> Entity {
-    commands
-        .spawn((
-            Text::new(String::new()),
-            Button,
-            OwnerLink::default(),
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::default(),
-            ChildOf(parent),
-        ))
-        .observe(on_owner_link)
         .id()
 }
 

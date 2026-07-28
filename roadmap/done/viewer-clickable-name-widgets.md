@@ -2,7 +2,7 @@
 id: viewer-clickable-name-widgets
 title: Reusable clickable avatar-name / group-name widgets
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-28) — noticed while adding owner links to the
   About Region floater that name resolution + click-to-profile is reimplemented
   per floater
@@ -67,3 +67,21 @@ Then **migrate the existing bespoke implementations** onto them:
 
 Reference (Firestorm, read-only): the `LLNameEditor` / `LLAvatarName` name
 widgets and the common "click a resident/group name → profile" behaviour.
+
+## Progress
+
+- **Done:** the widget (`ui_name_link.rs` — owner-kind-aware `NameLink`,
+  tri-state `NameTarget` `Loading`/`Unset`/`Set`, per-call-site Fluent labels,
+  optional group-owned suffix, in-place resolution + one name-request on bind +
+  click-to-profile; `NameLinkPlugin`). `about_region.rs` (all three owner links)
+  and `about_land.rs` (parcel owner + group) migrated onto it; the bespoke
+  `OwnerLink` / `spawn_link_button` / `owner_text` / `group_text` /
+  `request_names_for_parcel` and their `LINK_COLOR`s deleted. Owner floaters
+  verified live on OpenSim.
+- **Not needed:** the People / friends and group member/role **table** sites —
+  they resolve names in place and already open profiles on a row-level click
+  (the single-node widget does not fit a virtualised table cell).
+- **Split out:** clickable **sender names in the chat / conversations
+  transcript** need a per-line restructure (the transcript is one flowed `Text`
+  blob and `TranscriptLine` lacks the speaker's `AgentKey`), so they are a
+  follow-up: [[viewer-chat-clickable-sender-names]].

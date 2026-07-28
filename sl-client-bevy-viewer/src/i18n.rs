@@ -513,6 +513,14 @@ pub(crate) struct Translator<'w> {
 }
 
 impl Translator<'_> {
+    /// Whether the bundle or the locale changed since last frame — the same
+    /// signal [`apply_translations`] sweeps on. A widget that re-resolves its own
+    /// text (rather than binding a static [`Translated`]) gates a full re-resolve
+    /// on this so a locale switch relocalises it.
+    pub(crate) fn changed(&self) -> bool {
+        self.localization.is_changed() || self.locale.is_changed()
+    }
+
     /// Resolve a key with no arguments.
     pub(crate) fn get(&self, key: &str) -> String {
         self.finish(key, self.localization.content(key))
