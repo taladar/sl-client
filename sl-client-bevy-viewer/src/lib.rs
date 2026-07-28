@@ -165,6 +165,7 @@ mod ui_texture_picker;
 mod underwater_fog;
 mod virtual_list;
 mod water;
+mod web_auth;
 mod web_floater;
 mod world_map;
 mod world_map_math;
@@ -465,6 +466,12 @@ struct Options {
     /// escape hatch when the system's GStreamer misbehaves.
     #[clap(long)]
     disable_video_media: bool,
+    /// Do not log the grid account into the Second Life websites at login
+    /// (`viewer-web-openid-auth`): the in-viewer browser, profile Web tab and
+    /// Search Web tab then browse anonymously instead of already signed in.
+    /// Has no effect off Second Life (OpenSim sends no OpenID token).
+    #[clap(long)]
+    no_web_auth: bool,
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -684,6 +691,9 @@ struct MediaRuntime {
     web: bool,
     /// Whether the video (GStreamer) engine may initialise.
     video: bool,
+    /// Whether to auto-login the grid account into the Second Life websites at
+    /// login (`viewer-web-openid-auth`); cleared by `--no-web-auth`.
+    web_auth: bool,
 }
 
 /// Run one windowed session to completion, returning any recoverable login
@@ -970,6 +980,14 @@ fn run_session(
     .add_plugins(crate::media_engine::MediaEnginePlugin {
         enabled: media.web,
         video_enabled: media.video,
+    })
+    // The Second Life website auto-login (viewer-web-openid-auth): at login,
+    // POST the login response's OpenID token off-thread and inject the reply's
+    // session cookie into the shared browser context, so the web surfaces
+    // below open already signed in. No-op off Second Life or with
+    // `--no-web-auth`.
+    .add_plugins(crate::web_auth::WebAuthPlugin {
+        enabled: media.web && media.web_auth,
     })
     // The embedded-browser UI widget (LLMediaCtrl): surface-backed image
     // nodes with click-to-focus pointer / keyboard routing.
@@ -1730,6 +1748,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             MediaRuntime {
                 web: !options.disable_web_media,
                 video: !options.disable_video_media,
+                web_auth: !options.no_web_auth,
             },
         );
         if let Some(challenge) = outcome.challenge {

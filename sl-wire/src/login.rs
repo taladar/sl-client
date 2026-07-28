@@ -409,6 +409,18 @@ pub struct LoginSuccess {
     /// `SimulatorFeatures` `map-server-url` — where present — is fresher and
     /// should win. `None` when the grid does not announce one.
     pub map_server_url: Option<url::Url>,
+    /// The OpenID endpoint the viewer POSTs [`openid_token`](Self::openid_token)
+    /// to at login (`openid_url` response field) to mint the grid's web-session
+    /// cookie. The POST reply's `Set-Cookie` is injected into the embedded
+    /// browser's cookie store so the in-viewer web surfaces (web profiles,
+    /// search, marketplace) open already logged in. Only Second Life grids send
+    /// this; OpenSim omits it, so `None` there.
+    pub openid_url: Option<url::Url>,
+    /// The one-time token POSTed to [`openid_url`](Self::openid_url) as the raw
+    /// request body (`Content-Type: application/x-www-form-urlencoded`), from
+    /// the `openid_token` response field. `None` on grids that do not
+    /// central-authenticate their websites (OpenSim).
+    pub openid_token: Option<String>,
 }
 
 /// An agent's home location, parsed from the `home` login response field (a
@@ -631,6 +643,10 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         map_server_url: members
             .get("map-server-url")
             .and_then(|s| url::Url::parse(s.trim()).ok()),
+        openid_url: members
+            .get("openid_url")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        openid_token: members.get("openid_token").cloned(),
     })))
 }
 
@@ -1110,6 +1126,12 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         "map-server-url",
         success.map_server_url.as_ref().map(url::Url::as_str),
     );
+    push_opt_string_member(
+        out,
+        "openid_url",
+        success.openid_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(out, "openid_token", success.openid_token.as_deref());
 }
 
 /// Appends an `<i4>` struct member.

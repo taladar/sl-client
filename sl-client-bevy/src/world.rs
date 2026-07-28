@@ -58,6 +58,15 @@ pub struct SlIdentity {
     /// [`Event::SimulatorFeatures`](sl_proto::Event::SimulatorFeatures) — is
     /// fresher and should win where present.
     pub map_server_url: Option<url::Url>,
+    /// The OpenID endpoint from login (`openid_url`), or `None` off Second Life.
+    /// The viewer POSTs [`openid_token`](Self::openid_token) here and injects the
+    /// reply's session cookie into the embedded browser so the in-viewer web
+    /// surfaces (web profiles, search, marketplace) open already logged in.
+    pub openid_url: Option<url::Url>,
+    /// The one-time OpenID token from login (`openid_token`), POSTed to
+    /// [`openid_url`](Self::openid_url) to mint the web-session cookie. `None`
+    /// off Second Life.
+    pub openid_token: Option<String>,
     /// The handle of the region the agent's root circuit currently occupies.
     /// Seeded from the login response and updated on each `RegionChanged`. The
     /// matching region entity is the one marked [`SlCurrentRegion`].

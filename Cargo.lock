@@ -8446,6 +8446,7 @@ dependencies = [
  "image",
  "parley",
  "pretty_assertions",
+ "reqwest 0.12.28",
  "sl-account-dirs",
  "sl-anim",
  "sl-cef",

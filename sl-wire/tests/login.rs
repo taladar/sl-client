@@ -103,6 +103,8 @@ mod test {
   <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>
   <member><name>agent_appearance_service</name><value><string>https://appearance.example/</string></value></member>
   <member><name>map-server-url</name><value><string>http://127.0.0.1:9000/</string></value></member>
+  <member><name>openid_url</name><value><string>https://id.secondlife.com/openid/webkit</string></value></member>
+  <member><name>openid_token</name><value><string>a-one-time-token</string></value></member>
   <member><name>message</name><value><string>Welcome</string></value></member>
 </struct></value></param></params></methodResponse>"#;
 
@@ -128,6 +130,36 @@ mod test {
             Some("http://127.0.0.1:9000/")
         );
         assert_eq!(success.message.as_deref(), Some("Welcome"));
+        assert_eq!(
+            success.openid_url.as_ref().map(url::Url::as_str),
+            Some("https://id.secondlife.com/openid/webkit")
+        );
+        assert_eq!(success.openid_token.as_deref(), Some("a-one-time-token"));
+        Ok(())
+    }
+
+    #[test]
+    fn openid_fields_absent_parse_to_none() -> Result<(), Box<dyn std::error::Error>> {
+        // An OpenSim-style response carries neither `openid_url` nor
+        // `openid_token`; both must parse to `None` so the web auto-login stays
+        // dormant off Second Life.
+        let xml = r#"<?xml version="1.0"?>
+<methodResponse><params><param><value><struct>
+  <member><name>login</name><value><string>true</string></value></member>
+  <member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>
+  <member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>
+  <member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>
+  <member><name>circuit_code</name><value><i4>1</i4></value></member>
+  <member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>
+  <member><name>sim_port</name><value><i4>9000</i4></value></member>
+  <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>
+</struct></value></param></params></methodResponse>"#;
+
+        let LoginResponse::Success(success) = parse_login_response(xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(success.openid_url, None);
+        assert_eq!(success.openid_token, None);
         Ok(())
     }
 
@@ -600,6 +632,8 @@ mod test {
             )?],
             agent_appearance_service: None,
             map_server_url: Some(url::Url::parse("http://127.0.0.1:9000/")?),
+            openid_url: Some(url::Url::parse("https://id.secondlife.com/openid/webkit")?),
+            openid_token: Some("open-id-token-blob".to_owned()),
         })
     }
 
@@ -643,6 +677,8 @@ mod test {
         assert_eq!(parsed.library_owner, success.library_owner);
         assert_eq!(parsed.library_skeleton, success.library_skeleton);
         assert_eq!(parsed.map_server_url, success.map_server_url);
+        assert_eq!(parsed.openid_url, success.openid_url);
+        assert_eq!(parsed.openid_token, success.openid_token);
         Ok(())
     }
 

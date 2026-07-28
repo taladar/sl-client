@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 222 |
+| ready | 221 |
 | blocked | 121 |
 | in-progress | 10 |
 | bugs | 12 |
-| done | 617 |
+| done | 618 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1063** |
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (221)
 
 ### protocol
 
@@ -599,8 +599,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
-- [`viewer-web-openid-auth`](ready/viewer-web-openid-auth.md) — Second Life
-  website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
@@ -1074,7 +1072,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (617)
+## done (618)
 
 ### protocol
 
@@ -1810,6 +1808,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
+  website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-world-map-floater`](done/viewer-world-map-floater.md) — World-map
   floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
   (done))

@@ -733,6 +733,8 @@ fn advance_login(
                             seed_capability: session.seed_capability().cloned(),
                             agent_appearance_service: session.agent_appearance_service().cloned(),
                             map_server_url: session.map_server_url().cloned(),
+                            openid_url: session.openid_url().cloned(),
+                            openid_token: session.openid_token().map(str::to_owned),
                             region_handle: session.region_handle(),
                             circuit_id: session.root_circuit_id(),
                         };

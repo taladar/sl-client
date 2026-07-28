@@ -39,6 +39,9 @@ pub enum MediaError {
     /// Creating a media surface failed.
     #[error("media surface creation failed: {0}")]
     SurfaceCreation(String),
+    /// Injecting or clearing a cookie in the shared request context failed.
+    #[error("shared-context cookie operation failed: {0}")]
+    Cookie(String),
 }
 
 /// Configuration for initialising a [`MediaBackend`].
@@ -335,6 +338,33 @@ pub trait MediaSurface {
     fn request_close(&self);
 }
 
+/// A cookie to inject into the engine's **shared** (trusted-UI) request
+/// context, so the embedded browser surfaces that use it open already
+/// authenticated.
+///
+/// Only the shared context is ever targeted — never the isolated per-in-world
+/// contexts a hostile media prim runs in, which must not see the grid session.
+/// This carries the grid's web-session cookie minted from the login response's
+/// OpenID handshake (`viewer-web-openid-auth`).
+#[derive(Debug, Clone)]
+pub struct SharedCookie {
+    /// The URL the cookie is being set for. CEF requires this to match
+    /// [`domain`](Self::domain) (its host), so both come from the OpenID host.
+    pub url: String,
+    /// The cookie name (the part before the first `=` of the `Set-Cookie`).
+    pub name: String,
+    /// The cookie value (up to the first `;` of the `Set-Cookie`).
+    pub value: String,
+    /// The host the cookie is scoped to (the OpenID endpoint's host).
+    pub domain: String,
+    /// The cookie path (`/` for the grid session cookie).
+    pub path: String,
+    /// Whether the cookie is `Secure` (HTTPS only).
+    pub secure: bool,
+    /// Whether the cookie is `HttpOnly` (not exposed to page scripts).
+    pub http_only: bool,
+}
+
 /// A media engine: owns its global runtime, creates surfaces, and pumps the
 /// engine's per-frame work.
 pub trait MediaBackend {
@@ -356,6 +386,33 @@ pub trait MediaBackend {
     /// Shuts the engine down: closes remaining surfaces, pumps until they
     /// are gone (bounded), and tears down the global runtime. Idempotent.
     fn shutdown(&mut self);
+    /// Injects `cookie` into the engine's **shared** (trusted-UI) request
+    /// context, so browser surfaces created with `isolated: false` see it. The
+    /// isolated in-world contexts are never touched. Must be called on the
+    /// engine's pump thread.
+    ///
+    /// The default is a no-op returning `Ok(())` for engines with no
+    /// cookie/request-context notion (the video player).
+    ///
+    /// # Errors
+    /// Returns [`MediaError::Cookie`] if the shared context's cookie store is
+    /// unavailable or rejects the cookie.
+    fn set_shared_cookie(&mut self, _cookie: &SharedCookie) -> Result<(), MediaError> {
+        Ok(())
+    }
+    /// Clears every cookie in the engine's **shared** (trusted-UI) request
+    /// context, so a logged-out / switched avatar's web session does not
+    /// persist. The isolated in-world contexts are never touched. Must be
+    /// called on the engine's pump thread.
+    ///
+    /// The default is a no-op returning `Ok(())`.
+    ///
+    /// # Errors
+    /// Returns [`MediaError::Cookie`] if the shared context's cookie store is
+    /// unavailable.
+    fn clear_shared_cookies(&mut self) -> Result<(), MediaError> {
+        Ok(())
+    }
 }
 
 /// Which engine a media URL belongs to — the reference viewer's

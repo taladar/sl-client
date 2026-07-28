@@ -56,8 +56,9 @@ maturity / type / online-status icon graphics) is not reproduced — it needs
 the skin icon set wired into table Custom cells, a separable follow-up. A
 standalone event floater + the reminder-that-arrives stay with
 [[viewer-event-details]] (the protocol has no `EventNotification` event). The
-full SL templated web URL (login `search_token`, per-grid `search.[GRID]`
-host) is a follow-up on the base URL.
+full SL templated web URL (per-grid `search.[GRID]` host + login session id)
+landed with [[viewer-web-openid-auth]] (2026-07-28), which also signs the Web
+tab in.
 
 Context: [context/viewer.md](../context/viewer.md).
 

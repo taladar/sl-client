@@ -82,6 +82,40 @@ pub(crate) struct MediaEngine {
     pub(crate) video_enabled: bool,
 }
 
+impl MediaEngine {
+    /// Injects a cookie into the web engine's **shared** (trusted-UI) request
+    /// context (the one non-isolated browser panels use), so those surfaces
+    /// open already authenticated. A no-op (returning `Ok`) when the web
+    /// engine is not live. Must run on the pump thread — this is a non-send
+    /// resource, so Bevy already schedules its readers there.
+    ///
+    /// # Errors
+    /// Propagates a [`sl_cef::MediaError`] from the engine when the shared
+    /// cookie store rejects the cookie.
+    pub(crate) fn set_shared_cookie(
+        &mut self,
+        cookie: &sl_cef::SharedCookie,
+    ) -> Result<(), sl_cef::MediaError> {
+        match self.backend.as_mut() {
+            Some(backend) => backend.set_shared_cookie(cookie),
+            None => Ok(()),
+        }
+    }
+
+    /// Clears every cookie in the web engine's shared request context (a
+    /// logged-out / switched avatar's web session must not persist). A no-op
+    /// when the web engine is not live.
+    ///
+    /// # Errors
+    /// Propagates a [`sl_cef::MediaError`] from the engine.
+    pub(crate) fn clear_shared_cookies(&mut self) -> Result<(), sl_cef::MediaError> {
+        match self.backend.as_mut() {
+            Some(backend) => backend.clear_shared_cookies(),
+            None => Ok(()),
+        }
+    }
+}
+
 /// One live surface: the engine-side handle plus the Bevy image its frames
 /// are mirrored into.
 pub(crate) struct MediaSlot {

@@ -24,21 +24,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use cef::args::Args;
 use cef::rc::Rc as _;
 use cef::{
-    App, Browser, BrowserHost, BrowserSettings, CefString, Client, CommandLine, CursorInfo,
+    App, Browser, BrowserHost, BrowserSettings, CefString, Client, CommandLine, Cookie, CursorInfo,
     CursorType, DisplayHandler, Errorcode, Frame, ImplApp, ImplBrowser, ImplBrowserHost,
-    ImplClient, ImplCommandLine, ImplDisplayHandler, ImplFrame, ImplLifeSpanHandler,
-    ImplLoadHandler, ImplRenderHandler, KeyEvent, KeyEventType, LifeSpanHandler, LoadHandler,
-    LogSeverity, MouseButtonType, MouseEvent, PaintElementType, PopupFeatures, Rect, RenderHandler,
-    RequestContext, RequestContextSettings, ScreenInfo, Settings, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapClient, WrapDisplayHandler, WrapLifeSpanHandler,
-    WrapLoadHandler, WrapRenderHandler, browser_host_create_browser_sync,
-    request_context_create_context, wrap_app, wrap_client, wrap_display_handler,
-    wrap_life_span_handler, wrap_load_handler, wrap_render_handler,
+    ImplClient, ImplCommandLine, ImplCookieManager, ImplDisplayHandler, ImplFrame,
+    ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler, KeyEvent, KeyEventType,
+    LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent, PaintElementType,
+    PopupFeatures, Rect, RenderHandler, RequestContext, RequestContextSettings, ScreenInfo,
+    Settings, WindowInfo, WindowOpenDisposition, WrapApp, WrapClient, WrapDisplayHandler,
+    WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler, browser_host_create_browser_sync,
+    cookie_manager_get_global_manager, request_context_create_context, wrap_app, wrap_client,
+    wrap_display_handler, wrap_life_span_handler, wrap_load_handler, wrap_render_handler,
 };
 
 use crate::{
     BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError, MediaSurface,
-    Modifiers, MouseButton, SurfaceConfig, SurfaceStatus,
+    Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus,
 };
 
 /// Whether the global CEF runtime was initialised in this process. CEF can
@@ -837,6 +837,53 @@ impl MediaBackend for CefMediaBackend {
         cef::do_message_loop_work();
         cef::shutdown();
         tracing::info!("CEF runtime shut down");
+    }
+
+    fn set_shared_cookie(&mut self, cookie: &SharedCookie) -> Result<(), MediaError> {
+        if self.shut_down {
+            return Err(MediaError::Cookie(String::from("the backend is shut down")));
+        }
+        // The global cookie manager backs the *shared* (global) request
+        // context — the one non-isolated surfaces are created against
+        // (`create_surface` passes `None` for those). Isolated in-world
+        // surfaces have their own contexts and are never reached here.
+        let manager = cookie_manager_get_global_manager(None)
+            .ok_or_else(|| MediaError::Cookie(String::from("global cookie manager unavailable")))?;
+        let cef_cookie = Cookie {
+            name: CefString::from(cookie.name.as_str()),
+            value: CefString::from(cookie.value.as_str()),
+            domain: CefString::from(cookie.domain.as_str()),
+            path: CefString::from(cookie.path.as_str()),
+            secure: c_int::from(cookie.secure),
+            httponly: c_int::from(cookie.http_only),
+            // A session cookie: no expiry, cleared when the store is cleared.
+            has_expires: 0,
+            ..Cookie::default()
+        };
+        let url = CefString::from(cookie.url.as_str());
+        // The set is queued onto CEF's IO thread; passing no callback is fine
+        // since a following navigation reads the store after it is applied.
+        if manager.set_cookie(Some(&url), Some(&cef_cookie), None) == 1 {
+            Ok(())
+        } else {
+            Err(MediaError::Cookie(format!(
+                "set_cookie rejected {} for {}",
+                cookie.name, cookie.url
+            )))
+        }
+    }
+
+    fn clear_shared_cookies(&mut self) -> Result<(), MediaError> {
+        if self.shut_down {
+            return Ok(());
+        }
+        let manager = cookie_manager_get_global_manager(None)
+            .ok_or_else(|| MediaError::Cookie(String::from("global cookie manager unavailable")))?;
+        // `delete_cookies(None, None, ..)` deletes every cookie in the store;
+        // `flush_store` persists the deletion before the process may exit.
+        let _deleted = manager.delete_cookies(None, None, None);
+        let _flushed = manager.flush_store(None);
+        Ok(())
     }
 }
 

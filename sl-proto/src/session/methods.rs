@@ -205,6 +205,8 @@ impl Session {
             pending_complete_movement: false,
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
             login_account: None,
             xfer_downloads: BTreeMap::new(),
             pending_xfer_uploads: BTreeMap::new(),
@@ -328,6 +330,22 @@ impl Session {
     #[must_use]
     pub const fn map_server_url(&self) -> Option<&url::Url> {
         self.map_server_url.as_ref()
+    }
+
+    /// The OpenID endpoint from login (`openid_url`), or `None` off Second Life.
+    /// The viewer POSTs [`openid_token`](Self::openid_token) here to mint the
+    /// grid's web-session cookie, which it injects into the embedded browser so
+    /// the in-viewer web surfaces open logged in.
+    #[must_use]
+    pub const fn openid_url(&self) -> Option<&url::Url> {
+        self.openid_url.as_ref()
+    }
+
+    /// The one-time OpenID token from login (`openid_token`), POSTed to
+    /// [`openid_url`](Self::openid_url). `None` off Second Life.
+    #[must_use]
+    pub fn openid_token(&self) -> Option<&str> {
+        self.openid_token.as_deref()
     }
 
     /// Feeds a parsed CAPS response into the session, surfacing any recognised
@@ -1298,6 +1316,8 @@ impl Session {
                 self.agent_appearance_service
                     .clone_from(&success.agent_appearance_service);
                 self.map_server_url.clone_from(&success.map_server_url);
+                self.openid_url.clone_from(&success.openid_url);
+                self.openid_token.clone_from(&success.openid_token);
                 self.inventory.set_agent_root(success.inventory_root);
                 self.inventory.set_library_root(success.library_root);
                 self.inventory

@@ -40,7 +40,7 @@ use sl_client_bevy::{
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, EventId, EventInfo, GlobalCoordinates, GroupKey, GroupProfile,
     ParcelCategory, ParcelDetails, ParcelKey, QueryId, RegionCoordinates, RegionHandle, SlCommand,
-    SlEvent, SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
+    SlEvent, SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
 };
 use sl_settings::SettingValue;
 
@@ -49,7 +49,7 @@ use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::group_profile::OpenGroupProfile;
-use crate::i18n::Translated;
+use crate::i18n::{Translated, UiLocale};
 use crate::media_engine::MediaSurfaces;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::settings::ViewerSettings;
@@ -1861,6 +1861,8 @@ fn on_search_press(
     settings: Option<Res<ViewerSettings>>,
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
+    identity: Res<SlIdentity>,
+    ui_locale: Res<UiLocale>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -1876,12 +1878,20 @@ fn on_search_press(
         settings.as_deref(),
         &views,
         &surfaces,
+        identity.session_id,
+        &ui_locale.lang.to_string(),
         &mut commands,
     );
 }
 
 /// Commit the field's text and run the active tab (a directory query, or a web
 /// navigation for the Web tab).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "commits the field and runs the active tab: the UI table, query field, state, \
+              settings, the browser view + surfaces for the Web tab, the session id and language \
+              for the templated SL search URL, and the command writer"
+)]
 fn run_new_search(
     ui: &SearchUi,
     fields: &Query<&EditableText>,
@@ -1889,6 +1899,8 @@ fn run_new_search(
     settings: Option<&ViewerSettings>,
     views: &Query<&BrowserView>,
     surfaces: &MediaSurfaces,
+    session_id: Option<Uuid>,
+    language: &str,
     commands: &mut MessageWriter<SlCommand>,
 ) {
     let text = fields
@@ -1903,7 +1915,7 @@ fn run_new_search(
             state.set_query_start(category, 0);
             dispatch_query(category, state, settings, commands);
         }
-        None => navigate_web(ui, state, views, surfaces),
+        None => navigate_web(ui, state, views, surfaces, session_id, language),
     }
 }
 
@@ -1918,28 +1930,70 @@ fn read_limit(fields: &Query<&EditableText>, field: Entity) -> i32 {
 }
 
 /// Navigate the embedded web view to the grid's search site for the current
-/// query (the OpenSim `search-server-url` when the grid provided one, else the SL
-/// search site).
+/// query.
+///
+/// On **OpenSim** (the grid announced a `search-server-url` via
+/// `SimulatorFeatures`, kept in [`SearchState::web_search_base`]) this keeps the
+/// old behaviour — substitute the query into the base URL. On **Second Life**
+/// (no per-grid base) it builds the reference viewer's full templated search
+/// URL ([`build_sl_search_url`]) — the `search.[GRID]/viewer/?…&sid=[SESSION_ID]`
+/// form the SL search site expects, carrying the login session id so the Web
+/// tab opens signed in (paired with the OpenID cookie auto-login,
+/// `viewer-web-openid-auth`). Falls back to the bare search site before login.
 fn navigate_web(
     ui: &SearchUi,
     state: &SearchState,
     views: &Query<&BrowserView>,
     surfaces: &MediaSurfaces,
+    session_id: Option<Uuid>,
+    language: &str,
 ) {
-    let base = state.web_search_base.as_deref().unwrap_or(SL_SEARCH_URL);
-    let url = if state.query.is_empty() {
-        base.to_owned()
-    } else {
-        let escaped: String =
-            url::form_urlencoded::byte_serialize(state.query.as_bytes()).collect();
-        let separator = if base.contains('?') { '&' } else { '?' };
-        format!("{base}{separator}q={escaped}")
+    let url = match (state.web_search_base.as_deref(), session_id) {
+        // OpenSim: substitute the query into the grid-provided base URL.
+        (Some(base), _) => {
+            if state.query.is_empty() {
+                base.to_owned()
+            } else {
+                let escaped: String =
+                    url::form_urlencoded::byte_serialize(state.query.as_bytes()).collect();
+                let separator = if base.contains('?') { '&' } else { '?' };
+                format!("{base}{separator}q={escaped}")
+            }
+        }
+        // Second Life, logged in: the full templated search URL.
+        (None, Some(session_id)) => build_sl_search_url(session_id, &state.query, language),
+        // Second Life, not yet logged in: the bare search site.
+        (None, None) => SL_SEARCH_URL.to_owned(),
     };
     if let Ok(view) = views.get(ui.web_view)
         && let Some(slot) = view.surface.and_then(|id| surfaces.get(id))
     {
         slot.surface.navigate(&url);
     }
+}
+
+/// The standard-collection query parameters the reference searches by default
+/// on the Web tab (people / places / events / groups / destinations), each a
+/// repeated `collection_chosen` following `search_type=standard`
+/// (`llfloatersearch.cpp`, the `[COLLECTION]` substitution).
+const SL_SEARCH_COLLECTIONS: &str = "&collection_chosen=people&collection_chosen=places\
+&collection_chosen=events&collection_chosen=groups&collection_chosen=destinations";
+
+/// Build the Second Life search site's templated URL for the Web tab
+/// (`SearchURL` in the reference: `https://search.[GRID]/viewer/?query_term=…\
+/// &search_type=standard[COLLECTION]&maturity=…&lang=…&sid=[SESSION_ID]`).
+///
+/// `session_id` is the login session id ([`SlIdentity::session_id`], the
+/// reference's `[SESSION_ID]` = `gAgent.getSessionID()`); `language` is the
+/// active UI language tag. The maturity is left at the widest (`gma`): the Web
+/// tab carries no maturity checkboxes and the site applies the signed-in
+/// account's own content settings.
+fn build_sl_search_url(session_id: Uuid, query: &str, language: &str) -> String {
+    let escaped: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+    format!(
+        "https://search.secondlife.com/viewer/?query_term={escaped}\
+&search_type=standard{SL_SEARCH_COLLECTIONS}&maturity=gma&lang={language}&sid={session_id}"
+    )
 }
 
 /// Send the wire query for `category` at its current paging offset.
@@ -2170,6 +2224,8 @@ fn enter_to_search(
     settings: Option<Res<ViewerSettings>>,
     views: Query<&BrowserView>,
     surfaces: NonSend<MediaSurfaces>,
+    identity: Res<SlIdentity>,
+    ui_locale: Res<UiLocale>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if !keyboard.just_pressed(KeyCode::Enter) {
@@ -2188,6 +2244,8 @@ fn enter_to_search(
         settings.as_deref(),
         &views,
         &surfaces,
+        identity.session_id,
+        &ui_locale.lang.to_string(),
         &mut commands,
     );
     keyboard.clear_just_pressed(KeyCode::Enter);
@@ -3045,7 +3103,7 @@ mod tests {
 
     use super::{
         CATEGORY_ORDER, EventsMode, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page,
-        SearchCategory, SearchTab, events_query_text,
+        SearchCategory, SearchTab, build_sl_search_url, events_query_text,
     };
     use pretty_assertions::assert_eq;
 
@@ -3112,6 +3170,24 @@ mod tests {
         assert_eq!(
             LandSaleFilter::Estate.to_search_type(),
             LandSearchType::ESTATE
+        );
+    }
+
+    /// The Second Life templated Web-tab URL carries the session id, the
+    /// URL-escaped query, the standard collections and the language tag in the
+    /// reference's `SearchURL` shape.
+    #[test]
+    fn sl_search_url_is_templated() {
+        // 0x2222… renders as 22222222-2222-2222-2222-222222222222, no fallible
+        // parse (the workspace denies `expect`/`unwrap` in tests too).
+        let session = super::Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
+        let url = build_sl_search_url(session, "cool stuff", "en");
+        assert_eq!(
+            url,
+            "https://search.secondlife.com/viewer/?query_term=cool+stuff\
+&search_type=standard&collection_chosen=people&collection_chosen=places\
+&collection_chosen=events&collection_chosen=groups&collection_chosen=destinations\
+&maturity=gma&lang=en&sid=22222222-2222-2222-2222-222222222222"
         );
     }
 }

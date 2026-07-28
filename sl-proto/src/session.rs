@@ -1094,6 +1094,13 @@ pub struct Session {
     /// `<url>map-<zoom>-<x>-<y>-objects.jpg`. `None` when the grid does not
     /// announce one.
     map_server_url: Option<url::Url>,
+    /// The OpenID endpoint from the `openid_url` login field, POSTed
+    /// [`openid_token`](Self::openid_token) to mint the grid's web-session
+    /// cookie. `None` off Second Life (OpenSim omits it).
+    openid_url: Option<url::Url>,
+    /// The one-time token from the `openid_token` login field, POSTed to
+    /// [`openid_url`](Self::openid_url). `None` off Second Life.
+    openid_token: Option<String>,
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,

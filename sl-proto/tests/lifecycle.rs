@@ -237,6 +237,8 @@ mod test {
             library_skeleton: Vec::new(),
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         })))
     }
 
@@ -8700,6 +8702,8 @@ mod test {
             library_skeleton: Vec::new(),
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         }));
         session.handle_login_response(login, now)?;
 
@@ -8778,6 +8782,8 @@ mod test {
             }],
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         }));
         session.handle_login_response(login, now)?;
 
@@ -8878,6 +8884,8 @@ mod test {
             }],
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         }));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
@@ -9198,6 +9206,8 @@ mod test {
             library_skeleton: Vec::new(),
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         }));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
@@ -9326,6 +9336,8 @@ mod test {
             library_skeleton: Vec::new(),
             agent_appearance_service: None,
             map_server_url: None,
+            openid_url: None,
+            openid_token: None,
         }));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
