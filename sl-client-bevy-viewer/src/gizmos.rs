@@ -1136,6 +1136,12 @@ impl Plugin for EditGizmoPlugin {
             .init_resource::<GizmoInteraction>()
             .init_resource::<BuiltRig>()
             .init_resource::<GizmoReadoutUi>()
+            // Gated on build mode: the interaction / drag / readout systems all
+            // bailed on `!active`, and `maintain_gizmo_rig` is the teardown that
+            // despawns the manipulator rig once the tool goes inactive — the
+            // settling window keeps it scheduled across that edge. The overlay
+            // camera `spawn_gizmo_camera` creates is spawned lazily on the first
+            // build-mode entry and then persists.
             .add_systems(
                 Update,
                 (
@@ -1148,7 +1154,8 @@ impl Plugin for EditGizmoPlugin {
                     place_gizmo_rig,
                     tint_gizmo_handles,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
             );
     }
 }

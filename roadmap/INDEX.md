@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 220 |
+| ready | 219 |
 | blocked | 121 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 620 |
+| done | 621 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1064** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (220)
+## ready (219)
 
 ### protocol
 
@@ -221,8 +221,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
   Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
-- [`viewer-build-systems-gate-on-build-mode`](ready/viewer-build-systems-gate-on-build-mode.md)
-  — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-undo-redo`](ready/viewer-build-undo-redo.md) — Object-edit
   undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing` (done))
@@ -1070,7 +1068,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (620)
+## done (621)
 
 ### protocol
 
@@ -1223,6 +1221,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
+- [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
+  — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
   — Build tools — gate modifications on modify/move permission + grey the
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera

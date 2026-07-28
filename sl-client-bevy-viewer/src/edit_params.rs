@@ -2064,7 +2064,15 @@ impl Plugin for EditParamsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShownSnapshot>()
             .init_resource::<ParamFieldFocus>()
-            .add_systems(Update, (sync_param_widgets, commit_param_fields).chain());
+            // Both systems already bailed on `!EditToolState::active`; the gate
+            // hoists that out of the scheduler so they are not run at all outside
+            // build mode.
+            .add_systems(
+                Update,
+                (sync_param_widgets, commit_param_fields)
+                    .chain()
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
+            );
     }
 }
 

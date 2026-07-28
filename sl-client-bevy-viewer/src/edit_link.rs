@@ -196,7 +196,12 @@ pub(crate) struct EditLinkPlugin;
 impl Plugin for EditLinkPlugin {
     /// Register the link / unlink driver.
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, drive_link_unlink);
+        // Link / unlink only fires while the build tool is active (it already
+        // bailed otherwise), so gate it out of the scheduler outside build mode.
+        app.add_systems(
+            Update,
+            drive_link_unlink.run_if(crate::edit_tool::edit_tool_active_or_settling),
+        );
     }
 }
 

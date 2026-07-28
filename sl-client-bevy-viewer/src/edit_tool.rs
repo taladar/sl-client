@@ -371,11 +371,24 @@ impl Plugin for EditToolPlugin {
                     .chain()
                     .after(UiScaffoldSystems::SpawnRoot),
             )
+            // The two activation drivers stay ungated: `Ctrl+B` toggles the
+            // floater and `mirror_floater_into_state` turns that shown/hidden
+            // state into [`EditToolState::active`] (clearing the selection on
+            // the close edge). Everything else is gated on build mode being
+            // active — see the second `add_systems` call.
+            .add_systems(
+                Update,
+                (toggle_build_floater_on_ctrl_b, mirror_floater_into_state).chain(),
+            )
+            // The rest of the floater sync / commit systems only do work while
+            // the tool is active (each already bailed on `!active`), so gating
+            // them here hoists that check out of every system body into the
+            // scheduler. Ordered after `mirror_floater_into_state` so the resting
+            // tool / fields track the state it just mirrored, exactly as the
+            // original single chain did.
             .add_systems(
                 Update,
                 (
-                    toggle_build_floater_on_ctrl_b,
-                    mirror_floater_into_state,
                     apply_tool_modifier_override,
                     sync_build_tool_from_radio,
                     sync_radio_from_build_tool,
@@ -387,7 +400,9 @@ impl Plugin for EditToolPlugin {
                     sync_numeric_fields,
                     commit_numeric_fields,
                 )
-                    .chain(),
+                    .chain()
+                    .after(mirror_floater_into_state)
+                    .run_if(edit_tool_active_or_settling),
             );
     }
 }
@@ -1592,6 +1607,46 @@ pub(crate) fn edit_tool_inactive(state: Res<EditToolState>) -> bool {
     !state.active
 }
 
+/// How many frames the build systems keep running after the tool deactivates.
+/// The gated systems already reach a steady state in one reconcile, but the
+/// teardown reconcilers (selection clear + wire deselect, highlight / gizmo
+/// despawn, texture-preview revert) depend on `mirror_floater_into_state` having
+/// cleared the selection *earlier the same frame*; those systems live in other
+/// plugins with no cross-plugin ordering guarantee, so a couple of extra frames
+/// let the edge propagate regardless of the order Bevy happened to pick. Three
+/// is comfortably below anything observable.
+const EDIT_TOOL_SETTLE_FRAMES: u8 = 3;
+
+/// The settling countdown behind [`edit_tool_active_or_settling`], split out as
+/// a pure helper so it can be unit-tested without a Bevy world: `true` while
+/// `active` (which reloads the counter), then for [`EDIT_TOOL_SETTLE_FRAMES`]
+/// further calls, then `false` until the next active call.
+const fn settle_tick(active: bool, settle: &mut u8) -> bool {
+    if active {
+        *settle = EDIT_TOOL_SETTLE_FRAMES;
+        true
+    } else if *settle > 0 {
+        *settle = settle.saturating_sub(1);
+        true
+    } else {
+        false
+    }
+}
+
+/// Run condition: true while the build tool is **active**, and for a short
+/// settling window after it deactivates. This is the gate for the whole
+/// build-tool system set — the floater sync / commit systems, the selection /
+/// gizmo / create / texture systems — so they are only scheduled while building
+/// instead of running (and bailing on `!active`) every frame. The settling
+/// window keeps the teardown reconcilers scheduled just long enough to tear
+/// their state down on the active→inactive edge; see [`EDIT_TOOL_SETTLE_FRAMES`].
+pub(crate) fn edit_tool_active_or_settling(
+    state: Res<EditToolState>,
+    mut settle: Local<u8>,
+) -> bool {
+    settle_tick(state.active, &mut settle)
+}
+
 /// Parse one numeric field's committed value.
 fn parse_field(text: &str) -> Option<f32> {
     match TextInputKind::Float.parse(text.trim()) {
@@ -1611,10 +1666,39 @@ fn parse_field(text: &str) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildToggle, EditTool, EditToolState, GridFrame, display_degrees, group_values};
+    use super::{
+        BuildToggle, EDIT_TOOL_SETTLE_FRAMES, EditTool, EditToolState, GridFrame, display_degrees,
+        group_values, settle_tick,
+    };
     use crate::objects::ObjectSlMotion;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Vector;
+
+    /// The build-system gate runs while active, then for exactly
+    /// [`EDIT_TOOL_SETTLE_FRAMES`] frames after deactivation (so the teardown
+    /// reconcilers get their edge), then stops — and reactivation reloads the
+    /// window.
+    #[test]
+    fn settle_window_runs_after_deactivation() {
+        let mut settle = 0_u8;
+        // Never activated yet: inactive is inactive.
+        assert!(!settle_tick(false, &mut settle));
+        // Active frames run and keep the counter loaded.
+        assert!(settle_tick(true, &mut settle));
+        assert!(settle_tick(true, &mut settle));
+        // Deactivate: runs for the settling window, then stops.
+        for _frame in 0..EDIT_TOOL_SETTLE_FRAMES {
+            assert!(settle_tick(false, &mut settle));
+        }
+        assert!(!settle_tick(false, &mut settle));
+        assert!(!settle_tick(false, &mut settle));
+        // Reactivating reloads the full window again.
+        assert!(settle_tick(true, &mut settle));
+        for _frame in 0..EDIT_TOOL_SETTLE_FRAMES {
+            assert!(settle_tick(false, &mut settle));
+        }
+        assert!(!settle_tick(false, &mut settle));
+    }
 
     /// The defaults are the reference's: move tool, snap on, half-metre grid,
     /// world frame, whole-linkset selection.

@@ -400,6 +400,10 @@ impl Plugin for EditCreatePlugin {
         app.init_resource::<CreateToolState>()
             .init_resource::<PendingRezzes>()
             .init_resource::<CreateCursor>()
+            // Gated on build mode: every create system already bailed unless the
+            // Create tool was active. The settling window lets `sync_create_panel`
+            // hide the panel and `update_create_cursor` hand the wand cursor back
+            // on the close edge.
             .add_systems(
                 Update,
                 (
@@ -409,13 +413,16 @@ impl Plugin for EditCreatePlugin {
                     handle_create_pointer.after(crate::gizmos::drive_gizmo_interaction),
                     select_new_object.after(crate::objects::update_objects),
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
             )
             // The wand cursor runs after the camera's cursor system so, in Create
             // mode, the wand wins over the camera's default arrow.
             .add_systems(
                 Update,
-                update_create_cursor.after(crate::camera::update_camera_cursor),
+                update_create_cursor
+                    .after(crate::camera::update_camera_cursor)
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
             );
     }
 }

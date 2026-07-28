@@ -610,6 +610,11 @@ impl Plugin for EditSelectionPlugin {
             .init_resource::<HighlightAssets>()
             .init_resource::<FaceCursorAssets>()
             .init_resource::<DragHoverHighlight>()
+            // The selection pipeline is gated on build mode. The input systems
+            // already bailed on `!active`; the wire-diff / highlight / face-cursor
+            // systems are the teardown reconcilers that must run on the
+            // active→inactive edge (send the deselects, despawn the outline /
+            // face-cursor overlays) — the settling window covers that edge.
             .add_systems(
                 Update,
                 (
@@ -620,10 +625,16 @@ impl Plugin for EditSelectionPlugin {
                     sync_selection_wire,
                     apply_selection_highlight,
                     apply_face_cursor_highlight,
-                    apply_drag_hover_highlight,
                 )
-                    .chain(),
-            );
+                    .chain()
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
+            )
+            // The inventory drag-drop hover outline is NOT build-mode work — you
+            // can drop an item onto an in-world object without opening the Build
+            // floater — so it stays ungated. It owns its own `DragHoverOverlay`
+            // component, distinct from the selection outline, so dropping it out
+            // of the chain above changes no behaviour.
+            .add_systems(Update, apply_drag_hover_highlight);
     }
 }
 

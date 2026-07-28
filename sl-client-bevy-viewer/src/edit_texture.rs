@@ -550,6 +550,11 @@ impl Plugin for EditTexturePlugin {
                     .after(crate::edit_params::spawn_param_tabs)
                     .after(crate::ui::UiScaffoldSystems::SpawnRoot),
             )
+            // Gated on build mode: the widget sync / commit systems already
+            // bailed on `!active`, and the live-preview systems only ever have a
+            // preview to drive or revert while (or just after) building. The
+            // settling window lets `revert_texture_preview_on_deselect` restore
+            // the previewed faces on the close edge, after the selection clears.
             .add_systems(
                 Update,
                 (
@@ -564,7 +569,8 @@ impl Plugin for EditTexturePlugin {
                     drive_texture_preview,
                     revert_texture_preview_on_deselect,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(crate::edit_tool::edit_tool_active_or_settling),
             );
     }
 }
