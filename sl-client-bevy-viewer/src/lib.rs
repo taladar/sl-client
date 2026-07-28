@@ -29,6 +29,7 @@
 //! was.
 
 mod about_land;
+mod about_region;
 mod animations;
 mod animesh;
 mod appearance;
@@ -192,6 +193,7 @@ use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 use crate::about_land::AboutLandPlugin;
+use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
     poll_animations, pose_avatar_skeletons, update_animation_caps,
@@ -1047,6 +1049,10 @@ fn run_session(
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.
     .add_plugins(AboutLandPlugin)
+    // The Region / Estate floater (viewer-region-options-debug / -general /
+    // -terrain / -estate): the region-and-estate info surface. Bound to the
+    // current region, persistence-exempt; opened from the World menu.
+    .add_plugins(AboutRegionPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

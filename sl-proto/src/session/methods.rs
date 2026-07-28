@@ -61,28 +61,29 @@ use crate::types::{
     CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
     DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EjectAction,
-    EstateAccessDelta, EstateCovenant, Event, EventInfo, FeatureDisabled, FolderInfo, FolderType,
-    FollowCamProperty, FollowCamPropertyValue, FreezeAction, Friend, FriendRights, GenericMessage,
-    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupNoticeAttachment,
-    GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec,
-    InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove,
-    InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, Material, Maturity,
-    MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelOverlayInfo, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate,
-    PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    RegionInfoUpdate, RegionStats, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event, EventInfo, FeatureDisabled,
+    FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue, FreezeAction, Friend,
+    FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation, GodRegionUpdate,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
+    ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem,
+    InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType,
+    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayInfo, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate, RegionStats,
+    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo,
+    ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
+    SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -10083,6 +10084,108 @@ impl Session {
             yn(update.allow_parcel_changes),
         ];
         circuit.send_estate_owner_message("setregioninfo", &params, now)?;
+        Ok(())
+    }
+
+    /// Updates the region's debug toggles (disable scripts / collisions /
+    /// physics region-wide) via `EstateOwnerMessage`/`setregiondebug`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_region_debug(
+        &mut self,
+        update: &RegionDebugUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let yn = |flag: bool| if flag { "Y" } else { "N" }.to_owned();
+        let params = [
+            yn(update.disable_scripts),
+            yn(update.disable_collisions),
+            yn(update.disable_physics),
+        ];
+        circuit.send_estate_owner_message("setregiondebug", &params, now)?;
+        Ok(())
+    }
+
+    /// Updates the region's terrain settings (water height, terrain raise/lower
+    /// limits, the four ground detail textures, and the per-corner elevation
+    /// bands) via the reference viewer's four `EstateOwnerMessage`s:
+    /// `setregionterrain`, `texturedetail`, `textureheights`, `texturecommit`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if any of the requests fails to encode.
+    pub fn set_region_terrain(
+        &mut self,
+        update: &RegionTerrainUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let yn = |flag: bool| if flag { "Y" } else { "N" }.to_owned();
+        // setregionterrain: water/raise/lower, region sun, then the estate-sun
+        // fields (the reference resets these to the estate default).
+        let terrain = [
+            format!("{:.6}", update.water_height),
+            format!("{:.6}", update.terrain_raise_limit),
+            format!("{:.6}", update.terrain_lower_limit),
+            yn(update.use_estate_sun),
+            yn(update.fixed_sun),
+            format!("{:.6}", update.sun_hour),
+            "Y".to_owned(),
+            "N".to_owned(),
+            "0.000000".to_owned(),
+        ];
+        circuit.send_estate_owner_message("setregionterrain", &terrain, now)?;
+        // texturedetail: one "index uuid" per detail texture.
+        let detail: Vec<String> = update
+            .detail_textures
+            .iter()
+            .enumerate()
+            .map(|(index, texture)| format!("{index} {texture}"))
+            .collect();
+        circuit.send_estate_owner_message("texturedetail", &detail, now)?;
+        // textureheights: one "index start range" per corner.
+        let heights: Vec<String> = update
+            .start_heights
+            .iter()
+            .zip(update.height_ranges.iter())
+            .enumerate()
+            .map(|(index, (start, range))| format!("{index} {start:.6} {range:.6}"))
+            .collect();
+        circuit.send_estate_owner_message("textureheights", &heights, now)?;
+        // texturecommit: apply.
+        circuit.send_estate_owner_message("texturecommit", &[], now)?;
+        Ok(())
+    }
+
+    /// Updates the estate settings (the access / limit / voice / teleport flags
+    /// and the fixed-sun hour) via `EstateOwnerMessage`/`estatechangeinfo`. The
+    /// `flags` field is the whole estate flag bitfield, so build it from the
+    /// current flags and the toggles with [`EstateFlags`](crate::EstateFlags).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_estate_info(
+        &mut self,
+        update: &EstateInfoUpdate,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // Params: estate name, flags (u32), sun hour scaled by 1024 (the wire
+        // fixed-point the reference viewer sends).
+        let sun = (update.sun_hour * 1024.0).round();
+        let params = [
+            update.estate_name.clone(),
+            update.flags.to_string(),
+            format!("{sun:.0}"),
+        ];
+        circuit.send_estate_owner_message("estatechangeinfo", &params, now)?;
         Ok(())
     }
 

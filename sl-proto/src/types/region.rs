@@ -65,6 +65,15 @@ pub struct RegionIdentity {
     pub terrain: RegionTerrainComposition,
 }
 
+impl RegionIdentity {
+    /// The region/estate owner, or `None` when the grid sent a nil id (the
+    /// on-wire sentinel for "unset").
+    #[must_use]
+    pub fn owner(&self) -> Option<Uuid> {
+        (!self.sim_owner.is_nil()).then_some(self.sim_owner)
+    }
+}
+
 /// The four default ground ("detail") texture ids a region falls back to when its
 /// `RegionHandshake` leaves a `TerrainDetail` slot **nil** — ordered lowest to
 /// highest ground: dirt, grass, mountain, rock. These are the standard Linden

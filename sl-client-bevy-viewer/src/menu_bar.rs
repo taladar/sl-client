@@ -175,6 +175,9 @@ static WORLD_MENU: MenuDef = MenuDef {
         // current parcel, and its read-only "About this location" variant.
         MenuItemDef::Command(MenuCommand::new("About Land…", "about-land")),
         MenuItemDef::Command(MenuCommand::new("Place Profile…", "place-profile")),
+        // The Region / Estate floater (viewer-region-options-*) on the agent's
+        // current region.
+        MenuItemDef::Command(MenuCommand::new("Region / Estate…", "about-region")),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&ENVIRONMENT_MENU),
     ],
@@ -405,6 +408,7 @@ fn handle_top_menu_actions(
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
     mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
+    mut about_region: MessageWriter<crate::about_region::OpenAboutRegion>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -476,6 +480,9 @@ fn handle_top_menu_actions(
                         read_only: action.action == "place-profile",
                     });
                 }
+            }
+            "about-region" => {
+                about_region.write(crate::about_region::OpenAboutRegion);
             }
             "env-fixed-sunrise" => set_fixed(&mut environment, Some(FixedSky::Sunrise)),
             "env-fixed-midday" => set_fixed(&mut environment, Some(FixedSky::Midday)),

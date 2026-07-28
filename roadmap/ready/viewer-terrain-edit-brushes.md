@@ -2,7 +2,7 @@
 id: viewer-terrain-edit-brushes
 title: Terrain editing — sculpt brushes
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-terrain-editing
 blocked_by: [viewer-input-action-map, viewer-region-options-debug]
 ---

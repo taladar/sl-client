@@ -1370,6 +1370,15 @@ impl Client {
                         Some(Command::SetRegionInfo(update)) => {
                             self.session.set_region_info(&update, Instant::now())?;
                         }
+                        Some(Command::SetRegionDebug(update)) => {
+                            self.session.set_region_debug(&update, Instant::now())?;
+                        }
+                        Some(Command::SetRegionTerrain(update)) => {
+                            self.session.set_region_terrain(&update, Instant::now())?;
+                        }
+                        Some(Command::SetEstateInfo(update)) => {
+                            self.session.set_estate_info(&update, Instant::now())?;
+                        }
                         Some(Command::RequestEstateCovenant) => {
                             self.session.request_estate_covenant(Instant::now())?;
                         }

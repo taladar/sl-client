@@ -436,9 +436,10 @@ pub use inventory::{
 };
 pub use land::{LandBrushAction, LandBrushSize, LandEdit, TerraformArea};
 pub use map::{
-    EjectAction, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, FreezeAction,
-    GodRegionUpdate, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, NeighborInfo,
-    RegionInfoUpdate, SimWideDeleteFlags, TelehubInfo,
+    EjectAction, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo,
+    EstateInfoUpdate, FreezeAction, GodRegionUpdate, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, NeighborInfo, RegionDebugUpdate, RegionInfoUpdate, RegionTerrainUpdate,
+    SimWideDeleteFlags, TelehubInfo,
 };
 pub use name::{AvatarName, GroupName};
 pub use nearby::{

@@ -173,6 +173,150 @@ impl Default for RegionInfoUpdate {
     }
 }
 
+/// The region-debug toggles to apply via
+/// [`Session::set_region_debug`](crate::Session::set_region_debug)
+/// (`EstateOwnerMessage` method `setregiondebug`). Each disables a subsystem
+/// region-wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RegionDebugUpdate {
+    /// Disable all scripts region-wide.
+    pub disable_scripts: bool,
+    /// Disable object collisions region-wide.
+    pub disable_collisions: bool,
+    /// Disable object physics region-wide.
+    pub disable_physics: bool,
+}
+
+/// The region-terrain settings to apply via
+/// [`Session::set_region_terrain`](crate::Session::set_region_terrain). This
+/// sends the reference viewer's four `EstateOwnerMessage`s in sequence:
+/// `setregionterrain` (water height + raise/lower limits + sun), `texturedetail`
+/// (the four ground detail texture ids), `textureheights` (the per-corner
+/// elevation bands), and `texturecommit` (apply).
+///
+/// (Not `Eq`: several fields are `f32`.)
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionTerrainUpdate {
+    /// The water height, in metres.
+    pub water_height: f32,
+    /// The maximum a terrain edit may raise the ground, in metres.
+    pub terrain_raise_limit: f32,
+    /// The maximum a terrain edit may lower the ground, in metres.
+    pub terrain_lower_limit: f32,
+    /// Whether the region uses the estate's sun position rather than its own.
+    pub use_estate_sun: bool,
+    /// Whether the region's sun is fixed (rather than cycling).
+    pub fixed_sun: bool,
+    /// The fixed sun hour (0–24), used when [`Self::fixed_sun`] is set.
+    pub sun_hour: f32,
+    /// The four ground/detail texture ids (lowest to highest elevation).
+    pub detail_textures: [Uuid; 4],
+    /// The per-corner blend start heights, in the same `00, 01, 10, 11` corner
+    /// slot order as the `RegionHandshake` and the reference
+    /// `height_start_spin_0..3` (so slot `i` here is `textureheights` index `i` —
+    /// no reordering versus [`RegionTerrainComposition`](crate::RegionTerrainComposition)).
+    pub start_heights: [f32; 4],
+    /// The per-corner blend height ranges, in the same slot order as
+    /// [`Self::start_heights`].
+    pub height_ranges: [f32; 4],
+}
+
+impl Default for RegionTerrainUpdate {
+    fn default() -> Self {
+        Self {
+            water_height: 20.0,
+            terrain_raise_limit: 4.0,
+            terrain_lower_limit: -4.0,
+            use_estate_sun: true,
+            fixed_sun: false,
+            sun_hour: 0.0,
+            detail_textures: [Uuid::nil(); 4],
+            start_heights: [0.0; 4],
+            height_ranges: [0.0; 4],
+        }
+    }
+}
+
+/// An estate's flag bitfield, as carried in the `estateupdateinfo` reply and the
+/// `estatechangeinfo` request. These bit positions are the simulator's estate
+/// flags (`llregionflags.h` `REGION_FLAGS_*`), which differ from the 32-bit
+/// [`RegionFlags`](sl_wire::RegionFlags) carried in `RegionHandshake` — use this
+/// type for estate settings and that one for per-region handshake flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EstateFlags {
+    /// The raw flags value.
+    bits: u32,
+}
+
+impl EstateFlags {
+    /// The estate's sun is fixed rather than cycling.
+    pub const SUN_FIXED: Self = Self { bits: 1 << 4 };
+    /// Parcel owners may set stricter access than the estate.
+    pub const ALLOW_ACCESS_OVERRIDE: Self = Self { bits: 1 << 5 };
+    /// The estate is publicly visible / anyone may visit.
+    pub const EXTERNALLY_VISIBLE: Self = Self { bits: 1 << 15 };
+    /// Direct teleport (rather than routing to a telehub) is allowed.
+    pub const ALLOW_DIRECT_TELEPORT: Self = Self { bits: 1 << 20 };
+    /// Anonymous (no-payment-info) avatars are denied.
+    pub const DENY_ANONYMOUS: Self = Self { bits: 1 << 23 };
+    /// Voice chat is allowed in the estate.
+    pub const ALLOW_VOICE: Self = Self { bits: 1 << 28 };
+    /// Age-unverified avatars are denied.
+    pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 30 };
+    /// Scripted agents (bots) are denied.
+    pub const DENY_BOTS: Self = Self { bits: 1 << 31 };
+
+    /// Builds flags from a raw value.
+    #[must_use]
+    pub const fn from_bits(bits: u32) -> Self {
+        Self { bits }
+    }
+
+    /// The raw flags value.
+    #[must_use]
+    pub const fn bits(self) -> u32 {
+        self.bits
+    }
+
+    /// Whether every bit in `other` is set in `self`.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.bits & other.bits == other.bits
+    }
+
+    /// A copy with the bits of `flag` set when `on`, cleared otherwise.
+    #[must_use]
+    pub const fn with(self, flag: Self, on: bool) -> Self {
+        if on {
+            Self {
+                bits: self.bits | flag.bits,
+            }
+        } else {
+            Self {
+                bits: self.bits & !flag.bits,
+            }
+        }
+    }
+}
+
+/// The estate settings to apply via
+/// [`Session::set_estate_info`](crate::Session::set_estate_info)
+/// (`EstateOwnerMessage` method `estatechangeinfo`). The `flags` are the full
+/// estate flag bitfield (build it from the current estate flags and the toggles
+/// with [`EstateFlags`]); the simulator applies the whole field, so preserve the
+/// bits the UI does not expose.
+///
+/// (Not `Eq`: `sun_hour` is `f32`.)
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstateInfoUpdate {
+    /// The estate name (unchanged by this UI, but the wire message carries it).
+    pub estate_name: String,
+    /// The full estate flag bitfield to apply.
+    pub flags: u32,
+    /// The estate's fixed sun hour (0–24); only meaningful with a fixed sun.
+    pub sun_hour: f32,
+}
+
 /// What to do to a user being removed from the agent's land via
 /// [`Session::eject_user`](crate::Session::eject_user) (`EjectUser`). The wire
 /// `Flags` field is `0` for a plain eject and `0x1` to also add the user to the

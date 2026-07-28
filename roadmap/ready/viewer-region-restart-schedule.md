@@ -2,7 +2,7 @@
 id: viewer-region-restart-schedule
 title: Region restart schedule + restart countdown
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-region-options-general]
 ---

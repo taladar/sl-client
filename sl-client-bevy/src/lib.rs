@@ -61,22 +61,22 @@ pub use sl_proto::{
     ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
     ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
     Diagnostic, Direction, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo,
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
-    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandingType,
-    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags,
+    EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
+    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
+    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
+    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
+    LandImpact, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
@@ -90,22 +90,23 @@ pub use sl_proto::{
     PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PointAtType,
     PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId,
     QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SkySettings,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, SurfaceInfo,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit, UpdatableAssetType,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, particle_pattern, pcode, sim_access, texture_anim_mode,
+    RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
+    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RenderMaterialEntry,
+    RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
+    SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
+    SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, SurfaceInfo, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, Transmit, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest,
+    WaterSettings, Wearable, WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -2187,6 +2188,15 @@ fn advance_running(
             }
             Command::SetRegionInfo(update) => {
                 session.set_region_info(update, now).ok();
+            }
+            Command::SetRegionDebug(update) => {
+                session.set_region_debug(update, now).ok();
+            }
+            Command::SetRegionTerrain(update) => {
+                session.set_region_terrain(update, now).ok();
+            }
+            Command::SetEstateInfo(update) => {
+                session.set_estate_info(update, now).ok();
             }
             Command::RequestEstateCovenant => {
                 session.request_estate_covenant(now).ok();

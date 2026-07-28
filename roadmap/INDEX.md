@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 220 |
-| blocked | 126 |
-| in-progress | 8 |
+| ready | 223 |
+| blocked | 121 |
+| in-progress | 10 |
 | bugs | 12 |
-| done | 613 |
+| done | 615 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1060** |
+| **total** | **1062** |
 
 ## ideas (56)
 
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (220)
+## ready (223)
 
 ### protocol
 
@@ -259,6 +259,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
   the chat display windows
+- [`viewer-clickable-name-widgets`](ready/viewer-clickable-name-widgets.md) —
+  Reusable clickable avatar-name / group-name widgets
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
@@ -486,9 +488,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-region-options-debug`](ready/viewer-region-options-debug.md) — Region
-  / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
-  (done))
+- [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
+  — Group picker for the Region/Estate Access → Allowed Groups list
+- [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
+  Region restart schedule + restart countdown (blocked by
+  `viewer-region-options-general` (done))
 - [`viewer-region-script-count-monitor`](ready/viewer-region-script-count-monitor.md)
   — Announce region script-count changes to chat
 - [`viewer-region-top-objects`](ready/viewer-region-top-objects.md) — Top
@@ -551,6 +555,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatar animations (+ revoke variant)
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
+- [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
+  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
+  `viewer-region-options-debug` (done))
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -665,7 +672,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (126)
+## blocked (121)
 
 ### protocol
 
@@ -884,19 +891,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mirrors (hero probes) (blocked by `viewer-perf-probe-scheduling`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
   — Region / parcel environment settings panel (blocked by
-  `viewer-region-options-general`, `viewer-environment-my-environments`)
-- [`viewer-region-options-estate`](blocked/viewer-region-options-estate.md) —
-  Region / Estate floater — estate tab (blocked by
-  `viewer-region-options-debug`)
-- [`viewer-region-options-general`](blocked/viewer-region-options-general.md) —
-  Region / Estate floater — region (general) tab (blocked by
-  `viewer-region-options-debug`)
-- [`viewer-region-options-terrain`](blocked/viewer-region-options-terrain.md) —
-  Region / Estate floater — terrain tab (blocked by
-  `viewer-region-options-debug`)
-- [`viewer-region-restart-schedule`](blocked/viewer-region-restart-schedule.md)
-  — Region restart schedule + restart countdown (blocked by
-  `viewer-region-options-general`)
+  `viewer-region-options-general` (done), `viewer-environment-my-environments`)
 - [`viewer-region-tracker`](blocked/viewer-region-tracker.md) — Region tracker —
   watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-notification-host`)
@@ -955,9 +950,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host`)
 - [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
   — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
-- [`viewer-terrain-edit-brushes`](blocked/viewer-terrain-edit-brushes.md) —
-  Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
-  `viewer-region-options-debug`)
 - [`viewer-ui-interaction-contracts`](blocked/viewer-ui-interaction-contracts.md)
   — An interaction contract per registered element, swept like the matrix
   (blocked by `viewer-ui-interaction-harness`)
@@ -1018,7 +1010,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (8)
+## in-progress (10)
 
 ### viewer
 
@@ -1026,6 +1018,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
+  — Region / Estate floater — estate tab (blocked by
+  `viewer-region-options-debug` (done))
+- [`viewer-region-options-terrain`](in-progress/viewer-region-options-terrain.md)
+  — Region / Estate floater — terrain tab (blocked by
+  `viewer-region-options-debug` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -1078,7 +1076,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (613)
+## done (615)
 
 ### protocol
 
@@ -1683,6 +1681,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
+  / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
+  (done))
+- [`viewer-region-options-general`](done/viewer-region-options-general.md) —
+  Region / Estate floater — region (general) tab (blocked by
+  `viewer-region-options-debug` (done))
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))

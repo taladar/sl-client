@@ -2,10 +2,18 @@
 id: viewer-region-options-debug
 title: Region / Estate floater — region debug tab
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-region-options
 blocked_by: [viewer-ui-widget-scaffold]
 ---
+
+Done (2026-07-28): the Region / Estate ("About Region") floater shell
+(`about_region.rs`, `AboutRegionPlugin`, opened from **World ▸ Region /
+Estate…**, persistence-exempt, built once + updated in place) plus the **Debug**
+tab — the disable scripts / collisions / physics toggles (new
+`Command::SetRegionDebug` / `setregiondebug`) and Restart / Cancel-Restart
+(`RestartRegion`, `-1` = cancel). The shell also stands up the Region, Terrain,
+Estate, Covenant, Access, and placeholder Environment / Experiences tabs.
 
 Context: [context/viewer.md](../context/viewer.md).
 

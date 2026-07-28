@@ -11,23 +11,23 @@ use crate::{
     AssetUpdateLocation, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
     ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
     CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
-    EjectAction, EstateAccessDelta, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
-    FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
-    GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
-    InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
-    InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, LureId, MapItemType,
-    Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType,
-    MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
-    ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission,
+    ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights,
+    GestureActivation, GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey,
+    GroupRequestId, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId,
+    InterestsUpdate, InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey,
+    InventoryOffer, InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount,
+    LureId, MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
     ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionHandle,
-    RegionInfoUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
-    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate,
+    RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
+    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdatableAssetType,
+    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1085,6 +1085,17 @@ pub enum Command {
     },
     /// Update the region's settings (`setregioninfo`).
     SetRegionInfo(RegionInfoUpdate),
+    /// Update the region's debug toggles — disable scripts / collisions /
+    /// physics region-wide (`setregiondebug`).
+    SetRegionDebug(RegionDebugUpdate),
+    /// Update the region's terrain settings — water height, raise/lower limits,
+    /// the four ground detail textures, and the per-corner elevation bands
+    /// (`setregionterrain` + `texturedetail` + `textureheights` +
+    /// `texturecommit`).
+    SetRegionTerrain(RegionTerrainUpdate),
+    /// Update the estate's settings — access / limit / voice / teleport flags
+    /// and the fixed-sun hour (`estatechangeinfo`).
+    SetEstateInfo(EstateInfoUpdate),
     /// Request the estate covenant summary (`EstateCovenantRequest`); the reply
     /// arrives as [`Event::EstateCovenant`](crate::Event::EstateCovenant).
     RequestEstateCovenant,

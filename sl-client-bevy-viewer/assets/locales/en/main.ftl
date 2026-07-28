@@ -385,6 +385,130 @@ about-land-env-version = Parcel environment version:
 about-land-env-day-cycle = Active day cycle:
 about-land-env-edit-note = Per-parcel environment editing is a separate feature; this is the current environment.
 
+## The Region / Estate ("About Region") floater (viewer-region-options-*).
+
+# The floater's title bar.
+about-region-title = Region / Estate
+# Tab labels.
+about-region-tab-region = Region
+about-region-tab-debug = Debug
+about-region-tab-terrain = Terrain
+about-region-tab-estate = Estate
+about-region-tab-covenant = Covenant
+about-region-tab-access = Access
+about-region-tab-environment = Environment
+about-region-tab-experiences = Experiences
+
+# Shared placeholders.
+about-region-loading = (loading)
+about-region-none = (none)
+about-region-apply = Apply
+about-region-remove = Remove
+
+# Region tab: identity read-outs.
+about-region-region = Region:
+about-region-type = Type:
+about-region-owner = Owner:
+about-region-grid-position = Grid position:
+about-region-maturity = Rating:
+about-region-agent-limit = Agent limit:
+about-region-object-bonus = Object bonus:
+
+# Region tab: editable flags.
+about-region-block-terraform = Block terraform
+about-region-block-fly = Block fly
+about-region-allow-damage = Allow damage
+about-region-restrict-push = Restrict pushing
+about-region-allow-resell = Allow land resell
+about-region-allow-join-divide = Allow land join / divide
+
+# Region tab: estate-manager actions.
+about-region-teleport-home-one = Teleport Home One Resident…
+about-region-teleport-home-all = Teleport Home All Residents…
+
+# Debug tab.
+about-region-disable-scripts = Disable scripts
+about-region-disable-collisions = Disable collisions
+about-region-disable-physics = Disable physics
+about-region-restart-delay = Restart in (seconds):
+about-region-restart = Restart Region
+about-region-cancel-restart = Cancel Restart
+
+# Terrain tab.
+about-region-water-height = Water height:
+about-region-terrain-raise = Terrain raise limit:
+about-region-terrain-lower = Terrain lower limit:
+about-region-terrain-textures = Terrain textures
+about-region-terrain-tex-1 = 1 (low):
+about-region-terrain-tex-2 = 2:
+about-region-terrain-tex-3 = 3:
+about-region-terrain-tex-4 = 4 (high):
+about-region-terrain-elevation = Elevation ranges (low = start, high = range)
+about-region-corner-sw-low = SW low
+about-region-corner-sw-high = high
+about-region-corner-se-low = SE low
+about-region-corner-se-high = high
+about-region-corner-nw-low = NW low
+about-region-corner-nw-high = high
+about-region-corner-ne-low = NE low
+about-region-corner-ne-high = high
+
+# Estate tab.
+about-region-estate = Estate:
+about-region-estate-owner = Estate owner:
+about-region-abuse-email = Abuse email:
+about-region-estate-note = Changes here affect every region in the estate.
+about-region-estate-public = Anyone can visit (public access)
+about-region-estate-direct-tp = Allow direct teleport
+about-region-estate-payment = Must have payment info on file
+about-region-estate-age = Must be age-verified
+about-region-estate-bots = Deny scripted agents (bots)
+about-region-estate-voice = Allow voice chat
+about-region-estate-override = Parcel owners may restrict access further
+about-region-apply-estate = Apply Estate Settings
+about-region-estate-message = Message to estate:
+about-region-send-estate-message = Send Message To Estate
+about-region-kick-estate = Kick Resident From Estate…
+
+# Covenant tab (read-only).
+about-region-last-modified = Last modified:
+about-region-resale = Resale:
+about-region-subdivide = Subdivide:
+about-region-covenant-none = There is no Covenant provided for this Estate.
+about-region-covenant-loading = (loading covenant…)
+about-region-resale-allowed = Land in this region may be resold.
+about-region-resale-blocked = Land in this region may not be resold.
+about-region-subdivide-allowed = Land in this region may be joined or subdivided.
+about-region-subdivide-blocked = Land in this region may not be joined or subdivided.
+
+# Access tab.
+about-region-managers = Estate managers
+about-region-allowed = Allowed residents
+about-region-allowed-groups = Allowed groups
+about-region-banned = Banned residents
+about-region-add-manager = Add Manager…
+about-region-add-allowed = Add Resident…
+about-region-add-banned = Ban Resident…
+about-region-allowed-groups-note = Adding an allowed group needs a group picker (a separate feature); existing groups can be removed here.
+about-region-access-name = Name
+about-region-access-remove = Remove
+
+# Product-type labels.
+about-region-product-full = Estate / Full Region
+about-region-product-homestead = Homestead
+about-region-product-openspace = Openspace
+about-region-product-unknown = Unknown
+
+# Maturity-rating labels.
+about-region-rating-pg = General
+about-region-rating-mature = Moderate
+about-region-rating-adult = Adult
+about-region-rating-unknown = Unknown
+
+# Environment / Experiences placeholder tabs.
+about-region-env-unimplemented = Region environment editing is not implemented yet.
+about-region-experiences-unimplemented = Region experiences are not implemented yet.
+
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 # The picker window's title bar.
