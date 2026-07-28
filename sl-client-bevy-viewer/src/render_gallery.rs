@@ -340,7 +340,8 @@ type HasDeclaration = Or<(
 /// no credentials to reject, no grid to be unreachable, no world to fail to load.
 /// That is the whole point of the gallery, and the signature says so.
 pub fn run() {
-    crate::init_tracing();
+    // Held for the whole process so the Chrome profiler (if enabled) flushes.
+    let _tracing_guards = crate::init_tracing();
     let args = GalleryArgs::parse();
     let start = match args.scene.as_deref() {
         None => 0,

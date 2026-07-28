@@ -2,7 +2,7 @@
 id: viewer-profiling-logplugin-tracing
 title: Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 topic: viewer
-status: ideas
+status: done
 origin: discovered 2026-07-25 while profiling the custom-face-material perf regression
 refs: [viewer-profiling, viewer-custom-face-material-shader]
 ---
@@ -37,3 +37,27 @@ Until then, ad-hoc profiling uses `RenderDiagnosticsPlugin` +
 `LogDiagnosticsPlugin` and bespoke `SL_VIEWER_DIAG` timers (a main-world
 Update-schedule timer, a `FaceMaterial` modified-event counter) — enough to
 split CPU vs GPU and main-world vs render-world, but not per-system.
+
+## Done (2026-07-28)
+
+Took the first option: the Tracy / Chrome layers are added to **our**
+subscriber. `init_tracing` (`sl-client-bevy-viewer/src/lib.rs`) now re-creates
+the layers `LogPlugin` would have, behind three viewer Cargo features:
+
+- `profile-tracy` → `dep:tracing-tracy` + `bevy/trace` + `bevy/trace_tracy`
+  (the last also makes `bevy_render` emit the per-frame `tracy.frame_mark`
+  event our `TracyLayer` consumes; that event is filtered out of the fmt log).
+- `profile-tracy-memory` → `profile-tracy` + `bevy/trace_tracy_memory` (Bevy's
+  `bevy_log` provides the process-wide profiled `#[global_allocator]`, so no
+  allocator wiring is needed on our side).
+- `profile-chrome` → `dep:tracing-chrome` + `bevy/trace` + `bevy/trace_chrome`;
+  honours `TRACE_CHROME`, names spans by formatted fields, and its `FlushGuard`
+  is returned in a new `TracingGuards` value each `run()` holds for the process
+  lifetime so the trace file finalises.
+
+`tracing-tracy`/`tracing-chrome` are pinned to Bevy 0.19 `bevy_log`'s versions
+(`0.11.4` / `0.7.0`) so the transitive `tracy-client` unifies on one build
+(verified: single `tracy-client 0.18.4`). Documented in the book
+(`book/src/tools/profiling.md`). The broader [[viewer-profiling]] deliverables
+(RenderDiagnosticsPlugin rows in the statistics floater, dhat heap-regression
+tests, samply notes, assert-no-alloc) remain open there.

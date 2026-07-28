@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
+| ideas | 55 |
 | ready | 220 |
 | blocked | 121 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 619 |
+| done | 620 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1064** |
 
-## ideas (56)
+## ideas (55)
 
 ### viewer
 
@@ -96,8 +96,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
-- [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
-  — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
 ### server
 
@@ -1072,7 +1070,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (619)
+## done (620)
 
 ### protocol
 
@@ -1624,6 +1622,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-edit-face-selection` (done))
 - [`viewer-profile-web-tab-browser`](done/viewer-profile-web-tab-browser.md) —
   Profile Web tab — render the feed in the embedded browser
+- [`viewer-profiling-logplugin-tracing`](done/viewer-profiling-logplugin-tracing.md)
+  — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
   skinning distortion
 - [`viewer-r10`](done/viewer-r10-tiled-faces-need-a-repeating-texture-sampler.md)

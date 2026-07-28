@@ -49,6 +49,7 @@
 ## Tools
 
 - [The REPL test client](tools/sl-repl.md)
+- [Profiling the viewer](tools/profiling.md)
 
 ## Conformance Testing
 

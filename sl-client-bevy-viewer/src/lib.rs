@@ -1778,17 +1778,101 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     Ok(())
 }
 
+/// Guards that keep profiling tracing layers alive for the process lifetime.
+///
+/// The Chrome/Perfetto tracer (`profile-chrome`) buffers events on a worker
+/// thread and only finalises a complete trace file when its flush guard drops,
+/// so [`init_tracing`]'s caller must hold the returned value until the app exits
+/// (`let _guards = init_tracing();`). With no profiling feature enabled this is a
+/// zero-sized do-nothing token, but callers should hold it uniformly.
+#[must_use = "hold the returned guard until the app exits so profiling output is flushed"]
+pub struct TracingGuards {
+    /// Flush guard for the `tracing-chrome` trace file; dropping it finalises and
+    /// closes the JSON trace. Never read — only its `Drop` matters.
+    #[cfg(feature = "profile-chrome")]
+    _chrome: tracing_chrome::FlushGuard,
+}
+
+impl std::fmt::Debug for TracingGuards {
+    /// Hand-written because `tracing_chrome::FlushGuard` is not `Debug`; the guard
+    /// carries no inspectable state worth printing anyway.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TracingGuards").finish_non_exhaustive()
+    }
+}
+
 /// Install the `tracing` subscriber both binaries share.
 ///
 /// The viewer disables Bevy's own `LogPlugin` (see `run_session`) because the
 /// login happens before the window exists and its logs must go somewhere, so the
 /// subscriber is ours to install — once, from the binary, before any Bevy plugin
-/// could claim the global slot.
-pub fn init_tracing() {
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_ignored| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+/// could claim the global slot. Bevy's own profilers attach their tracing layers
+/// *through* `LogPlugin`, so with it disabled they never install; the `profile-*`
+/// features re-wire the Tracy and Chrome/Perfetto layers here instead (see
+/// `viewer-profiling-logplugin-tracing`).
+///
+/// Hold the returned [`TracingGuards`] until the app exits so the Chrome tracer's
+/// trace file is flushed.
+pub fn init_tracing() -> TracingGuards {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_ignored| EnvFilter::new("info"));
+
+    // When Tracy is active, `bevy_render` emits a `tracy.frame_mark` INFO event
+    // every frame purely as a Tracy frame boundary; keep it out of the
+    // human-readable log so it does not spam the terminal (mirrors `LogPlugin`).
+    #[cfg(feature = "profile-tracy")]
+    let fmt_layer = {
+        use tracing_subscriber::Layer as _;
+        tracing_subscriber::fmt::layer().with_filter(tracing_subscriber::filter::FilterFn::new(
+            |meta| meta.fields().field("tracy.frame_mark").is_none(),
+        ))
+    };
+    #[cfg(not(feature = "profile-tracy"))]
+    let fmt_layer = tracing_subscriber::fmt::layer();
+
+    #[cfg(feature = "profile-chrome")]
+    let (chrome_layer, chrome_guard) = {
+        use tracing_subscriber::fmt::{FormattedFields, format::DefaultFields};
+        // `TRACE_CHROME` overrides the output path, matching Bevy's `LogPlugin`.
+        let mut builder = tracing_chrome::ChromeLayerBuilder::new();
+        if let Ok(path) = std::env::var("TRACE_CHROME") {
+            builder = builder.file(path);
+        }
+        // Name spans by their formatted fields (e.g. the system name), so the
+        // trace shows "system: name=..." instead of a wall of bare "system".
+        builder
+            .name_fn(Box::new(|event_or_span| match event_or_span {
+                tracing_chrome::EventOrSpan::Event(event) => event.metadata().name().into(),
+                tracing_chrome::EventOrSpan::Span(span) => span
+                    .extensions()
+                    .get::<FormattedFields<DefaultFields>>()
+                    .map_or_else(
+                        || span.metadata().name().into(),
+                        |fields| format!("{}: {}", span.metadata().name(), fields.fields.as_str()),
+                    ),
+            }))
+            .build()
+    };
+
+    // The `EnvFilter` sits below the output layers so it gates all of them (the
+    // fmt log, Tracy and Chrome), exactly as `LogPlugin` orders them.
+    let subscriber = tracing_subscriber::registry().with(filter).with(fmt_layer);
+
+    #[cfg(feature = "profile-tracy")]
+    let subscriber = subscriber.with(tracing_tracy::TracyLayer::default());
+
+    #[cfg(feature = "profile-chrome")]
+    let subscriber = subscriber.with(chrome_layer);
+
+    subscriber.init();
+
+    #[cfg(feature = "profile-tracy")]
+    warn!("Tracy profiling is active; memory use grows until a Tracy client connects");
+
+    TracingGuards {
+        #[cfg(feature = "profile-chrome")]
+        _chrome: chrome_guard,
+    }
 }
 
 /// The viewer entry point: parse options, initialise logging, and run the viewer.
@@ -1801,7 +1885,8 @@ pub fn init_tracing() {
 ///
 /// Returns [`Error`] if the credentials, grid or login URI cannot be resolved.
 pub fn run() -> Result<(), Error> {
-    init_tracing();
+    // Held for the whole process so the Chrome profiler (if enabled) flushes.
+    let _tracing_guards = init_tracing();
     let options = Options::parse();
     run_viewer(&options)
 }

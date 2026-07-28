@@ -27,6 +27,29 @@ default = ["spacenav"]
 # (viewer-input-spacenav-device / -camera-mapping). Linux-only for now (evdev).
 spacenav = ["dep:evdev"]
 
+# Profiling (viewer-profiling-logplugin-tracing). The viewer installs its own
+# `tracing` subscriber (`init_tracing`) and disables Bevy's `LogPlugin`, because
+# login logging happens before the Bevy `App`/window exists. Bevy's built-in
+# profilers attach their tracing layers *through* `LogPlugin`, so with it
+# disabled they never install. These features re-wire those layers into our own
+# subscriber and turn on `bevy/trace` so the per-system spans actually exist.
+
+# Stream Bevy's per-system / per-stage spans to the Tracy profiler UI (live
+# frame timeline + per-zone call counts). `bevy/trace_tracy` also makes
+# `bevy_render` emit the per-frame `tracy.frame_mark` boundary event our
+# `TracyLayer` consumes. Match Tracy GUI version to `tracy-client` (see the book).
+profile-tracy = ["dep:tracing-tracy", "bevy/trace", "bevy/trace_tracy"]
+
+# Tracy with per-allocation memory profiling (higher overhead). Bevy's
+# `trace_tracy_memory` installs a process-wide `#[global_allocator]` that reports
+# every alloc/free to Tracy, so no allocator wiring is needed on our side.
+profile-tracy-memory = ["profile-tracy", "bevy/trace_tracy_memory"]
+
+# Write a Chrome/Perfetto trace file (path from `TRACE_CHROME`, else
+# `./trace-<unix-ts>.json`) viewable in Perfetto or `chrome://tracing`. The
+# no-GUI fallback for bug reports.
+profile-chrome = ["dep:tracing-chrome", "bevy/trace", "bevy/trace_chrome"]
+
 [dependencies]
 # OS clipboard for the world map's Copy SLURL (wayland-data-control covers
 # running under a Wayland compositor without a focused-window handle).
@@ -121,7 +144,13 @@ thiserror = { version = "2.0.18" }
 # dedicated worker thread (a small current-thread runtime, not an app-wide one).
 tokio = { version = "1.52.3", features = ["net", "rt", "time"] }
 tracing = { version = "0.1.44" }
+# Profiling layers wired into our own subscriber (`init_tracing`), behind the
+# `profile-*` features. Pinned to the same versions Bevy's `bevy_log` uses so the
+# transitive `tracy-client` unifies on one build — Tracy captures only work when
+# our `TracyLayer` and Bevy's memory allocator / frame marks share a client.
+tracing-chrome = { version = "0.7.0", optional = true }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
+tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { version = "2.5.8" }
 
