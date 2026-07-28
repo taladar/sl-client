@@ -1071,3 +1071,26 @@ texture-picker-ok = OK
 texture-picker-cancel = Cancel
 bottom-toolbar-build = Build
 bottom-toolbar-search = Search
+
+## The notification / toast host (viewer-ui-notification-host). Each message
+## template's body may carry [KEY] substitution tokens the host fills from the
+## raised notification's arguments (the reference [NAME] substitutions).
+
+notification-button-ok = OK
+notification-button-cancel = Cancel
+notification-ignore-checkbox = Don't show me this again
+notification-system-tip = [MESSAGE]
+notification-system-message = [MESSAGE]
+notification-generic-alert = [MESSAGE]
+notification-region-restart-minutes = The region you are in now will restart in [MINUTES] minutes. If you stay in this region you will be logged out.
+notification-confirm-quit = Are you sure you want to quit?
+notification-overflow =
+    { $count ->
+        [one] { $count } more
+       *[other] { $count } more
+    }
+
+# The `SL_VIEWER_NOTIFICATION_DEMO` sample toasts (a debug affordance).
+notification-demo-tip = A transient tip — it fades away after ten seconds unless you hover it.
+notification-demo-notify = An informational notice — it stays for thirty seconds, then fades.
+notification-demo-alert = A sticky alert — it waits for you to acknowledge it rather than fading.

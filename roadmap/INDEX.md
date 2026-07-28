@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 219 |
-| blocked | 121 |
+| ready | 227 |
+| blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 621 |
+| done | 622 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1064** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (219)
+## ready (227)
 
 ### protocol
 
@@ -277,6 +277,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-derender-blacklist`](ready/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
+- [`viewer-dialog-lldialog`](ready/viewer-dialog-lldialog.md) — llDialog script
+  dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-dialog-offers-invites`](ready/viewer-dialog-offers-invites.md) —
+  Inventory / teleport offers + friendship / group invites (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-dialog-script-load-url`](ready/viewer-dialog-script-load-url.md) —
+  Script web-page request dialog (llLoadURL) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
   display name (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-do-not-disturb-away`](ready/viewer-do-not-disturb-away.md) — Away /
@@ -302,6 +310,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-experience-permission-dialog`](ready/viewer-experience-permission-dialog.md)
+  — Experience permission flow (accept / manage) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -319,6 +330,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-god-tools`](ready/viewer-god-tools.md) — God tools floater (blocked
   by `viewer-ui-widget-scaffold` (done))
+- [`viewer-grid-status-feed`](ready/viewer-grid-status-feed.md) — Grid status
+  feed notifications (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-group-chat-snooze`](ready/viewer-group-chat-snooze.md) — Per-group
   chat snooze and group-mute options
 - [`viewer-group-insignia-editing`](ready/viewer-group-insignia-editing.md) —
@@ -396,6 +409,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
+- [`viewer-notification-history`](ready/viewer-notification-history.md) —
+  Notification list / history panel (blocked by `viewer-ui-notification-host`
+  (done))
 - [`viewer-object-contents-copy-refinements`](ready/viewer-object-contents-copy-refinements.md)
   — Object Contents floater — named copy folder + Copy And Wear (blocked by
   `viewer-prim-inventory-editing` (done))
@@ -458,6 +474,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
+- [`viewer-permission-request-dialog`](ready/viewer-permission-request-dialog.md)
+  — Script permission-request dialog (ScriptQuestion) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -492,6 +511,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-top-objects`](ready/viewer-region-top-objects.md) — Top
   objects — top scripts / top colliders (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-region-tracker`](ready/viewer-region-tracker.md) — Region tracker —
+  watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
+  (done), `viewer-ui-notification-host` (done))
 - [`viewer-render-animation-coverage`](ready/viewer-render-animation-coverage.md)
   — Render-scene coverage — the animated avatar paths, which need their decode
   split from their transport (blocked by `viewer-render-scene-coverage` (done))
@@ -547,6 +569,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatar animations (+ revoke variant)
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
+- [`viewer-teleport-flow-progress`](ready/viewer-teleport-flow-progress.md) —
+  Teleport flow — progress screen & arrival (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
@@ -569,9 +594,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-ui-interaction-harness`](ready/viewer-ui-interaction-harness.md) —
   Headless synthetic-pointer input for the UI test harness
-- [`viewer-ui-notification-host`](ready/viewer-ui-notification-host.md) —
-  Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-ui-skin-tokens` (done))
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -662,7 +684,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (121)
+## blocked (112)
 
 ### protocol
 
@@ -713,14 +735,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend`)
 - [`viewer-chat-bubbles`](blocked/viewer-chat-bubbles.md) — Chat bubbles
   (blocked by `viewer-name-tags-billboard-render`)
-- [`viewer-dialog-lldialog`](blocked/viewer-dialog-lldialog.md) — llDialog
-  script dialogs + textbox prompts (blocked by `viewer-ui-notification-host`)
-- [`viewer-dialog-offers-invites`](blocked/viewer-dialog-offers-invites.md) —
-  Inventory / teleport offers + friendship / group invites (blocked by
-  `viewer-ui-notification-host`)
-- [`viewer-dialog-script-load-url`](blocked/viewer-dialog-script-load-url.md) —
-  Script web-page request dialog (llLoadURL) (blocked by
-  `viewer-ui-notification-host`)
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -731,9 +745,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-experience-permission-dialog`](blocked/viewer-experience-permission-dialog.md)
-  — Experience permission flow (accept / manage) (blocked by
-  `viewer-ui-notification-host`)
 - [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
   SimSession (blocked by `protocol-sim-caps-framework`)
 - [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
@@ -754,8 +765,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by
   `viewer-preferences-graphics-tab`)
-- [`viewer-grid-status-feed`](blocked/viewer-grid-status-feed.md) — Grid status
-  feed notifications (blocked by `viewer-ui-notification-host`)
 - [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
   — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
   by `viewer-audio-backend`)
@@ -836,8 +845,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-name-tags-billboard-render`)
 - [`viewer-name-tags-preferences`](blocked/viewer-name-tags-preferences.md) —
   Name tags — preference toggles (blocked by `viewer-preferences-floater`)
-- [`viewer-notification-history`](blocked/viewer-notification-history.md) —
-  Notification list / history panel (blocked by `viewer-ui-notification-host`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
@@ -846,9 +853,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-permission-active-grants`](blocked/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog`)
-- [`viewer-permission-request-dialog`](blocked/viewer-permission-request-dialog.md)
-  — Script permission-request dialog (ScriptQuestion) (blocked by
-  `viewer-ui-notification-host`)
 - [`viewer-photo-hosting-upload`](blocked/viewer-photo-hosting-upload.md) —
   Share snapshots to external photo/hosting services (blocked by
   `viewer-snapshot-floater`)
@@ -882,9 +886,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
   — Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`)
-- [`viewer-region-tracker`](blocked/viewer-region-tracker.md) — Region tracker —
-  watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-ui-notification-host`)
 - [`viewer-render-baselines`](blocked/viewer-render-baselines.md) — Render
   regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-render-test-harness` (done),
@@ -935,9 +936,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
   — Open a task-inventory item into its editor + Save Back to Object (blocked by
   `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
-- [`viewer-teleport-flow-progress`](blocked/viewer-teleport-flow-progress.md) —
-  Teleport flow — progress screen & arrival (blocked by
-  `viewer-ui-notification-host`)
 - [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
   — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
 - [`viewer-ui-interaction-contracts`](blocked/viewer-ui-interaction-contracts.md)
@@ -1068,7 +1066,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (621)
+## done (622)
 
 ### protocol
 
@@ -1758,6 +1756,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-ui-menu-search`](done/viewer-ui-menu-search.md) — Menu search field
   (blocked by `viewer-ui-menu-bar` (done))
+- [`viewer-ui-notification-host`](done/viewer-ui-notification-host.md) —
+  Notification / toast host (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-ui-skin-tokens` (done))
 - [`viewer-ui-radial-menu`](done/viewer-ui-radial-menu.md) — Radial (pie) menu
   widget (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-radio-widget`](done/viewer-ui-radio-widget.md) — Reusable

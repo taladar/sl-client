@@ -2,7 +2,7 @@
 id: viewer-dialog-script-load-url
 title: Script web-page request dialog (llLoadURL)
 topic: viewer
-status: blocked
+status: ready
 origin: script-interface survey (2026-07-23)
 blocked_by: [viewer-ui-notification-host]
 refs: [viewer-media-prim-browser, viewer-slurl-parse-dispatch]

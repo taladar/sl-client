@@ -2,7 +2,7 @@
 id: viewer-permission-request-dialog
 title: Script permission-request dialog (ScriptQuestion)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-notifications-dialogs
 blocked_by: [viewer-ui-notification-host]
 ---

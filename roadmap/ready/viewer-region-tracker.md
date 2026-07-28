@@ -2,7 +2,7 @@
 id: viewer-region-tracker
 title: Region tracker — watch regions, notify on status
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold, viewer-ui-notification-host]
 ---

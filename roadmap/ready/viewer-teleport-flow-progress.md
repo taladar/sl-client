@@ -2,7 +2,7 @@
 id: viewer-teleport-flow-progress
 title: Teleport flow — progress screen & arrival
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-teleport-flow
 blocked_by: [viewer-ui-notification-host]
 ---

@@ -584,6 +584,15 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
     },
     UiElement {
+        id: "notification-toast",
+        summary: "A toast card from the notification host (viewer-ui-notification-host): an \
+                  accent-bordered panel with a wrapping message, an OK / Cancel button row and \
+                  the \"don't show me this again\" checkbox. The live host \
+                  (`crate::notification_host`) stacks, times out and dismisses these in a corner \
+                  channel; here it is static so its layout is swept.",
+        spawn: crate::notification_host::spawn_notification_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

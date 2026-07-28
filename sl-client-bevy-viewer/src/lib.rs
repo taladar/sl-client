@@ -113,6 +113,8 @@ mod minimap;
 mod minimap_math;
 mod movement;
 mod nearby_chat_bar;
+mod notification_host;
+mod notifications;
 mod object_menu;
 mod objects;
 mod parcel_audio;
@@ -278,6 +280,9 @@ use crate::materials::{
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::movement::{AvatarControls, drive_avatar_controls};
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
+use crate::notification_host::{
+    NotificationHostPlugin, ingest_alert_messages, spawn_notification_demo,
+};
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
@@ -1046,6 +1051,20 @@ fn run_session(
     // region / parcel / position, L$ balance, SLT time and FPS read-outs that
     // share the top row, hugging its trailing edge next to the menu bar.
     .add_plugins(crate::status_bar::StatusBarPlugin)
+    // The toast / notification host (viewer-ui-notification-host): the screen
+    // channel that stacks, times out, fades and dismisses transient
+    // notifications from the declarative catalogue, plus the modal-alert scrim —
+    // the shared substrate the specific dialogs sit in. The live source
+    // (`ingest_alert_messages`) and the `SL_VIEWER_NOTIFICATION_DEMO` trigger are
+    // added below as viewer-only systems, since the plugin itself must host
+    // without the session `SlEvent` stream (so the login-free gallery can use it).
+    .add_plugins(NotificationHostPlugin)
+    // Surface the simulator's `AlertMessage` / `AgentAlertMessage` (a stream
+    // nothing consumed before) as notifications, and — only when
+    // `SL_VIEWER_NOTIFICATION_DEMO` is set — raise a sample spread on startup so
+    // the live stacking / fade / modal behaviour can be watched without a server
+    // alert.
+    .add_systems(Update, (ingest_alert_messages, spawn_notification_demo))
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout
