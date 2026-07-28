@@ -161,6 +161,12 @@ const LEAVE_CONFIRM_NO_KEY: &str = "groups-leave-confirm-no";
 pub(crate) struct GroupsModel {
     /// The agent's groups, by group id, mapped to the group's display name.
     groups: BTreeMap<GroupKey, String>,
+    /// Names of **other** groups the agent is not a member of, resolved on
+    /// demand (`UUIDGroupNameRequest` → [`SlSessionEvent::GroupNames`], or a
+    /// group profile). Kept separate from [`groups`](Self::groups), which is the
+    /// authoritative membership set; [`group_name`](Self::group_name) falls back
+    /// to this so a group-owned parcel / object shows a name, not a UUID.
+    resolved: BTreeMap<GroupKey, String>,
     /// Whether the agent accepts notices from each group — retained (unlike the
     /// display name, which the list needs) for the group profile floater's
     /// membership toggle, which has no other source for the login-time value.
@@ -202,11 +208,45 @@ impl GroupsModel {
         self.accept_notices.get(&group).copied()
     }
 
-    /// The display name of `group`, if the agent is a member. The build
-    /// floater's General tab shows the selected object's group through this
-    /// (an object set to a group the agent is not in falls back to its id).
+    /// The display name of `group` — the agent's own membership name, else a
+    /// name resolved on demand ([`note_resolved_name`](Self::note_resolved_name)),
+    /// else `None` (the caller falls back to the id and can request a resolve).
     pub(crate) fn group_name(&self, group: GroupKey) -> Option<&str> {
-        self.groups.get(&group).map(String::as_str)
+        self.groups
+            .get(&group)
+            .or_else(|| self.resolved.get(&group))
+            .map(String::as_str)
+    }
+
+    /// Whether the agent is a member of `group` — a membership test that, unlike
+    /// [`group_name`](Self::group_name), does **not** consider the on-demand
+    /// resolved-name cache (a resolved non-member group must not read as a member).
+    pub(crate) fn is_member(&self, group: GroupKey) -> bool {
+        self.groups.contains_key(&group)
+    }
+
+    /// Request `group`'s name (`UUIDGroupNameRequest`) if it is not already known
+    /// — the shared resolve path every group-name display site uses so a
+    /// non-member group's name fills the cache instead of showing a UUID forever.
+    /// Call at a discrete event (a floater open, a selection change), not per
+    /// frame; the reply folds into the [`resolved`](Self::resolved) cache.
+    pub(crate) fn request_name(&self, group: GroupKey, commands: &mut MessageWriter<SlCommand>) {
+        if self.group_name(group).is_none() {
+            commands.write(SlCommand(Command::RequestGroupNames(vec![group])));
+        }
+    }
+
+    /// Fold a resolved name for a non-member `group` into the on-demand cache.
+    /// Public so any group-name display site can seed the shared cache from a
+    /// name it learned (an IM session, a profile) rather than keeping its own.
+    pub(crate) fn note_resolved_name(&mut self, group: GroupKey, name: &str) {
+        if name.is_empty() || self.groups.contains_key(&group) {
+            return;
+        }
+        if self.resolved.get(&group).map(String::as_str) != Some(name) {
+            self.resolved.insert(group, name.to_owned());
+            self.touch();
+        }
     }
 
     /// The agent's group ids, in the map's stable id order — the build
@@ -820,6 +860,15 @@ fn ingest_group_events(mut events: MessageReader<SlEvent>, mut model: ResMut<Gro
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::GroupMemberships(memberships) => model.apply_memberships(memberships),
+            // On-demand names for non-member groups (a group-owned parcel / object).
+            SlSessionEvent::GroupNames(names) => {
+                for group in names {
+                    model.note_resolved_name(group.id, &group.name);
+                }
+            }
+            SlSessionEvent::GroupProfileReceived(profile) => {
+                model.note_resolved_name(profile.group_id, &profile.name);
+            }
             SlSessionEvent::ActiveGroupChanged(active) => model.set_active(active.active_group_id),
             // Both the UDP `AgentDropGroup` and its CAPS event-queue twin drop the
             // agent from a group (leaving, ejection, or dissolution).

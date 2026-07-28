@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 35 |
-| ready | 212 |
-| blocked | 106 |
+| ready | 213 |
+| blocked | 104 |
 | in-progress | 8 |
 | bugs | 12 |
-| done | 610 |
-| deferred | 18 |
+| done | 613 |
+| deferred | 19 |
 | wont-do | 6 |
-| **total** | **1007** |
+| **total** | **1010** |
 
 ## ideas (35)
 
@@ -99,7 +99,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-profiling-logplugin-tracing`](ideas/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 
-## ready (212)
+## ready (213)
 
 ### protocol
 
@@ -332,6 +332,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   into an intermediate SL model
 - [`viewer-minimap-menu-cam-face`](ready/viewer-minimap-menu-cam-face.md) —
   Minimap context menu — Cam / Face towards avatar
+- [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
+  Minimap context menu — About Land / Place Profile / World Map (blocked by
+  `viewer-parcel-options-general` (done), `viewer-world-map-floater` (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -339,6 +342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags — world-space billboard renderer
 - [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
   Name tags — wire GetDisplayNames caps into the tag
+- [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
+  Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
 - [`viewer-object-contents-copy-refinements`](ready/viewer-object-contents-copy-refinements.md)
@@ -382,9 +387,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-join-split`](ready/viewer-parcel-join-split.md) — Parcel join
   / split (blocked by `viewer-input-action-map` (done),
   `viewer-parcel-overlay-decode` (done))
-- [`viewer-parcel-options-general`](ready/viewer-parcel-options-general.md) —
-  About Land floater — general / covenant / objects (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-particle-editor`](ready/viewer-particle-editor.md) — Particle-system
   editor (blocked by `viewer-ui-texture-picker` (done), `viewer-ui-color-picker`
   (done))
@@ -605,7 +607,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (106)
+## blocked (104)
 
 ### viewer
 
@@ -714,9 +716,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
-- [`viewer-minimap-menu-land-items`](blocked/viewer-minimap-menu-land-items.md)
-  — Minimap context menu — About Land / Place Profile / World Map (blocked by
-  `viewer-parcel-options-general`, `viewer-world-map-floater` (done))
 - [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
   — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
   `viewer-contact-sets`)
@@ -744,9 +743,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-parcel-options-access-media`](blocked/viewer-parcel-options-access-media.md)
-  — About Land floater — access / ban / media / sound (blocked by
-  `viewer-parcel-options-general`)
 - [`viewer-permission-active-grants`](blocked/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog`)
@@ -958,7 +954,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (610)
+## done (613)
 
 ### protocol
 
@@ -1086,6 +1082,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
+  About Land floater — Options tab
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
   — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
   `viewer-appearance-editor-shell` (done))
@@ -1467,6 +1465,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p8-2`](done/viewer-p8-2-stitch-modes.md) — Stitch modes
 - [`viewer-p8-3`](done/viewer-p8-3-stitch-tests.md) — Stitch tests
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
+- [`viewer-parcel-options-access-media`](done/viewer-parcel-options-access-media.md)
+  — About Land floater — access / ban / media / sound (blocked by
+  `viewer-parcel-options-general` (done))
+- [`viewer-parcel-options-general`](done/viewer-parcel-options-general.md) —
+  About Land floater — general / covenant / objects (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-parcel-overlay-decode`](done/viewer-parcel-overlay-decode.md) —
   Decode ParcelOverlay into a 64×64 grid resource
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
@@ -2213,7 +2217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (18)
+## deferred (19)
 
 ### protocol
 
@@ -2259,6 +2263,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-os-native-integration-windows`](deferred/viewer-os-native-integration-windows.md)
   — Windows native OS integration (file dialogs, OpenURI, notifications)
   (blocked by `viewer-os-portals-linux`)
+- [`viewer-parcel-config-missing-writes`](deferred/viewer-parcel-config-missing-writes.md)
+  — About Land — the controls that have no protocol write path yet
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 

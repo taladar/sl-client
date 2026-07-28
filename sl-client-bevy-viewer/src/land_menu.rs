@@ -19,8 +19,6 @@
 //! (the muscle memory) is laid down now and each slice lights up when its
 //! feature lands — one `when` edit, address unchanged:
 //!
-//! - **About Land…** waits for a parcel-information surface
-//!   (`viewer-parcel-options-general`); the parcel *data* is already modelled.
 //! - **Create** and **Edit Terrain** wait for the build / terraform tools.
 //! - **Go Here** waits for autopilot.
 //! - **Mute Part. Own.** waits for particle picking
@@ -32,6 +30,13 @@
 //! `Land.Sit` does. The reference then *autopilots* to the clicked point and
 //! sits there; without autopilot (`Go Here` above) ours sits in place — the
 //! deliberate simplification, upgraded when autopilot lands.
+//!
+//! **About Land…** → the About Land floater ([`crate::about_land`]) on the
+//! parcel the right-click landed on. The clicked ground point is stashed
+//! ([`LandMenuTarget`]) when the pie opens and resolved to a parcel by testing
+//! each of the current region's parcel membership bitmaps
+//! ([`about_land_target`]); a click that lands off the current region's parcels
+//! falls back to the agent's own parcel.
 //!
 //! # How a pick reaches here
 //!
@@ -52,6 +57,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
+use crate::about_land::{AboutLandSubject, OpenAboutLand};
 use crate::avatar_menu::{SelfGroundSit, UNIMPLEMENTED};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::terrain::TerrainSurface;
@@ -71,7 +77,7 @@ pub(crate) static LAND_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "About Land...",
                 action: "about-land",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -147,6 +153,9 @@ pub(crate) struct LandRayHit {
     /// The hit distance along the ray, in metres — compared against the avatar
     /// pick so the nearer target wins.
     pub(crate) distance: f32,
+    /// The world-space point the ray struck the terrain, used to resolve which
+    /// parcel a right-click landed on (the About Land slice).
+    pub(crate) point: Vec3,
 }
 
 /// Resolve `ray` to the terrain, first-hit-only: `Some` exactly when the
@@ -166,6 +175,7 @@ pub(crate) fn pick_land(
     let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
     terrain.contains(entity).then_some(LandRayHit {
         distance: hit.distance,
+        point: hit.point,
     })
 }
 
@@ -185,6 +195,18 @@ pub(crate) fn pick_land(
 pub(crate) struct OpenLandMenu {
     /// Where to centre the pie, in logical pixels.
     pub(crate) at: Vec2,
+    /// The world-space ground point the right-click landed on — the subject the
+    /// About Land slice resolves to a parcel.
+    pub(crate) point: Vec3,
+}
+
+/// The world-space ground point the currently-open land pie was opened on,
+/// stashed by [`open_land_menu`] so a slice picked later ([`handle_land_menu_actions`])
+/// can act on it. The land pie carries no target entity; this is its equivalent.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct LandMenuTarget {
+    /// The world-space ground point of the pick, or `None` before any pick.
+    pub(crate) point: Option<Vec3>,
 }
 
 /// The plugin wiring the land context menu into the viewer.
@@ -196,6 +218,7 @@ impl Plugin for LandMenuPlugin {
     /// pick into an open pie and a picked slice into a command.
     fn build(&self, app: &mut App) {
         app.add_message::<OpenLandMenu>()
+            .init_resource::<LandMenuTarget>()
             .add_systems(Update, (open_land_menu, handle_land_menu_actions).chain());
     }
 }
@@ -204,8 +227,13 @@ impl Plugin for LandMenuPlugin {
 ///
 /// No conditions: the land pie's only live slice (Sit Here) is unconditional,
 /// and every placeholder is gated on the never-supplied [`UNIMPLEMENTED`].
-fn open_land_menu(mut requests: MessageReader<OpenLandMenu>, mut pies: MessageWriter<OpenPieMenu>) {
+fn open_land_menu(
+    mut requests: MessageReader<OpenLandMenu>,
+    mut pies: MessageWriter<OpenPieMenu>,
+    mut target: ResMut<LandMenuTarget>,
+) {
     for request in requests.read() {
+        target.point = Some(request.point);
         pies.write(OpenPieMenu {
             menu: &LAND_PIE,
             at: request.at,
@@ -217,13 +245,15 @@ fn open_land_menu(mut requests: MessageReader<OpenLandMenu>, mut pies: MessageWr
 
 /// Dispatch a picked land-menu slice to the command behind it.
 ///
-/// Only Sit Here is wired; every other slice is a disabled placeholder that
-/// never emits, so the fall-through is intentionally silent.
+/// Only Sit Here and About Land are wired; every other slice is a disabled
+/// placeholder that never emits, so the fall-through is intentionally silent.
 fn handle_land_menu_actions(
     mut actions: MessageReader<UiAction>,
     parcel: Res<SlAgentParcel>,
+    target: Res<LandMenuTarget>,
     mut ground_sit: ResMut<SelfGroundSit>,
     mut commands: MessageWriter<SlCommand>,
+    mut about_land: MessageWriter<OpenAboutLand>,
 ) {
     for action in actions.read() {
         if action.element != LAND_MENU_ELEMENT {
@@ -239,6 +269,29 @@ fn handle_land_menu_actions(
                 }
                 ground_sit.sitting = true;
                 commands.write(SlCommand(Command::SitOnGround));
+            }
+            "about-land" => {
+                // Open on the clicked ground point: the simulator resolves which
+                // parcel contains it (so a click on *any* parcel opens on that
+                // parcel, not just one already fetched). The current region's
+                // terrain sits at the scene origin, so the Bevy world point
+                // converts straight to region-local metres. With no point (should
+                // not happen for a land pick) fall back to the agent's parcel.
+                if let Some(point) = target.point {
+                    let local = crate::coords::bevy_to_sl_vec(point);
+                    about_land.write(OpenAboutLand {
+                        subject: AboutLandSubject::AtPoint {
+                            x: local.x,
+                            y: local.y,
+                        },
+                        read_only: false,
+                    });
+                } else if let Some(parcel) = parcel.current.as_ref() {
+                    about_land.write(OpenAboutLand {
+                        subject: AboutLandSubject::CurrentParcel(parcel.local_id),
+                        read_only: false,
+                    });
+                }
             }
             // Every other slice is a disabled placeholder: no behaviour yet.
             _other => {}
@@ -318,17 +371,21 @@ mod tests {
         }
     }
 
-    /// In the live viewer's actual state (no conditions supplied), Sit Here is
-    /// the one live slice and every placeholder keeps its slot but reads
-    /// disabled — the reference menu shape present before the features are.
+    /// In the live viewer's actual state (no conditions supplied), Sit Here and
+    /// About Land are the live slices and every remaining placeholder keeps its
+    /// slot but reads disabled — the reference menu shape present before the
+    /// features are.
     #[test]
-    fn sit_here_is_live_and_placeholders_are_disabled() -> Result<(), TestError> {
+    fn wired_slices_are_live_and_placeholders_are_disabled() -> Result<(), TestError> {
         let plain = resolve_slots(&LAND_PIE, &PieConditions::default());
         let sit = slot_at(&plain, Compass::NorthWest)?;
         assert_eq!(sit.outcome, SlotOutcome::Action("sit-here"));
         assert!(sit.enabled, "Sit Here must be live unconditionally");
+        // About Land is wired (viewer-parcel-options-general): live unconditionally.
+        let about = slot_at(&plain, Compass::East)?;
+        assert_eq!(about.outcome, SlotOutcome::Action("about-land"));
+        assert!(about.enabled, "About Land must be live unconditionally");
         for (point, name) in [
-            (Compass::East, "About Land..."),
             (Compass::NorthEast, "Create"),
             (Compass::North, "Go Here"),
             (Compass::West, "Mute Part. Own."),
@@ -341,12 +398,12 @@ mod tests {
                 "{name} is a placeholder and must read disabled until it is wired"
             );
         }
-        // The proof that the sentinel is what disables them: hold it, and they
-        // light up. The live viewer never does this.
+        // The proof that the sentinel is what disables the placeholders: hold it,
+        // and they light up. The live viewer never does this.
         let held = resolve_slots(&LAND_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::East)?.enabled,
-            "holding the sentinel proves it is the only thing gating the placeholder"
+            slot_at(&held, Compass::NorthEast)?.enabled,
+            "holding the sentinel proves it is the only thing gating a placeholder"
         );
         Ok(())
     }

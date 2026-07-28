@@ -94,6 +94,10 @@ const MAX_ROWS: usize = 400;
 /// A bordered control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 
+/// A [disabled](bevy::ui::InteractionDisabled) swatch's border — dimmed so a
+/// swatch the consumer cannot change reads as disabled.
+const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
+
 /// A tile / swatch's empty fill.
 const EMPTY_FILL: Color = Color::srgba(0.1, 0.1, 0.12, 1.0);
 
@@ -199,9 +203,14 @@ pub(crate) fn spawn_material_swatch(
 fn open_picker_from_swatch(
     press: On<Pointer<Press>>,
     swatches: Query<(&TextureSwatchValue, Option<&MaterialSwatchValue>)>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut opens: MessageWriter<OpenTexturePicker>,
 ) {
     if press.button != PointerButton::Primary {
+        return;
+    }
+    // A disabled swatch does not open the picker (scroll past it still works).
+    if disabled.contains(press.entity) {
         return;
     }
     if let Ok((texture, material)) = swatches.get(press.entity) {
@@ -399,7 +408,28 @@ impl Plugin for TexturePickerPlugin {
                     scroll_tree,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, reflect_texture_swatch_disabled);
+    }
+}
+
+/// Dim a texture swatch's border while it is
+/// [disabled](bevy::ui::InteractionDisabled), restoring it when enabled.
+fn reflect_texture_swatch_disabled(
+    mut swatches: Query<
+        (&mut BorderColor, Has<bevy::ui::InteractionDisabled>),
+        With<TextureSwatchValue>,
+    >,
+) {
+    for (mut border, disabled) in &mut swatches {
+        let wanted = BorderColor::all(if disabled {
+            DISABLED_BORDER
+        } else {
+            CONTROL_BORDER
+        });
+        if *border != wanted {
+            *border = wanted;
+        }
     }
 }
 

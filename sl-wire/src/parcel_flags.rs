@@ -40,6 +40,15 @@ impl ParcelFlags {
     pub const USE_PASS_LIST: Self = Self { bits: 1 << 11 };
     /// The parcel is listed in search.
     pub const SHOW_DIRECTORY: Self = Self { bits: 1 << 12 };
+    /// In-world sounds (gestures, object/collision sounds) are restricted to the
+    /// parcel — they do not play outside it, and outside sounds do not play in
+    /// (`PF_SOUND_LOCAL`).
+    pub const SOUND_LOCAL: Self = Self { bits: 1 << 15 };
+    /// The parcel's search listing is flagged as moderate ("mature") content
+    /// (`PF_MATURE_PUBLISH`).
+    pub const MATURE_PUBLISH: Self = Self { bits: 1 << 18 };
+    /// Group members' scripts may run on the parcel (`PF_ALLOW_GROUP_SCRIPTS`).
+    pub const ALLOW_GROUP_SCRIPTS: Self = Self { bits: 1 << 25 };
     /// Object entry from neighbouring parcels is denied to non-owners.
     pub const RESTRICT_PUSHOBJECT: Self = Self { bits: 1 << 21 };
     /// Anonymous (non-account) avatars are denied.
@@ -111,6 +120,9 @@ impl RegionFlags {
     pub const BLOCK_LAND_RESELL: Self = Self { bits: 1 << 7 };
     /// The region is a sandbox (objects are auto-returned).
     pub const SANDBOX: Self = Self { bits: 1 << 8 };
+    /// Parcels may be joined or subdivided (`REGION_FLAGS_ALLOW_PARCEL_CHANGES`).
+    /// Drives the About Land covenant tab's "Subdivide" clause.
+    pub const ALLOW_PARCEL_CHANGES: Self = Self { bits: 1 << 26 };
     /// Object entry across the region edge is blocked.
     pub const SKIP_COLLISIONS: Self = Self { bits: 1 << 12 };
     /// Scripts are disabled region-wide.

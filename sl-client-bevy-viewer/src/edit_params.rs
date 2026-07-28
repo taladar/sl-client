@@ -2111,10 +2111,16 @@ fn agent_label(
         .map_or_else(|| PENDING_NAME.to_owned(), str::to_owned)
 }
 
-/// The display line for a group: its name when the agent is a member, else
-/// its id (the reference resolves any group via its name cache; a group-name
-/// request path is not built here yet).
-fn group_label(group: GroupKey, groups: &GroupsModel) -> String {
+/// The display line for a group: its resolved name, else its id — requesting the
+/// name (via the shared [`GroupsModel`] cache) as a side effect so a non-member
+/// group's name fills in once the reply arrives, exactly like the creator /
+/// owner avatar names.
+fn group_label(
+    group: GroupKey,
+    groups: &GroupsModel,
+    names: &mut MessageWriter<SlCommand>,
+) -> String {
+    groups.request_name(group, names);
     groups
         .group_name(group)
         .map_or_else(|| group.uuid().to_string(), str::to_owned)
@@ -2143,7 +2149,7 @@ fn build_snapshot(
     });
     let owner_label = properties.map_or_else(String::new, |properties| match properties.owner {
         OwnerKey::Agent(agent) => agent_label(agent, avatars, names),
-        OwnerKey::Group(group) => group_label(group, groups),
+        OwnerKey::Group(group) => group_label(group, groups, names),
     });
     let group = properties.and_then(|properties| properties.group);
     Some(SnapshotData {
@@ -2158,7 +2164,7 @@ fn build_snapshot(
         creator_label,
         owner_label,
         group,
-        group_label: group.map_or_else(String::new, |group| group_label(group, groups)),
+        group_label: group.map_or_else(String::new, |group| group_label(group, groups, names)),
         permissions: properties.map(|properties| properties.permissions),
     })
 }

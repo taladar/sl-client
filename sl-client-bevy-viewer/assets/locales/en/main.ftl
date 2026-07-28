@@ -216,6 +216,175 @@ group-notice-has-attachment = This notice has an attachment.
 group-notice-compose = Send a notice
 group-notice-send = Send Notice
 
+## The About Land floater (viewer-parcel-options-general +
+## viewer-parcel-options-access-media) — the parcel info surface, all nine
+## reference tabs.
+
+# The floater title and its nine tabs.
+about-land-title = About Land
+about-land-tab-general = General
+about-land-tab-covenant = Covenant
+about-land-tab-objects = Objects
+about-land-tab-options = Options
+about-land-tab-media = Media
+about-land-tab-sound = Sound
+about-land-tab-access = Access
+about-land-tab-experiences = Experiences
+about-land-tab-environment = Environment
+
+# Shared placeholders and controls.
+about-land-loading = (loading)
+about-land-none = (none)
+about-land-no-parcel = No parcel selected.
+about-land-apply = Apply
+about-land-add = Add…
+about-land-remove = Remove
+about-land-yes = Yes
+about-land-no = No
+about-land-always = Always
+
+# General-tab labels.
+about-land-name = Name:
+about-land-parcel-id = Parcel ID:
+about-land-description = Description:
+about-land-type = Type:
+about-land-rating = Rating:
+about-land-owner = Owner:
+about-land-group = Group:
+about-land-area = Area:
+about-land-claimed = Claimed:
+about-land-traffic = Traffic:
+about-land-for-sale = For Sale:
+about-land-save = Save
+about-land-group-owned = (Group Owned)
+about-land-not-for-sale = Not for sale
+# The sale-price line: { $price } L$ total, { $persqm } L$ per square metre.
+about-land-sale-price = L$ { $price } (L$ { $persqm }/m²)
+
+# Land-type (region product) values.
+about-land-product-full = Estate / Full Region
+about-land-product-homestead = Homestead
+about-land-product-openspace = Openspace
+about-land-product-unknown = Unknown
+
+# Content-rating (maturity) values.
+about-land-rating-pg = General
+about-land-rating-mature = Moderate
+about-land-rating-adult = Adult
+about-land-rating-unknown = Unknown
+
+# Covenant-tab labels and clauses.
+about-land-estate = Estate:
+about-land-estate-owner = Estate owner:
+about-land-last-modified = Last modified:
+about-land-region = Region:
+about-land-region-type = Type:
+about-land-region-rating = Rating:
+about-land-resale = Resale:
+about-land-subdivide = Subdivide:
+about-land-covenant-none = There is no Covenant provided for this Estate.
+about-land-covenant-loading = (loading covenant…)
+about-land-resale-allowed = Land in this region may be resold.
+about-land-resale-blocked = Land in this region may not be resold.
+about-land-subdivide-allowed = Land in this region may be joined or subdivided.
+about-land-subdivide-blocked = Land in this region may not be joined or subdivided.
+
+# Objects-tab labels.
+about-land-region-capacity = Region capacity:
+about-land-parcel-capacity = Parcel capacity:
+about-land-parcel-impact = Parcel land impact:
+about-land-owner-objects = Owned by parcel owner:
+about-land-group-objects = Set to group:
+about-land-other-objects = Owned by others:
+about-land-selected-objects = Selected / sat upon:
+about-land-autoreturn = Auto-return (minutes):
+about-land-object-owners = Object Owners:
+about-land-refresh = Refresh
+about-land-owners-empty = No objects on this parcel.
+about-land-owner-agent = Resident
+about-land-owner-group = Group
+# One object-owner row's object count.
+about-land-owner-count = { $count } objects
+# The object-owners table column headers.
+about-land-owners-type = Type
+about-land-owners-name = Name
+about-land-owners-count = Count
+# The allow / ban list table column headers.
+about-land-access-name = Name
+about-land-access-expiry = Expires
+
+# Options-tab section headers and checkboxes.
+about-land-options-allow = Allow other Residents to:
+about-land-options-land = Land options:
+about-land-opt-terraform = Edit terrain
+about-land-opt-fly = Fly
+about-land-opt-build = Build objects (everyone)
+about-land-opt-build-group = Build objects (group)
+about-land-opt-entry = Object entry (everyone)
+about-land-opt-entry-group = Object entry (group)
+about-land-opt-scripts = Run scripts (everyone)
+about-land-opt-scripts-group = Run scripts (group)
+about-land-opt-safe = Safe (no damage)
+about-land-opt-no-push = No pushing
+about-land-opt-search = Show place in search
+about-land-opt-mature = Moderate content
+about-land-category = Category:
+about-land-snapshot = Snapshot:
+about-land-landing-point = Landing point:
+about-land-landing-set = Set here
+about-land-landing-clear = Clear
+about-land-teleport-routing = Teleport routing:
+# Search categories (ParcelCategory 0–7).
+about-land-cat-none = Any category
+about-land-cat-linden = Linden location
+about-land-cat-residential = Residential
+about-land-cat-commercial = Commercial
+about-land-cat-industrial = Industrial
+about-land-cat-park = Parks & Nature
+about-land-cat-other = Other
+about-land-cat-adult = Adult
+# Teleport routing (LandingType 0/1/2).
+about-land-routing-blocked = Blocked
+about-land-routing-landing = Landing point
+about-land-routing-anywhere = Anywhere
+
+# Media-tab controls.
+about-land-media-url = Media URL:
+about-land-media-texture = Replace texture:
+about-land-media-autoscale = Auto-scale content
+about-land-media-type = Media type:
+about-land-media-size = Media size:
+about-land-media-loop = Media loops
+about-land-media-auto-size = Auto
+
+# Sound-tab controls.
+about-land-music-url = Music URL:
+about-land-sound-local = Restrict gesture and object sounds to this parcel
+about-land-voice-enable = Enable voice
+about-land-voice-local = Restrict voice to this parcel
+about-land-av-sounds = Avatar sounds (everyone)
+about-land-av-sounds-group = Avatar sounds (group)
+
+# Access-tab controls and lists.
+about-land-access-public = Allow public access
+about-land-access-payment = Must have payment info on file
+about-land-access-age = Must be age-verified
+about-land-access-group = Allow group access
+about-land-access-passes = Sell passes
+about-land-pass-price = Pass price (L$):
+about-land-pass-hours = Pass hours:
+about-land-allowed = Allowed Residents
+about-land-banned = Banned Residents
+
+# Experiences tab (no per-parcel experience protocol yet).
+about-land-experiences-unavailable = Per-parcel experience lists are not available yet.
+
+# Environment-tab summary.
+about-land-env-override = Parcel overrides allowed:
+about-land-env-version = Parcel environment version:
+about-land-env-day-cycle = Active day cycle:
+about-land-env-edit-note = Per-parcel environment editing is a separate feature; this is the current environment.
+
 ## The emoji-picker floater (viewer-emoji-picker-floater).
 
 # The picker window's title bar.

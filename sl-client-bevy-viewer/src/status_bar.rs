@@ -257,6 +257,15 @@ pub(crate) struct AgentRegionPosition {
     position: Option<Vector>,
 }
 
+impl AgentRegionPosition {
+    /// The agent's region-local position in metres, or `None` before the own
+    /// avatar object arrives. Read by the About Land Options tab to set a
+    /// parcel's landing point to where the agent stands.
+    pub(crate) const fn position(&self) -> Option<&Vector> {
+        self.position.as_ref()
+    }
+}
+
 /// Which read-out a status text node carries, so one update system can rewrite
 /// every text node from a single `Query<(&StatusReadout, &mut Text)>` (several
 /// `Query<&mut Text, With<_>>` in one system would be a conflicting access). In
@@ -462,16 +471,46 @@ fn spawn_readout(
             slot.min_width = Val::Px(0.0);
         }
     }
-    commands
+    let slot_entity = commands
         .spawn((slot, Name::new("status-readout-slot"), ChildOf(parent)))
-        .with_child((
+        .id();
+    let text = commands
+        .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(STATUS_FONT_SIZE),
             TextColor(Color::WHITE),
             ClassList::new_with_classes(["sk-status-readout"]),
             readout,
             Name::new("status-readout"),
-        ));
+            ChildOf(slot_entity),
+        ))
+        .id();
+    // The parcel name is a click target: pressing it opens the About Land
+    // floater on the current parcel (the reference viewer's location read-out).
+    if readout == StatusReadout::ParcelName {
+        commands
+            .entity(text)
+            .insert((Button, Pickable::default()))
+            .observe(on_parcel_name_press);
+    }
+}
+
+/// Open the About Land floater on the agent's current parcel when the top-bar
+/// location read-out is clicked.
+fn on_parcel_name_press(
+    press: On<Pointer<Press>>,
+    parcel: Res<SlAgentParcel>,
+    mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    if let Some(current) = parcel.current.as_ref() {
+        about_land.write(crate::about_land::OpenAboutLand {
+            subject: crate::about_land::AboutLandSubject::CurrentParcel(current.local_id),
+            read_only: false,
+        });
+    }
 }
 
 /// Ask the simulator for the agent's balance the moment the region handshake

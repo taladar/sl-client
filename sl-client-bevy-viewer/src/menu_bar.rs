@@ -171,6 +171,11 @@ static WORLD_MENU: MenuDef = MenuDef {
                 .checked_when(WORLD_MAP_OPEN),
         ),
         MenuItemDef::Separator,
+        // The About Land floater (viewer-parcel-options-general) on the agent's
+        // current parcel, and its read-only "About this location" variant.
+        MenuItemDef::Command(MenuCommand::new("About Land…", "about-land")),
+        MenuItemDef::Command(MenuCommand::new("Place Profile…", "place-profile")),
+        MenuItemDef::Separator,
         MenuItemDef::Submenu(&ENVIRONMENT_MENU),
     ],
 };
@@ -398,6 +403,8 @@ fn handle_top_menu_actions(
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
+    agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
+    mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -458,6 +465,16 @@ fn handle_top_menu_actions(
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;
+                }
+            }
+            "about-land" | "place-profile" => {
+                if let Some(current) = agent_parcel.current.as_ref() {
+                    about_land.write(crate::about_land::OpenAboutLand {
+                        subject: crate::about_land::AboutLandSubject::CurrentParcel(
+                            current.local_id,
+                        ),
+                        read_only: action.action == "place-profile",
+                    });
                 }
             }
             "env-fixed-sunrise" => set_fixed(&mut environment, Some(FixedSky::Sunrise)),

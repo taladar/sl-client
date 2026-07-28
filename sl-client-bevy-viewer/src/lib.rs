@@ -28,6 +28,7 @@
 //! [`gallery::run`]) are `pub`; the module tree stays `pub(crate)` exactly as it
 //! was.
 
+mod about_land;
 mod animations;
 mod animesh;
 mod appearance;
@@ -190,6 +191,7 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::about_land::AboutLandPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
     poll_animations, pose_avatar_skeletons, update_animation_caps,
@@ -1041,6 +1043,10 @@ fn run_session(
     // content slot it fills.
     .add_plugins(GroupsPlugin)
     .add_plugins(GroupProfilePlugin)
+    // The About Land floater (viewer-parcel-options-general): the parcel's
+    // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
+    // opened from the top-bar location read-out and the land pie.
+    .add_plugins(AboutLandPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

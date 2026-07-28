@@ -841,6 +841,10 @@ impl Plugin for TextInputPlugin {
         app.add_systems(
             PostUpdate,
             (
+                // Before `bevy_text` drains the queued edits, so a disabled field
+                // never holds focus when the frame's edits apply — it cannot be
+                // typed into, not merely greyed.
+                clear_disabled_field_focus.before(EditableTextSystems),
                 // Before `bevy_text` drains the queued edits, so an overwrite
                 // rewrite still reaches this frame's `apply_text_edits`.
                 apply_overwrite_edits.before(EditableTextSystems),
@@ -857,6 +861,21 @@ impl Plugin for TextInputPlugin {
                 drive_caret_blink.after(EditableTextSystems),
             ),
         );
+    }
+}
+
+/// Drop input focus from a [disabled](bevy::ui::InteractionDisabled) text field
+/// before the frame's edits apply, so a field a consumer has disabled (e.g. a
+/// parcel control the agent lacks rights to change) cannot be focused or typed
+/// into — the interaction half of the disabled look [`reflect_disabled_text_color`]
+/// paints. Runs each frame: a click that momentarily focuses a disabled field is
+/// undone here before `bevy_text` drains any keystroke.
+fn clear_disabled_field_focus(
+    mut focus: ResMut<InputFocus>,
+    disabled: Query<(), (With<EditableText>, With<bevy::ui::InteractionDisabled>)>,
+) {
+    if focus.get().is_some_and(|entity| disabled.contains(entity)) {
+        focus.clear();
     }
 }
 

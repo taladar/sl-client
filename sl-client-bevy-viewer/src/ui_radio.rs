@@ -72,6 +72,10 @@ const INDICATOR_ON: Color = Color::srgb(0.52, 0.68, 0.95);
 /// glance.
 const INDICATOR_OFF: Color = Color::srgb(0.50, 0.55, 0.63);
 
+/// A [disabled](bevy::ui::InteractionDisabled) group's indicator colour — dimmed
+/// so a radio the consumer cannot change reads as disabled.
+const INDICATOR_DISABLED: Color = Color::srgb(0.34, 0.36, 0.40);
+
 /// An option label's colour.
 const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
@@ -201,7 +205,10 @@ pub(crate) struct RadioWidgetPlugin;
 
 impl Plugin for RadioWidgetPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, apply_radio_selection);
+        app.add_systems(
+            Update,
+            (apply_radio_selection, reflect_radio_disabled).chain(),
+        );
     }
 }
 
@@ -322,9 +329,15 @@ fn on_radio_value_change(
     change: On<ValueChange<Entity>>,
     mut groups: Query<&mut RadioSelection>,
     items: Query<&RadioItem>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut actions: MessageWriter<UiAction>,
 ) {
     let group_id = change.source;
+    // A disabled group ignores selection changes (scroll and read-out stay live;
+    // only the pick is inert), the interaction half of the disabled state.
+    if disabled.contains(group_id) {
+        return;
+    }
     // The event's value is the newly-picked option; its `RadioItem` names the
     // index to move to. A value that is not one of this group's options
     // (impossible in practice, but the query is fallible) is ignored.
@@ -392,6 +405,31 @@ fn apply_radio_selection(
             if color.0 != wanted_color {
                 color.0 = wanted_color;
             }
+        }
+    }
+}
+
+/// Grey a disabled group's indicator glyphs (and restore them when enabled) —
+/// the visual half of the disabled state, run every frame so it tracks both the
+/// group's disabled flag and its selection. Supersedes
+/// [`apply_radio_selection`]'s indicator colouring.
+fn reflect_radio_disabled(
+    groups: Query<(&RadioSelection, Has<bevy::ui::InteractionDisabled>)>,
+    mut indicators: Query<(&RadioIndicator, &mut TextColor)>,
+) {
+    for (indicator, mut color) in &mut indicators {
+        let Ok((selection, disabled)) = groups.get(indicator.group) else {
+            continue;
+        };
+        let wanted = if disabled {
+            INDICATOR_DISABLED
+        } else if indicator.index == selection.active {
+            INDICATOR_ON
+        } else {
+            INDICATOR_OFF
+        };
+        if color.0 != wanted {
+            color.0 = wanted;
         }
     }
 }

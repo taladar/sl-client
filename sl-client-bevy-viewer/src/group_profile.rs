@@ -1564,7 +1564,7 @@ fn build_general_tab(
         }
         return;
     };
-    let is_member = groups.group_name(target).is_some();
+    let is_member = groups.is_member(target);
     let sig = GeneralSig {
         is_member,
         can_edit_identity: has_power(profile.powers, group_powers::GROUP_CHANGE_IDENTITY),

@@ -2,7 +2,7 @@
 id: viewer-minimap-menu-land-items
 title: Minimap context menu — About Land / Place Profile / World Map
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-minimap-interactions (2026-07-23)
 blocked_by: [viewer-parcel-options-general, viewer-world-map-floater]
 refs: [viewer-minimap-interactions, viewer-rlv-enforce-info-hiding]

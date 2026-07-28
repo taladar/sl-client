@@ -1007,8 +1007,11 @@ fn request_avatar_menu_on_right_click(
             // object — so this arm is an avatar out-distanced by terrain, or
             // nothing but possibly terrain.)
             _no_avatar_or_object => {
-                if land_hit.is_some() {
-                    land_requests.write(OpenLandMenu { at: cursor });
+                if let Some(land) = land_hit {
+                    land_requests.write(OpenLandMenu {
+                        at: cursor,
+                        point: land.point,
+                    });
                 }
                 None
             }

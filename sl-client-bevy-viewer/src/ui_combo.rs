@@ -57,6 +57,17 @@ const ROW_HOVER: Color = Color::srgba(0.28, 0.34, 0.46, 1.0);
 /// The value / option text colour.
 const TEXT_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
+/// A [disabled](bevy::ui::InteractionDisabled) combo's value / arrow text colour
+/// — a muted grey matching the disabled text field, so a combo the user cannot
+/// change reads as disabled while its selection stays legible.
+const DISABLED_TEXT_COLOR: Color = Color::srgb(0.45, 0.47, 0.52);
+
+/// A disabled combo's background.
+const DISABLED_BACKGROUND: Color = Color::srgba(0.12, 0.12, 0.14, 1.0);
+
+/// A disabled combo's border.
+const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
+
 /// The dropdown arrow glyph.
 const ARROW_GLYPH: &str = "\u{25be}";
 
@@ -156,7 +167,7 @@ impl Plugin for ComboWidgetPlugin {
         app.add_message::<ComboChanged>()
             .init_resource::<crate::hud_pick::UiPointerClaim>()
             .add_systems(First, crate::hud_pick::reset_ui_pointer_claim)
-            .add_systems(Update, apply_combo_selection)
+            .add_systems(Update, (apply_combo_selection, reflect_combo_disabled))
             .add_systems(
                 Startup,
                 attach_combo_dismiss.after(UiScaffoldSystems::SpawnRoot),
@@ -247,11 +258,18 @@ fn seed_value_text(commands: &mut Commands, value: Entity, spec: &ComboSpec, act
 fn toggle_combo_popover(
     mut press: On<Pointer<Press>>,
     anchors: Query<&ComboOptions>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     popovers: Query<(Entity, &ComboPopover)>,
     mut claim: ResMut<crate::hud_pick::UiPointerClaim>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
+        return;
+    }
+    // A disabled combo does not open — it consumes the press so the click lands
+    // nowhere, but changes nothing (the reference's disabled-control behaviour).
+    if disabled.contains(press.entity) {
+        press.propagate(false);
         return;
     }
     press.propagate(false);
@@ -435,6 +453,46 @@ fn apply_combo_selection(
                         .entity(child)
                         .remove::<Translated>()
                         .insert(Text::new(label.clone()));
+                }
+            }
+        }
+    }
+}
+
+/// Grey a combo's anchor and value / arrow text while it is
+/// [disabled](bevy::ui::InteractionDisabled), and restore them when enabled — so
+/// a consumer disables a combo the same way it disables a text field (adding the
+/// marker), and the widget reflects it.
+fn reflect_combo_disabled(
+    mut anchors: Query<
+        (
+            &Children,
+            Has<bevy::ui::InteractionDisabled>,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        With<ComboSelection>,
+    >,
+    mut texts: Query<&mut TextColor>,
+) {
+    for (children, disabled, mut background, mut border) in &mut anchors {
+        let (want_bg, want_border, want_text) = if disabled {
+            (DISABLED_BACKGROUND, DISABLED_BORDER, DISABLED_TEXT_COLOR)
+        } else {
+            (COMBO_BACKGROUND, COMBO_BORDER, TEXT_COLOR)
+        };
+        if background.0 != want_bg {
+            background.0 = want_bg;
+        }
+        let wanted_border = BorderColor::all(want_border);
+        if *border != wanted_border {
+            *border = wanted_border;
+        }
+        for child in children.iter() {
+            if let Ok(mut color) = texts.get_mut(child) {
+                let wanted = TextColor(want_text);
+                if *color != wanted {
+                    *color = wanted;
                 }
             }
         }

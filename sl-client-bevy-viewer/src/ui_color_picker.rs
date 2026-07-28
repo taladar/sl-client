@@ -52,6 +52,10 @@ const PICKER_FONT: f32 = 13.0;
 /// A bordered control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.4, 0.4, 0.45, 1.0);
 
+/// A [disabled](bevy::ui::InteractionDisabled) swatch's border — dimmed so a
+/// swatch the consumer cannot change reads as disabled.
+const DISABLED_BORDER: Color = Color::srgba(0.28, 0.28, 0.32, 1.0);
+
 /// A slider track's fill.
 const TRACK_FILL: Color = Color::srgba(0.12, 0.12, 0.14, 1.0);
 
@@ -107,9 +111,14 @@ pub(crate) fn spawn_color_swatch(
 fn open_picker_from_swatch(
     press: On<Pointer<Press>>,
     swatches: Query<&ColorSwatchValue>,
+    disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     mut opens: MessageWriter<OpenColorPicker>,
 ) {
     if press.button != PointerButton::Primary {
+        return;
+    }
+    // A disabled swatch does not open the picker (scroll past it still works).
+    if disabled.contains(press.entity) {
         return;
     }
     if let Ok(value) = swatches.get(press.entity) {
@@ -117,6 +126,26 @@ fn open_picker_from_swatch(
             requester: press.entity,
             current: value.0,
         });
+    }
+}
+
+/// Dim a colour swatch's border while it is
+/// [disabled](bevy::ui::InteractionDisabled), restoring it when enabled.
+fn reflect_color_swatch_disabled(
+    mut swatches: Query<
+        (&mut BorderColor, Has<bevy::ui::InteractionDisabled>),
+        With<ColorSwatchValue>,
+    >,
+) {
+    for (mut border, disabled) in &mut swatches {
+        let wanted = BorderColor::all(if disabled {
+            DISABLED_BORDER
+        } else {
+            CONTROL_BORDER
+        });
+        if *border != wanted {
+            *border = wanted;
+        }
     }
 }
 
@@ -212,6 +241,7 @@ impl Plugin for ColorPickerPlugin {
                     handle_open_color_picker,
                     sync_color_picker_visual,
                     apply_color_swatch_fill,
+                    reflect_color_swatch_disabled,
                 ),
             );
     }
