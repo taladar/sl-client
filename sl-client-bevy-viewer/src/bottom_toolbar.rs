@@ -66,6 +66,7 @@ use crate::i18n::Translated;
 use crate::inventory::InventoryUi;
 use crate::minimap::MinimapUi;
 use crate::nearby_chat_bar::NearbyChatBar;
+use crate::search::SearchUi;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -167,6 +168,8 @@ enum ToolbarTarget {
     Minimap,
     /// The world-map floater ([`crate::world_map`]).
     WorldMap,
+    /// The Search floater ([`crate::search`]) — the directory search.
+    Search,
     /// The Build Tools floater ([`crate::edit_tool`]) — opening it enters edit
     /// mode with nothing selected yet.
     BuildTools,
@@ -236,6 +239,11 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
         action: "toggle-minimap",
         label_key: "bottom-toolbar-minimap",
         target: ToolbarTarget::Minimap,
+    },
+    ToolbarButtonDef {
+        action: "toggle-search",
+        label_key: "bottom-toolbar-search",
+        target: ToolbarTarget::Search,
     },
     ToolbarButtonDef {
         action: "toggle-build-tools",
@@ -497,6 +505,7 @@ fn handle_toolbar_actions(
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
     world_map: Option<Res<WorldMapUi>>,
+    search: Option<Res<SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
@@ -529,6 +538,12 @@ fn handle_toolbar_actions(
         {
             shown.0 = !shown.0;
         }
+        if action.action == "toggle-search"
+            && let Some(ui) = &search
+            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        {
+            shown.0 = !shown.0;
+        }
         if action.action == "toggle-build-tools"
             && let Some(ui) = &build_tools
             && let Ok(mut shown) = panels.get_mut(ui.panel())
@@ -556,6 +571,7 @@ fn resolve_target_open(
     conversations: Option<&ConversationsUi>,
     minimap: Option<&MinimapUi>,
     world_map: Option<&WorldMapUi>,
+    search: Option<&SearchUi>,
     build_tools: Option<&crate::edit_tool::BuildToolsUi>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
@@ -572,6 +588,9 @@ fn resolve_target_open(
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::WorldMap => world_map
+            .and_then(|ui| panels.get(ui.panel()).ok())
+            .map(|shown| shown.0),
+        ToolbarTarget::Search => search
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
         ToolbarTarget::BuildTools => build_tools
@@ -595,6 +614,7 @@ fn update_toolbar_button_states(
     conversations: Option<Res<ConversationsUi>>,
     minimap: Option<Res<MinimapUi>>,
     world_map: Option<Res<WorldMapUi>>,
+    search: Option<Res<SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
@@ -607,6 +627,7 @@ fn update_toolbar_button_states(
     let conversations = conversations.as_deref();
     let minimap = minimap.as_deref();
     let world_map = world_map.as_deref();
+    let search = search.as_deref();
     let build_tools = build_tools.as_deref();
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button flashes while the window is closed and an IM /
@@ -623,6 +644,7 @@ fn update_toolbar_button_states(
             conversations,
             minimap,
             world_map,
+            search,
             build_tools,
             nearby_chat,
             &panels,
@@ -752,6 +774,7 @@ mod tests {
                 "toggle-inventory",
                 "toggle-map",
                 "toggle-minimap",
+                "toggle-search",
                 "toggle-build-tools"
             ]
         );

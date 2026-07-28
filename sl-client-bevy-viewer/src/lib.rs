@@ -132,6 +132,7 @@ mod render_scene;
 #[cfg(test)]
 mod render_test;
 mod screenshot;
+mod search;
 mod session;
 mod settings;
 mod settings_binding;
@@ -982,6 +983,9 @@ fn run_session(
     // The world-map floater: grid-wide tile imagery (shared sl-map-apis
     // fetch / cache), per-region info + item markers, region-name search.
     .add_plugins(crate::world_map::WorldMapPlugin)
+    // The Search floater: the protocol-backed legacy directory search
+    // (people / groups / events / places / land / classifieds).
+    .add_plugins(crate::search::SearchFloaterPlugin)
     // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
     // driving per-face surfaces, world input routing and the focus model.
     .add_plugins(crate::media_prim::MediaPrimPlugin)

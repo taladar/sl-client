@@ -68,6 +68,10 @@ const CONVERSATIONS_OPEN: &str = "conversations-open";
 /// the check mark on the Content ▸ Web Browser entry.
 const WEB_BROWSER_OPEN: &str = "web-browser-open";
 
+/// The condition key that holds while the Search floater is open — drives the
+/// check mark on the Content ▸ Search entry.
+const SEARCH_OPEN: &str = "search-open";
+
 /// The condition key that holds while the minimap floater is open — drives the
 /// check mark on the World ▸ Mini-Map entry.
 const MINIMAP_OPEN: &str = "minimap-open";
@@ -208,13 +212,21 @@ static BUILD_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Content menu — the in-viewer web browser today; search / marketplace
-/// are future entries.
+/// The Content menu — the directory search and the in-viewer web browser today;
+/// marketplace is a future entry.
 static CONTENT_MENU: MenuDef = MenuDef {
     label: "Content",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Web Browser", "toggle-web-browser").checked_when(WEB_BROWSER_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Search…", "toggle-search")
+                .accel("Ctrl+F")
+                .checked_when(SEARCH_OPEN),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Web Browser", "toggle-web-browser").checked_when(WEB_BROWSER_OPEN),
+        ),
+    ],
 };
 
 /// The Help menu — a name for future help / about entries.
@@ -315,6 +327,7 @@ fn update_top_menu_conditions(
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    search: Option<Res<crate::search::SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
     selection: Res<crate::edit_selection::SelectionSet>,
@@ -337,6 +350,9 @@ fn update_top_menu_conditions(
     let world_map_open = world_map
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let search_open = search
+        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let build_tools_open = build_tools
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
@@ -355,6 +371,9 @@ fn update_top_menu_conditions(
     }
     if world_map_open {
         wanted.push(WORLD_MAP_OPEN);
+    }
+    if search_open {
+        wanted.push(SEARCH_OPEN);
     }
     if build_tools_open {
         wanted.push(BUILD_TOOLS_OPEN);
@@ -404,6 +423,7 @@ fn handle_top_menu_actions(
     web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
     minimap: Option<Res<crate::minimap::MinimapUi>>,
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
+    search: Option<Res<crate::search::SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
@@ -459,6 +479,13 @@ fn handle_top_menu_actions(
             }
             "toggle-world-map" => {
                 if let Some(ui) = &world_map
+                    && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-search" => {
+                if let Some(ui) = &search
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
                 {
                     shown.0 = !shown.0;

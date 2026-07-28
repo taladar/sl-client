@@ -790,6 +790,53 @@ worldmap-layer-mature-events = Moderate Events
 worldmap-layer-adult-events = Adult Events
 worldmap-layer-region-names = Region Names
 
+# The Search floater (viewer-search-floater): the Firestorm fsfloatersearch
+# reproduction — a tab strip of result tables plus a shared details pane.
+search-title = Search
+search-query-label = Search:
+search-button = Search
+search-maturity-label = Show:
+search-maturity-general = General
+search-maturity-moderate = Moderate
+search-maturity-adult = Adult
+search-online-only = Online only
+search-tab-web = Web
+search-tab-people = People
+search-tab-groups = Groups
+search-tab-events = Events
+search-tab-places = Places
+search-tab-land = Land
+search-tab-classifieds = Classifieds
+search-label-category = Category:
+search-label-saletype = For sale:
+search-label-sort = Sort by:
+search-prev = ‹ Prev
+search-next = Next ›
+# The result-table column headers.
+search-col-name = Name
+search-col-members = Members
+search-col-traffic = Traffic
+search-col-price = Price
+search-col-area = Area
+search-col-ppm = L$/m²
+search-col-type = Type
+search-col-date = Date
+search-land-ascending = Ascending
+search-label-price-max = Max price:
+search-label-area-min = Min area:
+# The Events tab date-mode radio.
+search-events-current = Upcoming
+search-events-bydate = By date
+# The shared details pane's action buttons.
+search-detail-profile = Open Profile
+search-detail-message = Send Message
+search-detail-friend = Add Friend
+search-detail-chat = Join Chat
+search-detail-join = Join Group
+search-detail-teleport = Teleport
+search-detail-map = Show on Map
+search-detail-remind = Remind me
+
 # Build tools (the object edit floater, viewer-object-edit-floater-shell).
 build-tools-floater-title = Build Tools
 build-tool-move = Move
@@ -1023,3 +1070,4 @@ texture-picker-default = Default
 texture-picker-ok = OK
 texture-picker-cancel = Cancel
 bottom-toolbar-build = Build
+bottom-toolbar-search = Search

@@ -4,7 +4,9 @@ title: Second Life website auto-login (OpenID cookie) in the in-viewer browser
 topic: viewer
 status: ready
 origin: user request (2026-07-22), while shipping the CEF web-media engine
-refs: [viewer-media-prim-browser, viewer-profile-web-tab-browser]
+refs:
+  [viewer-media-prim-browser, viewer-profile-web-tab-browser,
+  viewer-search-floater]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -13,6 +15,15 @@ The reference viewer logs the **grid account into the Second Life websites**
 (my.secondlife.com web profiles, marketplace, search) automatically, so the
 in-viewer browser opens them already authenticated. Our web floater and
 profile Web tab currently browse anonymously.
+
+**Also covers the Search floater's Web tab** ([[viewer-search-floater]]): its
+embedded browser is on the same shared (trusted-UI) request context, so once
+this auto-login lands the Web search opens **logged in** for free — and the
+same login response supplies the `search_token` the full SL templated search
+URL wants (`search.[GRID]/viewer/?...&sid=[SESSION_ID]`), which the search
+floater currently substitutes only the query into a base URL. Fold that
+templated-URL build (per-grid host + session token + maturity/collection
+params) into this task rather than the search floater.
 
 ## How the reference does it (verified in Firestorm source)
 

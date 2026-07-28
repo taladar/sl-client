@@ -67,8 +67,8 @@ use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSpec, register_table_settings,
-    spawn_table, spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
+    register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
@@ -258,6 +258,7 @@ const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
 /// widths (draggable + persisted), scroll, row pool and selection.
 const FRIENDS_TABLE: TableSpec = TableSpec {
     element: "people-friends",
+    selection: TableSelectionMode::None,
     columns: &[
         TableColumn {
             header_key: HEADER_NAME_KEY,

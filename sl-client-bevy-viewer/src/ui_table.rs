@@ -43,7 +43,7 @@ use sl_settings::SettingValue;
 use crate::i18n::{LocaleEllipsisMarker, Translated};
 use crate::settings::ViewerSettings;
 use crate::ui_font::UiFont;
-use crate::virtual_list::{VirtualList, VirtualViewport};
+use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
 
 /// The smallest a resizable column may be dragged, in logical pixels — enough to
 /// keep its header legible.
@@ -178,6 +178,8 @@ pub(crate) struct TableSpec {
     pub(crate) element: &'static str,
     /// The columns, left to right.
     pub(crate) columns: &'static [TableColumn],
+    /// The row-selection mode the widget provides.
+    pub(crate) selection: TableSelectionMode,
     /// The default (pre-persistence) sort levels, most-significant first. Empty
     /// leaves the table unsorted (the consumer's natural order).
     pub(crate) default_sort: &'static [TableSortDefault],
@@ -205,6 +207,26 @@ pub(crate) struct TableSpec {
     pub(crate) sort_setting: Option<&'static str>,
     /// The persisted-setting name for this table's column widths, or `None`.
     pub(crate) widths_setting: Option<&'static str>,
+}
+
+/// How the table lets the user select rows — owned by the widget (the highlight,
+/// the click handling, the [`TableState`] read-back), with *what happens* on a
+/// selection change left to the consumer (it reads [`TableState::selected`] and
+/// [`TableState::selection_revision`], exactly as it reads the sort). Mirrors the
+/// reference `LLScrollListCtrl`'s `multi_select` attribute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TableSelectionMode {
+    /// No widget-owned selection: rows are not selectable and the widget never
+    /// paints a selection highlight (a display-only table, or one whose consumer
+    /// wires its own row selection). The default.
+    #[default]
+    None,
+    /// At most one selected row; a click selects only that row.
+    Single,
+    /// Any number of selected rows: a plain click selects one, `Ctrl`+click
+    /// toggles a row, `Shift`+click selects the range from the anchor. Awaiting
+    /// its first consumer (the friends-list conference / multi-invite picker).
+    Multi,
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +389,17 @@ pub(crate) struct TableState {
     /// Whether the persisted sort / widths have been seeded from settings yet
     /// (a once-guard, since the account scope loads after the table spawns).
     seeded: bool,
+    /// The selected row **data indices** (into the consumer's ordered items), in
+    /// ascending order. Empty when nothing is selected; at most one for
+    /// [`TableSelectionMode::Single`]. Stored as indices (not entities) so it
+    /// survives row recycling.
+    selected: Vec<usize>,
+    /// The range anchor for a `Shift`+click in [`TableSelectionMode::Multi`] — the
+    /// last row plainly selected or `Ctrl`-toggled on.
+    anchor: Option<usize>,
+    /// Bumped whenever the selection changes, so a consumer reacts (populates a
+    /// detail pane, enables an action) exactly when the selection moved.
+    selection_revision: u64,
 }
 
 impl TableState {
@@ -383,7 +416,99 @@ impl TableState {
     pub(crate) const fn sort_revision(&self) -> u64 {
         self.sort_revision
     }
+
+    /// The table's selection mode.
+    pub(crate) const fn selection_mode(&self) -> TableSelectionMode {
+        self.spec.selection
+    }
+
+    /// The selected row data indices, ascending. Empty when nothing is selected.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the multi-select read-back a Multi-mode consumer reads; single-select \
+                      consumers use primary_selected. Exercised by the unit tests"
+        )
+    )]
+    pub(crate) fn selected(&self) -> &[usize] {
+        &self.selected
+    }
+
+    /// The single selected index for a single-select consumer (the first, if
+    /// several are somehow selected).
+    pub(crate) fn primary_selected(&self) -> Option<usize> {
+        self.selected.first().copied()
+    }
+
+    /// Whether `index` is currently selected.
+    pub(crate) fn is_selected(&self, index: usize) -> bool {
+        self.selected.contains(&index)
+    }
+
+    /// The selection revision — a consumer stores the value it last acted on and
+    /// re-reads when it advances.
+    pub(crate) const fn selection_revision(&self) -> u64 {
+        self.selection_revision
+    }
+
+    /// Clear the selection (e.g. when the consumer replaces the table's data, so a
+    /// stale index does not point at a different row). A no-op — with no revision
+    /// bump — when already empty.
+    pub(crate) fn clear_selection(&mut self) {
+        if !self.selected.is_empty() || self.anchor.is_some() {
+            self.selected.clear();
+            self.anchor = None;
+            self.selection_revision = self.selection_revision.wrapping_add(1);
+        }
+    }
+
+    /// Apply a click on row `index` under the current mode and modifier keys,
+    /// bumping the revision only on a real change. Pure so the selection algebra is
+    /// unit-testable without an ECS world.
+    fn apply_click(&mut self, index: usize, ctrl: bool, shift: bool) {
+        let mode = self.spec.selection;
+        if mode == TableSelectionMode::None {
+            return;
+        }
+        let before = self.selected.clone();
+        if mode == TableSelectionMode::Multi && ctrl {
+            // Ctrl+click toggles the row in or out of the selection.
+            if let Some(position) = self.selected.iter().position(|selected| *selected == index) {
+                self.selected.remove(position);
+            } else {
+                self.selected.push(index);
+                self.selected.sort_unstable();
+            }
+            self.anchor = Some(index);
+        } else if mode == TableSelectionMode::Multi && shift {
+            // Shift+click selects the inclusive range from the anchor; the anchor
+            // stays put across a shift-drag of the far end.
+            let anchor = self.anchor.unwrap_or(index);
+            let (low, high) = (anchor.min(index), anchor.max(index));
+            self.selected = (low..=high).collect();
+        } else {
+            // A plain click (either mode) selects only the clicked row.
+            self.selected = vec![index];
+            self.anchor = Some(index);
+        }
+        if self.selected != before {
+            self.selection_revision = self.selection_revision.wrapping_add(1);
+        }
+    }
 }
+
+/// On a pooled body **row**, naming the table it belongs to, so the widget's
+/// selection click handler and highlight can find the row's [`TableState`].
+#[derive(Component, Debug, Clone, Copy)]
+struct TableRow {
+    /// The table root this row belongs to.
+    table: Entity,
+}
+
+/// The background of a selected row — a translucent accent, matching the bespoke
+/// selection highlights the migrated tables used.
+const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// Links a header or body cell (the width-bearing node) to its table and column,
 /// so [`sync_table_column_widths`] keeps every cell of a column the same width as
@@ -495,6 +620,9 @@ pub(crate) fn spawn_table(
                 sort_revision: 0,
                 dirty: false,
                 seeded: false,
+                selected: Vec::new(),
+                anchor: None,
+                selection_revision: 0,
             },
             Name::new(format!("{}:table", spec.element)),
             ChildOf(parent),
@@ -789,20 +917,27 @@ pub(crate) fn spawn_table_row(
     root: Entity,
     spec: &'static TableSpec,
 ) -> TableRowCells {
-    commands.entity(row_entity).insert((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            height: Val::Px(spec.row_height),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(spec.column_gap),
-            padding: UiRect::horizontal(Val::Px(spec.row_padding)),
-            ..default()
-        },
-        BackgroundColor(Color::NONE),
-        Pickable::default(),
-    ));
+    commands
+        .entity(row_entity)
+        .insert((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                height: Val::Px(spec.row_height),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(spec.column_gap),
+                padding: UiRect::horizontal(Val::Px(spec.row_padding)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            Pickable::default(),
+            TableRow { table: root },
+        ))
+        // The widget's built-in selection click; a no-op for a
+        // [`TableSelectionMode::None`] table, so a consumer with its own row
+        // observer (the group members list) is unaffected.
+        .observe(select_table_row_on_press);
     let mut cells = Vec::with_capacity(spec.columns.len());
     for (index, column) in spec.columns.iter().enumerate() {
         cells.push(spawn_body_cell(
@@ -1235,6 +1370,7 @@ impl Plugin for TableWidgetPlugin {
                 seed_tables_from_settings,
                 sync_table_column_widths,
                 drive_table_sort_arrows,
+                apply_table_selection_highlight,
                 persist_table_state,
             ),
         )
@@ -1245,12 +1381,70 @@ impl Plugin for TableWidgetPlugin {
     }
 }
 
+/// The widget's built-in row-selection click: select the pressed row under the
+/// table's [`TableSelectionMode`] and the held modifier keys, bumping the table's
+/// selection revision. A no-op for a [`TableSelectionMode::None`] table (so a
+/// consumer with its own row observer is unaffected) and for a parked row.
+fn select_table_row_on_press(
+    press: On<Pointer<Press>>,
+    rows: Query<(&VirtualRow, &TableRow)>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut tables: Query<&mut TableState>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok((row, row_ref)) = rows.get(press.entity) else {
+        return;
+    };
+    let Some(index) = row.index else {
+        return;
+    };
+    let Ok(mut state) = tables.get_mut(row_ref.table) else {
+        return;
+    };
+    if state.selection_mode() == TableSelectionMode::None {
+        return;
+    }
+    let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
+    let shift = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+    state.apply_click(index, ctrl, shift);
+}
+
+/// Paint each selectable table's rows: the selection accent for a row whose data
+/// index is selected, transparent otherwise. Skips [`TableSelectionMode::None`]
+/// tables entirely, so a consumer that owns its own row backgrounds keeps them.
+fn apply_table_selection_highlight(
+    tables: Query<&TableState>,
+    mut rows: Query<(&VirtualRow, &TableRow, &mut BackgroundColor)>,
+) {
+    for (row, row_ref, mut background) in &mut rows {
+        let Ok(state) = tables.get(row_ref.table) else {
+            continue;
+        };
+        if state.selection_mode() == TableSelectionMode::None {
+            continue;
+        }
+        let selected = row.index.is_some_and(|index| state.is_selected(index));
+        let wanted = if selected {
+            SELECTED_ROW_BACKGROUND
+        } else {
+            Color::NONE
+        };
+        if background.0 != wanted {
+            background.0 = wanted;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, TableAlign, TableColumn, TableColumnKind,
-        TableColumnWidth, TableSort, TableSortDefault, resize_column_width,
+        TableColumnWidth, TableSelectionMode, TableSort, TableSortDefault, TableSpec, TableState,
+        resize_column_width,
     };
+    use bevy::color::Color;
     use pretty_assertions::assert_eq;
 
     /// A three-column fixture: a flexible Name, a fixed Title, a fixed Land.
@@ -1345,5 +1539,91 @@ mod tests {
         assert_eq!(resize_column_width(30.0, -100.0, 1.0), MIN_COLUMN_WIDTH);
         // Dragging far past the maximum clamps at the top.
         assert_eq!(resize_column_width(790.0, 100.0, 1.0), MAX_COLUMN_WIDTH);
+    }
+
+    /// A table spec fixture with the given selection mode (the other fields are
+    /// irrelevant to the selection algebra).
+    const fn spec_with(selection: TableSelectionMode) -> TableSpec {
+        TableSpec {
+            element: "test",
+            selection,
+            columns: COLUMNS,
+            default_sort: DEFAULTS,
+            builtin_sort: false,
+            row_height: 20.0,
+            font_size: 12.0,
+            header_color: Color::WHITE,
+            cell_color: Color::WHITE,
+            column_gap: 4.0,
+            row_padding: 4.0,
+            sort_setting: None,
+            widths_setting: None,
+        }
+    }
+
+    static SINGLE_SPEC: TableSpec = spec_with(TableSelectionMode::Single);
+    static MULTI_SPEC: TableSpec = spec_with(TableSelectionMode::Multi);
+    static NONE_SPEC: TableSpec = spec_with(TableSelectionMode::None);
+
+    /// A fresh [`TableState`] over `spec`, with nothing selected.
+    fn state(spec: &'static TableSpec) -> TableState {
+        TableState {
+            spec,
+            widths: Vec::new(),
+            sort: TableSort::from_defaults(spec.default_sort),
+            sort_revision: 0,
+            dirty: false,
+            seeded: false,
+            selected: Vec::new(),
+            anchor: None,
+            selection_revision: 0,
+        }
+    }
+
+    /// Single-select replaces the selection with the clicked row.
+    #[test]
+    fn single_select_replaces() {
+        let mut table = state(&SINGLE_SPEC);
+        table.apply_click(2, false, false);
+        assert_eq!(table.selected(), &[2]);
+        assert_eq!(table.primary_selected(), Some(2));
+        table.apply_click(5, false, false);
+        assert_eq!(table.selected(), &[5]);
+        // Two real changes → two revisions.
+        assert_eq!(table.selection_revision(), 2);
+    }
+
+    /// Multi-select: a plain click replaces, Ctrl toggles, and a Ctrl-toggle off
+    /// removes a row.
+    #[test]
+    fn multi_ctrl_toggles() {
+        let mut table = state(&MULTI_SPEC);
+        table.apply_click(1, false, false);
+        assert_eq!(table.selected(), &[1]);
+        table.apply_click(3, true, false);
+        assert_eq!(table.selected(), &[1, 3]);
+        table.apply_click(1, true, false);
+        assert_eq!(table.selected(), &[3]);
+    }
+
+    /// Multi-select: a Shift click selects the inclusive range from the anchor.
+    #[test]
+    fn multi_shift_range() {
+        let mut table = state(&MULTI_SPEC);
+        table.apply_click(2, false, false);
+        table.apply_click(5, false, true);
+        assert_eq!(table.selected(), &[2, 3, 4, 5]);
+    }
+
+    /// A `None` table never records a selection, and clearing an empty selection
+    /// does not churn the revision.
+    #[test]
+    fn none_mode_and_clear_are_inert() {
+        let mut table = state(&NONE_SPEC);
+        table.apply_click(2, false, false);
+        assert!(table.selected().is_empty());
+        assert_eq!(table.selection_revision(), 0);
+        table.clear_selection();
+        assert_eq!(table.selection_revision(), 0);
     }
 }

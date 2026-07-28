@@ -69,8 +69,8 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSpec, set_table_cell,
-    spawn_table, spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
+    set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
@@ -145,6 +145,7 @@ const BANNED_TABLE: TableSpec = access_table("about-region-banned");
 const fn access_table(element: &'static str) -> TableSpec {
     TableSpec {
         element,
+        selection: TableSelectionMode::None,
         columns: &[
             TableColumn {
                 header_key: "about-region-access-name",

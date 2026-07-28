@@ -67,9 +67,9 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_table::{
-    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSortDefault,
-    TableSortKey, TableSpec, TableState, register_table_settings, set_table_cell, spawn_table,
-    spawn_table_row,
+    TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableRowCells, TableSelectionMode,
+    TableSortDefault, TableSortKey, TableSpec, TableState, register_table_settings, set_table_cell,
+    spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
@@ -162,6 +162,7 @@ const ROLES_WIDTHS_SETTING: &str = "roles_widths";
 /// [`member_column_ordering`].
 const MEMBERS_TABLE: TableSpec = TableSpec {
     element: "group-members",
+    selection: TableSelectionMode::None,
     columns: &[
         TableColumn {
             header_key: "group-members-name",
@@ -222,6 +223,7 @@ const MEMBERS_TABLE: TableSpec = TableSpec {
 /// [`notice_column_ordering`].
 const NOTICES_TABLE: TableSpec = TableSpec {
     element: "group-notices",
+    selection: TableSelectionMode::None,
     columns: &[
         TableColumn {
             header_key: "group-notices-subject",
@@ -272,6 +274,7 @@ const NOTICES_TABLE: TableSpec = TableSpec {
 /// [`role_column_ordering`].
 const ROLES_TABLE: TableSpec = TableSpec {
     element: "group-roles",
+    selection: TableSelectionMode::None,
     columns: &[
         TableColumn {
             header_key: "group-roles-col-name",
