@@ -1,5 +1,9 @@
-//! SpaceNavigator / 6-DOF device input (`viewer-input-spacenav-device`) and its
-//! mapping onto the flycam (`viewer-input-spacenav-camera-mapping`).
+//! SpaceNavigator / 6-DOF device input (`viewer-input-spacenav-device`), its
+//! mapping onto the flycam (`viewer-input-spacenav-camera-mapping`), and — when
+//! flycam is off — onto the **avatar** (`viewer-input-spacenav-avatar-motion`):
+//! push forward / back walks, twist turns, and lift / press vertically flies up /
+//! down (the same intent PageUp / PageDown express). See [`avatar_nav_drive`] and
+//! its consumer [`crate::movement`].
 //!
 //! A 3Dconnexion SpaceNavigator / SpaceMouse reports six self-centring analogue
 //! axes — three translation, three rotation. This module reads them off the Linux
@@ -42,6 +46,25 @@ const DEFAULT_DEAD_ZONE: f32 = 0.01;
 /// The reference SpaceNavigator default feathering (`FlycamFeathering`) — the
 /// input ramp rate; less is softer.
 const DEFAULT_FEATHERING: f32 = 5.0;
+
+/// The reference **SpaceNavigator-on-Linux** default per-axis avatar-motion scales,
+/// in flycam-function order `[forward, strafe, up, roll, pitch, yaw]`
+/// (`AvatarAxisScale0..5`). These are the reference `setSNDefaults` values with its
+/// Linux `platformScale = 20` / `platformScaleAvXZ = 1` folded in (so `.1 * 20 = 2`
+/// for pitch / yaw). Only forward, up and yaw are consumed here — walking, flying
+/// up / down, and turning — matching the requested scope; strafe / roll / pitch keep
+/// their reference defaults for a later, fuller mapping.
+const DEFAULT_AVATAR_SCALE: [f32; 6] = [1.0, 1.0, 1.0, 0.0, 2.0, 2.0];
+/// The reference SpaceNavigator default per-axis avatar dead-zone
+/// (`AvatarAxisDeadZone0..5`), flycam-function order — larger than the flycam's, so
+/// a resting hand does not creep the avatar.
+const DEFAULT_AVATAR_DEAD_ZONE: [f32; 6] = [0.1, 0.1, 0.1, 1.0, 0.02, 0.01];
+/// The reference SpaceNavigator default avatar feathering (`AvatarFeathering`) — the
+/// turn-rate ramp; less is softer.
+const DEFAULT_AVATAR_FEATHERING: f32 = 6.0;
+/// The reference default run threshold (`JoystickRunThreshold`): a forward push
+/// scaled past this magnitude runs rather than walks.
+const DEFAULT_RUN_THRESHOLD: f32 = 0.25;
 
 /// The reference SpaceNavigator default for `AutoLeveling` — on, so the flycam
 /// eases its horizon back to level (removing composed-rotation roll drift, and
@@ -89,6 +112,184 @@ impl Default for FlycamAxisSettings {
     }
 }
 
+/// The per-axis dead-zone / scale plus feathering and the run threshold the avatar
+/// motion applies to the raw [`SpacenavInput::axes`] when flycam is off, refreshed
+/// from [`ViewerSettings`] — the reference's `AvatarAxisDeadZone*` /
+/// `AvatarAxisScale*` / `AvatarFeathering` / `JoystickRunThreshold`.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct AvatarAxisSettings {
+    /// Per-axis scale (flycam-function order).
+    pub(crate) scale: [f32; 6],
+    /// Per-axis dead-zone (flycam-function order).
+    pub(crate) dead_zone: [f32; 6],
+    /// The feathering (turn-rate ramp) rate; less is softer.
+    pub(crate) feathering: f32,
+    /// The forward-push magnitude past which walking becomes running.
+    pub(crate) run_threshold: f32,
+}
+
+impl Default for AvatarAxisSettings {
+    fn default() -> Self {
+        Self {
+            scale: DEFAULT_AVATAR_SCALE,
+            dead_zone: DEFAULT_AVATAR_DEAD_ZONE,
+            feathering: DEFAULT_AVATAR_FEATHERING,
+            run_threshold: DEFAULT_RUN_THRESHOLD,
+        }
+    }
+}
+
+/// The feathering / hysteresis state the avatar-motion mapping carries between
+/// frames: the smoothed body-yaw per-frame delta (the reference `sDelta[RY]`) and
+/// the run hysteresis ramp (`mJoystickRun`). Translation (forward / up) is a
+/// per-frame sign decision and needs no state.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub(crate) struct AvatarNavSmoothing {
+    /// The feathered body-yaw per-frame turn (radians).
+    yaw_delta: f32,
+    /// The run hysteresis ramp: `0` walk, rising to `2` run (the reference's
+    /// respond-next-frame debounce).
+    run_ramp: i8,
+}
+
+/// The SpaceNavigator's contribution to avatar motion this frame, derived from the
+/// raw axes by the reference `moveAvatar` dead-zone / scale / feathering pipeline
+/// and consumed by [`crate::movement`], which OR-composes it with the keyboard.
+///
+/// Only the three requested functions are produced — forward (walk), up (fly up /
+/// down, as PageUp / PageDown do) and yaw (turn) — so the mapping stays the
+/// keyboard-parallel walk / turn / fly, not the reference's fuller strafe / pitch.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct AvatarNavDrive {
+    /// `1` walk forward, `-1` walk back, `0` neither (forward axis, past dead-zone).
+    pub(crate) forward: i8,
+    /// `1` ascend, `-1` descend, `0` neither (up axis) — the PageUp / PageDown intent.
+    pub(crate) vertical: i8,
+    /// The body-yaw turn this frame (radians, twist axis, feathered); positive turns
+    /// the body left. Zero when centred.
+    pub(crate) yaw_delta: f32,
+    /// Whether the forward push is past the run threshold this frame.
+    pub(crate) run: bool,
+}
+
+/// Below this feathered per-frame yaw magnitude (radians) a released twist is
+/// treated as fully centred, so it stops turning rather than approaching zero
+/// forever.
+const YAW_SETTLE_EPSILON: f32 = 1.0e-5;
+
+/// The flycam-function index of the forward (walk), up (fly) and yaw (turn) axes in
+/// [`SpacenavInput::axes`] — the three the avatar mapping consumes.
+const AVATAR_FORWARD_AXIS: usize = 0;
+/// See [`AVATAR_FORWARD_AXIS`].
+const AVATAR_UP_AXIS: usize = 2;
+/// See [`AVATAR_FORWARD_AXIS`].
+const AVATAR_YAW_AXIS: usize = 5;
+
+/// Apply a soft dead-zone to a raw axis value: subtract the dead-zone from the
+/// magnitude (ramping from zero at the edge) and keep the sign, clamping to zero
+/// inside it — the reference `moveAvatar` per-axis dead-zone.
+fn dead_zoned(raw: f32, dead_zone: f32) -> f32 {
+    if raw > 0.0 {
+        (raw - dead_zone).max(0.0)
+    } else {
+        (raw + dead_zone).min(0.0)
+    }
+}
+
+/// Compute the SpaceNavigator's [`AvatarNavDrive`] for this frame from the raw axes,
+/// the settings and the carried [`AvatarNavSmoothing`] state.
+///
+/// Forward / up become a **sign** (walk or fly ±1) once past their dead-zone —
+/// avatar motion is the simulator-authoritative discrete intent, so a proportional
+/// speed would be discarded. Yaw is **feathered** (ramped) into a per-frame body
+/// turn, and the forward push drives a hysteretic run decision, both matching the
+/// reference. `dt` is the clamped frame time.
+pub(crate) fn avatar_nav_drive(
+    input: &SpacenavInput,
+    settings: &AvatarAxisSettings,
+    smoothing: &mut AvatarNavSmoothing,
+    dt: f32,
+) -> AvatarNavDrive {
+    // Forward / back: sign of the dead-zoned, scaled forward axis. Positive is a
+    // forward push (the device normalises push → +forward), so it walks forward.
+    let forward_scale = settings
+        .scale
+        .get(AVATAR_FORWARD_AXIS)
+        .copied()
+        .unwrap_or(0.0);
+    let forward_dz = settings
+        .dead_zone
+        .get(AVATAR_FORWARD_AXIS)
+        .copied()
+        .unwrap_or(0.0);
+    let forward_val = dead_zoned(
+        input.axes.get(AVATAR_FORWARD_AXIS).copied().unwrap_or(0.0),
+        forward_dz,
+    ) * forward_scale;
+    let forward = sign_i8(forward_val);
+
+    // Up / down: sign of the dead-zoned up axis (lift → +up → ascend), the same
+    // intent PageUp / PageDown express.
+    let up_dz = settings
+        .dead_zone
+        .get(AVATAR_UP_AXIS)
+        .copied()
+        .unwrap_or(0.0);
+    let vertical = sign_i8(dead_zoned(
+        input.axes.get(AVATAR_UP_AXIS).copied().unwrap_or(0.0),
+        up_dz,
+    ));
+
+    // Yaw: feather the dead-zoned, scaled, frame-timed twist into a body turn (the
+    // reference `sDelta[RY]` ramp). Positive twist turns the body left.
+    let yaw_scale = settings.scale.get(AVATAR_YAW_AXIS).copied().unwrap_or(0.0);
+    let yaw_dz = settings
+        .dead_zone
+        .get(AVATAR_YAW_AXIS)
+        .copied()
+        .unwrap_or(0.0);
+    let yaw_target = dead_zoned(
+        input.axes.get(AVATAR_YAW_AXIS).copied().unwrap_or(0.0),
+        yaw_dz,
+    ) * yaw_scale
+        * dt;
+    smoothing.yaw_delta += (yaw_target - smoothing.yaw_delta) * dt * settings.feathering;
+    // Snap a decaying-to-centre yaw to exactly zero once negligible, so a released
+    // twist stops marking the avatar as turning (the feathering only approaches zero
+    // asymptotically) rather than dribbling AgentUpdates forever.
+    if yaw_target == 0.0 && smoothing.yaw_delta.abs() < YAW_SETTLE_EPSILON {
+        smoothing.yaw_delta = 0.0;
+    }
+
+    // Run hysteresis (reference `handleRun`): the forward push magnitude past the
+    // threshold ramps up over a frame before running, and back down before walking,
+    // so an input spike near the threshold does not flap between walk and run.
+    let run_input = forward_val.abs();
+    if run_input > settings.run_threshold {
+        smoothing.run_ramp = smoothing.run_ramp.saturating_add(1).min(2);
+    } else if smoothing.run_ramp > 0 {
+        smoothing.run_ramp = smoothing.run_ramp.saturating_sub(1);
+    }
+
+    AvatarNavDrive {
+        forward,
+        vertical,
+        yaw_delta: smoothing.yaw_delta,
+        run: smoothing.run_ramp >= 2,
+    }
+}
+
+/// The sign of `value` as an `i8` (`1` / `-1` / `0`).
+const fn sign_i8(value: f32) -> i8 {
+    if value > 0.0 {
+        1
+    } else if value < 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
 /// The `FlycamAxisScale<n>` setting name for flycam function `n`.
 fn scale_setting(index: usize) -> String {
     format!("FlycamAxisScale{index}")
@@ -104,6 +305,22 @@ const FEATHERING_SETTING: &str = "FlycamFeathering";
 
 /// The auto-leveling setting name (matching the reference).
 const AUTO_LEVELING_SETTING: &str = "AutoLeveling";
+
+/// The `AvatarAxisScale<n>` setting name for flycam function `n`.
+fn avatar_scale_setting(index: usize) -> String {
+    format!("AvatarAxisScale{index}")
+}
+
+/// The `AvatarAxisDeadZone<n>` setting name for flycam function `n`.
+fn avatar_dead_zone_setting(index: usize) -> String {
+    format!("AvatarAxisDeadZone{index}")
+}
+
+/// The avatar feathering setting name (matching the reference).
+const AVATAR_FEATHERING_SETTING: &str = "AvatarFeathering";
+
+/// The run-threshold setting name (matching the reference).
+const RUN_THRESHOLD_SETTING: &str = "JoystickRunThreshold";
 
 /// Register the flycam-axis settings on the store with the reference defaults, so
 /// the names exist (and persist) whether or not the read half is compiled in, and
@@ -135,11 +352,41 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::Bool(DEFAULT_AUTO_LEVELING),
         "Ease the flycam horizon back to level",
     );
+    for (index, &scale) in DEFAULT_AVATAR_SCALE.iter().enumerate() {
+        settings.register_in(
+            AVATAR_SECTION,
+            &avatar_scale_setting(index),
+            SettingValue::F32(scale),
+            "Avatar-motion axis scaler",
+        );
+        settings.register_in(
+            AVATAR_SECTION,
+            &avatar_dead_zone_setting(index),
+            SettingValue::F32(DEFAULT_AVATAR_DEAD_ZONE.get(index).copied().unwrap_or(0.0)),
+            "Avatar-motion axis dead zone",
+        );
+    }
+    settings.register_in(
+        AVATAR_SECTION,
+        AVATAR_FEATHERING_SETTING,
+        SettingValue::F32(DEFAULT_AVATAR_FEATHERING),
+        "Avatar-motion feathering (less is softer)",
+    );
+    settings.register_in(
+        AVATAR_SECTION,
+        RUN_THRESHOLD_SETTING,
+        SettingValue::F32(DEFAULT_RUN_THRESHOLD),
+        "Forward-push magnitude past which walking becomes running",
+    );
 }
 
 /// The persisted-file section the flycam / SpaceNavigator settings are grouped
 /// under (`[spacenav.flycam]`).
 const FLYCAM_SECTION: &[&str] = &["spacenav", "flycam"];
+
+/// The persisted-file section the avatar-motion SpaceNavigator settings are grouped
+/// under (`[spacenav.avatar]`).
+const AVATAR_SECTION: &[&str] = &["spacenav", "avatar"];
 
 /// Refresh [`FlycamAxisSettings`] from the store each frame (cheap reads), so a
 /// value changed in the (future) settings UI takes effect live.
@@ -168,6 +415,33 @@ pub(crate) fn refresh_flycam_settings(
     }
 }
 
+/// Refresh [`AvatarAxisSettings`] from the store each frame (cheap reads), so a
+/// value changed in the (future) settings UI takes effect live.
+pub(crate) fn refresh_avatar_settings(
+    store: Res<ViewerSettings>,
+    mut settings: ResMut<AvatarAxisSettings>,
+) {
+    let store = store.store();
+    for index in 0..6 {
+        if let Ok(value) = store.get_f32(&avatar_scale_setting(index))
+            && let Some(slot) = settings.scale.get_mut(index)
+        {
+            *slot = value;
+        }
+        if let Ok(value) = store.get_f32(&avatar_dead_zone_setting(index))
+            && let Some(slot) = settings.dead_zone.get_mut(index)
+        {
+            *slot = value;
+        }
+    }
+    if let Ok(value) = store.get_f32(AVATAR_FEATHERING_SETTING) {
+        settings.feathering = value;
+    }
+    if let Ok(value) = store.get_f32(RUN_THRESHOLD_SETTING) {
+        settings.run_threshold = value;
+    }
+}
+
 /// The SpaceNavigator plugin: publishes [`SpacenavInput`] / [`FlycamAxisSettings`]
 /// always, and (with the `spacenav` feature on Linux) the device read that fills
 /// the input.
@@ -178,7 +452,9 @@ impl Plugin for SpacenavPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpacenavInput>()
             .init_resource::<FlycamAxisSettings>()
-            .add_systems(Update, refresh_flycam_settings);
+            .init_resource::<AvatarAxisSettings>()
+            .init_resource::<AvatarNavSmoothing>()
+            .add_systems(Update, (refresh_flycam_settings, refresh_avatar_settings));
         #[cfg(all(feature = "spacenav", target_os = "linux"))]
         {
             app.add_systems(Startup, device::open_device)
@@ -393,5 +669,162 @@ mod device {
         // Toggle on the press edge (down now, up last frame).
         input.toggle_flycam = button_now && !device.button_down;
         device.button_down = button_now;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AVATAR_FORWARD_AXIS, AVATAR_UP_AXIS, AVATAR_YAW_AXIS, AvatarAxisSettings, AvatarNavDrive,
+        AvatarNavSmoothing, SpacenavInput, avatar_nav_drive,
+    };
+    use pretty_assertions::assert_eq;
+
+    /// A [`SpacenavInput`] with a single flycam-function axis deflected.
+    fn axis_input(index: usize, value: f32) -> SpacenavInput {
+        let mut input = SpacenavInput::default();
+        if let Some(slot) = input.axes.get_mut(index) {
+            *slot = value;
+        }
+        input
+    }
+
+    /// A representative frame time (~60 fps).
+    const DT: f32 = 1.0 / 60.0;
+
+    /// A centred device drives nothing.
+    #[test]
+    fn centred_input_is_inert() {
+        let mut smoothing = AvatarNavSmoothing::default();
+        let drive = avatar_nav_drive(
+            &SpacenavInput::default(),
+            &AvatarAxisSettings::default(),
+            &mut smoothing,
+            DT,
+        );
+        assert_eq!(drive, AvatarNavDrive::default());
+    }
+
+    /// A forward push past the dead-zone walks forward; a pull back walks back; an
+    /// input inside the dead-zone does neither.
+    #[test]
+    fn forward_axis_walks_by_sign() {
+        let settings = AvatarAxisSettings::default();
+
+        let mut smoothing = AvatarNavSmoothing::default();
+        assert_eq!(
+            avatar_nav_drive(
+                &axis_input(AVATAR_FORWARD_AXIS, 0.5),
+                &settings,
+                &mut smoothing,
+                DT
+            )
+            .forward,
+            1
+        );
+
+        let mut smoothing = AvatarNavSmoothing::default();
+        assert_eq!(
+            avatar_nav_drive(
+                &axis_input(AVATAR_FORWARD_AXIS, -0.5),
+                &settings,
+                &mut smoothing,
+                DT
+            )
+            .forward,
+            -1
+        );
+
+        // Inside the (0.1) dead-zone: no walk.
+        let mut smoothing = AvatarNavSmoothing::default();
+        assert_eq!(
+            avatar_nav_drive(
+                &axis_input(AVATAR_FORWARD_AXIS, 0.05),
+                &settings,
+                &mut smoothing,
+                DT
+            )
+            .forward,
+            0
+        );
+    }
+
+    /// A lift ascends, a press descends — the PageUp / PageDown intent.
+    #[test]
+    fn up_axis_flies_by_sign() {
+        let settings = AvatarAxisSettings::default();
+
+        let mut smoothing = AvatarNavSmoothing::default();
+        assert_eq!(
+            avatar_nav_drive(
+                &axis_input(AVATAR_UP_AXIS, 0.5),
+                &settings,
+                &mut smoothing,
+                DT
+            )
+            .vertical,
+            1
+        );
+
+        let mut smoothing = AvatarNavSmoothing::default();
+        assert_eq!(
+            avatar_nav_drive(
+                &axis_input(AVATAR_UP_AXIS, -0.5),
+                &settings,
+                &mut smoothing,
+                DT
+            )
+            .vertical,
+            -1
+        );
+    }
+
+    /// A held twist ramps the body-yaw turn up over frames (feathering) in the
+    /// direction of the twist, and a released twist settles it back to exactly zero.
+    #[test]
+    fn yaw_axis_ramps_and_settles() {
+        let settings = AvatarAxisSettings::default();
+        let mut smoothing = AvatarNavSmoothing::default();
+        let held = axis_input(AVATAR_YAW_AXIS, 1.0);
+
+        let first = avatar_nav_drive(&held, &settings, &mut smoothing, DT).yaw_delta;
+        let second = avatar_nav_drive(&held, &settings, &mut smoothing, DT).yaw_delta;
+        // Positive twist turns the body left (positive yaw), and the feathering ramps
+        // it up rather than snapping.
+        assert!(first > 0.0);
+        assert!(second > first);
+
+        // Release: after enough frames the feathered turn settles back to exactly
+        // zero, so the avatar stops being marked as turning.
+        let centred = SpacenavInput::default();
+        let mut settled = false;
+        for _ in 0..10_000 {
+            if avatar_nav_drive(&centred, &settings, &mut smoothing, DT).yaw_delta == 0.0 {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled);
+    }
+
+    /// A gentle forward push walks; a hard push past the run threshold runs, but only
+    /// after the one-frame hysteresis debounce.
+    #[test]
+    fn run_threshold_needs_a_hard_sustained_push() {
+        let settings = AvatarAxisSettings::default();
+
+        // A small push (scale 1.0, so the scaled magnitude ~0.4) stays under the 0.25
+        // threshold? 0.4 > 0.25 — use a genuinely gentle push instead.
+        let mut smoothing = AvatarNavSmoothing::default();
+        let gentle = axis_input(AVATAR_FORWARD_AXIS, 0.2); // dead-zoned to 0.1, scaled 0.1
+        assert!(!avatar_nav_drive(&gentle, &settings, &mut smoothing, DT).run);
+        assert!(!avatar_nav_drive(&gentle, &settings, &mut smoothing, DT).run);
+
+        // A hard push (dead-zoned to 0.9, scaled 0.9 > 0.25): the ramp debounces one
+        // frame, then runs.
+        let mut smoothing = AvatarNavSmoothing::default();
+        let hard = axis_input(AVATAR_FORWARD_AXIS, 1.0);
+        assert!(!avatar_nav_drive(&hard, &settings, &mut smoothing, DT).run);
+        assert!(avatar_nav_drive(&hard, &settings, &mut smoothing, DT).run);
     }
 }

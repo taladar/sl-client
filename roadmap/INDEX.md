@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 221 |
+| ready | 220 |
 | blocked | 121 |
 | in-progress | 10 |
-| bugs | 12 |
-| done | 618 |
+| bugs | 13 |
+| done | 619 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1063** |
+| **total** | **1064** |
 
 ## ideas (56)
 
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (221)
+## ready (220)
 
 ### protocol
 
@@ -349,8 +349,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
-- [`viewer-input-spacenav-avatar-motion`](ready/viewer-input-spacenav-avatar-motion.md)
-  — SpaceNavigator drives avatar walking / turning outside flycam
 - [`viewer-input-spacenav-settings-ui`](ready/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
@@ -1033,7 +1031,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (12)
+## bugs (13)
 
 ### protocol
 
@@ -1064,6 +1062,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-third-person-cam-lag-vertical-flight`](bugs/viewer-third-person-cam-lag-vertical-flight.md)
+  — Third-person camera lags behind an avatar flying up or down
 
 ### aditi
 
@@ -1072,7 +1072,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (618)
+## done (619)
 
 ### protocol
 
@@ -1295,6 +1295,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-focus-contexts`](done/viewer-input-focus-contexts.md) — Input
   focus / modal context state machine (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-input-spacenav-avatar-motion`](done/viewer-input-spacenav-avatar-motion.md)
+  — SpaceNavigator drives avatar walking / turning outside flycam
 - [`viewer-input-spacenav-camera-mapping`](done/viewer-input-spacenav-camera-mapping.md)
   — SpaceNavigator → camera/flycam mapping (blocked by
   `viewer-input-spacenav-device` (done), `viewer-camera-flycam` (done),

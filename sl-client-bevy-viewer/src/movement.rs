@@ -44,6 +44,7 @@ use crate::avatars::AvatarState;
 use crate::camera::{CameraAim, CameraMode};
 use crate::input_action::Action;
 use crate::physics::AvatarMotion;
+use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
 use crate::terrain::TerrainState;
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
@@ -152,20 +153,30 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
 ///
 /// - **Flycam** — the actions drive the *camera* not the avatar, so this stops the
 ///   body (once) and bows out.
-/// - **Seated on a vehicle** — left / right send the **yaw** control bits that
-///   *steer the vehicle*, never turning the avatar body. Crucially this holds
-///   through a region / corner crossing: our session keeps the seat across the
-///   border (unlike the reference, whose transient unseat there is what flips the
-///   keys back to avatar-turn and orbits the camera), so [`SlAgentParcel::seated_on`]
-///   stays set and the steering never reverts mid-crossing.
+/// - **Seated on a vehicle** — left / right (or the SpaceNavigator's twist) send the
+///   **yaw** control bits that *steer the vehicle*, never turning the avatar body,
+///   while forward / back and up / down send their control bits unchanged — so the
+///   device drives a vehicle through the very same `AgentUpdate` a script sees from
+///   the keys. Crucially this holds through a region / corner crossing: our session
+///   keeps the seat across the border (unlike the reference, whose transient unseat
+///   there is what flips the keys back to avatar-turn and orbits the camera), so
+///   [`SlAgentParcel::seated_on`] stays set and the steering never reverts
+///   mid-crossing.
 /// - **Mouselook** — the mouse turns the body (its heading follows
 ///   [`CameraAim`]), so left / right *strafe* instead.
 /// - **Third person** — left / right turn the avatar heading, the classic default.
+///
+/// The **SpaceNavigator** ([`crate::spacenav`]) composes with the keyboard here the
+/// way the reference `LLViewerJoystick::moveAvatar` composes with the keys: its
+/// forward axis walks (either source moving the avatar, neither blocking the other),
+/// its up axis flies up / down exactly as PageUp / PageDown do, and its twist turns
+/// the body. It only drives the avatar when flycam is off (in flycam it drives the
+/// camera instead, via [`crate::camera::drive_flycam`]).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading time, the actions, the camera mode / aim, identity, avatars, \
-              terrain, the fly permission + seat, and the avatar motions plus the controls state \
-              and command writer"
+              terrain, the fly permission + seat, the SpaceNavigator input + settings + smoothing, \
+              and the avatar motions plus the controls state and command writer"
 )]
 pub(crate) fn drive_avatar_controls(
     actions: Res<ButtonInput<Action>>,
@@ -176,21 +187,39 @@ pub(crate) fn drive_avatar_controls(
     avatars: Res<AvatarState>,
     terrain: Res<TerrainState>,
     agent: Res<SlAgentParcel>,
+    spacenav: Res<SpacenavInput>,
+    avatar_axes: Res<AvatarAxisSettings>,
+    mut nav_smoothing: ResMut<AvatarNavSmoothing>,
     motions: Query<&AvatarMotion>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
-    let dt = time.delta_secs();
+    // The reference clamps the frame time so a big frame-rate drop does not make a
+    // huge feathered turn jump.
+    let dt = time.delta_secs().min(0.2);
 
     // In flycam the movement actions drive the camera (`crate::camera::drive_flycam`),
-    // not the avatar. Stop the body once on entering flycam, then leave it alone.
+    // not the avatar. Park the body: drop every *movement* bit so it stops walking /
+    // ascending, but keep the `FLY` flag if it was flying — clearing it would make
+    // the simulator land the avatar, so a hovering avatar would plummet the moment
+    // the camera switched to flycam. With `FLY` set and no motion bits the avatar
+    // just hovers in place, which is what a spectator flycam wants.
     if *mode == CameraMode::Flycam {
-        if controls.last_controls != ControlFlags::empty() {
-            writer.write(SlCommand(Command::SetControls(ControlFlags::empty())));
-            controls.last_controls = ControlFlags::empty();
+        let parked = if controls.flying {
+            ControlFlags::FLY
+        } else {
+            ControlFlags::empty()
+        };
+        if controls.last_controls != parked {
+            writer.write(SlCommand(Command::SetControls(parked)));
+            controls.last_controls = parked;
         }
         return;
     }
+
+    // The SpaceNavigator's walk / fly / turn contribution this frame (empty when no
+    // device is connected — the axes are zero), composed with the keyboard below.
+    let nav = avatar_nav_drive(&spacenav, &avatar_axes, &mut nav_smoothing, dt);
 
     let seated = agent.seated_on.is_some();
     let mouselook = *mode == CameraMode::Mouselook;
@@ -211,8 +240,11 @@ pub(crate) fn drive_avatar_controls(
         controls.seeded = true;
     }
 
-    let ascend = actions.pressed(Action::MoveUp);
-    let descend = actions.pressed(Action::MoveDown);
+    // Ascend / descend from PageUp / PageDown or the SpaceNavigator's up axis (a
+    // lift ascends, a press descends — the same intent as the keys), so the two
+    // sources compose and either flies the avatar up or down.
+    let ascend = actions.pressed(Action::MoveUp) || nav.vertical > 0;
+    let descend = actions.pressed(Action::MoveDown) || nav.vertical < 0;
 
     // Flight is an avatar concern, not a vehicle one: skip the whole fly toggle /
     // take-off / auto-land machinery while seated (the vehicle owns vertical motion
@@ -269,15 +301,18 @@ pub(crate) fn drive_avatar_controls(
     if controls.flying {
         flags = flags.union(ControlFlags::FLY);
     }
-    let forward = actions.pressed(Action::MoveForward);
-    let backward = actions.pressed(Action::MoveBackward);
+    // Walk forward / back from the keys or the SpaceNavigator's forward axis (push
+    // walks forward, pull back walks back).
+    let forward = actions.pressed(Action::MoveForward) || nav.forward > 0;
+    let backward = actions.pressed(Action::MoveBackward) || nav.forward < 0;
     if forward {
         flags = flags.union(ControlFlags::AT_POS);
     }
     if backward {
         flags = flags.union(ControlFlags::AT_NEG);
     }
-    if actions.pressed(Action::Run) && (forward || backward) {
+    // Run from Shift or a forward push past the SpaceNavigator run threshold.
+    if (actions.pressed(Action::Run) || nav.run) && (forward || backward) {
         flags = flags.union(ControlFlags::FAST_AT);
     }
     if ascend {
@@ -294,11 +329,15 @@ pub(crate) fn drive_avatar_controls(
     let mut turning = false;
     if seated {
         // Steer the vehicle with the yaw bits; never turn the avatar body (which is
-        // what the reference bug does after a laggy crossing).
-        if left {
+        // what the reference bug does after a laggy crossing). The SpaceNavigator's
+        // twist steers it the same way the keys do (a positive twist turns left, like
+        // MoveLeft), so a vehicle can be flown with the device — the forward / back
+        // and up / down bits already come through the uniform flags above, so the
+        // whole device drives the same control message a script sees from the keys.
+        if left || nav.yaw_delta > 0.0 {
             flags = flags.union(ControlFlags::YAW_POS);
         }
-        if right {
+        if right || nav.yaw_delta < 0.0 {
             flags = flags.union(ControlFlags::YAW_NEG);
         }
     } else if mouselook {
@@ -319,6 +358,13 @@ pub(crate) fn drive_avatar_controls(
         }
         if right {
             controls.yaw -= TURN_RATE_RAD_PER_SEC * dt;
+            turning = true;
+        }
+        // The SpaceNavigator's twist turns the body too (feathered per frame); it
+        // composes with the keys and, like them, only turns in third person (in
+        // mouselook the camera aim owns the heading, seated the vehicle does).
+        if nav.yaw_delta != 0.0 {
+            controls.yaw += nav.yaw_delta;
             turning = true;
         }
     }
