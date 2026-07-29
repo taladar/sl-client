@@ -52,6 +52,7 @@ use tracing::{debug, warn};
 
 use crate::chat::LocalChatNotice;
 use crate::i18n::Translator;
+use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
     DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationKind,
     NotificationManager, NotificationPriority, NotificationRecord, NotificationResponse,
@@ -782,7 +783,8 @@ fn is_suppressed(settings: Option<&ViewerSettings>, name: &str) -> bool {
 #[expect(
     clippy::too_many_arguments,
     reason = "a raise needs the request queue, the manager, the channel/root, i18n, \
-              suppression settings and the dismiss channel; each is distinct"
+              suppression settings, the dismiss channel and the persistence channel; each is \
+              distinct"
 )]
 fn raise_notifications(
     mut commands: Commands,
@@ -794,6 +796,7 @@ fn raise_notifications(
     settings: Option<Res<ViewerSettings>>,
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,
+    mut persist: MessageWriter<PersistNotification>,
 ) {
     let Some(channel) = channel else {
         return;
@@ -959,6 +962,21 @@ fn raise_notifications(
         });
         if tmpl.unique {
             manager.register_unique(tmpl.name, request.context.as_deref(), id);
+        }
+        // Persist a sticky (non-fading) `persist` notification so it re-displays
+        // after a relog until the user answers it — the reference
+        // `LLPersistentNotificationStorage`. A fading tip / notify is transient by
+        // nature and is not persisted.
+        if tmpl.persist && !tmpl.kind.fades() {
+            persist.write(PersistNotification {
+                id,
+                kind: PersistedKind::Catalogue {
+                    template: tmpl.name.to_owned(),
+                    args: request.args.pairs().to_vec(),
+                    body: request.body.clone(),
+                    context: request.context.clone(),
+                },
+            });
         }
         debug!(
             template = tmpl.name,

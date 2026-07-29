@@ -115,6 +115,7 @@ mod minimap_math;
 mod movement;
 mod nearby_chat_bar;
 mod notification_host;
+mod notification_persist;
 mod notifications;
 mod object_menu;
 mod objects;
@@ -285,6 +286,7 @@ use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
     NotificationHostPlugin, ingest_alert_messages, spawn_notification_demo,
 };
+use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
     ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
@@ -1061,6 +1063,11 @@ fn run_session(
     // added below as viewer-only systems, since the plugin itself must host
     // without the session `SlEvent` stream (so the login-free gallery can use it).
     .add_plugins(NotificationHostPlugin)
+    // The persistent-notification store (viewer-notification-persistence): saves
+    // the open (unacknowledged) sticky notifications to a per-account file and
+    // re-displays them on next login (the reference LLPersistentNotificationStorage).
+    // After the host, whose PersistNotification / NotificationResponse it records.
+    .add_plugins(NotificationPersistPlugin)
     // Surface the simulator's `AlertMessage` / `AgentAlertMessage` (a stream
     // nothing consumed before) as notifications, and — only when
     // `SL_VIEWER_NOTIFICATION_DEMO` is set — raise a sample spread on startup so

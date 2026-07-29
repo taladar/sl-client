@@ -109,6 +109,11 @@ reqwest = { version = "0.12.15", default-features = false, features = [
     "blocking",
     "rustls-tls",
 ] }
+# The persistent-notification store (viewer-notification-persistence) serializes
+# the open (unacknowledged) toasts to a per-account JSON file, so they re-display
+# on next login exactly as the reference `LLPersistentNotificationStorage` does.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145" }
 sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
 sl-cef = { version = "0.1.0", path = "../sl-cef" }

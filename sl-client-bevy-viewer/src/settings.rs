@@ -130,6 +130,15 @@ impl ViewerSettings {
         self.account_path.is_some()
     }
 
+    /// The per-avatar account directory (the parent of the account
+    /// `settings.toml`), once resolved at login — where a sibling per-account file
+    /// (the persistent-notification store, [`crate::notification_persist`]) lives.
+    /// `None` until login, and when the platform has no per-avatar directory.
+    #[must_use]
+    pub(crate) fn account_dir(&self) -> Option<&Path> {
+        self.account_path.as_deref().and_then(Path::parent)
+    }
+
     /// Load the persisted global overrides, if the file exists — a missing file is
     /// the common first-run case and not an error.
     fn load_global(&mut self) {

@@ -8485,6 +8485,8 @@ dependencies = [
  "parley",
  "pretty_assertions",
  "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "sl-account-dirs",
  "sl-anim",
  "sl-cef",

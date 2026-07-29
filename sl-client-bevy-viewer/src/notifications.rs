@@ -334,6 +334,19 @@ impl NotificationArgs {
             .map(|(_name, value)| value.as_str())
     }
 
+    /// The key/value bindings, in insertion order — the persistent-notification
+    /// store ([`crate::notification_persist`]) serializes these to re-raise a
+    /// persisted notification with its original substitutions.
+    pub(crate) fn pairs(&self) -> &[(String, String)] {
+        &self.pairs
+    }
+
+    /// Rebuild an argument set from serialized [`pairs`](Self::pairs) — the inverse
+    /// used when a persisted notification is reloaded from disk.
+    pub(crate) const fn from_pairs(pairs: Vec<(String, String)>) -> Self {
+        Self { pairs }
+    }
+
     /// Parse an `AlertInfo` `ExtraParams` blob into arguments: `key=value` pairs
     /// separated by `|` or newlines, each side trimmed. A fragment without an
     /// `=` is ignored. The reference parses this per-alert; this handles the
@@ -394,7 +407,7 @@ pub(crate) fn substitute(template: &str, args: &NotificationArgs) -> String {
 /// A monotonic identifier for one raised notification instance, so a caller can
 /// match a [`NotificationResponse`] (or issue a [`DismissNotification`]) to the
 /// exact notification it raised.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct NotificationId(u64);
 
 /// A request to raise a notification from the catalogue — the message a caller

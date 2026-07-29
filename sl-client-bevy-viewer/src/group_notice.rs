@@ -42,9 +42,11 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use std::collections::BTreeMap;
+
 use sl_client_bevy::{
-    AssetType, Command, GroupNoticeKey, GroupNoticeReceived, SlCommand, SlEvent, SlSessionEvent,
-    TextureKey, to_bevy_image,
+    AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, SlCommand,
+    SlEvent, SlSessionEvent, TextureKey, Uuid, to_bevy_image,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 
@@ -53,7 +55,12 @@ use crate::group_profile::{OpenGroupProfile, RequestedGroupNotices};
 use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translator};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
-use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
+use crate::notification_persist::{
+    PersistNotification, PersistedKind, ReloadPersistedNotification,
+};
+use crate::notifications::{
+    NotificationId, NotificationKind, NotificationManager, NotificationPriority,
+};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::status_bar::slt;
 use crate::textures::TextureManager;
@@ -66,6 +73,11 @@ use crate::ui_font::UiFont;
 /// the shared [`Toast`](crate::notification_host) machinery wants a stable name
 /// for its history / response bookkeeping).
 const GROUP_NOTICE_TEMPLATE: &str = "GroupNotice";
+
+/// The renderer id a persisted group-notice card ([`PersistedKind::Custom`])
+/// carries, so the persistent store routes its reload back here
+/// ([`reload_group_notices`]).
+const GROUP_NOTICE_RENDERER: &str = "group-notice";
 
 /// The element id the gallery specimen and its inert actions report under.
 const GROUP_NOTICE_ELEMENT: &str = "group-notice-toast";
@@ -147,10 +159,17 @@ const ICON_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
 pub(crate) struct GroupNoticePlugin;
 
 impl Plugin for GroupNoticePlugin {
-    /// Ingest received notices (into the shared toast channel) and poll their
-    /// insignia textures each frame.
+    /// Ingest received notices (into the shared toast channel), re-raise ones
+    /// persisted from a previous session, and poll their insignia textures.
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (ingest_group_notices, poll_group_notice_insignia));
+        app.add_systems(
+            Update,
+            (
+                ingest_group_notices,
+                reload_group_notices,
+                poll_group_notice_insignia,
+            ),
+        );
     }
 }
 
@@ -180,6 +199,7 @@ fn ingest_group_notices(
     mut textures: ResMut<TextureManager>,
     translator: Translator,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut persist: MessageWriter<PersistNotification>,
     mut commands: Commands,
 ) {
     let Some(channel) = channel else {
@@ -204,16 +224,79 @@ fn ingest_group_notices(
         if groups.group_name(notice.group_id).is_none() {
             groups.request_name(notice.group_id, &mut sl_commands);
         }
-        spawn_group_notice_card(
+        let id = spawn_group_notice_card(
             &mut commands,
             &channel,
             &mut manager,
             &notice,
             &groups,
-            &mut textures,
             &translator,
+            &mut textures,
         );
+        persist_group_notice(&mut persist, id, &notice);
     }
+}
+
+/// Re-raise the group-notice cards persisted from a previous session (the
+/// [`PersistedKind::Custom`] entries [`crate::notification_persist`] reloads at
+/// login): decode each back into a [`GroupNoticeReceived`], pop its card, and
+/// re-persist it (a fresh id) so it keeps surviving relogs until answered.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the reload \
+              stream, the shared channel + manager it raises into, the group model + texture \
+              manager + translator it renders from, and the persistence channel it re-persists \
+              through"
+)]
+fn reload_group_notices(
+    mut reloads: MessageReader<ReloadPersistedNotification>,
+    channel: Option<Res<NotificationChannelRoot>>,
+    mut manager: ResMut<NotificationManager>,
+    groups: Res<GroupsModel>,
+    mut textures: ResMut<TextureManager>,
+    translator: Translator,
+    mut persist: MessageWriter<PersistNotification>,
+    mut commands: Commands,
+) {
+    let Some(channel) = channel else {
+        return;
+    };
+    for reload in reloads.read() {
+        if reload.renderer != GROUP_NOTICE_RENDERER {
+            continue;
+        }
+        let Some(notice) = decode_group_notice(&reload.data) else {
+            warn!("group notice: dropping a malformed persisted card");
+            continue;
+        };
+        let id = spawn_group_notice_card(
+            &mut commands,
+            &channel,
+            &mut manager,
+            &notice,
+            &groups,
+            &translator,
+            &mut textures,
+        );
+        persist_group_notice(&mut persist, id, &notice);
+    }
+}
+
+/// Persist a group-notice card under its toast `id`, so it re-displays after a
+/// relog until the user answers it — a [`PersistedKind::Custom`] payload the
+/// [`reload_group_notices`] system rebuilds from.
+fn persist_group_notice(
+    persist: &mut MessageWriter<PersistNotification>,
+    id: NotificationId,
+    notice: &GroupNoticeReceived,
+) {
+    persist.write(PersistNotification {
+        id,
+        kind: PersistedKind::Custom {
+            renderer: GROUP_NOTICE_RENDERER.to_owned(),
+            data: encode_group_notice(notice),
+        },
+    });
 }
 
 /// The already-resolved content of one group-notice card, ready to render — the
@@ -412,9 +495,9 @@ fn spawn_group_notice_card(
     manager: &mut NotificationManager,
     notice: &GroupNoticeReceived,
     groups: &GroupsModel,
-    textures: &mut TextureManager,
     translator: &Translator,
-) {
+    textures: &mut TextureManager,
+) -> NotificationId {
     let group_name = groups
         .group_name(notice.group_id)
         .map_or_else(|| notice.group_id.uuid().to_string(), ToOwned::to_owned);
@@ -447,7 +530,7 @@ fn spawn_group_notice_card(
     // Adopt the card into the shared toast channel so it stacks / orders /
     // overflow-cycles with the catalogue notifications. An `Alert` never
     // auto-expires — only a user click ends it.
-    adopt_toast(
+    let id = adopt_toast(
         commands,
         manager,
         channel,
@@ -496,6 +579,7 @@ fn spawn_group_notice_card(
             sl.write(SlCommand(Command::StartGroupSession(group)));
         },
     );
+    id
 }
 
 /// Spawn the insignia box and its placeholder: the group image once decoded (a
@@ -788,6 +872,60 @@ const fn attachment_glyph(asset_type: AssetType) -> &'static str {
     }
 }
 
+/// Serialize a received group notice into the flat string map the persistent
+/// store ([`crate::notification_persist`]) saves — the fields
+/// [`decode_group_notice`] rebuilds the card from. The group insignia is **not**
+/// stored: it is re-derived from [`GroupsModel`] on reload (the group is still a
+/// membership), matching the reference (which re-reads the insignia from its group
+/// data rather than the notice).
+fn encode_group_notice(notice: &GroupNoticeReceived) -> BTreeMap<String, String> {
+    let mut data = BTreeMap::new();
+    data.insert("group_id".to_owned(), notice.group_id.uuid().to_string());
+    data.insert("sender".to_owned(), notice.sender_name.clone());
+    data.insert("subject".to_owned(), notice.subject.clone());
+    data.insert("body".to_owned(), notice.body.clone());
+    if let Some(timestamp) = notice.timestamp {
+        data.insert("timestamp".to_owned(), timestamp.to_string());
+    }
+    if let Some(item) = &notice.attachment {
+        data.insert(
+            "asset_type".to_owned(),
+            item.asset_type.to_code().to_string(),
+        );
+        data.insert("item_name".to_owned(), item.item_name.clone());
+    }
+    data
+}
+
+/// Rebuild a [`GroupNoticeReceived`] from a persisted string map (the inverse of
+/// [`encode_group_notice`]). Returns `None` only when the group id is missing /
+/// unparsable — the one field a card cannot be shown without.
+fn decode_group_notice(data: &BTreeMap<String, String>) -> Option<GroupNoticeReceived> {
+    let group_id = data
+        .get("group_id")
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+        .map(GroupKey::from)?;
+    let attachment = data.get("asset_type").map(|code| {
+        let asset_type = code
+            .parse::<i32>()
+            .map_or(AssetType::Texture, AssetType::from_code);
+        GroupNoticeItem {
+            asset_type,
+            item_name: data.get("item_name").cloned().unwrap_or_default(),
+        }
+    });
+    Some(GroupNoticeReceived {
+        group_id,
+        sender_name: data.get("sender").cloned().unwrap_or_default(),
+        subject: data.get("subject").cloned().unwrap_or_default(),
+        body: data.get("body").cloned().unwrap_or_default(),
+        timestamp: data
+            .get("timestamp")
+            .and_then(|raw| raw.parse::<u32>().ok()),
+        attachment,
+    })
+}
+
 /// The gallery / `ui_test` specimen: a static group-notice card with an
 /// attachment, so its layout is swept by the harness login-free (a live notice
 /// needs a grid). Registered in [`crate::ui_element::ELEMENTS`]; its buttons
@@ -848,9 +986,9 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod tests {
-    use super::attachment_glyph;
+    use super::{attachment_glyph, decode_group_notice, encode_group_notice};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::AssetType;
+    use sl_client_bevy::{AssetType, GroupKey, GroupNoticeItem, GroupNoticeReceived, Uuid};
 
     /// A few asset classes map to distinct glyphs, and an unknown class falls back
     /// to the generic package — so the attachment row always shows something.
@@ -859,5 +997,50 @@ mod tests {
         assert_eq!(attachment_glyph(AssetType::Notecard), "\u{1f4c4}");
         assert_eq!(attachment_glyph(AssetType::Landmark), "\u{1f4cd}");
         assert_eq!(attachment_glyph(AssetType::Other(999)), "\u{1f4e6}");
+    }
+
+    /// A notice with an attachment survives the persist encode → decode round trip
+    /// bit-for-bit (minus the insignia, which is re-derived) — the guarantee a
+    /// reloaded card rebuilds identically.
+    #[test]
+    fn group_notice_encode_decode_round_trips() -> Result<(), String> {
+        let notice = GroupNoticeReceived {
+            group_id: GroupKey::from(Uuid::from_u128(0x9401)),
+            sender_name: "Board Member".to_owned(),
+            subject: "Board meeting".to_owned(),
+            body: "Tuesday at noon SLT".to_owned(),
+            timestamp: Some(1_700_000_000),
+            attachment: Some(GroupNoticeItem {
+                asset_type: AssetType::Notecard,
+                item_name: "Agenda".to_owned(),
+            }),
+        };
+        let decoded = decode_group_notice(&encode_group_notice(&notice))
+            .ok_or_else(|| "expected a decoded notice".to_owned())?;
+        assert_eq!(decoded, notice);
+        Ok(())
+    }
+
+    /// A notice with no attachment and no timestamp round-trips too (the optional
+    /// fields simply absent), and a map missing the group id decodes to `None`.
+    #[test]
+    fn group_notice_optional_fields_and_missing_group() -> Result<(), String> {
+        let notice = GroupNoticeReceived {
+            group_id: GroupKey::from(Uuid::from_u128(0x9402)),
+            sender_name: "Officer".to_owned(),
+            subject: "Notice".to_owned(),
+            body: String::new(),
+            timestamp: None,
+            attachment: None,
+        };
+        let encoded = encode_group_notice(&notice);
+        let decoded =
+            decode_group_notice(&encoded).ok_or_else(|| "expected a decoded notice".to_owned())?;
+        assert_eq!(decoded, notice);
+        // A payload with no group id cannot rebuild a card.
+        let mut without_group = encoded;
+        without_group.remove("group_id");
+        assert!(decode_group_notice(&without_group).is_none());
+        Ok(())
     }
 }

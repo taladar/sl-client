@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 113 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 623 |
+| done | 624 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1066** |
+| **total** | **1067** |
 
 ## ideas (55)
 
@@ -1069,7 +1069,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (623)
+## done (624)
 
 ### protocol
 
@@ -1400,6 +1400,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cameras
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
+- [`viewer-notification-persistence`](done/viewer-notification-persistence.md) —
+  Persistent notifications — survive relog until answered (blocked by
+  `viewer-ui-notification-host` (done), `viewer-group-notice-display` (done))
 - [`viewer-object-context-menu`](done/viewer-object-context-menu.md) — Object
   hover / context menu entries (blocked by `viewer-ui-radial-menu` (done),
   `viewer-ui-context-menu` (done))

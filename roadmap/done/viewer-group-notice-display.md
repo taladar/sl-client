@@ -47,8 +47,11 @@ Reference (Firestorm, read-only): `lltoastgroupnotifypanel`,
 - **Seen only on active close** — the card is an `Alert` (never auto-fades);
   display sends **no** server acknowledgement, and overflow only *hides* a
   queued notice. It ends only when the user clicks OK / × (a
-  `ResolveNotification` teardown that is a pure UI dismissal — no `SlCommand`),
-  so an unclosed notice can be redelivered by the server on the next login.
+  `ResolveNotification` teardown that is a pure UI dismissal — no `SlCommand`).
+  An unclosed notice re-displays on the next login via the client-side
+  persistent-notification store ([[viewer-notification-persistence]]), matching
+  the reference `LLPersistentNotificationStorage` — "seen" is the active close,
+  not a server ack.
 
 **Note for the attachment follow-up ([[viewer-group-notice-attachments]]):**
 when close-on-dismiss learns to **decline** an unaccepted attachment
