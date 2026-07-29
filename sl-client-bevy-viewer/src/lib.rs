@@ -2018,8 +2018,14 @@ pub fn init_tracing() -> TracingGuards {
 
     subscriber.init();
 
+    // On-demand mode (the `tracing-tracy/ondemand` feature) means the client
+    // records nothing until a profiler connects and discards on disconnect, so
+    // memory does *not* grow while untethered — unlike Tracy's default, which
+    // buffers every event until a client attaches.
     #[cfg(feature = "profile-tracy")]
-    warn!("Tracy profiling is active; memory use grows until a Tracy client connects");
+    info!(
+        "Tracy profiling is active (on-demand): data is collected only while a profiler is connected"
+    );
 
     TracingGuards {
         #[cfg(feature = "profile-chrome")]

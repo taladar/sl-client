@@ -42,6 +42,18 @@ long"; `bevy_render` emits a `tracy.frame_mark` event every frame so Tracy draws
 frame boundaries. (That event is filtered out of the human-readable log so it
 does not spam the terminal.)
 
+**On-demand mode.** `profile-tracy` enables `tracing-tracy/ondemand`, so the
+Tracy client collects **nothing until a profiler connects** and discards on
+disconnect. Without it, Tracy's default buffers every event in memory the whole
+time no client is attached — an untethered run grows without bound (~2 M
+zones/s), and on this CEF build that heap growth eventually trips Chromium's
+periodic memory-dump `CHECK` (`MallocDumpProvider::OnMemoryDump`), aborting the
+process with `SIGILL`. On-demand keeps memory flat between captures (verified:
+~3.8 GB steady untethered, vs. >10 GB and an abort without it), so the build is
+safe to leave running and connect to only when capturing. The trade-off is that
+a capture sees only events from the moment you connect — there is no pre-connect
+history.
+
 **Version pin.** Tracy checks its **wire protocol version** on handshake and
 refuses to connect on any mismatch — this is effectively an *exact*
 Tracy-release match, not merely "same major version", because the protocol bumps
@@ -61,6 +73,29 @@ cargo tree -p sl-client-bevy-viewer --features profile-tracy -i tracy-client-sys
 (from Bevy's `bevy_log`) that reports every alloc/free to Tracy, giving
 per-allocation lifetimes correlated with frame structure. It carries real
 overhead, so keep it opt-in.
+
+#### Machine-readable export (`scripts/tracy-grab.sh`)
+
+The GUI is graphical and streams a lot of data fast, which is awkward when you
+want to grep, diff two runs, or hand the numbers to a tool. `tracy-grab.sh`
+captures a bounded window headlessly and exports it to tab-separated tables:
+
+```console
+scripts/tracy-grab.sh 10 # capture 10s -> tracy-grab-10s/*.tsv
+```
+
+It writes `zones-self.tsv` (self time per zone, sorted — the view that surfaces
+which systems burn the frame), `zones-inclusive.tsv`, and `messages.tsv`, and
+prints the top self-time zones. It needs the `tracy-capture` and
+`tracy-csvexport` utilities (from `$PATH`, or built under `$TRACY_DIR`; the
+script header has the `cmake` lines). Because Tracy accepts only **one**
+profiler connection, disconnect the GUI before capturing — or keep the GUI, use
+its **File -> Save trace**, and run `tracy-csvexport -e <file>` yourself. For a
+single zone's per-frame timeline (large, so always filtered):
+
+```console
+tracy-csvexport -u -f composite_minimap trace.tracy
+```
 
 ### Chrome / Perfetto (no-GUI fallback for bug reports)
 

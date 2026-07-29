@@ -38,7 +38,20 @@ spacenav = ["dep:evdev"]
 # frame timeline + per-zone call counts). `bevy/trace_tracy` also makes
 # `bevy_render` emit the per-frame `tracy.frame_mark` boundary event our
 # `TracyLayer` consumes. Match Tracy GUI version to `tracy-client` (see the book).
-profile-tracy = ["dep:tracing-tracy", "bevy/trace", "bevy/trace_tracy"]
+#
+# `tracing-tracy/ondemand` puts the Tracy client in on-demand mode: it collects
+# nothing until a profiler connects and discards on disconnect. Without it the
+# client buffers every event in memory the entire time no profiler is attached
+# (the "memory grows until a client connects" warning) — an untethered run grows
+# without bound, which on a CEF build eventually trips Chromium's memory-dump
+# `CHECK`. On-demand keeps memory flat between captures, so the build is safe to
+# leave running and connect to only when needed (see `scripts/tracy-grab.sh`).
+profile-tracy = [
+    "dep:tracing-tracy",
+    "tracing-tracy/ondemand",
+    "bevy/trace",
+    "bevy/trace_tracy",
+]
 
 # Tracy with per-allocation memory profiling (higher overhead). Bevy's
 # `trace_tracy_memory` installs a process-wide `#[global_allocator]` that reports
