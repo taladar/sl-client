@@ -2,7 +2,7 @@
 id: viewer-notification-catalogue
 title: Notification catalogue — port the reference server-alert & confirm entries
 topic: viewer
-status: ready
+status: done
 origin: notification-host coverage audit (2026-07-29) — the catalogue is a
   5-entry seed; the bulk of reference notifications have no entry yet
 blocked_by: [viewer-ui-notification-host]
@@ -57,3 +57,39 @@ generic emitters raise from, and pairs with the alerts tab
 Reference (Firestorm, read-only): `skins/default/xui/en/notifications.xml`,
 `llnotifications`, the `LLNotificationsUtil::add` call sites in
 `llviewermessage.cpp`, and the reference `notification_visibility.xml`.
+
+## Done
+
+Grew the catalogue (`NOTIFICATIONS` in `src/notifications.rs`) from its 5-entry
+seed with the **generic, cross-feature** entries — the ones a feature does not
+own — and set up the **complete accounting** the end goal wants: every one of
+the reference's 1,329 `notifications.xml` entries now maps to exactly one home.
+
+- **Ported here (20 entries)** — the keyed server alerts
+  `ingest_alert_messages` raises when the simulator's `AlertInfo` key matches
+  (the maturity / access family `RegionEntryAccessBlocked` /
+  `TeleportEntryAccessBlocked` / `LandClaimAccessBlocked` /
+  `LandBuyAccessBlocked` + `_Notify`, the region-restart `Seconds` companion,
+  `TooManyScripts`, `FailedToPlaceObject`, `FailedToFindWearableUnnamed`,
+  `HomePositionSet`), the standard shared confirms (`ConfirmEmptyTrash`,
+  `RemoveFromFriends`, `GroupLeaveConfirmMember`, `YouHaveBeenLoggedOut`,
+  `MustAgreeToLogIn`) and generic tips (`LandmarkCreated`,
+  `GrantedModifyRights`, `TeleportToPerson`). Two custom button forms
+  (`LEAVE_CANCEL_FORM`, `VIEW_IM_QUIT_FORM`) keep stable `OK` / `Cancel` names
+  under localized labels; Fluent bodies in `en/main.ftl` are trimmed of the
+  reference's bracketed KB URLs (the `[KEY]` engine reads `[...]` as a token —
+  linkification is deferred). A test makes every catalogue `message_key` /
+  `label_key` load-bearing against `en/main.ftl`.
+- **Complete coverage accounting** — every reference notification is classified
+  by owning feature family in
+  [context/notif-coverage.tsv](../context/notif-coverage.tsv): `ported` (the 20
+  above), `done` (16 already handled by a bespoke dialog task — script dialogs /
+  permissions / offers / group notice / experience prompt), or `followup` (1,293
+  across 27 feature families).
+- **Per-family follow-ups** — one `viewer-notification-catalogue-<family>` task
+  per family (objects-edit, estate-region, preferences, land-parcel, inventory,
+  teleport, appearance-wearables, money-economy, groups, friends-people,
+  snapshot-social, diagnostics, login-session, avatar-movement, scripts,
+  im-chat, media-sound, marketplace, voice, landmarks-navigation, misc,
+  ui-hints, web-browser, security, experiences, premium-account, rlv), each
+  owning its manifest rows and gated on that feature's raise-site plumbing.

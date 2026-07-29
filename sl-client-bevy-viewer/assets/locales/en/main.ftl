@@ -1078,12 +1078,46 @@ bottom-toolbar-search = Search
 
 notification-button-ok = OK
 notification-button-cancel = Cancel
+notification-button-leave = Leave
+notification-button-quit = Quit
+notification-button-view-im-chat = View IM & Chat
 notification-ignore-checkbox = Don't show me this again
 notification-system-tip = [MESSAGE]
 notification-system-message = [MESSAGE]
 notification-generic-alert = [MESSAGE]
 notification-region-restart-minutes = The region you are in now will restart in [MINUTES] minutes. If you stay in this region you will be logged out.
 notification-confirm-quit = Are you sure you want to quit?
+
+## Keyed server alerts (viewer-notification-catalogue): the AlertInfo-keyed
+## messages the simulator sends. Ported from the reference notifications.xml,
+## trimmed of its bracketed knowledge-base URLs (the [KEY] engine would read a
+## bracketed URL as a substitution token) pending the linkification layer.
+
+notification-region-entry-access-blocked = The region you're trying to visit has a maturity rating exceeding your maximum maturity preference. Change this preference in your maturity preferences.
+notification-teleport-entry-access-blocked = The region you're trying to teleport to has a maturity rating exceeding your maximum maturity preference. Change this preference in your maturity preferences.
+notification-land-claim-access-blocked = The land you're trying to claim has a maturity rating exceeding your current preferences. You can change your preferences in your maturity preferences.
+notification-land-buy-access-blocked = The land you're trying to buy has a maturity rating exceeding your current preferences. You can change your preferences in your maturity preferences.
+notification-region-entry-access-blocked-notify = The region you're trying to visit contains [REGIONMATURITY] content, but your current preferences are set to exclude [REGIONMATURITY] content.
+notification-region-restart-seconds = The region "[NAME]" will restart in [SECONDS] seconds. If you stay in this region when it shuts down, you will be logged out.
+notification-too-many-scripts = Too many scripts.
+notification-failed-to-place-object = Failed to place object at specified location. Please try again.
+notification-failed-to-find-wearable = Failed to find [TYPE] in the database.
+notification-home-position-set = Home position set.
+
+## Standard action-confirmation modals (viewer-notification-catalogue): shared
+## confirms raised by their owning feature (inventory / people / groups / login).
+
+notification-confirm-empty-trash = [COUNT] items and folders will be permanently deleted. Are you sure you want to permanently delete the contents of your Trash?
+notification-remove-from-friends = Are you sure you want to remove [NAME] from your Friends List?
+notification-group-leave-confirm-member = Leave the group '[GROUP]'? Currently, the fee to join this group again is L$[COST].
+notification-you-have-been-logged-out = You have been logged out of [CURRENT_GRID]. [MESSAGE]
+notification-must-agree-to-login = You must agree to the Terms and Conditions, Privacy Policy, and Terms of Service to continue logging into [CURRENT_GRID].
+
+## Info tips / notifies not routed to nearby chat (viewer-notification-catalogue).
+
+notification-landmark-created = You have added "[LANDMARK_NAME]" to your [FOLDER_NAME] folder.
+notification-granted-modify-rights = [NAME] has given you permission to edit their objects.
+notification-teleport-to-person = To open a private conversation with someone, right-click on their avatar and choose 'IM' from the menu.
 notification-overflow =
     { $count ->
         [one] { $count } more

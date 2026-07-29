@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 227 |
+| ready | 253 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 631 |
+| done | 632 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1073** |
+| **total** | **1100** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (227)
+## ready (253)
 
 ### protocol
 
@@ -408,9 +408,87 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
-- [`viewer-notification-catalogue`](ready/viewer-notification-catalogue.md) —
-  Notification catalogue — port the reference server-alert & confirm entries
-  (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-appearance-wearables`](ready/viewer-notification-catalogue-appearance-wearables.md)
+  — Notification catalogue — appearance & wearables entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-avatar-movement`](ready/viewer-notification-catalogue-avatar-movement.md)
+  — Notification catalogue — avatar movement entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-diagnostics`](ready/viewer-notification-catalogue-diagnostics.md)
+  — Notification catalogue — diagnostics entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-estate-region`](ready/viewer-notification-catalogue-estate-region.md)
+  — Notification catalogue — estate & region management entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-experiences`](ready/viewer-notification-catalogue-experiences.md)
+  — Notification catalogue — experiences entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-friends-people`](ready/viewer-notification-catalogue-friends-people.md)
+  — Notification catalogue — friends / people entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-groups`](ready/viewer-notification-catalogue-groups.md)
+  — Notification catalogue — groups entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-im-chat`](ready/viewer-notification-catalogue-im-chat.md)
+  — Notification catalogue — IM & chat entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-inventory`](ready/viewer-notification-catalogue-inventory.md)
+  — Notification catalogue — inventory entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-land-parcel`](ready/viewer-notification-catalogue-land-parcel.md)
+  — Notification catalogue — land / parcel entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-landmarks-navigation`](ready/viewer-notification-catalogue-landmarks-navigation.md)
+  — Notification catalogue — landmarks & navigation entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-login-session`](ready/viewer-notification-catalogue-login-session.md)
+  — Notification catalogue — login & session entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-marketplace`](ready/viewer-notification-catalogue-marketplace.md)
+  — Notification catalogue — marketplace entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-media-sound`](ready/viewer-notification-catalogue-media-sound.md)
+  — Notification catalogue — media & sound entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-misc`](ready/viewer-notification-catalogue-misc.md)
+  — Notification catalogue — miscellaneous entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-money-economy`](ready/viewer-notification-catalogue-money-economy.md)
+  — Notification catalogue — money / economy entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-objects-edit`](ready/viewer-notification-catalogue-objects-edit.md)
+  — Notification catalogue — object build / edit / rez entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-preferences`](ready/viewer-notification-catalogue-preferences.md)
+  — Notification catalogue — preferences & settings entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-premium-account`](ready/viewer-notification-catalogue-premium-account.md)
+  — Notification catalogue — premium / account entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-rlv`](ready/viewer-notification-catalogue-rlv.md)
+  — Notification catalogue — RLVa entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-scripts`](ready/viewer-notification-catalogue-scripts.md)
+  — Notification catalogue — scripts (LSL) entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-security`](ready/viewer-notification-catalogue-security.md)
+  — Notification catalogue — security entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-snapshot-social`](ready/viewer-notification-catalogue-snapshot-social.md)
+  — Notification catalogue — snapshot & social entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-teleport`](ready/viewer-notification-catalogue-teleport.md)
+  — Notification catalogue — teleport entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-ui-hints`](ready/viewer-notification-catalogue-ui-hints.md)
+  — Notification catalogue — UI hints entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-voice`](ready/viewer-notification-catalogue-voice.md)
+  — Notification catalogue — voice entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-web-browser`](ready/viewer-notification-catalogue-web-browser.md)
+  — Notification catalogue — embedded web / browser entries (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-notification-history`](ready/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`
   (done))
@@ -1068,7 +1146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (631)
+## done (632)
 
 ### protocol
 
@@ -1410,6 +1488,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cameras
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
+- [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
+  Notification catalogue — port the reference server-alert & confirm entries
+  (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-notification-persistence`](done/viewer-notification-persistence.md) —
   Persistent notifications — survive relog until answered (blocked by
   `viewer-ui-notification-host` (done), `viewer-group-notice-display` (done))

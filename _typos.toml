@@ -5,8 +5,19 @@
 # they are prose in many languages by design, so an English typo checker only
 # produces false positives over them. Excluded wholesale rather than
 # allow-listing each foreign word as more locales land.
+#
+# `roadmap/context/notif-coverage.tsv` (viewer-notification-catalogue) is a
+# verbatim list of the reference viewer's ~1,300 `notifications.xml` entry names
+# — external wire/template identifiers, several of them Linden's own misspellings
+# (`SettingsUnsuported`, `LandmarkSeach`, `Wating…`, `…Dimentions`, `…Acess…`),
+# which are ours to cite exactly, not to correct. Excluded like the vendored
+# message template above rather than allow-listing each.
 [files]
-extend-exclude = ["sl-wire/message_template.msg", "*.ftl"]
+extend-exclude = [
+  "sl-wire/message_template.msg",
+  "roadmap/context/notif-coverage.tsv",
+  "*.ftl",
+]
 
 [default]
 # The conformance records stamp a git-describe hash (e.g. "a843ba4-dirty") in

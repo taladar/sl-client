@@ -159,6 +159,41 @@ pub(crate) const OK_CANCEL_FORM: &[NotificationButton] = &[
     },
 ];
 
+/// An OK / Cancel form whose affirmative button reads "Leave" — the reference
+/// `okcancelbuttons` with `yestext="Leave"`, used by the leave-group confirm. The
+/// affirmative keeps the stable `OK` [`name`](NotificationButton::name) so a
+/// consumer routes on it; only the label differs.
+pub(crate) const LEAVE_CANCEL_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "OK",
+        label_key: "notification-button-leave",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-cancel",
+        is_default: false,
+    },
+];
+
+/// The logged-out modal's form — the reference `okcancelbuttons` with
+/// `yestext="View IM & Chat"` / `notext="Quit"`: the affirmative opens the IM /
+/// chat window, the negative quits. As with [`LEAVE_CANCEL_FORM`] the button
+/// [`name`](NotificationButton::name)s stay the stable `OK` / `Cancel` so a
+/// consumer routes on them; only the labels differ.
+pub(crate) const VIEW_IM_QUIT_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "OK",
+        label_key: "notification-button-view-im-chat",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-quit",
+        is_default: false,
+    },
+];
+
 /// A declarative notification template — one catalogue entry, mirroring the
 /// reference `LLNotificationTemplate`. See the [module documentation](self).
 #[derive(Debug, Clone, Copy)]
@@ -214,11 +249,25 @@ impl NotificationTemplate {
 
 /// **The catalogue.** Every notification the host can raise, declared as data.
 ///
-/// Deliberately a representative seed rather than the reference's full ~1,300
-/// entries: the point of the host is the *mechanism*, and each specific dialog
-/// task adds the concrete entries it needs. The seed covers all four kinds, the
-/// `[KEY]` substitution, the `unique` dedup and the ignore checkbox, so every
-/// path the host implements has a live example.
+/// A curated port of the reference's `notifications.xml` — not its full ~1,300
+/// entries (each bespoke dialog owns its own form), but the notifications with
+/// **no dialog of their own** that today fall back to the generic raw-string
+/// `SystemMessage` / `GenericAlert`:
+///
+/// - The generic fallbacks and demo exemplars first (`SystemTip` …
+///   `ConfirmQuit`) — one of each kind, exercising `[KEY]` substitution, the
+///   `unique` dedup and the ignore checkbox.
+/// - **Keyed server alerts** the simulator sends by `AlertInfo` key
+///   ([`crate::notification_host::ingest_alert_messages`] raises these when the
+///   key matches): the maturity / access-blocked family, the region-restart
+///   countdowns, and standalone failure notices.
+/// - **Standard action-confirmation modals** shared across features (empty
+///   trash, remove friend, leave group, logged-out, agree-to-login) — raised by
+///   their owning feature, but the *entry* (text, buttons) belongs here.
+/// - **Info tips / notifies** not routed to nearby chat (landmark created,
+///   granted-modify-rights, a help tip).
+///
+/// See `viewer-notification-catalogue`.
 pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
     // A generic transient tip — the fallback for an unkeyed server hint.
     NotificationTemplate {
@@ -284,6 +333,222 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: true,
         form: OK_CANCEL_FORM,
+    },
+    // ---- Keyed server alerts (raised by `ingest_alert_messages` when the
+    // simulator's `AlertInfo` key names one of these). ----
+    //
+    // The maturity / access-blocked family: the simulator blocks an entry, a
+    // land claim or a land buy whose maturity rating exceeds the agent's
+    // preference. The reference's `_Change` / `_AdultsOnlyContent` variants are
+    // deferred (they carry a "change my preference and retry" callback that
+    // needs the maturity-preference plumbing); this ports the plain refusals.
+    NotificationTemplate {
+        name: "RegionEntryAccessBlocked",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-region-entry-access-blocked",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    NotificationTemplate {
+        name: "TeleportEntryAccessBlocked",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-teleport-entry-access-blocked",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    NotificationTemplate {
+        name: "LandClaimAccessBlocked",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-land-claim-access-blocked",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    NotificationTemplate {
+        name: "LandBuyAccessBlocked",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-land-buy-access-blocked",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    // The non-modal maturity notice the reference shows on a soft block (a tip
+    // that logs to chat), with the `[REGIONMATURITY]` substitution.
+    NotificationTemplate {
+        name: "RegionEntryAccessBlocked_Notify",
+        kind: NotificationKind::Tip,
+        message_key: "notification-region-entry-access-blocked-notify",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: true,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    // The seconds-granularity restart countdown — the companion to the existing
+    // `RegionRestartMinutes`, with `[NAME]` / `[SECONDS]`.
+    NotificationTemplate {
+        name: "RegionRestartSeconds",
+        kind: NotificationKind::Alert,
+        message_key: "notification-region-restart-seconds",
+        priority: NotificationPriority::High,
+        persist: true,
+        log_to_chat: true,
+        unique: true,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    // Standalone failure notices the simulator sends by key.
+    NotificationTemplate {
+        name: "TooManyScripts",
+        kind: NotificationKind::Notify,
+        message_key: "notification-too-many-scripts",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    NotificationTemplate {
+        name: "FailedToPlaceObject",
+        kind: NotificationKind::Notify,
+        message_key: "notification-failed-to-place-object",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    NotificationTemplate {
+        name: "FailedToFindWearableUnnamed",
+        kind: NotificationKind::Notify,
+        message_key: "notification-failed-to-find-wearable",
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    NotificationTemplate {
+        name: "HomePositionSet",
+        kind: NotificationKind::Notify,
+        message_key: "notification-home-position-set",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: true,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    // ---- Standard action-confirmation modals: shared `alertmodal` / `alert`
+    // confirms raised by their owning feature (inventory / people / groups /
+    // login flow). Data-only entries here; the owning feature supplies the
+    // `[COUNT]` / `[NAME]` / `[GROUP]` arguments and reads the response. ----
+    NotificationTemplate {
+        name: "ConfirmEmptyTrash",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-confirm-empty-trash",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+    },
+    NotificationTemplate {
+        name: "RemoveFromFriends",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-remove-from-friends",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+    },
+    NotificationTemplate {
+        name: "GroupLeaveConfirmMember",
+        kind: NotificationKind::Alert,
+        message_key: "notification-group-leave-confirm-member",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: LEAVE_CANCEL_FORM,
+    },
+    NotificationTemplate {
+        name: "YouHaveBeenLoggedOut",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-you-have-been-logged-out",
+        priority: NotificationPriority::High,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: false,
+        form: VIEW_IM_QUIT_FORM,
+    },
+    NotificationTemplate {
+        name: "MustAgreeToLogIn",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-must-agree-to-login",
+        priority: NotificationPriority::High,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: false,
+        form: OK_FORM,
+    },
+    // ---- Info tips / notifies not routed to nearby chat. ----
+    NotificationTemplate {
+        name: "LandmarkCreated",
+        kind: NotificationKind::Tip,
+        message_key: "notification-landmark-created",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    NotificationTemplate {
+        name: "GrantedModifyRights",
+        kind: NotificationKind::Notify,
+        message_key: "notification-granted-modify-rights",
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+    },
+    NotificationTemplate {
+        name: "TeleportToPerson",
+        kind: NotificationKind::Tip,
+        message_key: "notification-teleport-to-person",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
     },
 ];
 
@@ -611,10 +876,33 @@ impl NotificationArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        NOTIFICATIONS, NotificationArgs, NotificationKind, NotificationManager, substitute,
-        template,
+        LEAVE_CANCEL_FORM, NOTIFICATIONS, NotificationArgs, NotificationKind, NotificationManager,
+        VIEW_IM_QUIT_FORM, substitute, template,
     };
     use pretty_assertions::{assert_eq, assert_ne};
+
+    /// The English Fluent bundle source, embedded so the catalogue's keys can be
+    /// checked against it without the async asset load.
+    const EN_FTL: &str = include_str!("../assets/locales/en/main.ftl");
+
+    /// The set of message identifiers declared in [`EN_FTL`] — a message entry
+    /// begins at column 0 with `identifier =` (attributes and continuation lines
+    /// are indented, comments begin with `#`).
+    fn ftl_keys() -> std::collections::HashSet<String> {
+        EN_FTL
+            .lines()
+            .filter_map(|line| {
+                if line.starts_with([' ', '\t', '#']) {
+                    return None;
+                }
+                let ident = line.split_once('=')?.0.trim();
+                if ident.is_empty() || ident.contains(char::is_whitespace) {
+                    return None;
+                }
+                Some(ident.to_owned())
+            })
+            .collect()
+    }
 
     /// Names are the catalogue's primary key and what a response routes on, so a
     /// duplicate would make one template's raise ambiguous.
@@ -677,6 +965,69 @@ mod tests {
                     .map(|button| button.name);
                 assert_eq!(entry.default_button(), default);
             }
+        }
+    }
+
+    /// Every catalogue `message_key` and button `label_key` resolves to an
+    /// English Fluent entry, so a raised toast never renders its raw key. Guards
+    /// the catalogue against a typo drifting from `en/main.ftl`.
+    #[test]
+    fn every_key_has_an_english_fluent_entry() {
+        let keys = ftl_keys();
+        for entry in NOTIFICATIONS {
+            assert!(
+                keys.contains(entry.message_key),
+                "{}: message_key {} has no en/main.ftl entry",
+                entry.name,
+                entry.message_key
+            );
+            for button in entry.form {
+                assert!(
+                    keys.contains(button.label_key),
+                    "{}: button label_key {} has no en/main.ftl entry",
+                    entry.name,
+                    button.label_key
+                );
+            }
+        }
+    }
+
+    /// The keyed server alerts [`crate::notification_host::ingest_alert_messages`]
+    /// matches an `AlertInfo` key against are in the catalogue with the reference
+    /// kind, so a real keyed alert resolves to the right channel.
+    #[test]
+    fn keyed_server_alerts_are_catalogued() {
+        for (name, kind) in [
+            ("RegionEntryAccessBlocked", NotificationKind::AlertModal),
+            ("TeleportEntryAccessBlocked", NotificationKind::AlertModal),
+            ("LandClaimAccessBlocked", NotificationKind::AlertModal),
+            ("LandBuyAccessBlocked", NotificationKind::AlertModal),
+            ("RegionEntryAccessBlocked_Notify", NotificationKind::Tip),
+            ("RegionRestartSeconds", NotificationKind::Alert),
+            ("TooManyScripts", NotificationKind::Notify),
+            ("FailedToPlaceObject", NotificationKind::Notify),
+        ] {
+            let entry = template(name);
+            assert!(entry.is_some(), "{name} not in catalogue");
+            if let Some(entry) = entry {
+                assert_eq!(entry.kind, kind, "{name}: wrong kind");
+            }
+        }
+    }
+
+    /// The custom-labelled forms keep the stable `OK` / `Cancel` button names so a
+    /// consumer routes on the name, not the localized label, and each names one
+    /// default.
+    #[test]
+    fn custom_forms_route_on_stable_names() {
+        for form in [LEAVE_CANCEL_FORM, VIEW_IM_QUIT_FORM] {
+            let names: Vec<&str> = form.iter().map(|button| button.name).collect();
+            assert_eq!(names, vec!["OK", "Cancel"]);
+            assert_eq!(
+                form.iter().filter(|button| button.is_default).count(),
+                1,
+                "a form must name exactly one default"
+            );
         }
     }
 
