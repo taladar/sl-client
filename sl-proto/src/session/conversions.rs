@@ -3087,6 +3087,19 @@ pub fn chat_session_request_body(method: &str, session_id: Uuid) -> String {
     .to_llsd_xml()
 }
 
+/// The LLSD-XML body of an offline group-invitation response — the `{ "group":
+/// <uuid> }` payload the reference `response_group_invitation_coro` POSTs to the
+/// `AcceptGroupInvite` / `DeclineGroupInvite` capability. This is the modern
+/// reply path for an invitation that arrived while the agent was **offline**
+/// (a null IM session id); an online invitation is answered over UDP by
+/// [`Session::accept_group_invitation`](crate::Session::accept_group_invitation)
+/// instead. The cap chosen (accept vs decline) is the whole difference; the body
+/// is identical.
+#[must_use]
+pub fn group_invite_response_body(group_id: GroupKey) -> String {
+    llsd_map(vec![("group", Llsd::Uuid(group_id.uuid()))]).to_llsd_xml()
+}
+
 /// Decodes the agent roster carried by a `ChatSessionRequest` `"accept
 /// invitation"` reply into the participant agent ids. Handles both the modern
 /// `agent_info` map (whose keys are the agent uuids) and the deprecated `agents`
@@ -5160,6 +5173,20 @@ mod caps_serializer_tests {
                 sim_access: 21,
                 teleport_flags: 0x8000_00ff,
             })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn group_invite_response_body_carries_the_group() -> Result<(), String> {
+        let group = GroupKey::from(Uuid::from_u128(0x9601));
+        let body = super::group_invite_response_body(group);
+        let parsed = sl_wire::parse_llsd_xml(&body).map_err(|error| error.to_string())?;
+        // The body is the reference `{ "group": <uuid> }` — the accept / decline
+        // caps differ, this payload does not.
+        assert_eq!(
+            parsed.get("group").and_then(Llsd::as_uuid),
+            Some(group.uuid())
         );
         Ok(())
     }

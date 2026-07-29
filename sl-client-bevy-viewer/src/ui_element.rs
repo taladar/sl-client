@@ -646,6 +646,39 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::script_permission::spawn_script_permission_caution_specimen,
     },
     UiElement {
+        id: "inventory-offer-toast",
+        summary: "An inventory-offer card (viewer-dialog-offers-invites): the gift heading, the \
+                  \"{giver} has given you an item\" lead, the item name, and the Accept / Decline \
+                  / Block actions. The live host (`crate::offers_invites`) pops one per received \
+                  inventory-offer IM; here it is static so the layout is swept.",
+        spawn: crate::offers_invites::spawn_inventory_offer_specimen,
+    },
+    UiElement {
+        id: "teleport-offer-toast",
+        summary: "A teleport-offer / lure card (viewer-dialog-offers-invites): the location \
+                  heading, the \"{offerer} has offered to teleport you\" lead, the offer message, \
+                  and the Teleport / Decline actions. The live host (`crate::offers_invites`) \
+                  pops one per received lure IM; here it is static so the layout is swept.",
+        spawn: crate::offers_invites::spawn_teleport_offer_specimen,
+    },
+    UiElement {
+        id: "friendship-offer-toast",
+        summary: "A friendship-offer card (viewer-dialog-offers-invites): the handshake heading, \
+                  the \"{agent} is offering to be your friend\" lead, any custom message, and the \
+                  Accept / Decline actions. The live host (`crate::offers_invites`) pops one per \
+                  received friendship-offer IM; here it is static so the layout is swept.",
+        spawn: crate::offers_invites::spawn_friendship_offer_specimen,
+    },
+    UiElement {
+        id: "group-invite-toast",
+        summary: "A group-membership invitation card (viewer-dialog-offers-invites): the people \
+                  heading, the \"{inviter} has invited you to join a group\" lead, the invite \
+                  message and any membership fee, and the Join / Decline actions. The live host \
+                  (`crate::offers_invites`) pops one per received group-invitation IM; here it is \
+                  static so the layout is swept.",
+        spawn: crate::offers_invites::spawn_group_invite_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

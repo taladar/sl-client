@@ -120,6 +120,7 @@ mod notification_persist;
 mod notifications;
 mod object_menu;
 mod objects;
+mod offers_invites;
 mod parcel_audio;
 mod particles;
 mod paths;
@@ -298,6 +299,7 @@ use crate::objects::{
     log_suspicious_objects, pick_object, prune_control_avatars, spawn_animesh_control_avatars,
     update_objects,
 };
+use crate::offers_invites::OffersInvitesPlugin;
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
@@ -1133,6 +1135,14 @@ fn run_session(
     // wiring the grant / deny reply (Command::AnswerScriptPermissions). After
     // NotificationHostPlugin, whose shared channel it adopts its card into.
     .add_plugins(ScriptPermissionPlugin)
+    // The offers & invites toast host (viewer-dialog-offers-invites): pops an
+    // accept / decline card when the grid throws an inventory offer, a teleport
+    // lure, a friendship offer or a group-membership invitation over IM, wiring
+    // each to its protocol reply (AcceptInventoryOffer / AcceptTeleportLure /
+    // AcceptFriendship / AcceptGroupInvitation and the matching declines). After
+    // NotificationHostPlugin, whose shared channel it adopts its card into, and
+    // InventoryPlugin, whose folders the accept replies file into.
+    .add_plugins(OffersInvitesPlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.

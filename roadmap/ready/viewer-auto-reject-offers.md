@@ -2,7 +2,7 @@
 id: viewer-auto-reject-offers
 title: Auto-decline teleport/friendship/group-invite modes
 topic: viewer
-status: blocked
+status: ready
 origin: debug-settings/chat-lines survey (2026-07-23)
 blocked_by: [viewer-dialog-offers-invites]
 refs: [viewer-do-not-disturb-away]

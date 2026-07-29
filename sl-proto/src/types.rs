@@ -401,7 +401,8 @@ pub use avatar_profile::{
 };
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
-    GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage, InventoryOffer,
+    GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,
+    InventoryOffer,
 };
 pub use diagnostic::Diagnostic;
 pub use directory::{

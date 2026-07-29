@@ -610,6 +610,8 @@ const fn command_name(command: &Command) -> &'static str {
         Command::JoinGroup(..) => "join_group",
         Command::LeaveGroup(..) => "leave_group",
         Command::InviteToGroup { .. } => "invite_to_group",
+        Command::AcceptGroupInvitation { .. } => "accept_group_invitation",
+        Command::DeclineGroupInvitation { .. } => "decline_group_invitation",
         Command::SetGroupAcceptNotices { .. } => "set_group_accept_notices",
         Command::SetGroupContribution { .. } => "set_group_contribution",
         Command::StartGroupSession(..) => "start_group_session",

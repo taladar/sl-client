@@ -1150,3 +1150,21 @@ script-permission-q-experience = Participate in an experience
 script-permission-q-estate = Suppress alerts when managing estate access lists
 script-permission-q-override-anim = Replace your default animations
 script-permission-q-return-objects = Return objects on your behalf
+
+# The offers & invites toasts (viewer-dialog-offers-invites): the accept /
+# decline cards the grid throws at the user over IM — an inventory offer, a
+# teleport offer / lure, a friendship offer, and a group-membership invitation.
+offer-inventory-heading = Inventory Offer
+offer-inventory-from = { $name } has given you an item:
+offer-teleport-heading = Teleport Offer
+offer-teleport-from = { $name } has offered to teleport you to their location:
+offer-friendship-heading = Friendship Offer
+offer-friendship-from = { $name } is offering to be your friend.
+offer-group-heading = Group Invitation
+offer-group-from = { $name } has invited you to join a group:
+offer-group-fee = There is a fee of L$ { $fee } to join this group.
+offer-button-accept = Accept
+offer-button-decline = Decline
+offer-button-teleport = Teleport
+offer-button-join = Join
+offer-button-block = Block

@@ -15,12 +15,13 @@ use reqwest::blocking::Client as ReqwestBlockingClient;
 use std::collections::{BTreeSet, HashMap};
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
     CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
@@ -45,7 +46,8 @@ use sl_proto::{
     build_update_script_task_request, build_update_task_item_asset_request,
     build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
     display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, parse_login_response,
+    forget_experience_query, group_experiences_query, group_invite_response_body,
+    parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -67,14 +69,14 @@ pub use sl_proto::{
     ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
     FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
     FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole,
-    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
-    GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId,
-    InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
-    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
-    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact,
-    LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
+    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
+    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
+    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
     LindenBalance, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
     LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
@@ -1521,6 +1523,44 @@ fn advance_running(
             }
             Command::InviteToGroup { group_id, invitees } => {
                 session.invite_to_group(*group_id, invitees, now).ok();
+            }
+            Command::AcceptGroupInvitation {
+                group_id,
+                transaction_id,
+                use_offline_cap,
+            } => {
+                // An online invitation is answered over UDP; an offline one (null
+                // session id) POSTs to the AcceptGroupInvite cap when present.
+                if *use_offline_cap {
+                    if let Some(caps) = caps.as_ref()
+                        && let Some(url) = caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned()
+                    {
+                        let body = group_invite_response_body(*group_id);
+                        std::thread::spawn(move || run_caps_oneway(&url, body));
+                    }
+                } else {
+                    session
+                        .accept_group_invitation(*group_id, *transaction_id, now)
+                        .ok();
+                }
+            }
+            Command::DeclineGroupInvitation {
+                group_id,
+                transaction_id,
+                use_offline_cap,
+            } => {
+                if *use_offline_cap {
+                    if let Some(caps) = caps.as_ref()
+                        && let Some(url) = caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned()
+                    {
+                        let body = group_invite_response_body(*group_id);
+                        std::thread::spawn(move || run_caps_oneway(&url, body));
+                    }
+                } else {
+                    session
+                        .decline_group_invitation(*group_id, *transaction_id, now)
+                        .ok();
+                }
             }
             Command::SetGroupAcceptNotices {
                 group_id,

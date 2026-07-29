@@ -5970,6 +5970,89 @@ impl Session {
         Ok(())
     }
 
+    /// Accepts a received group-membership invitation
+    /// ([`ImDialog::GroupInvitation`]) — the reference `send_join_group_response`
+    /// with `accept=true` — by sending an `IM_GROUP_INVITATION_ACCEPT` IM back to
+    /// the group. `group_id` and `transaction_id` are the
+    /// [`GroupInvitationReceived::group_id`](crate::GroupInvitationReceived::group_id)
+    /// and
+    /// [`transaction_id`](crate::GroupInvitationReceived::transaction_id) decoded
+    /// from the invitation IM. The simulator enrolls the agent (charging any
+    /// membership fee) and pushes an updated `AgentGroupDataUpdate`; the reply
+    /// itself carries no fee — the simulator resolves it from the stored invite.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn accept_group_invitation(
+        &mut self,
+        group_id: GroupKey,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.reply_group_invitation(
+            group_id,
+            transaction_id,
+            ImDialog::GroupInvitationAccept,
+            now,
+        )
+    }
+
+    /// Declines a received group-membership invitation
+    /// ([`ImDialog::GroupInvitation`]) — the reference `send_join_group_response`
+    /// with `accept=false` — by sending an `IM_GROUP_INVITATION_DECLINE` IM back
+    /// to the group. `group_id` and `transaction_id` are the decoded
+    /// [`GroupInvitationReceived`](crate::GroupInvitationReceived) fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn decline_group_invitation(
+        &mut self,
+        group_id: GroupKey,
+        transaction_id: TransactionId,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.reply_group_invitation(
+            group_id,
+            transaction_id,
+            ImDialog::GroupInvitationDecline,
+            now,
+        )
+    }
+
+    /// The shared body of [`accept_group_invitation`](Self::accept_group_invitation)
+    /// / [`decline_group_invitation`](Self::decline_group_invitation): send the
+    /// group-invitation reply IM (the given accept/decline `dialog`) addressed to
+    /// the group, echoing the invitation's `transaction_id` as the IM session id
+    /// so the simulator matches it to the pending invite. The message/name are
+    /// unread by the simulator; the agent's own name rides along as the sender.
+    fn reply_group_invitation(
+        &mut self,
+        group_id: GroupKey,
+        transaction_id: TransactionId,
+        dialog: ImDialog,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_im(
+            &OutgoingIm {
+                to_agent_id: group_id.uuid(),
+                from_group: false,
+                dialog,
+                id: transaction_id.get(),
+                message: "",
+                from_name: &from_name,
+                binary_bucket: Vec::new(),
+            },
+            now,
+        )?;
+        Ok(())
+    }
+
     /// Sets whether the agent accepts notices from a group and lists it in their
     /// profile (`SetGroupAcceptNotices`).
     ///

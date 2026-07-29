@@ -1,7 +1,9 @@
 //! Chat and instant messaging value types.
 
 use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey};
-use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{
+    AgentKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryKey, ObjectKey,
+};
 use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
@@ -327,6 +329,13 @@ pub enum ImDialog {
     FriendshipOffered,
     /// A friendship offer was accepted (`IM_FRIENDSHIP_ACCEPTED`).
     FriendshipAccepted,
+    /// A group-membership invitation was accepted
+    /// (`IM_GROUP_INVITATION_ACCEPT`) — the reply the invitee sends back to the
+    /// group to join it.
+    GroupInvitationAccept,
+    /// A group-membership invitation was declined
+    /// (`IM_GROUP_INVITATION_DECLINE`).
+    GroupInvitationDecline,
     /// The correspondent started typing (`IM_TYPING_START`).
     TypingStart,
     /// The correspondent stopped typing (`IM_TYPING_STOP`).
@@ -361,6 +370,8 @@ impl ImDialog {
             26 => Self::TeleportRequest,
             28 => Self::GotoUrl,
             32 => Self::GroupNotice,
+            35 => Self::GroupInvitationAccept,
+            36 => Self::GroupInvitationDecline,
             38 => Self::FriendshipOffered,
             39 => Self::FriendshipAccepted,
             41 => Self::TypingStart,
@@ -394,6 +405,8 @@ impl ImDialog {
             Self::TeleportRequest => 26,
             Self::GotoUrl => 28,
             Self::GroupNotice => 32,
+            Self::GroupInvitationAccept => 35,
+            Self::GroupInvitationDecline => 36,
             Self::FriendshipOffered => 38,
             Self::FriendshipAccepted => 39,
             Self::TypingStart => 41,
@@ -552,6 +565,61 @@ impl InstantMessage {
             attachment,
         })
     }
+
+    /// Decodes a received **group-membership invitation**
+    /// ([`ImDialog::GroupInvitation`]) — the "join this group?" offer — into the
+    /// pieces a viewer displays and the ids it echoes back when accepting or
+    /// declining ([`GroupInvitationReceived`]).
+    ///
+    /// The reference `invite_bucket_t` [`binary_bucket`](Self::binary_bucket) is
+    /// 20 bytes:
+    ///
+    /// ```text
+    /// [0..4]   membership fee (S32, network / big-endian order)
+    /// [4..20]  the role id the invitee would be enrolled under (16 bytes)
+    /// ```
+    ///
+    /// OpenSim sends the bucket all-zeroed (a free join into the Everyone role);
+    /// Second Life fills in the fee and role. A bucket of the wrong length yields
+    /// a zero fee and nil role (the invitation is still actionable — the fee and
+    /// role are the simulator's to enforce on accept). The **group id** is the
+    /// invitation IM's [`from_agent_id`](Self::from_agent_id) (the simulator sets
+    /// a group invitation's sender to the group), the **transaction id** its
+    /// [`id`](Self::id) (echoed back on the reply), and the **inviter name** its
+    /// [`from_agent_name`](Self::from_agent_name). Returns `None` for any other
+    /// dialog.
+    #[must_use]
+    pub fn group_invitation(&self) -> Option<GroupInvitationReceived> {
+        if !matches!(self.dialog, ImDialog::GroupInvitation) {
+            return None;
+        }
+        // The fee is a big-endian S32 in the first four bucket bytes; a
+        // wrong-sized bucket (e.g. OpenSim's zeroed 20 bytes still fits) reads as
+        // zero rather than failing the whole decode.
+        let membership_fee = self
+            .binary_bucket
+            .get(0..4)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map_or(0, i32::from_be_bytes);
+        // The role id follows the fee (bytes 4..20); a truncated bucket leaves it
+        // nil (the Everyone role).
+        let role_id = self
+            .binary_bucket
+            .get(4..20)
+            .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+            .map_or_else(
+                || GroupRoleKey::from(Uuid::nil()),
+                |bytes| GroupRoleKey::from(Uuid::from_bytes(bytes)),
+            );
+        Some(GroupInvitationReceived {
+            group_id: GroupKey::from(self.from_agent_id.uuid()),
+            role_id,
+            membership_fee,
+            transaction_id: self.id,
+            inviter_name: self.from_agent_name.clone(),
+            message: self.message.clone(),
+        })
+    }
 }
 
 /// A received group notice, decoded from an [`ImDialog::GroupNotice`]
@@ -572,6 +640,31 @@ pub struct GroupNoticeReceived {
     pub timestamp: Option<u32>,
     /// The attached inventory item, if the notice carries one.
     pub attachment: Option<GroupNoticeItem>,
+}
+
+/// A received group-membership invitation, decoded from an
+/// [`ImDialog::GroupInvitation`] [`InstantMessage`] by
+/// [`InstantMessage::group_invitation`]. Reply by echoing
+/// [`group_id`](Self::group_id) and [`transaction_id`](Self::transaction_id)
+/// back in an `IM_GROUP_INVITATION_ACCEPT` / `IM_GROUP_INVITATION_DECLINE` IM
+/// (the reference `send_join_group_response`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInvitationReceived {
+    /// The group the invitee is invited to join (the invitation IM's sender).
+    pub group_id: GroupKey,
+    /// The role the invitee would be enrolled under (nil = the Everyone role);
+    /// the simulator enforces it on accept from the stored invite, so the reply
+    /// need not carry it.
+    pub role_id: GroupRoleKey,
+    /// The one-off L$ fee to join (0 = free); the simulator charges it on accept.
+    pub membership_fee: i32,
+    /// The invitation's transaction id (the IM's `id`), echoed back on the reply
+    /// so the simulator can match it to the pending invite.
+    pub transaction_id: Uuid,
+    /// The name of the agent who sent the invitation.
+    pub inviter_name: String,
+    /// The human-readable invitation message the simulator composed.
+    pub message: String,
 }
 
 /// The inventory item attached to a received group notice — its class and name,
@@ -608,7 +701,9 @@ pub struct InventoryOffer {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
+    use sl_types::key::{
+        AgentKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryKey, ObjectKey,
+    };
     use sl_types::map::RegionCoordinates;
     use uuid::Uuid;
 
@@ -750,6 +845,103 @@ mod tests {
         let mut im = group_notice_im("Subject|Body", notice_bucket(Uuid::from_u128(0x9406), None));
         im.dialog = ImDialog::Message;
         assert!(im.group_notice().is_none());
+    }
+
+    /// A group-membership invitation IM with the given fee/role bucket and
+    /// message, for the [`InstantMessage::group_invitation`] tests. The invitation
+    /// IM's sender is the group and its `id` is the transaction id.
+    fn group_invite_im(group: Uuid, transaction: Uuid, bucket: Vec<u8>) -> InstantMessage {
+        InstantMessage {
+            from_agent_id: AgentKey::from(group),
+            from_agent_name: "Inviter Resident".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
+            dialog: ImDialog::GroupInvitation,
+            from_group: true,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: Some(1_700_000_000),
+            id: transaction,
+            parent_estate_id: 0,
+            message: "Inviter Resident has invited you to join a group.".to_owned(),
+            binary_bucket: bucket,
+        }
+    }
+
+    /// The reference 20-byte `invite_bucket_t`: a big-endian S32 fee followed by
+    /// the 16-byte role id. The fee bytes are laid out most-significant-first by
+    /// hand rather than with the endian-suffixed byte methods the clippy
+    /// `big_endian_bytes` restriction forbids.
+    fn invite_bucket(fee: i32, role: Uuid) -> Vec<u8> {
+        let mut bucket = vec![
+            u8::try_from((fee >> 24) & 0xff).unwrap_or(0),
+            u8::try_from((fee >> 16) & 0xff).unwrap_or(0),
+            u8::try_from((fee >> 8) & 0xff).unwrap_or(0),
+            u8::try_from(fee & 0xff).unwrap_or(0),
+        ];
+        bucket.extend_from_slice(role.as_bytes());
+        bucket
+    }
+
+    /// A well-formed invitation decodes its group (the sender), transaction id
+    /// (the IM id), inviter name, fee and role.
+    #[test]
+    fn group_invitation_decodes_fee_and_role() -> Result<(), String> {
+        let group = Uuid::from_u128(0x9501);
+        let role = Uuid::from_u128(0x9502);
+        let transaction = Uuid::from_u128(0x9503);
+        let im = group_invite_im(group, transaction, invite_bucket(150, role));
+        let invite = im
+            .group_invitation()
+            .ok_or_else(|| "expected a group invitation".to_owned())?;
+        assert_eq!(invite.group_id, GroupKey::from(group));
+        assert_eq!(invite.role_id, GroupRoleKey::from(role));
+        assert_eq!(invite.membership_fee, 150);
+        assert_eq!(invite.transaction_id, transaction);
+        assert_eq!(invite.inviter_name, "Inviter Resident");
+        Ok(())
+    }
+
+    /// OpenSim sends the bucket all-zeroed (a free join into the Everyone role);
+    /// that decodes to a zero fee and nil role, still actionable.
+    #[test]
+    fn group_invitation_zeroed_bucket_is_free_everyone() -> Result<(), String> {
+        let im = group_invite_im(
+            Uuid::from_u128(0x9504),
+            Uuid::from_u128(0x9505),
+            vec![0_u8; 20],
+        );
+        let invite = im
+            .group_invitation()
+            .ok_or_else(|| "expected a group invitation".to_owned())?;
+        assert_eq!(invite.membership_fee, 0);
+        assert_eq!(invite.role_id, GroupRoleKey::from(Uuid::nil()));
+        Ok(())
+    }
+
+    /// A truncated bucket does not fail the decode: the fee reads as zero and the
+    /// role as nil (the fee and role are the simulator's to enforce on accept).
+    #[test]
+    fn group_invitation_truncated_bucket_defaults() -> Result<(), String> {
+        let im = group_invite_im(Uuid::from_u128(0x9506), Uuid::from_u128(0x9507), Vec::new());
+        let invite = im
+            .group_invitation()
+            .ok_or_else(|| "expected a group invitation".to_owned())?;
+        assert_eq!(invite.membership_fee, 0);
+        assert_eq!(invite.role_id, GroupRoleKey::from(Uuid::nil()));
+        Ok(())
+    }
+
+    /// A non-invitation dialog yields no group invitation.
+    #[test]
+    fn group_invitation_rejects_other_dialogs() {
+        let mut im = group_invite_im(
+            Uuid::from_u128(0x9508),
+            Uuid::from_u128(0x9509),
+            invite_bucket(0, Uuid::nil()),
+        );
+        im.dialog = ImDialog::Message;
+        assert!(im.group_invitation().is_none());
     }
 
     /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw

@@ -11,11 +11,12 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use sl_proto::{
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
+    CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
     CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
@@ -42,7 +43,8 @@ use sl_proto::{
     build_update_script_task_request, build_update_task_item_asset_request,
     build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
     display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, parse_login_response,
+    forget_experience_query, group_experiences_query, group_invite_response_body,
+    parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -1011,6 +1013,28 @@ impl Client {
                         }
                         Some(Command::InviteToGroup { group_id, invitees }) => {
                             self.session.invite_to_group(group_id, &invitees, Instant::now())?;
+                        }
+                        Some(Command::AcceptGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
+                            // Online: UDP reply. Offline (null session id): POST to
+                            // the AcceptGroupInvite cap when present.
+                            if use_offline_cap {
+                                if let Some(url) = caps.get(CAP_ACCEPT_GROUP_INVITE).cloned() {
+                                    let body = group_invite_response_body(group_id);
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                }
+                            } else {
+                                self.session.accept_group_invitation(group_id, transaction_id, Instant::now())?;
+                            }
+                        }
+                        Some(Command::DeclineGroupInvitation { group_id, transaction_id, use_offline_cap }) => {
+                            if use_offline_cap {
+                                if let Some(url) = caps.get(CAP_DECLINE_GROUP_INVITE).cloned() {
+                                    let body = group_invite_response_body(group_id);
+                                    tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                }
+                            } else {
+                                self.session.decline_group_invitation(group_id, transaction_id, Instant::now())?;
+                            }
                         }
                         Some(Command::SetGroupAcceptNotices { group_id, accept_notices, list_in_profile }) => {
                             self.session.set_group_accept_notices(group_id, accept_notices, list_in_profile, Instant::now())?;

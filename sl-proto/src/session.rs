@@ -326,6 +326,21 @@ pub const CAP_READ_OFFLINE_MSGS: &str = "ReadOfflineMsgs";
 /// commands; the roster reply seeds the session participants.
 pub const CAP_CHAT_SESSION_REQUEST: &str = "ChatSessionRequest";
 
+/// The modern capability for **accepting** a group-membership invitation that
+/// arrived while the agent was **offline** (a null IM session id). A POST of
+/// `{ "group": <group-uuid> }` ([`group_invite_response_body`]); the simulator
+/// enrolls the agent and replies with a `{ "success": bool }` map. An *online*
+/// invitation is answered over UDP instead (see
+/// [`Session::accept_group_invitation`]). Second Life exposes this cap; OpenSim
+/// does not (its invitations use the UDP reply path), so the local grid never
+/// exercises it.
+pub const CAP_ACCEPT_GROUP_INVITE: &str = "AcceptGroupInvite";
+
+/// The modern capability for **declining** an offline group-membership
+/// invitation — the decline counterpart of [`CAP_ACCEPT_GROUP_INVITE`], same
+/// `{ "group": <group-uuid> }` body.
+pub const CAP_DECLINE_GROUP_INVITE: &str = "DeclineGroupInvite";
+
 /// The `ChatSessionRequest` method that accepts (joins) a chat-session invitation,
 /// for both text and voice channels (the voice-join signalling is layered on top
 /// — see chat task B8). The reply carries the session's current agent roster.
@@ -532,6 +547,8 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_REGION_EXPERIENCES,
     CAP_READ_OFFLINE_MSGS,
     CAP_CHAT_SESSION_REQUEST,
+    CAP_ACCEPT_GROUP_INVITE,
+    CAP_DECLINE_GROUP_INVITE,
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
@@ -1259,9 +1276,9 @@ pub use conversions::{
     bulk_update_inventory_to_llsd, chat_session_request_body, chatterbox_invitation_to_llsd,
     created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
     enable_simulator_to_caps_llsd, environment_to_llsd, establish_agent_communication_to_llsd,
-    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
-    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
-    parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
-    set_display_name_reply_to_llsd, sim_console_response_to_llsd, teleport_finish_to_llsd,
-    windlight_refresh_to_llsd,
+    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
+    inventory_descendents_to_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
+    open_region_info_to_llsd, parcel_info_to_llsd, required_voice_version_to_llsd,
+    server_appearance_update_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
+    teleport_finish_to_llsd, windlight_refresh_to_llsd,
 };

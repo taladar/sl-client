@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 55 |
 | ready | 228 |
-| blocked | 113 |
+| blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 628 |
+| done | 629 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1072** |
@@ -191,6 +191,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-auto-reject-offers`](ready/viewer-auto-reject-offers.md) —
+  Auto-decline teleport/friendship/group-invite modes (blocked by
+  `viewer-dialog-offers-invites` (done))
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -281,9 +284,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-derender-blacklist`](ready/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
-- [`viewer-dialog-offers-invites`](ready/viewer-dialog-offers-invites.md) —
-  Inventory / teleport offers + friendship / group invites (blocked by
-  `viewer-ui-notification-host` (done))
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
   display name (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-do-not-disturb-away`](ready/viewer-do-not-disturb-away.md) — Away /
@@ -689,7 +689,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (113)
+## blocked (112)
 
 ### protocol
 
@@ -717,9 +717,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-ambient-wind-sound`](blocked/viewer-ambient-wind-sound.md) — Ambient
   wind sound (blocked by `viewer-audio-backend`)
-- [`viewer-auto-reject-offers`](blocked/viewer-auto-reject-offers.md) —
-  Auto-decline teleport/friendship/group-invite modes (blocked by
-  `viewer-dialog-offers-invites`)
 - [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
   `viewer-name-tags-display-names`)
@@ -1074,7 +1071,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (628)
+## done (629)
 
 ### protocol
 
@@ -1271,6 +1268,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   specular
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
   dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-dialog-offers-invites`](done/viewer-dialog-offers-invites.md) —
+  Inventory / teleport offers + friendship / group invites (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))

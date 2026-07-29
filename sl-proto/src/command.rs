@@ -515,6 +515,42 @@ pub enum Command {
         /// The `(invitee_id, role_id)` pairs.
         invitees: Vec<(AgentKey, GroupRoleKey)>,
     },
+    /// Accept a received group-membership invitation — the reply that joins the
+    /// group. The `group_id` and `transaction_id` are the
+    /// [`GroupInvitationReceived`](crate::GroupInvitationReceived) fields decoded
+    /// from the incoming [`ImDialog::GroupInvitation`](crate::ImDialog::GroupInvitation) IM.
+    ///
+    /// `use_offline_cap` picks the reply path, mirroring the reference
+    /// `send_join_group_response`: an **online** invitation (`false`) is answered
+    /// over UDP with an `IM_GROUP_INVITATION_ACCEPT` IM
+    /// ([`Session::accept_group_invitation`](crate::Session::accept_group_invitation));
+    /// an invitation that arrived while the agent was **offline** (a null IM
+    /// session id — `true`) is answered by POSTing `{ "group": <id> }` to the
+    /// [`AcceptGroupInvite`](crate::CAP_ACCEPT_GROUP_INVITE) capability, since the
+    /// null session id cannot be echoed back over UDP. Set it from the
+    /// invitation IM (`id.is_nil() && offline`).
+    AcceptGroupInvitation {
+        /// The inviting group (the invitation IM's sender).
+        group_id: GroupKey,
+        /// The invitation's transaction id, echoed back on the UDP reply path.
+        transaction_id: TransactionId,
+        /// Whether to answer over the offline `AcceptGroupInvite` cap rather than
+        /// the UDP IM.
+        use_offline_cap: bool,
+    },
+    /// Decline a received group-membership invitation — the decline counterpart
+    /// of [`AcceptGroupInvitation`](Self::AcceptGroupInvitation), with the same
+    /// online-UDP / offline-cap ([`DeclineGroupInvite`](crate::CAP_DECLINE_GROUP_INVITE))
+    /// path choice.
+    DeclineGroupInvitation {
+        /// The inviting group (the invitation IM's sender).
+        group_id: GroupKey,
+        /// The invitation's transaction id, echoed back on the UDP reply path.
+        transaction_id: TransactionId,
+        /// Whether to answer over the offline `DeclineGroupInvite` cap rather than
+        /// the UDP IM.
+        use_offline_cap: bool,
+    },
     /// Set whether the agent accepts notices from a group / lists it in profile.
     SetGroupAcceptNotices {
         /// The group.
