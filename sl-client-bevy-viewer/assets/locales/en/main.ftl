@@ -1104,3 +1104,10 @@ group-notice-timestamp = { $when } SLT
 group-notice-button-ok = OK
 group-notice-button-notices = Group Notices
 group-notice-button-chat = Group Chat
+
+# The script-dialog toast (viewer-dialog-lldialog): the card a scripted object's
+# llDialog / llTextBox pops. The title reads "Owner Name's 'Object Name'".
+script-dialog-from = { $owner }'s '{ $object }'
+script-dialog-button-block = Block
+script-dialog-button-ignore = Ignore
+script-dialog-button-submit = Submit

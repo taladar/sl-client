@@ -602,6 +602,23 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::group_notice::spawn_group_notice_specimen,
     },
     UiElement {
+        id: "script-dialog-toast",
+        summary: "A script-dialog card (viewer-dialog-lldialog): an object / owner title, the \
+                  dialog message, and a three-column button grid filled bottom-up (button 0 \
+                  bottom-left), plus the Block / Ignore actions. The live host \
+                  (`crate::script_dialog`) pops one per received llDialog; here it is static so \
+                  the grid layout is swept.",
+        spawn: crate::script_dialog::spawn_script_dialog_specimen,
+    },
+    UiElement {
+        id: "script-dialog-textbox-toast",
+        summary: "An llTextBox script-dialog card (viewer-dialog-lldialog): the object / owner \
+                  title, the prompt, a text-entry field and a Submit / Block / Ignore row. The \
+                  live host (`crate::script_dialog`) pops one per received llTextBox; here it is \
+                  static so the text-prompt layout is swept.",
+        spawn: crate::script_dialog::spawn_script_textbox_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

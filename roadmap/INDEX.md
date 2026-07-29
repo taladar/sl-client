@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 228 |
-| blocked | 113 |
+| ready | 227 |
+| blocked | 114 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 625 |
+| done | 626 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1069** |
+| **total** | **1070** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (228)
+## ready (227)
 
 ### protocol
 
@@ -277,8 +277,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-derender-blacklist`](ready/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
-- [`viewer-dialog-lldialog`](ready/viewer-dialog-lldialog.md) — llDialog script
-  dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-dialog-offers-invites`](ready/viewer-dialog-offers-invites.md) —
   Inventory / teleport offers + friendship / group invites (blocked by
   `viewer-ui-notification-host` (done))
@@ -687,7 +685,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (113)
+## blocked (114)
 
 ### protocol
 
@@ -922,6 +920,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlva-floaters-toggles`](blocked/viewer-rlva-floaters-toggles.md) —
   "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked by
   `viewer-rlv-restriction-state`)
+- [`viewer-script-dialog-body-links`](blocked/viewer-script-dialog-body-links.md)
+  — Script dialog body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification`)
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
@@ -1072,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (625)
+## done (626)
 
 ### protocol
 
@@ -1267,6 +1268,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
   — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
   specular
+- [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
+  dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))

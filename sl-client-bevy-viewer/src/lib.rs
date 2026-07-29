@@ -136,6 +136,7 @@ mod render_scene;
 #[cfg(test)]
 mod render_test;
 mod screenshot;
+mod script_dialog;
 mod search;
 mod session;
 mod settings;
@@ -301,6 +302,7 @@ use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
+use crate::script_dialog::ScriptDialogPlugin;
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
     repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
@@ -1107,6 +1109,12 @@ fn run_session(
     // toast for a notice the Notices tab pulled up itself) and GroupsPlugin
     // (whose membership insignia it shows).
     .add_plugins(GroupNoticePlugin)
+    // The script-dialog toast host (viewer-dialog-lldialog): pops a card — object
+    // / owner title, message, and a button grid or a text field — when a scripted
+    // object calls llDialog / llTextBox, wiring the reply on the hidden chat
+    // channel (Command::ReplyScriptDialog). After NotificationHostPlugin, whose
+    // shared channel it adopts its card into.
+    .add_plugins(ScriptDialogPlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.
