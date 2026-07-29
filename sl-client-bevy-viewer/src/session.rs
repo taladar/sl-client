@@ -49,6 +49,10 @@ pub(crate) struct ViewerSession {
     /// Whether the `--play-animation` debug animation has been triggered yet, so
     /// it fires once on the first region handshake rather than on every one.
     play_on_login_done: bool,
+    /// Whether the login-time offline-instant-message drain has been requested, so
+    /// it fires once (on the first region handshake) rather than on every region
+    /// cross.
+    offline_messages_requested: bool,
     /// The wall-clock deadline (`Time::elapsed_secs`) at which a pending quit
     /// forces an exit even without a `LoggedOut`; `None` until quit is
     /// requested.
@@ -334,6 +338,23 @@ pub(crate) fn drive_session(
                 // advertises its throttle; the 1000 kbps preset matches its generous
                 // end and is ample to stream the full scene.
                 commands.write(SlCommand(Command::SetThrottle(Throttle::preset_1000())));
+                // Drain the agent's stored offline instant messages, once — the
+                // reference `LLIMProcessing::requestOfflineMessages`, which the
+                // simulator otherwise holds and re-delivers on every login until
+                // retrieved (OpenSim deletes them as it hands them over). They
+                // arrive as ordinary `InstantMessageReceived` events with `offline`
+                // set, folding into the conversations, offers and group-notice
+                // surfaces like any live IM. The legacy UDP `RetrieveInstantMessages`
+                // is used (not the modern `ReadOfflineMsgs` cap) because it carries
+                // the per-message transaction ids our UDP accept paths need — the
+                // cap path drops them, which is why the reference only uses the cap
+                // when the AcceptFriendship / AcceptGroupInvite caps are also
+                // present (a path we do not wire yet).
+                if !session.offline_messages_requested {
+                    info!("requesting stored offline instant messages");
+                    commands.write(SlCommand(Command::RetrieveInstantMessages));
+                    session.offline_messages_requested = true;
+                }
                 // Kick off the `--play-animation` debug animations on the agent's
                 // own avatar, once, so its skeleton is driven (P18.3 / P18.4) — the
                 // sim broadcasts the agent's own `AvatarAnimation` back, which the

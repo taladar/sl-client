@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 113 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 624 |
+| done | 625 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1068** |
+| **total** | **1069** |
 
 ## ideas (55)
 
@@ -1072,7 +1072,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (624)
+## done (625)
 
 ### protocol
 
@@ -1415,6 +1415,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-offline-im-drain`](done/viewer-offline-im-drain.md) — Drain stored
+  offline instant messages at login
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the

@@ -73,9 +73,18 @@
  * ring shows for keyboard use and hides for the mouse, the conventional desktop
  * behaviour. The base rule pins the resting outline to zero width, so when
  * :focus-visible stops matching the ring collapses to nothing regardless of the
- * colour the outline reverts to. */
+ * colour the outline reverts to.
+ *
+ * The resting rule also sets the colour and offset (not just the width) so those
+ * properties have a *baseline* to revert to when the :focus / :focus-visible rule
+ * below stops matching — without it bevy_flair has no value to fall back to and
+ * warns "Cannot set property 'outline-color' … to None" every time a field or
+ * focusable loses focus. The zero width keeps the ring invisible at rest whatever
+ * the colour, so the baseline is purely to satisfy the revert. */
 .sk-focusable {
   outline-width: 0px;
+  outline-color: var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .sk-focusable:focus-visible {
