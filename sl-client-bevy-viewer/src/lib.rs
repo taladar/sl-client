@@ -1904,6 +1904,55 @@ impl std::fmt::Debug for TracingGuards {
     }
 }
 
+/// A [`tracing_tracy`] field formatter kept as a *distinct type* from the
+/// terminal fmt layer's [`DefaultFields`].
+///
+/// The fmt layer and Tracy both cache a span's formatted fields in the span's
+/// extension map, keyed by the field-formatter type: `FormattedFields<N>`. With
+/// [`tracing_tracy::TracyLayer::default`] that type is `FormattedFields<DefaultFields>`
+/// — exactly the type the fmt layer already stores. The fmt layer's
+/// `on_new_span` runs first (it is the inner layer) and inserts an
+/// ANSI-*coloured* copy (it colours terminal output). Tracy's `on_new_span`
+/// then finds the extension already present and reuses it verbatim, so the raw
+/// ANSI escapes end up in Tracy zone names, which Tracy renders literally.
+///
+/// Wrapping [`DefaultFields`] in a newtype gives Tracy its own extension type
+/// (`FormattedFields<TracyFieldFormatter>`), so it formats its own copy — with
+/// ANSI disabled, since [`FormattedFields::new`] defaults `was_ansi` to `false`
+/// — while the terminal fmt layer keeps its colours.
+#[cfg(feature = "profile-tracy")]
+#[derive(Default)]
+struct TracyFieldFormatter(tracing_subscriber::fmt::format::DefaultFields);
+
+#[cfg(feature = "profile-tracy")]
+impl<'writer> tracing_subscriber::fmt::FormatFields<'writer> for TracyFieldFormatter {
+    /// Delegate to the wrapped [`DefaultFields`]; the newtype exists only to be a
+    /// distinct type in the span extension map, not to change the formatting.
+    fn format_fields<R: tracing_subscriber::field::RecordFields>(
+        &self,
+        writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        tracing_subscriber::fmt::FormatFields::format_fields(&self.0, writer, fields)
+    }
+}
+
+/// Tracy configuration that swaps the default field formatter for
+/// [`TracyFieldFormatter`] so Tracy zone names carry no ANSI escapes.
+#[cfg(feature = "profile-tracy")]
+#[derive(Default)]
+struct TracyConfig(TracyFieldFormatter);
+
+#[cfg(feature = "profile-tracy")]
+impl tracing_tracy::Config for TracyConfig {
+    type Formatter = TracyFieldFormatter;
+
+    /// The field formatter Tracy uses for zone names — our ANSI-free newtype.
+    fn formatter(&self) -> &Self::Formatter {
+        &self.0
+    }
+}
+
 /// Install the `tracing` subscriber both binaries share.
 ///
 /// The viewer disables Bevy's own `LogPlugin` (see `run_session`) because the
@@ -1962,7 +2011,7 @@ pub fn init_tracing() -> TracingGuards {
     let subscriber = tracing_subscriber::registry().with(filter).with(fmt_layer);
 
     #[cfg(feature = "profile-tracy")]
-    let subscriber = subscriber.with(tracing_tracy::TracyLayer::default());
+    let subscriber = subscriber.with(tracing_tracy::TracyLayer::new(TracyConfig::default()));
 
     #[cfg(feature = "profile-chrome")]
     let subscriber = subscriber.with(chrome_layer);
