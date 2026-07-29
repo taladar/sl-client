@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 227 |
+| ready | 228 |
 | blocked | 113 |
 | in-progress | 10 |
 | bugs | 13 |
 | done | 624 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1067** |
+| **total** | **1068** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (227)
+## ready (228)
 
 ### protocol
 
@@ -409,6 +409,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
+- [`viewer-notification-catalogue`](ready/viewer-notification-catalogue.md) —
+  Notification catalogue — port the reference server-alert & confirm entries
+  (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-notification-history`](ready/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`
   (done))

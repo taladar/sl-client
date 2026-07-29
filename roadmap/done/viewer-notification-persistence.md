@@ -6,7 +6,7 @@ status: done
 origin: user request (2026-07-29), while implementing viewer-group-notice-display
   — an unclosed notice must re-display on next login, not be lost
 blocked_by: [viewer-ui-notification-host, viewer-group-notice-display]
-refs: [viewer-notification-history, sl-settings-account-scope-identity]
+refs: [viewer-notification-history]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -24,9 +24,8 @@ against `LLToastGroupNotifyPanel::onClickOk`). This task adds that store.
 - **Store** — new `notification_persist.rs` + `NotificationPersistPlugin`: a
   `PersistentNotificationStore` that serializes the open notifications to a
   per-account `open_notifications.json` (a sibling of the account
-  `settings.toml`, via the account dir from
-  [[sl-settings-account-scope-identity]]). serde + serde_json added to the
-  viewer crate.
+  `settings.toml`, via the account dir the `sl-account-dirs` per-avatar scope
+  resolves at login). serde + serde_json added to the viewer crate.
 - **Record / forget** — a producer writes a `PersistNotification { id, kind }`;
   the store forgets an entry when its `NotificationResponse` arrives (any
   answer, incl. a close ×). `NotificationId` is session-local (not serialized);
