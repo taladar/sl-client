@@ -39,12 +39,22 @@
 //! `ScriptQuestion` for the non-implicit remainder. So this host faithfully
 //! prompts for whatever the sim actually asks and adds no client-side auto-grant
 //! (which would be dead: the sim never sends an implicit-only request as a
-//! question). The accepted-experience management surface — the experience name,
-//! the *Block Experience* action, and the reference `ScriptQuestionExperience`
-//! card — is [[viewer-experience-permission-dialog]]'s; here an experience
-//! request lists `Participate in an experience` and its grant carries the
-//! experience id for the mirror. Active grants are tracked / revoked by
+//! question). Active grants are tracked / revoked by
 //! [[viewer-permission-active-grants]].
+//!
+//! # Experience requests are routed to the experience host
+//!
+//! A `ScriptQuestion` that names an **experience** (its `Experience.ExperienceID`
+//! is set) and is **not** a money-caution request goes to the reference
+//! `ScriptQuestionExperience` card — the accept-the-experience prompt with its
+//! own *Block Experience* action — which is [`crate::experience_permission`]'s
+//! ([[viewer-experience-permission-dialog]]). This host therefore **skips** such
+//! a request (leaving the caution / standard shapes to the non-experience and
+//! money paths), exactly as the reference `process_script_question` shows
+//! `ScriptQuestionExperience` instead of `ScriptQuestion` for it. The shared
+//! permission-line machinery ([`recognized_mask`], [`other_permission_keys`],
+//! [`is_caution`]) is `pub(crate)` so the experience host renders the same
+//! `[QUESTIONS]` lines and computes the same grant mask.
 //!
 //! There are no free-text URLs in a permission prompt (the strings are the fixed
 //! reference permission wording), so — unlike the script dialog / group notice —
@@ -212,21 +222,28 @@ fn known_mask() -> i32 {
 
 /// The recognised subset of a request's permission bits (the requested bits this
 /// host models, unmodelled bits dropped). This is the mask a grant reply sends.
-fn recognized_mask(permissions: ScriptPermissions) -> i32 {
+/// `pub(crate)` so the experience host ([`crate::experience_permission`]) computes
+/// the same grant mask when the user accepts an experience request.
+pub(crate) fn recognized_mask(permissions: ScriptPermissions) -> i32 {
     permissions.0 & known_mask()
 }
 
 /// Whether a request asks for the **debit** (take-money) permission — the one
 /// caution permission, which routes to the reference `ScriptQuestionCaution` card.
-fn is_caution(permissions: ScriptPermissions) -> bool {
+/// `pub(crate)` so the experience host ([`crate::experience_permission`]) shares
+/// the caution test: a money request keeps the caution card even under an
+/// experience, so only a *non-caution* experience request routes to it.
+pub(crate) fn is_caution(permissions: ScriptPermissions) -> bool {
     recognized_mask(permissions) & ScriptPermissions::DEBIT != 0
 }
 
 /// The fluent keys of a request's recognised permission lines **excluding**
 /// `DEBIT` (money is the caution card's headline, never an ordinary line), in
 /// table order. Drives the standard card's body and the caution card's
-/// "also requesting" list alike.
-fn other_permission_keys(permissions: ScriptPermissions) -> Vec<&'static str> {
+/// "also requesting" list alike. `pub(crate)` so the experience host
+/// ([`crate::experience_permission`]) lists the same `[QUESTIONS]` permission
+/// lines on its `ScriptQuestionExperience` card.
+pub(crate) fn other_permission_keys(permissions: ScriptPermissions) -> Vec<&'static str> {
     let recognized = recognized_mask(permissions);
     PERMISSION_QUESTIONS
         .iter()
@@ -264,6 +281,14 @@ fn ingest_script_permissions(
         let SlSessionEvent::ScriptPermissionRequest(request) = &event.0 else {
             continue;
         };
+        // A non-caution request made under an experience is the reference
+        // `ScriptQuestionExperience` card — the experience host owns it
+        // ([`crate::experience_permission`]). A money-caution request keeps the
+        // caution card here even under an experience (the reference shows
+        // `ScriptQuestionCaution` first), so only skip the non-caution case.
+        if request.experience_id.is_some() && !is_caution(request.permissions) {
+            continue;
+        }
         spawn_script_permission_card(&mut commands, &channel, &mut manager, request, &translator);
     }
 }

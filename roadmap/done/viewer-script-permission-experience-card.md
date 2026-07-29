@@ -2,7 +2,7 @@
 id: viewer-script-permission-experience-card
 title: Script permission-request experience card (ScriptQuestionExperience)
 topic: viewer
-status: blocked
+status: done
 origin: deferred from viewer-permission-request-dialog (2026-07-29) — the
   experience variant parked pending the experience acceptance/management surface
 blocked_by: [viewer-experience-permission-dialog]
@@ -37,3 +37,27 @@ control / camera consumers see it).
 Reference (Firestorm, read-only): the `ScriptQuestionExperience` notification
 and `process_script_experience_details` / the `experience_permission` event pump
 in `llviewermessage.cpp`, `LLExperienceCache`.
+
+## Outcome (2026-07-29)
+
+Delivered together with (and by) [[viewer-experience-permission-dialog]] — the
+two tasks describe the same `ScriptQuestionExperience` card, so implementing the
+acceptance surface completed this one.
+
+`src/script_permission.rs` now **skips** a non-caution experience-backed
+`ScriptQuestion` (`experience_id.is_some()`), and `src/experience_permission.rs`
+raises the distinct experience card instead: it resolves the experience name /
+grid-vs-land scope (`RequestExperienceInfo`), shows the "not shown again unless
+revoked" note, offers **Block Experience** (and Block Object) beside Yes / No,
+and on grant records the acceptance in the experience permission store
+(`SetExperiencePermission` `Allow`).
+
+Not done — and now understood to be moot:
+**no client-side auto-grant registration**. The reference does not auto-grant
+for an accepted experience; the **simulator** computes the implicit grant and
+simply does not send a `ScriptQuestion` for an already-accepted experience (see
+the `src/script_permission.rs` module docs). So there is nothing for
+[[viewer-permission-active-grants]] to register from an acceptance — the "gate
+the standard card" the original note imagined is the sim's job, already handled
+by routing the (only-ever-arriving, not-yet-accepted) experience request to the
+experience card.

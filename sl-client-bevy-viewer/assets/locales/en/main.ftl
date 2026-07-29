@@ -1151,6 +1151,37 @@ script-permission-q-estate = Suppress alerts when managing estate access lists
 script-permission-q-override-anim = Replace your default animations
 script-permission-q-return-objects = Return objects on your behalf
 
+# The experience-acceptance toast (viewer-experience-permission-dialog): the
+# reference ScriptQuestionExperience card a scripted object pops to run under an
+# experience. The object / owner / scope come from the ScriptQuestion; the name and
+# scope from the fetched experience metadata; the permission lines reuse the
+# script-permission-q-* strings above.
+experience-permission-intro = '{ $object }', an object owned by { $owner }, requests your participation in the { $scope } experience:
+experience-permission-once = Once permission is granted you will not see this message again for this experience unless it is revoked from the experience profile.
+experience-permission-scripts = Scripts associated with this experience will be able to do the following on regions where the experience is active:
+experience-permission-confirm = Is this OK?
+experience-permission-button-yes = Yes
+experience-permission-button-no = No
+experience-permission-button-block-experience = Block Experience
+experience-permission-button-block-object = Block Object
+# Shown in place of the name when the grid cannot resolve the experience id.
+experience-permission-unknown-name = (unknown experience)
+# The notification-well history line summarising an experience prompt.
+experience-permission-history = Experience: { $experience }
+# The experience scope word, from the metadata's grid-wide vs land property
+# (the reference Grid-Scope / Land-Scope substitution).
+experience-scope-grid = grid-wide
+experience-scope-land = land-scoped
+
+# The Experiences floater (viewer-experience-permission-dialog): the manage surface
+# listing the agent's allowed / blocked experiences with a per-row Forget.
+experiences-title = Experiences
+experiences-refresh = Refresh
+experiences-allowed-heading = Allowed experiences
+experiences-blocked-heading = Blocked experiences
+experiences-empty = No experiences.
+experiences-forget = Forget
+
 # The offers & invites toasts (viewer-dialog-offers-invites): the accept /
 # decline cards the grid throws at the user over IM — an inventory offer, a
 # teleport offer / lure, a friendship offer, and a group-membership invitation.

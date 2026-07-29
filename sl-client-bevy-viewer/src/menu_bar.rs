@@ -64,6 +64,10 @@ const INVENTORY_OPEN: &str = "inventory-open";
 /// the check mark on the Comm ▸ Conversations entry.
 const CONVERSATIONS_OPEN: &str = "conversations-open";
 
+/// The condition key that holds while the Experiences floater is open — drives the
+/// check mark on the Avatar ▸ Experiences entry.
+const EXPERIENCES_OPEN: &str = "experiences-open";
+
 /// The condition key that holds while the web browser floater is open — drives
 /// the check mark on the Content ▸ Web Browser entry.
 const WEB_BROWSER_OPEN: &str = "web-browser-open";
@@ -117,6 +121,9 @@ static AVATAR_MENU: MenuDef = MenuDef {
             MenuCommand::new("Inventory", "toggle-inventory")
                 .accel("Ctrl+I")
                 .checked_when(INVENTORY_OPEN),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Experiences", "toggle-experiences").checked_when(EXPERIENCES_OPEN),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Quit", "quit").accel("Ctrl+Q")),
@@ -329,6 +336,7 @@ fn update_top_menu_conditions(
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
     search: Option<Res<crate::search::SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    experiences: Option<Res<crate::experiences_floater::ExperiencesUi>>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
     selection: Res<crate::edit_selection::SelectionSet>,
     edit_tool: Res<crate::edit_tool::EditToolState>,
@@ -356,6 +364,9 @@ fn update_top_menu_conditions(
     let build_tools_open = build_tools
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
+    let experiences_open = experiences
+        .and_then(|ui| panels.get(ui.panel).ok().map(|shown| shown.0))
+        .unwrap_or(false);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -377,6 +388,9 @@ fn update_top_menu_conditions(
     }
     if build_tools_open {
         wanted.push(BUILD_TOOLS_OPEN);
+    }
+    if experiences_open {
+        wanted.push(EXPERIENCES_OPEN);
     }
     // The Build ▸ Link / Unlink enable gates, from the current selection.
     if crate::edit_link::can_link(&selection, &edit_tool) {
@@ -425,6 +439,7 @@ fn handle_top_menu_actions(
     world_map: Option<Res<crate::world_map::WorldMapUi>>,
     search: Option<Res<crate::search::SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    experiences: Option<Res<crate::experiences_floater::ExperiencesUi>>,
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
     mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
@@ -494,6 +509,13 @@ fn handle_top_menu_actions(
             "toggle-build-tools" => {
                 if let Some(ui) = &build_tools
                     && let Ok(mut shown) = panels.get_mut(ui.panel())
+                {
+                    shown.0 = !shown.0;
+                }
+            }
+            "toggle-experiences" => {
+                if let Some(ui) = &experiences
+                    && let Ok(mut shown) = panels.get_mut(ui.panel)
                 {
                     shown.0 = !shown.0;
                 }

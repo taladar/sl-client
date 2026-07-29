@@ -646,6 +646,24 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::script_permission::spawn_script_permission_caution_specimen,
     },
     UiElement {
+        id: "experience-permission-toast",
+        summary: "The experience-acceptance card (viewer-experience-permission-dialog): the \
+                  ScriptQuestionExperience object / owner / scope intro, the experience name, the \
+                  remembered-until-revoked note, the bulleted permission lines, \"Is this OK?\", \
+                  and the Yes / No / Block Experience / Block Object actions. The live host \
+                  (`crate::experience_permission`) pops one per received experience \
+                  ScriptQuestion; here it is static so the layout is swept.",
+        spawn: crate::experience_permission::spawn_experience_specimen,
+    },
+    UiElement {
+        id: "experiences-floater",
+        summary: "The Experiences manage surface (viewer-experience-permission-dialog): the \
+                  Allowed / Blocked headed lists, each row an experience name with a Forget \
+                  button. The live floater (`crate::experiences_floater`) fills the lists from \
+                  the GetExperiences reply; here it is static so the layout is swept.",
+        spawn: crate::experiences_floater::spawn_experiences_specimen,
+    },
+    UiElement {
         id: "inventory-offer-toast",
         summary: "An inventory-offer card (viewer-dialog-offers-invites): the gift heading, the \
                   \"{giver} has given you an item\" lead, the item name, and the Accept / Decline \

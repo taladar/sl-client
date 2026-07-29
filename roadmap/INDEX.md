@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 228 |
+| ready | 227 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 629 |
+| done | 631 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1072** |
+| **total** | **1073** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (228)
+## ready (227)
 
 ### protocol
 
@@ -309,9 +309,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-experience-permission-dialog`](ready/viewer-experience-permission-dialog.md)
-  — Experience permission flow (accept / manage) (blocked by
-  `viewer-ui-notification-host` (done))
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -744,6 +741,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
+- [`viewer-experience-permission-body-links`](blocked/viewer-experience-permission-body-links.md)
+  — Experience card name — clickable experience-profile SLURL (blocked by
+  `viewer-url-linkification`)
 - [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
   SimSession (blocked by `protocol-sim-caps-framework`)
 - [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
@@ -921,9 +921,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
-- [`viewer-script-permission-experience-card`](blocked/viewer-script-permission-experience-card.md)
-  — Script permission-request experience card (ScriptQuestionExperience)
-  (blocked by `viewer-experience-permission-dialog`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
 - [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
@@ -1071,7 +1068,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (629)
+## done (631)
 
 ### protocol
 
@@ -1285,6 +1282,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
+  — Experience permission flow (accept / manage) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-face-materials-pbr`](done/viewer-face-materials-pbr.md) — Texture tab
   — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -1717,6 +1717,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
+  — Script permission-request experience card (ScriptQuestionExperience)
+  (blocked by `viewer-experience-permission-dialog` (done))
 - [`viewer-search-floater`](done/viewer-search-floater.md) — Search floater —
   directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)

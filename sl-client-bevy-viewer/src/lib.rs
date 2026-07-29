@@ -69,6 +69,8 @@ mod edit_wearable;
 mod emoji_complete;
 mod emoji_picker;
 mod environment;
+mod experience_permission;
+mod experiences_floater;
 mod face_material;
 mod flexi;
 mod floater;
@@ -251,6 +253,8 @@ use crate::edit_tool::EditToolPlugin;
 use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
+use crate::experience_permission::ExperiencePermissionPlugin;
+use crate::experiences_floater::ExperiencesPlugin;
 use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
@@ -1135,6 +1139,21 @@ fn run_session(
     // wiring the grant / deny reply (Command::AnswerScriptPermissions). After
     // NotificationHostPlugin, whose shared channel it adopts its card into.
     .add_plugins(ScriptPermissionPlugin)
+    // The experience-acceptance toast host (viewer-experience-permission-dialog):
+    // pops the reference ScriptQuestionExperience card — object / owner, the
+    // experience name / scope, the requested permission bits, Yes / No / Block
+    // Experience / Block Object — when a scripted object requests to run under an
+    // experience (a ScriptQuestion carrying an Experience id), admitting or
+    // blocking the experience (Command::SetExperiencePermission) alongside the
+    // grant / deny reply. After ScriptPermissionPlugin (which skips the experience
+    // requests this host owns) and NotificationHostPlugin (whose shared channel it
+    // adopts its card into).
+    .add_plugins(ExperiencePermissionPlugin)
+    // The Experiences floater (viewer-experience-permission-dialog): the manage
+    // surface listing the agent's allowed / blocked experiences with a per-row
+    // Forget (Command::SetExperiencePermission Forget); opened from the Avatar
+    // menu. After FloaterPlugin, whose spawn_floater it builds on.
+    .add_plugins(ExperiencesPlugin)
     // The offers & invites toast host (viewer-dialog-offers-invites): pops an
     // accept / decline card when the grid throws an inventory offer, a teleport
     // lure, a friendship offer or a group-membership invitation over IM, wiring
