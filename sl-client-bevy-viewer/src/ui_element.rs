@@ -593,6 +593,15 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::notification_host::spawn_notification_specimen,
     },
     UiElement {
+        id: "group-notice-toast",
+        summary: "A group-notice card (viewer-group-notice-display): the group image, a \"Group \
+                  Notice\" header, the \"Sent by …\" title, the subject / SLT date / body, an \
+                  attached item row, and the OK / Group Notices / Group Chat actions. The live \
+                  host (`crate::group_notice`) pops one per received notice; here it is static so \
+                  its layout is swept.",
+        spawn: crate::group_notice::spawn_group_notice_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

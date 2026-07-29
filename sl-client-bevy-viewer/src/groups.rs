@@ -50,7 +50,7 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, GroupKey, GroupMembership, SlCommand, SlEvent, SlSessionEvent, Uuid,
+    Command, GroupKey, GroupMembership, SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 
 use crate::conversations::{ConversationKey, OpenConversation};
@@ -171,6 +171,10 @@ pub(crate) struct GroupsModel {
     /// display name, which the list needs) for the group profile floater's
     /// membership toggle, which has no other source for the login-time value.
     accept_notices: BTreeMap<GroupKey, bool>,
+    /// Each member group's insignia (texture id), from the login-time
+    /// `AgentGroupDataUpdate` — the source the group-notice toast
+    /// ([`crate::group_notice`]) reads the notice's group image from.
+    insignia: BTreeMap<GroupKey, TextureKey>,
     /// The currently-active (worn) group, if any.
     active: Option<GroupKey>,
     /// Bumped on each mutation; the view compares its last-built value to skip an
@@ -192,13 +196,26 @@ impl GroupsModel {
     fn apply_memberships(&mut self, memberships: &[GroupMembership]) {
         self.groups.clear();
         self.accept_notices.clear();
+        self.insignia.clear();
         for membership in memberships {
             self.groups
                 .insert(membership.group_id, membership.group_name.clone());
             self.accept_notices
                 .insert(membership.group_id, membership.accept_notices);
+            self.insignia
+                .insert(membership.group_id, membership.group_insignia_id);
         }
         self.touch();
+    }
+
+    /// The insignia texture of a member `group`, if known — the group-notice toast
+    /// ([`crate::group_notice`]) reads it to show the notice's group image. A nil
+    /// texture (a group with no insignia) is reported as `None`.
+    pub(crate) fn group_insignia(&self, group: GroupKey) -> Option<TextureKey> {
+        self.insignia
+            .get(&group)
+            .copied()
+            .filter(|key| *key != TextureKey::from(Uuid::nil()))
     }
 
     /// Whether the agent accepts notices from `group`, if the agent is a member —

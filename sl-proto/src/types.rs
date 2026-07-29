@@ -400,8 +400,8 @@ pub use avatar_profile::{
     LoginAccount, PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
 };
 pub use chat::{
-    ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, ImDialog,
-    InstantMessage, InventoryOffer,
+    ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
+    GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage, InventoryOffer,
 };
 pub use diagnostic::Diagnostic;
 pub use directory::{

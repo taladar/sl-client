@@ -77,6 +77,7 @@ mod flycam_ui;
 pub mod gallery;
 mod gizmos;
 mod ground;
+mod group_notice;
 mod group_profile;
 mod groups;
 mod hand_pose;
@@ -250,6 +251,7 @@ use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::gizmos::EditGizmoPlugin;
+use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
 use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
@@ -1091,6 +1093,13 @@ fn run_session(
     // content slot it fills.
     .add_plugins(GroupsPlugin)
     .add_plugins(GroupProfilePlugin)
+    // The group-notice toast host (viewer-group-notice-display): pops a card —
+    // group image, subject, body and any attached item — when a group posts a
+    // notice, mirroring the reference LLToastGroupNotifyPanel. After
+    // GroupProfilePlugin (whose RequestedGroupNotices it reads to suppress a
+    // toast for a notice the Notices tab pulled up itself) and GroupsPlugin
+    // (whose membership insignia it shows).
+    .add_plugins(GroupNoticePlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.

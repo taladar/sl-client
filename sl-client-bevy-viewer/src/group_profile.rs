@@ -360,6 +360,29 @@ pub(crate) struct OpenGroupProfile {
     pub(crate) group: GroupKey,
 }
 
+/// The set of group-notice ids the Notices tab has explicitly **requested** (by
+/// clicking a notice in the list). The reply arrives as an
+/// [`ImDialog::GroupNotice`] IM indistinguishable from an unsolicited push, so
+/// the group-notice toast host ([`crate::group_notice`]) consults this set to
+/// suppress a toast for a notice the user pulled up to read here — the reference
+/// distinction between `IM_GROUP_NOTICE_REQUESTED` (no popup) and a fresh
+/// `IM_GROUP_NOTICE`.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct RequestedGroupNotices(HashSet<GroupNoticeKey>);
+
+impl RequestedGroupNotices {
+    /// Mark `notice` as explicitly requested by the Notices tab.
+    pub(crate) fn mark_requested(&mut self, notice: GroupNoticeKey) {
+        self.0.insert(notice);
+    }
+
+    /// Consume a requested `notice` — returns `true` (and forgets it) when the
+    /// notice was one the tab requested, so the toast host can suppress its popup.
+    pub(crate) fn take_requested(&mut self, notice: GroupNoticeKey) -> bool {
+        self.0.remove(&notice)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Pure member roster (accumulated, deduplicated).
 // ---------------------------------------------------------------------------
@@ -816,6 +839,7 @@ impl Plugin for GroupProfilePlugin {
             .init_resource::<MembersView>()
             .init_resource::<NoticesView>()
             .init_resource::<RolesView>()
+            .init_resource::<RequestedGroupNotices>()
             .add_message::<OpenGroupProfile>()
             .add_systems(
                 Startup,
@@ -2541,6 +2565,12 @@ fn bind_notice_rows(
 }
 
 /// Select a notice on press: show it, and request its full body if not cached.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an observer's parameters are its injected queries / resources: the pick, the row \
+              query, the UI handles, the focus, the state + dirty flags, the requested-notice \
+              set it records into, and the command writer it fetches through"
+)]
 fn on_notice_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundNotice>,
@@ -2548,6 +2578,7 @@ fn on_notice_row_press(
     mut focus: ResMut<InputFocus>,
     mut state: ResMut<GroupProfileState>,
     mut dirty: ResMut<GroupProfileDirty>,
+    mut requested: ResMut<RequestedGroupNotices>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -2565,6 +2596,8 @@ fn on_notice_row_press(
         let notice_id = notice.notice_id;
         if !state.notice_bodies.contains_key(&notice_id) {
             state.pending_notice = Some(notice_id);
+            // Suppress the toast for a notice we're pulling up to read here.
+            requested.mark_requested(notice_id);
             sl_commands.write(SlCommand(Command::RequestGroupNotice(notice_id)));
         }
     }

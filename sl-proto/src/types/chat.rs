@@ -1,7 +1,7 @@
 //! Chat and instant messaging value types.
 
 use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey};
-use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
 use sl_types::map::RegionCoordinates;
 use uuid::Uuid;
 
@@ -473,6 +473,116 @@ impl InstantMessage {
             from_task: matches!(self.dialog, ImDialog::TaskInventoryOffered),
         })
     }
+
+    /// Decodes a received **group notice** ([`ImDialog::GroupNotice`]) into the
+    /// pieces a viewer displays: the posting group, the sender's name, the subject
+    /// and body, the timestamp, and the optional inventory attachment descriptor.
+    ///
+    /// The notice's [`message`](Self::message) is `subject|body` — the simulator
+    /// joins the two with a `|` (a body with its own `|`s keeps them, only the
+    /// first splits). The [`binary_bucket`](Self::binary_bucket) is the reference
+    /// `notice_bucket_full_t`:
+    ///
+    /// ```text
+    /// [0]      has_inventory (0 / 1)
+    /// [1]      attachment asset type (LLAssetType code)
+    /// [2..18]  group id (16 bytes)
+    /// [18..]   attachment item name (NUL-terminated UTF-8)
+    /// ```
+    ///
+    /// The group id comes from the bucket; a bucket too short to hold the 18-byte
+    /// header falls back to [`from_agent_id`](Self::from_agent_id) (OpenSim sets
+    /// the notice IM's sender to the group id). Returns `None` for any other
+    /// dialog.
+    #[must_use]
+    pub fn group_notice(&self) -> Option<GroupNoticeReceived> {
+        if !matches!(self.dialog, ImDialog::GroupNotice) {
+            return None;
+        }
+        // `subject|body`; a body containing `|`s keeps them (only the first splits).
+        let (subject, body) = match self.message.split_once('|') {
+            Some((subject, body)) => (subject.to_owned(), body.to_owned()),
+            None => (self.message.clone(), String::new()),
+        };
+        // The group id lives in the bucket header; fall back to the sender id
+        // (the group id under OpenSim's notice IM) when the bucket is truncated.
+        let group_id = self
+            .binary_bucket
+            .get(2..18)
+            .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+            .map_or_else(
+                || GroupKey::from(self.from_agent_id.uuid()),
+                |bytes| GroupKey::from(Uuid::from_bytes(bytes)),
+            );
+        let has_inventory = self.binary_bucket.first().is_some_and(|byte| *byte != 0);
+        let attachment = if has_inventory {
+            let asset_type = self
+                .binary_bucket
+                .get(1)
+                .map_or(AssetType::Texture, |byte| {
+                    AssetType::from_code(i32::from(*byte))
+                });
+            // The item name is the NUL-terminated tail after the 18-byte header.
+            let item_name = self
+                .binary_bucket
+                .get(18..)
+                .map_or_else(String::new, |tail| {
+                    // The name is NUL-terminated; take the bytes before the first NUL
+                    // (or the whole tail when unterminated) without slice indexing.
+                    let end = tail
+                        .iter()
+                        .position(|byte| *byte == 0)
+                        .unwrap_or(tail.len());
+                    let name = tail.get(..end).unwrap_or(tail);
+                    String::from_utf8_lossy(name).into_owned()
+                });
+            Some(GroupNoticeItem {
+                asset_type,
+                item_name,
+            })
+        } else {
+            None
+        };
+        Some(GroupNoticeReceived {
+            group_id,
+            sender_name: self.from_agent_name.clone(),
+            subject,
+            body,
+            timestamp: self.timestamp,
+            attachment,
+        })
+    }
+}
+
+/// A received group notice, decoded from an [`ImDialog::GroupNotice`]
+/// [`InstantMessage`] by [`InstantMessage::group_notice`]. The subject / body are
+/// split from the IM message; the group id and attachment come from the binary
+/// bucket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupNoticeReceived {
+    /// The group the notice was posted to.
+    pub group_id: GroupKey,
+    /// The name of the member who posted the notice.
+    pub sender_name: String,
+    /// The notice subject (the part before the first `|` of the message).
+    pub subject: String,
+    /// The notice body (everything after the first `|`; empty when absent).
+    pub body: String,
+    /// The notice's timestamp as a Unix time in seconds, or `None` when unset.
+    pub timestamp: Option<u32>,
+    /// The attached inventory item, if the notice carries one.
+    pub attachment: Option<GroupNoticeItem>,
+}
+
+/// The inventory item attached to a received group notice — its class and name,
+/// for display. Accepting the item (copying it into inventory) is the viewer's
+/// notice-attachment accept path, not this decode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupNoticeItem {
+    /// The attached item's asset class.
+    pub asset_type: AssetType,
+    /// The attached item's display name.
+    pub item_name: String,
 }
 
 /// An inventory offer received over IM, decoded from the binary bucket of an
@@ -498,7 +608,7 @@ pub struct InventoryOffer {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
-    use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey};
+    use sl_types::key::{AgentKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey};
     use sl_types::map::RegionCoordinates;
     use uuid::Uuid;
 
@@ -506,6 +616,141 @@ mod tests {
         AgentOrObjectKey, AssetType, ChatSource, ChatType, ChatTypeNotAVolume, ImDialog,
         InstantMessage, InventoryItemOrFolderKey,
     };
+
+    /// A group-notice IM with the given message and binary bucket, for the
+    /// [`InstantMessage::group_notice`] tests.
+    fn group_notice_im(message: &str, bucket: Vec<u8>) -> InstantMessage {
+        InstantMessage {
+            from_agent_id: AgentKey::from(Uuid::from_u128(0x6009)),
+            from_agent_name: "Board Member".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xa12)),
+            dialog: ImDialog::GroupNotice,
+            from_group: true,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: Some(1_700_000_000),
+            id: Uuid::from_u128(0x0117),
+            parent_estate_id: 0,
+            message: message.to_owned(),
+            binary_bucket: bucket,
+        }
+    }
+
+    /// A group id embedded in a full notice bucket header, with an optional
+    /// attachment (`has_inventory`, asset type, item name).
+    fn notice_bucket(group: Uuid, attachment: Option<(u8, &str)>) -> Vec<u8> {
+        let mut bucket = Vec::new();
+        match attachment {
+            Some((asset_type, _name)) => {
+                bucket.push(1);
+                bucket.push(asset_type);
+            }
+            None => {
+                bucket.push(0);
+                bucket.push(0);
+            }
+        }
+        bucket.extend_from_slice(group.as_bytes());
+        if let Some((_asset_type, name)) = attachment {
+            bucket.extend_from_slice(name.as_bytes());
+        }
+        bucket.push(0); // NUL terminator for the item name.
+        bucket
+    }
+
+    /// A group notice with no attachment decodes its group, sender, subject and
+    /// body, and reports no attachment.
+    #[test]
+    fn group_notice_without_attachment_decodes() -> Result<(), String> {
+        let group = Uuid::from_u128(0x9401);
+        let im = group_notice_im(
+            "Board meeting|Tuesday at noon SLT",
+            notice_bucket(group, None),
+        );
+        let notice = im
+            .group_notice()
+            .ok_or_else(|| "expected a group notice".to_owned())?;
+        assert_eq!(notice.group_id, GroupKey::from(group));
+        assert_eq!(notice.sender_name, "Board Member");
+        assert_eq!(notice.subject, "Board meeting");
+        assert_eq!(notice.body, "Tuesday at noon SLT");
+        assert_eq!(notice.timestamp, Some(1_700_000_000));
+        assert!(notice.attachment.is_none());
+        Ok(())
+    }
+
+    /// A group notice with an attachment decodes the item's asset type and name.
+    #[test]
+    fn group_notice_with_attachment_decodes_item() -> Result<(), String> {
+        let group = Uuid::from_u128(0x9402);
+        // `7` is `Notecard`.
+        let im = group_notice_im(
+            "Rules|See attached.",
+            notice_bucket(group, Some((7, "Group Rules"))),
+        );
+        let notice = im
+            .group_notice()
+            .ok_or_else(|| "expected a group notice".to_owned())?;
+        let attachment = notice
+            .attachment
+            .ok_or_else(|| "expected an attachment".to_owned())?;
+        assert_eq!(attachment.asset_type, AssetType::Notecard);
+        assert_eq!(attachment.item_name, "Group Rules");
+        Ok(())
+    }
+
+    /// A body may itself contain `|`s — only the first splits subject from body.
+    #[test]
+    fn group_notice_body_keeps_later_pipes() -> Result<(), String> {
+        let im = group_notice_im(
+            "Subject|a|b|c",
+            notice_bucket(Uuid::from_u128(0x9403), None),
+        );
+        let notice = im
+            .group_notice()
+            .ok_or_else(|| "expected a group notice".to_owned())?;
+        assert_eq!(notice.subject, "Subject");
+        assert_eq!(notice.body, "a|b|c");
+        Ok(())
+    }
+
+    /// A message with no `|` is all subject, empty body.
+    #[test]
+    fn group_notice_without_pipe_is_all_subject() -> Result<(), String> {
+        let im = group_notice_im(
+            "Just a subject",
+            notice_bucket(Uuid::from_u128(0x9404), None),
+        );
+        let notice = im
+            .group_notice()
+            .ok_or_else(|| "expected a group notice".to_owned())?;
+        assert_eq!(notice.subject, "Just a subject");
+        assert_eq!(notice.body, "");
+        Ok(())
+    }
+
+    /// A truncated bucket (no room for the 18-byte header) falls back to the
+    /// sender id for the group and reports no attachment.
+    #[test]
+    fn group_notice_truncated_bucket_falls_back_to_sender() -> Result<(), String> {
+        let mut im = group_notice_im("Subject|Body", Vec::new());
+        im.from_agent_id = AgentKey::from(Uuid::from_u128(0x9405));
+        let notice = im
+            .group_notice()
+            .ok_or_else(|| "expected a group notice".to_owned())?;
+        assert_eq!(notice.group_id, GroupKey::from(Uuid::from_u128(0x9405)));
+        assert!(notice.attachment.is_none());
+        Ok(())
+    }
+
+    /// A non-group-notice dialog yields no group notice.
+    #[test]
+    fn group_notice_rejects_other_dialogs() {
+        let mut im = group_notice_im("Subject|Body", notice_bucket(Uuid::from_u128(0x9406), None));
+        im.dialog = ImDialog::Message;
+        assert!(im.group_notice().is_none());
+    }
 
     /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw
     /// id and unwrapping it again yields the identical bytes, so the on-wire

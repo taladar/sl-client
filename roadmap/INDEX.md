@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 55 |
 | ready | 227 |
-| blocked | 112 |
+| blocked | 113 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 622 |
+| done | 623 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1064** |
+| **total** | **1066** |
 
 ## ideas (55)
 
@@ -684,7 +684,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (112)
+## blocked (113)
 
 ### protocol
 
@@ -765,6 +765,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by
   `viewer-preferences-graphics-tab`)
+- [`viewer-group-notice-body-links`](blocked/viewer-group-notice-body-links.md)
+  — Group notice body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification`)
 - [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
   — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
   by `viewer-audio-backend`)
@@ -1066,7 +1069,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (622)
+## done (623)
 
 ### protocol
 
@@ -1277,6 +1280,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
+- [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
+  notice display — image, title, body, item toast (blocked by
+  `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
 - [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
   pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n

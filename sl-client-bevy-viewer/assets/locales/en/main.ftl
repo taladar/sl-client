@@ -1094,3 +1094,13 @@ notification-overflow =
 notification-demo-tip = A transient tip — it fades away after ten seconds unless you hover it.
 notification-demo-notify = An informational notice — it stays for thirty seconds, then fades.
 notification-demo-alert = A sticky alert — it waits for you to acknowledge it rather than fading.
+
+# The group-notice toast (viewer-group-notice-display): the card a received
+# group notice pops.
+group-notice-header = Group Notice
+group-notice-sent-by = Sent by { $sender }, { $group }
+group-notice-loading = (loading)
+group-notice-timestamp = { $when } SLT
+group-notice-button-ok = OK
+group-notice-button-notices = Group Notices
+group-notice-button-chat = Group Chat

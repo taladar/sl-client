@@ -349,7 +349,11 @@ fn pump_media_engine(
     mut engine: NonSendMut<MediaEngine>,
     mut surfaces: NonSendMut<MediaSurfaces>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
+    // Optional: the in-world PBR face-material store exists in the full viewer but
+    // not in a UI-only host (the gallery renders the browser surface into a UI
+    // `ImageNode`, which registers no `touch_materials`), so a missing store just
+    // means there are no media faces to refresh — not an error.
+    mut materials: Option<ResMut<Assets<FaceMaterial>>>,
 ) {
     if let Some(backend) = engine.backend.as_mut() {
         backend.pump();
@@ -419,9 +423,12 @@ fn pump_media_engine(
             let _replaced = images.insert(image_id, image);
             slot.size = new_size;
             // A new GPU texture: rebuild the bind group of every material
-            // sampling this image (see MediaSlot::touch_materials).
-            slot.touch_materials
-                .retain(|handle| materials.get_mut(handle.id()).is_some());
+            // sampling this image (see MediaSlot::touch_materials). With no
+            // material store (a UI-only host), there are no faces to touch.
+            if let Some(materials) = materials.as_mut() {
+                slot.touch_materials
+                    .retain(|handle| materials.get_mut(handle.id()).is_some());
+            }
             debug!(
                 "media surface resized to {}x{} ({:?}, {} material(s) touched)",
                 new_size.x,

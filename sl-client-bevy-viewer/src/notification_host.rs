@@ -161,8 +161,10 @@ const CYCLE_GLYPH: &str = "\u{25b8}";
 /// The most toasts shown at once; the rest queue (hidden and paused) and are
 /// reached by dismissing a visible one or cycling the overflow control — so a
 /// flood does not fill the whole edge of the screen (the reference notification
-/// well).
-const MAX_VISIBLE_TOASTS: usize = 3;
+/// well). One at a time: the richer cards (a group-notice card with its image,
+/// subject, body and item) are tall enough that even a few would claim the whole
+/// screen edge, so the rest wait behind the "N more ▸" control.
+const MAX_VISIBLE_TOASTS: usize = 1;
 
 /// The env var that, when set, raises a staggered sequence of sample
 /// notifications shortly after startup, so the live stacking / timeout / fade /
@@ -245,9 +247,12 @@ impl Plugin for NotificationHostPlugin {
 /// can parent a corner toast to the channel and the overflow systems can drive
 /// the "N more" control.
 #[derive(Resource, Debug, Clone, Copy)]
-struct NotificationChannelRoot {
-    /// The stacking channel container the toasts are children of.
-    channel: Entity,
+pub(crate) struct NotificationChannelRoot {
+    /// The stacking channel container the toasts are children of. Exposed so a
+    /// bespoke-content toast (the group-notice card, [`crate::group_notice`]) can
+    /// join the same stack — and thus the same ordering / overflow-cycling — as
+    /// the catalogue toasts, via [`adopt_toast`].
+    pub(crate) channel: Entity,
     /// The overflow control (a "N more ▸" cycle button), the last channel child,
     /// hidden until the stack exceeds [`MAX_VISIBLE_TOASTS`].
     overflow: Entity,
@@ -318,16 +323,18 @@ struct IgnoreCheckbox {
 #[derive(Message, Debug, Clone, Copy)]
 struct CycleToasts;
 
-/// Internal: a resolved teardown for one toast, from a button click, an
-/// auto-expiry or a [`DismissNotification`]. Centralises teardown so one system
-/// despawns the toast, clears the dedup index, persists the ignore flag and
-/// emits the public [`NotificationResponse`].
+/// A resolved teardown for one toast, from a button click, an auto-expiry or a
+/// [`DismissNotification`]. Centralises teardown so one system despawns the toast,
+/// clears the dedup index, persists the ignore flag and emits the public
+/// [`NotificationResponse`]. Exposed so a bespoke-content toast (the group-notice
+/// card, [`crate::group_notice`]) tears down through the same path as the
+/// catalogue toasts — the reference "close counts as acknowledged".
 #[derive(Message, Debug, Clone, Copy)]
-struct ResolveNotification {
+pub(crate) struct ResolveNotification {
     /// The [`Toast`]-bearing entity to tear down.
-    toast: Entity,
+    pub(crate) toast: Entity,
     /// The chosen button, or `None` for an expiry / external dismiss.
-    button: Option<&'static str>,
+    pub(crate) button: Option<&'static str>,
 }
 
 /// Startup: declare each ignorable notification's "show again" flag (default on),
@@ -672,6 +679,61 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
         ignore,
         close,
     }
+}
+
+/// Adopt an externally-built card `root` as a managed toast in the shared corner
+/// channel — the way a bespoke-content notification (the group-notice card,
+/// [`crate::group_notice`]) joins the catalogue toasts so it inherits the same
+/// priority ordering and "N more" overflow-cycling rather than owning a second
+/// channel.
+///
+/// Parents the card into the channel, tags it with a [`Toast`] (of the given
+/// `kind` — its [`lifetime_secs`](NotificationKind::lifetime_secs) drives whether
+/// it fades or sticks), and records a history entry. The caller is responsible for
+/// wiring the card's own dismiss affordances to a [`ResolveNotification`] (so a
+/// **user** close is what ends it — display alone never does). Returns the toast's
+/// [`NotificationId`](crate::notifications::NotificationId).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the toast's identity is genuinely this many independent facts (channel, kind, \
+              priority, template, default button, history body) plus the commands / manager / \
+              root it acts on; bundling them into a struct would only move the list, not shorten it"
+)]
+pub(crate) fn adopt_toast(
+    commands: &mut Commands,
+    manager: &mut NotificationManager,
+    channel: &NotificationChannelRoot,
+    root: Entity,
+    kind: NotificationKind,
+    priority: NotificationPriority,
+    template: &'static str,
+    default_button: Option<&'static str>,
+    history_body: String,
+) -> crate::notifications::NotificationId {
+    let id = manager.allocate_id();
+    commands.entity(root).insert((
+        Toast {
+            id,
+            template,
+            priority,
+            default_button,
+            age: 0.0,
+            lifetime: kind.lifetime_secs(),
+            opacity: 1.0,
+            hovered: false,
+            overflowed: false,
+            resolved: false,
+        },
+        ChildOf(channel.channel),
+    ));
+    manager.push_history(NotificationRecord {
+        id,
+        template,
+        kind,
+        body: history_body,
+        response: None,
+    });
+    id
 }
 
 /// Spawn a full-screen modal scrim under the UI root, centring its child dialog
