@@ -1121,3 +1121,32 @@ load-url-owner-loading = (loading…)
 load-url-button-load = Load
 load-url-button-block = Block
 load-url-button-ignore = Ignore
+
+# The script permission-request toast (viewer-permission-request-dialog): the card
+# a scripted object's llRequestPermissions pops (the ScriptQuestion message),
+# naming the object / owner and the requested permission bits.
+script-permission-intro = '{ $object }', an object owned by { $owner }, would like to:
+script-permission-confirm = Is this OK?
+script-permission-button-yes = Yes
+script-permission-button-no = No
+script-permission-button-block = Block
+# The caution (money-access) variant (ScriptQuestionCaution), shown when a script
+# asks to debit the agent's L$ account.
+script-permission-caution-warning = The object '{ $object }' wants access to take money from your Linden Dollar account. If you allow this, it can take any or all of your money from you at any time, with no further warning or request.
+script-permission-caution-advice = Before allowing this access, make sure you know what the object is and why it is making this request, as well as whether you trust the creator. If you're not certain, click Deny.
+script-permission-caution-additional = If you allow access to your account, you will also be allowing the object to:
+script-permission-button-allow = Allow access
+script-permission-button-deny = Deny
+# The requested-permission lines (the reference ScriptQuestion [QUESTIONS] strings).
+script-permission-q-debit = Take Linden dollars (L$) from you
+script-permission-q-controls = Act on your control inputs
+script-permission-q-animation = Animate your avatar
+script-permission-q-attach = Attach to your avatar
+script-permission-q-links = Link and delink from other objects
+script-permission-q-track-camera = Track your camera
+script-permission-q-control-camera = Control your camera
+script-permission-q-teleport = Teleport you
+script-permission-q-experience = Participate in an experience
+script-permission-q-estate = Suppress alerts when managing estate access lists
+script-permission-q-override-anim = Replace your default animations
+script-permission-q-return-objects = Return objects on your behalf

@@ -138,6 +138,7 @@ mod render_scene;
 mod render_test;
 mod screenshot;
 mod script_dialog;
+mod script_permission;
 mod search;
 mod session;
 mod settings;
@@ -305,6 +306,7 @@ use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
 use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
 use crate::script_dialog::ScriptDialogPlugin;
+use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
     PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
     repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
@@ -1124,6 +1126,13 @@ fn run_session(
     // After NotificationHostPlugin (whose shared channel it adopts its card into)
     // and WebFloaterPlugin (whose OpenWebBrowser message Load writes).
     .add_plugins(LoadUrlPlugin)
+    // The script permission-request toast host (viewer-permission-request-dialog):
+    // pops a card — object / owner, the requested permission bits, Yes / No /
+    // Block (or the money-access caution card with Allow access / Deny) — when a
+    // scripted object calls llRequestPermissions (the ScriptQuestion message),
+    // wiring the grant / deny reply (Command::AnswerScriptPermissions). After
+    // NotificationHostPlugin, whose shared channel it adopts its card into.
+    .add_plugins(ScriptPermissionPlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.

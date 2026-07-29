@@ -2,7 +2,7 @@
 id: viewer-camera-script-control
 title: Script control of the camera (llSetCameraParams / follow-cam)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-camera-system
 blocked_by: [viewer-camera-third-person-orbit, viewer-permission-request-dialog]
 ---

@@ -2,7 +2,7 @@
 id: viewer-permission-active-grants
 title: Active permission grants (review / revoke)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-notifications-dialogs
 blocked_by: [viewer-permission-request-dialog]
 ---

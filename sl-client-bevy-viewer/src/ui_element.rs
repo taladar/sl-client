@@ -628,6 +628,24 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::load_url::spawn_load_url_specimen,
     },
     UiElement {
+        id: "script-permission-toast",
+        summary: "A script permission-request card (viewer-permission-request-dialog): the \
+                  object / owner intro, a bulleted line per requested permission, \"Is this \
+                  OK?\", and the Yes / No / Block actions. The live host \
+                  (`crate::script_permission`) pops one per received llRequestPermissions \
+                  (ScriptQuestion message); here it is static so the layout is swept.",
+        spawn: crate::script_permission::spawn_script_permission_specimen,
+    },
+    UiElement {
+        id: "script-permission-caution-toast",
+        summary: "The money-access caution card (viewer-permission-request-dialog): the \
+                  ScriptQuestionCaution warning shown when a script asks to debit L$, the \
+                  \"also requesting\" list, and the Allow access / Deny actions. The live host \
+                  (`crate::script_permission`) pops one per debit request; here it is static \
+                  so the layout is swept.",
+        spawn: crate::script_permission::spawn_script_permission_caution_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

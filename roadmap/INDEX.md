@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 226 |
-| blocked | 115 |
+| ready | 228 |
+| blocked | 113 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 627 |
+| done | 628 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1071** |
+| **total** | **1072** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (226)
+## ready (228)
 
 ### protocol
 
@@ -237,6 +237,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-camera-script-control`](ready/viewer-camera-script-control.md) —
+  Script control of the camera (llSetCameraParams / follow-cam) (blocked by
+  `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`
+  (done))
 - [`viewer-chat-autoreplace`](ready/viewer-chat-autoreplace.md) — Chat
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
@@ -353,6 +357,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
+- [`viewer-input-script-control-capture`](ready/viewer-input-script-control-capture.md)
+  — Script control capture (llTakeControls) (blocked by
+  `viewer-input-action-map` (done), `viewer-permission-request-dialog` (done))
 - [`viewer-input-spacenav-settings-ui`](ready/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
@@ -472,9 +479,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
-- [`viewer-permission-request-dialog`](ready/viewer-permission-request-dialog.md)
-  — Script permission-request dialog (ScriptQuestion) (blocked by
-  `viewer-ui-notification-host` (done))
+- [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
+  — Active permission grants (review / revoke) (blocked by
+  `viewer-permission-request-dialog` (done))
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -682,7 +689,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (115)
+## blocked (113)
 
 ### protocol
 
@@ -725,9 +732,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
-- [`viewer-camera-script-control`](blocked/viewer-camera-script-control.md) —
-  Script control of the camera (llSetCameraParams / follow-cam) (blocked by
-  `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`)
 - [`viewer-cef-audio-mixer-handoff`](blocked/viewer-cef-audio-mixer-handoff.md)
   — CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend`)
@@ -786,9 +790,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
-- [`viewer-input-script-control-capture`](blocked/viewer-input-script-control-capture.md)
-  — Script control capture (llTakeControls) (blocked by
-  `viewer-input-action-map` (done), `viewer-permission-request-dialog`)
 - [`viewer-inspector-popups`](blocked/viewer-inspector-popups.md) — Avatar /
   object inspector popups from clickable chat names (blocked by
   `viewer-url-linkification`)
@@ -854,9 +855,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-permission-active-grants`](blocked/viewer-permission-active-grants.md)
-  — Active permission grants (review / revoke) (blocked by
-  `viewer-permission-request-dialog`)
 - [`viewer-photo-hosting-upload`](blocked/viewer-photo-hosting-upload.md) —
   Share snapshots to external photo/hosting services (blocked by
   `viewer-snapshot-floater`)
@@ -926,6 +924,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
+- [`viewer-script-permission-experience-card`](blocked/viewer-script-permission-experience-card.md)
+  — Script permission-request experience card (ScriptQuestionExperience)
+  (blocked by `viewer-experience-permission-dialog`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
 - [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
@@ -1073,7 +1074,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (627)
+## done (628)
 
 ### protocol
 
@@ -1619,6 +1620,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
+  — Script permission-request dialog (ScriptQuestion) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)

@@ -2,7 +2,7 @@
 id: viewer-input-script-control-capture
 title: Script control capture (llTakeControls)
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-input-system
 blocked_by: [viewer-input-action-map, viewer-permission-request-dialog]
 ---
