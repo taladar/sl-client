@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 227 |
-| blocked | 114 |
+| ready | 226 |
+| blocked | 115 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 626 |
+| done | 627 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1070** |
+| **total** | **1071** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (227)
+## ready (226)
 
 ### protocol
 
@@ -279,9 +279,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   asset blacklist (blocked by `viewer-object-context-menu` (done))
 - [`viewer-dialog-offers-invites`](ready/viewer-dialog-offers-invites.md) —
   Inventory / teleport offers + friendship / group invites (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-dialog-script-load-url`](ready/viewer-dialog-script-load-url.md) —
-  Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
   display name (blocked by `viewer-ui-widget-scaffold` (done))
@@ -685,7 +682,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (114)
+## blocked (115)
 
 ### protocol
 
@@ -799,6 +796,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-inventory-sound-anim-preview`](blocked/viewer-inventory-sound-anim-preview.md)
   — Inventory sound & animation preview (blocked by `viewer-audio-backend`)
+- [`viewer-load-url-body-links`](blocked/viewer-load-url-body-links.md) — Script
+  web-page toast body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -1073,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (626)
+## done (627)
 
 ### protocol
 
@@ -1270,6 +1270,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   specular
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
   dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
+  Script web-page request dialog (llLoadURL) (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))

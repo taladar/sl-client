@@ -96,6 +96,7 @@ mod inventory_properties;
 mod land_menu;
 mod legacy_materials;
 mod lights;
+mod load_url;
 mod local_chat_input;
 mod locomotion;
 mod locomotion_ik;
@@ -274,6 +275,7 @@ use crate::legacy_materials::{
     register_legacy_materials,
 };
 use crate::lights::{LocalLights, drive_local_lights};
+use crate::load_url::LoadUrlPlugin;
 use crate::local_chat_input::LocalChatInputPlugin;
 use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
@@ -1115,6 +1117,13 @@ fn run_session(
     // channel (Command::ReplyScriptDialog). After NotificationHostPlugin, whose
     // shared channel it adopts its card into.
     .add_plugins(ScriptDialogPlugin)
+    // The script web-page request toast host (viewer-dialog-script-load-url):
+    // pops a card — heading, object / owner title, message and the target URL —
+    // when a scripted object calls llLoadURL (the LoadURL message), with Load
+    // (open the URL in the embedded browser), Block (mute) and Ignore actions.
+    // After NotificationHostPlugin (whose shared channel it adopts its card into)
+    // and WebFloaterPlugin (whose OpenWebBrowser message Load writes).
+    .add_plugins(LoadUrlPlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.

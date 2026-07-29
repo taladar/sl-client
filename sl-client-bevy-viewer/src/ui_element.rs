@@ -619,6 +619,15 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::script_dialog::spawn_script_textbox_specimen,
     },
     UiElement {
+        id: "load-url-toast",
+        summary: "A script web-page request card (viewer-dialog-script-load-url): the \"Open a \
+                  web page?\" heading, the object / owner title, the script message, the target \
+                  URL, and the Load / Block / Ignore actions. The live host (`crate::load_url`) \
+                  pops one per received llLoadURL (LoadURL message); here it is static so the \
+                  layout is swept.",
+        spawn: crate::load_url::spawn_load_url_specimen,
+    },
+    UiElement {
         id: "minimap",
         summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
                   avatar dots and the compass labels. The live floater composites a CPU image \

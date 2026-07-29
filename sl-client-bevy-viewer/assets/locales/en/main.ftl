@@ -1111,3 +1111,13 @@ script-dialog-from = { $owner }'s '{ $object }'
 script-dialog-button-block = Block
 script-dialog-button-ignore = Ignore
 script-dialog-button-submit = Submit
+
+# The script web-page request toast (viewer-dialog-script-load-url): the card a
+# scripted object's llLoadURL pops, showing the object, owner and target URL so
+# the user can vet the link before opening it in the embedded browser.
+load-url-heading = Open a web page?
+load-url-from = '{ $object }' owned by { $owner }
+load-url-owner-loading = (loading…)
+load-url-button-load = Load
+load-url-button-block = Block
+load-url-button-ignore = Ignore
