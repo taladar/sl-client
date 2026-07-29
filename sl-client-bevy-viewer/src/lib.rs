@@ -149,6 +149,7 @@ mod settings_binding;
 mod skin;
 mod sky;
 mod sky_presets;
+mod snapshot_floater;
 mod spacenav;
 mod status_bar;
 mod terrain;
@@ -771,7 +772,14 @@ fn run_session(
     });
     let config_accounts_base = crate::paths::config_accounts_base();
 
+    // Resolve the system time zone now, while the process is still single-threaded:
+    // it reads the `TZ` environment variable, and reading the environment is only
+    // sound before Bevy's task pools spawn (below, with `DefaultPlugins`). The
+    // snapshot floater reuses this cached zone to stamp filenames in local time.
+    let local_time_zone = crate::snapshot_floater::LocalTimeZone::capture();
+
     let mut app = App::new();
+    app.insert_resource(local_time_zone);
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
@@ -1170,6 +1178,11 @@ fn run_session(
     // -terrain / -estate): the region-and-estate info surface. Bound to the
     // current region, persistence-exempt; opened from the World menu.
     .add_plugins(AboutRegionPlugin)
+    // The snapshot floater (viewer-snapshot-floater): a framed live world preview
+    // (a second off-screen camera into an image) with resolution / format
+    // selection and a save-to-disk destination that echoes the path to chat.
+    // Opened from the bottom toolbar's Snapshot button.
+    .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 253 |
+| ready | 255 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 13 |
-| done | 632 |
+| bugs | 14 |
+| done | 634 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1100** |
+| **total** | **1105** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (253)
+## ready (255)
 
 ### protocol
 
@@ -351,6 +351,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
   — Keyboard bindings stable across physical keyboard layouts (blocked by
   `viewer-input-action-map` (done))
+- [`viewer-input-modifier-chords`](ready/viewer-input-modifier-chords.md) —
+  Modifier-chord bindings in the input action map (blocked by
+  `viewer-input-action-map` (done))
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
@@ -557,6 +560,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
+- [`viewer-photo-hosting-upload`](ready/viewer-photo-hosting-upload.md) — Share
+  snapshots to external photo/hosting services (blocked by
+  `viewer-snapshot-floater` (done))
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -634,11 +640,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
-- [`viewer-snapshot-floater`](ready/viewer-snapshot-floater.md) — Snapshot
-  floater — preview, format, destinations (blocked by
-  `viewer-ui-widget-scaffold` (done))
-- [`viewer-snapshot-quick-key`](ready/viewer-snapshot-quick-key.md) —
-  Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
+- [`viewer-snapshot-hide-balance`](ready/viewer-snapshot-hide-balance.md) —
+  Snapshot option — hide the L$ balance (blocked by `viewer-snapshot-floater`
+  (done))
+- [`viewer-snapshot-postcard`](ready/viewer-snapshot-postcard.md) — Snapshot
+  destination — postcard / e-mail (blocked by `viewer-snapshot-floater` (done))
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
   profile extras — land/money, experiences, bans, create/invite (blocked by
   `viewer-social-group-profile` (done))
@@ -930,9 +936,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-photo-hosting-upload`](blocked/viewer-photo-hosting-upload.md) —
-  Share snapshots to external photo/hosting services (blocked by
-  `viewer-snapshot-floater`)
 - [`viewer-preferences-alerts-tab`](blocked/viewer-preferences-alerts-tab.md) —
   Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`)
 - [`viewer-preferences-audio-tab`](blocked/viewer-preferences-audio-tab.md) —
@@ -1003,9 +1006,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   recovery (blocked by `viewer-lsl-editor-widget`)
 - [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
   backup — export / import (blocked by `viewer-preferences-floater`)
+- [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
+  Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
+  (done), `viewer-image-upload`)
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
-  `viewer-snapshot-floater`, `viewer-image-upload`)
+  `viewer-snapshot-floater` (done), `viewer-image-upload`)
 - [`viewer-sound-explorer`](blocked/viewer-sound-explorer.md) — Sound explorer —
   nearby sound sources (blocked by `viewer-in-world-sounds`)
 - [`viewer-spacenav-input-tests`](blocked/viewer-spacenav-input-tests.md) —
@@ -1105,7 +1111,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1121,6 +1127,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
+- [`viewer-flexi-resettle-after-snapshot`](bugs/viewer-flexi-resettle-after-snapshot.md)
+  — Flexi prims re-settle after taking a snapshot
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1146,7 +1154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (632)
+## done (634)
 
 ### protocol
 
@@ -1809,6 +1817,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-snapshot-floater`](done/viewer-snapshot-floater.md) — Snapshot
+  floater — preview, format, destinations (blocked by
+  `viewer-ui-widget-scaffold` (done))
+- [`viewer-snapshot-quick-key`](done/viewer-snapshot-quick-key.md) —
+  Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
 - [`viewer-social-group-profile`](done/viewer-social-group-profile.md) — Group
   profile floater — general / members / roles / notices (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))

@@ -2,7 +2,7 @@
 id: viewer-photo-hosting-upload
 title: Share snapshots to external photo/hosting services
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
 blocked_by: [viewer-snapshot-floater]
 ---

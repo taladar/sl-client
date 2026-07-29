@@ -465,28 +465,42 @@ fn fragment(
         pbr_functions::alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
     var out: FragmentOutput;
-    // Reuse `StandardMaterial`'s metallic-roughness PBR lighting (a legacy face's
-    // base is matte — metallic 0, roughness 1, reflectance 0 — so this is just its
-    // diffuse term and the legacy specular is added below, no doubled GGX lobe).
-    out.color = apply_pbr_lighting(pbr_input);
+    // Honour the `StandardMaterial` **unlit** flag, exactly as Bevy's own `pbr`
+    // fragment does. Legacy SL **fullbright** faces (P27.4, `bump::apply_surface_flags`)
+    // and every **HUD** face (`hud::apply_hud_fullbright`) set it: such a face is
+    // shown at full texture brightness, ignoring scene lighting, so its base colour
+    // *is* the whole surface — no PBR lighting term and no legacy specular. This
+    // custom shader must branch on the flag too; when it always applied lighting, a
+    // fullbright face rendered black wherever no light reached it (a HUD is on its
+    // own layer, which the world's sun does not light at all — the reported all-black
+    // HUD, and dark fullbright prims at night).
+    if (pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u {
+        out.color = pbr_input.material.base_color;
+    } else {
+        // Reuse `StandardMaterial`'s metallic-roughness PBR lighting (a legacy face's
+        // base is matte — metallic 0, roughness 1, reflectance 0 — so this is just its
+        // diffuse term and the legacy specular is added below, no doubled GGX lobe).
+        out.color = apply_pbr_lighting(pbr_input);
 
-    // Legacy Blinn-Phong specular (Phase 2): a legacy face adds the SL specular
-    // highlight — the analytic normalized Blinn-Phong lobe, plus a crude environment
-    // reflection term (no reflection probe on the headless path). Added before fog /
-    // post so the highlight is fogged like the reference's. Inert for a PBR / diffuse
-    // face (`mode != LEGACY`), where the base material is the whole surface.
-    if sl.mode == SL_FACE_MODE_LEGACY {
-        let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
-        let glossiness = sl.glossiness * gloss_modulator;
-        let highlight = sl_blinn_phong_specular(
-            pbr_input.N, pbr_input.world_position.xyz, spec_rgb, glossiness,
-        );
-        // Environment reflection: with no reflection probe headless, approximate the
-        // reference's `applyLegacyEnv` as a spec-tinted ambient term scaled by the
-        // environment weight (`env_intensity * spec.a`).
-        let env = sl.env_intensity * spec_sample.a;
-        let ambient = env * spec_rgb * lights.ambient_color.rgb;
-        out.color = vec4<f32>(out.color.rgb + highlight + ambient, out.color.a);
+        // Legacy Blinn-Phong specular (Phase 2): a legacy face adds the SL specular
+        // highlight — the analytic normalized Blinn-Phong lobe, plus a crude
+        // environment reflection term (no reflection probe on the headless path).
+        // Added before fog / post so the highlight is fogged like the reference's.
+        // Inert for a PBR / diffuse face (`mode != LEGACY`), where the base material
+        // is the whole surface.
+        if sl.mode == SL_FACE_MODE_LEGACY {
+            let spec_rgb = sl.specular_color.rgb * spec_sample.rgb;
+            let glossiness = sl.glossiness * gloss_modulator;
+            let highlight = sl_blinn_phong_specular(
+                pbr_input.N, pbr_input.world_position.xyz, spec_rgb, glossiness,
+            );
+            // Environment reflection: with no reflection probe headless, approximate
+            // the reference's `applyLegacyEnv` as a spec-tinted ambient term scaled by
+            // the environment weight (`env_intensity * spec.a`).
+            let env = sl.env_intensity * spec_sample.a;
+            let ambient = env * spec_rgb * lights.ambient_color.rgb;
+            out.color = vec4<f32>(out.color.rgb + highlight + ambient, out.color.a);
+        }
     }
 
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);

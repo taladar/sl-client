@@ -69,6 +69,27 @@ pub(crate) fn cache_accounts_base() -> Option<PathBuf> {
     Some(project_dirs()?.cache_dir().join(ACCOUNTS_SUBDIR))
 }
 
+/// The directory disk snapshots are written to
+/// ([`crate::snapshot_floater`]), or `None` when the platform exposes no home
+/// directory at all (the floater then disables the disk destination).
+///
+/// Unlike the settings / chat / cache trees this is **not** per-avatar and not
+/// hidden under an XDG data root: a snapshot is a photo the user wants to find
+/// and share, so it lands in the standard **Pictures** directory under a named
+/// subfolder — the reference viewer's "Snapshots" folder convention. When the
+/// platform reports no Pictures directory it falls back to the data root.
+pub(crate) fn snapshots_dir() -> Option<PathBuf> {
+    if let Some(dirs) = directories::UserDirs::new()
+        && let Some(pictures) = dirs.picture_dir()
+    {
+        return Some(pictures.join(SNAPSHOTS_SUBDIR));
+    }
+    Some(project_dirs()?.data_dir().join("snapshots"))
+}
+
+/// The Pictures-directory subfolder disk snapshots land in.
+const SNAPSHOTS_SUBDIR: &str = "sl-client-bevy-viewer snapshots";
+
 /// The web-media (CEF) engine's cache root under the **cache** directory —
 /// Chromium's disk caches and logs, shared across avatars like the asset
 /// caches — or `None` when the platform has no cache directory (the engine

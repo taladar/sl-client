@@ -93,7 +93,21 @@ evdev = { version = "0.13.2", optional = true }
 fluent = { version = "0.16.1" }
 fluent_content = { version = "0.0.5" }
 fs-err = { version = "3.3.0" }
-image = { version = "0.25.10", default-features = false, features = ["tga"] }
+# `tga` for the sculpt/decode paths; `png` / `jpeg` / `bmp` so the snapshot
+# floater (`src/snapshot_floater.rs`) can encode a saved snapshot in the format
+# the user picks. The formats unify with the set `bevy_image` already turns on,
+# so naming them here only makes the snapshot encoder's requirement explicit.
+image = { version = "0.25.10", default-features = false, features = [
+    "tga",
+    "png",
+    "jpeg",
+    "bmp",
+] }
+# Local (system-timezone) time, for the snapshot floater's human-readable
+# ISO-8601 filenames. Resolving the system zone reads the `TZ` env var, so the
+# zone is captured **once at startup** (before Bevy spawns its task-pool threads)
+# and reused — see `snapshot_floater::LocalTimeZone`.
+jiff = { version = "0.2.35" }
 # A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
 # the bundled faces under private family names: `bevy_text` wraps parley but does
 # not re-export it, so `Blob` / `FontInfoOverride` / `GenericFamily` are only

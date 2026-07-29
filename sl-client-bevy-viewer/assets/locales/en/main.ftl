@@ -548,6 +548,9 @@ bottom-toolbar-people = People
 # bar that will sit above the button row).
 bottom-toolbar-conversations = Conversations
 bottom-toolbar-camera = Camera
+# The snapshot (photo) floater toggle — the reference's toolbar "Snapshot"
+# command (singular).
+bottom-toolbar-snapshot = Snapshot
 ## The inventory filters floater (viewer-inventory-advanced-filters).
 
 inventory-filters-title = Inventory Filters
@@ -1233,3 +1236,29 @@ offer-button-decline = Decline
 offer-button-teleport = Teleport
 offer-button-join = Join
 offer-button-block = Block
+
+## The snapshot floater (viewer-snapshot-floater) — a framed preview of the world
+## (refreshed on demand), include-UI / include-HUD toggles, a format picker and a
+## save-to-disk destination laid out as tabs. The postcard / e-mail, profile-feed
+## and inventory destinations are placeholder tabs with their own follow-up tasks.
+snapshot-title = Snapshot
+snapshot-refresh = Refresh
+snapshot-preview-empty = Click Refresh to update the preview.
+snapshot-include-ui = Show interface in snapshot
+snapshot-include-hud = Show HUD objects in snapshot
+snapshot-format-label = Format:
+snapshot-save-disk = Save to Disk
+snapshot-hint = Saves at the window's resolution to your Pictures folder; the path is echoed to nearby chat.
+snapshot-status-ready = Ready
+snapshot-status-saving = Working…
+snapshot-saved = Saved snapshot to { $path }
+snapshot-save-failed = Could not save the snapshot: { $error }
+snapshot-no-dir = No snapshot folder is available on this system.
+# The destination tabs.
+snapshot-tab-disk = Disk
+snapshot-tab-postcard = Postcard
+snapshot-tab-profile = Profile
+snapshot-tab-inventory = Inventory
+snapshot-postcard-todo = Sending a snapshot as a postcard / e-mail is coming in its own task.
+snapshot-profile-todo = Posting a snapshot to your profile feed is coming in its own task.
+snapshot-inventory-todo = Saving a snapshot to inventory as a texture is coming in its own task.

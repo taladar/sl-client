@@ -173,6 +173,9 @@ enum ToolbarTarget {
     /// The Build Tools floater ([`crate::edit_tool`]) — opening it enters edit
     /// mode with nothing selected yet.
     BuildTools,
+    /// The snapshot floater ([`crate::snapshot_floater`]) — the photo tool, opened
+    /// from the Snapshot button (the reference's toolbar `snapshot` command).
+    Snapshot,
     /// A floater that has not landed yet — the button is a disabled placeholder
     /// until its own task wires a real target here.
     Unlanded,
@@ -254,6 +257,11 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
         action: "toggle-people",
         label_key: "bottom-toolbar-people",
         target: ToolbarTarget::Unlanded,
+    },
+    ToolbarButtonDef {
+        action: "toggle-snapshot",
+        label_key: "bottom-toolbar-snapshot",
+        target: ToolbarTarget::Snapshot,
     },
     ToolbarButtonDef {
         action: "toggle-camera",
@@ -507,6 +515,7 @@ fn handle_toolbar_actions(
     world_map: Option<Res<WorldMapUi>>,
     search: Option<Res<SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    snapshot: Option<Res<crate::snapshot_floater::SnapshotUi>>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
@@ -550,6 +559,12 @@ fn handle_toolbar_actions(
         {
             shown.0 = !shown.0;
         }
+        if action.action == "toggle-snapshot"
+            && let Some(ui) = &snapshot
+            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        {
+            shown.0 = !shown.0;
+        }
         if action.action == "toggle-nearby-chat"
             && let Some(bar) = nearby_chat.as_deref_mut()
         {
@@ -573,6 +588,7 @@ fn resolve_target_open(
     world_map: Option<&WorldMapUi>,
     search: Option<&SearchUi>,
     build_tools: Option<&crate::edit_tool::BuildToolsUi>,
+    snapshot: Option<&crate::snapshot_floater::SnapshotUi>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
@@ -596,6 +612,9 @@ fn resolve_target_open(
         ToolbarTarget::BuildTools => build_tools
             .and_then(|ui| panels.get(ui.panel()).ok())
             .map(|shown| shown.0),
+        ToolbarTarget::Snapshot => snapshot
+            .and_then(|ui| panels.get(ui.panel()).ok())
+            .map(|shown| shown.0),
         ToolbarTarget::Unlanded => None,
     }
 }
@@ -616,6 +635,7 @@ fn update_toolbar_button_states(
     world_map: Option<Res<WorldMapUi>>,
     search: Option<Res<SearchUi>>,
     build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    snapshot: Option<Res<crate::snapshot_floater::SnapshotUi>>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
     time: Res<Time>,
@@ -629,6 +649,7 @@ fn update_toolbar_button_states(
     let world_map = world_map.as_deref();
     let search = search.as_deref();
     let build_tools = build_tools.as_deref();
+    let snapshot = snapshot.as_deref();
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button flashes while the window is closed and an IM /
     // group / conference has unread lines — the reference's toolbar attention cue
@@ -646,6 +667,7 @@ fn update_toolbar_button_states(
             world_map,
             search,
             build_tools,
+            snapshot,
             nearby_chat,
             &panels,
         ) {
@@ -775,7 +797,8 @@ mod tests {
                 "toggle-map",
                 "toggle-minimap",
                 "toggle-search",
-                "toggle-build-tools"
+                "toggle-build-tools",
+                "toggle-snapshot"
             ]
         );
         assert!(
