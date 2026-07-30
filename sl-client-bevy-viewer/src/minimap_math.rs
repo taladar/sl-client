@@ -245,11 +245,6 @@ impl LayerRaster {
         }
     }
 
-    /// Clear every texel back to transparent, keeping the allocation.
-    pub(crate) fn clear(&mut self) {
-        self.data.fill(0);
-    }
-
     /// The byte offset of texel (`x`, `y`), or `None` when out of bounds.
     fn offset(&self, x: i32, y: i32) -> Option<usize> {
         let size = i32::try_from(self.size).ok()?;

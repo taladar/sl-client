@@ -27,10 +27,12 @@
 //! property lines.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
@@ -337,8 +339,10 @@ struct MinimapState {
     /// The cursor position over the surface, in logical node pixels (for
     /// placing the tooltip).
     cursor_node: Option<Vec2>,
-    /// The object layer raster.
-    object_layer: LayerRaster,
+    /// The object layer raster. `Arc`-shared so the background compositor
+    /// ([`composite_minimap`]) can snapshot it into its job for the price of a
+    /// refcount bump — [`regen_minimap_layers`] rebuilds it into a fresh `Arc`.
+    object_layer: Arc<LayerRaster>,
     /// The object layer's capture centre (global metres east / north).
     object_center: (f64, f64),
     /// The object layer's texels per metre at capture.
@@ -347,8 +351,9 @@ struct MinimapState {
     object_elapsed: f32,
     /// The object layer must regenerate now (scale / resize / toggle).
     object_dirty: bool,
-    /// The parcel layer raster.
-    parcel_layer: LayerRaster,
+    /// The parcel layer raster. `Arc`-shared for the same reason as
+    /// [`object_layer`](Self::object_layer).
+    parcel_layer: Arc<LayerRaster>,
     /// The parcel layer's capture centre (global metres east / north).
     parcel_center: (f64, f64),
     /// The parcel layer's texels per metre at capture.
@@ -356,15 +361,25 @@ struct MinimapState {
     /// The parcel layer must regenerate now (overlay change / toggle).
     parcel_dirty: bool,
     /// Per-region shaded terrain backdrops (256×256, one texel per metre,
-    /// bottom-up rows like every layer raster).
-    terrain_maps: HashMap<RegionHandle, LayerRaster>,
+    /// bottom-up rows like every layer raster). `Arc`-shared as a whole so the
+    /// background compositor snapshots the entire set with one refcount bump.
+    terrain_maps: Arc<HashMap<RegionHandle, LayerRaster>>,
     /// The [`TerrainState::map_revision`] the backdrops were built at.
     terrain_revision: Option<u64>,
     /// Seconds since the terrain backdrops were last rebuilt (throttles the
     /// rebuild while patches stream in).
     terrain_elapsed: f32,
-    /// The stamp of the last composited frame; recomposite when it changes.
+    /// The stamp of the last *applied* composite; recomposite when the frame's
+    /// stamp differs from this.
     last_stamp: Option<CompositeStamp>,
+    /// The in-flight background composite, if one is rendering. Only one runs at
+    /// a time — changes that land while it runs coalesce into the next spawn, so
+    /// the minimap trails the world by however long one render takes rather than
+    /// blocking the frame.
+    pending: Option<Task<Vec<u8>>>,
+    /// The stamp the [`pending`](Self::pending) task is rendering, promoted to
+    /// [`last_stamp`](Self::last_stamp) when it is applied.
+    pending_stamp: Option<CompositeStamp>,
     /// This frame's avatar dots (hover / context-menu hit-testing).
     dots: Vec<DotInfo>,
     /// The double-click tracker: the time and position of the last click.
@@ -395,19 +410,21 @@ impl Default for MinimapState {
             surface_px: UVec2::new(64, 64),
             cursor: None,
             cursor_node: None,
-            object_layer: LayerRaster::default(),
+            object_layer: Arc::new(LayerRaster::default()),
             object_center: (0.0, 0.0),
             object_tpm: 1.0,
             object_elapsed: 0.0,
             object_dirty: true,
-            parcel_layer: LayerRaster::default(),
+            parcel_layer: Arc::new(LayerRaster::default()),
             parcel_center: (0.0, 0.0),
             parcel_tpm: 1.0,
             parcel_dirty: true,
-            terrain_maps: HashMap::new(),
+            terrain_maps: Arc::new(HashMap::new()),
             terrain_revision: None,
             terrain_elapsed: 1.0,
             last_stamp: None,
+            pending: None,
+            pending_stamp: None,
             dots: Vec::new(),
             last_click: None,
             menu: MenuContext::default(),
@@ -541,6 +558,7 @@ impl Plugin for MinimapPlugin {
                     drive_minimap_view,
                     regen_minimap_layers,
                     composite_minimap,
+                    apply_minimap_surface,
                     layout_minimap_compass,
                     update_minimap_hover,
                     handle_minimap_actions,
@@ -977,11 +995,12 @@ fn regen_minimap_layers(
         state.terrain_elapsed = 0.0;
         state.terrain_revision = Some(terrain.map_revision());
         let handles: Vec<RegionHandle> = regions.iter().map(|(region, _)| region.handle).collect();
-        state.terrain_maps.clear();
+        let mut maps = HashMap::new();
         for handle in handles {
             let map = build_terrain_map(&terrain, &water, handle);
-            state.terrain_maps.insert(handle, map);
+            maps.insert(handle, map);
         }
+        state.terrain_maps = Arc::new(maps);
         state.last_stamp = None;
     }
 
@@ -1002,11 +1021,9 @@ fn regen_minimap_layers(
         };
         let max_radius = store.get_f32(SETTING_PRIM_MAX_RADIUS).unwrap_or(16.0);
         let max_vert = store.get_f32(SETTING_PRIM_MAX_VERT).unwrap_or(256.0);
-        if state.object_layer.size == raster_size {
-            state.object_layer.clear();
-        } else {
-            state.object_layer = LayerRaster::new(raster_size);
-        }
+        // Build into a fresh local raster, then publish it as a new `Arc`: the
+        // previous one may still be borrowed by an in-flight composite task.
+        let mut raster = LayerRaster::new(raster_size);
         state.object_center = (state.camera.0, state.camera.1);
         state.object_tpm = tpm;
         let origin = origin_global(state.origin);
@@ -1030,15 +1047,9 @@ fn regen_minimap_layers(
             let radius = minimap_math::object_map_radius(scale, flags, accents, max_radius);
             let rel_east = narrow(east - state.object_center.0);
             let rel_north = narrow(north - state.object_center.1);
-            minimap_math::render_object_point(
-                &mut state.object_layer,
-                tpm,
-                rel_east,
-                rel_north,
-                color,
-                radius,
-            );
+            minimap_math::render_object_point(&mut raster, tpm, rel_east, rel_north, color, radius);
         }
+        state.object_layer = Arc::new(raster);
         state.last_stamp = None;
     }
 
@@ -1051,18 +1062,13 @@ fn regen_minimap_layers(
     };
     if show_lines && (state.parcel_dirty || centre_moved) {
         state.parcel_dirty = false;
-        if state.parcel_layer.size == raster_size {
-            state.parcel_layer.clear();
-        } else {
-            state.parcel_layer = LayerRaster::new(raster_size);
-        }
         state.parcel_center = (state.camera.0, state.camera.1);
         state.parcel_tpm = tpm;
         let show_sale = store.get_bool(SETTING_FOR_SALE).unwrap_or(true);
         let parcel_center = state.parcel_center;
-        // Split-borrow the raster out of the state so the overlay closure and
-        // the &mut raster do not alias.
-        let mut raster = core::mem::take(&mut state.parcel_layer);
+        // Build into a fresh local raster, then publish it as a new `Arc`: the
+        // previous one may still be borrowed by an in-flight composite task.
+        let mut raster = LayerRaster::new(raster_size);
         for (region, _current) in &regions {
             let (region_east, region_north) = region.handle.global_coordinates();
             let origin_east = narrow(f64::from(region_east) - parcel_center.0);
@@ -1101,7 +1107,7 @@ fn regen_minimap_layers(
                 &cell,
             );
         }
-        state.parcel_layer = raster;
+        state.parcel_layer = Arc::new(raster);
         state.last_stamp = None;
     }
 }
@@ -1240,12 +1246,88 @@ const VOID_COLOR: Rgba = [24, 28, 34, 255];
 /// The neighbouring-region tint (the current region draws untinted).
 const NEIGHBOUR_TINT: f32 = 0.8;
 
-/// Composite the surface image when any of its inputs changed: terrain
-/// backdrop, object and parcel layers, frustum wedge, chat rings, pick-radius
-/// circle, avatar dots, self marker, and the tracking beacon.
+/// One avatar dot resolved to everything the background render needs — its
+/// surface position, colour, and altitude glyph — so the pixel loop never
+/// touches the ECS ([`AvatarState`], [`FriendsModel`], …).
+struct ResolvedDot {
+    /// Surface position, in image pixels.
+    view: Vec2,
+    /// The dot colour (mark / Linden / friend / default).
+    color: Rgba,
+    /// The above / level / below / unknown altitude glyph.
+    glyph: minimap_math::HeightGlyph,
+}
+
+/// A self-contained snapshot of everything one minimap composite draws,
+/// gathered from the ECS on the main thread and moved into the background task.
+///
+/// The layer rasters are `Arc`-shared, so building this is a handful of
+/// refcount bumps plus the (small) resolved-dot list — cheap enough to do every
+/// time the composite stamp changes, which is what keeps the heavy pixel loop
+/// (up to 512×512) off the frame's critical path.
+struct CompositeJob {
+    /// The output image size, in pixels.
+    surface_px: UVec2,
+    /// This frame's world↔surface transform.
+    view: MapView,
+    /// The camera's global position (metres east / north).
+    camera: (f64, f64),
+    /// Per-region terrain backdrops.
+    terrain_maps: Arc<HashMap<RegionHandle, LayerRaster>>,
+    /// The region the avatar is in (drawn untinted; neighbours are tinted).
+    current_region: Option<RegionHandle>,
+    /// The object layer raster and its capture geometry.
+    object_layer: Arc<LayerRaster>,
+    /// The object layer's capture centre (global metres east / north).
+    object_center: (f64, f64),
+    /// The object layer's texels per metre at capture.
+    object_tpm: f32,
+    /// The parcel layer raster and its capture geometry.
+    parcel_layer: Arc<LayerRaster>,
+    /// The parcel layer's capture centre (global metres east / north).
+    parcel_center: (f64, f64),
+    /// The parcel layer's texels per metre at capture.
+    parcel_tpm: f32,
+    /// Whether the object layer is composited.
+    show_objects: bool,
+    /// Whether the parcel-line layer is composited.
+    show_lines: bool,
+    /// The frustum wedge apex (surface pixels).
+    wedge_centre: Vec2,
+    /// The wedge length in pixels.
+    wedge_radius: f32,
+    /// The wedge bearing in radians (0 with rotate-on; `-heading` north-up).
+    wedge_direction: f32,
+    /// The wedge half-angle (horizontal FOV) in radians.
+    fov_width: f32,
+    /// The own-avatar surface position, once known (self marker + chat rings).
+    self_view: Option<Vec2>,
+    /// The enabled chat rings as `(radius_px, colour)`, drawn at `self_view`.
+    chat_rings: Vec<(f32, Rgba)>,
+    /// The cursor pick circle as `(centre, radius_px)`, when the cursor is over
+    /// the surface.
+    cursor_ring: Option<(Vec2, f32)>,
+    /// The avatar-dot radius in pixels.
+    dot_radius: f32,
+    /// The avatar dots.
+    dots: Vec<ResolvedDot>,
+    /// The tracking beacon surface position, when tracking.
+    tracking_view: Option<Vec2>,
+}
+
+/// Gather the composite inputs on the main thread and, when they changed since
+/// the last *applied* frame, spawn the pixel work on the background compute
+/// pool. Only one render runs at a time: while it is in flight this returns
+/// early, so changes coalesce into the next spawn. The finished pixels are
+/// uploaded by [`apply_minimap_surface`].
+///
+/// This is deliberately split from the render so the heavy loop never holds
+/// [`Assets<Image>`] (which almost every other viewer system also touches) —
+/// holding it across the loop serialised the whole frame and stalled the main
+/// thread for the render's full duration.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the composite genuinely folds every map data source into one image; a staging \
+    reason = "the composite genuinely folds every map data source into one snapshot; a staging \
               resource would only rename the parameters"
 )]
 fn composite_minimap(
@@ -1262,7 +1344,6 @@ fn composite_minimap(
     cameras: Query<&Projection, With<ViewerCamera>>,
     regions: Query<(&SlRegion, Option<&SlCurrentRegion>)>,
     panels: Query<&UiPanelShown>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1361,13 +1442,128 @@ fn composite_minimap(
         }),
         toggles: (show_objects, show_lines, rings_on),
     };
-    if state.last_stamp.as_ref() == Some(&stamp) {
+
+    // Keep the hit-test dots current every frame regardless of the render path.
+    // Coalesce: never queue a second render while one is in flight, and skip
+    // when nothing changed since the last applied frame.
+    if state.pending.is_some() || state.last_stamp.as_ref() == Some(&stamp) {
         state.dots = dots;
         return;
     }
 
-    let width = state.surface_px.x;
-    let height = state.surface_px.y;
+    // Resolve every ECS-derived overlay input into plain data for the task.
+    let ppm = state.view.pixels_per_metre();
+    let dot_radius = minimap_math::dot_radius(ppm);
+    let current_region = regions
+        .iter()
+        .find_map(|(region, current)| current.map(|_| region.handle));
+
+    let centre = state.view.view_from_rel(0.0, 0.0);
+    let rotate_on = state.view.rotation.abs() > f32::EPSILON;
+    let wedge_direction = if rotate_on { 0.0 } else { -state.heading };
+    let (fov_width, far_clip) =
+        cameras
+            .single()
+            .map_or((1.3, 4096.0), |projection| match projection {
+                Projection::Perspective(perspective) => {
+                    (perspective.fov * perspective.aspect_ratio, perspective.far)
+                }
+                Projection::Orthographic(_) | Projection::Custom(_) => (1.3, 4096.0),
+            });
+    let side = state.surface_px.x.max(state.surface_px.y);
+    let wedge_radius = (far_clip * ppm).min(minimap_math::u32_to_f32(side) * 1.5);
+
+    let self_view = state.agent.map(|(east, north, _up)| {
+        state.view.view_from_rel(
+            narrow(east - state.camera.0),
+            narrow(north - state.camera.1),
+        )
+    });
+
+    let mut chat_rings: Vec<(f32, Rgba)> = Vec::new();
+    if rings_on && self_view.is_some() {
+        for (enabled_setting, range, color) in [
+            (SETTING_WHISPER_RING, ranges.whisper, COLOR_WHISPER_RING),
+            (SETTING_SAY_RING, ranges.say, COLOR_CHAT_RING),
+            (SETTING_SHOUT_RING, ranges.shout, COLOR_SHOUT_RING),
+        ] {
+            if store.get_bool(enabled_setting).unwrap_or(true) {
+                chat_rings.push((range * ppm, color));
+            }
+        }
+    }
+
+    let cursor_ring = state.cursor.map(|cursor| {
+        let pick_scale = store.get_f32(SETTING_PICK_SCALE).unwrap_or(3.0);
+        (cursor, dot_radius * pick_scale)
+    });
+
+    let resolved_dots: Vec<ResolvedDot> = dots
+        .iter()
+        .zip(altitudes.iter())
+        .map(|(dot, altitude)| ResolvedDot {
+            view: dot.view,
+            color: avatar_color(dot.agent, friends.as_deref(), &avatars, &marks),
+            glyph: minimap_math::height_glyph(*altitude, dot.altitude_unknown, state.camera.2),
+        })
+        .collect();
+
+    let tracking_view = tracking.target.and_then(|target| match target {
+        TrackTarget::Location { east, north, .. } => Some(state.view.view_from_rel(
+            narrow(east - state.camera.0),
+            narrow(north - state.camera.1),
+        )),
+        TrackTarget::Avatar(agent) => avatars
+            .root_entity_of(agent)
+            .and_then(|entity| transforms.get(entity).ok())
+            .map(|transform| {
+                let (east, north, _up) = global_from_bevy(origin, transform.translation());
+                state.view.view_from_rel(
+                    narrow(east - state.camera.0),
+                    narrow(north - state.camera.1),
+                )
+            }),
+    });
+
+    let job = CompositeJob {
+        surface_px: state.surface_px,
+        view: state.view,
+        camera: (state.camera.0, state.camera.1),
+        terrain_maps: Arc::clone(&state.terrain_maps),
+        current_region,
+        object_layer: Arc::clone(&state.object_layer),
+        object_center: state.object_center,
+        object_tpm: state.object_tpm,
+        parcel_layer: Arc::clone(&state.parcel_layer),
+        parcel_center: state.parcel_center,
+        parcel_tpm: state.parcel_tpm,
+        show_objects,
+        show_lines,
+        wedge_centre: centre,
+        wedge_radius,
+        wedge_direction,
+        fov_width,
+        self_view,
+        chat_rings,
+        cursor_ring,
+        dot_radius,
+        dots: resolved_dots,
+        tracking_view,
+    };
+
+    state.dots = dots;
+    let task = AsyncComputeTaskPool::get().spawn(async move { render_minimap_surface(&job) });
+    state.pending = Some(task);
+    state.pending_stamp = Some(stamp);
+}
+
+/// The heavy pixel work, run on the background compute pool: terrain backdrop,
+/// object and parcel layers, frustum wedge, chat rings, pick-radius circle,
+/// avatar dots, self marker, and the tracking beacon. Pure — it reads only its
+/// snapshot [`CompositeJob`], so it touches no ECS state or `Assets<Image>`.
+fn render_minimap_surface(job: &CompositeJob) -> Vec<u8> {
+    let width = job.surface_px.x;
+    let height = job.surface_px.y;
     let mut data = vec![
         0u8;
         usize::try_from(width)
@@ -1377,15 +1573,12 @@ fn composite_minimap(
     ];
 
     // The inverse transform, incrementally: rel(x, y) = rel00 + x·dx + y·dy.
-    let (rel00_e, rel00_n) = state.view.rel_from_view(Vec2::new(0.5, 0.5));
-    let (rel10_e, rel10_n) = state.view.rel_from_view(Vec2::new(1.5, 0.5));
-    let (rel01_e, rel01_n) = state.view.rel_from_view(Vec2::new(0.5, 1.5));
+    let (rel00_e, rel00_n) = job.view.rel_from_view(Vec2::new(0.5, 0.5));
+    let (rel10_e, rel10_n) = job.view.rel_from_view(Vec2::new(1.5, 0.5));
+    let (rel01_e, rel01_n) = job.view.rel_from_view(Vec2::new(0.5, 1.5));
     let (dx_e, dx_n) = (rel10_e - rel00_e, rel10_n - rel00_n);
     let (dy_e, dy_n) = (rel01_e - rel00_e, rel01_n - rel00_n);
 
-    let current_region = regions
-        .iter()
-        .find_map(|(region, current)| current.map(|_| region.handle));
     let region_width = f64::from(minimap_math::REGION_WIDTH_METRES);
 
     let mut offset = 0usize;
@@ -1395,20 +1588,20 @@ fn composite_minimap(
         let mut rel_e = row_e;
         let mut rel_n = row_n;
         for _x in 0..width {
-            let global_e = state.camera.0 + f64::from(rel_e);
-            let global_n = state.camera.1 + f64::from(rel_n);
+            let global_e = job.camera.0 + f64::from(rel_e);
+            let global_n = job.camera.1 + f64::from(rel_n);
             let mut pixel = VOID_COLOR;
             if global_e >= 0.0 && global_n >= 0.0 {
                 let region_e = (global_e / region_width).floor() * region_width;
                 let region_n = (global_n / region_width).floor() * region_width;
                 if let Some(handle) = region_handle_at(global_e, global_n)
-                    && let Some(map) = state.terrain_maps.get(&handle)
+                    && let Some(map) = job.terrain_maps.get(&handle)
                 {
                     let local_x = minimap_math::round_i32(narrow(global_e - region_e) - 0.5);
                     let local_y = minimap_math::round_i32(narrow(global_n - region_n) - 0.5);
                     let texel = map.get(local_x, local_y);
                     if texel[3] > 0 {
-                        pixel = if Some(handle) == current_region {
+                        pixel = if Some(handle) == job.current_region {
                             texel
                         } else {
                             region_tint(texel, NEIGHBOUR_TINT)
@@ -1416,21 +1609,21 @@ fn composite_minimap(
                     }
                 }
             }
-            if show_objects && state.object_layer.size > 0 {
+            if job.show_objects && job.object_layer.size > 0 {
                 let sample = sample_layer(
-                    &state.object_layer,
-                    state.object_tpm,
-                    state.object_center,
+                    &job.object_layer,
+                    job.object_tpm,
+                    job.object_center,
                     global_e,
                     global_n,
                 );
                 pixel = minimap_math::blend_over(pixel, sample);
             }
-            if show_lines && state.parcel_layer.size > 0 {
+            if job.show_lines && job.parcel_layer.size > 0 {
                 let sample = sample_layer(
-                    &state.parcel_layer,
-                    state.parcel_tpm,
-                    state.parcel_center,
+                    &job.parcel_layer,
+                    job.parcel_tpm,
+                    job.parcel_center,
                     global_e,
                     global_n,
                 );
@@ -1452,118 +1645,61 @@ fn composite_minimap(
         height,
         data: &mut data,
     };
-    let ppm = state.view.pixels_per_metre();
 
-    // Camera frustum wedge, from the (pan-adjusted) camera point. With
-    // rotate-on the map turns under a fixed upward wedge; north-up rotates
-    // the wedge itself by the camera heading (clockwise, hence the sign).
-    let centre = state.view.view_from_rel(0.0, 0.0);
-    let rotate_on = state.view.rotation.abs() > f32::EPSILON;
-    let wedge_direction = if rotate_on { 0.0 } else { -state.heading };
-    let (fov_width, far_clip) =
-        cameras
-            .single()
-            .map_or((1.3, 4096.0), |projection| match projection {
-                Projection::Perspective(perspective) => {
-                    (perspective.fov * perspective.aspect_ratio, perspective.far)
-                }
-                Projection::Orthographic(_) | Projection::Custom(_) => (1.3, 4096.0),
-            });
-    let wedge_radius = (far_clip * ppm).min(minimap_math::u32_to_f32(width.max(height)) * 1.5);
+    // Camera frustum wedge, from the (pan-adjusted) camera point.
     minimap_math::draw_wedge(
         &mut surface,
-        centre.x,
-        centre.y,
-        wedge_radius,
-        wedge_direction,
-        fov_width,
+        job.wedge_centre.x,
+        job.wedge_centre.y,
+        job.wedge_radius,
+        job.wedge_direction,
+        job.fov_width,
         COLOR_FRUSTUM,
     );
 
     // Chat rings around the self marker.
-    let self_view = state.agent.map(|(east, north, _up)| {
-        state.view.view_from_rel(
-            narrow(east - state.camera.0),
-            narrow(north - state.camera.1),
-        )
-    });
-    if rings_on && let Some(self_view) = self_view {
-        for (enabled_setting, range, color) in [
-            (SETTING_WHISPER_RING, ranges.whisper, COLOR_WHISPER_RING),
-            (SETTING_SAY_RING, ranges.say, COLOR_CHAT_RING),
-            (SETTING_SHOUT_RING, ranges.shout, COLOR_SHOUT_RING),
-        ] {
-            if store.get_bool(enabled_setting).unwrap_or(true) {
-                minimap_math::draw_ring(
-                    &mut surface,
-                    self_view.x,
-                    self_view.y,
-                    range * ppm,
-                    2.0,
-                    color,
-                );
-            }
+    if let Some(self_view) = job.self_view {
+        for &(radius, color) in &job.chat_rings {
+            minimap_math::draw_ring(&mut surface, self_view.x, self_view.y, radius, 2.0, color);
         }
     }
 
     // Pick-radius circle at the cursor.
-    let dot_radius = minimap_math::dot_radius(ppm);
-    if let Some(cursor) = state.cursor {
-        let pick_scale = store.get_f32(SETTING_PICK_SCALE).unwrap_or(3.0);
+    if let Some((cursor, radius)) = job.cursor_ring {
         minimap_math::draw_ring(
             &mut surface,
             cursor.x,
             cursor.y,
-            dot_radius * pick_scale,
+            radius,
             1.5,
             [255, 255, 255, 40],
         );
     }
 
     // Avatar dots.
-    for (dot, altitude) in dots.iter().zip(altitudes.iter()) {
-        let color = avatar_color(dot.agent, friends.as_deref(), &avatars, &marks);
-        let glyph = minimap_math::height_glyph(*altitude, dot.altitude_unknown, state.camera.2);
+    for dot in &job.dots {
         minimap_math::draw_avatar_glyph(
             &mut surface,
             dot.view.x,
             dot.view.y,
-            dot_radius,
-            glyph,
-            color,
+            job.dot_radius,
+            dot.glyph,
+            dot.color,
         );
     }
 
     // The tracking beacon.
-    if let Some(target) = tracking.target {
-        let position = match target {
-            TrackTarget::Location { east, north, .. } => Some(state.view.view_from_rel(
-                narrow(east - state.camera.0),
-                narrow(north - state.camera.1),
-            )),
-            TrackTarget::Avatar(agent) => avatars
-                .root_entity_of(agent)
-                .and_then(|entity| transforms.get(entity).ok())
-                .map(|transform| {
-                    let (east, north, _up) = global_from_bevy(origin, transform.translation());
-                    state.view.view_from_rel(
-                        narrow(east - state.camera.0),
-                        narrow(north - state.camera.1),
-                    )
-                }),
-        };
-        if let Some(position) = position {
-            minimap_math::draw_tracking(&mut surface, position, COLOR_TRACK);
-        }
+    if let Some(position) = job.tracking_view {
+        minimap_math::draw_tracking(&mut surface, position, COLOR_TRACK);
     }
 
     // The self marker: a yellow dot with a white outline, at the avatar.
-    if let Some(self_view) = self_view {
+    if let Some(self_view) = job.self_view {
         minimap_math::draw_ring(
             &mut surface,
             self_view.x,
             self_view.y,
-            dot_radius + 1.0,
+            job.dot_radius + 1.0,
             1.5,
             [255, 255, 255, 230],
         );
@@ -1571,16 +1707,49 @@ fn composite_minimap(
             &mut surface,
             self_view.x,
             self_view.y,
-            dot_radius,
+            job.dot_radius,
             COLOR_AVATAR_SELF,
         );
     }
 
+    data
+}
+
+/// Upload a finished background composite into the minimap image and promote
+/// its stamp. Cheap: it takes [`Assets<Image>`] only for the O(1) buffer move,
+/// never across the render, so it never stalls the frame.
+fn apply_minimap_surface(
+    ui: Option<Res<MinimapUi>>,
+    mut state: ResMut<MinimapState>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let ready = if let Some(task) = state.pending.as_mut() {
+        block_on(poll_once(task))
+    } else {
+        return;
+    };
+    let Some(data) = ready else {
+        return;
+    };
+    state.pending = None;
+    let stamp = state.pending_stamp.take();
     if let Some(mut image) = images.get_mut(ui.image.id()) {
-        image.data = Some(data);
+        // The image can be resized (`drive_minimap_view` replaces it with a
+        // fresh `blank_surface`) between a render being spawned and finishing,
+        // leaving this buffer sized for the *old* surface. Writing it would
+        // desync the pixel data from the texture descriptor and make wgpu read
+        // past the buffer, so only upload when the sizes still match; otherwise
+        // drop the stale render and let `composite_minimap` redraw at the new
+        // size (its stamp differs, so it re-spawns next frame).
+        let expected = image.data.as_ref().map_or(0, Vec::len);
+        if data.len() == expected {
+            image.data = Some(data);
+            state.last_stamp = stamp;
+        }
     }
-    state.dots = dots;
-    state.last_stamp = Some(stamp);
 }
 
 /// Quantise a global metre coordinate to `1/step` steps for the stamp.
