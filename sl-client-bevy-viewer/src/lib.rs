@@ -1344,7 +1344,10 @@ fn run_session(
                 setup_clouds,
                 setup_stars,
                 setup_water,
-                setup_chat_overlay,
+                // The chat overlay now parents itself under the scaffold's
+                // `UiRoot` (so the snapshot include-UI-off hide covers it), and so
+                // must see the root.
+                setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
                 setup_pipeline_overlay,
                 // The UI text & font foundation demo panel (viewer-ui-text-foundation),
                 // which parents itself to the scaffold's `UiRoot` and so must see it.

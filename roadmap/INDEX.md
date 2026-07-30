@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 255 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 14 |
-| done | 635 |
+| bugs | 13 |
+| done | 636 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1106** |
@@ -1111,7 +1111,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (13)
 
 ### protocol
 
@@ -1137,8 +1137,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resolved)
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
-- [`viewer-snapshot-chat-overlay-not-hidden`](bugs/viewer-snapshot-chat-overlay-not-hidden.md)
-  — Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1154,7 +1152,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (635)
+## done (636)
 
 ### protocol
 
@@ -1819,6 +1817,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)
+  — Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 - [`viewer-snapshot-floater`](done/viewer-snapshot-floater.md) — Snapshot
   floater — preview, format, destinations (blocked by
   `viewer-ui-widget-scaffold` (done))

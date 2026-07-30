@@ -29,6 +29,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{ChatMessage, ChatType, SlEvent, SlSessionEvent};
 
 use crate::bottom_toolbar::BottomArea;
+use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 
 /// The most chat lines the overlay ever shows at once. Fading already bounds each
@@ -150,7 +151,15 @@ const fn is_displayable(message: &ChatMessage) -> bool {
 /// Startup system: spawn the overlay's column container, pinned to the
 /// bottom-left corner. It starts empty; each arriving line is spawned as a child
 /// and stacks upward, so the newest line stays at the bottom.
-pub(crate) fn setup_chat_overlay(mut commands: Commands) {
+///
+/// Parented under [`UiRoot`] so the snapshot floater's include-UI-off hide
+/// (`Display::None` on `UiRoot`) covers it like every other panel — otherwise the
+/// overlay's transient lines (including the "snapshot saved" notice) leak into a
+/// clean-world-view shot. It stays absolutely positioned, so anchoring against the
+/// full-window root is identical to anchoring against the window
+/// ([`position_chat_overlay`] finds it by marker, not by parent, so it is
+/// unaffected).
+pub(crate) fn setup_chat_overlay(mut commands: Commands, root: Res<UiRoot>) {
     commands.spawn((
         // Anchored at the bottom-left with auto size, so the column grows upward as
         // lines are added; children stack top-to-bottom, newest appended last (and
@@ -168,6 +177,7 @@ pub(crate) fn setup_chat_overlay(mut commands: Commands) {
         // (touch, and the avatar context menu's body pick) wherever they float.
         Pickable::IGNORE,
         ChatOverlayContainer,
+        ChildOf(root.0),
         Name::new("chat-overlay"),
     ));
 }
@@ -277,8 +287,12 @@ pub(crate) fn tick_chat_overlay(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAT_FADE_DURATION, CHAT_HOLD_TIME, format_chat_line, is_displayable, is_faded, line_alpha,
+        CHAT_FADE_DURATION, CHAT_HOLD_TIME, ChatOverlayContainer, format_chat_line, is_displayable,
+        is_faded, line_alpha, setup_chat_overlay,
     };
+    use crate::ui::{UiRoot, UiScaffoldSystems};
+    use crate::ui_test::{LayoutTest, TestError, find_by_name, settle};
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ChatAudible, ChatMessage, ChatSource, ChatType, RegionCoordinates};
 
@@ -343,5 +357,33 @@ mod tests {
         assert!(close(line_alpha(end + 100.0), 0.0));
         // Still holding right at the hold boundary — not fading yet.
         assert!(!is_faded(CHAT_HOLD_TIME));
+    }
+
+    /// The overlay container must spawn as a descendant of [`UiRoot`], not as a
+    /// separate top-level root — otherwise the snapshot floater's include-UI-off
+    /// hide (`Display::None` on `UiRoot`) would not cover it and its transient
+    /// lines would leak into a clean-world-view shot
+    /// (`viewer-snapshot-chat-overlay-not-hidden`).
+    #[test]
+    fn overlay_is_parented_under_ui_root() -> Result<(), TestError> {
+        let mut app = LayoutTest::new().build();
+        app.add_systems(
+            Startup,
+            setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        let root = app.world().resource::<UiRoot>().0;
+        let overlay =
+            find_by_name(&mut app, "chat-overlay").ok_or("chat overlay container did not spawn")?;
+        // It carries the marker (so `position_chat_overlay` still finds it) and is
+        // a child of the single UI root (so the include-UI hide reaches it).
+        assert!(app.world().get::<ChatOverlayContainer>(overlay).is_some());
+        let parent = app
+            .world()
+            .get::<ChildOf>(overlay)
+            .ok_or("chat overlay has no parent — it is still a top-level root")?;
+        assert_eq!(parent.parent(), root);
+        Ok(())
     }
 }

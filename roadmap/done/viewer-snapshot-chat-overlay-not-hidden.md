@@ -2,7 +2,7 @@
 id: viewer-snapshot-chat-overlay-not-hidden
 title: Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 topic: viewer
-status: bugs
+status: done
 origin: observed live testing viewer-flexi-resettle-after-snapshot (2026-07-30)
 refs: [viewer-snapshot-floater, viewer-flexi-resettle-after-snapshot]
 ---
@@ -39,3 +39,30 @@ the same time: any of them would leak into an include-UI-off shot too.
 
 Note this is cosmetic and independent of the flexi re-settle fix that surfaced
 it; the snapshot save itself works.
+
+## Resolution
+
+Took the first fix direction: `setup_chat_overlay` (`chat.rs`) now spawns the
+`ChatOverlayContainer` with `ChildOf(UiRoot)` (and runs
+`.after(UiScaffoldSystems::SpawnRoot)`), so the include-UI-off `Display::None`
+on `UiRoot` reaches it like every other panel. It stays absolutely positioned,
+so anchoring against the full-window root is identical to anchoring against the
+window, and `position_chat_overlay` finds it by marker (not by parent), so it is
+unaffected. Pinned by a client-side test (`overlay_is_parented_under_ui_root`).
+
+The requested audit of other non-`UiRoot` top-level UI nodes:
+
+- **Avatar name tags** (`avatars.rs` `spawn_label`) are the one other
+  default-visible top-level node, but they are **deliberately left as-is**:
+  in the reference viewer name tags are world-space HUD text governed by a
+  separate "show names" control, not the snapshot Show-UI toggle, so hiding them
+  with include-UI-off would diverge. Gating them belongs to a future show-names
+  toggle, not to this include-UI hide.
+- **Pipeline-status overlay** (`diagnostics.rs`) and the **pick inspector**
+  (`avatar_menu.rs`) are debug/opt-in (F3 / `SL_VIEWER_PIPELINE_OVERLAY`, and
+  `SL_VIEWER_DEBUG_PICK`); a developer who enabled a debug overlay generally
+  wants it in the debug shot, so they are left alone.
+- All notification/toast/dialog cards, the flycam button, media controls, the
+  emoji picker, the selection rect, and the demo panels already parent under
+  `UiRoot` (via a channel/scrim/host that is itself `ChildOf(UiRoot)`), so they
+  are already covered.
