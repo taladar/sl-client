@@ -92,15 +92,23 @@ script header has the `cmake` lines). Because Tracy accepts only **one**
 profiler connection, disconnect the GUI before capturing — or keep the GUI, use
 its **File -> Save trace**, and run `tracy-csvexport -e <file>` yourself.
 
-**Keep the window short (≤ ~10–15 s).** A full-instrumentation Bevy trace emits
-~5 k zones per frame (every system, every stage), so a 30 s capture is ~6 M
-zones / ~88 MB. At that size the shared `libTracyServer` **Worker load** does
-not terminate in reasonable time — a 30 s trace hung both `tracy-csvexport` (95
-min, 99.9 % CPU, no output) **and the Tracy GUI (stuck at 91 %)**. A 10 s trace
-(~1.2 M zones) loads and exports in seconds. For the "loading / rezzing"
-question a 10 s window right after the region handshake is the heaviest, most
-representative slice anyway. For a single zone's per-frame timeline (large, so
-always filtered):
+**Trace length is not a data-volume limit — a load that never finished was a
+Tracy bug on a truncated file.** An earlier version of this note claimed a 30 s
+/ ~6 M-zone / ~88 MB capture was simply too big for the shared `libTracyServer`
+**Worker load** to finish — that was a **misdiagnosis**. The 30 s trace that
+hung both `tracy-csvexport` (95 min, 99.9 % CPU, no output) **and the Tracy GUI
+(stuck at 91 %)** was **truncated** (the capture file did not finish writing /
+the profiler connection was cut before the stream closed); the loader had a bug
+where it spun indefinitely on a truncated file instead of erroring out. That
+**Tracy bug is now fixed** — `tracy-csvexport` and the GUI now **exit with an
+error** on a truncated file rather than hanging. A complete trace of the same
+length loads and exports fine — the amount of data is not the constraint. So if
+a capture fails to load, it is truncated (let `tracy-capture` run to the end and
+disconnect cleanly); the length is not the problem. A ~10 s window right after
+the region handshake is still the heaviest, most representative slice for the
+"loading / rezzing" question, so it stays a good default — just not a hard cap
+imposed by size. For a single zone's per-frame timeline (large, so always
+filtered):
 
 ```console
 tracy-csvexport -u -f composite_minimap trace.tracy

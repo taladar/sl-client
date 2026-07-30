@@ -62,6 +62,8 @@ Remaining work (this is the real task now):
   (`sl-client-fork-upstream-for-upstream-bugs`).
 - Confirm `ui_picking` / `update_clipping` need to run every frame.
 
-Re-measure with `tracy-grab.sh` (≤10 s window — 30 s traces exceed the Tracy
-loader; see the profiling doc): the target is `ui_layout_system` **min**
-dropping on zero-change frames.
+Re-measure with `tracy-grab.sh` (a ~10 s window right after the handshake is the
+heaviest rezzing slice; a longer one is fine too — the earlier "30 s exceeds the
+Tracy loader" claim was a truncated-file / Tracy-loader bug, not a size limit,
+see the profiling doc): the target is `ui_layout_system` **min** dropping on
+zero-change frames.
