@@ -522,7 +522,13 @@ impl Plugin for CameraPlugin {
                     drive_flycam,
                     position_camera,
                 )
-                    .chain(),
+                    .chain()
+                    // Run after the avatar dead-reckoner so `position_camera` reads
+                    // the anchor's Transform *after* this frame's motion is applied —
+                    // otherwise the follow trails the avatar by a frame (metres, at
+                    // fly speed). `drive_avatar_motion` is itself after the avatar
+                    // object update, so the anchor is fully current here.
+                    .after(crate::physics::drive_avatar_motion),
             )
             .add_systems(Update, update_camera_cursor);
     }
@@ -1061,6 +1067,18 @@ pub(crate) fn drive_flycam(
 /// Everything [`position_camera`] needs to find the own avatar's world pose.
 type AvatarPoseQuery<'world, 'state> = Query<'world, 'state, &'static GlobalTransform>;
 
+/// The own avatar anchor's **current-frame** local `Transform`. The body-root
+/// anchor is a top-level entity (spawned with no parent), so its `Transform` is its
+/// world pose — and, crucially, it is the value written *this* frame by the
+/// avatar-motion systems, whereas its `GlobalTransform` is only recomputed in
+/// `PostUpdate` and so lags a frame. Reading the `Transform` (with
+/// [`position_camera`] ordered after `drive_avatar_motion`) lets the follow track
+/// the avatar's live position with **no frame lag** — at fast fly speeds a single
+/// frame of staleness is metres, enough to throw the avatar off screen. Filtered
+/// `Without<ViewerCamera>` so it never overlaps the camera's own `&mut Transform`.
+type AvatarTransformQuery<'world, 'state> =
+    Query<'world, 'state, &'static Transform, Without<ViewerCamera>>;
+
 /// Compute and apply the final camera pose for the active mode, easing it toward
 /// the target so mode transitions glide.
 ///
@@ -1083,6 +1101,7 @@ pub(crate) fn position_camera(
     body: Option<Res<AvatarBody>>,
     time: Res<Time>,
     globals: AvatarPoseQuery,
+    transforms: AvatarTransformQuery,
     motions: Query<&AvatarMotion>,
     mut ray_cast: MeshRayCast,
     mut aim_out: ResMut<CameraAim>,
@@ -1093,9 +1112,10 @@ pub(crate) fn position_camera(
     };
     aim_out.mouselook = *mode == CameraMode::Mouselook;
 
-    // The own avatar's world position and stable (heading-derived) facing, if it
-    // has arrived.
-    let avatar_pose = own_avatar_pose(&identity, &avatars, &globals, &motions);
+    // The own avatar's live world position and stable (heading-derived) facing, if
+    // it has arrived. Read from the current-frame anchor `Transform`, not the
+    // frame-late `GlobalTransform`, so the follow does not trail by a frame.
+    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions);
 
     match *mode {
         CameraMode::Flycam => {
@@ -1114,7 +1134,7 @@ pub(crate) fn position_camera(
             // height), nudged a touch forward along the look so the view is not
             // inside the face. Falls back to the anchor plus a head-height offset for
             // a placeholder-sphere avatar with no skeleton.
-            let eye = own_avatar_head(&identity, &avatars, body.as_deref(), &globals)
+            let eye = own_avatar_head(&identity, &avatars, body.as_deref(), &globals, &transforms)
                 .map(|head| vadd(head, vscale(look_forward, MOUSELOOK_EYE_OFFSET.x)))
                 .or_else(|| {
                     avatar_pose.map(|(avatar, facing)| {
@@ -1152,30 +1172,49 @@ pub(crate) fn position_camera(
             *transform = posed;
         }
         CameraMode::ThirdPerson => {
-            let (mut eye, focus) = match *focus_target {
+            let (mut eye, focus, follow_avatar) = match *focus_target {
                 // Focus on a picked point: the camera keeps the world offset it had
                 // when the point was picked (and as orbit / zoom has changed it
                 // since), so alt-clicking re-pivots around the object *without*
-                // moving the camera — the reference's `setFocusGlobal` behaviour.
-                FocusTarget::Point(point) => (vadd(point, rig.point_offset), point),
+                // moving the camera — the reference's `setFocusGlobal` behaviour. A
+                // fixed world point is smoothed in world space (there is nothing to
+                // trail), so it is not an avatar follow.
+                FocusTarget::Point(point) => (vadd(point, rig.point_offset), point, false),
                 // Rear-view follow: orbit around the avatar's **head**, so zooming
                 // in converges on the back of the head (and into mouselook), not the
-                // avatar root.
+                // avatar root. The focus is recomputed from the live avatar every
+                // frame and followed **rigidly** (only the orbit offset is smoothed),
+                // so the camera and avatar stay a locked pair — no trailing on a
+                // sustained vertical flight.
                 FocusTarget::Avatar => {
                     let Some((anchor, facing)) = avatar_pose else {
                         return;
                     };
-                    let head = own_avatar_head(&identity, &avatars, body.as_deref(), &globals);
+                    let head = own_avatar_head(
+                        &identity,
+                        &avatars,
+                        body.as_deref(),
+                        &globals,
+                        &transforms,
+                    );
                     let focus = third_person_focus(head, anchor, facing);
                     let eye =
                         third_person_eye(focus, facing, rig.azimuth, rig.elevation, rig.distance);
-                    (eye, focus)
+                    (eye, focus, true)
                 }
             };
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
             eye = collide_camera(&mut ray_cast, focus, eye);
-            apply_pose(&mut transform, &mut rig, eye, focus, &time, false);
+            apply_pose(
+                &mut transform,
+                &mut rig,
+                eye,
+                focus,
+                follow_avatar,
+                &time,
+                false,
+            );
         }
     }
 }
@@ -1184,11 +1223,21 @@ pub(crate) fn position_camera(
 /// transform, seeding (snapping) on the first frame so it does not glide in from
 /// the origin. `snap` bypasses the smoothing (mouselook, where a lag reads as
 /// sluggish aim).
+///
+/// `follow_avatar` selects **rigid follow**: the focus is taken from the live
+/// avatar every frame with no world-space easing, and only the eye's **offset from
+/// the focus** — the orbit / zoom / collision geometry — is smoothed. So the camera
+/// and avatar move as a **locked pair**: they can jump together against the world
+/// (whatever the avatar's rendered position does, the camera does too), but never
+/// drift relative to each other — a sustained vertical flight has zero follow lag,
+/// as the reference viewer does. `false` (a fixed focus point) smooths the whole
+/// pose in world space as before — a static point has nothing to trail.
 fn apply_pose(
     transform: &mut Transform,
     rig: &mut CameraRig,
     eye: Vec3,
     focus: Vec3,
+    follow_avatar: bool,
     time: &Time,
     snap: bool,
 ) {
@@ -1197,10 +1246,20 @@ fn apply_pose(
     } else {
         let dt = time.delta_secs();
         let t = 1.0 - 0.5_f32.powf(dt / SMOOTH_HALF_LIFE);
-        (
-            vlerp(rig.smoothed_eye, eye, t),
-            vlerp(rig.smoothed_focus, focus, t),
-        )
+        if follow_avatar {
+            // Rigid follow: the focus tracks the avatar this frame (no world-space
+            // easing, so the camera never trails the body's translation), and only
+            // the eye's offset from the focus is eased — the orbit / zoom / collision
+            // geometry — so those changes still glide while the follow stays locked.
+            let previous_offset = vsub(rig.smoothed_eye, rig.smoothed_focus);
+            let offset = vlerp(previous_offset, vsub(eye, focus), t);
+            (vadd(focus, offset), focus)
+        } else {
+            (
+                vlerp(rig.smoothed_eye, eye, t),
+                vlerp(rig.smoothed_focus, focus, t),
+            )
+        }
     };
     rig.smoothed_eye = final_eye;
     rig.smoothed_focus = final_focus;
@@ -1250,17 +1309,20 @@ fn collide_camera(ray_cast: &mut MeshRayCast, focus: Vec3, eye: Vec3) -> Vec3 {
 fn own_avatar_pose(
     identity: &SlIdentity,
     avatars: &AvatarState,
-    globals: &AvatarPoseQuery,
+    transforms: &AvatarTransformQuery,
     motions: &Query<&AvatarMotion>,
 ) -> Option<(Vec3, Vec3)> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
-    let global = globals.get(anchor).ok()?;
+    // The anchor is a root entity, so its local `Transform` is its world pose — and
+    // it is this frame's value (unlike the frame-late `GlobalTransform`), so the
+    // camera follows the avatar's live position without a frame of drift.
+    let transform = transforms.get(anchor).ok()?;
     let facing = motions.get(anchor).map_or_else(
-        |_error| global.rotation().mul_vec3(Vec3::X),
+        |_error| transform.rotation.mul_vec3(Vec3::X),
         |motion| facing_from_yaw(motion.yaw()),
     );
-    Some((global.translation(), facing))
+    Some((transform.translation, facing))
 }
 
 /// The own avatar's head-joint (`mHead`) world position, for the third-person
@@ -1273,11 +1335,23 @@ fn own_avatar_head(
     avatars: &AvatarState,
     body: Option<&AvatarBody>,
     globals: &AvatarPoseQuery,
+    transforms: &AvatarTransformQuery,
 ) -> Option<Vec3> {
     let agent = identity.agent_id?;
+    let anchor = avatars.body_root_of(agent)?;
     let index = body?.joint_index("mHead")?;
     let head = avatars.joint_entities_of(agent)?.get(index)?;
-    globals.get(*head).ok().map(GlobalTransform::translation)
+    // The head joint is deep in the skeleton, so its world pose is only available
+    // through its `GlobalTransform` — which lags a frame (and its animated pose is
+    // written in `PostUpdate`). Correct it by the anchor's own motion this frame
+    // (current `Transform` minus frame-late `GlobalTransform`, both taken from the
+    // same root anchor) so the head focus tracks the avatar's live position — the
+    // per-frame head sway relative to the anchor is negligible (measured
+    // `d_head ≈ d_root`).
+    let head_global = globals.get(*head).ok()?.translation();
+    let anchor_global = globals.get(anchor).ok()?.translation();
+    let anchor_now = transforms.get(anchor).ok()?.translation;
+    Some(vadd(head_global, vsub(anchor_now, anchor_global)))
 }
 
 /// The Second Life heading (yaw about the SL up axis) a Bevy-space forward points
@@ -1382,6 +1456,84 @@ mod tests {
         assert!(
             forward.abs_diff_eq(dir, 1.0e-4),
             "aim {forward:?} vs {dir:?}"
+        );
+    }
+
+    /// A third-person camera following the avatar tracks a **sustained** vertical
+    /// flight with **zero** steady-state lag: rigid follow re-derives the focus from
+    /// the avatar every frame and smooths only the eye's offset from it, so a
+    /// constant climb leaves the smoothed eye exactly on the desired eye — the
+    /// reference's "camera moves up and down with the avatar" — and the eye stays a
+    /// fixed offset from the focus (a locked pair). World-space smoothing (a fixed
+    /// focus point) instead trails the climb, so the assertion pins the fix rather
+    /// than the framework.
+    #[test]
+    fn follow_has_no_steady_state_vertical_lag() {
+        use super::{CameraRig, apply_pose, vadd, vsub};
+        use bevy::math::Vec3;
+        use bevy::prelude::{Time, Transform};
+        use std::time::Duration;
+
+        let dt = 1.0 / 60.0;
+        let mut time = Time::default();
+        time.advance_by(Duration::from_secs_f32(dt));
+
+        // The fixed rear-view geometry (eye behind + above the anchor, focus above
+        // it) and a steady climb of ~6 m/s (0.1 m per 60 Hz frame).
+        let eye_off = Vec3::new(0.0, 0.75, 3.0);
+        let focus_off = Vec3::new(0.0, 0.5, 0.0);
+        let climb = Vec3::new(0.0, 0.1, 0.0);
+
+        // Run a constant-velocity climb through the smoother and return the final
+        // smoothed eye and focus once it has settled.
+        let settle = |follow_avatar: bool| -> (Vec3, Vec3, Vec3) {
+            let mut rig = CameraRig::default();
+            let mut transform = Transform::default();
+            let mut anchor = Vec3::new(100.0, 20.0, 50.0);
+            // Seed on the first frame (snaps), then climb for long enough to reach
+            // steady state.
+            apply_pose(
+                &mut transform,
+                &mut rig,
+                vadd(anchor, eye_off),
+                vadd(anchor, focus_off),
+                follow_avatar,
+                &time,
+                false,
+            );
+            for _frame in 0..60 {
+                anchor = vadd(anchor, climb);
+                apply_pose(
+                    &mut transform,
+                    &mut rig,
+                    vadd(anchor, eye_off),
+                    vadd(anchor, focus_off),
+                    follow_avatar,
+                    &time,
+                    false,
+                );
+            }
+            (rig.smoothed_eye, rig.smoothed_focus, vadd(anchor, eye_off))
+        };
+
+        // Following the avatar: the smoothed eye sits exactly on the desired eye (no
+        // vertical trailing) and stays the fixed rear-view offset from the focus (a
+        // locked pair).
+        let (eye, focus, desired) = settle(true);
+        assert!(
+            vsub(eye, desired).length() < 1.0e-4,
+            "following the avatar should have zero steady-state lag"
+        );
+        assert!(
+            vsub(vsub(eye, focus), vsub(eye_off, focus_off)).length() < 1.0e-4,
+            "the eye stays a fixed offset from the focus (camera + avatar locked)"
+        );
+        // World-space smoothing (a fixed focus point) trails the climb by a visible
+        // margin (a fraction of a metre), which is the reported bug.
+        let (lagging_eye, _focus, desired) = settle(false);
+        assert!(
+            vsub(lagging_eye, desired).length() > 0.1,
+            "world-space smoothing lags a sustained climb (the bug)"
         );
     }
 

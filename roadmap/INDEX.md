@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 641 |
+| done | 642 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1116** |
+| **total** | **1117** |
 
 ## ideas (55)
 
@@ -1130,6 +1130,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
+- [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
+  — Ease the avatar's rendered translation toward truth (dead-reckoning
+  rubberband)
 - [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
@@ -1149,8 +1152,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
-- [`viewer-third-person-cam-lag-vertical-flight`](bugs/viewer-third-person-cam-lag-vertical-flight.md)
-  — Third-person camera lags behind an avatar flying up or down
 
 ### aditi
 
@@ -1159,7 +1160,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (641)
+## done (642)
 
 ### protocol
 
@@ -1863,6 +1864,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
+- [`viewer-third-person-cam-lag-vertical-flight`](done/viewer-third-person-cam-lag-vertical-flight.md)
+  — Third-person camera lags behind an avatar flying up or down
 - [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))
