@@ -140,8 +140,21 @@ impl Material for WaterMaterial {
 
     /// Pin the vertex buffer layout to the position attribute (the shader derives
     /// the wave texcoords, view vector, and fresnel per fragment from the world
-    /// position, reading no UV or normal) and disable back-face culling so the
-    /// surface is visible from below (an avatar underwater still sees the surface).
+    /// position, reading no UV or normal), disable back-face culling so the surface
+    /// is visible from below (an avatar underwater still sees the surface), and make
+    /// the surface **write depth**.
+    ///
+    /// Depth-writing a translucent surface is deliberate and matches the reference
+    /// (`LLDrawPoolWater` renders with `LLGLDepthTest(GL_TRUE, GL_TRUE)`). On its own
+    /// it would turn the sea into an opaque depth occluder and hide everything
+    /// translucent behind it, so it is correct **only** in concert with the viewer's
+    /// water-relative transparency ordering (the `transparency` module in
+    /// `sl-client-bevy-viewer`): all translucent content *below* the water is drawn
+    /// before the surface (already composited, so it shows through the translucent
+    /// water), the water is drawn next writing depth, and all translucent content
+    /// *above* the water is drawn after — where the depth write now gives per-pixel
+    /// occlusion of anything that dips behind the surface (a fountain's spray, a boat
+    /// wake) rather than the whole-plane back-to-front sort that painted it out.
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -153,6 +166,12 @@ impl Material for WaterMaterial {
             .get_layout(&[Mesh::ATTRIBUTE_POSITION.at_shader_location(0)])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // Write depth so the water surface occludes above-water translucency behind
+        // it per pixel; the pre/post-water draw ordering (see the doc above) keeps it
+        // from hiding below-water translucency.
+        if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.depth_write_enabled = Some(true);
+        }
         Ok(())
     }
 }

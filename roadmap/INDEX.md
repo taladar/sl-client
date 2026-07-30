@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 54 |
+| ideas | 55 |
 | ready | 254 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 14 |
-| done | 639 |
+| bugs | 13 |
+| done | 640 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1109** |
+| **total** | **1110** |
 
-## ideas (54)
+## ideas (55)
 
 ### viewer
 
@@ -94,6 +94,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
+- [`viewer-straddling-transparency-oit`](ideas/viewer-straddling-transparency-oit.md)
+  — Per-pixel ordering for translucent objects straddling the waterline
 
 ### server
 
@@ -1106,7 +1108,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (13)
 
 ### protocol
 
@@ -1130,8 +1132,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
-- [`viewer-particle-water-ordering`](bugs/viewer-particle-water-ordering.md) —
-  Translucent content (particles) orders wrong against the water surface
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
@@ -1149,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (639)
+## done (640)
 
 ### protocol
 
@@ -1698,6 +1698,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-parcel-overlay-decode`](done/viewer-parcel-overlay-decode.md) —
   Decode ParcelOverlay into a 64×64 grid resource
+- [`viewer-particle-water-ordering`](done/viewer-particle-water-ordering.md) —
+  Translucent content (particles) orders wrong against the water surface
 - [`viewer-pbr-blinn-phong-build-preview`](done/viewer-pbr-blinn-phong-build-preview.md)
   — PBR supersedes Blinn-Phong on a face; build tool previews Blinn-Phong
   (FIRE-35138)

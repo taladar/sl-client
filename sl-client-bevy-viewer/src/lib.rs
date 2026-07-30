@@ -157,6 +157,7 @@ mod terrain;
 mod texture_anim;
 mod textures;
 mod tonemap;
+mod transparency;
 mod typing;
 mod ui;
 mod ui_color_picker;
@@ -1207,6 +1208,12 @@ fn run_session(
     // The water-surface material (P23.1), driven from the region's EEP water
     // settings by the `water` module's systems below.
     .add_plugins(WaterMaterialPlugin)
+    // Water-relative transparency ordering (viewer-particle-water-ordering): a
+    // render-world re-sort of the transparent phase so translucent content (a
+    // fountain's spray, translucent prims) orders correctly against the
+    // depth-writing water surface — below-water draws through it, above-water over
+    // it — rather than being painted out by the camera-following plane.
+    .add_plugins(crate::transparency::TransparencyOrderPlugin)
     // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
     // fogs everything below the water surface (reference `getWaterFogView`).
     .add_plugins(UnderwaterFogPlugin)

@@ -46,6 +46,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     Color as SlColor, DecodedTexture, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
@@ -58,6 +59,7 @@ use crate::environment::EnvironmentState;
 use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::transparency::WaterSurface;
 
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;
@@ -93,7 +95,10 @@ const DEFAULT_WATER_NORMAL: Uuid = Uuid::from_u128(0x822d_ed49_9a6c_f61c_cb89_6d
 /// ocean sits at. Published each frame by [`drive_water`] so the underwater-fog
 /// post-process ([`crate::underwater_fog`]) knows where the surface is without
 /// reaching into [`WaterState`].
-#[derive(Resource)]
+///
+/// Extracted into the render world too, where the transparency-ordering re-sort
+/// ([`crate::transparency`]) buckets every translucent item above / below it.
+#[derive(Resource, Clone, Copy, ExtractResource)]
 pub(crate) struct WaterLevel(pub(crate) f32);
 
 impl Default for WaterLevel {
@@ -189,6 +194,9 @@ pub(crate) fn setup_water(
         Transform::from_xyz(0.0, DEFAULT_WATER_HEIGHT, 0.0),
         // The water never casts shadows (P24 adds cascaded shadow maps for the sun).
         NotShadowCaster,
+        // Marks this as a water surface for the transparency-ordering re-sort, which
+        // pins it to its own bucket between below- and above-water translucency.
+        WaterSurface,
         WaterOcean,
     ));
 
@@ -366,6 +374,8 @@ fn reconcile_region_planes(
                         MeshMaterial3d(state.material.clone()),
                         Transform::from_translation(translation),
                         NotShadowCaster,
+                        // See the ocean plane: pins this plane to the water bucket.
+                        WaterSurface,
                         WaterRegionPlane { region, height },
                     ))
                     .id();

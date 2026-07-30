@@ -2,12 +2,38 @@
 id: viewer-particle-water-ordering
 title: Translucent content (particles) orders wrong against the water surface
 topic: viewer
-status: bugs
+status: done
 origin: found live-testing GPU particles on aditi (2026-07-30)
-refs: [viewer-perf-gpu-particles]
+refs: [viewer-perf-gpu-particles, viewer-straddling-transparency-oit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Done (2026-07-30, live-confirmed on aditi — particles now draw in front of the
+water as they should).** Ported the reference `LLDrawPoolAlpha` pre/post-water
+split to the Bevy renderer:
+
+- The **water surface writes depth** (`WaterMaterial::specialize`,
+  `sl-client-bevy/src/water.rs`), matching the reference
+  `LLGLDepthTest(GL_TRUE, GL_TRUE)`.
+- A **render-world re-sort** (new `sl-client-bevy-viewer/src/transparency.rs`,
+  `TransparencyOrderPlugin`) buckets **every** `Transparent3d` item — particles
+  *and* prims, whoever queued them — by centre height relative to the water
+  level: below-water → water → above-water, with the water pinned to its own
+  bucket (a `WaterSurface` marker, since a camera-following / region-sized
+  plane's mesh centre is a useless sort key). It runs once in
+  `RenderSystems::PhaseSort` after Bevy's `sort_phase_system::<Transparent3d>`
+  and re-sorts each view's phase by `(water_bucket, distance)`, preserving
+  back-to-front order within each bucket. One interception point covers all
+  transparent content without touching `queue_material_meshes`.
+
+Below-water translucency draws first (composited, so it shows *through* the
+translucent surface — the failure mode of the naive "water writes depth" fix),
+the water draws next writing depth, and above-water translucency draws last with
+per-pixel depth occlusion against the surface. Bucket assignment is per-object,
+so a single large translucent prim straddling the waterline is still classified
+whole — the per-pixel remainder is filed as
+[[viewer-straddling-transparency-oit]].
 
 The water surface (a camera-following alpha-blended plane, `WaterMaterial`,
 `AlphaMode::Blend`) draws **over** particles that are in front of it — a
