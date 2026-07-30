@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 259 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 14 |
-| done | 640 |
+| bugs | 13 |
+| done | 641 |
 | deferred | 20 |
 | wont-do | 6 |
 | **total** | **1116** |
@@ -1118,7 +1118,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (13)
 
 ### protocol
 
@@ -1142,8 +1142,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
-- [`viewer-perf-minimap-layer-raster-offthread`](bugs/viewer-perf-minimap-layer-raster-offthread.md)
-  — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
@@ -1161,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (640)
+## done (641)
 
 ### protocol
 
@@ -1724,6 +1722,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
+  — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))

@@ -36,11 +36,12 @@ use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
-    AgentKey, Command, MuteFlags, MuteType, OwnerKey, ParcelOwnership, RegionCoordinates,
-    RegionHandle, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel, SlParcelOverlay,
-    SlRegion, SlRegionIdentity, SlSessionEvent, Vector,
+    AgentKey, Command, MuteFlags, MuteType, OwnerKey, ParcelOverlayGrid, ParcelOwnership,
+    RegionCoordinates, RegionHandle, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel,
+    SlParcelOverlay, SlRegion, SlRegionIdentity, SlSessionEvent, TerrainPatch, Vector,
 };
 use sl_settings::{Scope, SettingValue};
+use sl_terrain::TerrainComposition;
 
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
@@ -289,6 +290,56 @@ struct DotInfo {
     altitude_unknown: bool,
 }
 
+/// The view inputs the object layer was last rasterised for, used by the
+/// stationary throttle: when none of these move, a truly static scene needs no
+/// object-layer rebuild (the world-anchored raster is still correctly centred).
+/// A real object change is tracked separately by
+/// [`objects_dirty_pending`](MinimapState::objects_dirty_pending), so the
+/// throttle only ever skips a rebuild that would draw the same pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ObjectPose {
+    /// The camera's global position (metres east / north) and altitude.
+    camera: (f64, f64, f32),
+    /// The camera heading in radians.
+    heading: f32,
+    /// The own avatar's global position, when known.
+    agent: Option<(f64, f64, f32)>,
+    /// The number of connected regions (a new neighbour changes the object set).
+    regions: usize,
+}
+
+impl ObjectPose {
+    /// Whether `self` is close enough to `other` that the object raster built
+    /// for `other` still applies — same region set, and camera / avatar within
+    /// sub-metre and heading within a fraction of a degree.
+    fn is_stationary_from(&self, other: &Self) -> bool {
+        /// The largest horizontal / vertical move (metres) treated as unmoved.
+        const POS_EPS: f64 = 0.25;
+        /// The largest altitude move (metres) treated as unmoved.
+        const Z_EPS: f32 = 0.25;
+        /// The largest heading change (radians, ≈0.6°) treated as unturned.
+        const HEADING_EPS: f32 = 0.01;
+        /// Whether two optional avatar positions are the same to `POS_EPS`.
+        fn agent_close(a: Option<(f64, f64, f32)>, b: Option<(f64, f64, f32)>) -> bool {
+            match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => {
+                    (a.0 - b.0).abs() < POS_EPS
+                        && (a.1 - b.1).abs() < POS_EPS
+                        && (a.2 - b.2).abs() < Z_EPS
+                }
+                _mismatch => false,
+            }
+        }
+        self.regions == other.regions
+            && (self.camera.0 - other.camera.0).abs() < POS_EPS
+            && (self.camera.1 - other.camera.1).abs() < POS_EPS
+            && (self.camera.2 - other.camera.2).abs() < Z_EPS
+            && (self.heading - other.heading).abs() < HEADING_EPS
+            && agent_close(self.agent, other.agent)
+    }
+}
+
 /// The right-click context captured when the menu opened.
 #[derive(Debug, Clone, Default)]
 struct MenuContext {
@@ -351,6 +402,23 @@ struct MinimapState {
     object_elapsed: f32,
     /// The object layer must regenerate now (scale / resize / toggle).
     object_dirty: bool,
+    /// A real object change (`ObjectState` mutated) has landed since the object
+    /// layer was last rasterised — the stationary throttle must not skip a
+    /// rebuild while this is set. Cleared when an object rebuild is spawned.
+    objects_dirty_pending: bool,
+    /// The view pose the object layer was last rasterised for; the stationary
+    /// throttle compares the current pose against it.
+    object_pose: Option<ObjectPose>,
+    /// The in-flight object-layer rasterisation, built off the frame thread.
+    /// Only one runs at a time; a change that lands while it runs coalesces into
+    /// the next spawn, exactly like [`pending`](Self::pending).
+    object_task: Option<Task<LayerRaster>>,
+    /// The capture centre the [`object_task`](Self::object_task) is rasterising
+    /// for, promoted to [`object_center`](Self::object_center) when it finishes.
+    object_pending_center: (f64, f64),
+    /// The texels per metre the [`object_task`](Self::object_task) is
+    /// rasterising for, promoted to [`object_tpm`](Self::object_tpm) on finish.
+    object_pending_tpm: f32,
     /// The parcel layer raster. `Arc`-shared for the same reason as
     /// [`object_layer`](Self::object_layer).
     parcel_layer: Arc<LayerRaster>,
@@ -360,6 +428,15 @@ struct MinimapState {
     parcel_tpm: f32,
     /// The parcel layer must regenerate now (overlay change / toggle).
     parcel_dirty: bool,
+    /// The in-flight parcel-layer rasterisation, built off the frame thread
+    /// (coalesced like [`object_task`](Self::object_task)).
+    parcel_task: Option<Task<LayerRaster>>,
+    /// The capture centre the [`parcel_task`](Self::parcel_task) is rasterising
+    /// for, promoted to [`parcel_center`](Self::parcel_center) when it finishes.
+    parcel_pending_center: (f64, f64),
+    /// The texels per metre the [`parcel_task`](Self::parcel_task) is
+    /// rasterising for, promoted to [`parcel_tpm`](Self::parcel_tpm) on finish.
+    parcel_pending_tpm: f32,
     /// Per-region shaded terrain backdrops (256×256, one texel per metre,
     /// bottom-up rows like every layer raster). `Arc`-shared as a whole so the
     /// background compositor snapshots the entire set with one refcount bump.
@@ -369,6 +446,9 @@ struct MinimapState {
     /// Seconds since the terrain backdrops were last rebuilt (throttles the
     /// rebuild while patches stream in).
     terrain_elapsed: f32,
+    /// The in-flight terrain-backdrop rasterisation, built off the frame thread
+    /// (coalesced like [`object_task`](Self::object_task)).
+    terrain_task: Option<Task<HashMap<RegionHandle, LayerRaster>>>,
     /// The stamp of the last *applied* composite; recomposite when the frame's
     /// stamp differs from this.
     last_stamp: Option<CompositeStamp>,
@@ -415,13 +495,22 @@ impl Default for MinimapState {
             object_tpm: 1.0,
             object_elapsed: 0.0,
             object_dirty: true,
+            objects_dirty_pending: true,
+            object_pose: None,
+            object_task: None,
+            object_pending_center: (0.0, 0.0),
+            object_pending_tpm: 1.0,
             parcel_layer: Arc::new(LayerRaster::default()),
             parcel_center: (0.0, 0.0),
             parcel_tpm: 1.0,
             parcel_dirty: true,
+            parcel_task: None,
+            parcel_pending_center: (0.0, 0.0),
+            parcel_pending_tpm: 1.0,
             terrain_maps: Arc::new(HashMap::new()),
             terrain_revision: None,
             terrain_elapsed: 1.0,
+            terrain_task: None,
             last_stamp: None,
             pending: None,
             pending_stamp: None,
@@ -957,9 +1046,162 @@ const OBJECT_LAYER_PERIOD: f32 = 0.5;
 /// metres (squared test, the reference's 3 m).
 const PARCEL_MOVE_METRES: f64 = 3.0;
 
-/// Regenerate the cached content layers on their own triggers: the object
-/// raster on a 0.5 s timer (or dirty), the parcel raster on overlay change /
-/// centre movement, the terrain backdrops on terrain revision change.
+/// One object's contribution to the object layer, snapshotted on the main
+/// thread so the disc-plotting loop runs on the background compute pool.
+struct ObjectSample {
+    /// East offset from the layer capture centre, in metres.
+    rel_east: f32,
+    /// North offset from the layer capture centre, in metres.
+    rel_north: f32,
+    /// The object's altitude, in metres (for the above / below-water colour).
+    up: f32,
+    /// The object's combined `PrimFlags` (own bits OR-ed with the root's).
+    flags: u32,
+    /// The object's scale, in metres.
+    scale: [f32; 3],
+    /// The water height at the object, in metres.
+    water_height: f32,
+}
+
+/// Everything the object-layer rasteriser needs, moved into the background task.
+struct ObjectLayerInput {
+    /// The raster side, in texels.
+    raster_size: u32,
+    /// The layer texels per metre.
+    tpm: f32,
+    /// The accent toggles (physical / scripted / temp-on-rez / phantom).
+    accents: ObjectAccents,
+    /// The largest radius (metres) an object draws with.
+    max_radius: f32,
+    /// The objects that passed the on-map / vertical-cull filter.
+    objects: Vec<ObjectSample>,
+}
+
+/// Rasterise the object layer from its snapshot — the O(objects) disc-plotting
+/// loop, run on the background compute pool so it never blocks the frame.
+fn build_object_layer(input: &ObjectLayerInput) -> LayerRaster {
+    let mut raster = LayerRaster::new(input.raster_size);
+    for object in &input.objects {
+        let color = minimap_math::object_map_color(
+            object.flags,
+            object.up >= object.water_height,
+            input.accents,
+        );
+        let radius = minimap_math::object_map_radius(
+            object.scale,
+            object.flags,
+            input.accents,
+            input.max_radius,
+        );
+        minimap_math::render_object_point(
+            &mut raster,
+            input.tpm,
+            object.rel_east,
+            object.rel_north,
+            color,
+            radius,
+        );
+    }
+    raster
+}
+
+/// One region's parcel overlay, snapshotted for the background rasteriser.
+struct ParcelRegionSample {
+    /// The region's south-west corner east offset from the capture centre (m).
+    origin_east: f32,
+    /// The region's south-west corner north offset from the capture centre (m).
+    origin_north: f32,
+    /// The region's decoded overlay grid, when its circuit delivered one.
+    grid: Option<ParcelOverlayGrid>,
+}
+
+/// Everything the parcel-layer rasteriser needs, moved into the background task.
+struct ParcelLayerInput {
+    /// The raster side, in texels.
+    raster_size: u32,
+    /// The layer texels per metre.
+    tpm: f32,
+    /// Whether for-sale / auction parcels are filled.
+    show_sale: bool,
+    /// The regions to draw.
+    regions: Vec<ParcelRegionSample>,
+}
+
+/// Rasterise the parcel layer from its snapshot, on the background compute pool.
+fn build_parcel_layer(input: &ParcelLayerInput) -> LayerRaster {
+    let mut raster = LayerRaster::new(input.raster_size);
+    for region in &input.regions {
+        let grid = region.grid.as_ref();
+        let cell = |row: usize, col: usize| -> Option<ParcelCell> {
+            let cell = grid?.cell(row, col)?;
+            let fill = match cell.ownership {
+                ParcelOwnership::ForSale => Some(minimap_math::ParcelFill::ForSale),
+                ParcelOwnership::Auction => Some(minimap_math::ParcelFill::Auction),
+                _other => None,
+            };
+            Some(ParcelCell {
+                fill,
+                west_line: cell.west_line,
+                south_line: cell.south_line,
+            })
+        };
+        let grids_per_edge = grid.map_or(0, ParcelOverlayGrid::grids_per_edge);
+        minimap_math::render_parcel_region(
+            &mut raster,
+            input.tpm,
+            region.origin_east,
+            region.origin_north,
+            minimap_math::REGION_WIDTH_METRES,
+            COLOR_PARCEL_LINE,
+            input.show_sale,
+            // A region without a decoded overlay (a neighbour) draws its full
+            // outline, since no edge cells supply its south / west lines.
+            grid.is_none(),
+            grids_per_edge,
+            &cell,
+        );
+    }
+    raster
+}
+
+/// One region's terrain inputs, snapshotted for the background rasteriser.
+struct TerrainRegionSample {
+    /// The region handle (the backdrop map key).
+    handle: RegionHandle,
+    /// The region's decoded land patches.
+    patches: Vec<TerrainPatch>,
+    /// The region's terrain composition, once its handshake was seen.
+    composition: Option<TerrainComposition>,
+    /// The region's water height, in metres.
+    water_height: f32,
+}
+
+/// Rasterise every region's terrain backdrop from its snapshot, on the
+/// background compute pool.
+fn build_terrain_maps(regions: &[TerrainRegionSample]) -> HashMap<RegionHandle, LayerRaster> {
+    let mut maps = HashMap::new();
+    for region in regions {
+        maps.insert(
+            region.handle,
+            build_terrain_map(
+                &region.patches,
+                region.composition.as_ref(),
+                region.water_height,
+            ),
+        );
+    }
+    maps
+}
+
+/// Regenerate the cached content layers on their own triggers, off the frame
+/// thread: the object raster on a 0.5 s timer (or dirty), the parcel raster on
+/// overlay change / centre movement, the terrain backdrops on terrain revision
+/// change. Each layer's heavy rasterisation runs on the background compute pool
+/// (mirroring [`composite_minimap`]): this system snapshots the layer's inputs
+/// into owned `Send` data, spawns one task, and publishes the finished `Arc`
+/// (bumping [`last_stamp`](MinimapState::last_stamp) to force a recomposite)
+/// when it lands. Only one task per layer is ever in flight — a change that
+/// arrives while it runs coalesces into the next spawn.
 #[expect(
     clippy::too_many_arguments,
     reason = "the three cached layers read disjoint world state (objects + transforms, parcel \
@@ -985,130 +1227,197 @@ fn regen_minimap_layers(
     if overlay.is_changed() {
         state.parcel_dirty = true;
     }
+    // Accumulate a real object change (rez / move / removal) across frames, so
+    // the stationary throttle never skips a rebuild for one that landed between
+    // timer fires. `ObjectState` is only marked changed when an object event is
+    // actually applied, so a truly idle scene leaves this clear.
+    if objects.is_changed() {
+        state.objects_dirty_pending = true;
+    }
+
+    // Publish any layer whose background rasterisation finished, promoting its
+    // capture geometry together with the raster so the compositor always samples
+    // a raster against the centre / tpm it was built for.
+    let object_ready = state
+        .object_task
+        .as_mut()
+        .and_then(|task| block_on(poll_once(task)));
+    if let Some(raster) = object_ready {
+        state.object_task = None;
+        state.object_layer = Arc::new(raster);
+        state.object_center = state.object_pending_center;
+        state.object_tpm = state.object_pending_tpm;
+        state.last_stamp = None;
+    }
+    let parcel_ready = state
+        .parcel_task
+        .as_mut()
+        .and_then(|task| block_on(poll_once(task)));
+    if let Some(raster) = parcel_ready {
+        state.parcel_task = None;
+        state.parcel_layer = Arc::new(raster);
+        state.parcel_center = state.parcel_pending_center;
+        state.parcel_tpm = state.parcel_pending_tpm;
+        state.last_stamp = None;
+    }
+    let terrain_ready = state
+        .terrain_task
+        .as_mut()
+        .and_then(|task| block_on(poll_once(task)));
+    if let Some(maps) = terrain_ready {
+        state.terrain_task = None;
+        state.terrain_maps = Arc::new(maps);
+        state.last_stamp = None;
+    }
+
     if !panels.get(ui.root).is_ok_and(|shown| shown.0) {
         return;
     }
     let store = settings.store();
 
-    // Terrain backdrops: rebuild (throttled) when the terrain data moved on.
-    if state.terrain_revision != Some(terrain.map_revision()) && state.terrain_elapsed >= 0.5 {
-        state.terrain_elapsed = 0.0;
-        state.terrain_revision = Some(terrain.map_revision());
-        let handles: Vec<RegionHandle> = regions.iter().map(|(region, _)| region.handle).collect();
-        let mut maps = HashMap::new();
-        for handle in handles {
-            let map = build_terrain_map(&terrain, &water, handle);
-            maps.insert(handle, map);
-        }
-        state.terrain_maps = Arc::new(maps);
-        state.last_stamp = None;
-    }
-
     // The shared layer raster geometry.
     let raster_size = minimap_math::layer_raster_size(state.view.size);
     let tpm = minimap_math::layer_texels_per_metre(raster_size, state.view.size, state.view.scale);
 
-    // Object layer.
-    let show_objects = store.get_bool(SETTING_OBJECTS).unwrap_or(true);
-    if show_objects && (state.object_dirty || state.object_elapsed >= OBJECT_LAYER_PERIOD) {
-        state.object_dirty = false;
-        state.object_elapsed = 0.0;
-        let accents = ObjectAccents {
-            physical: store.get_bool(SETTING_PHYSICAL).unwrap_or(false),
-            scripted: store.get_bool(SETTING_SCRIPTED).unwrap_or(false),
-            temp_on_rez: store.get_bool(SETTING_TEMP_ON_REZ).unwrap_or(false),
-            phantom_alpha: phantom_alpha(store.get_u32(SETTING_PHANTOM_OPACITY).unwrap_or(100)),
-        };
-        let max_radius = store.get_f32(SETTING_PRIM_MAX_RADIUS).unwrap_or(16.0);
-        let max_vert = store.get_f32(SETTING_PRIM_MAX_VERT).unwrap_or(256.0);
-        // Build into a fresh local raster, then publish it as a new `Arc`: the
-        // previous one may still be borrowed by an in-flight composite task.
-        let mut raster = LayerRaster::new(raster_size);
-        state.object_center = (state.camera.0, state.camera.1);
-        state.object_tpm = tpm;
-        let origin = origin_global(state.origin);
-        let agent_z = state.agent.map_or(state.camera.2, |agent| agent.2);
-        for (entity, flags) in objects.minimap_objects() {
-            let Ok(transform) = transforms.get(entity) else {
-                continue;
-            };
-            let scale = infos
-                .get(entity)
-                .map_or([1.0, 1.0, 1.0], ObjectDebugInfo::scale);
-            if !minimap_math::object_on_map(flags, scale, accents) {
-                continue;
-            }
-            let (east, north, up) = global_from_bevy(origin, transform.translation());
-            if max_vert > 0.0 && (up - agent_z).abs() > max_vert {
-                continue;
-            }
-            let water_height = region_water_height(&water, east, north);
-            let color = minimap_math::object_map_color(flags, up >= water_height, accents);
-            let radius = minimap_math::object_map_radius(scale, flags, accents, max_radius);
-            let rel_east = narrow(east - state.object_center.0);
-            let rel_north = narrow(north - state.object_center.1);
-            minimap_math::render_object_point(&mut raster, tpm, rel_east, rel_north, color, radius);
+    // Terrain backdrops: spawn a rebuild (throttled) when the terrain data moved
+    // on and none is already in flight. Already data-gated, so an idle scene
+    // never re-rasterises it.
+    if state.terrain_task.is_none()
+        && state.terrain_revision != Some(terrain.map_revision())
+        && state.terrain_elapsed >= 0.5
+    {
+        state.terrain_elapsed = 0.0;
+        state.terrain_revision = Some(terrain.map_revision());
+        let mut samples: Vec<TerrainRegionSample> = Vec::new();
+        for (region, _current) in &regions {
+            let handle = region.handle;
+            samples.push(TerrainRegionSample {
+                handle,
+                patches: terrain.land_patches_of(handle).cloned().collect(),
+                composition: terrain.composition_of(handle).copied(),
+                water_height: water.height_of(handle).unwrap_or(20.0),
+            });
         }
-        state.object_layer = Arc::new(raster);
-        state.last_stamp = None;
+        let task = AsyncComputeTaskPool::get().spawn(async move { build_terrain_maps(&samples) });
+        state.terrain_task = Some(task);
     }
 
-    // Parcel layer: dirty flag, or the centre moved > 3 m.
+    // Object layer: a 0.5 s timer (or an explicit dirty), gated by the
+    // stationary throttle and coalesced to one task in flight.
+    let show_objects = store.get_bool(SETTING_OBJECTS).unwrap_or(true);
+    if show_objects
+        && state.object_task.is_none()
+        && (state.object_dirty || state.object_elapsed >= OBJECT_LAYER_PERIOD)
+    {
+        let pose = ObjectPose {
+            camera: state.camera,
+            heading: state.heading,
+            agent: state.agent,
+            regions: regions.iter().count(),
+        };
+        // Skip only when nothing that changes the raster moved: no explicit
+        // dirty, no real object change, and an unchanged view pose. A real move,
+        // a new neighbour region, or a rez all keep `stationary` false and force
+        // the rebuild — so currentness is never traded away, only idle churn.
+        let stationary = !state.object_dirty
+            && !state.objects_dirty_pending
+            && state
+                .object_pose
+                .as_ref()
+                .is_some_and(|prev| pose.is_stationary_from(prev));
+        if !stationary {
+            let accents = ObjectAccents {
+                physical: store.get_bool(SETTING_PHYSICAL).unwrap_or(false),
+                scripted: store.get_bool(SETTING_SCRIPTED).unwrap_or(false),
+                temp_on_rez: store.get_bool(SETTING_TEMP_ON_REZ).unwrap_or(false),
+                phantom_alpha: phantom_alpha(store.get_u32(SETTING_PHANTOM_OPACITY).unwrap_or(100)),
+            };
+            let max_radius = store.get_f32(SETTING_PRIM_MAX_RADIUS).unwrap_or(16.0);
+            let max_vert = store.get_f32(SETTING_PRIM_MAX_VERT).unwrap_or(256.0);
+            let center = (state.camera.0, state.camera.1);
+            let origin = origin_global(state.origin);
+            let agent_z = state.agent.map_or(state.camera.2, |agent| agent.2);
+            // Snapshot the surviving objects on the main thread (cheap: a
+            // transform read plus the on-map / vertical-cull filter), leaving
+            // the disc-plotting loop — the 66 ms spike — to the background task.
+            let mut samples: Vec<ObjectSample> = Vec::new();
+            for (entity, flags) in objects.minimap_objects() {
+                let Ok(transform) = transforms.get(entity) else {
+                    continue;
+                };
+                let scale = infos
+                    .get(entity)
+                    .map_or([1.0, 1.0, 1.0], ObjectDebugInfo::scale);
+                if !minimap_math::object_on_map(flags, scale, accents) {
+                    continue;
+                }
+                let (east, north, up) = global_from_bevy(origin, transform.translation());
+                if max_vert > 0.0 && (up - agent_z).abs() > max_vert {
+                    continue;
+                }
+                samples.push(ObjectSample {
+                    rel_east: narrow(east - center.0),
+                    rel_north: narrow(north - center.1),
+                    up,
+                    flags,
+                    scale,
+                    water_height: region_water_height(&water, east, north),
+                });
+            }
+            let input = ObjectLayerInput {
+                raster_size,
+                tpm,
+                accents,
+                max_radius,
+                objects: samples,
+            };
+            let task = AsyncComputeTaskPool::get().spawn(async move { build_object_layer(&input) });
+            state.object_task = Some(task);
+            state.object_pending_center = center;
+            state.object_pending_tpm = tpm;
+            state.object_dirty = false;
+            state.object_elapsed = 0.0;
+            state.objects_dirty_pending = false;
+            state.object_pose = Some(pose);
+        }
+    }
+
+    // Parcel layer: an explicit dirty or the centre moved > 3 m — already the
+    // stationary gate (a still map never moves the centre), coalesced to one
+    // task in flight.
     let show_lines = store.get_bool(SETTING_PROPERTY_LINES).unwrap_or(true);
     let centre_moved = {
         let de = state.camera.0 - state.parcel_center.0;
         let dn = state.camera.1 - state.parcel_center.1;
         de * de + dn * dn > PARCEL_MOVE_METRES * PARCEL_MOVE_METRES
     };
-    if show_lines && (state.parcel_dirty || centre_moved) {
+    if show_lines && state.parcel_task.is_none() && (state.parcel_dirty || centre_moved) {
         state.parcel_dirty = false;
-        state.parcel_center = (state.camera.0, state.camera.1);
-        state.parcel_tpm = tpm;
+        let center = (state.camera.0, state.camera.1);
         let show_sale = store.get_bool(SETTING_FOR_SALE).unwrap_or(true);
-        let parcel_center = state.parcel_center;
-        // Build into a fresh local raster, then publish it as a new `Arc`: the
-        // previous one may still be borrowed by an in-flight composite task.
-        let mut raster = LayerRaster::new(raster_size);
+        let mut samples: Vec<ParcelRegionSample> = Vec::new();
         for (region, _current) in &regions {
             let (region_east, region_north) = region.handle.global_coordinates();
-            let origin_east = narrow(f64::from(region_east) - parcel_center.0);
-            let origin_north = narrow(f64::from(region_north) - parcel_center.1);
-            // Each region's own decoded overlay (current region always;
-            // neighbours once their child circuit delivered one — Second Life
-            // pushes them on child establishment, OpenSim on parcel changes).
-            let grid = overlay.grid_of(region.handle);
-            let cell = |row: usize, col: usize| -> Option<ParcelCell> {
-                let cell = grid?.cell(row, col)?;
-                let fill = match cell.ownership {
-                    ParcelOwnership::ForSale => Some(minimap_math::ParcelFill::ForSale),
-                    ParcelOwnership::Auction => Some(minimap_math::ParcelFill::Auction),
-                    _other => None,
-                };
-                Some(ParcelCell {
-                    fill,
-                    west_line: cell.west_line,
-                    south_line: cell.south_line,
-                })
-            };
-            let grids_per_edge = grid.map_or(0, sl_client_bevy::ParcelOverlayGrid::grids_per_edge);
-            minimap_math::render_parcel_region(
-                &mut raster,
-                tpm,
-                origin_east,
-                origin_north,
-                minimap_math::REGION_WIDTH_METRES,
-                COLOR_PARCEL_LINE,
-                show_sale,
-                // A region without a decoded overlay (a neighbour) draws its
-                // full outline, since no edge cells supply its south / west
-                // property lines.
-                grid.is_none(),
-                grids_per_edge,
-                &cell,
-            );
+            samples.push(ParcelRegionSample {
+                origin_east: narrow(f64::from(region_east) - center.0),
+                origin_north: narrow(f64::from(region_north) - center.1),
+                // Each region's own decoded overlay (current region always;
+                // neighbours once their child circuit delivered one — Second
+                // Life pushes them on child establishment, OpenSim on parcel
+                // changes).
+                grid: overlay.grid_of(region.handle).cloned(),
+            });
         }
-        state.parcel_layer = Arc::new(raster);
-        state.last_stamp = None;
+        let input = ParcelLayerInput {
+            raster_size,
+            tpm,
+            show_sale,
+            regions: samples,
+        };
+        let task = AsyncComputeTaskPool::get().spawn(async move { build_parcel_layer(&input) });
+        state.parcel_task = Some(task);
+        state.parcel_pending_center = center;
+        state.parcel_pending_tpm = tpm;
     }
 }
 
@@ -1151,16 +1460,17 @@ fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
 /// Build one region's shaded terrain backdrop: 256×256 texels (one per metre,
 /// bottom-up rows), coloured from the decoded height patches and splat
 /// weights, hill-shaded, and tinted toward water below the water height.
-/// Cells with no decoded patch stay transparent.
+/// Cells with no decoded patch stay transparent. Takes an owned snapshot
+/// (patches / composition / water height) so it can run on the background pool.
 fn build_terrain_map(
-    terrain: &TerrainState,
-    water: &WaterState,
-    region: RegionHandle,
+    patches: &[TerrainPatch],
+    composition: Option<&TerrainComposition>,
+    water_height: f32,
 ) -> LayerRaster {
     /// The backdrop side, in texels (one per metre of a classic region).
     const SIDE: usize = 256;
     let mut heights = vec![f32::NAN; SIDE * SIDE];
-    for patch in terrain.land_patches_of(region) {
+    for patch in patches {
         let size = usize::try_from(patch.size).unwrap_or(16);
         let base_x = usize::try_from(patch.patch_x)
             .unwrap_or(0)
@@ -1187,8 +1497,6 @@ fn build_terrain_map(
             }
         }
     }
-    let water_height = water.height_of(region).unwrap_or(20.0);
-    let composition = terrain.composition_of(region);
     let mut raster = LayerRaster::new(256);
     let height_at = |x: usize, y: usize| -> f32 {
         heights
@@ -2838,8 +3146,10 @@ pub(crate) fn spawn_minimap_specimen(
 mod tests {
     use super::{
         COMPASS_MINOR, COMPASS_POINTS, MARK_COLORS, MINIMAP_MENU, MenuDef, MenuItemDef,
-        grid_index_at, phantom_alpha, range_metres, region_handle_at,
+        ObjectLayerInput, ObjectPose, ObjectSample, grid_index_at, phantom_alpha, range_metres,
+        region_handle_at,
     };
+    use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
     use pretty_assertions::assert_eq;
 
     /// Collect every action string reachable from a menu.
@@ -2937,5 +3247,114 @@ mod tests {
         assert!((range_metres(20) - 20.0).abs() < f32::EPSILON);
         assert!((range_metres(-5) - 0.0).abs() < f32::EPSILON);
         assert!((range_metres(1_000_000) - 4096.0).abs() < f32::EPSILON);
+    }
+
+    /// A reference pose the stationary tests perturb.
+    fn reference_pose() -> ObjectPose {
+        ObjectPose {
+            camera: (1000.0, 2000.0, 30.0),
+            heading: 0.5,
+            agent: Some((1001.0, 2001.0, 25.0)),
+            regions: 4,
+        }
+    }
+
+    #[test]
+    fn stationary_when_pose_unchanged() {
+        let pose = reference_pose();
+        assert!(pose.is_stationary_from(&pose));
+        // A sub-epsilon jitter is still stationary (avoids rebuild churn).
+        let jittered = ObjectPose {
+            camera: (1000.05, 2000.05, 30.05),
+            heading: 0.505,
+            ..pose
+        };
+        assert!(jittered.is_stationary_from(&pose));
+    }
+
+    #[test]
+    fn real_movement_defeats_the_throttle() {
+        let pose = reference_pose();
+        // A metre of camera travel is a real move.
+        let moved = ObjectPose {
+            camera: (1001.0, 2000.0, 30.0),
+            ..pose
+        };
+        assert!(!moved.is_stationary_from(&pose));
+        // A new neighbour region must force a rebuild.
+        let new_region = ObjectPose { regions: 5, ..pose };
+        assert!(!new_region.is_stationary_from(&pose));
+        // A turn past the heading epsilon must force a rebuild.
+        let turned = ObjectPose {
+            heading: 1.0,
+            ..pose
+        };
+        assert!(!turned.is_stationary_from(&pose));
+        // The avatar moving (even with the camera fixed) must force a rebuild.
+        let agent_moved = ObjectPose {
+            agent: Some((1005.0, 2001.0, 25.0)),
+            ..pose
+        };
+        assert!(!agent_moved.is_stationary_from(&pose));
+    }
+
+    #[test]
+    fn appearing_avatar_defeats_the_throttle() {
+        let pose = reference_pose();
+        let gained_agent = ObjectPose {
+            agent: None,
+            ..pose
+        };
+        // Gaining (or losing) a known avatar position is a mismatch, not close.
+        assert!(!pose.is_stationary_from(&gained_agent));
+        assert!(!gained_agent.is_stationary_from(&pose));
+    }
+
+    #[test]
+    fn object_layer_plots_owned_object_centre() {
+        // A single owned object at the capture centre must colour the middle of
+        // the raster (the off-thread builder mirrors the old inline loop).
+        let input = ObjectLayerInput {
+            raster_size: 64,
+            tpm: 1.0,
+            accents: ObjectAccents {
+                physical: false,
+                scripted: false,
+                temp_on_rez: false,
+                phantom_alpha: 255,
+            },
+            max_radius: 16.0,
+            objects: vec![ObjectSample {
+                rel_east: 0.0,
+                rel_north: 0.0,
+                up: 30.0,
+                flags: FLAG_YOU_OWNER,
+                scale: [2.0, 2.0, 2.0],
+                water_height: 20.0,
+            }],
+        };
+        let raster = super::build_object_layer(&input);
+        assert_eq!(raster.size, 64);
+        // The centre texel is opaque; a far corner stays transparent.
+        assert!(raster.get(32, 32)[3] > 0, "centre dot should be drawn");
+        assert_eq!(raster.get(0, 0)[3], 0, "corner should stay clear");
+    }
+
+    #[test]
+    fn empty_object_layer_is_transparent() {
+        let input = ObjectLayerInput {
+            raster_size: 32,
+            tpm: 1.0,
+            accents: ObjectAccents {
+                physical: false,
+                scripted: false,
+                temp_on_rez: false,
+                phantom_alpha: 255,
+            },
+            max_radius: 16.0,
+            objects: Vec::new(),
+        };
+        let raster = super::build_object_layer(&input);
+        assert!(raster.data.iter().all(|&byte| byte == 0));
     }
 }
