@@ -65,6 +65,25 @@ const MAX_TENSION_FORCE: f32 = 0.99;
 /// is treated as a 0.2 s step so the chain eases rather than exploding.
 const MAX_TIMESTEP: f32 = 0.2;
 
+/// The **fixed** time step the chain integrates at, decoupled from the render frame
+/// (a 60 FPS step). Unlike the reference, which integrates each frame's variable
+/// `secondsThisFrame` in one pass, [`FlexiChain::step`] accumulates real elapsed
+/// time and advances the chain in whole steps of exactly this size (a fixed-timestep
+/// accumulator; the leftover carries to the next frame).
+///
+/// This is what a stable spring sim needs and the reference lacks. A flexi's rest
+/// pose is a **per-step-size equilibrium** (gravity / user force scale linearly with
+/// the step, tension saturates), so if the step size tracked the frame time the
+/// equilibrium would drift with the frame rate — and a hitch (a snapshot read-back
+/// stall, an asset-decode burst, an alt-tab) would hand the integrator one huge step,
+/// shoving a settled chain far off its rest pose so it visibly swings back and
+/// re-settles. Integrating at a *constant* step instead pins the equilibrium: at any
+/// frame rate, and across any stall, a settled chain sees only more equilibrium-sized
+/// steps and so stays put, while a moving chain advances by the correct total sim
+/// time (frame-rate independent). A frame longer than [`MAX_TIMESTEP`] still caps the
+/// work (and drops the excess) so a long pause cannot spiral into unbounded catch-up.
+const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
+
 /// The tension decay base (Firestorm's `pow(0.85f, dt*30)`): the tension
 /// coefficient approaches its target with this per-`1/30 s` retention.
 const TENSION_DECAY_BASE: f32 = 0.85;
@@ -148,6 +167,11 @@ pub struct FlexiChain {
     sections: Vec<Section>,
     /// The simulated section count (`1 << softness`); the node count is one more.
     num_sections: usize,
+    /// Unspent real time carried between frames for the fixed-timestep accumulator
+    /// ([`FIXED_TIMESTEP`]): [`step`](Self::step) adds the frame's `dt`, integrates
+    /// as many whole [`FIXED_TIMESTEP`] steps as have accumulated, and keeps the
+    /// remainder (`< FIXED_TIMESTEP`) here for the next frame.
+    accumulator: f32,
 }
 
 impl FlexiChain {
@@ -216,6 +240,7 @@ impl FlexiChain {
         Self {
             sections,
             num_sections,
+            accumulator: 0.0,
         }
     }
 
@@ -227,14 +252,18 @@ impl FlexiChain {
         self.num_sections
     }
 
-    /// Advance the chain one frame of `dt` seconds, with the prim's current world
+    /// Advance the chain by the frame's `dt` seconds, with the prim's current world
     /// `base_position` / `base_rotation` and `object_scale` (metres per axis).
     ///
-    /// A faithful port of `doFlexibleUpdate`: it pins the anchor to the prim base,
-    /// then for each node integrates gravity, the user force, chain tension toward
-    /// the parent direction, and inertia, clamps the bend angle to the per-section
-    /// maximum, and re-derives each node's velocity and orientation. `dt` is
-    /// clamped to `MAX_TIMESTEP` (0.2 s); a non-positive `dt` is a no-op.
+    /// A **fixed-timestep accumulator**: `dt` is added to the carried remainder and
+    /// the chain is integrated in whole `FIXED_TIMESTEP` passes, keeping any leftover
+    /// (`< FIXED_TIMESTEP`) for the next frame. Integrating at a constant step —
+    /// rather than the reference's variable per-frame step — pins the flexi's rest
+    /// equilibrium so it neither drifts with the frame rate nor lurches after a hitch
+    /// (see `FIXED_TIMESTEP`); each pass runs the faithful `doFlexibleUpdate`
+    /// (`integrate`) body. The accumulated backlog is capped at `MAX_TIMESTEP`
+    /// (0.2 s) so a long stall cannot spiral into unbounded catch-up, and a
+    /// non-positive or `NaN` `dt` is a no-op.
     pub fn step(
         &mut self,
         attributes: &FlexiAttributes,
@@ -246,7 +275,36 @@ impl FlexiChain {
         if dt.is_nan() || dt <= 0.0 {
             return;
         }
-        let dt = dt.min(MAX_TIMESTEP);
+        // Accumulate the frame's elapsed time, then drain it in fixed steps. The
+        // backlog is bounded so a multi-second pause runs at most a dozen catch-up
+        // passes (and drops the rest) rather than freezing on a burst of integration.
+        self.accumulator = (self.accumulator + dt).min(MAX_TIMESTEP);
+        while self.accumulator >= FIXED_TIMESTEP {
+            self.integrate(
+                attributes,
+                object_scale,
+                base_position,
+                base_rotation,
+                FIXED_TIMESTEP,
+            );
+            self.accumulator -= FIXED_TIMESTEP;
+        }
+    }
+
+    /// One explicit-Euler integration pass over `dt` seconds — the faithful port of
+    /// `doFlexibleUpdate`'s body. Pins the anchor to the prim base, then for each
+    /// node integrates gravity, the user force, chain tension toward the parent
+    /// direction, and inertia, clamps the bend angle to the per-section maximum, and
+    /// re-derives each node's velocity and orientation. [`step`](Self::step) calls
+    /// this once per sub-step; `dt` here is already the (sub-)step size.
+    fn integrate(
+        &mut self,
+        attributes: &FlexiAttributes,
+        object_scale: [f32; 3],
+        base_position: [f32; 3],
+        base_rotation: [f32; 4],
+        dt: f32,
+    ) {
         let num_sections = self.num_sections;
         if self.sections.len() <= num_sections {
             return;
@@ -740,5 +798,120 @@ mod tests {
                 "zero-dt step moved a node: {a:?} vs {b:?}"
             );
         }
+    }
+
+    /// The fixed-timestep accumulator makes **frame splitting irrelevant**: one big
+    /// frame integrates the same chain as several smaller frames summing to it. This
+    /// is the property that keeps a hitch (one huge frame) equivalent to the many
+    /// normal frames it replaced, so a settled chain cannot lurch. Uses a total of
+    /// `0.18 s` — safely between the 10th and 11th `FIXED_TIMESTEP` boundary (10.8
+    /// steps) — so float rounding cannot make the two paths drain a different number
+    /// of fixed steps.
+    #[test]
+    fn a_split_frame_equals_one_whole_frame() {
+        let scale = [1.0, 1.0, 4.0];
+        let base_pos = [128.0, 128.0, 30.0];
+        // Laid on its side (local +Z along world +X) so gravity actually bends it —
+        // a straight-up chain would just settle axially and mask any divergence.
+        let base_rot = [
+            0.0,
+            -core::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+            core::f32::consts::FRAC_1_SQRT_2,
+        ];
+        let mut attrs = attributes();
+        attrs.user_force = [0.0, 0.5, 0.0];
+
+        // One 0.18 s frame (a hitch), against eighteen 0.01 s frames (normal play).
+        let mut whole = FlexiChain::new(&cylinder_shape(), &attrs, scale, base_pos, base_rot);
+        whole.step(&attrs, scale, base_pos, base_rot, 0.18);
+
+        let mut split = FlexiChain::new(&cylinder_shape(), &attrs, scale, base_pos, base_rot);
+        for _ in 0..18 {
+            split.step(&attrs, scale, base_pos, base_rot, 0.01);
+        }
+
+        let whole_path = whole.path(base_pos, base_rot, scale);
+        let split_path = split.path(base_pos, base_rot, scale);
+        for (w, s) in whole_path.points.iter().zip(split_path.points.iter()) {
+            for (wp, sp) in w.position.iter().zip(s.position.iter()) {
+                assert!(
+                    (wp - sp).abs() < 1.0e-6,
+                    "the hitch frame diverged from the frames it replaced: {w:?} vs {s:?}"
+                );
+            }
+        }
+    }
+
+    /// The bug (`viewer-flexi-resettle-after-snapshot`): a **settled** chain must not
+    /// lurch when a single hitch frame arrives. A settled chain is handed a `0.2 s`
+    /// frame two ways — the accumulating [`FlexiChain::step`] and a single raw
+    /// [`FlexiChain::integrate`] pass (the reference's one-shot behaviour) — and the
+    /// accumulated chain moves far less: it stays on its fixed-timestep equilibrium
+    /// while the one-shot pass visibly swings out.
+    #[test]
+    fn a_settled_chain_survives_a_frame_spike() {
+        let scale = [1.0, 1.0, 4.0];
+        let base_pos = [128.0, 128.0, 30.0];
+        let base_rot = [
+            0.0,
+            -core::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+            core::f32::consts::FRAC_1_SQRT_2,
+        ];
+        // A gentle, near-straight chain: its rest bend sits below the angle clamp, so
+        // its equilibrium is genuinely step-size dependent (a chain forced hard into
+        // the clamp is pinned rigid and a big step cannot move it, hiding the effect).
+        let mut attrs = attributes();
+        attrs.user_force = [0.0, 0.5, 0.0];
+
+        // Settle through `step` so the rest pose is the fixed-timestep equilibrium —
+        // the state the live viewer sits in for minutes, regardless of frame rate.
+        let mut chain = FlexiChain::new(&cylinder_shape(), &attrs, scale, base_pos, base_rot);
+        let frame = 1.0 / 60.0;
+        for _ in 0..600 {
+            chain.step(&attrs, scale, base_pos, base_rot, frame);
+        }
+        let settled_tip = chain
+            .path(base_pos, base_rot, scale)
+            .points
+            .last()
+            .copied()
+            .unwrap_or_default()
+            .position;
+
+        // Distance the tip moves from that rest pose under a 0.2 s hitch frame.
+        let displacement = |mut c: FlexiChain, one_shot: bool| -> f32 {
+            if one_shot {
+                c.integrate(&attrs, scale, base_pos, base_rot, 0.2);
+            } else {
+                c.step(&attrs, scale, base_pos, base_rot, 0.2);
+            }
+            let tip = c
+                .path(base_pos, base_rot, scale)
+                .points
+                .last()
+                .copied()
+                .unwrap_or_default()
+                .position;
+            ((tip[0] - settled_tip[0]).powi(2)
+                + (tip[1] - settled_tip[1]).powi(2)
+                + (tip[2] - settled_tip[2]).powi(2))
+            .sqrt()
+        };
+
+        let one_shot = displacement(chain.clone(), true);
+        let accumulated = displacement(chain, false);
+        // The one-shot pass shoves the tip a visible distance off its rest pose (the
+        // swing the user sees); the accumulator keeps it an order of magnitude closer.
+        assert!(
+            one_shot > 0.005,
+            "the one-shot 0.2 s pass should lurch a settled chain (moved {one_shot})"
+        );
+        assert!(
+            accumulated < one_shot * 0.2,
+            "the fixed-timestep accumulator should keep the settled chain near rest \
+             (accumulated {accumulated} vs one-shot {one_shot})"
+        );
     }
 }

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 14 |
-| done | 634 |
+| done | 635 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1105** |
+| **total** | **1106** |
 
 ## ideas (55)
 
@@ -1127,8 +1127,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
-- [`viewer-flexi-resettle-after-snapshot`](bugs/viewer-flexi-resettle-after-snapshot.md)
-  — Flexi prims re-settle after taking a snapshot
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1139,6 +1137,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resolved)
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
+- [`viewer-snapshot-chat-overlay-not-hidden`](bugs/viewer-snapshot-chat-overlay-not-hidden.md)
+  — Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1154,7 +1154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (634)
+## done (635)
 
 ### protocol
 
@@ -1376,6 +1376,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
+- [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
+  — Flexi prims re-settle after taking a snapshot
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))

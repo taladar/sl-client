@@ -62,6 +62,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
@@ -209,6 +210,7 @@ impl Plugin for SnapshotFloaterPlugin {
                     start_capture,
                     drive_capture,
                     process_shot,
+                    poll_snapshot_saves,
                 )
                     .chain(),
             );
@@ -968,13 +970,14 @@ fn drive_capture(
 }
 
 /// Finish a capture once its frame lands: update the preview, and (for a save)
-/// encode the frame to disk and echo the path to chat. The visual restore of the
-/// hidden layers is handled on a timer by [`drive_capture`], not here, so it never
-/// waits on this callback.
+/// hand the frame to an off-thread [`spawn_save_task`] that encodes and writes it.
+/// The visual restore of the hidden layers is handled on a timer by
+/// [`drive_capture`], not here, so it never waits on this callback; the saved path
+/// is echoed to chat later by [`poll_snapshot_saves`], once the write completes.
 #[expect(
     clippy::too_many_arguments,
     reason = "finishing one capture reads the shot + state, updates the preview image asset + its \
-              node + hint, and reports to both nearby chat and the localised status line"
+              node + hint, and spawns the off-thread write while setting the localised status line"
 )]
 fn process_shot(
     mut shot: ResMut<CapturedShot>,
@@ -983,7 +986,7 @@ fn process_shot(
     mut images: ResMut<Assets<Image>>,
     mut nodes: Query<&mut Node>,
     mut image_nodes: Query<&mut ImageNode>,
-    mut notices: MessageWriter<LocalChatNotice>,
+    mut commands: Commands,
     local_tz: Option<Res<LocalTimeZone>>,
     translator: Translator,
 ) {
@@ -1015,13 +1018,13 @@ fn process_shot(
         state.status = StatusKind::Ready;
         return;
     }
-    match save_to_disk(&mut state, local_tz.as_deref(), &dynamic) {
-        Ok(path) => {
-            let saved = path.display().to_string();
-            let message =
-                translator.format("snapshot-saved", &TransArgs::new().text("path", &saved));
-            notices.write(LocalChatNotice::new(message.clone()));
-            state.status = StatusKind::Message(message);
+    // Resolve the destination on the frame thread (cheap, no IO), then offload the
+    // encode + write so the heavy PNG/JPEG deflate and disk write never stall the
+    // frame. The status stays `Working` until `poll_snapshot_saves` reports the
+    // finished write; only the (synchronous) "no directory" case resolves here.
+    match resolve_save_dest(&mut state, local_tz.as_deref()) {
+        Ok(dest) => {
+            commands.spawn(SnapshotSaveTask(spawn_save_task(dynamic, dest)));
         }
         Err(SaveError::NoDir) => {
             state.status = StatusKind::Message(translator.get("snapshot-no-dir"));
@@ -1032,6 +1035,47 @@ fn process_shot(
                 &TransArgs::new().text("error", &error),
             ));
         }
+    }
+}
+
+/// A pending off-thread snapshot write, spawned by [`process_shot`] and drained by
+/// [`poll_snapshot_saves`]. The task yields the written path on success, or a
+/// formatted error string (a `create_dir_all` or encode/write failure) — so a
+/// failed save still surfaces on the status line rather than being swallowed.
+#[derive(Component)]
+struct SnapshotSaveTask(Task<Result<PathBuf, String>>);
+
+/// Poll the off-thread snapshot writes; when one finishes, echo the saved path to
+/// nearby chat and the status line (or surface the write error), then drop the task
+/// entity. Runs every frame after [`process_shot`]; a write in flight costs one
+/// cheap non-blocking poll.
+fn poll_snapshot_saves(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &mut SnapshotSaveTask)>,
+    mut state: ResMut<SnapshotState>,
+    mut notices: MessageWriter<LocalChatNotice>,
+    translator: Translator,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = block_on(poll_once(&mut task.0)) else {
+            continue;
+        };
+        match result {
+            Ok(path) => {
+                let saved = path.display().to_string();
+                let message =
+                    translator.format("snapshot-saved", &TransArgs::new().text("path", &saved));
+                notices.write(LocalChatNotice::new(message.clone()));
+                state.status = StatusKind::Message(message);
+            }
+            Err(error) => {
+                state.status = StatusKind::Message(translator.format(
+                    "snapshot-save-failed",
+                    &TransArgs::new().text("error", &error),
+                ));
+            }
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -1065,25 +1109,38 @@ fn update_preview(
     }
 }
 
-/// A disk-save failure.
+/// A disk-save failure resolved **synchronously**, before the off-thread write.
 enum SaveError {
     /// No snapshots directory exists on this platform.
     NoDir,
-    /// The directory could not be created, or the encode / write failed.
+    /// The selected extension has no `image` encoder (should not happen — every
+    /// [`FORMATS`] entry is validated in tests — but handled rather than panicked).
     Io(String),
 }
 
-/// Encode a captured frame to the next output path under the snapshots directory,
-/// at the window's own resolution, in the selected format. Returns the written
-/// path. The filename carries a human-readable **local** ISO-8601 stamp from the
-/// startup-captured [`LocalTimeZone`].
-fn save_to_disk(
+/// The resolved destination for a snapshot save: the directory to ensure exists, the
+/// full output path, and the encoder inferred from its extension. Only these (pure,
+/// no-IO) decisions are made on the frame thread; [`spawn_save_task`] does the
+/// `create_dir_all`, encode and write off it.
+struct SaveDest {
+    /// The snapshots directory (created by the write task if it is missing).
+    dir: PathBuf,
+    /// The full output path the frame is written to.
+    path: PathBuf,
+    /// The encoder inferred from the path's extension.
+    format: image::ImageFormat,
+}
+
+/// Resolve the next output destination under the snapshots directory on the frame
+/// thread — a filename carrying a human-readable **local** ISO-8601 stamp (from the
+/// startup-captured [`LocalTimeZone`]) plus the per-session counter, and the encoder
+/// for the selected format. No IO happens here; the directory create + encode +
+/// write is deferred to [`spawn_save_task`].
+fn resolve_save_dest(
     state: &mut SnapshotState,
     zone: Option<&LocalTimeZone>,
-    dynamic: &image::DynamicImage,
-) -> Result<PathBuf, SaveError> {
+) -> Result<SaveDest, SaveError> {
     let dir = crate::paths::snapshots_dir().ok_or(SaveError::NoDir)?;
-    fs_err::create_dir_all(&dir).map_err(|error| SaveError::Io(error.to_string()))?;
     state.counter = state.counter.wrapping_add(1);
     let name = format!(
         "snapshot-{}-{}.{}",
@@ -1094,10 +1151,28 @@ fn save_to_disk(
     let path = dir.join(name);
     let format =
         image::ImageFormat::from_path(&path).map_err(|error| SaveError::Io(error.to_string()))?;
-    dynamic
-        .save_with_format(&path, format)
-        .map_err(|error| SaveError::Io(error.to_string()))?;
-    Ok(path)
+    Ok(SaveDest { dir, path, format })
+}
+
+/// Spawn the off-thread encode + write of `dynamic` to `dest` on Bevy's
+/// [`IoTaskPool`], returning the [`Task`] [`poll_snapshot_saves`] drains.
+///
+/// The full-resolution PNG/JPEG encode (a deflate pass) plus the disk write is the
+/// several-hundred-millisecond stall that must never run on the frame thread: a
+/// hitch there spikes the next frame's `Time::delta`, which — before flexi
+/// sub-stepping — made nearby flexi prims visibly re-settle
+/// (`viewer-flexi-resettle-after-snapshot`) and still costs a dropped frame for
+/// every other per-frame simulation. Off-thread, the capture costs the frame
+/// nothing past the (already off-thread) GPU read-back.
+fn spawn_save_task(dynamic: image::DynamicImage, dest: SaveDest) -> Task<Result<PathBuf, String>> {
+    IoTaskPool::get().spawn(async move {
+        let SaveDest { dir, path, format } = dest;
+        fs_err::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        dynamic
+            .save_with_format(&path, format)
+            .map_err(|error| error.to_string())?;
+        Ok(path)
+    })
 }
 
 /// The current **local** time as a filename-safe ISO-8601 stamp
