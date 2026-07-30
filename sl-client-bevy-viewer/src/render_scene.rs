@@ -2441,6 +2441,8 @@ fn flexi_streamer(
         shape,
         softness: data.softness,
         face_entities,
+        // Unlatched: the chain settles onto its rest pose before it stops re-uploading.
+        rest: None,
     });
 }
 

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 637 |
+| done | 638 |
 | deferred | 19 |
 | wont-do | 6 |
-| **total** | **1106** |
+| **total** | **1107** |
 
 ## ideas (55)
 
@@ -64,8 +64,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar ground probe — stop per-frame full-scene raycasts
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
   — Chat transcript via virtual list — stop re-shaping the whole history
-- [`viewer-perf-flexi-settle-lod`](ideas/viewer-perf-flexi-settle-lod.md) —
-  Flexi prims — settle detection, distance LOD, stop per-frame re-upload
+- [`viewer-perf-flexi-distance-lod`](ideas/viewer-perf-flexi-distance-lod.md) —
+  Flexi prims — distance / pixel-area LOD and tessellation-allocation reuse
 - [`viewer-perf-frame-churn-cleanups`](ideas/viewer-perf-frame-churn-cleanups.md)
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
@@ -1149,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (637)
+## done (638)
 
 ### protocol
 
@@ -1706,6 +1706,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
+  — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))

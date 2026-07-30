@@ -41,7 +41,10 @@
 //!   simulate / render section count and update period by its on-screen pixel
 //!   area (`updateRenderRes` / `doIdleUpdate`); here the section count is fixed by
 //!   the softness (`1 << softness`) and every chain steps every frame. Flexi prims
-//!   are few and low-resolution (at most eight sections), so this is cheap.
+//!   are few and low-resolution (at most eight sections), so the step itself is
+//!   cheap; the expensive part (re-tessellating the profile sweep and re-uploading
+//!   the vertex buffers) is what the viewer skips once a chain has settled, using
+//!   the movement [`FlexiChain::step`] reports (`viewer-perf-flexi-settle-lod`).
 //! - **No wind.** The viewer has no region wind field, so the wind force is zero
 //!   (the `wind_sensitivity` param is ingested but contributes nothing).
 //! - **No collision sphere.** The reference's collision-sphere push-out is
@@ -253,7 +256,9 @@ impl FlexiChain {
     }
 
     /// Advance the chain by the frame's `dt` seconds, with the prim's current world
-    /// `base_position` / `base_rotation` and `object_scale` (metres per axis).
+    /// `base_position` / `base_rotation` and `object_scale` (metres per axis), and
+    /// return how far the chain **moved** this frame — the largest single-step node
+    /// displacement in metres (0.0 for a no-op frame).
     ///
     /// A **fixed-timestep accumulator**: `dt` is added to the carried remainder and
     /// the chain is integrated in whole `FIXED_TIMESTEP` passes, keeping any leftover
@@ -264,6 +269,14 @@ impl FlexiChain {
     /// (`integrate`) body. The accumulated backlog is capped at `MAX_TIMESTEP`
     /// (0.2 s) so a long stall cannot spiral into unbounded catch-up, and a
     /// non-positive or `NaN` `dt` is a no-op.
+    ///
+    /// The returned movement is the viewer's **settle** signal
+    /// (`viewer-perf-flexi-settle-lod`): once a chain has relaxed onto its
+    /// fixed-timestep equilibrium every step barely moves a node, so the viewer can
+    /// bank the tiny movement and skip re-tessellating / re-uploading the geometry
+    /// until an anchor move or a force / gravity change wakes it. A frame that banks
+    /// time without draining a whole fixed step (a fast frame) integrates nothing and
+    /// so returns 0.0 — correct, since the geometry is unchanged that frame.
     pub fn step(
         &mut self,
         attributes: &FlexiAttributes,
@@ -271,24 +284,27 @@ impl FlexiChain {
         base_position: [f32; 3],
         base_rotation: [f32; 4],
         dt: f32,
-    ) {
+    ) -> f32 {
         if dt.is_nan() || dt <= 0.0 {
-            return;
+            return 0.0;
         }
         // Accumulate the frame's elapsed time, then drain it in fixed steps. The
         // backlog is bounded so a multi-second pause runs at most a dozen catch-up
         // passes (and drops the rest) rather than freezing on a burst of integration.
         self.accumulator = (self.accumulator + dt).min(MAX_TIMESTEP);
+        let mut max_move = 0.0_f32;
         while self.accumulator >= FIXED_TIMESTEP {
-            self.integrate(
+            let moved = self.integrate(
                 attributes,
                 object_scale,
                 base_position,
                 base_rotation,
                 FIXED_TIMESTEP,
             );
+            max_move = max_move.max(moved);
             self.accumulator -= FIXED_TIMESTEP;
         }
+        max_move
     }
 
     /// One explicit-Euler integration pass over `dt` seconds — the faithful port of
@@ -297,6 +313,10 @@ impl FlexiChain {
     /// direction, and inertia, clamps the bend angle to the per-section maximum, and
     /// re-derives each node's velocity and orientation. [`step`](Self::step) calls
     /// this once per sub-step; `dt` here is already the (sub-)step size.
+    ///
+    /// Returns the largest distance any node (including the pinned anchor) moved this
+    /// pass, in metres — the raw material for [`step`](Self::step)'s settle signal. A
+    /// degenerate chain (too few nodes) reports no movement.
     fn integrate(
         &mut self,
         attributes: &FlexiAttributes,
@@ -304,22 +324,32 @@ impl FlexiChain {
         base_position: [f32; 3],
         base_rotation: [f32; 4],
         dt: f32,
-    ) {
+    ) -> f32 {
         let num_sections = self.num_sections;
         if self.sections.len() <= num_sections {
-            return;
+            return 0.0;
         }
 
         let scale_z = object_scale.get(2).copied().unwrap_or(1.0);
         let section_length = scale_z / usize_to_f32(num_sections);
 
+        // The largest node displacement this pass (squared until the final `sqrt`),
+        // seeded with the anchor's reposition so an anchor-only move (the prim glides
+        // without bending) still reads as motion and wakes a settled prim.
+        let mut max_move_sq = 0.0_f32;
+
         // Anchor node (0): pinned to the prim base each frame.
         let anchor_direction = rotate_vector(base_rotation, [0.0, 0.0, 1.0]);
         let anchor_position = vec_sub(base_position, vec_scale(anchor_direction, scale_z * 0.5));
+        let anchor_was = self.sections.first().map(|anchor| anchor.position);
         if let Some(anchor) = self.sections.first_mut() {
             anchor.position = anchor_position;
             anchor.direction = anchor_direction;
             anchor.rotation = base_rotation;
+        }
+        if let Some(was) = anchor_was {
+            let moved = vec_sub(anchor_position, was);
+            max_move_sq = max_move_sq.max(dot(moved, moved));
         }
 
         // Coefficients constant across sections this frame.
@@ -409,8 +439,11 @@ impl FlexiChain {
             );
             cur.rotation = segment_rotation;
 
-            // Velocity is the frame's position delta, clamped to unit length.
+            // Velocity is the frame's position delta, clamped to unit length; its
+            // pre-clamp magnitude is also this node's contribution to the settle
+            // signal (how far it actually moved this pass).
             let mut velocity = vec_sub(cur.position, last_position);
+            max_move_sq = max_move_sq.max(dot(velocity, velocity));
             if dot(velocity, velocity) > 1.0 {
                 velocity = normalize(velocity);
             }
@@ -429,6 +462,8 @@ impl FlexiChain {
                 *slot = cur;
             }
         }
+
+        max_move_sq.sqrt()
     }
 
     /// Read the current chain out as a deformed extrusion [`Path`], in **metre**
@@ -774,6 +809,81 @@ mod tests {
         );
         // The tip stays finite (the chain does not explode).
         assert!(tip.position.iter().all(|c| c.is_finite()));
+    }
+
+    /// [`FlexiChain::step`] reports the chain's movement, and it **decays toward
+    /// zero** as the chain settles (`viewer-perf-flexi-settle-lod`): the first steps
+    /// off the straight rest pose move a node a visible distance, but after a second
+    /// of relaxation onto the fixed-timestep equilibrium each step barely moves — the
+    /// signal the viewer thresholds to stop re-uploading a settled prim.
+    #[test]
+    fn step_movement_decays_as_the_chain_settles() {
+        let scale = [1.0, 1.0, 4.0];
+        let base_pos = [128.0, 128.0, 30.0];
+        // Laid on its side so gravity actually bends it (a straight-up chain settles
+        // axially with almost no lateral motion).
+        let base_rot = [
+            0.0,
+            -core::f32::consts::FRAC_1_SQRT_2,
+            0.0,
+            core::f32::consts::FRAC_1_SQRT_2,
+        ];
+        let attrs = attributes();
+        let mut chain = FlexiChain::new(&cylinder_shape(), &attrs, scale, base_pos, base_rot);
+        let frame = 1.0 / 60.0;
+
+        let first = chain.step(&attrs, scale, base_pos, base_rot, frame);
+        assert!(
+            first > 1.0e-4,
+            "the chain should visibly move off its rest pose (moved {first})"
+        );
+
+        // Relax onto the equilibrium.
+        for _ in 0..600 {
+            chain.step(&attrs, scale, base_pos, base_rot, frame);
+        }
+        let settled = chain.step(&attrs, scale, base_pos, base_rot, frame);
+        // The settled chain sits on a tiny residual limit cycle (sub-millimetre per
+        // step), an order of magnitude below the first off-rest step — small enough
+        // that the viewer's settle latch treats it as at-rest.
+        assert!(
+            settled < 5.0e-4,
+            "a settled chain should report negligible movement (moved {settled})"
+        );
+        assert!(
+            settled < first * 0.1,
+            "movement should decay by an order of magnitude as the chain settles \
+             ({settled} vs {first})"
+        );
+    }
+
+    /// Moving the anchor wakes a settled chain: [`FlexiChain::step`] reports movement
+    /// on the frame the prim's base jumps, even though the chain was at rest — the
+    /// anchor's reposition is folded into the settle signal so a gliding prim (moved
+    /// without bending) is never wrongly treated as settled.
+    #[test]
+    fn moving_the_anchor_reports_movement() {
+        let scale = [1.0, 1.0, 4.0];
+        let base_rot = [0.0, 0.0, 0.0, 1.0];
+        let attrs = attributes();
+        let mut chain = FlexiChain::new(
+            &cylinder_shape(),
+            &attrs,
+            scale,
+            [128.0, 128.0, 30.0],
+            base_rot,
+        );
+        let frame = 1.0 / 60.0;
+        // Settle at the original base.
+        for _ in 0..600 {
+            chain.step(&attrs, scale, [128.0, 128.0, 30.0], base_rot, frame);
+        }
+        // Now teleport the base a metre sideways.
+        let moved = chain.step(&attrs, scale, [129.0, 128.0, 30.0], base_rot, frame);
+        assert!(
+            moved > 0.1,
+            "an anchor jump should register as movement (moved {moved})"
+        );
     }
 
     /// A non-positive `dt` is a no-op: the chain does not move.

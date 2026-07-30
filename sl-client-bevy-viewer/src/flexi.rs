@@ -87,6 +87,58 @@ use sl_client_bevy::{
 /// pixel-area managed; flexi prims are thin and few, so a smooth profile is cheap.
 pub(crate) const FLEXI_LOD: PrimLod = PrimLod::High;
 
+/// The per-step chain movement (metres) below which a flexi prim's chain is
+/// considered to have **settled** onto its rest pose (`viewer-perf-flexi-settle-lod`).
+///
+/// When [`FlexiChain::step`] reports the chain moved less than this in a frame, the
+/// transient is over: [`simulate_flexi`] does one last geometry rewrite and then
+/// **latches** the prim settled (recording the pose / attributes / scale it settled
+/// at, its [`FlexiRest`]), after which it is frozen and costs nothing until one of
+/// those inputs changes. A settled chain sits on a tiny residual limit cycle well
+/// below this threshold (~0.1 mm/step), so it latches reliably; 0.3 mm is also the
+/// worst-case geometry error frozen at the latch, far below a pixel at any normal
+/// viewing distance.
+///
+/// [`FlexiChain::step`]: sl_client_bevy::FlexiChain::step
+const STEP_SETTLE_EPSILON: f32 = 3.0e-4;
+
+/// The squared distance (metres²) the prim's anchor may drift from its settled pose
+/// before a latched flexi prim **wakes** (`viewer-perf-flexi-settle-lod`). One
+/// millimetre: a prim gliding slower than this per frame accumulates against its
+/// recorded rest pose (not the previous frame) and so still wakes once it has moved
+/// a millimetre in total, while true rest never trips it.
+const WAKE_POSITION_EPSILON_SQ: f32 = 1.0e-3 * 1.0e-3;
+
+/// How far the prim's anchor rotation may turn from its settled orientation (as
+/// `1 - |dot|` of the two quaternions) before a latched flexi prim **wakes**. A spin
+/// changes the chain's hang direction, so it must re-simulate; the sign-independent
+/// `|dot|` treats `q` and `-q` as the same orientation.
+const WAKE_ROTATION_EPSILON: f32 = 1.0e-5;
+
+/// How far the prim's metre scale may differ per axis from its settled value before a
+/// latched flexi prim **wakes** (`viewer-perf-flexi-settle-lod`). A tenth of a
+/// millimetre: below any real resize but enough to avoid an exact float compare.
+const WAKE_SCALE_EPSILON: f32 = 1.0e-4;
+
+/// The rest state a **settled** flexi prim is frozen at (`viewer-perf-flexi-settle-lod`):
+/// the anchor pose, dequantized attributes, and metre scale that produced its current
+/// geometry. [`simulate_flexi`] compares the live values against this each frame and,
+/// while they all still match (within [`WAKE_POSITION_EPSILON_SQ`] /
+/// [`WAKE_ROTATION_EPSILON`], exactly for attributes / scale), skips the prim
+/// entirely — no chain step, no re-tessellation, no GPU upload. Any mismatch (the prim
+/// moved, or a script changed its gravity / force / size) wakes it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct FlexiRest {
+    /// The prim's anchor world position (SL Z-up metres) at the latch.
+    base_position: [f32; 3],
+    /// The prim's anchor world rotation `(x, y, z, w)` at the latch.
+    base_rotation: [f32; 4],
+    /// The dequantized flexi attributes driving the chain at the latch.
+    attributes: FlexiAttributes,
+    /// The prim's metre scale at the latch.
+    scale: [f32; 3],
+}
+
 /// A component marking an object entity as a **flexible ("flexi") prim**, carrying
 /// the decoded `LLFlexibleObjectData` parameters in Second Life semantics — ready
 /// for P32.2 to drive a CPU chain simulation and deform the prim's path.
@@ -177,6 +229,13 @@ pub(crate) struct FlexiSimState {
     /// The prim's face entities (one per non-empty tessellated face, in order),
     /// whose position / normal attributes are overwritten each frame.
     pub(crate) face_entities: Vec<Entity>,
+    /// The rest state this prim is **settled** and frozen at, or `None` while its
+    /// chain is still moving (`viewer-perf-flexi-settle-lod`). `Some` skips the whole
+    /// per-frame cost (chain step, re-tessellation, GPU upload) until the prim's pose,
+    /// attributes, or scale change; `None` steps and re-uploads every frame until the
+    /// chain settles. Seeded `None` so the first frames drive the chain onto its rest
+    /// pose before it latches.
+    pub(crate) rest: Option<FlexiRest>,
 }
 
 /// Map a decoded [`FlexibleData`] block onto the pure solver's [`FlexiAttributes`]
@@ -215,6 +274,35 @@ fn sl_world_pose(global: &GlobalTransform) -> ([f32; 3], [f32; 4]) {
     )
 }
 
+/// Whether `current` is within [`WAKE_POSITION_EPSILON_SQ`] of the `rest` anchor
+/// position — i.e. the prim has not glided far enough to wake a settled chain.
+fn position_settled(current: [f32; 3], rest: [f32; 3]) -> bool {
+    let dx = current[0] - rest[0];
+    let dy = current[1] - rest[1];
+    let dz = current[2] - rest[2];
+    dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < WAKE_POSITION_EPSILON_SQ
+}
+
+/// Whether the prim's metre `scale` still matches the one it settled at (each axis
+/// within [`WAKE_SCALE_EPSILON`]) — i.e. it has not been resized. An exact array
+/// compare would flag `clippy::float_cmp`, and a resize is always far larger than
+/// this tolerance anyway.
+fn scale_settled(current: [f32; 3], rest: [f32; 3]) -> bool {
+    (current[0] - rest[0]).abs() < WAKE_SCALE_EPSILON
+        && (current[1] - rest[1]).abs() < WAKE_SCALE_EPSILON
+        && (current[2] - rest[2]).abs() < WAKE_SCALE_EPSILON
+}
+
+/// Whether `current` is within [`WAKE_ROTATION_EPSILON`] of the `rest` anchor
+/// rotation — i.e. the prim has not turned far enough to wake a settled chain. Uses
+/// the sign-independent `|dot|` so a quaternion and its negation (the same
+/// orientation) compare equal.
+fn rotation_settled(current: [f32; 4], rest: [f32; 4]) -> bool {
+    let dot =
+        current[0] * rest[0] + current[1] * rest[1] + current[2] * rest[2] + current[3] * rest[3];
+    dot.abs() > 1.0 - WAKE_ROTATION_EPSILON
+}
+
 /// Advance every flexi prim's chain one frame and re-tessellate its geometry
 /// (P32.2) — the flexi counterpart of [`drive_particles`](crate::particles).
 ///
@@ -225,6 +313,22 @@ fn sl_world_pose(global: &GlobalTransform) -> ([f32; 3], [f32; 4]) {
 /// mutated rather than respawned). A prim whose softness changed since the chain was
 /// built is skipped for the frame — the shape-fingerprint rebuild (which re-creates
 /// the state at the new node count) has already run this frame in `update_objects`.
+///
+/// **Settle latch (`viewer-perf-flexi-settle-detection`).** A settled flexi scene
+/// runs the whole per-frame cost — chain step, profile re-tessellation, vertex-buffer
+/// re-upload — for dozens of near-static prims (settled hair, skirts, chains, plants)
+/// with nothing changing. So once a prim's chain stops moving it is **latched**: the
+/// pose / attributes / scale it settled at are recorded in [`FlexiSimState::rest`],
+/// and while those inputs still match (the checks below) the prim is skipped entirely
+/// — no step, no tessellation, no upload. A prim moves off rest each frame until a
+/// [`FlexiChain::step`] reports movement below [`STEP_SETTLE_EPSILON`], when it does
+/// one last rewrite and latches. It wakes when the anchor glides
+/// ([`WAKE_POSITION_EPSILON_SQ`]) or turns ([`WAKE_ROTATION_EPSILON`]), or a
+/// script changes its attributes / scale. The `Aabb` a latched prim keeps (from its
+/// last rewrite) stays correct because its geometry is not changing, so frustum
+/// culling and ray-cast picking (`viewer-flexi-prim-picking`) still track it.
+///
+/// [`FlexiChain::step`]: sl_client_bevy::FlexiChain::step
 pub(crate) fn simulate_flexi(
     time: Res<Time>,
     mut sims: Query<(&ObjectFlexi, &mut FlexiSimState, &GlobalTransform)>,
@@ -247,8 +351,31 @@ pub(crate) fn simulate_flexi(
         let scale = flexi.scale;
         let (base_position, base_rotation) = sl_world_pose(global);
 
-        sim.chain
+        // A settled prim whose inputs are unchanged is frozen — no chain step, no
+        // re-tessellation, no GPU upload. Its geometry (and its `Aabb`, so picking /
+        // culling) still reflect the rest state it latched at.
+        if sim.rest.is_some_and(|rest| {
+            rest.attributes == attributes
+                && scale_settled(scale, rest.scale)
+                && position_settled(base_position, rest.base_position)
+                && rotation_settled(base_rotation, rest.base_rotation)
+        }) {
+            continue;
+        }
+
+        let moved = sim
+            .chain
             .step(&attributes, scale, base_position, base_rotation, dt);
+        // The chain has stopped moving: rewrite the geometry once more, then latch the
+        // prim settled at this pose / attributes / scale so it costs nothing until an
+        // input changes. While still moving, stay unlatched and re-upload every frame.
+        sim.rest = (moved < STEP_SETTLE_EPSILON).then_some(FlexiRest {
+            base_position,
+            base_rotation,
+            attributes,
+            scale,
+        });
+
         let path = sim.chain.path(base_position, base_rotation, scale);
         let prim = tessellate_with_path(&sim.shape, FLEXI_LOD, &path);
 
@@ -480,6 +607,7 @@ mod tests {
                 shape,
                 softness: 2,
                 face_entities: vec![face],
+                rest: None,
             },
             GlobalTransform::default(),
         ));
@@ -515,6 +643,229 @@ mod tests {
             .compute_aabb()
             .ok_or("mesh has no computable Aabb")?;
         assert_eq!(settled, expected);
+        Ok(())
+    }
+
+    /// The settle latch (`viewer-perf-flexi-settle-lod`): once a stationary flexi
+    /// prim's chain has settled, [`super::simulate_flexi`] **freezes** it and stops
+    /// rewriting its mesh — the expensive re-tessellation + GPU re-upload are skipped
+    /// every frame until an input changes. Proven by overwriting the settled mesh with
+    /// a distinctive sentinel and confirming later frames leave it untouched; a still-
+    /// running sim would replace it with the swept prim.
+    #[test]
+    fn a_settled_flexi_freezes_and_stops_rewriting() -> Result<(), TestError> {
+        use bevy::app::{App, TaskPoolPlugin, Update};
+        use bevy::asset::{AssetApp as _, AssetPlugin, Assets, RenderAssetUsages};
+        use bevy::mesh::{Mesh, Mesh3d, PrimitiveTopology, VertexAttributeValues};
+        use bevy::time::Time;
+        use bevy::transform::components::GlobalTransform;
+        use core::time::Duration;
+        use sl_client_bevy::{FlexiChain, PrimShapeFloat, PrimShapeParams};
+
+        /// Advance the clock one 16 ms frame (a whole fixed step) and run the app.
+        fn step(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_millis(16));
+            app.update();
+        }
+
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<Mesh>();
+        app.init_resource::<Time>();
+        app.add_systems(Update, super::simulate_flexi);
+
+        let rest = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.0, 0.01, 0.0]],
+        );
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(rest);
+        let face = app.world_mut().spawn(Mesh3d(handle.clone())).id();
+
+        // A gently-drooping flexi block, so it settles within a handful of frames.
+        let data = FlexibleData {
+            softness: 2,
+            tension: 1.0,
+            air_friction: 3.0,
+            gravity: 0.3,
+            wind_sensitivity: 0.0,
+            user_force: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        let shape = PrimShapeFloat::from_params(&PrimShapeParams::default());
+        let scale = [0.3, 0.3, 4.0];
+        let chain = FlexiChain::new(
+            &shape,
+            &super::flexi_attributes(&data),
+            scale,
+            [0.0; 3],
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        app.world_mut().spawn((
+            ObjectFlexi { data, scale },
+            super::FlexiSimState {
+                chain,
+                shape,
+                softness: 2,
+                face_entities: vec![face],
+                rest: None,
+            },
+            GlobalTransform::default(),
+        ));
+
+        // Let the chain relax and latch settled (the anchor never moves, so nothing
+        // will wake it once it does).
+        for _frame in 0..120 {
+            step(&mut app);
+        }
+
+        // Stamp a distinctive sentinel over the settled geometry.
+        let sentinel = vec![[7.0, 7.0, 7.0], [8.0, 8.0, 8.0], [9.0, 9.0, 9.0]];
+        {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            let mut mesh = meshes.get_mut(&handle).ok_or("mesh gone")?;
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, sentinel.clone());
+        }
+
+        // Run more frames: a frozen prim must not touch the mesh.
+        for _frame in 0..20 {
+            step(&mut app);
+        }
+
+        let mesh = app
+            .world()
+            .resource::<Assets<Mesh>>()
+            .get(&handle)
+            .ok_or("mesh gone")?;
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            return Err("mesh lost its position attribute".into());
+        };
+        assert_eq!(
+            positions, &sentinel,
+            "a settled flexi's mesh was rewritten — the settle latch did not freeze it"
+        );
+        Ok(())
+    }
+
+    /// Waking a settled flexi prim (`viewer-perf-flexi-settle-lod`): after it has
+    /// latched, **moving its anchor** must un-freeze it so its geometry follows —
+    /// otherwise a flexi antenna would stick in place as its wearer walks off. Proven
+    /// by settling the prim, stamping a sentinel, teleporting the anchor, and
+    /// confirming the sim overwrites the sentinel again.
+    #[test]
+    fn moving_a_settled_flexi_wakes_it() -> Result<(), TestError> {
+        use bevy::app::{App, TaskPoolPlugin, Update};
+        use bevy::asset::{AssetApp as _, AssetPlugin, Assets, RenderAssetUsages};
+        use bevy::mesh::{Mesh, Mesh3d, PrimitiveTopology, VertexAttributeValues};
+        use bevy::time::Time;
+        use bevy::transform::components::{GlobalTransform, Transform};
+        use core::time::Duration;
+        use sl_client_bevy::{FlexiChain, PrimShapeFloat, PrimShapeParams};
+
+        /// Advance the clock one 16 ms frame and run the app.
+        fn step(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_millis(16));
+            app.update();
+        }
+
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        app.init_asset::<Mesh>();
+        app.init_resource::<Time>();
+        app.add_systems(Update, super::simulate_flexi);
+
+        let rest = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.0, 0.01, 0.0]],
+        );
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(rest);
+        let face = app.world_mut().spawn(Mesh3d(handle.clone())).id();
+
+        let data = FlexibleData {
+            softness: 2,
+            tension: 1.0,
+            air_friction: 3.0,
+            gravity: 0.3,
+            wind_sensitivity: 0.0,
+            user_force: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        let shape = PrimShapeFloat::from_params(&PrimShapeParams::default());
+        let scale = [0.3, 0.3, 4.0];
+        let chain = FlexiChain::new(
+            &shape,
+            &super::flexi_attributes(&data),
+            scale,
+            [0.0; 3],
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        let prim = app
+            .world_mut()
+            .spawn((
+                ObjectFlexi { data, scale },
+                super::FlexiSimState {
+                    chain,
+                    shape,
+                    softness: 2,
+                    face_entities: vec![face],
+                    rest: None,
+                },
+                GlobalTransform::default(),
+            ))
+            .id();
+
+        // Settle.
+        for _frame in 0..120 {
+            step(&mut app);
+        }
+        // Sentinel over the settled geometry.
+        let sentinel = vec![[7.0, 7.0, 7.0], [8.0, 8.0, 8.0], [9.0, 9.0, 9.0]];
+        {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            let mut mesh = meshes.get_mut(&handle).ok_or("mesh gone")?;
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, sentinel.clone());
+        }
+
+        // Teleport the prim a couple of metres — well past the wake threshold.
+        app.world_mut()
+            .entity_mut(prim)
+            .insert(GlobalTransform::from(Transform::from_xyz(2.0, 0.0, 0.0)));
+
+        step(&mut app);
+
+        let mesh = app
+            .world()
+            .resource::<Assets<Mesh>>()
+            .get(&handle)
+            .ok_or("mesh gone")?;
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            return Err("mesh lost its position attribute".into());
+        };
+        assert_ne!(
+            positions, &sentinel,
+            "moving a settled flexi did not wake it — its geometry is stuck at the old pose"
+        );
         Ok(())
     }
 }

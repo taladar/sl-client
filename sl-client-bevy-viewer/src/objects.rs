@@ -1981,6 +1981,9 @@ fn apply_flexi_sim(
                 shape: PrimShapeFloat::from_params(&object.shape),
                 softness,
                 face_entities: face_entities.to_vec(),
+                // Unlatched: the first frames drive the fresh chain onto its rest pose
+                // before it latches settled and stops re-uploading.
+                rest: None,
             });
         }
         None => {
