@@ -34,3 +34,6 @@ __pycache__/
 # Runtime-generated viewer settings (persisted per user, not committed)
 viewer-settings.json
 viewer-settings.toml
+
+# Tracy machine-readable capture output (scripts/tracy-grab.sh)
+tracy-grab-*/

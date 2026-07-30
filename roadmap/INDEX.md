@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 254 |
+| ready | 259 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 13 |
+| bugs | 14 |
 | done | 640 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1110** |
+| **total** | **1116** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (254)
+## ready (259)
 
 ### protocol
 
@@ -545,6 +545,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
+  — Reduce avian3d collider-tree churn during bulk rez
+- [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
+  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
 - [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)
@@ -557,6 +561,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
+- [`viewer-perf-slfaceext-material-reprep`](ready/viewer-perf-slfaceext-material-reprep.md)
+  — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
+  — Dirty-gate terrain::update_terrain (runs every frame)
+- [`viewer-perf-ui-layout-per-frame-relayout`](ready/viewer-perf-ui-layout-per-frame-relayout.md)
+  — Cut per-frame UI layout cost — structural bevy_ui floor
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
@@ -1108,7 +1118,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1132,6 +1142,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-perf-minimap-layer-raster-offthread`](bugs/viewer-perf-minimap-layer-raster-offthread.md)
+  — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)

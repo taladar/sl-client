@@ -90,8 +90,17 @@ prints the top self-time zones. It needs the `tracy-capture` and
 `tracy-csvexport` utilities (from `$PATH`, or built under `$TRACY_DIR`; the
 script header has the `cmake` lines). Because Tracy accepts only **one**
 profiler connection, disconnect the GUI before capturing — or keep the GUI, use
-its **File -> Save trace**, and run `tracy-csvexport -e <file>` yourself. For a
-single zone's per-frame timeline (large, so always filtered):
+its **File -> Save trace**, and run `tracy-csvexport -e <file>` yourself.
+
+**Keep the window short (≤ ~10–15 s).** A full-instrumentation Bevy trace emits
+~5 k zones per frame (every system, every stage), so a 30 s capture is ~6 M
+zones / ~88 MB. At that size the shared `libTracyServer` **Worker load** does
+not terminate in reasonable time — a 30 s trace hung both `tracy-csvexport` (95
+min, 99.9 % CPU, no output) **and the Tracy GUI (stuck at 91 %)**. A 10 s trace
+(~1.2 M zones) loads and exports in seconds. For the "loading / rezzing"
+question a 10 s window right after the region handshake is the heaviest, most
+representative slice anyway. For a single zone's per-frame timeline (large, so
+always filtered):
 
 ```console
 tracy-csvexport -u -f composite_minimap trace.tracy
