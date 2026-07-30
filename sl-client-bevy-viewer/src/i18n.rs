@@ -140,7 +140,12 @@ impl Plugin for ViewerI18nPlugin {
                     apply_translations,
                     toggle_i18n_demo,
                     apply_i18n_demo_visibility.after(toggle_i18n_demo),
-                    update_i18n_demo_text,
+                    // The demo panel is hidden by default (F6 toggles it), so
+                    // gate its per-frame text rebuild on visibility: otherwise
+                    // it recomputes ~14 translated/formatted lines every frame
+                    // (profiled at 0.1–2.9 ms of frame time) only to discard
+                    // them against the change guard while nothing is on screen.
+                    update_i18n_demo_text.run_if(i18n_demo_visible),
                 ),
             );
     }
@@ -961,6 +966,13 @@ fn cycle_count(_activate: On<Activate>, mut count: ResMut<I18nDemoCount>) {
 /// Observer: advance the demo's gender selector.
 fn cycle_gender(_activate: On<Activate>, mut gender: ResMut<I18nDemoGender>) {
     *gender = gender.next();
+}
+
+/// Run condition: the i18n demo panel is currently shown. Gates
+/// [`update_i18n_demo_text`] so its per-frame line rebuild only runs while the
+/// panel is visible.
+fn i18n_demo_visible(visible: Res<I18nDemoVisible>) -> bool {
+    visible.0
 }
 
 /// Toggle the demo panel on `F6`.

@@ -60,8 +60,11 @@
 //! instant into the Pacific wall-clock components (with the US daylight-saving
 //! rules) that the locale formatter then renders.
 
+use core::time::Duration;
+
 use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
+use bevy::time::common_conditions::on_timer;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, LindenBalance, ParcelFlags, RegionFlags, SlAgentParcel, SlCommand, SlCurrentRegion,
@@ -314,7 +317,15 @@ impl Plugin for StatusBarPlugin {
                     request_balance_on_entry,
                     track_balance,
                     track_agent_position,
-                    update_status_readouts,
+                    // The read-outs are human-status text (region / coords /
+                    // balance / time / FPS): a ~10 Hz refresh is imperceptible,
+                    // but running the rewrite every frame re-dirties the FPS
+                    // slot's `Text` on almost every frame (the FPS integer keeps
+                    // changing), forcing bevy_ui to re-shape and re-measure that
+                    // text (`text_system` / `measure_text_system`) each frame.
+                    // Throttling to 10 Hz leaves most frames with no status-text
+                    // change at all.
+                    update_status_readouts.run_if(on_timer(Duration::from_millis(100))),
                     update_parcel_icons,
                 ),
             );
