@@ -8557,6 +8557,7 @@ dependencies = [
  "bevy",
  "bevy_flair",
  "bevy_fluent",
+ "bytemuck",
  "bytes",
  "clap",
  "crossbeam-channel",

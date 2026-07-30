@@ -41,11 +41,14 @@
 //!   velocity/acceleration Verlet step, `TARGET_POS` / `TARGET_LINEAR` attraction,
 //!   `BOUNCE`, `FOLLOW_SRC` drift, the per-particle colour / scale / glow
 //!   interpolation, and the age-out kill.
-//! - [`build_cloud_mesh`] ports `LLVOPartGroup::getGeometry` — each particle is a
-//!   quad built to face the camera (with the `FOLLOW_VELOCITY` re-orientation),
-//!   baked into one dynamic mesh per source, tinted by the per-vertex particle
-//!   colour and textured via the shared texture pipeline (or a procedural soft
-//!   sprite when the source names no texture, mirroring `sDefaultParticleImagep`).
+//! - [`build_cloud_instances`] turns the live particles into a compact per-particle
+//!   [`ParticleInstance`] buffer; the camera-facing billboard expansion
+//!   (`LLVOPartGroup::getGeometry`, with the `FOLLOW_VELOCITY` re-orientation) and
+//!   the texturing / lighting move onto the GPU in
+//!   [`particle_render`](crate::particle_render) — one shared unit-quad mesh, drawn
+//!   instanced. The source's sprite is resolved once through the shared texture
+//!   pipeline (or a procedural soft sprite when the source names no texture,
+//!   mirroring `sDefaultParticleImagep`).
 //!
 //! The simulation runs in **Bevy world space** (Y-up): a source's position and
 //! orientation come from its object entity's `GlobalTransform`, so the emitter
@@ -91,14 +94,17 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
-use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::batching::NoAutomaticBatching;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, to_bevy_image};
 
 use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_rotation;
-use crate::hud::{HUD_RENDER_LAYER, HudCamera, on_hud_layer};
+use crate::hud::{HUD_RENDER_LAYER, on_hud_layer};
+use crate::particle_render::{
+    ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances, ParticleQuad,
+};
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 
@@ -195,9 +201,10 @@ mod part_flags {
     pub(super) const BOUNCE: u32 = 0x04;
     /// Follow the source position with no rotation (`LL_PART_FOLLOW_SRC_MASK`).
     pub(super) const FOLLOW_SRC: u32 = 0x10;
-    /// Orient the billboard along the particle velocity
-    /// (`LL_PART_FOLLOW_VELOCITY_MASK`).
-    pub(super) const FOLLOW_VELOCITY: u32 = 0x20;
+    // `LL_PART_FOLLOW_VELOCITY_MASK` (`0x20`) orients the billboard along the particle
+    // velocity; that is a *render* decision, applied GPU-side in `particle.wgsl` (which
+    // reads the bit out of the per-instance `flags`), so it is not mirrored here — the
+    // CPU simulation never inspects it.
     /// Interpolate the velocity toward the source's target
     /// (`LL_PART_TARGET_POS_MASK`).
     pub(super) const TARGET_POS: u32 = 0x40;
@@ -595,29 +602,28 @@ struct Cloud {
     emitter: Emitter,
     /// The source's live particles.
     particles: Vec<Particle>,
-    /// The world-space entity carrying this source's baked billboard mesh (not a
-    /// child of the object entity — its geometry is in absolute world coordinates).
+    /// The world-space entity carrying this source's shared quad mesh plus the
+    /// per-frame [`ParticleInstances`] / [`ParticleDrawParams`] the instanced render
+    /// reads (not a child of the object entity — its particles are in absolute world
+    /// coordinates).
     entity: Entity,
-    /// The dynamic billboard mesh, rebuilt each frame from `particles`.
-    mesh: Handle<Mesh>,
-    /// The cloud's material (blend mode + texture), rebuilt only when the source
-    /// system changes.
-    material: Handle<StandardMaterial>,
-    /// The system this cloud's emitter and material were last configured for; a
-    /// change resets the emitter and re-derives the material.
+    /// The system this cloud's emitter was last configured for; a change resets the
+    /// emitter and re-resolves the texture.
     system: ParticleSystem,
-    /// Whether the cloud's diffuse texture has been resolved onto its material yet.
+    /// The resolved diffuse texture handle (the source's sprite, or the default soft
+    /// blob until — or unless — the named sprite decodes).
+    texture: Handle<Image>,
+    /// Whether the cloud's diffuse texture has been resolved yet.
     texture_applied: bool,
-    /// Whether the cloud entity is currently visible (has live geometry). Tracked so
+    /// Whether the cloud entity is currently visible (has live particles). Tracked so
     /// the `Visibility` component is only rewritten on a change, and so an empty
-    /// (zero-particle) cloud's mesh is left untouched rather than re-inserted empty
-    /// every frame — which trips bevy's mesh allocator (R26).
+    /// (zero-particle) cloud is hidden — kept out of the render queue — rather than
+    /// drawn with a zero-length instance buffer.
     visible: bool,
     /// Whether this source is a **HUD attachment** (P35.4): its cloud entity sits on
-    /// [`HUD_RENDER_LAYER`] (drawn by the HUD camera, not the fly camera), billboards
-    /// against the fixed HUD camera, and renders unlit. Tracked so a source whose HUD
-    /// classification arrives a frame late (the layer propagates in `PostUpdate`) is
-    /// re-layered when it flips.
+    /// [`HUD_RENDER_LAYER`] (drawn by the HUD camera, not the fly camera) and renders
+    /// unlit. Tracked so a source whose HUD classification arrives a frame late (the
+    /// layer propagates in `PostUpdate`) is re-layered when it flips.
     is_hud: bool,
 }
 
@@ -748,15 +754,16 @@ fn default_particle_image() -> Image {
     image
 }
 
-/// The alpha mode a particle system's blend function implies: an additive
+/// The blend mode a particle system's blend function implies: an additive
 /// (destination `ONE`) blend is the glow / fire look; anything else is ordinary
 /// source-over alpha. A whole system shares one blend function (it lives on the
-/// system's particle *template*), so one material per cloud suffices.
-const fn alpha_mode_for(system: &ParticleSystem) -> AlphaMode {
+/// system's particle *template*), so one choice per cloud drives the pipeline
+/// specialization in [`particle_render`](crate::particle_render).
+const fn particle_blend(system: &ParticleSystem) -> ParticleBlend {
     if system.part_blend_func_dest == LL_PART_BF_ONE {
-        AlphaMode::Add
+        ParticleBlend::Additive
     } else {
-        AlphaMode::Blend
+        ParticleBlend::Alpha
     }
 }
 
@@ -769,27 +776,6 @@ const fn is_unlit(system: &ParticleSystem, is_hud: bool) -> bool {
     is_hud
         || system.part_flags & part_flags::EMISSIVE != 0
         || system.part_blend_func_dest == LL_PART_BF_ONE
-}
-
-/// Build the material for a cloud from its system's blend function, with the
-/// default sprite as its initial texture. Emissive / additive (and HUD) particles
-/// are drawn unlit (fullbright, as the reference draws most particles); the material
-/// is double-sided (the billboards face the camera either way).
-fn particle_material(
-    system: &ParticleSystem,
-    is_hud: bool,
-    default_image: Handle<Image>,
-) -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: Some(default_image),
-        alpha_mode: alpha_mode_for(system),
-        unlit: is_unlit(system, is_hud),
-        cull_mode: None,
-        // Do not occlude other transparent geometry with particle depth.
-        depth_bias: 0.0,
-        ..default()
-    }
 }
 
 /// Convert a Second Life [`Vector`](sl_client_bevy::Vector) into a Bevy [`Vec3`]
@@ -861,101 +847,40 @@ pub(crate) const fn float_to_u8(value: f32) -> u8 {
     value.clamp(0.0, 255.0) as u8
 }
 
-/// Build the dynamic billboard mesh for a cloud's live particles, each a
-/// camera-facing quad — a port of `LLVOPartGroup::getGeometry`. Positions are in
-/// absolute Bevy world space (the cloud entity has an identity transform).
-fn build_cloud_mesh(particles: &[Particle], camera_pos: Vec3) -> Mesh {
+/// Turn a cloud's live particles into the compact per-particle [`ParticleInstance`]
+/// buffer the instanced render uploads — the CPU side of what was `build_cloud_mesh`.
+/// The camera-facing billboard expansion (`LLVOPartGroup::getGeometry`, with the
+/// `FOLLOW_VELOCITY` re-orientation) now lives in the vertex shader
+/// ([`particle.wgsl`](../particle.wgsl)); each record just carries the particle's world
+/// position, size, colour, velocity, and flags. Positions are in absolute Bevy world
+/// space (the cloud entity has an identity transform).
+fn build_cloud_instances(particles: &[Particle]) -> Vec<ParticleInstance> {
+    particles
+        .iter()
+        .map(|part| ParticleInstance {
+            position: part.pos.to_array(),
+            scale: part.scale,
+            color: part.color,
+            velocity: part.velocity.to_array(),
+            flags: part.flags,
+        })
+        .collect()
+}
+
+/// The world-space centroid of a cloud's live particles — the transparency sort key for
+/// the cloud (its entity sits at the origin, so the entity transform is no help),
+/// falling back to `default` (the source position) for an empty cloud.
+fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
     let count = particles.len();
-    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(count.saturating_mul(4));
-    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(count.saturating_mul(4));
-    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(count.saturating_mul(4));
-    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(count.saturating_mul(4));
-    let mut indices: Vec<u32> = Vec::with_capacity(count.saturating_mul(6));
-    let mut base: u32 = 0;
-
+    if count == 0 {
+        return default;
+    }
+    let mut sum = Vec3::ZERO;
     for part in particles {
-        let (v0, v1, v2, v3, normal) = billboard_quad(part, camera_pos);
-        positions.push(v0.to_array());
-        positions.push(v1.to_array());
-        positions.push(v2.to_array());
-        positions.push(v3.to_array());
-        for _ in 0..4 {
-            normals.push(normal.to_array());
-            colors.push(part.color);
-        }
-        // The texcoords the reference assigns to the four billboard corners.
-        uvs.push([0.0, 1.0]);
-        uvs.push([0.0, 0.0]);
-        uvs.push([1.0, 1.0]);
-        uvs.push([1.0, 0.0]);
-        // Two triangles over the quad (winding is irrelevant — the material is
-        // double-sided).
-        for offset in [0, 1, 2, 2, 1, 3] {
-            indices.push(base.saturating_add(offset));
-        }
-        base = base.saturating_add(4);
+        sum = v_add(sum, part.pos);
     }
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
-
-/// The four world-space corners and the normal of one particle's camera-facing
-/// billboard quad, a port of `LLVOPartGroup::getGeometry` (the non-ribbon path),
-/// including the `FOLLOW_VELOCITY` re-orientation.
-fn billboard_quad(part: &Particle, camera_pos: Vec3) -> (Vec3, Vec3, Vec3, Vec3, Vec3) {
-    let at = v_sub(part.pos, camera_pos);
-    // The camera-facing basis: right ⊥ (at, up), then up ⊥ (right, at).
-    let up_world = Vec3::Y;
-    let mut right = normalize_or(at.cross(up_world), Vec3::X);
-    let mut up = normalize_or(right.cross(at), Vec3::Y);
-
-    // Orient the billboard along the velocity when flagged (streak the sprite in
-    // its direction of travel).
-    if part.flags & part_flags::FOLLOW_VELOCITY != 0 && part.velocity != Vec3::ZERO {
-        let nv = part.velocity.normalize_or_zero();
-        let f0 = nv.dot(right);
-        let f1 = nv.dot(up);
-        let len = (f0 * f0 + f1 * f1).sqrt();
-        if len > 1.0e-4 {
-            let f0n = f0 / len;
-            let f1n = f1 / len;
-            let new_up = v_add(v_scale(right, f0n), v_scale(up, f1n));
-            let new_right = v_sub(v_scale(right, f1n), v_scale(up, f0n));
-            up = normalize_or(new_up, up);
-            right = normalize_or(new_right, right);
-        }
-    }
-
-    let half_right = v_scale(right, 0.5 * part.scale[0]);
-    let half_up = v_scale(up, 0.5 * part.scale[1]);
-    let pos_plus_up = v_add(part.pos, half_up);
-    let pos_minus_up = v_sub(part.pos, half_up);
-    let normal = normalize_or(v_scale(at, -1.0), Vec3::Z);
-    (
-        v_sub(pos_plus_up, half_right),
-        v_sub(pos_minus_up, half_right),
-        v_add(pos_plus_up, half_right),
-        v_add(pos_minus_up, half_right),
-        normal,
-    )
-}
-
-/// Normalise `v`, or return `fallback` if it is too short to normalise stably.
-fn normalize_or(v: Vec3, fallback: Vec3) -> Vec3 {
-    if v.length_squared() > 1.0e-12 {
-        v.normalize()
-    } else {
-        fallback
-    }
+    let inv = 1.0 / f32::from(u16::try_from(count).unwrap_or(u16::MAX));
+    v_scale(sum, inv)
 }
 
 /// Drive the particle simulation and render (P30.2): for every live particle
@@ -980,10 +905,7 @@ pub(crate) fn drive_particles(
         &GlobalTransform,
         Option<&RenderLayers>,
     )>,
-    camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    hud_camera: Query<&GlobalTransform, (With<HudCamera>, Without<ViewerCamera>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    quad: Res<ParticleQuad>,
     mut images: ResMut<Assets<Image>>,
     mut manager: ResMut<TextureManager>,
     default_image: Res<DefaultParticleImage>,
@@ -993,18 +915,6 @@ pub(crate) fn drive_particles(
     // flag, mirrored — read once and cached. Defaulted on (HUD particles emit).
     mut hud_disabled: Local<Option<bool>>,
 ) {
-    let Ok(camera) = camera.single() else {
-        return;
-    };
-    let camera_pos = camera.translation();
-    // The fixed HUD camera stands well back of the origin-anchored HUD screen and
-    // looks along it; billboarding HUD particles at its position keeps them square to
-    // the (orthographic) HUD view. Absent a HUD camera (a run without avatar assets
-    // spawns no HUD screen), no source is a HUD source anyway, so the fallback is
-    // never used.
-    let hud_camera_pos = hud_camera
-        .single()
-        .map_or(camera_pos, GlobalTransform::translation);
     let hud_disabled = *hud_disabled
         .get_or_insert_with(|| std::env::var_os("SL_VIEWER_DISABLE_HUD_PARTICLES").is_some());
     let dt = time.delta_secs();
@@ -1050,32 +960,34 @@ pub(crate) fn drive_particles(
     for (entity, src, q_sl, system, is_hud) in &sources_data {
         let is_hud = *is_hud;
         // Ensure a cloud exists for this source, spawning its render entity on first
-        // sight. A HUD source's entity goes on the HUD render layer, so the HUD camera
-        // draws it (and the fly camera does not); a world source's stays on the
-        // default layer.
+        // sight. Every cloud instances the one shared quad mesh; a HUD source's entity
+        // goes on the HUD render layer, so the HUD camera draws it (and the fly camera
+        // does not) — `queue_particles` scopes the draw to the matching view. The
+        // per-frame instance / draw-parameter components are inserted below (not in the
+        // spawn bundle), so a cloud spawned this frame carries them the same frame.
         let cloud = sim.clouds.entry(*entity).or_insert_with(|| {
-            let mesh = meshes.add(Mesh::new(
-                PrimitiveTopology::TriangleList,
-                RenderAssetUsages::default(),
-            ));
-            let material =
-                materials.add(particle_material(system, is_hud, default_image.0.clone()));
             let mut cloud_commands = commands.spawn((
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
+                Mesh3d(quad.mesh.clone()),
                 Transform::IDENTITY,
-                // Starts hidden: the mesh is empty until the first particles are
-                // built into it, and an empty mesh must not be rendered / uploaded
-                // (R26). Flipped to visible once it has geometry.
+                // Starts hidden: no particles yet. Flipped to visible once it has any,
+                // which is also what keeps an idle cloud out of the render queue.
                 Visibility::Hidden,
                 NotShadowCaster,
-                // The billboard mesh is rebuilt in place every frame, so its
-                // `Aabb` (computed once when `Mesh3d` was added, from the then
-                // empty mesh) never covers the live particles — leaving it
-                // frustum-culled from every viewpoint. Particles are their own
-                // dynamic geometry, so opt out of frustum culling entirely (the
-                // way `objects.rs` does for its rebuilt meshes).
+                // The billboards live in the per-particle instance buffer, not the
+                // shared quad's `Aabb` (which sits at the origin), so without this the
+                // quad would frustum-cull the whole cloud from every viewpoint (the
+                // way `objects.rs` opts its dynamic meshes out).
                 NoFrustumCulling,
+                // Every cloud instances the *same* shared quad mesh through the same
+                // pipeline, so Bevy's GPU-preprocessing batcher would merge sort-adjacent
+                // clouds into one draw — and our custom draw reads one cloud's instance
+                // buffer per item, so a merged draw would render only the first cloud and
+                // drop the rest. Because the sort order is camera-dependent, that showed
+                // as whole streams flickering in and out as the camera moved. Opting each
+                // cloud out of automatic batching gives every cloud its own draw (its own
+                // instance buffer) while leaving the rest of the scene's indirect drawing
+                // untouched.
+                NoAutomaticBatching,
                 // Named so a diagnostic — or `crate::render_test`'s checks —
                 // can say "the particle cloud" rather than an entity id the
                 // reader has no way to resolve. The cloud is spawned here rather
@@ -1091,9 +1003,8 @@ pub(crate) fn drive_particles(
                 emitter: Emitter::new(entity.to_bits()),
                 particles: Vec::new(),
                 entity: cloud_entity,
-                mesh,
-                material,
                 system: system.clone(),
+                texture: default_image.0.clone(),
                 texture_applied: false,
                 visible: false,
                 is_hud,
@@ -1102,7 +1013,8 @@ pub(crate) fn drive_particles(
 
         // The HUD classification can arrive a frame after the cloud is spawned (the
         // source's HUD layer propagates down in `PostUpdate`): move the cloud entity
-        // onto (or off) the HUD layer and re-light its material when it flips.
+        // onto (or off) the HUD layer when it flips (the `unlit` choice is re-derived
+        // into `ParticleDrawParams` every frame below, so nothing else needs updating).
         if cloud.is_hud != is_hud {
             cloud.is_hud = is_hud;
             if is_hud {
@@ -1112,23 +1024,16 @@ pub(crate) fn drive_particles(
             } else {
                 commands.entity(cloud.entity).remove::<RenderLayers>();
             }
-            if let Some(mut material) = materials.get_mut(&cloud.material) {
-                material.unlit = is_unlit(system, is_hud);
-            }
         }
 
         // A re-tuned source (a fresh `llParticleSystem`) restarts the emitter and
-        // re-derives the material and texture.
+        // re-resolves the texture.
         if cloud.system != *system {
             cloud.system = system.clone();
             cloud.emitter = Emitter::new(entity.to_bits());
             cloud.particles.clear();
             cloud.texture_applied = false;
-            if let Some(mut material) = materials.get_mut(&cloud.material) {
-                material.alpha_mode = alpha_mode_for(system);
-                material.unlit = is_unlit(system, is_hud);
-                material.base_color_texture = Some(default_image.0.clone());
-            }
+            cloud.texture = default_image.0.clone();
         }
 
         // Advance the existing particles (dropping the dead), then emit this
@@ -1149,30 +1054,30 @@ pub(crate) fn drive_particles(
         );
 
         // Resolve the source's diffuse texture through the shared pipeline (or keep
-        // the default sprite), applying it once it decodes.
-        apply_cloud_texture(
-            cloud,
-            system,
-            &mut manager,
-            &mut images,
-            &mut materials,
-            &default_image,
-        );
+        // the default sprite), recording it on the cloud once it decodes.
+        apply_cloud_texture(cloud, system, &mut manager, &mut images, &default_image);
 
-        // Rebuild the billboard mesh from the current particles — but only when the
-        // cloud has any. Re-inserting an empty (zero-vertex) mesh makes bevy's mesh
-        // allocator log a "use-after-free: unallocated key" error every frame (it
-        // skips allocating a zero-size vertex buffer but still tries to copy into it,
-        // R26), so an idle / zero-particle cloud instead leaves its last mesh
-        // untouched and hides the entity. Visibility is only rewritten on a change.
+        // Update the per-frame render inputs on the cloud entity: the compact instance
+        // buffer (the GPU expands each particle into a camera-facing billboard) and the
+        // draw parameters (texture, blend, lit/unlit, sort centre). Inserting each frame
+        // is how the render-world extract picks up the change, mirroring the visibility
+        // write below.
+        let instances = build_cloud_instances(&cloud.particles);
+        let sort_center = cloud_centroid(&cloud.particles, *src);
+        commands.entity(cloud.entity).insert((
+            ParticleInstances { instances },
+            ParticleDrawParams {
+                texture: cloud.texture.clone(),
+                blend: particle_blend(system),
+                unlit: is_unlit(system, is_hud),
+                sort_center,
+            },
+        ));
+
+        // An empty (zero-particle) cloud is hidden — kept out of the render queue —
+        // rather than drawn with a zero-length instance buffer. Visibility is only
+        // rewritten on a change.
         let want_visible = !cloud.particles.is_empty();
-        if want_visible {
-            // A HUD cloud faces the fixed HUD camera (so its quads stay square to the
-            // orthographic HUD view); a world cloud faces the fly camera.
-            let billboard_from = if is_hud { hud_camera_pos } else { camera_pos };
-            let mesh = build_cloud_mesh(&cloud.particles, billboard_from);
-            let _replaced = meshes.insert(&cloud.mesh, mesh);
-        }
         if cloud.visible != want_visible {
             cloud.visible = want_visible;
             let visibility = if want_visible {
@@ -1196,14 +1101,15 @@ pub(crate) fn drive_particles(
 }
 
 /// Resolve a cloud's diffuse texture: request the source's named texture through
-/// the shared pipeline and drop it onto the material once it decodes, or keep the
-/// procedural default sprite when the source names none.
+/// the shared pipeline and record it on the cloud once it decodes, or keep the
+/// procedural default sprite when the source names none. The recorded handle is
+/// carried into [`ParticleDrawParams`], from which the render world builds the
+/// cloud's material bind group (rebuilt only when the handle changes).
 fn apply_cloud_texture(
     cloud: &mut Cloud,
     system: &ParticleSystem,
     manager: &mut TextureManager,
     images: &mut Assets<Image>,
-    materials: &mut Assets<StandardMaterial>,
     default_image: &DefaultParticleImage,
 ) {
     if cloud.texture_applied {
@@ -1215,19 +1121,13 @@ fn apply_cloud_texture(
             // promptly rather than queued behind nearer prims.
             manager.request_boosted(texture_id, AVATAR_BOOST_PRIORITY);
             if let Some(decoded) = manager.decoded(texture_id) {
-                let handle = images.add(build_particle_image(decoded));
-                if let Some(mut material) = materials.get_mut(&cloud.material) {
-                    material.base_color_texture = Some(handle);
-                }
+                cloud.texture = images.add(build_particle_image(decoded));
                 cloud.texture_applied = true;
             }
         }
         None => {
-            // No named texture: the default sprite (set at material creation) is
-            // final.
-            if let Some(mut material) = materials.get_mut(&cloud.material) {
-                material.base_color_texture = Some(default_image.0.clone());
-            }
+            // No named texture: the default sprite is final.
+            cloud.texture = default_image.0.clone();
             cloud.texture_applied = true;
         }
     }
@@ -1391,10 +1291,12 @@ mod tests {
     // P30.2 simulation tests.
     // -----------------------------------------------------------------------
 
-    use super::{Emitter, Particle, Rng, alpha_mode_for, build_cloud_mesh, is_unlit, part_flags};
+    use super::{
+        Emitter, Particle, Rng, build_cloud_instances, cloud_centroid, is_unlit, part_flags,
+        particle_blend,
+    };
+    use crate::particle_render::ParticleBlend;
     use bevy::math::{Quat, Vec3};
-    use bevy::mesh::{Mesh, PrimitiveTopology, VertexAttributeValues};
-    use bevy::prelude::AlphaMode;
 
     /// The seed the emitter tests use, so the pseudo-random sequence is fixed.
     const TEST_SEED: u64 = 0x1234_5678;
@@ -1636,12 +1538,77 @@ mod tests {
         }
     }
 
-    /// The billboard mesh has four vertices and six indices per particle, all
-    /// attributes present.
+    /// The instance builder emits one compact record per particle, carrying its world
+    /// position, size, colour, velocity, and flags verbatim (the GPU expands the
+    /// billboard).
     #[test]
-    fn mesh_has_a_quad_per_particle() {
+    fn instances_are_one_per_particle() {
+        // A `FOLLOW_VELOCITY` (0x20) particle: the CPU carries the raw flag bits through
+        // to the instance verbatim; the billboard re-orientation it selects is applied
+        // GPU-side in `particle.wgsl`.
+        let flags = part_flags::BOUNCE | 0x20;
         let part = Particle {
-            pos: Vec3::new(0.0, 0.0, 10.0),
+            pos: Vec3::new(1.0, 2.0, 10.0),
+            velocity: Vec3::new(0.0, 3.0, 0.0),
+            accel: Vec3::ZERO,
+            age: 0.0,
+            max_age: 1.0,
+            flags,
+            start_color: [255; 4],
+            end_color: [255; 4],
+            start_scale: [2.0, 3.0],
+            end_scale: [2.0, 3.0],
+            color: [0.25, 0.5, 0.75, 1.0],
+            scale: [2.0, 3.0],
+            pos_offset: Vec3::ZERO,
+        };
+        let particles = vec![part.clone(), part];
+        let instances = build_cloud_instances(&particles);
+        assert_eq!(instances.len(), 2);
+        let Some(first) = instances.first() else {
+            unreachable!("two instances were built")
+        };
+        // The fields are carried across verbatim (no arithmetic). Compare element-wise
+        // with a tolerance (destructuring rather than indexing) rather than a bit-exact
+        // float-array `==`, which clippy's `float_cmp` rightly flags even for
+        // exactly-set values.
+        let close = |a: f32, b: f32| (a - b).abs() < 1.0e-6;
+        let [px, py, pz] = first.position;
+        assert!(
+            close(px, 1.0) && close(py, 2.0) && close(pz, 10.0),
+            "position"
+        );
+        let [sx, sy] = first.scale;
+        assert!(close(sx, 2.0) && close(sy, 3.0), "scale");
+        let [cr, cg, cb, ca] = first.color;
+        assert!(
+            close(cr, 0.25) && close(cg, 0.5) && close(cb, 0.75) && close(ca, 1.0),
+            "color"
+        );
+        let [vx, vy, vz] = first.velocity;
+        assert!(
+            close(vx, 0.0) && close(vy, 3.0) && close(vz, 0.0),
+            "velocity"
+        );
+        assert_eq!(first.flags, flags);
+        // Every instance record's position is finite (the harness-guarded invariant).
+        for instance in &instances {
+            for component in instance.position {
+                assert!(component.is_finite(), "instance position not finite");
+            }
+        }
+    }
+
+    /// The sort centroid is the mean particle position, falling back to the source
+    /// position for an empty cloud.
+    #[test]
+    fn centroid_is_the_particle_mean() {
+        assert_eq!(
+            cloud_centroid(&[], Vec3::new(5.0, 6.0, 7.0)),
+            Vec3::new(5.0, 6.0, 7.0)
+        );
+        let make = |pos| Particle {
+            pos,
             velocity: Vec3::ZERO,
             accel: Vec3::ZERO,
             age: 0.0,
@@ -1649,31 +1616,18 @@ mod tests {
             flags: 0,
             start_color: [255; 4],
             end_color: [255; 4],
-            start_scale: [2.0, 2.0],
-            end_scale: [2.0, 2.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-            scale: [2.0, 2.0],
+            start_scale: [1.0, 1.0],
+            end_scale: [1.0, 1.0],
+            color: [1.0; 4],
+            scale: [1.0, 1.0],
             pos_offset: Vec3::ZERO,
         };
-        let particles = vec![part.clone(), part];
-        let mesh = build_cloud_mesh(&particles, Vec3::ZERO);
-        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            unreachable!("mesh has float3 positions")
-        };
-        assert_eq!(positions.len(), 8);
-        assert_eq!(mesh.indices().map(bevy::mesh::Indices::len), Some(12));
-        // The billboard faces the camera: with the camera at the origin looking down
-        // +Z at a particle on +Z, the quad spans the X/Y plane (all four corners at
-        // the particle's Z).
-        for pos in positions {
-            assert!(
-                (pos[2] - 10.0).abs() < 1.0e-4,
-                "corner not camera-facing: {pos:?}"
-            );
-        }
+        let particles = vec![
+            make(Vec3::new(0.0, 0.0, 0.0)),
+            make(Vec3::new(2.0, 4.0, 6.0)),
+        ];
+        let centroid = cloud_centroid(&particles, Vec3::ZERO);
+        assert!(centroid.abs_diff_eq(Vec3::new(1.0, 2.0, 3.0), 1.0e-6));
     }
 
     /// Additive-blend (destination `ONE`) systems are drawn unlit and additive; an
@@ -1682,11 +1636,11 @@ mod tests {
     fn blend_mode_follows_the_blend_function() {
         let mut additive = live_system();
         additive.part_blend_func_dest = super::LL_PART_BF_ONE;
-        assert_eq!(alpha_mode_for(&additive), AlphaMode::Add);
+        assert_eq!(particle_blend(&additive), ParticleBlend::Additive);
         assert!(is_unlit(&additive, false));
 
         let alpha = live_system(); // dest 9 (one-minus-src-alpha).
-        assert_eq!(alpha_mode_for(&alpha), AlphaMode::Blend);
+        assert_eq!(particle_blend(&alpha), ParticleBlend::Alpha);
         assert!(!is_unlit(&alpha, false));
     }
 

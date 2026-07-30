@@ -94,6 +94,10 @@ bevy_flair = { version = "0.8.0" }
 # formats through (never a pre-formatted string); `unic-langid` is the language
 # tag those resources are keyed by.
 bevy_fluent = { version = "0.15.0" }
+# Plain-old-data derives for the GPU particle instance record (`src/particle_render.rs`):
+# `ParticleInstance` is uploaded verbatim as instance-rate vertex data, so it must be
+# `Pod` for `RawBufferVec`.
+bytemuck = { version = "1.25.1", features = ["derive"] }
 bytes = { version = "1.12.0" }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env"] }
 # Sync-capable channels between the ECS and the world-map tile worker thread

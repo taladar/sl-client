@@ -371,7 +371,13 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<ParticleSim>()
             .init_resource::<TextureManager>()
-            .add_systems(Startup, crate::particles::setup_particles)
+            .add_systems(
+                Startup,
+                (
+                    crate::particles::setup_particles,
+                    crate::particle_render::setup_particle_quad,
+                ),
+            )
             .add_systems(
                 Update,
                 (drive_particles, simulate_flexi, drive_texture_animations),

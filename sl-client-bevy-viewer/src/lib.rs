@@ -124,6 +124,7 @@ mod object_menu;
 mod objects;
 mod offers_invites;
 mod parcel_audio;
+mod particle_render;
 mod particles;
 mod paths;
 mod people;
@@ -238,7 +239,7 @@ use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
 use crate::camera::{
     CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
-    position_camera,
+    dump_camera_pose, position_camera,
 };
 use crate::chat::{
     ChatOverlay, position_chat_overlay, setup_chat_overlay, tick_chat_overlay, update_chat_overlay,
@@ -305,6 +306,7 @@ use crate::objects::{
     update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
+use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
 use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
@@ -1191,6 +1193,7 @@ fn run_session(
     // through (per-map UV transforms + legacy Blinn-Phong specular; inert where
     // unused). Registered once here.
     .add_plugins(crate::face_material::SlFaceMaterialPlugin)
+    .add_plugins(ParticleRenderPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
@@ -1361,6 +1364,9 @@ fn run_session(
                 setup_hud_screen,
                 // P30.2: upload the procedural default particle sprite.
                 setup_particles,
+                // GPU particles (viewer-perf-gpu-particles): upload the one shared
+                // unit-quad mesh every cloud instances.
+                setup_particle_quad,
             ),
         )
         .add_systems(
@@ -1617,6 +1623,10 @@ fn run_session(
                 // rebuild its camera-facing billboard mesh, after the fly-camera so the
                 // billboards face the current viewpoint.
                 drive_particles.after(position_camera),
+                // Debug (env `SL_VIEWER_CAMERA_DUMP`): log the camera pose as a
+                // ready-to-paste `--camera-position`/`--camera-look-at` for repeatable
+                // benchmark / screenshot framing, after the camera is positioned.
+                dump_camera_pose.after(position_camera),
                 // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
                 // and rewrite its deformed geometry in place, after `update_objects` so
                 // this frame's spawns / rebuilds have seeded their chain state.

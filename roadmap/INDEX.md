@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 54 |
 | ready | 254 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 13 |
-| done | 638 |
-| deferred | 19 |
+| bugs | 14 |
+| done | 639 |
+| deferred | 20 |
 | wont-do | 6 |
-| **total** | **1107** |
+| **total** | **1109** |
 
-## ideas (55)
+## ideas (54)
 
 ### viewer
 
@@ -70,8 +70,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
-- [`viewer-perf-gpu-particles`](ideas/viewer-perf-gpu-particles.md) —
-  GPU-instanced particle rendering
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
 - [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
@@ -1108,7 +1106,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1132,6 +1130,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-particle-water-ordering`](bugs/viewer-particle-water-ordering.md) —
+  Translucent content (particles) orders wrong against the water surface
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
@@ -1149,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (638)
+## done (639)
 
 ### protocol
 
@@ -1708,6 +1708,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Actually render PBR (GLTF) materials on a face — and on the material preview
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
+- [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
+  GPU-instanced particle rendering
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))
@@ -2475,7 +2477,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
 
-## deferred (19)
+## deferred (20)
 
 ### protocol
 
@@ -2523,6 +2525,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-os-portals-linux`)
 - [`viewer-parcel-config-missing-writes`](deferred/viewer-parcel-config-missing-writes.md)
   — About Land — the controls that have no protocol write path yet
+- [`viewer-perf-gpu-particle-sim`](deferred/viewer-perf-gpu-particle-sim.md) —
+  GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 

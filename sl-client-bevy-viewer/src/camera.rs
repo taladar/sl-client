@@ -50,12 +50,13 @@
 //! `indra/newview/lltoolfocus.cpp` (alt-zoom), `indra/newview/llviewerjoystick`
 //! (the flycam).
 
+use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
 use crate::avatars::{AvatarBody, AvatarState};
-use crate::coords::sl_to_bevy_vec;
+use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::input_context::InputContext;
 use crate::physics::AvatarMotion;
@@ -205,6 +206,57 @@ pub(crate) enum FocusTarget {
 /// the camera in mouselook, third person and flycam.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub(crate) struct ViewerCamera;
+
+/// A debug affordance (env `SL_VIEWER_CAMERA_DUMP`): log the current camera pose and the
+/// smoothed frame rate once a second. The pose is emitted as a ready-to-paste
+/// `--camera-position X,Y,Z --camera-look-at X,Y,Z`, so an operator can fly to a chosen
+/// viewpoint (e.g. framing a particle fountain for a repeatable benchmark or screenshot)
+/// and then pin that exact pose on later runs — the pose the CLI wants is not otherwise
+/// shown anywhere. Coordinates are emitted in Second Life region-local space (Z-up
+/// metres), the same convention `--camera-position` parses; the FPS lets an A/B benchmark
+/// be read straight from the log rather than off the status bar.
+///
+/// Off by default, throttled to 1 Hz, and a plain main-world read, so it does not perturb
+/// render-world timing.
+pub(crate) fn dump_camera_pose(
+    time: Res<Time>,
+    diagnostics: Res<DiagnosticsStore>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    mut enabled: Local<Option<bool>>,
+    mut timer: Local<f32>,
+) {
+    let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_CAMERA_DUMP").is_some());
+    if !on {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer < 1.0 {
+        return;
+    }
+    *timer = 0.0;
+    let Ok(global) = camera.single() else {
+        return;
+    };
+    let pos = global.translation();
+    // A point ten metres down the view ray; `--camera-look-at` only needs a point on the
+    // ray, so the exact distance is irrelevant.
+    let forward = global.forward();
+    let look = Vec3::new(
+        pos.x + forward.x * 10.0,
+        pos.y + forward.y * 10.0,
+        pos.z + forward.z * 10.0,
+    );
+    let sl_pos = bevy_to_sl_vec(pos);
+    let sl_look = bevy_to_sl_vec(look);
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(Diagnostic::smoothed)
+        .unwrap_or(0.0);
+    info!(
+        "benchmark: fps={fps:.1} --camera-position {:.2},{:.2},{:.2} --camera-look-at {:.2},{:.2},{:.2}",
+        sl_pos.x, sl_pos.y, sl_pos.z, sl_look.x, sl_look.y, sl_look.z,
+    );
+}
 
 /// The drivable state of the [`ViewerCamera`], shared by every mode.
 ///

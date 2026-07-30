@@ -83,6 +83,7 @@ use tracing_subscriber::registry;
 
 use crate::camera::ViewerCamera;
 use crate::face_material::FaceMaterial;
+use crate::particle_render::ParticleInstances;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
     SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
@@ -428,6 +429,14 @@ pub(crate) struct Geometry {
     pub(crate) textures: Vec<TextureSlot>,
     /// Whether the geometry declared its texture may clamp rather than repeat.
     pub(crate) sampler_may_clamp: bool,
+    /// Whether this renderable is a **point cloud** — a GPU-instanced particle cloud
+    /// ([`crate::particle_render`]) whose `positions` are the live per-particle world
+    /// positions, not a triangle mesh. The billboard geometry is expanded on the GPU
+    /// from one shared quad, so a point cloud carries no per-vertex normals / UVs /
+    /// indices; the invariants that apply to it are position finiteness and world
+    /// bounds (the NaN-over-time coverage the particle mesh used to provide before the
+    /// per-particle positions moved into the instance buffer).
+    pub(crate) is_point_cloud: bool,
 }
 
 /// One texture a renderable samples, and the single fact the checks care about.
@@ -518,6 +527,11 @@ struct Gathered {
     sampler_may_clamp: bool,
     /// How many joints it binds, if skinned.
     joint_count: Option<usize>,
+    /// The live per-particle world positions, if this entity is a GPU-instanced
+    /// particle cloud (it carries a [`ParticleInstances`] component) — used in place of
+    /// the shared quad's four static vertices, so the finiteness / change checks still
+    /// see the particles.
+    particle_positions: Option<Vec<Vec3>>,
 }
 
 /// Every renderable in the app's world, with its geometry and declarations.
@@ -542,6 +556,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
         Option<&UvsInUnitSquare>,
         Option<&SamplerMayClamp>,
         Option<&SkinnedMesh>,
+        Option<&ParticleInstances>,
     )>();
     let gathered: Vec<Gathered> = query
         .iter(app.world())
@@ -558,6 +573,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 atlas,
                 clamp,
                 skin,
+                particles,
             )| {
                 let name = named
                     .get(&entity)
@@ -570,6 +586,15 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                     .filter(|parent| parent.as_str() != "scene-root")
                     .cloned()
                     .unwrap_or_else(|| name.clone());
+                // A particle cloud's live positions come from its instance buffer, not
+                // the shared quad mesh (which is one static unit square).
+                let particle_positions = particles.map(|particles| {
+                    particles
+                        .instances
+                        .iter()
+                        .map(|instance| Vec3::from_array(instance.position))
+                        .collect()
+                });
                 Gathered {
                     name,
                     group,
@@ -582,6 +607,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                     uvs_in_unit_square: atlas.is_some(),
                     sampler_may_clamp: clamp.is_some(),
                     joint_count: skin.map(|skin| skin.joints.len()),
+                    particle_positions,
                 }
             },
         )
@@ -620,11 +646,28 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
             let textures =
                 material.map_or_else(Vec::new, |material| texture_slots(&material.base, images));
             let uv_transform = material.map(|material| material.base.uv_transform);
+            // A particle cloud renders as one shared quad mesh instanced per particle, so
+            // the mesh's four static vertices say nothing about the live cloud. Read the
+            // per-particle world positions from the instance buffer instead, and mark it a
+            // point cloud so the mesh-only invariants (normals / UVs / indices) are skipped
+            // — the finiteness / bounds / change checks still apply, over the particles.
+            let is_point_cloud = entry.particle_positions.is_some();
+            let (positions, normals, uvs, indices) = match entry.particle_positions {
+                Some(particle_positions) => {
+                    (particle_positions, Vec::new(), Vec::new(), Vec::new())
+                }
+                None => (
+                    read_vec3(mesh, Mesh::ATTRIBUTE_POSITION),
+                    read_vec3(mesh, Mesh::ATTRIBUTE_NORMAL),
+                    uvs,
+                    indices,
+                ),
+            };
             Some(Geometry {
                 name: entry.name,
                 group: entry.group,
-                positions: read_vec3(mesh, Mesh::ATTRIBUTE_POSITION),
-                normals: read_vec3(mesh, Mesh::ATTRIBUTE_NORMAL),
+                positions,
+                normals,
                 uvs,
                 indices,
                 joint_indices,
@@ -638,6 +681,7 @@ pub(crate) fn scene_geometry(app: &mut App) -> Vec<Geometry> {
                 uvs_in_unit_square: entry.uvs_in_unit_square,
                 textures,
                 sampler_may_clamp: entry.sampler_may_clamp,
+                is_point_cloud,
             })
         })
         .collect()
@@ -687,15 +731,21 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
         // Nothing to check, and that is itself the finding: a renderable with no
         // vertices renders as nothing, which is the failure mode every other
         // check passes vacuously through. It is also R26's trigger — an empty
-        // mesh Bevy's allocator then logs about every frame.
+        // mesh Bevy's allocator then logs about every frame. A **point cloud**
+        // (a particle cloud) is exempt: a source between bursts legitimately holds
+        // zero live particles, and the shared quad it instances is never itself
+        // empty — so an empty instance list is nothing to check, not a bug.
         if object.positions.is_empty() {
-            violations.push(format!("{name}: has no vertex positions at all"));
+            if !object.is_point_cloud {
+                violations.push(format!("{name}: has no vertex positions at all"));
+            }
             continue;
         }
 
         // Finite, and within a plausible world. See `MAX_COORDINATE` — and
         // `WorldScaleGeometry`, which is what a sky dome legitimately declares
-        // instead of it.
+        // instead of it. For a point cloud these are the per-particle positions —
+        // the NaN-over-time coverage that used to live on the rebuilt billboard mesh.
         let limit = object.max_extent.unwrap_or(MAX_COORDINATE);
         for (index, position) in object.positions.iter().enumerate() {
             if !position.is_finite() {
@@ -712,6 +762,14 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
                 ));
                 break;
             }
+        }
+
+        // The remaining invariants are all properties of a triangle mesh — per-vertex
+        // normals / UVs, whole-triangle indices, skinning, samplers. A point cloud has
+        // none of those (its billboards are expanded GPU-side from one shared quad), so
+        // finiteness + bounds above are the whole of its geometry contract.
+        if object.is_point_cloud {
+            continue;
         }
 
         // Normals: one per vertex, each unit length.
@@ -1130,6 +1188,7 @@ mod tests {
             uvs_in_unit_square: false,
             textures: Vec::new(),
             sampler_may_clamp: false,
+            is_point_cloud: false,
         };
         mutate(&mut object);
         geometry_violations(&[object])
