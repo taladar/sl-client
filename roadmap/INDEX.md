@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 255 |
+| ready | 254 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 636 |
+| done | 637 |
 | deferred | 19 |
 | wont-do | 6 |
 | **total** | **1106** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (255)
+## ready (254)
 
 ### protocol
 
@@ -640,9 +640,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
   parsing & action dispatch
-- [`viewer-snapshot-hide-balance`](ready/viewer-snapshot-hide-balance.md) —
-  Snapshot option — hide the L$ balance (blocked by `viewer-snapshot-floater`
-  (done))
 - [`viewer-snapshot-postcard`](ready/viewer-snapshot-postcard.md) — Snapshot
   destination — postcard / e-mail (blocked by `viewer-snapshot-floater` (done))
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
@@ -1152,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (636)
+## done (637)
 
 ### protocol
 
@@ -1822,6 +1819,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-floater`](done/viewer-snapshot-floater.md) — Snapshot
   floater — preview, format, destinations (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-snapshot-hide-balance`](done/viewer-snapshot-hide-balance.md) —
+  Snapshot option — hide the L$ balance (blocked by `viewer-snapshot-floater`
+  (done))
 - [`viewer-snapshot-quick-key`](done/viewer-snapshot-quick-key.md) —
   Quick-snapshot keybind → disk (blocked by `viewer-input-action-map` (done))
 - [`viewer-social-group-profile`](done/viewer-social-group-profile.md) — Group

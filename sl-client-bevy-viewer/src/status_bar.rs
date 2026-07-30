@@ -288,6 +288,15 @@ enum StatusReadout {
     Fps,
 }
 
+/// Marker on the L$ balance read-out text node, so the snapshot floater can find
+/// and blank it for a shot without knowing this module's private
+/// [`StatusReadout`] enum (`viewer-snapshot-hide-balance`). Its slot keeps its
+/// fixed width, so hiding the text via [`Visibility::Hidden`] blanks the balance
+/// without shifting the row — the reference viewer's "hide L$ balance in
+/// snapshots" behaviour.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct BalanceReadout;
+
 /// The status area's runtime: keep the balance / position read-models current
 /// and rewrite the read-outs each frame. The row itself is spawned by
 /// [`spawn_status_area`], invoked from [`crate::menu_bar`] so the read-outs share
@@ -492,6 +501,10 @@ fn spawn_readout(
             .entity(text)
             .insert((Button, Pickable::default()))
             .observe(on_parcel_name_press);
+    }
+    // Mark the balance so the snapshot floater can blank it for a shot.
+    if readout == StatusReadout::Balance {
+        commands.entity(text).insert(BalanceReadout);
     }
 }
 

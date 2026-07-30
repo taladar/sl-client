@@ -1246,6 +1246,7 @@ snapshot-refresh = Refresh
 snapshot-preview-empty = Click Refresh to update the preview.
 snapshot-include-ui = Show interface in snapshot
 snapshot-include-hud = Show HUD objects in snapshot
+snapshot-hide-balance = Hide L$ balance in snapshot
 snapshot-format-label = Format:
 snapshot-save-disk = Save to Disk
 snapshot-hint = Saves at the window's resolution to your Pictures folder; the path is echoed to nearby chat.

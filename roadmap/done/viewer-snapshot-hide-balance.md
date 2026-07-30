@@ -2,7 +2,7 @@
 id: viewer-snapshot-hide-balance
 title: Snapshot option — hide the L$ balance
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07) — follow-up to viewer-snapshot-floater
 blocked_by: [viewer-snapshot-floater]
 refs: [viewer-snapshot-quick-key]

@@ -25,6 +25,13 @@
 //!   stays in the frame. (The HUD *camera* is deliberately left alone — the UI
 //!   renders through it, and it shares the world camera's HDR view-target chain,
 //!   so toggling it would drop the interface and break the HUD lighting.)
+//! - **Hide L$ balance** ([[viewer-snapshot-hide-balance]]) blanks the status
+//!   bar's balance read-out ([`crate::status_bar::BalanceReadout`], via
+//!   `Visibility::Hidden`) for the shot, so a photo shared publicly does not leak
+//!   the shooter's balance. It only matters while the UI is in the frame (with
+//!   **Include UI** off the whole status bar is gone already), so it is inert
+//!   there. The read-out's slot keeps its width, so blanking it does not shift
+//!   the row — the reference viewer's `RenderHideBalanceInSnapshot`.
 //!
 //! Because those changes must be *rendered* before the shutter, a capture is a
 //! tiny state machine: hide what the toggles exclude, wait a frame, take the
@@ -40,8 +47,8 @@
 //! the running local-chat index photographers rely on, matching the quick key
 //! ([[viewer-snapshot-quick-key]]).
 //!
-//! The include-UI / include-HUD / format choices persist per avatar
-//! ([`crate::settings`]).
+//! The include-UI / include-HUD / hide-balance / format choices persist per
+//! avatar ([`crate::settings`]).
 //!
 //! # The other destinations are their own tabs (and tasks)
 //!
@@ -70,6 +77,7 @@ use crate::chat::LocalChatNotice;
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
+use crate::status_bar::BalanceReadout;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -178,6 +186,10 @@ const SETTING_INCLUDE_UI: &str = "snapshot_include_ui";
 /// The setting name for whether worn HUD attachments are kept in the shot.
 const SETTING_INCLUDE_HUD: &str = "snapshot_include_hud";
 
+/// The setting name for whether the status-bar L$ balance is blanked in a shot
+/// that includes the UI (the reference viewer's `RenderHideBalanceInSnapshot`).
+const SETTING_HIDE_BALANCE: &str = "snapshot_hide_balance";
+
 // ---------------------------------------------------------------------------
 // Plugin.
 // ---------------------------------------------------------------------------
@@ -239,6 +251,12 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::Bool(false),
         "keep worn HUD attachments in saved snapshots",
     );
+    settings.register_in(
+        SETTINGS_SECTION,
+        SETTING_HIDE_BALANCE,
+        SettingValue::Bool(false),
+        "blank the status-bar L$ balance in snapshots that include the UI",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -279,8 +297,8 @@ enum StatusKind {
 #[derive(Resource, Debug)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "each bool is an independent flag: the two persisted include-UI / include-HUD \
-              preferences, the save-vs-refresh mode of the current capture, the two \
+    reason = "each bool is an independent flag: the three persisted include-UI / include-HUD / \
+              hide-balance preferences, the save-vs-refresh mode of the current capture, the three \
               what-this-capture-hid flags, and the one-shot settings-loaded latch"
 )]
 struct SnapshotState {
@@ -290,6 +308,8 @@ struct SnapshotState {
     include_ui: bool,
     /// Whether worn HUD attachments are kept in the shot.
     include_hud: bool,
+    /// Whether the status-bar L$ balance is blanked in a UI-included shot.
+    hide_balance: bool,
     /// Where the current capture is in its hide/restore cycle (visual only).
     phase: CapturePhase,
     /// Whether a capture is in flight — set when one starts, cleared when its shot
@@ -304,6 +324,8 @@ struct SnapshotState {
     hid_ui: bool,
     /// Whether this capture disabled the HUD camera.
     hid_hud: bool,
+    /// Whether this capture blanked the status-bar balance.
+    hid_balance: bool,
     /// Whether the persisted preferences have been loaded into the controls yet.
     loaded: bool,
     /// A per-session counter appended to the filename so two saves in the same
@@ -320,11 +342,13 @@ impl Default for SnapshotState {
             format: DEFAULT_FORMAT,
             include_ui: false,
             include_hud: false,
+            hide_balance: false,
             phase: CapturePhase::Idle,
             busy: false,
             save_after: false,
             hid_ui: false,
             hid_hud: false,
+            hid_balance: false,
             loaded: false,
             counter: 0,
             status: StatusKind::Ready,
@@ -379,6 +403,8 @@ pub(crate) struct SnapshotUi {
     ui_glyph: Entity,
     /// The include-HUD checkbox glyph node.
     hud_glyph: Entity,
+    /// The hide-L$-balance checkbox glyph node.
+    balance_glyph: Entity,
     /// The format combo anchor.
     format_combo: Entity,
     /// The transient status text node.
@@ -407,6 +433,8 @@ enum SnapshotToggle {
     Ui,
     /// Keep worn HUD attachments in the shot.
     Hud,
+    /// Blank the status-bar L$ balance in a UI-included shot.
+    Balance,
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +505,12 @@ fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<
         .entity(hud_button)
         .insert(SnapshotToggle::Hud)
         .observe(toggle_pressed);
+    let (balance_button, balance_glyph) =
+        spawn_checkbox(&mut commands, content, "snapshot-hide-balance", 4);
+    commands
+        .entity(balance_button)
+        .insert(SnapshotToggle::Balance)
+        .observe(toggle_pressed);
 
     let format_row = commands
         .spawn((
@@ -502,7 +536,7 @@ fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<
             element: "snapshot-format",
             labels: &format_labels(),
             active: state.format,
-            tab_index: 4,
+            tab_index: 5,
             font_size: FONT_SIZE,
             translate_labels: false,
         },
@@ -526,6 +560,7 @@ fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<
         preview_hint,
         ui_glyph,
         hud_glyph,
+        balance_glyph,
         format_combo,
         status,
     });
@@ -596,7 +631,7 @@ fn spawn_destination_tabs(commands: &mut Commands, parent: Entity) {
             placement: TabPlacement::BlockStart,
             labels: &labels,
             active: 0,
-            tab_index: 5,
+            tab_index: 6,
             font_size: FONT_SIZE,
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
@@ -608,7 +643,7 @@ fn spawn_destination_tabs(commands: &mut Commands, parent: Entity) {
 
     // Save to Disk: the Save button and a one-line hint.
     let disk = panel(0);
-    let save = spawn_text_button(commands, disk, "snapshot-save-disk", 6);
+    let save = spawn_text_button(commands, disk, "snapshot-save-disk", 7);
     commands.entity(save).observe(
         |_activate: On<Activate>, mut requests: MessageWriter<RequestSnapshotCapture>| {
             requests.write(RequestSnapshotCapture { save: true });
@@ -733,6 +768,10 @@ fn toggle_pressed(
             state.include_hud = !state.include_hud;
             (state.include_hud, SETTING_INCLUDE_HUD)
         }
+        SnapshotToggle::Balance => {
+            state.hide_balance = !state.hide_balance;
+            (state.hide_balance, SETTING_HIDE_BALANCE)
+        }
     };
     settings.set_account(name, SettingValue::Bool(value));
 }
@@ -749,8 +788,8 @@ fn format_labels() -> Vec<String> {
 // Preferences.
 // ---------------------------------------------------------------------------
 
-/// Load the persisted format / include-UI / include-HUD preferences once, after
-/// login resolves the account settings.
+/// Load the persisted format / include-UI / include-HUD / hide-balance
+/// preferences once, after login resolves the account settings.
 fn load_persisted_preferences(
     settings: Res<ViewerSettings>,
     ui: Option<Res<SnapshotUi>>,
@@ -776,6 +815,9 @@ fn load_persisted_preferences(
     }
     if let Ok(value) = store.get_bool(SETTING_INCLUDE_HUD) {
         state.include_hud = value;
+    }
+    if let Ok(value) = store.get_bool(SETTING_HIDE_BALANCE) {
+        state.hide_balance = value;
     }
     if let Ok(mut selection) = selections.get_mut(ui.format_combo) {
         selection.active = state.format;
@@ -810,7 +852,7 @@ fn apply_format_combo(
     }
 }
 
-/// Keep the two checkbox glyphs in sync with the toggles.
+/// Keep the three checkbox glyphs in sync with the toggles.
 fn update_toggle_glyphs(
     state: Res<SnapshotState>,
     ui: Option<Res<SnapshotUi>>,
@@ -824,6 +866,7 @@ fn update_toggle_glyphs(
     };
     set_check_glyph(&mut texts, ui.ui_glyph, state.include_ui);
     set_check_glyph(&mut texts, ui.hud_glyph, state.include_hud);
+    set_check_glyph(&mut texts, ui.balance_glyph, state.hide_balance);
 }
 
 /// Set one checkbox glyph's text and colour to reflect its checked state.
@@ -898,7 +941,8 @@ fn start_capture(
     mut state: ResMut<SnapshotState>,
     root: Res<UiRoot>,
     mut nodes: Query<&mut Node>,
-    mut hud: Query<&mut Visibility, With<HudScreen>>,
+    mut hud: Query<&mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
+    mut balance: Query<&mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
 ) {
     // Collapse a burst of clicks; a request while busy is dropped.
     let Some(request) = requests.read().last().copied() else {
@@ -911,6 +955,7 @@ fn start_capture(
     state.save_after = request.save;
     state.hid_ui = !state.include_ui;
     state.hid_hud = !state.include_hud;
+    state.hid_balance = should_hide_balance(state.include_ui, state.hide_balance);
     if state.hid_ui
         && let Ok(mut node) = nodes.get_mut(root.0)
     {
@@ -921,8 +966,22 @@ fn start_capture(
             *visibility = Visibility::Hidden;
         }
     }
+    if state.hid_balance {
+        for mut visibility in &mut balance {
+            *visibility = Visibility::Hidden;
+        }
+    }
     state.phase = CapturePhase::Waiting(HIDE_FRAMES);
     state.status = StatusKind::Working;
+}
+
+/// Whether this capture blanks the status-bar balance: only when the balance
+/// toggle is set **and** the UI is in the frame. With the UI excluded the whole
+/// status bar is hidden already ([`UiRoot`] `Display::None`), so blanking the
+/// balance would be a redundant no-op — the reference viewer only applies
+/// `RenderHideBalanceInSnapshot` to interface-included shots.
+const fn should_hide_balance(include_ui: bool, hide_balance: bool) -> bool {
+    include_ui && hide_balance
 }
 
 /// Advance the shutter countdown; when it elapses, request the window screenshot;
@@ -933,7 +992,8 @@ fn drive_capture(
     mut commands: Commands,
     root: Res<UiRoot>,
     mut nodes: Query<&mut Node>,
-    mut hud: Query<&mut Visibility, With<HudScreen>>,
+    mut hud: Query<&mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
+    mut balance: Query<&mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
 ) {
     match state.phase {
         CapturePhase::Idle => {}
@@ -961,6 +1021,11 @@ fn drive_capture(
             }
             if state.hid_hud {
                 for mut visibility in &mut hud {
+                    *visibility = Visibility::Inherited;
+                }
+            }
+            if state.hid_balance {
+                for mut visibility in &mut balance {
                     *visibility = Visibility::Inherited;
                 }
             }
@@ -1213,7 +1278,7 @@ fn dimension_to_f32(value: u32) -> f32 {
 mod tests {
     use super::{
         DEFAULT_FORMAT, FORMATS, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH, SnapshotState, clamp_index,
-        fit_within,
+        fit_within, should_hide_balance,
     };
     use pretty_assertions::assert_eq;
 
@@ -1271,6 +1336,27 @@ mod tests {
         );
         state.format = FORMATS.len().saturating_add(10);
         assert!(!state.extension().is_empty());
+    }
+
+    /// The balance is blanked only when the toggle is set **and** the UI is in
+    /// the frame: with the UI excluded the status bar is hidden already, so the
+    /// blank is inert there (matching `RenderHideBalanceInSnapshot`, which only
+    /// applies to interface-included shots).
+    #[test]
+    fn balance_hidden_only_with_ui_in_frame() {
+        assert!(
+            should_hide_balance(true, true),
+            "UI in + toggle on hides it"
+        );
+        assert!(
+            !should_hide_balance(false, true),
+            "UI excluded: status bar already gone, so a no-op"
+        );
+        assert!(
+            !should_hide_balance(true, false),
+            "toggle off keeps the balance even with the UI in frame"
+        );
+        assert!(!should_hide_balance(false, false), "neither: nothing to do");
     }
 
     /// Every format's extension is one `image` infers an encoder from.
