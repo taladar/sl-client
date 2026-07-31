@@ -158,6 +158,10 @@ mod terrain;
 mod texture_anim;
 mod textures;
 mod tonemap;
+// Tracy plot streaming + physics secondary frame mark; only compiled when the
+// Tracy client (and its `tracing-tracy` bridge) is present.
+#[cfg(feature = "profile-tracy")]
+mod tracy_plots;
 mod transparency;
 mod typing;
 mod ui;
@@ -1248,6 +1252,12 @@ fn run_session(
     // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
     // work is watched against.
     .add_plugins(FrameTimeDiagnosticsPlugin::default());
+    // Stream those diagnostics (and any others registered) to Tracy as plots,
+    // and mark the fixed-timestep physics loop as a Tracy secondary frame, so
+    // the profiler shows graphed telemetry and a physics-cadence timeline on top
+    // of the `tracing` zones. Only present with the Tracy client compiled in.
+    #[cfg(feature = "profile-tracy")]
+    app.add_plugins(crate::tracy_plots::TracyProfilingPlugin);
     app
         // P24.1: a larger sun/moon shadow map than the 2048 default, so the four
         // region-scale cascades (see `sky::shadow_cascades`) keep enough texels per
