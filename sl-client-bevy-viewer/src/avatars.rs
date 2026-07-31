@@ -40,11 +40,12 @@ use bevy::math::Affine2;
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
     BodyPhysics, BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel,
-    JointOverrides, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
+    JointOverrides, Layer, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
     RUNTIME_MORPH_PARAMS, RegionHandle, ResolvedParams, ScopedObjectId, SkeletalDeformations,
     SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, Uuid,
     VolumeDeformations, avatar_texture, composite_region, decode_texture_entry,
@@ -2847,17 +2848,30 @@ pub(crate) struct OwnLocalBake {
     /// slot ([`BakeRegion::slot`]); a region with no worn layers is absent (so its
     /// body part keeps the flat skin material rather than a transparent bake).
     regions: HashMap<usize, (Handle<Image>, BakeAlpha)>,
-    /// Whether the composite has been built from the ready bake inputs (a one-shot
-    /// per session — the worn outfit does not change in this passive viewer).
-    built: bool,
+    /// The [`OwnBakeInputs`] generation the composite was last built from, or `None`
+    /// before the first build. When the inputs re-assemble (a runtime outfit change,
+    /// or an appearance-editor live edit) their generation advances past this and
+    /// [`apply_own_local_bake`] re-composites.
+    built_generation: Option<u64>,
+    /// The background composite task and the [`OwnBakeInputs`] generation it is
+    /// compositing, while it runs — the composite is done off the frame thread
+    /// (never blocked on) and its images installed on completion, a later frame.
+    /// `None` when no composite is in flight; a newer generation supersedes an
+    /// older in-flight one.
+    task: Option<(u64, Task<CompositedRegions>)>,
 }
+
+/// The per-slot composited region images a background bake job produces: each
+/// baked slot ([`BakeRegion::slot`]) with its not-yet-uploaded Bevy [`Image`] and
+/// the composited-alpha classification for that region.
+type CompositedRegions = Vec<(usize, Image, BakeAlpha)>;
 
 impl OwnLocalBake {
     /// Force the client-side bake to re-composite on the next
     /// [`apply_own_local_bake`] — the appearance editor calls this after a live
     /// texture / tint edit changes the worn bake inputs.
     pub(crate) const fn invalidate(&mut self) {
-        self.built = false;
+        self.built_generation = None;
     }
 }
 
@@ -2924,7 +2938,14 @@ pub(crate) fn composite_own_region(
     inputs: &OwnBakeInputs,
     region: BakeRegion,
 ) -> Option<DecodedTexture> {
-    let layers = inputs.region_layers(region);
+    composite_region_from_layers(region, inputs.region_layers(region))
+}
+
+/// Composite one bake region from an owned layer list — the layer-list form of
+/// [`composite_own_region`], borrowing no ECS state so it runs on the background
+/// composite task ([`run_local_bake_job`]). `None` for an empty region (no worn
+/// layers). See [`composite_own_region`] for the flip / opaque-eye rationale.
+fn composite_region_from_layers(region: BakeRegion, layers: &[Layer]) -> Option<DecodedTexture> {
     if layers.is_empty() {
         return None;
     }
@@ -2938,27 +2959,27 @@ pub(crate) fn composite_own_region(
 }
 
 /// Composite our own avatar's ready client-side bake inputs (P15.2) into one
-/// uploaded [`Image`] + alpha classification per baked slot: composite each bake
-/// region ([`composite_own_region`]), classify the composited alpha (so an alpha
-/// wearable carved into the bake renders masked, P14.3), and upload the RGBA to a
-/// Bevy [`Image`]. A region with no worn layers is skipped.
-fn build_local_bake(
-    inputs: &OwnBakeInputs,
-    images: &mut Assets<Image>,
-) -> HashMap<usize, (Handle<Image>, BakeAlpha)> {
-    let mut regions = HashMap::new();
+/// image + alpha classification per baked slot: composite each bake region
+/// ([`composite_region_from_layers`]), classify the composited alpha (so an alpha
+/// wearable carved into the bake renders masked, P14.3), and build (not yet upload)
+/// a Bevy [`Image`]. Runs on a background [`AsyncComputeTaskPool`] task off the
+/// frame thread ([`apply_own_local_bake`] uploads the images on completion) — the
+/// per-region composite (layer blend + resample + V-flip + alpha classification)
+/// is the ~55 ms hitch this avoids stalling on. A region with no worn layers is
+/// skipped.
+fn run_local_bake_job(job: &LocalBakeJob) -> CompositedRegions {
+    let mut regions: CompositedRegions = Vec::new();
     let mut summary: Vec<String> = Vec::new();
-    for region in BakeRegion::ALL {
-        let Some(decoded) = composite_own_region(inputs, region) else {
+    for (region, layers) in &job.regions {
+        let Some(decoded) = composite_region_from_layers(*region, layers) else {
             continue;
         };
         let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
-        let handle = images.add(to_bevy_image(&decoded));
-        let _prev = regions.insert(region.slot(), (handle, alpha));
+        regions.push((region.slot(), to_bevy_image(&decoded), alpha));
         summary.push(format!(
             "{}={} layer(s)/{alpha:?}",
             region.name(),
-            inputs.region_layers(region).len()
+            layers.len()
         ));
     }
     info!(
@@ -2968,11 +2989,20 @@ fn build_local_bake(
     regions
 }
 
+/// The owned inputs a background client-side bake composite needs: each non-empty
+/// bake region's layer list, cloned out of [`OwnBakeInputs`] so the composite runs
+/// on an [`AsyncComputeTaskPool`] task without borrowing ECS state.
+struct LocalBakeJob {
+    /// Each bake region paired with its (owned) composite layer list.
+    regions: Vec<(BakeRegion, Vec<Layer>)>,
+}
+
 /// Drape our own avatar's locally composited client-side bake (P15.3) over its
 /// body regions when the grid publishes no server bake for us (OpenSim).
 ///
 /// Once the bake inputs are assembled ([`OwnBakeInputs::is_ready`]) the composite
-/// is built once ([`build_local_bake`]) and, for each of our own body parts whose
+/// is built on a background task ([`run_local_bake_job`]) and, for each of our own
+/// body parts whose
 /// region the grid did **not** bake for us, the composited region image is set as
 /// that region's material — reusing the same per-`(agent, slot)` material slot the
 /// P14 server-bake path uses, so a server bake (Second Life) cleanly wins over the
@@ -3003,9 +3033,51 @@ pub(crate) fn apply_own_local_bake(
     let Some(agent) = identity.agent_id else {
         return;
     };
-    if !local.built {
-        local.regions = build_local_bake(&inputs, &mut images);
-        local.built = true;
+    // Spawn a background composite when the current inputs generation is not built
+    // and none is already compositing it (a fresh outfit → new generation
+    // supersedes an in-flight older one). The composite runs off the frame thread;
+    // a region with no worn layers (a server-bake grid, where the layers are gated
+    // off, or an empty outfit) composites nothing, so skip the task and mark built.
+    let generation = inputs.generation();
+    if local.built_generation != Some(generation)
+        && local
+            .task
+            .as_ref()
+            .is_none_or(|(task_gen, _task)| *task_gen != generation)
+    {
+        let regions: Vec<(BakeRegion, Vec<Layer>)> = BakeRegion::ALL
+            .into_iter()
+            .filter_map(|region| {
+                let layers = inputs.region_layers(region);
+                (!layers.is_empty()).then(|| (region, layers.to_vec()))
+            })
+            .collect();
+        if regions.is_empty() {
+            local.regions.clear();
+            local.built_generation = Some(generation);
+        } else {
+            let job = LocalBakeJob { regions };
+            local.task = Some((
+                generation,
+                AsyncComputeTaskPool::get().spawn(async move { run_local_bake_job(&job) }),
+            ));
+        }
+    }
+    // Install a finished composite (never blocking on it — `poll_once` yields
+    // `None` while it is still running, so its images land a later frame).
+    let finished = local
+        .task
+        .as_mut()
+        .and_then(|(task_gen, task)| block_on(poll_once(task)).map(|regions| (*task_gen, regions)));
+    if let Some((task_generation, composited)) = finished {
+        let mut regions = HashMap::new();
+        for (slot, image, alpha) in composited {
+            let handle = images.add(image);
+            let _prev = regions.insert(slot, (handle, alpha));
+        }
+        local.regions = regions;
+        local.built_generation = Some(task_generation);
+        local.task = None;
     }
     if local.regions.is_empty() {
         return;

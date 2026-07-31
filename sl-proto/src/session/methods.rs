@@ -3,12 +3,12 @@
 use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
     agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
-    ais_inventory_update_from_llsd, avatar_animations, avatar_appearance, avatar_group,
-    avatar_interests, avatar_names, avatar_properties, bulk_update_folder,
-    bulk_update_inventory_from_llsd, bulk_update_item, chat_message, chat_session_roster_from_llsd,
-    chatterbox_invitation_from_llsd, classified_info, created_category_from_llsd,
-    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
-    enable_simulator_from_caps_llsd, environment_from_llsd,
+    ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
+    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
+    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
+    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd, classified_info,
+    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
+    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
     group_account_transactions, group_active_proposal_item, group_member,
@@ -526,6 +526,14 @@ impl Session {
                         items,
                         item_callbacks: Vec::new(),
                     });
+                }
+                // Re-fetch any folder whose version this mutation advanced (chiefly
+                // the Current Outfit Folder on a wear / take-off): the background
+                // crawl re-reads its authoritative contents so the model reconverges
+                // — a DELETE reply names no removed item, so nothing else drops the
+                // stale link and the take-off would otherwise stay worn in the UI.
+                for (folder, version) in ais_updated_category_versions(body) {
+                    self.inventory.invalidate_folder(folder, version);
                 }
             }
             // The synchronous reply to a `CreateInventoryCategory` POST:
@@ -3246,17 +3254,35 @@ impl Session {
             // The agent's own current wearables, pushed at login and after every
             // wearable change (or in reply to `AgentWearablesRequest`).
             AnyMessage::AgentWearablesUpdate(update) => {
+                let wearables = update
+                    .wearable_data
+                    .iter()
+                    .map(|block| {
+                        let item_id = InventoryKey::from(block.item_id);
+                        let mut asset_id = crate::types::optional_uuid_from_wire(block.asset_id);
+                        // Some grids (OpenSim) echo a just-worn item without
+                        // resolving its asset id — a freshly added layer arrives with
+                        // a nil asset id and would be dropped from the client-side
+                        // bake (which fetches per asset id), so the added garment
+                        // never composites. Resolve it from the inventory cache the
+                        // item was fetched into, matching the reference viewer, which
+                        // keys the worn set on inventory items, not the wire echo.
+                        if asset_id.is_none_or(|id| id.is_nil())
+                            && let Some(item) = self.inventory.item(item_id)
+                            && !item.asset_id.is_nil()
+                        {
+                            asset_id = Some(item.asset_id);
+                        }
+                        Wearable {
+                            item_id,
+                            asset_id,
+                            wearable_type: WearableType::from_code(block.wearable_type),
+                        }
+                    })
+                    .collect();
                 self.events.push_back(Event::AgentWearables {
                     serial: update.agent_data.serial_num,
-                    wearables: update
-                        .wearable_data
-                        .iter()
-                        .map(|block| Wearable {
-                            item_id: InventoryKey::from(block.item_id),
-                            asset_id: crate::types::optional_uuid_from_wire(block.asset_id),
-                            wearable_type: WearableType::from_code(block.wearable_type),
-                        })
-                        .collect(),
+                    wearables,
                 });
             }
             // Another avatar's currently-playing animations, pushed whenever its
@@ -9370,6 +9396,18 @@ impl Session {
             self.inventory.remove_item(*item_id);
         }
         Ok(())
+    }
+
+    /// Optimistically drop `item_ids` from the local inventory cache **without** any
+    /// wire message — the local half of a removal whose server side is performed
+    /// over the AIS3 `DELETE /item/<id>` capability (Second Life). Mirrors the cache
+    /// effect of [`Self::remove_inventory_items`] so the model reflects a take-off /
+    /// detach immediately (the item's Current Outfit link vanishes and it stops
+    /// reading as worn), while the AIS3 reply reconverges the folder authoritatively.
+    pub fn remove_inventory_items_local(&mut self, item_ids: &[InventoryKey]) {
+        for item_id in item_ids {
+            self.inventory.remove_item(*item_id);
+        }
     }
 
     /// Rewrites the flags of item `item_id` via `ChangeInventoryItemFlags`. The

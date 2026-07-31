@@ -3480,6 +3480,29 @@ pub(crate) fn ais_inventory_update_from_llsd(
     (folders, items)
 }
 
+/// The `_updated_category_versions` map of an AIS3 mutation reply: each affected
+/// folder's id paired with its new version. Second Life returns it on every
+/// create / move / remove (including a Current Outfit Folder link removal, whose
+/// reply carries no removed item), and the reference viewer uses it to re-fetch
+/// those folders so the local model reconverges with authoritative server state —
+/// the piece our optimistic caching cannot mirror. Keys are folder UUIDs (encoded
+/// as LLSD strings), values the integer versions; nil / unparsable keys are
+/// dropped.
+pub(crate) fn ais_updated_category_versions(body: &Llsd) -> Vec<(InventoryFolderKey, i32)> {
+    let Some(map) = body
+        .get("_updated_category_versions")
+        .and_then(Llsd::as_map)
+    else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(key, value)| {
+            let uuid = Uuid::parse_str(key.trim()).ok()?;
+            (!uuid.is_nil()).then(|| (InventoryFolderKey::from(uuid), value.as_i32().unwrap_or(0)))
+        })
+        .collect()
+}
+
 /// Parses the synchronous `CreateInventoryCategory` reply
 /// (`{ folder_id, name, parent_id, type }`) into the created folder.
 pub(crate) fn created_category_from_llsd(body: &Llsd) -> Option<InventoryFolder> {
@@ -4915,9 +4938,10 @@ mod caps_serializer_tests {
 
     use super::{
         CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
-        bulk_update_inventory_from_llsd, bulk_update_inventory_to_llsd,
-        chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
-        created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
+        ais_updated_category_versions, bulk_update_inventory_from_llsd,
+        bulk_update_inventory_to_llsd, chatterbox_invitation_from_llsd,
+        chatterbox_invitation_to_llsd, created_category_from_llsd, created_category_to_llsd,
+        crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
         enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
         establish_agent_communication_from_llsd, establish_agent_communication_to_llsd,
         group_members_from_caps_llsd, group_members_to_caps_llsd, group_memberships_from_caps_llsd,
@@ -5563,6 +5587,32 @@ mod caps_serializer_tests {
         got_items.sort_by_key(|item| item.item_id.uuid());
         assert_eq!(got_folders, folders);
         assert_eq!(got_items, items);
+        Ok(())
+    }
+
+    #[test]
+    fn ais_updated_category_versions_parses_the_map() -> Result<(), Box<dyn std::error::Error>> {
+        let cof = Uuid::from_u128(0xc0f);
+        let other = Uuid::from_u128(0xabc);
+        let xml = format!(
+            "<llsd><map><key>_updated_category_versions</key><map>\
+             <key>{cof}</key><integer>42</integer>\
+             <key>{other}</key><integer>7</integer>\
+             </map></map></llsd>"
+        );
+        let mut got = ais_updated_category_versions(&sl_wire::parse_llsd_xml(&xml)?);
+        got.sort_by_key(|(folder, _version)| folder.uuid());
+        let mut expected = vec![
+            (InventoryFolderKey::from(cof), 42),
+            (InventoryFolderKey::from(other), 7),
+        ];
+        expected.sort_by_key(|(folder, _version)| folder.uuid());
+        assert_eq!(got, expected);
+        // A reply without the map (e.g. a plain fetch) yields nothing to re-fetch.
+        assert!(
+            ais_updated_category_versions(&sl_wire::parse_llsd_xml("<llsd><map/></llsd>")?)
+                .is_empty()
+        );
         Ok(())
     }
 

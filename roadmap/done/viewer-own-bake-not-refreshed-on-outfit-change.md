@@ -2,7 +2,7 @@
 id: viewer-own-bake-not-refreshed-on-outfit-change
 title: Own avatar bake not refreshed when worn layers change at runtime
 topic: viewer
-status: bugs
+status: done
 origin: user report (2026-07-31, own avatar on aditi)
 refs: [viewer-p15-3, viewer-p14-3, viewer-bom-mesh-alpha-feet-through-boots]
 ---
@@ -44,3 +44,28 @@ not a missing mechanism:
 Live on aditi: with the avatar rezzed, remove an alpha layer (or swap a clothing
 layer) and confirm the affected region re-textures / un-hides within a few
 seconds, on both the server-bake and local-composite paths.
+
+## Done (2026-07-31)
+
+Both paths now re-bake on a runtime `AgentWearables` update.
+
+- **Server bake** (`appearance.rs`): `drive_server_bake` re-runs the handshake
+  on `AgentWearables` (and, for COF-only BoM-layer changes that never touch the
+  legacy wearable set, when the Current Outfit Folder re-fetches) — the grid's
+  COF-version mismatch recovery corrects a stale read. Verified live on aditi
+  (COF advances, re-bake accepted per outfit change).
+- **Local composite** (`bake_inputs.rs` / `avatars.rs`): a runtime
+  `AgentWearables` re-fetches the worn assets and re-assembles; a `generation`
+  counter drives `apply_own_local_bake` to re-composite. Verified on OpenSim.
+- **Initial-bake race fix:** the runtime re-fetch only fires once the pipeline
+  is **settled** (`Ready`); a change that lands mid-fetch is **deferred**
+  (latest wins) rather than resetting the in-flight fetch — OpenSim sends a
+  second `AgentWearables` during the initial fetch, and resetting mid-fetch let
+  a stale asset-fetch event assemble an empty bake ("assembled from 0
+  wearables"). Found and fixed live (user-diagnosed).
+- **OpenSim add-not-rebake:** `AgentWearablesUpdate` decode now resolves a nil
+  worn-item `asset_id` from the inventory cache, so a freshly added layer is not
+  dropped from the composite. Verified on OpenSim.
+
+Cross-cutting perf/inventory work landed in the same change (see
+[[viewer-perf-avatar-bake-apply-spikes]] and the AIS3 inventory routing).

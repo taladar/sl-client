@@ -72,6 +72,32 @@ pub fn ais_item_url(item_id: InventoryKey) -> String {
     format!("/item/{item_id}")
 }
 
+/// The AIS3 create-inventory body for a single **link** — the reference viewer's
+/// `link_inventory_array` payload (`AISAPI::CreateInventory`, `POST /category/<id>`
+/// carrying `{ "links": [ { linked_id, type, inv_type, name, desc } ] }`). A COF
+/// link is created this way on Second Life (the legacy UDP `LinkInventoryItem` is
+/// rejected against the AIS-managed Current Outfit Folder → "Cannot create
+/// requested inventory"); `type` is the link asset class (24 `AT_LINK`, 25
+/// `AT_LINK_FOLDER`) and `inv_type` the linked object's inventory class. The URL is
+/// [`ais_create_category_url`] with the containing category id.
+#[must_use]
+pub fn build_ais_create_link_body(
+    linked_id: Uuid,
+    link_type: i32,
+    inv_type: i32,
+    name: &str,
+    description: &str,
+) -> String {
+    let mut out = format!(
+        "<llsd><map><key>links</key><array><map><key>linked_id</key><uuid>{linked_id}</uuid><key>type</key><integer>{link_type}</integer><key>inv_type</key><integer>{inv_type}</integer><key>name</key><string>"
+    );
+    push_escaped(&mut out, name);
+    out.push_str("</string><key>desc</key><string>");
+    push_escaped(&mut out, description);
+    out.push_str("</string></map></array></map></llsd>");
+    out
+}
+
 /// The AIS3 body for creating a new folder: `{ name, type }` (the `type` is the
 /// folder's preferred `FolderType`, or `-1` for none).
 #[must_use]
@@ -510,6 +536,15 @@ mod test {
         assert_eq!(
             build_ais_create_category_body(8, "A & B"),
             "<llsd><map><key>name</key><string>A &amp; B</string><key>type</key><integer>8</integer></map></llsd>"
+        );
+    }
+
+    #[test]
+    fn create_link_body_carries_a_links_array() {
+        let linked = uuid!("55555555-5555-5555-5555-555555555555");
+        assert_eq!(
+            build_ais_create_link_body(linked, 24, 18, "Shirt & Co", "worn"),
+            "<llsd><map><key>links</key><array><map><key>linked_id</key><uuid>55555555-5555-5555-5555-555555555555</uuid><key>type</key><integer>24</integer><key>inv_type</key><integer>18</integer><key>name</key><string>Shirt &amp; Co</string><key>desc</key><string>worn</string></map></array></map></llsd>"
         );
     }
 

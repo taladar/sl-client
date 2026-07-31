@@ -2,7 +2,7 @@
 id: viewer-perf-avatar-bake-apply-spikes
 title: Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 topic: viewer
-status: ready
+status: done
 origin: Tracy profiling of Aditi rezzing (2026-07-31, 2-min capture)
 refs: [viewer-perf-skeleton-single-solve]
 ---
@@ -76,3 +76,31 @@ the *stall* where the work is real (OpenSim).
 Measure each system's per-event max (not just mean) before/after with a
 multi-minute capture while avatars are loading (the mean hides these; only the
 per-event spike distribution shows them — see `book/src/tools/profiling.md`).
+
+## Done (2026-07-31) — `apply_own_local_bake` only
+
+Both confirmed fixes for `apply_own_local_bake` (the 55 ms outlier) landed:
+
+1. **Gate the client composite on the server bake.** `OwnBakeInputs` now latches
+   a `server_bake_grid` flag from the `UpdateAvatarAppearance` capability; on a
+   server-bake grid the layer textures are not fetched and the composite is not
+   assembled (`bake_inputs.rs`), so the ~55 ms `build_local_bake` never runs on
+   SL. The wearable *assets* are still parsed for shape params, and the
+   appearance editor still composites on demand. Verified on aditi:
+   `composited client-side bake` fires 0 times (was ≥1).
+2. **Off-thread the composite that remains (OpenSim).** `build_local_bake` is
+   now a background `AsyncComputeTaskPool` job (`run_local_bake_job`), polled
+   non-blocking with `poll_once` — the frame is never stalled; the composited
+   images install a later frame. A newer `OwnBakeInputs` generation supersedes
+   an in-flight one. Verified on OpenSim (composites run on the task pool, no
+   panic).
+
+This also matters for the runtime re-bake
+([[viewer-own-bake-not-refreshed-on-outfit-change]]): without the gate, every SL
+outfit change would re-fire the wasted composite.
+
+**Still open (moved out of scope for this pass):** the task's other
+*Investigate* items — spreading **other** avatars' bake application
+(`apply_avatar_bake_textures`, `apply_bom_face_materials`) across frames, and
+capping / off-screen-skipping `drive_avatar_skeletons`. A full Tracy
+before/after of the per-event max distribution was not re-run.

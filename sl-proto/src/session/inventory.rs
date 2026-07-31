@@ -398,6 +398,33 @@ impl Inventory {
         }
     }
 
+    /// Mark a cached folder's contents stale so the background crawl re-fetches
+    /// its descendents, when an AIS3 mutation reply's `_updated_category_versions`
+    /// reports the folder advanced past the version we hold. Only a folder we
+    /// already track and have [`Loaded`](FolderState::Loaded) at an older version
+    /// is flipped to [`Unknown`](FolderState::Unknown); an unknown, unfetched, or
+    /// already-current folder is left as is (so this never starts a fetch for a
+    /// folder the UI does not care about). Reconverges the model with authoritative
+    /// state after a create / move / remove our optimistic cache cannot fully mirror
+    /// — chiefly a Current Outfit Folder link removal (its DELETE reply carries no
+    /// removed item, so nothing else drops the stale link).
+    pub(crate) fn invalidate_folder(&mut self, folder: InventoryFolderKey, version: i32) {
+        if let Some(entry) = self.folders.get_mut(&folder)
+            && let FolderState::Loaded { version: current } = entry.state
+            && version > current
+        {
+            entry.state = FolderState::Unknown;
+            // Advance the recorded version so readers (chiefly the server-bake
+            // Current-Outfit-Folder version check) see the mutation immediately —
+            // before the re-fetch lands, and even for a DELETE reply that carries no
+            // updated folder payload of its own.
+            if let Some(payload) = entry.folder.as_mut() {
+                payload.version = version;
+            }
+            self.dirty = true;
+        }
+    }
+
     /// Re-parents a known folder under `new_parent`, moving it in the child index
     /// (unlink from the old parent, link under the new if present). Used by the
     /// in-place `MoveInventoryFolder` mutation. A no-op for a folder whose

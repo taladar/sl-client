@@ -30,14 +30,14 @@ use sl_proto::{
     INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_resource_cost_selected_request, build_send_user_report,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
@@ -194,6 +194,69 @@ use crate::voice::{post_voice_cap, post_voice_signaling};
 
 /// How long to sleep when the session has no scheduled timeout.
 const IDLE_SLEEP: Duration = Duration::from_secs(3600);
+
+/// The HTTP verb for an AIS3 inventory request ([`route_ais3`]).
+enum Ais3Verb {
+    /// `POST` — create (a folder, a link).
+    Post,
+    /// `PATCH` — mutate an existing folder / item (rename, move).
+    Patch,
+    /// `DELETE` — remove a folder / item / a folder's children.
+    Delete,
+}
+
+/// Whether the region offers the modern AIS3 inventory API (`InventoryAPIv3`) —
+/// Second Life does, stock OpenSim does not. Inventory mutations route through
+/// AIS3 when it is present and fall back to the legacy UDP messages otherwise
+/// (mirroring the reference viewer's `AISAPI::isAvailable`).
+fn has_ais3(caps: &HashMap<String, String>) -> bool {
+    caps.contains_key(CAP_INVENTORY_API_V3)
+}
+
+/// Route an inventory mutation through AIS3 (Second Life): spawn its HTTP request,
+/// feeding the reply back through `caps_tx` (parsed as an inventory update).
+/// Returns `true` when it dispatched, `false` when the `InventoryAPIv3` capability
+/// is absent (OpenSim) and the caller must fall back to the legacy UDP path.
+/// `suffix` is the AIS3 URL suffix under the cap base; `body` is the LLSD request
+/// body (ignored for [`Ais3Verb::Delete`]).
+fn route_ais3(
+    caps: &HashMap<String, String>,
+    http: &ReqwestClient,
+    caps_tx: &mpsc::Sender<(String, Llsd)>,
+    suffix: &str,
+    verb: Ais3Verb,
+    body: Option<String>,
+) -> bool {
+    let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() else {
+        return false;
+    };
+    let url = format!("{base}{suffix}");
+    let (http, caps_tx) = (http.clone(), caps_tx.clone());
+    match verb {
+        Ais3Verb::Post => {
+            tokio::spawn(post_voice_cap(
+                url,
+                body.unwrap_or_default(),
+                CAP_INVENTORY_API_V3,
+                http,
+                caps_tx,
+            ));
+        }
+        Ais3Verb::Patch => {
+            tokio::spawn(patch_caps_llsd(
+                url,
+                body.unwrap_or_default(),
+                CAP_INVENTORY_API_V3,
+                http,
+                caps_tx,
+            ));
+        }
+        Ais3Verb::Delete => {
+            tokio::spawn(delete_caps_llsd(url, CAP_INVENTORY_API_V3, http, caps_tx));
+        }
+    }
+    true
+}
 
 /// An error from the tokio client.
 #[derive(Debug, Error)]
@@ -838,10 +901,22 @@ impl Client {
                             self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
                         }
                         Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
-                            self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                            // Second Life routes through AIS3 (`PATCH /category/<id>`); OpenSim keeps UDP.
+                            let suffix = ais_category_url(folder_id);
+                            let body = build_ais_move_body(parent_id);
+                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Patch, Some(body)) {
+                                self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
+                            }
                         }
                         Some(Command::RemoveInventoryFolders(folder_ids)) => {
-                            self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
+                            // Second Life deletes each folder via AIS3 (`DELETE /category/<id>`); OpenSim keeps the UDP batch.
+                            if has_ais3(&caps) {
+                                for folder_id in &folder_ids {
+                                    route_ais3(&caps, &http, &caps_tx, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
+                                }
+                            } else {
+                                self.session.remove_inventory_folders(&folder_ids, Instant::now())?;
+                            }
                         }
                         Some(Command::CreateInventoryItem(new)) => {
                             self.session.create_inventory_item(&new, Instant::now())?;
@@ -850,7 +925,20 @@ impl Client {
                             self.session.create_script(folder_id, &name, &description, next_owner_mask, language, Instant::now())?;
                         }
                         Some(Command::LinkInventoryItem(new)) => {
-                            self.session.link_inventory_item(&new, Instant::now())?;
+                            // Second Life: create the link via AIS3 (`POST /category/<folder>` with a
+                            // `links` array) — the UDP `LinkInventoryItem` is rejected against the
+                            // AIS-managed Current Outfit Folder. OpenSim (no cap) keeps the UDP path.
+                            let suffix = ais_create_category_url(new.folder_id, Uuid::new_v4());
+                            let body = build_ais_create_link_body(
+                                new.linked_id.uuid(),
+                                new.link_type.to_code(),
+                                new.inv_type.to_code(),
+                                &new.name,
+                                &new.description,
+                            );
+                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Post, Some(body)) {
+                                self.session.link_inventory_item(&new, Instant::now())?;
+                            }
                         }
                         Some(Command::UpdateInventoryItem { item, transaction_id }) => {
                             self.session.update_inventory_item(&item, transaction_id, Instant::now())?;
@@ -859,19 +947,40 @@ impl Client {
                             self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
                         }
                         Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
-                            self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
+                            // Second Life re-parents via AIS3 (`PATCH /item/<id>`), but only a pure
+                            // move: the AIS3 move body carries no name, so a move that also renames
+                            // stays on UDP rather than dropping the rename. OpenSim keeps UDP.
+                            let routed = new_name.is_empty()
+                                && route_ais3(&caps, &http, &caps_tx, &ais_item_url(item_id), Ais3Verb::Patch, Some(build_ais_move_body(folder_id)));
+                            if !routed {
+                                self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
+                            }
                         }
                         Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
                             self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
                         }
                         Some(Command::RemoveInventoryItems(item_ids)) => {
-                            self.session.remove_inventory_items(&item_ids, Instant::now())?;
+                            // Second Life deletes each item via AIS3 (`DELETE /item/<id>`); OpenSim keeps the UDP batch.
+                            if has_ais3(&caps) {
+                                // Drop the items from the cache optimistically (the AIS3 DELETE does
+                                // not), so a taken-off / detached item leaves the model at once.
+                                self.session.remove_inventory_items_local(&item_ids);
+                                for item_id in &item_ids {
+                                    route_ais3(&caps, &http, &caps_tx, &ais_item_url(*item_id), Ais3Verb::Delete, None);
+                                }
+                            } else {
+                                self.session.remove_inventory_items(&item_ids, Instant::now())?;
+                            }
                         }
                         Some(Command::ChangeInventoryItemFlags { item_id, flags }) => {
                             self.session.change_inventory_item_flags(item_id, flags, Instant::now())?;
                         }
                         Some(Command::PurgeInventoryDescendents(folder_id)) => {
-                            self.session.purge_inventory_descendents(folder_id, Instant::now())?;
+                            // Second Life empties via AIS3 (`DELETE /category/<id>/children`); OpenSim keeps UDP.
+                            let suffix = ais_category_children_url(folder_id);
+                            if !route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Delete, None) {
+                                self.session.purge_inventory_descendents(folder_id, Instant::now())?;
+                            }
                         }
                         Some(Command::RemoveInventoryObjects { folder_ids, item_ids }) => {
                             self.session.remove_inventory_objects(&folder_ids, &item_ids, Instant::now())?;

@@ -23,8 +23,8 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    CAP_UPDATE_AVATAR_APPEARANCE, Command, FolderInfo, FolderType, SlCapabilities, SlCommand,
-    SlEvent, SlSessionEvent,
+    CAP_UPDATE_AVATAR_APPEARANCE, Command, FolderInfo, FolderType, InventoryFolderKey,
+    SlCapabilities, SlCommand, SlEvent, SlSessionEvent,
 };
 
 /// A bound on the COF-version mismatch recovery loop, so a grid that never
@@ -59,6 +59,13 @@ pub(crate) struct ServerBakeState {
     /// grid that never offers the capability (OpenSim) this stays `false` and a
     /// rebake request is inert.
     cap_available: bool,
+    /// The Current Outfit Folder's id, learned from the folder snapshot. A
+    /// re-fetch of *this* folder (its contents reconverged after a wear / take-off
+    /// mutated its links) re-runs the bake — the reference viewer's
+    /// `updateAppearanceFromCOF` after `removeCOFItemLinks` completes, so a
+    /// COF-only change (a BoM layer that never touches the legacy `AgentWearables`
+    /// set) still re-bakes.
+    cof_folder: Option<InventoryFolderKey>,
 }
 
 /// The version of the agent's Current Outfit Folder in the inventory-folder
@@ -69,6 +76,15 @@ fn current_outfit_version(folders: &[FolderInfo]) -> i32 {
         .iter()
         .find(|folder| folder.folder_type == FolderType::CurrentOutfit)
         .map_or(0, |folder| folder.version)
+}
+
+/// The Current Outfit Folder's id in the inventory-folder snapshot, if present —
+/// stored so a later re-fetch of that folder can re-trigger the bake.
+fn current_outfit_folder(folders: &[FolderInfo]) -> Option<InventoryFolderKey> {
+    folders
+        .iter()
+        .find(|folder| folder.folder_type == FolderType::CurrentOutfit)
+        .map(|folder| folder.folder_id)
 }
 
 /// Drive the one-shot server-side appearance bake for our own avatar: once the
@@ -101,6 +117,9 @@ pub(crate) fn drive_server_bake(
                 if state.stage == BakeStage::FoldersRequested =>
             {
                 let cof_version = current_outfit_version(folders);
+                if let Some(cof) = current_outfit_folder(folders) {
+                    state.cof_folder = Some(cof);
+                }
                 state.cof_version = cof_version;
                 state.attempts = 1;
                 state.stage = BakeStage::BakeRequested;
@@ -153,6 +172,46 @@ pub(crate) fn drive_server_bake(
                 state.stage = BakeStage::FoldersRequested;
                 state.attempts = 0;
                 debug!("simulator requested a rebake; re-running the server appearance bake");
+            }
+            // A runtime outfit change (took off / swapped a worn layer): the sim
+            // re-broadcasts our wearables and bumps the Current Outfit Folder
+            // version. Re-run the handshake so the grid re-composites at the new COF
+            // version and re-publishes our appearance — otherwise the stale server
+            // bake persists and a removed layer never reveals. This is the
+            // central-baking (Second Life) counterpart of the local-composite
+            // re-bake in `bake_inputs`. The re-read picks up the new COF version;
+            // should the version-bump `BulkUpdateInventory` not have landed yet, the
+            // grid answers with the version it `expected` and the existing mismatch
+            // recovery retries with it. A change mid-handshake is ignored — the
+            // in-flight bake reads the latest cached version. Inert without the
+            // capability (OpenSim, which the local composite covers instead).
+            SlSessionEvent::AgentWearables { .. }
+                if state.cap_available && state.stage == BakeStage::Done =>
+            {
+                writer.write(SlCommand(Command::QueryInventoryFolders));
+                state.stage = BakeStage::FoldersRequested;
+                state.attempts = 0;
+                debug!("own outfit changed at runtime; re-running the server appearance bake");
+            }
+            // The Current Outfit Folder's contents reconverged after a wear /
+            // take-off / detach mutated its links (its re-fetch, driven by the AIS3
+            // reply's `_updated_category_versions`). Re-run the bake now the COF is
+            // fresh — the reference viewer's `updateAppearanceFromCOF` after the link
+            // removals complete. This is what re-bakes a *COF-only* change (a BoM
+            // layer take-off that never touches the legacy `AgentWearables` set, so
+            // the arm above never fires), and it runs *after* the mutation so the
+            // grid sees the new version (no stale-bake race). Inert without the cap.
+            SlSessionEvent::InventoryDescendents {
+                folder_id, version, ..
+            } if state.cap_available
+                && state.stage == BakeStage::Done
+                && state.cof_folder == Some(*folder_id)
+                && *version > state.cof_version =>
+            {
+                writer.write(SlCommand(Command::QueryInventoryFolders));
+                state.stage = BakeStage::FoldersRequested;
+                state.attempts = 0;
+                debug!("Current Outfit Folder reconverged; re-running the server appearance bake");
             }
             _other => {}
         }

@@ -465,6 +465,29 @@ fn in_hud_attachment(state: &ObjectState, scoped: ScopedObjectId) -> bool {
     false
 }
 
+/// Whether `object` — being spawned or rebuilt, so its own tracked entry may not
+/// exist yet — is (part of) a HUD attachment: it is worn on a HUD point itself, or
+/// it is a linkset child of a root that is. A rigged mesh on a HUD is built as
+/// static HUD geometry rather than skinned to a body skeleton it does not have, so
+/// the warm-cache mesh build ([`build_object_geometry`]) needs this classification
+/// up front (the cold-cache path derives it in [`apply_object_meshes`] via
+/// [`in_hud_attachment`], once the object is tracked). Its own point is checked
+/// directly; a child defers to its linkset root's tracked entry.
+fn object_in_hud_attachment(
+    state: &ObjectState,
+    attachment_point: Option<u8>,
+    is_root: bool,
+    parent: ScopedObjectId,
+) -> bool {
+    if attachment_point.is_some_and(is_hud_point) {
+        return true;
+    }
+    if is_root {
+        return false;
+    }
+    in_hud_attachment(state, parent)
+}
+
 /// A deferred geometry build waiting on an asset fetch — a mesh object on its
 /// `LLMesh` asset, or a sculpted prim on its sculpt map texture — retained so the
 /// object's face entities can be spawned (and textured) once the asset decodes.
@@ -1799,6 +1822,7 @@ fn build_object_geometry(
     object: &Object,
     category: ObjectCategory,
     entity: Entity,
+    is_hud: bool,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
@@ -1861,6 +1885,30 @@ fn build_object_geometry(
             // of `mesh_manager` ends before the submesh build borrows the other
             // resources.
             match mesh_manager.decoded(key).map(Arc::clone) {
+                // A rigged mesh (one carrying a skin block) is worn by an avatar and
+                // must be skinned to its skeleton, never built as a static child —
+                // even when its asset is already warm in the cache, which is the
+                // case on a runtime re-attach (detach then "add to current outfit").
+                // The cold-cache decode path routes rigged meshes to
+                // `apply_rigged_attachments` via a `RiggedMesh` pending; the warm
+                // cache used to skip that and build static submeshes here, so a
+                // re-attached rigged garment rendered unrigged and mislocated. Mirror
+                // the decode path: defer to the rigged build (and upgrade to the
+                // finest block, since a skinned mesh cannot be pixel-area LOD ranked)
+                // unless it is worn on a HUD, which has no skeleton to skin to.
+                Some(_decoded) if !is_hud && mesh_manager.skin(key).is_some() => {
+                    mesh_manager.upgrade_to_finest(key);
+                    (
+                        Vec::new(),
+                        Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+                            key,
+                            texture_entry: object.texture_entry.clone(),
+                        })),
+                        None,
+                        None,
+                        None,
+                    )
+                }
                 Some(decoded) => (
                     build_mesh_submeshes(
                         &decoded,
@@ -2590,6 +2638,11 @@ fn apply_object(
     } else {
         state.objects.get(&parent).map(|root| root.entity)
     };
+    // Whether this object is worn on a HUD (itself or via its linkset root), so a
+    // rigged mesh on it is built as static HUD geometry rather than skinned to a
+    // body skeleton — the warm-cache mesh build needs this up front (the cold-cache
+    // decode path derives it once the object is tracked).
+    let is_hud = object_in_hud_attachment(state, attachment_point, is_root, parent);
 
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
@@ -2687,6 +2740,7 @@ fn apply_object(
                     object,
                     category,
                     existing.geometry,
+                    is_hud,
                     commands,
                     meshes,
                     materials,
@@ -2815,6 +2869,7 @@ fn apply_object(
         object,
         category,
         geometry,
+        is_hud,
         commands,
         meshes,
         materials,

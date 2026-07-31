@@ -32,10 +32,10 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AppearanceValues, AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion,
-    BevyAssetFetcher, BlobFetcher, CAP_VIEWER_ASSET, Command, DecodedTexture, Layer, LayerTint,
-    ResolvedParams, SlCapabilities, SlCommand, SlEvent, SlSessionEvent, TextureKey, VisualParams,
-    Wearable, WearableAsset, WearableType, avatar_texture, combine_layer_color, global_color,
-    region_layers,
+    BevyAssetFetcher, BlobFetcher, CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command,
+    DecodedTexture, Layer, LayerTint, ResolvedParams, SlCapabilities, SlCommand, SlEvent,
+    SlSessionEvent, TextureKey, VisualParams, Wearable, WearableAsset, WearableType,
+    avatar_texture, combine_layer_color, global_color, region_layers,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -69,6 +69,26 @@ enum BakeInputStage {
 pub(crate) struct OwnBakeInputs {
     /// The assembly stage.
     stage: BakeInputStage,
+    /// Whether the grid offers central (server-side) baking for our own avatar —
+    /// the `UpdateAvatarAppearance` capability is present (Second Life). When it is,
+    /// the server bake supersedes the client-side composite region-for-region, so
+    /// assembling it is pure waste (and strictly *more* asset traffic + JPEG2000
+    /// decode than the one already-composited server bake per region): the layer
+    /// textures are not fetched and the composite is not built (the perf gate). The
+    /// wearable *assets* are still parsed for their shape params, and the appearance
+    /// editor still composites on demand for its live preview.
+    server_bake_grid: bool,
+    /// Bumped each time the per-region layer lists are (re)assembled, so the
+    /// client-side composite ([`OwnLocalBake`](crate::avatars::OwnLocalBake)) knows
+    /// to re-composite when a runtime outfit change re-assembles the inputs.
+    generation: u64,
+    /// A runtime outfit change that arrived while the pipeline was still
+    /// mid-fetch, deferred until it settles ([`BakeInputStage::Ready`]) rather than
+    /// resetting the in-flight fetch — which would let a stale asset-fetch event
+    /// decrement the new round's pending count without parsing and assemble an
+    /// empty bake. The latest deferred wearables win; applied by
+    /// [`drive_wearable_requests`] once ready.
+    queued_refetch: Option<Vec<Wearable>>,
     /// The worn wearables (those carrying an asset id), from `AgentWearables`.
     wearables: Vec<Wearable>,
     /// The parsed worn wearable assets, in worn order.
@@ -98,6 +118,13 @@ impl OwnBakeInputs {
     #[must_use]
     pub(crate) fn is_ready(&self) -> bool {
         self.stage == BakeInputStage::Ready
+    }
+
+    /// The assembly generation, bumped on every (re)assembly. The client-side
+    /// composite compares it to detect a runtime outfit change and re-composite.
+    #[must_use]
+    pub(crate) const fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Build the transmitted `AvatarAppearance.visual_params` vector from the worn
@@ -248,6 +275,17 @@ impl WearableAssetManager {
         self.fetcher.set_cap_url(url);
     }
 
+    /// Drop the in-flight fetches and downloaded-bytes cache so a re-fetch (a
+    /// runtime outfit change) re-issues each worn asset request and re-announces its
+    /// arrival via [`WearableAssetFetched`]: [`request`](Self::request)
+    /// short-circuits on an already-downloaded id, so without this a re-fetch of an
+    /// unchanged worn asset would never fire the event that drives its parse. The
+    /// pending (cap-not-yet-set) queue is left as is.
+    fn reset_for_refetch(&mut self) {
+        self.inflight.clear();
+        self.fetched.clear();
+    }
+
     /// Issue any requests parked before the `ViewerAsset` capability was known (see
     /// [`pending`](Self::pending)), now that it is. A no-op while the cap is unset
     /// or nothing is pending. Call this whenever the cap is (re)set.
@@ -304,12 +342,56 @@ const fn wearable_asset_type(wearable_type: WearableType) -> AssetType {
 pub(crate) fn update_asset_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<WearableAssetManager>,
+    mut state: ResMut<OwnBakeInputs>,
 ) {
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
+        // The central-baking capability marks a grid that server-bakes our own
+        // avatar, so the client-side composite is superseded — gate it off (perf).
+        // Latch on: the capability is not withdrawn once offered.
+        if map.contains_key(CAP_UPDATE_AVATAR_APPEARANCE) {
+            state.server_bake_grid = true;
+        }
     }
     // Issue any wearable-asset requests parked while the cap was still unknown.
     manager.retry_pending();
+}
+
+/// What to do with a non-initial `AgentWearables` update (a runtime outfit
+/// change), decided by the bake pipeline's current [`stage`](BakeInputStage).
+enum OutfitAction {
+    /// Ignore it — before the handshake requested the first outfit ([`Idle`]);
+    /// an `AgentWearables` here is stray.
+    ///
+    /// [`Idle`]: BakeInputStage::Idle
+    Ignore,
+    /// The pipeline is settled ([`Ready`](BakeInputStage::Ready)): re-fetch now.
+    Refetch,
+    /// A fetch is still in flight ([`FetchingAssets`]/[`FetchingTextures`]):
+    /// **defer** it. Resetting now would corrupt the in-flight bake — a stale
+    /// asset-fetch event from the aborted round would decrement the new round's
+    /// pending count without parsing, assembling an empty bake (the login
+    /// "assembled from 0 wearables" symptom). Apply it once ready.
+    ///
+    /// [`FetchingAssets`]: BakeInputStage::FetchingAssets
+    /// [`FetchingTextures`]: BakeInputStage::FetchingTextures
+    Defer,
+}
+
+/// Decide how to handle a runtime `AgentWearables` update at `stage`. No
+/// update-`serial` dedup on purpose (mirroring the server-bake path,
+/// [`drive_server_bake`](crate::appearance::drive_server_bake)): live on aditi the
+/// sim re-broadcasts our wearables on an outfit change *without* advancing the
+/// serial, so a serial guard would silently drop real changes; a redundant
+/// re-fetch of an unchanged outfit is merely a cache-hit re-composite, whereas a
+/// missed change leaves a stale bake. [`AwaitingWearables`](BakeInputStage::AwaitingWearables)
+/// is handled by the initial-reply arm, not here.
+const fn outfit_action(stage: BakeInputStage) -> OutfitAction {
+    match stage {
+        BakeInputStage::Idle | BakeInputStage::AwaitingWearables => OutfitAction::Ignore,
+        BakeInputStage::Ready => OutfitAction::Refetch,
+        BakeInputStage::FetchingAssets | BakeInputStage::FetchingTextures => OutfitAction::Defer,
+    }
 }
 
 /// Drive the request half: once the region handshake completes, ask the sim for
@@ -322,6 +404,16 @@ pub(crate) fn drive_wearable_requests(
     mut manager: ResMut<WearableAssetManager>,
     mut writer: MessageWriter<SlCommand>,
 ) {
+    // Apply a deferred runtime outfit change once the pipeline settles (it arrived
+    // mid-fetch and was queued to avoid corrupting the in-flight bake). The latest
+    // deferred wearables win.
+    if state.stage == BakeInputStage::Ready
+        && let Some(wearables) = state.queued_refetch.take()
+    {
+        reset_for_refetch(&mut state, &mut manager);
+        start_asset_fetch(&mut state, &mut manager, &wearables, time.elapsed_secs());
+        debug!("applying deferred outfit change; re-fetching worn assets for a re-bake");
+    }
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::RegionHandshakeComplete if state.stage == BakeInputStage::Idle => {
@@ -330,11 +422,27 @@ pub(crate) fn drive_wearable_requests(
                 state.deadline = Some(time.elapsed_secs() + FETCH_GRACE_SECS);
                 debug!("requested own wearables for client-side bake inputs");
             }
+            // The initial outfit reply: start the first bake.
             SlSessionEvent::AgentWearables { wearables, .. }
                 if state.stage == BakeInputStage::AwaitingWearables =>
             {
                 start_asset_fetch(&mut state, &mut manager, wearables, time.elapsed_secs());
             }
+            // A runtime outfit change (took off / put on / swapped a worn layer):
+            // the sim re-broadcasts our wearables. Re-fetch + re-assemble so the
+            // change shows — the passive-viewer assumption that the worn outfit
+            // never changes no longer holds. Only when the pipeline is settled; a
+            // change mid-fetch is deferred (applied above once ready) so it cannot
+            // corrupt the in-flight bake.
+            SlSessionEvent::AgentWearables { wearables, .. } => match outfit_action(state.stage) {
+                OutfitAction::Refetch => {
+                    reset_for_refetch(&mut state, &mut manager);
+                    start_asset_fetch(&mut state, &mut manager, wearables, time.elapsed_secs());
+                    debug!("own outfit changed at runtime; re-fetching worn assets for a re-bake");
+                }
+                OutfitAction::Defer => state.queued_refetch = Some(wearables.clone()),
+                OutfitAction::Ignore => {}
+            },
             _other => {}
         }
     }
@@ -372,6 +480,21 @@ fn start_asset_fetch(
         );
         state.stage = BakeInputStage::FetchingAssets;
     }
+}
+
+/// Clear the assembled bake inputs and the asset manager's fetch bookkeeping so a
+/// runtime outfit change re-fetches every worn asset from scratch: the parsed
+/// assets, pending sets and per-region layers are stale, and the manager's
+/// downloaded-bytes cache would otherwise short-circuit the re-request without
+/// re-announcing it. The on-disk / in-memory [`AssetStore`] cache is untouched, so
+/// an unchanged worn asset re-fetches straight from cache; a removed layer's asset
+/// is simply no longer requested, so it drops out of the re-assembled bake.
+fn reset_for_refetch(state: &mut OwnBakeInputs, manager: &mut WearableAssetManager) {
+    state.assets.clear();
+    state.pending_assets.clear();
+    state.pending_textures.clear();
+    state.layers.clear();
+    manager.reset_for_refetch();
 }
 
 /// Poll the in-flight wearable-asset fetches; move each completed download into
@@ -446,7 +569,14 @@ pub(crate) fn assemble_own_bake(
                 state.pending_textures.len()
             );
         }
-        assemble(&mut state, &texture_manager, library.as_deref());
+        // On a server-bake grid the composite is superseded, so skip building it
+        // (the ~55 ms `build_local_bake` spike is pure waste there — the perf gate);
+        // the parsed assets are still available for shape resolution, and the
+        // appearance editor composites on demand via `reassemble`. Elsewhere
+        // (OpenSim) assemble the per-region layer lists the composite drapes.
+        if !state.server_bake_grid {
+            assemble(&mut state, &texture_manager, library.as_deref());
+        }
         state.stage = BakeInputStage::Ready;
     }
 }
@@ -469,19 +599,26 @@ fn parse_and_request_textures(
             return;
         }
     };
-    // Request every layer texture this wearable supplies that a bake region uses.
-    for &(slot, _name, _wearable) in &avatar_texture::LAYER_TEXTURES {
-        if !asset.supplies_layer(slot) {
-            continue;
-        }
-        if let Some(id) = asset.layer_texture(slot) {
-            let key = TextureKey::from(id);
-            if texture_manager.decoded(key).is_none() {
-                state.pending_textures.insert(key);
-                // Our own avatar's client-side bake layer textures are boosted
-                // (P20.2): they clothe the own avatar and are not ranked by the
-                // on-screen prim-face pass, so a fixed boost loads them promptly.
-                texture_manager.request_boosted(key, crate::render_priority::AVATAR_BOOST_PRIORITY);
+    // Request every layer texture this wearable supplies that a bake region uses —
+    // unless the grid server-bakes our own avatar, where the client composite is
+    // superseded, so its (JPEG2000-heavy) layer textures are never needed and are
+    // not fetched (the perf gate). The wearable asset itself is still parsed and
+    // kept for its shape params.
+    if !state.server_bake_grid {
+        for &(slot, _name, _wearable) in &avatar_texture::LAYER_TEXTURES {
+            if !asset.supplies_layer(slot) {
+                continue;
+            }
+            if let Some(id) = asset.layer_texture(slot) {
+                let key = TextureKey::from(id);
+                if texture_manager.decoded(key).is_none() {
+                    state.pending_textures.insert(key);
+                    // Our own avatar's client-side bake layer textures are boosted
+                    // (P20.2): they clothe the own avatar and are not ranked by the
+                    // on-screen prim-face pass, so a fixed boost loads them promptly.
+                    texture_manager
+                        .request_boosted(key, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                }
             }
         }
     }
@@ -524,6 +661,9 @@ fn assemble(
         summary.join(" ")
     );
     state.layers = layers;
+    // Signal the client-side composite that the inputs changed so it re-composites
+    // (a runtime outfit change, or an appearance-editor live edit).
+    state.generation = state.generation.wrapping_add(1);
 }
 
 /// The decoded texture for a bake-region layer `slot`: the first worn wearable of
@@ -619,4 +759,42 @@ fn mask_weight(
     params
         .and_then(|params| params.get(param_id))
         .map_or(0.0, |param| param.default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BakeInputStage, OutfitAction, outfit_action};
+
+    /// A runtime `AgentWearables` is ignored before the handshake requested the
+    /// first outfit; the initial reply itself is handled by its own arm, not here.
+    #[test]
+    fn outfit_change_ignored_before_the_handshake() {
+        assert!(matches!(
+            outfit_action(BakeInputStage::Idle),
+            OutfitAction::Ignore
+        ));
+        assert!(matches!(
+            outfit_action(BakeInputStage::AwaitingWearables),
+            OutfitAction::Ignore
+        ));
+    }
+
+    /// A settled pipeline re-fetches immediately; a change that lands mid-fetch is
+    /// deferred so it cannot corrupt the in-flight bake (the "assembled from 0"
+    /// login race).
+    #[test]
+    fn outfit_change_refetches_when_settled_defers_mid_fetch() {
+        assert!(matches!(
+            outfit_action(BakeInputStage::Ready),
+            OutfitAction::Refetch
+        ));
+        assert!(matches!(
+            outfit_action(BakeInputStage::FetchingAssets),
+            OutfitAction::Defer
+        ));
+        assert!(matches!(
+            outfit_action(BakeInputStage::FetchingTextures),
+            OutfitAction::Defer
+        ));
+    }
 }

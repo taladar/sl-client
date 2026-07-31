@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 261 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 15 |
-| done | 645 |
+| bugs | 16 |
+| done | 649 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1125** |
+| **total** | **1130** |
 
 ## ideas (56)
 
@@ -377,6 +377,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-secondary-window`](ready/viewer-inventory-secondary-window.md)
   — Secondary inventory windows
+- [`viewer-inventory-show-in-main-from-worn-recent`](ready/viewer-inventory-show-in-main-from-worn-recent.md)
+  — '"Show in Main view" inventory menu action from the Worn / Recent tabs'
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
@@ -548,8 +550,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
-- [`viewer-perf-avatar-bake-apply-spikes`](ready/viewer-perf-avatar-bake-apply-spikes.md)
-  — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
@@ -1125,7 +1125,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (15)
+## bugs (16)
 
 ### protocol
 
@@ -1144,20 +1144,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
+- [`viewer-inventory-clothing-layers-shirt-icon`](bugs/viewer-inventory-clothing-layers-shirt-icon.md)
+  — All clothing layers show the shirt icon instead of per-type icons
 - [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
   — Inventory rows with long names wrap to multiple lines and overlap
+- [`viewer-inventory-worn-markers-show-early`](bugs/viewer-inventory-worn-markers-show-early.md)
+  — Show (worn) / bold inventory markers early, without opening Current Outfit
+- [`viewer-inventory-worn-tab-items-without-folders`](bugs/viewer-inventory-worn-tab-items-without-folders.md)
+  — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
-- [`viewer-own-bake-not-refreshed-on-outfit-change`](bugs/viewer-own-bake-not-refreshed-on-outfit-change.md)
-  — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
-- [`viewer-reattached-rigged-mesh-renders-static-mislocated`](bugs/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
-  — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1171,7 +1173,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (645)
+## done (649)
 
 ### protocol
 
@@ -1301,6 +1303,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
+- [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
+  — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
   — Edit Shape / Skin / Hair / Eyes — body-part editors (blocked by
   `viewer-appearance-editor-shell` (done))
@@ -1535,6 +1539,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-offline-im-drain`](done/viewer-offline-im-drain.md) — Drain stored
   offline instant messages at login
+- [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
+  — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
   crate skeletons
 - [`viewer-p0-2`](done/viewer-p0-2-register-the-members.md) — Register the
@@ -1733,6 +1739,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-perf-avatar-bake-apply-spikes`](done/viewer-perf-avatar-bake-apply-spikes.md)
+  — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
@@ -1826,6 +1834,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
+  — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))
