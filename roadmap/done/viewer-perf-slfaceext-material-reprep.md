@@ -119,9 +119,16 @@ live confirmation of the ~40 ms `apply_prim_textures` spike flattening still
 wants a camera-movement capture (LOD upgrades trigger on approach, which the
 log-in-and-rez pattern does not reliably exercise).
 
-Follow-up (b) still open: the spawn drain clones every incoming object event —
-clone only the overflow to trim `update_objects`'s worst-frame main-thread cost
-(~11 ms).
+Follow-up (b) **done**: `update_objects` no longer clones every incoming object
+event. It now drains any earlier-frame backlog first, then applies new events
+**inline (no clone)** while the queue is empty and the budget holds, cloning
+only the overflow it must defer (`apply_pending_object_event` handles the owned
+backlog events; the inline path calls `apply_object` / `remove_object` on the
+borrowed event). Strict FIFO is preserved — the moment one event is buffered,
+every later one is too. This removes the per-event `Box<Object>` clone in the
+common steady-state case (frequent motion updates that process inline), the
+avoidable allocation churn; a saturated rez burst still clones its overflow
+(unavoidable to defer it).
 
 ## Original brief
 

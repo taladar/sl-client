@@ -1240,10 +1240,47 @@ fn drain_budgeted<T>(
     builds
 }
 
+/// Apply one buffered object event (from the backlog), returning whether it built
+/// geometry (see [`apply_object`]). The inline fast path in [`update_objects`] calls
+/// [`apply_object`] / [`remove_object`] directly on the borrowed event instead, so it
+/// need not clone; this handles the owned, already-deferred events.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the ECS resources apply_object / remove_object need through one call"
+)]
+fn apply_pending_object_event(
+    state: &mut ObjectState,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    mesh_manager: &mut MeshManager,
+    event: PendingObjectEvent,
+) -> bool {
+    match event {
+        PendingObjectEvent::Upsert(object) => apply_object(
+            state,
+            &object,
+            commands,
+            meshes,
+            materials,
+            manager,
+            prim_textures,
+            mesh_manager,
+        ),
+        PendingObjectEvent::Remove(scoped) => {
+            remove_object(state, scoped, commands);
+            false
+        }
+    }
+}
+
 /// Fold the object event stream into the scene graph: spawn / update / despawn
 /// entities, classify them, keep their transforms current, and maintain linkset
-/// parenting — buffering into [`PendingObjectEvents`] and draining at
-/// [`SpawnBudget`] geometry-builds per frame.
+/// parenting — draining any earlier-frame backlog first, then applying new events
+/// inline (no clone) while the queue is empty and the [`SpawnBudget`] holds, else
+/// buffering the overflow into [`PendingObjectEvents`] for a later frame.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading the object stream and the ECS resources the geometry build needs"
@@ -1260,47 +1297,70 @@ pub(crate) fn update_objects(
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
 ) {
-    // Buffer every object-stream event in arrival order…
+    let mut budget = spawn_budget.per_frame;
+    // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
+    //    events never jump ahead of it. Only a spawn / re-tessellation (`apply_object`
+    //    returns `true`) costs budget; a move or remove is free.
+    let drained = drain_budgeted(&mut pending.queue, budget, |event| {
+        apply_pending_object_event(
+            &mut state,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut manager,
+            &mut prim_textures,
+            &mut mesh_manager,
+            event,
+        )
+    });
+    budget = budget.saturating_sub(drained);
+    // 2. Process new events in arrival order: while the backlog is fully drained and
+    //    budget remains, apply them **inline without cloning**; once the budget is
+    //    spent (or any backlog remains) buffer the rest — only the overflow is cloned.
+    //    Strict FIFO holds because the moment one event is buffered, `queue.is_empty()`
+    //    is false and every later event is buffered too.
     for event in events.read() {
-        match &event.0 {
-            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                // `object` is already a `Box<Object>` in the event, so clone the box
-                // rather than re-boxing it.
-                pending
-                    .queue
-                    .push_back(PendingObjectEvent::Upsert(object.clone()));
+        if pending.queue.is_empty() && budget > 0 {
+            let built = match &event.0 {
+                SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
+                    apply_object(
+                        &mut state,
+                        object,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &mut prim_textures,
+                        &mut mesh_manager,
+                    )
+                }
+                SlSessionEvent::ObjectRemoved { local_id, .. } => {
+                    remove_object(&mut state, *local_id, &mut commands);
+                    false
+                }
+                _other => false,
+            };
+            if built {
+                budget = budget.saturating_sub(1);
             }
-            SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                pending
-                    .queue
-                    .push_back(PendingObjectEvent::Remove(*local_id));
+        } else {
+            match &event.0 {
+                SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
+                    // `object` is already a `Box<Object>`, so clone the box (only now,
+                    // on the overflow) rather than re-boxing it.
+                    pending
+                        .queue
+                        .push_back(PendingObjectEvent::Upsert(object.clone()));
+                }
+                SlSessionEvent::ObjectRemoved { local_id, .. } => {
+                    pending
+                        .queue
+                        .push_back(PendingObjectEvent::Remove(*local_id));
+                }
+                _other => {}
             }
-            _other => {}
         }
     }
-    // …then drain the backlog up to this frame's geometry-build budget, spreading a
-    // rez burst across frames. Only a spawn / re-tessellation (`apply_object` returns
-    // `true`) costs budget; a move or remove is free.
-    let _builds = drain_budgeted(
-        &mut pending.queue,
-        spawn_budget.per_frame,
-        |event| match event {
-            PendingObjectEvent::Upsert(object) => apply_object(
-                &mut state,
-                &object,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &mut prim_textures,
-                &mut mesh_manager,
-            ),
-            PendingObjectEvent::Remove(scoped) => {
-                remove_object(&mut state, scoped, &mut commands);
-                false
-            }
-        },
-    );
 }
 
 /// A scale component (metres) above this is unusual for ordinary content and
