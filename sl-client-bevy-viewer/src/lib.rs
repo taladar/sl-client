@@ -338,8 +338,8 @@ use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
     DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
-    apply_prim_textures, drain_deferred_face_textures, poll_textures, reset_texture_apply_budget,
-    update_texture_caps,
+    apply_prim_textures, drain_deferred_face_textures, drain_lod_reuploads, poll_textures,
+    reset_texture_apply_budget, update_texture_caps,
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
@@ -1443,13 +1443,15 @@ fn run_session(
                     // already-decoded texture (a build-tool live-preview pre-fetch, then
                     // a commit re-tessellation) that the decode-event-driven
                     // `apply_prim_textures` alone would strand, then drain the deferred
-                    // backlog with whatever budget is left. Chained so the drain sees the
-                    // budget the applies spent (see `TextureApplyBudget`).
+                    // backlog (face drapes, then the lower-priority LOD re-uploads) with
+                    // whatever budget is left. Chained so each drain sees the budget the
+                    // earlier steps spent (see `TextureApplyBudget`).
                     (
                         reset_texture_apply_budget,
                         apply_prim_textures,
                         crate::textures::patch_parked_decoded_textures,
                         drain_deferred_face_textures,
+                        drain_lod_reuploads,
                     )
                         .chain(),
                     update_material_caps,

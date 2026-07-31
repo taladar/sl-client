@@ -107,11 +107,21 @@ Tooling: the large post-fix trace crashed `tracy-csvexport` (SIGSEGV in
 ppqsort's parallel branchless partition). Fixed in the tracy fork
 (`taladar/bevy`, commit `c3e0f6d7`) by reverting to sequential ppqsort.
 
-Follow-ups (not blocking): (a) the LOD re-decode path in `apply_prim_textures`
-(image re-upload behind an existing handle) is **unbudgeted** and is the
-residual ~40 ms `apply_prim_textures` spike; (b) the spawn drain clones every
-incoming object event — clone only the overflow to trim `update_objects`'s
-worst-frame main-thread cost (~11 ms).
+Follow-up (a) **done**: the LOD re-decode path in `apply_prim_textures` now
+shares the image-build budget — a re-upload behind an existing handle
+(`refresh_lod_image`, ~1.5 ms each) is gated by `defer_lod_reupload`, and the
+overflow queues on `PrimTextures::pending_lod` for `drain_lod_reuploads` (the
+last, lowest-priority step of the texture-apply chain, so a face's first
+appearance always wins the frame's budget over a mere refinement). Gating on the
+image budget also bounds the LOD reprep (fewer textures processed → fewer
+materials re-marked). Unit tested (`lod_reupload_gate_defers_and_dedups…`). A
+live confirmation of the ~40 ms `apply_prim_textures` spike flattening still
+wants a camera-movement capture (LOD upgrades trigger on approach, which the
+log-in-and-rez pattern does not reliably exercise).
+
+Follow-up (b) still open: the spawn drain clones every incoming object event —
+clone only the overflow to trim `update_objects`'s worst-frame main-thread cost
+(~11 ms).
 
 ## Original brief
 

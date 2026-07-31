@@ -670,6 +670,14 @@ pub(crate) struct PrimTextures {
     /// despawned face's material is not kept alive; ids that no longer resolve are
     /// pruned when the texture is refreshed.
     materials: HashMap<TextureKey, Vec<AssetId<FaceMaterial>>>,
+    /// Level-of-detail re-uploads deferred past a frame's image-build budget
+    /// (`TextureApplyBudget`), drained FIFO by [`drain_lod_reuploads`]. A LOD
+    /// re-decode rebuilds the texture's RGBA image (~1.5 ms each) and marks its
+    /// materials changed; a camera move that upgrades many textures at once would
+    /// otherwise rebuild them all in one frame (the residual ~40 ms
+    /// `apply_prim_textures` spike). Only the id is held — the store keeps the
+    /// latest decoded image, so a re-queued id still refreshes to the newest level.
+    pending_lod: VecDeque<TextureKey>,
 }
 
 /// Default per-frame cap on how many face materials the texture-apply systems may
@@ -1146,6 +1154,54 @@ fn drape_decoded_texture(
     true
 }
 
+/// Refresh the Bevy image behind a texture's existing handle after a level-of-detail
+/// re-decode (P21.1) and mark every material sampling it changed, so Bevy rebuilds
+/// their bind groups and the new resolution appears (a material's bind group caches
+/// the texture's GPU view and is not rebuilt on an image change alone). Pruning any
+/// material whose face has despawned. A no-op if the texture is not decoded or has no
+/// built image.
+fn refresh_lod_image(
+    manager: &TextureManager,
+    prim_textures: &mut PrimTextures,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<FaceMaterial>,
+    id: TextureKey,
+) {
+    let Some(handle) = prim_textures.images.get(&id).cloned() else {
+        return;
+    };
+    let Some(image) = manager.decoded(id) else {
+        return;
+    };
+    let refreshed = build_prim_image(image);
+    let _replaced = images.insert(&handle, refreshed);
+    if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
+        // Touch each live material (prune any whose face was despawned).
+        material_ids.retain(|&material_id| materials.get_mut(material_id).is_some());
+    }
+}
+
+/// Guard a level-of-detail re-upload against the per-frame image-build budget: with
+/// the budget spent, queue `id` on `pending_lod` (deduplicated) for
+/// [`drain_lod_reuploads`] and return `true`; otherwise return `false` so the caller
+/// refreshes now. Rebuilding a texture's RGBA image is the dominant LOD cost, so this
+/// alone bounds the LOD path (fewer textures processed also means fewer materials
+/// re-marked). LOD shares the budget with the initial-decode path but drains last, so
+/// a face's first appearance always wins the frame's budget over a mere refinement.
+fn defer_lod_reupload(
+    prim_textures: &mut PrimTextures,
+    budget: &TextureApplyBudget,
+    id: TextureKey,
+) -> bool {
+    if budget.image_remaining > 0 {
+        return false;
+    }
+    if !prim_textures.pending_lod.contains(&id) {
+        prim_textures.pending_lod.push_back(id);
+    }
+    true
+}
+
 /// Drop each freshly decoded diffuse texture onto the prim faces parked on it (or
 /// refresh the image behind a level-of-detail re-decode), building images and draping
 /// faces under the per-frame [`TextureApplyBudget`].
@@ -1165,19 +1221,21 @@ pub(crate) fn apply_prim_textures(
 ) {
     for &TextureDecoded(id) in decoded.read() {
         // Level-of-detail re-decode (P21.1): a texture already uploaded to the GPU
-        // whose store entry the driver upgraded / downgraded. Refresh the Bevy
-        // image *behind its existing handle*, then mark every material sampling it
-        // changed so Bevy rebuilds their bind groups — a material's bind group
-        // caches the texture's GPU view and is not rebuilt on an image change
-        // alone, so without this the new resolution would decode but never appear.
-        if let Some(handle) = prim_textures.images.get(&id).cloned() {
-            if let Some(image) = manager.decoded(id) {
-                let refreshed = build_prim_image(image);
-                let _replaced = images.insert(&handle, refreshed);
-                if let Some(material_ids) = prim_textures.materials.get_mut(&id) {
-                    // Touch each live material (prune any whose face was despawned).
-                    material_ids.retain(|&material_id| materials.get_mut(material_id).is_some());
-                }
+        // whose store entry the driver upgraded / downgraded. Refresh it under the
+        // per-frame image-build budget — a camera move that upgrades many textures at
+        // once would otherwise rebuild them all in one frame; the overflow defers to
+        // `drain_lod_reuploads`.
+        if prim_textures.images.contains_key(&id) {
+            if manager.decoded(id).is_some() && !defer_lod_reupload(&mut prim_textures, &budget, id)
+            {
+                refresh_lod_image(
+                    &manager,
+                    &mut prim_textures,
+                    &mut images,
+                    &mut materials,
+                    id,
+                );
+                budget.image_remaining = budget.image_remaining.saturating_sub(1);
             }
             continue;
         }
@@ -1263,6 +1321,36 @@ pub(crate) fn drain_deferred_face_textures(
         &mut budget.reprep_remaining,
         &mut deferred.queue,
     );
+}
+
+/// Drain the level-of-detail re-upload backlog ([`PrimTextures::pending_lod`]) up to
+/// the remaining per-frame image-build budget, FIFO. Runs after the initial-decode
+/// apply systems each frame so a face's first appearance always wins the frame's image
+/// budget over a mere LOD refinement. A queued id whose store entry is gone (the
+/// texture was evicted) is dropped for free.
+pub(crate) fn drain_lod_reuploads(
+    manager: Res<TextureManager>,
+    mut prim_textures: ResMut<PrimTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    while budget.image_remaining > 0 {
+        let Some(id) = prim_textures.pending_lod.pop_front() else {
+            break;
+        };
+        if manager.decoded(id).is_none() {
+            continue;
+        }
+        refresh_lod_image(
+            &manager,
+            &mut prim_textures,
+            &mut images,
+            &mut materials,
+            id,
+        );
+        budget.image_remaining = budget.image_remaining.saturating_sub(1);
+    }
 }
 
 /// Apply up to `budget` deferred drapes from `queue` (FIFO). Each live face spends
@@ -1426,8 +1514,8 @@ pub(crate) fn tint_color(color: [u8; 4]) -> Color {
 mod tests {
     use super::{
         DecodedAlpha, DeferredFaceTexture, FACE_ALPHA_MASK_CUTOFF, FaceMaterial, PrimTextures,
-        TextureAlpha, TextureApplyBudget, drain_deferred, drape_parked_faces, face_alpha_mode,
-        reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
+        TextureAlpha, TextureApplyBudget, defer_lod_reupload, drain_deferred, drape_parked_faces,
+        face_alpha_mode, reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
     };
     use crate::face_material::inert_face_material;
     use crate::legacy_materials::LegacyMaterialManager;
@@ -1642,6 +1730,28 @@ mod tests {
             reserve_image_build(&mut prim, &spent, id, faces()).is_some(),
             "an already-built image is not gated"
         );
+    }
+
+    /// The LOD re-upload gate: with the image budget spent, a re-decode is deferred
+    /// onto `pending_lod` (deduplicated); with budget available it refreshes now.
+    #[test]
+    fn lod_reupload_gate_defers_and_dedups_when_over_budget() {
+        let id = TextureKey::from(Uuid::from_u128(0x10d));
+        let mut prim = PrimTextures::default();
+
+        // Budget available → not deferred, nothing queued.
+        assert!(!defer_lod_reupload(&mut prim, &budget_with_image(1), id));
+        assert!(prim.pending_lod.is_empty());
+
+        // Budget spent → deferred, queued once.
+        let spent = budget_with_image(0);
+        assert!(defer_lod_reupload(&mut prim, &spent, id));
+        assert_eq!(prim.pending_lod.len(), 1);
+
+        // A repeat while still queued does not double-enqueue (the store keeps the
+        // latest level, so one refresh suffices).
+        assert!(defer_lod_reupload(&mut prim, &spent, id));
+        assert_eq!(prim.pending_lod.len(), 1);
     }
 
     /// A deferred drape whose face despawned is dropped for free — it neither panics
