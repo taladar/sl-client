@@ -302,10 +302,10 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    ObjectState, PrimLodTargets, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
-    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
-    log_suspicious_objects, pick_object, prune_control_avatars, spawn_animesh_control_avatars,
-    update_objects,
+    ObjectState, PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets,
+    adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
+    apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
+    prune_control_avatars, spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -333,7 +333,8 @@ use crate::spacenav::SpacenavPlugin;
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
-    PrimTextures, TextureDecoded, TextureManager, apply_prim_textures, poll_textures,
+    DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
+    apply_prim_textures, drain_deferred_face_textures, poll_textures, reset_texture_apply_budget,
     update_texture_caps,
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
@@ -1281,6 +1282,8 @@ fn run_session(
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
         .init_resource::<ObjectState>()
+        .init_resource::<PendingObjectEvents>()
+        .init_resource::<SpawnBudget>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
         .init_resource::<HudState>()
         // The water-render bookkeeping (P23.1) is created by `setup_water` at
@@ -1308,6 +1311,8 @@ fn run_session(
         .init_resource::<ChatOverlay>()
         .init_resource::<TextureManager>()
         .init_resource::<PrimTextures>()
+        .init_resource::<TextureApplyBudget>()
+        .init_resource::<DeferredFaceTextures>()
         .insert_resource(MaterialManager::new())
         .init_resource::<LegacyMaterialManager>()
         .init_resource::<BumpManager>()
@@ -1422,11 +1427,21 @@ fn run_session(
                 // stay within Bevy's per-tuple system limit; runs after the
                 // face-spawning systems so a face's PBR material is seen.
                 (
-                    apply_prim_textures,
-                    // Patch faces parked on an already-decoded texture (a build-tool
-                    // live-preview pre-fetch, then a commit re-tessellation), which the
-                    // decode-event-driven `apply_prim_textures` alone would strand.
-                    crate::textures::patch_parked_decoded_textures,
+                    // Amortise face-material re-preps across frames: refill the
+                    // per-frame budget, drape freshly decoded textures (deferring the
+                    // overflow past a decode burst), patch faces parked on an
+                    // already-decoded texture (a build-tool live-preview pre-fetch, then
+                    // a commit re-tessellation) that the decode-event-driven
+                    // `apply_prim_textures` alone would strand, then drain the deferred
+                    // backlog with whatever budget is left. Chained so the drain sees the
+                    // budget the applies spent (see `TextureApplyBudget`).
+                    (
+                        reset_texture_apply_budget,
+                        apply_prim_textures,
+                        crate::textures::patch_parked_decoded_textures,
+                        drain_deferred_face_textures,
+                    )
+                        .chain(),
                     update_material_caps,
                     register_pbr_materials,
                     // A render material assigned to an existing prim (build tool /

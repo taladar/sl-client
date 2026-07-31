@@ -36,7 +36,7 @@
 //! [`tessellate_sculpt`], and spawns its face the same way. Avatar placeholders
 //! (P10) attach their geometry to these entities in the same way.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::camera::visibility::NoFrustumCulling;
@@ -1163,9 +1163,87 @@ const fn local_translation(position: &Vector) -> Vec3 {
     Vec3::new(position.x, position.y, position.z)
 }
 
-/// Fold the object event stream into the scene graph: spawn/update/despawn
+/// Default cap on how many object geometry-builds [`update_objects`] performs per
+/// frame — a new object's spawn, or a known object's reshape / retexture
+/// re-tessellation, each of which creates the object's face materials. A region
+/// streaming in delivers a burst of object updates; spawning every object's faces in
+/// one frame creates hundreds of face materials at once, and Bevy's render world then
+/// builds all their bindless bind groups in one `prepare_erased_assets` (a
+/// multi-millisecond spike — the dominant rez hitch measured on Aditi). Bounding the
+/// builds per frame spreads a linkset's rez across a few frames (progressive
+/// pop-in, as the reference viewer does). A move / remove is free (it builds no
+/// geometry). At ~0.27 ms per object build this keeps the drain's main-thread cost
+/// bounded. Tune with `SL_VIEWER_OBJECT_SPAWN_BUDGET`.
+const DEFAULT_OBJECT_SPAWN_BUDGET: usize = 16;
+
+/// One buffered object-stream event awaiting processing under the per-frame spawn
+/// budget (see [`PendingObjectEvents`]).
+enum PendingObjectEvent {
+    /// An `ObjectAdded` / `ObjectUpdated`: (re)apply the object — spawn, move, or
+    /// reshape. Boxed because [`Object`] dwarfs the other variant.
+    Upsert(Box<Object>),
+    /// An `ObjectRemoved`: despawn the object and its tracked subtree.
+    Remove(ScopedObjectId),
+}
+
+/// The FIFO backlog of object-stream events, drained front-to-back by
+/// [`update_objects`] at up to [`SpawnBudget`] geometry-builds per frame so a
+/// region-rez burst does not spawn every object (and build every face material) in
+/// one frame. Kept in strict arrival order, so a linkset's root still spawns before
+/// its children and an update / remove still lands after the add it targets — exactly
+/// as inline processing did, just spread across frames.
+#[derive(Resource, Default)]
+pub(crate) struct PendingObjectEvents {
+    /// Events not yet processed, oldest at the front.
+    queue: VecDeque<PendingObjectEvent>,
+}
+
+/// The per-frame object geometry-build budget (see [`DEFAULT_OBJECT_SPAWN_BUDGET`]).
+#[derive(Resource)]
+pub(crate) struct SpawnBudget {
+    /// How many geometry-builds [`update_objects`] may perform each frame.
+    per_frame: usize,
+}
+
+impl Default for SpawnBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_OBJECT_SPAWN_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_OBJECT_SPAWN_BUDGET);
+        Self { per_frame }
+    }
+}
+
+/// Process queued items front-to-back, calling `process` on each; `process` returns
+/// `true` when the item did a geometry build (the budgeted work). The drain stops
+/// once `budget` builds have happened, leaving the rest queued for a later frame.
+/// Cheap items (`process` returns `false` — a move, a remove) are free and processed
+/// until the next build, so the backlog never stalls behind them. Strict FIFO, so
+/// arrival order is preserved across frames. Returns the number of builds performed.
+/// Testable core of [`update_objects`]'s spawn budgeting.
+fn drain_budgeted<T>(
+    queue: &mut VecDeque<T>,
+    budget: usize,
+    mut process: impl FnMut(T) -> bool,
+) -> usize {
+    let mut builds = 0;
+    while builds < budget {
+        let Some(item) = queue.pop_front() else {
+            break;
+        };
+        if process(item) {
+            builds = builds.saturating_add(1);
+        }
+    }
+    builds
+}
+
+/// Fold the object event stream into the scene graph: spawn / update / despawn
 /// entities, classify them, keep their transforms current, and maintain linkset
-/// parenting.
+/// parenting — buffering into [`PendingObjectEvents`] and draining at
+/// [`SpawnBudget`] geometry-builds per frame.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading the object stream and the ECS resources the geometry build needs"
@@ -1173,6 +1251,8 @@ const fn local_translation(position: &Vector) -> Vec3 {
 pub(crate) fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
+    mut pending: ResMut<PendingObjectEvents>,
+    spawn_budget: Res<SpawnBudget>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -1180,26 +1260,47 @@ pub(crate) fn update_objects(
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
 ) {
+    // Buffer every object-stream event in arrival order…
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                apply_object(
-                    &mut state,
-                    object,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &mut manager,
-                    &mut prim_textures,
-                    &mut mesh_manager,
-                );
+                // `object` is already a `Box<Object>` in the event, so clone the box
+                // rather than re-boxing it.
+                pending
+                    .queue
+                    .push_back(PendingObjectEvent::Upsert(object.clone()));
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                remove_object(&mut state, *local_id, &mut commands);
+                pending
+                    .queue
+                    .push_back(PendingObjectEvent::Remove(*local_id));
             }
             _other => {}
         }
     }
+    // …then drain the backlog up to this frame's geometry-build budget, spreading a
+    // rez burst across frames. Only a spawn / re-tessellation (`apply_object` returns
+    // `true`) costs budget; a move or remove is free.
+    let _builds = drain_budgeted(
+        &mut pending.queue,
+        spawn_budget.per_frame,
+        |event| match event {
+            PendingObjectEvent::Upsert(object) => apply_object(
+                &mut state,
+                &object,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                &mut mesh_manager,
+            ),
+            PendingObjectEvent::Remove(scoped) => {
+                remove_object(&mut state, scoped, &mut commands);
+                false
+            }
+        },
+    );
 }
 
 /// A scale component (metres) above this is unusual for ordinary content and
@@ -2396,6 +2497,11 @@ fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Comman
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
 )]
+/// Apply one object update — spawn a new object, or move / reshape / retexture a
+/// known one. Returns `true` when it **built geometry** (a new spawn, or a known
+/// object's shape/texture re-tessellation), which creates the object's face materials
+/// and is what [`update_objects`] budgets per frame; `false` for a motion-only move,
+/// a component-only refresh, or anything that touched no geometry.
 fn apply_object(
     state: &mut ObjectState,
     object: &Object,
@@ -2405,7 +2511,7 @@ fn apply_object(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
-) {
+) -> bool {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
     let is_root = object.parent_id.get() == 0;
@@ -2506,7 +2612,11 @@ fn apply_object(
         // none and must not be read as "cleared to empty".
         let texture_changed =
             !object.texture_entry.is_empty() && object.texture_entry != existing.texture_entry;
-        if existing.shape != shape || texture_changed {
+        // Whether this update re-tessellates (rebuilds the faces / face materials) —
+        // captured here, before `existing.shape` is overwritten below, so it can be
+        // returned as this call's "built geometry" verdict for the spawn budget.
+        let rebuilt = existing.shape != shape || texture_changed;
+        if rebuilt {
             // A genuine shape (or category) change, or a texture change: drop the
             // old face meshes and re-tessellate. A category change is subsumed
             // here, since the fingerprint covers pcode and the sculpt/mesh key.
@@ -2573,7 +2683,7 @@ fn apply_object(
             existing.texture_entry.clone_from(&object.texture_entry);
             existing.media_url = object.media_url.as_ref().map(url::Url::to_string);
         }
-        return;
+        return rebuilt;
     }
 
     // A new object: spawn its entity, parent it if its root is already present,
@@ -2692,6 +2802,8 @@ fn apply_object(
     if is_root {
         adopt_pending_children(state, scoped, entity, commands);
     }
+    // A new object always built its geometry (spawned its faces).
+    true
 }
 
 /// Reconcile a known object's Bevy parenting with its current linkset role,
@@ -3736,8 +3848,8 @@ pub(crate) fn apply_object_sculpts(
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectCategory, ShapeFingerprint, classify, geometry_transform, holder_transform,
-        object_transform,
+        ObjectCategory, ShapeFingerprint, classify, drain_budgeted, geometry_transform,
+        holder_transform, object_transform,
     };
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -3745,6 +3857,7 @@ mod tests {
         CircuitId, MeshKey, Object, ObjectMotion, RegionHandle, RegionLocalObjectId, Rotation,
         SculptData, SculptOrMeshKey, TextureKey, Uuid, Vector, pcode,
     };
+    use std::collections::VecDeque;
 
     /// The zero vector (`Vector` does not derive `Default`).
     const fn zero() -> Vector {
@@ -4032,5 +4145,46 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// The spawn budget spends only on geometry-builds, processes strictly FIFO, and
+    /// leaves the overflow queued: a burst of five events (three builds) with a budget
+    /// of two processes the first four (both builds plus the free cheap items between)
+    /// and holds the third build back for the next frame.
+    #[test]
+    fn spawn_budget_charges_builds_only_and_preserves_fifo() {
+        // (id, is_build): a build costs budget; a cheap item (move / remove) is free.
+        let mut queue: VecDeque<(u32, bool)> = VecDeque::from(vec![
+            (0, false),
+            (1, true),
+            (2, false),
+            (3, true),
+            (4, true),
+        ]);
+        let mut processed = Vec::new();
+        let builds = drain_budgeted(&mut queue, 2, |item| {
+            processed.push(item.0);
+            item.1
+        });
+        assert_eq!(builds, 2, "stops after the second build");
+        assert_eq!(
+            processed,
+            vec![0, 1, 2, 3],
+            "FIFO: cheap items ahead of / between the budgeted builds are freed too"
+        );
+        assert_eq!(
+            queue.into_iter().map(|item| item.0).collect::<Vec<_>>(),
+            vec![4],
+            "the third build waits for the next frame",
+        );
+    }
+
+    /// Under budget, the whole backlog drains and nothing is left queued.
+    #[test]
+    fn spawn_budget_drains_the_whole_backlog_when_under_budget() {
+        let mut queue: VecDeque<bool> = VecDeque::from(vec![true, false, true, false]);
+        let builds = drain_budgeted(&mut queue, 10, |item| item);
+        assert_eq!(builds, 2);
+        assert!(queue.is_empty(), "the backlog fully drains");
     }
 }

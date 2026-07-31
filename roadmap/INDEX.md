@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 262 |
+| ready | 261 |
 | blocked | 112 |
 | in-progress | 11 |
 | bugs | 13 |
-| done | 642 |
+| done | 643 |
 | deferred | 20 |
 | wont-do | 6 |
 | **total** | **1121** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (262)
+## ready (261)
 
 ### protocol
 
@@ -567,8 +567,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
-- [`viewer-perf-slfaceext-material-reprep`](ready/viewer-perf-slfaceext-material-reprep.md)
-  — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
   — Dirty-gate terrain::update_terrain (runs every frame)
 - [`viewer-perf-ui-layout-per-frame-relayout`](ready/viewer-perf-ui-layout-per-frame-relayout.md)
@@ -1168,7 +1166,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (642)
+## done (643)
 
 ### protocol
 
@@ -1733,6 +1731,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU-instanced particle rendering
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
+- [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
+  — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))

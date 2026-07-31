@@ -24,7 +24,7 @@
 //! one that fails to fetch) keeps its flat tint. No normal / specular / PBR /
 //! glow / bump — those are deferred (see the roadmap non-goals).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -672,6 +672,128 @@ pub(crate) struct PrimTextures {
     materials: HashMap<TextureKey, Vec<AssetId<FaceMaterial>>>,
 }
 
+/// Default per-frame cap on how many face materials the texture-apply systems may
+/// re-prep (mutate) in one frame — see [`TextureApplyBudget`]. Chosen so the common
+/// frame (which drapes only a handful of freshly decoded faces) is never touched,
+/// while a decode-burst frame that would otherwise re-prep hundreds of faces at
+/// once is spread across a few frames instead. Tune with
+/// `SL_VIEWER_FACE_REPREP_BUDGET`.
+const DEFAULT_FACE_REPREP_BUDGET: usize = 48;
+
+/// Default per-frame cap on how many decoded textures the texture-apply systems may
+/// turn into GPU [`Image`]s in one frame — see [`TextureApplyBudget`]. When textures
+/// are served from local cache a whole region's set can decode in a single frame;
+/// building them all at once (`build_prim_image` → `to_bevy_image`, a full RGBA
+/// upload each ~1.5 ms) was measured as a ~40–55 ms main-thread spike. Kept low
+/// because each build is expensive. Tune with `SL_VIEWER_TEXTURE_IMAGE_BUDGET`.
+const DEFAULT_TEXTURE_IMAGE_BUDGET: usize = 6;
+
+/// The two per-frame texture-apply budgets, shared by [`apply_prim_textures`],
+/// [`patch_parked_decoded_textures`] and the backlog drainer
+/// [`drain_deferred_face_textures`], and refilled each frame by
+/// [`reset_texture_apply_budget`].
+///
+/// **Re-preps** ([`reprep_remaining`](Self::reprep_remaining)): every
+/// `Assets<FaceMaterial>::get_mut` marks the material changed, and Bevy's render
+/// world then rebuilds its whole bindless bind group in `prepare_erased_assets` —
+/// cheap per material, but draping a burst of just-decoded textures onto hundreds
+/// of parked faces at once produces a multi-millisecond prepare spike. Capping the
+/// re-preps and deferring the overflow ([`DeferredFaceTextures`]) spreads it.
+///
+/// **Image builds** ([`image_remaining`](Self::image_remaining)): turning a decoded
+/// texture into a GPU image (`build_prim_image`) is a full RGBA upload; a
+/// cache-warm frame that decodes a region's whole texture set builds them all at
+/// once (~55 ms). Capping the builds leaves the excess textures' faces parked so
+/// [`patch_parked_decoded_textures`] builds them over the next frames.
+///
+/// The two orderings this covers: cache-warm, geometry arrives last and its faces
+/// meet already-decoded textures (re-prep spike); cache-cold, textures arrive last
+/// and a burst decodes together (image-build + re-prep spike).
+#[derive(Resource)]
+pub(crate) struct TextureApplyBudget {
+    /// The full per-frame material-reprep cap, refilled each frame.
+    reprep_per_frame: usize,
+    /// Material re-preps still allowed this frame; once zero, the rest defer.
+    reprep_remaining: usize,
+    /// The full per-frame image-build cap, refilled each frame.
+    image_per_frame: usize,
+    /// Image builds still allowed this frame; once zero, the texture's faces stay
+    /// parked for a later frame.
+    image_remaining: usize,
+}
+
+impl Default for TextureApplyBudget {
+    fn default() -> Self {
+        let reprep_per_frame =
+            env_budget("SL_VIEWER_FACE_REPREP_BUDGET", DEFAULT_FACE_REPREP_BUDGET);
+        let image_per_frame = env_budget(
+            "SL_VIEWER_TEXTURE_IMAGE_BUDGET",
+            DEFAULT_TEXTURE_IMAGE_BUDGET,
+        );
+        Self {
+            reprep_per_frame,
+            reprep_remaining: reprep_per_frame,
+            image_per_frame,
+            image_remaining: image_per_frame,
+        }
+    }
+}
+
+/// A positive per-frame budget from `var`, or `default` when it is unset /
+/// unparsable / zero.
+fn env_budget(var: &str, default: usize) -> usize {
+    std::env::var(var)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+/// A decoded texture's alpha classification, resolved once when it decodes and
+/// carried alongside every parked / deferred drape so the alpha mode need not be
+/// recomputed per face: whether the image carries an alpha channel (component-based)
+/// and whether that alpha holds real transparency (value-based).
+#[derive(Clone, Copy)]
+struct DecodedAlpha {
+    /// The decoded texture carries an alpha channel.
+    has_alpha: bool,
+    /// That alpha channel holds genuinely transparent texels.
+    has_transparency: bool,
+}
+
+/// One face-texture drape deferred past a frame's [`TextureApplyBudget`]: the diffuse
+/// [`Image`] is already built and its alpha classification already computed, so
+/// [`drain_deferred_face_textures`] applies it in a later frame with a plain
+/// `get_mut` and no recomputation.
+struct DeferredFaceTexture {
+    /// The parked face's material to drape the diffuse onto.
+    material: Handle<FaceMaterial>,
+    /// The already-uploaded diffuse image for the texture.
+    image: Handle<Image>,
+    /// The parked face's own alpha hint (mask / blend / none).
+    texture_alpha: TextureAlpha,
+    /// The decoded texture's alpha classification.
+    alpha: DecodedAlpha,
+}
+
+/// The backlog of face-texture drapes deferred past their frame's
+/// [`TextureApplyBudget`], drained at up to the budget per frame by
+/// [`drain_deferred_face_textures`]. FIFO, so the earliest-decoded (usually
+/// nearest / first-visible) faces texture first.
+#[derive(Resource, Default)]
+pub(crate) struct DeferredFaceTextures {
+    /// Drapes not yet applied, oldest at the front.
+    queue: VecDeque<DeferredFaceTexture>,
+}
+
+/// Refill the per-frame [`TextureApplyBudget`] counters at the start of the apply
+/// pass, before [`apply_prim_textures`] / [`patch_parked_decoded_textures`] / the
+/// drainer spend from them.
+pub(crate) fn reset_texture_apply_budget(mut budget: ResMut<TextureApplyBudget>) {
+    budget.reprep_remaining = budget.reprep_per_frame;
+    budget.image_remaining = budget.image_per_frame;
+}
+
 /// The state of a face's diffuse image — see [`TextureManager::diffuse_image`].
 #[derive(Debug, Clone)]
 pub(crate) enum DiffuseImage {
@@ -879,11 +1001,165 @@ impl PrimTextures {
 /// cache) its diffuse [`Image`], then drop it into every parked material's
 /// `base_color_texture`. A decode that failed drops the parked materials so they
 /// keep their flat tint.
+/// Drape a decoded diffuse `image` onto one parked face `material`, resolving its
+/// alpha mode (unless a legacy material already fixed it). Returns `true` if the
+/// material still existed — a despawned face's handle no longer resolves and is
+/// skipped, spending no re-prep budget. The single point every face-texture apply
+/// path funnels through ([`apply_prim_textures`], [`patch_parked_decoded_textures`],
+/// [`drain_deferred_face_textures`]).
+fn drape_face_texture(
+    materials: &mut Assets<FaceMaterial>,
+    legacy: &crate::legacy_materials::LegacyMaterialManager,
+    material: &Handle<FaceMaterial>,
+    image: &Handle<Image>,
+    texture_alpha: TextureAlpha,
+    alpha: DecodedAlpha,
+) -> bool {
+    let Some(mut face) = materials.get_mut(material) else {
+        return false;
+    };
+    face.base.base_color_texture = Some(image.clone());
+    // A face whose alpha mode a legacy material has already overridden keeps it
+    // (R25a): `NONE` means opaque in the reference even over an alpha texture, so
+    // the material must win regardless of whether it or this decode applied last.
+    if !legacy.is_alpha_overridden(material.id()) {
+        resolve_texture_alpha_mode(
+            &mut face.base,
+            texture_alpha,
+            alpha.has_alpha,
+            alpha.has_transparency,
+        );
+    }
+    true
+}
+
+/// Drape a texture's freshly decoded `parked` faces under the per-frame re-prep
+/// `budget`, pushing the overflow onto `deferred` for a later frame. Each real
+/// re-prep (a live face) spends one unit of budget; a despawned face is skipped for
+/// free. Shared by [`apply_prim_textures`] and [`patch_parked_decoded_textures`].
+fn drape_parked_faces(
+    materials: &mut Assets<FaceMaterial>,
+    legacy: &crate::legacy_materials::LegacyMaterialManager,
+    budget: &mut usize,
+    deferred: &mut VecDeque<DeferredFaceTexture>,
+    image: &Handle<Image>,
+    alpha: DecodedAlpha,
+    parked: Vec<(Handle<FaceMaterial>, TextureAlpha)>,
+) {
+    for (material, texture_alpha) in parked {
+        if *budget == 0 {
+            deferred.push_back(DeferredFaceTexture {
+                material,
+                image: image.clone(),
+                texture_alpha,
+                alpha,
+            });
+            continue;
+        }
+        if drape_face_texture(materials, legacy, &material, image, texture_alpha, alpha) {
+            *budget = budget.saturating_sub(1);
+        }
+    }
+}
+
+/// Whether a decoded texture carries alpha, and whether that alpha is really
+/// transparent — the classification [`resolve_texture_alpha_mode`] needs, computed
+/// once per decode.
+fn decoded_alpha(manager: &TextureManager, id: TextureKey) -> DecodedAlpha {
+    let has_alpha = manager
+        .decoded(id)
+        .is_some_and(|decoded| texture_has_alpha(decoded));
+    let has_transparency = has_alpha
+        && manager
+            .decoded(id)
+            .is_some_and(|decoded| texture_has_transparency(decoded));
+    DecodedAlpha {
+        has_alpha,
+        has_transparency,
+    }
+}
+
+/// Guard a texture's image build against the per-frame image-build budget. Returns
+/// `Some(parked)` — the caller should build the image and drape — when the image is
+/// already built (free) or the frame still has image-build budget. Returns `None`,
+/// after re-parking `parked` back onto `pending`, when the budget is spent and the
+/// image is not built yet: [`patch_parked_decoded_textures`] will build it in a later
+/// frame. This is the only place a cache-warm decode burst is throttled.
+fn reserve_image_build(
+    prim_textures: &mut PrimTextures,
+    budget: &TextureApplyBudget,
+    id: TextureKey,
+    parked: Vec<(Handle<FaceMaterial>, TextureAlpha)>,
+) -> Option<Vec<(Handle<FaceMaterial>, TextureAlpha)>> {
+    if prim_textures.images.contains_key(&id) || budget.image_remaining > 0 {
+        return Some(parked);
+    }
+    prim_textures.pending.entry(id).or_default().extend(parked);
+    None
+}
+
+/// Turn a decoded texture's parked faces into a rendered, textured batch: build (and
+/// cache) its GPU image, then drape it onto the parked faces under the two per-frame
+/// budgets. Returns `false` — leaving the faces parked for a later frame — when the
+/// image is not yet built and the frame's image-build budget is spent (so a
+/// cache-warm burst of decodes does not upload every texture in one frame);
+/// [`patch_parked_decoded_textures`] retries the parked faces next frame. Shared by
+/// [`apply_prim_textures`] and [`patch_parked_decoded_textures`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "funnels every resource the two texture-apply systems share into one place"
+)]
+fn drape_decoded_texture(
+    manager: &TextureManager,
+    legacy: &crate::legacy_materials::LegacyMaterialManager,
+    prim_textures: &mut PrimTextures,
+    budget: &mut TextureApplyBudget,
+    deferred: &mut VecDeque<DeferredFaceTexture>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<FaceMaterial>,
+    id: TextureKey,
+    parked: Vec<(Handle<FaceMaterial>, TextureAlpha)>,
+) -> bool {
+    let already_built = prim_textures.images.contains_key(&id);
+    let Some(parked) = reserve_image_build(prim_textures, budget, id, parked) else {
+        // Out of image-build budget this frame and the image is not built: the faces
+        // were re-parked for `patch` to build (and drape) in a later frame.
+        return false;
+    };
+    let alpha = decoded_alpha(manager, id);
+    let Some(image_handle) = prim_image(manager, prim_textures, images, id) else {
+        // The fetch failed: the parked faces keep their flat tint.
+        return true;
+    };
+    if !already_built {
+        budget.image_remaining = budget.image_remaining.saturating_sub(1);
+    }
+    drape_parked_faces(
+        materials,
+        legacy,
+        &mut budget.reprep_remaining,
+        deferred,
+        &image_handle,
+        alpha,
+        parked,
+    );
+    true
+}
+
+/// Drop each freshly decoded diffuse texture onto the prim faces parked on it (or
+/// refresh the image behind a level-of-detail re-decode), building images and draping
+/// faces under the per-frame [`TextureApplyBudget`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: the decode reader plus the resources building + draping textures need"
+)]
 pub(crate) fn apply_prim_textures(
     mut decoded: MessageReader<TextureDecoded>,
     manager: Res<TextureManager>,
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut deferred: ResMut<DeferredFaceTextures>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -909,37 +1185,20 @@ pub(crate) fn apply_prim_textures(
             // Not a texture any prim face is waiting on (e.g. a terrain texture).
             continue;
         };
-        // Whether the decoded texture carries an alpha channel (component-based),
-        // and whether that alpha holds real transparency (value-based) — read before
-        // `prim_image` borrows `prim_textures` mutably.
-        let has_alpha = manager
-            .decoded(id)
-            .is_some_and(|decoded| texture_has_alpha(decoded));
-        let has_transparency = has_alpha
-            && manager
-                .decoded(id)
-                .is_some_and(|decoded| texture_has_transparency(decoded));
-        let Some(image_handle) = prim_image(&manager, &mut prim_textures, &mut images, id) else {
-            // The fetch failed: the parked faces keep their flat tint.
-            continue;
-        };
-        for (material_handle, texture_alpha) in parked {
-            if let Some(mut material) = materials.get_mut(&material_handle) {
-                material.base.base_color_texture = Some(image_handle.clone());
-                // A face whose alpha mode a legacy material has already
-                // overridden keeps it (R25a): `NONE` means opaque in the
-                // reference even over an alpha texture, so the material must
-                // win regardless of whether it or this decode applied last.
-                if !legacy.is_alpha_overridden(material_handle.id()) {
-                    resolve_texture_alpha_mode(
-                        &mut material.base,
-                        texture_alpha,
-                        has_alpha,
-                        has_transparency,
-                    );
-                }
-            }
-        }
+        // Build the image (image-budgeted) and drape its faces (reprep-budgeted); the
+        // overflow of either defers to a later frame so a cache-warm decode burst does
+        // not upload every texture / re-prep hundreds of materials in one frame.
+        let _draped = drape_decoded_texture(
+            &manager,
+            &legacy,
+            &mut prim_textures,
+            &mut budget,
+            &mut deferred.queue,
+            &mut images,
+            &mut materials,
+            id,
+            parked,
+        );
     }
 }
 
@@ -953,6 +1212,8 @@ pub(crate) fn patch_parked_decoded_textures(
     manager: Res<TextureManager>,
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut deferred: ResMut<DeferredFaceTextures>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -963,31 +1224,69 @@ pub(crate) fn patch_parked_decoded_textures(
         .filter(|id| !prim_textures.images.contains_key(id) && manager.decoded(*id).is_some())
         .collect();
     for id in ready {
+        // Stop once the image-build budget is spent — the rest stay parked for the
+        // next frame (re-parking inside `drape_decoded_texture` is a no-op here, since
+        // the faces were never removed).
+        if budget.image_remaining == 0 {
+            break;
+        }
         let Some(parked) = prim_textures.pending.remove(&id) else {
             continue;
         };
-        let has_alpha = manager
-            .decoded(id)
-            .is_some_and(|decoded| texture_has_alpha(decoded));
-        let has_transparency = has_alpha
-            && manager
-                .decoded(id)
-                .is_some_and(|decoded| texture_has_transparency(decoded));
-        let Some(image_handle) = prim_image(&manager, &mut prim_textures, &mut images, id) else {
-            continue;
+        let _draped = drape_decoded_texture(
+            &manager,
+            &legacy,
+            &mut prim_textures,
+            &mut budget,
+            &mut deferred.queue,
+            &mut images,
+            &mut materials,
+            id,
+            parked,
+        );
+    }
+}
+
+/// Drain up to the remaining per-frame reprep budget of deferred face-texture drapes
+/// (overflow the apply systems pushed past the budget), spreading a decode burst's
+/// re-preps across frames. Runs after the apply systems each frame, so a fresh decode
+/// textures ahead of an older backlog item.
+pub(crate) fn drain_deferred_face_textures(
+    legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
+    mut budget: ResMut<TextureApplyBudget>,
+    mut deferred: ResMut<DeferredFaceTextures>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+) {
+    drain_deferred(
+        &mut materials,
+        &legacy,
+        &mut budget.reprep_remaining,
+        &mut deferred.queue,
+    );
+}
+
+/// Apply up to `budget` deferred drapes from `queue` (FIFO). Each live face spends
+/// one budget unit; a despawned face's item is dropped for free. Testable core of
+/// [`drain_deferred_face_textures`].
+fn drain_deferred(
+    materials: &mut Assets<FaceMaterial>,
+    legacy: &crate::legacy_materials::LegacyMaterialManager,
+    budget: &mut usize,
+    queue: &mut VecDeque<DeferredFaceTexture>,
+) {
+    while *budget > 0 {
+        let Some(item) = queue.pop_front() else {
+            break;
         };
-        for (material_handle, texture_alpha) in parked {
-            if let Some(mut material) = materials.get_mut(&material_handle) {
-                material.base.base_color_texture = Some(image_handle.clone());
-                if !legacy.is_alpha_overridden(material_handle.id()) {
-                    resolve_texture_alpha_mode(
-                        &mut material.base,
-                        texture_alpha,
-                        has_alpha,
-                        has_transparency,
-                    );
-                }
-            }
+        if drape_face_texture(
+            materials,
+            legacy,
+            &item.material,
+            &item.image,
+            item.texture_alpha,
+            item.alpha,
+        ) {
+            *budget = budget.saturating_sub(1);
         }
     }
 }
@@ -1126,14 +1425,20 @@ pub(crate) fn tint_color(color: [u8; 4]) -> Color {
 #[cfg(test)]
 mod tests {
     use super::{
-        FACE_ALPHA_MASK_CUTOFF, TextureAlpha, face_alpha_mode, resolve_texture_alpha_mode,
-        texture_has_alpha,
+        DecodedAlpha, DeferredFaceTexture, FACE_ALPHA_MASK_CUTOFF, FaceMaterial, PrimTextures,
+        TextureAlpha, TextureApplyBudget, drain_deferred, drape_parked_faces, face_alpha_mode,
+        reserve_image_build, resolve_texture_alpha_mode, texture_has_alpha,
     };
+    use crate::face_material::inert_face_material;
+    use crate::legacy_materials::LegacyMaterialManager;
+    use bevy::asset::{Assets, Handle};
+    use bevy::image::Image;
     use bevy::pbr::StandardMaterial;
     use bevy::prelude::AlphaMode;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{DecodedTexture, DiscardLevel};
+    use sl_client_bevy::{DecodedTexture, DiscardLevel, TextureKey, Uuid};
+    use std::collections::VecDeque;
 
     /// A decoded texture with the given source component count (pixels unused by
     /// the alpha test, so a single RGBA8 texel stands in).
@@ -1194,5 +1499,177 @@ mod tests {
         assert!(texture_has_alpha(&decoded(2)));
         assert!(!texture_has_alpha(&decoded(3)));
         assert!(texture_has_alpha(&decoded(4)));
+    }
+
+    /// An opaque, alpha-free classification, so a drape only fills the diffuse and
+    /// [`resolve_texture_alpha_mode`] is a no-op (its own resolution is covered by
+    /// [`texture_alpha_resolution_upgrades_only_opaque_faces`]).
+    const OPAQUE: DecodedAlpha = DecodedAlpha {
+        has_alpha: false,
+        has_transparency: false,
+    };
+
+    /// Add one untextured face material and return its handle.
+    fn add_face(materials: &mut Assets<FaceMaterial>) -> Handle<FaceMaterial> {
+        materials.add(inert_face_material(StandardMaterial::default()))
+    }
+
+    /// Add `n` untextured face materials and return their handles.
+    fn add_faces(materials: &mut Assets<FaceMaterial>, n: usize) -> Vec<Handle<FaceMaterial>> {
+        std::iter::repeat_with(|| add_face(materials))
+            .take(n)
+            .collect()
+    }
+
+    /// A deferred drape of `image` onto `material` with the opaque classification.
+    fn deferred(material: Handle<FaceMaterial>, image: Handle<Image>) -> DeferredFaceTexture {
+        DeferredFaceTexture {
+            material,
+            image,
+            texture_alpha: TextureAlpha::Mask,
+            alpha: OPAQUE,
+        }
+    }
+
+    /// How many of `handles` now carry a diffuse texture.
+    fn textured(materials: &Assets<FaceMaterial>, handles: &[Handle<FaceMaterial>]) -> usize {
+        handles
+            .iter()
+            .filter(|handle| {
+                materials
+                    .get(*handle)
+                    .is_some_and(|material| material.base.base_color_texture.is_some())
+            })
+            .count()
+    }
+
+    /// The overflow past a frame's re-prep budget is deferred, not applied: 5 parked
+    /// faces with a budget of 2 texture 2 now and queue 3 for later; draining then
+    /// finishes the backlog at 2 per frame.
+    #[test]
+    fn parked_faces_over_budget_defer_and_drain_across_frames() {
+        let mut materials = Assets::<FaceMaterial>::default();
+        let legacy = LegacyMaterialManager::default();
+        let image = Handle::<Image>::default();
+        let faces = add_faces(&mut materials, 5);
+        let parked = faces
+            .iter()
+            .map(|handle| (handle.clone(), TextureAlpha::Mask))
+            .collect();
+        let mut queue = VecDeque::new();
+
+        // Frame 1 apply: budget 2 → 2 textured, 3 deferred.
+        let mut budget = 2;
+        drape_parked_faces(
+            &mut materials,
+            &legacy,
+            &mut budget,
+            &mut queue,
+            &image,
+            OPAQUE,
+            parked,
+        );
+        assert_eq!(budget, 0, "the whole budget is spent");
+        assert_eq!(queue.len(), 3, "the overflow is deferred");
+        assert_eq!(textured(&materials, &faces), 2);
+
+        // Frame 1 drain: nothing left in the budget, so the backlog is untouched.
+        drain_deferred(&mut materials, &legacy, &mut budget, &mut queue);
+        assert_eq!(queue.len(), 3);
+        assert_eq!(textured(&materials, &faces), 2);
+
+        // Frame 2 drain: budget refilled to 2 → 2 more textured, 1 remains.
+        let mut budget = 2;
+        drain_deferred(&mut materials, &legacy, &mut budget, &mut queue);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(textured(&materials, &faces), 4);
+
+        // Frame 3 drain: the last one textures, budget to spare.
+        let mut budget = 2;
+        drain_deferred(&mut materials, &legacy, &mut budget, &mut queue);
+        assert!(queue.is_empty());
+        assert_eq!(textured(&materials, &faces), 5);
+        assert_eq!(budget, 1, "the drain stops when the backlog is empty");
+    }
+
+    /// A texture-apply budget with the given image-build allowance (the reprep side
+    /// left generous, since these tests exercise the image gate).
+    fn budget_with_image(image_remaining: usize) -> TextureApplyBudget {
+        TextureApplyBudget {
+            reprep_per_frame: 64,
+            reprep_remaining: 64,
+            image_per_frame: 8,
+            image_remaining,
+        }
+    }
+
+    /// The image-build gate: with budget spent and the image not yet built, the
+    /// texture's faces are re-parked (deferred to a later frame); with budget left, or
+    /// once the image is built, the caller proceeds and nothing is re-parked.
+    #[test]
+    fn image_build_gate_defers_only_when_over_budget_and_unbuilt() {
+        let id = TextureKey::from(Uuid::from_u128(0x51_ace));
+        let faces = || vec![(Handle::<FaceMaterial>::default(), TextureAlpha::Mask)];
+
+        // Over budget, image not built → deferred (None), faces re-parked.
+        let mut prim = PrimTextures::default();
+        let spent = budget_with_image(0);
+        assert!(
+            reserve_image_build(&mut prim, &spent, id, faces()).is_none(),
+            "over budget + unbuilt defers"
+        );
+        assert_eq!(
+            prim.pending.get(&id).map(Vec::len),
+            Some(1),
+            "the faces were re-parked for a later frame"
+        );
+
+        // Budget available → proceeds (Some), nothing re-parked.
+        let mut prim = PrimTextures::default();
+        assert!(
+            reserve_image_build(&mut prim, &budget_with_image(1), id, faces()).is_some(),
+            "budget available → proceeds"
+        );
+        assert!(
+            prim.pending.is_empty(),
+            "nothing deferred when budget remains"
+        );
+
+        // Image already built → proceeds even with budget spent (a built image is free).
+        let mut prim = PrimTextures::default();
+        let _prev = prim.images.insert(id, Handle::<Image>::default());
+        assert!(
+            reserve_image_build(&mut prim, &spent, id, faces()).is_some(),
+            "an already-built image is not gated"
+        );
+    }
+
+    /// A deferred drape whose face despawned is dropped for free — it neither panics
+    /// nor spends re-prep budget that a live face could have used.
+    #[test]
+    fn a_despawned_deferred_face_is_dropped_without_spending_budget() {
+        let mut materials = Assets::<FaceMaterial>::default();
+        let legacy = LegacyMaterialManager::default();
+        let image = Handle::<Image>::default();
+        let dead = add_face(&mut materials);
+        let live = add_face(&mut materials);
+        let mut queue = VecDeque::new();
+        // The first queued face despawns before the drain reaches it.
+        let _removed = materials.remove(dead.id());
+        queue.push_back(deferred(dead, image.clone()));
+        queue.push_back(deferred(live.clone(), image));
+
+        let mut budget = 1;
+        drain_deferred(&mut materials, &legacy, &mut budget, &mut queue);
+
+        // The dead item was skipped without cost, so the live face still textured.
+        assert_eq!(budget, 0);
+        assert!(queue.is_empty());
+        assert!(
+            materials
+                .get(&live)
+                .is_some_and(|material| material.base.base_color_texture.is_some()),
+            "the live face textured despite the dead item ahead of it"
+        );
     }
 }
