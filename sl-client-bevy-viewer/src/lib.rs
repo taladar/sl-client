@@ -158,6 +158,14 @@ mod terrain;
 mod texture_anim;
 mod textures;
 mod tonemap;
+// Per-kind entity-population diagnostics streamed to Tracy; only compiled with
+// the Tracy client present (it exists solely to feed the profiler).
+#[cfg(feature = "profile-tracy")]
+mod entity_diagnostics;
+// Live circuit-count diagnostic streamed to Tracy; only compiled with the Tracy
+// client present (it exists solely to feed the profiler).
+#[cfg(feature = "profile-tracy")]
+mod net_diagnostics;
 // Tracy plot streaming + physics secondary frame mark; only compiled when the
 // Tracy client (and its `tracing-tracy` bridge) is present.
 #[cfg(feature = "profile-tracy")]
@@ -196,7 +204,7 @@ use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::camera::{Exposure, Hdr};
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -1251,7 +1259,29 @@ fn run_session(
     // Frame-time / FPS instruments — the smoothed FPS the status area
     // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
     // work is watched against.
-    .add_plugins(FrameTimeDiagnosticsPlugin::default());
+    .add_plugins(FrameTimeDiagnosticsPlugin::default())
+    // Live entity count — cheap, and (via `tracy_plots`) plotted over time so a
+    // Tracy capture shows how per-frame system cost tracks the rezzing entity
+    // population instead of leaving it to be guessed from batch-span counts.
+    .add_plugins(EntityCountDiagnosticsPlugin::default());
+    // Extra diagnostic *sources* that are only worth their cost while a profiler
+    // is attached (nothing consumes them outside the Tracy plots yet — move them
+    // out of this gate once the statistics floater reads them), so they compile
+    // in only with the Tracy client:
+    //   * process/system CPU + memory — carries real sampling overhead;
+    //   * the live region-circuit count (`crate::net_diagnostics`);
+    //   * the per-kind entity population, main and render world
+    //     (`crate::entity_diagnostics`).
+    // Render-pass GPU/CPU timings + draw-call / pipeline stats need no add here:
+    // `RenderPlugin` (via `DefaultPlugins`) already installs
+    // `RenderDiagnosticsPlugin`, so those rows are always in the store and stream
+    // through `tracy_plots` whenever a profiler is attached.
+    #[cfg(feature = "profile-tracy")]
+    app.add_plugins((
+        bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+        crate::net_diagnostics::NetDiagnosticsPlugin,
+        crate::entity_diagnostics::EntityDiagnosticsPlugin,
+    ));
     // Stream those diagnostics (and any others registered) to Tracy as plots,
     // and mark the fixed-timestep physics loop as a Tracy secondary frame, so
     // the profiler shows graphed telemetry and a physics-cadence timeline on top

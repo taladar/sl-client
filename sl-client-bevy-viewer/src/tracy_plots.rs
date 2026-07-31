@@ -5,8 +5,9 @@
 //! own, both added here and compiled only under the `profile-tracy` feature:
 //!
 //! * **Diagnostics as plots.** Every enabled [`bevy::diagnostic::Diagnostic`]
-//!   (the `FrameTimeDiagnosticsPlugin` FPS / frame-time / frame-count set today,
-//!   plus anything else registered later) is pushed to Tracy each frame with
+//!   (the `FrameTimeDiagnosticsPlugin` FPS / frame-time / frame-count set plus
+//!   the `EntityCountDiagnosticsPlugin` live entity count, and anything else
+//!   registered later) is pushed to Tracy each frame with
 //!   `Client::plot`, so it appears as a graphed line in the profiler timeline
 //!   alongside the zones — the same numbers the status bar and the `F3` overlay
 //!   show, but plotted over time. `tracing-tracy` has no path for this; it only

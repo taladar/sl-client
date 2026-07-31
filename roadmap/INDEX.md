@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 56 |
 | ready | 261 |
 | blocked | 112 |
-| in-progress | 11 |
+| in-progress | 10 |
 | bugs | 13 |
-| done | 643 |
+| done | 644 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1121** |
+| **total** | **1122** |
 
-## ideas (55)
+## ideas (56)
 
 ### viewer
 
@@ -72,6 +72,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
+- [`viewer-perf-material-intern`](ideas/viewer-perf-material-intern.md) — Intern
+  face materials by content for shared handles + draw batching (blocked by
+  `viewer-perf-prim-tessellation-cache`)
 - [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
@@ -1095,7 +1098,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (11)
+## in-progress (10)
 
 ### viewer
 
@@ -1103,8 +1106,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
-- [`viewer-perf-pipeline-specialization-stalls`](in-progress/viewer-perf-pipeline-specialization-stalls.md)
-  — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
   — Region / Estate floater — estate tab (blocked by
   `viewer-region-options-debug` (done))
@@ -1166,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (643)
+## done (644)
 
 ### protocol
 
@@ -1731,6 +1732,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU-instanced particle rendering
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
+- [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
+  — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)

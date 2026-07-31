@@ -37,3 +37,5 @@ viewer-settings.toml
 
 # Tracy machine-readable capture output (scripts/tracy-grab.sh)
 tracy-grab-*/
+# Tracy long-capture output (ad-hoc profiling runs)
+/tracy-captures/

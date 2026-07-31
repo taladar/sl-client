@@ -44,6 +44,39 @@ parameters plus `PrimLod`:
 - Eviction: LRU or generation-based, since a region teardown / teleport
   should release the cache.
 
+## Recovering copy-paste duplication (geometry only)
+
+The real-world win is bigger than plain prims. SL has no instancing on the
+wire, but builders copy-paste constantly — a stand of identical trees, a fence
+of identical posts, a store vendor's wall of identical boxes — so a region
+carries many *separate* objects that are geometrically identical apart from
+position / rotation / scale. That duplication is **recoverable** from
+transform-independent geometry keys, and it is worth doing **independently of
+materials**:
+
+- **Key the mesh cache on shape only — never fold the texture in.** Same-shape
+  / different-texture prims are everywhere: the store vendor whose wall of
+  identical boxes each shows a different product, one sculpt reused with many
+  textures. A shape-only key still shares the geometry across all of them,
+  whereas a (shape + texture) key would dedup almost nothing there.
+- **Mesh / sculpt objects are the easy, high-value case:** copies reference the
+  *same* mesh-asset / sculpt-map UUID, so grouping by (asset UUID, LOD) detects
+  them directly — no tessellation involved, and trees / fences / furniture are
+  usually mesh or sculpt. Likely worth doing before (or with) the prim
+  fingerprint.
+- **Prims** use the shape-param fingerprint above (per (fingerprint, LOD,
+  face), so the per-face geometry is shared).
+
+This is the primary, high-hit-rate win: it kills the tessellation storm
+(texture-independent) and shares one vertex buffer + mesh prep across every
+copy, even when their textures differ. It does **not** by itself collapse draw
+calls when materials differ, and does **not** reduce entity count or
+per-instance frustum culling (a separate lever — see
+[[viewer-perf-pipeline-specialization-stalls]]). Collapsing the draws when the
+texture matches too is the composing, separate job of
+[[viewer-perf-material-intern]]. Excluded: anything whose geometry mutates per
+frame (flexi) cannot share a mesh handle.
+
 ## Estimated impact
 
 Medium: this is not steady-state per-frame CPU but dominates the two
