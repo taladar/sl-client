@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
-| ready | 261 |
+| ideas | 55 |
+| ready | 262 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 15 |
-| done | 645 |
+| done | 646 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1125** |
+| **total** | **1126** |
 
-## ideas (56)
+## ideas (55)
 
 ### viewer
 
@@ -72,11 +72,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
-- [`viewer-perf-material-intern`](ideas/viewer-perf-material-intern.md) — Intern
-  face materials by content for shared handles + draw batching (blocked by
-  `viewer-perf-prim-tessellation-cache`)
-- [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
-  — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
@@ -92,6 +87,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
+- [`viewer-perf-ui-static-relayout`](ideas/viewer-perf-ui-static-relayout.md) —
+  UI layout/text/styling runs every frame on a static UI
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
@@ -144,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (261)
+## ready (262)
 
 ### protocol
 
@@ -552,6 +549,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
+- [`viewer-perf-material-intern`](ready/viewer-perf-material-intern.md) — Intern
+  face materials by content for shared handles + draw batching (blocked by
+  `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
@@ -1171,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (645)
+## done (646)
 
 ### protocol
 
@@ -1741,6 +1741,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
+- [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
+  — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)

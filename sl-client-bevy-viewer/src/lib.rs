@@ -77,6 +77,7 @@ mod floater;
 mod floater_persist;
 mod flycam_ui;
 pub mod gallery;
+mod geometry_cache;
 mod gizmos;
 mod ground;
 mod group_notice;
@@ -1332,6 +1333,9 @@ fn run_session(
         .init_resource::<WaterLevel>()
         .init_resource::<PrimLodTargets>()
         .init_resource::<TreeLodTargets>()
+        // The cross-instance geometry cache: shared mesh handles for identical
+        // prim / sculpt / mesh geometry (`viewer-perf-prim-tessellation-cache`).
+        .init_resource::<geometry_cache::GeometryCache>()
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
@@ -1656,10 +1660,22 @@ fn run_session(
                 // prim's tessellation level of detail (P21.3); `apply_prim_lod` then
                 // re-tessellates any prim whose level changed, so it runs after.
                 drive_render_priority,
-                apply_prim_lod.after(drive_render_priority),
-                // Tree level of detail (P26.2): regenerate any tree whose branching /
-                // billboard tier the driver changed, after it has picked the tiers.
-                apply_tree_lod.after(drive_render_priority),
+                // Nested into one tuple to stay within Bevy's per-tuple system
+                // limit: the LOD appliers rebuild geometry after the driver has
+                // picked the levels, and the geometry-cache prune periodically
+                // drops cache entries whose shared meshes all died (every face
+                // entity despawned) — the cache holds only weak asset ids, so
+                // that is bookkeeping, not asset freeing.
+                (
+                    apply_prim_lod.after(drive_render_priority),
+                    // Tree level of detail (P26.2): regenerate any tree whose
+                    // branching / billboard tier the driver changed, after it has
+                    // picked the tiers.
+                    apply_tree_lod.after(drive_render_priority),
+                    geometry_cache::prune_geometry_cache.run_if(
+                        bevy::time::common_conditions::on_timer(geometry_cache::PRUNE_INTERVAL),
+                    ),
+                ),
                 // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
                 // resource on the toggle key, then drive the panel's visibility and
                 // (while shown) its text from the live store snapshots.

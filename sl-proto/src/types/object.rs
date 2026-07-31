@@ -373,7 +373,7 @@ fn starts_with_token(text: &str, token: &str) -> bool {
 /// are the simulator's quantized integers — the same encoding [`PrimShape`](crate::PrimShape) uses
 /// to *send* a shape — not dequantized floats; the quantization for each field
 /// matches the like-named [`PrimShape`](crate::PrimShape) field (e.g. `path_begin / 0.00002`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct PrimShapeParams {
     /// The path curve byte (`LL_PCODE_PATH_*`).
     pub path_curve: u8,

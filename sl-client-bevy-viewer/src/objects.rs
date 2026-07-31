@@ -62,6 +62,7 @@ use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
+use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 
@@ -1256,6 +1257,7 @@ fn apply_pending_object_event(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
+    cache: &mut GeometryCache,
     event: PendingObjectEvent,
 ) -> bool {
     match event {
@@ -1268,6 +1270,7 @@ fn apply_pending_object_event(
             manager,
             prim_textures,
             mesh_manager,
+            cache,
         ),
         PendingObjectEvent::Remove(scoped) => {
             remove_object(state, scoped, commands);
@@ -1296,6 +1299,7 @@ pub(crate) fn update_objects(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
+    mut cache: ResMut<GeometryCache>,
 ) {
     let mut budget = spawn_budget.per_frame;
     // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
@@ -1310,6 +1314,7 @@ pub(crate) fn update_objects(
             &mut manager,
             &mut prim_textures,
             &mut mesh_manager,
+            &mut cache,
             event,
         )
     });
@@ -1332,6 +1337,7 @@ pub(crate) fn update_objects(
                         &mut manager,
                         &mut prim_textures,
                         &mut mesh_manager,
+                        &mut cache,
                     )
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
@@ -1805,6 +1811,7 @@ fn build_object_geometry(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
+    cache: &mut GeometryCache,
 ) -> ObjectGeometryBuild {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
@@ -1838,6 +1845,7 @@ fn build_object_geometry(
                 prim_textures,
                 priority,
                 INITIAL_MANAGED_PRIM_LOD,
+                cache,
             ),
             None,
             // Retain the re-tessellation inputs so the pixel-area LOD driver can
@@ -1864,6 +1872,7 @@ fn build_object_geometry(
                 Some(decoded) => (
                     build_mesh_submeshes(
                         &decoded,
+                        key,
                         &object.texture_entry,
                         [object.scale.x, object.scale.y, object.scale.z],
                         entity,
@@ -1873,6 +1882,7 @@ fn build_object_geometry(
                         manager,
                         prim_textures,
                         priority,
+                        cache,
                     ),
                     None,
                     None,
@@ -1904,6 +1914,7 @@ fn build_object_geometry(
                 Some(map_image) => (
                     build_sculpt_faces(
                         &map_image,
+                        map,
                         sculpt_type,
                         &object.texture_entry,
                         [object.scale.x, object.scale.y, object.scale.z],
@@ -1914,6 +1925,7 @@ fn build_object_geometry(
                         manager,
                         prim_textures,
                         priority,
+                        cache,
                     ),
                     None,
                     None,
@@ -2002,6 +2014,10 @@ fn build_object_geometry(
 /// The face geometry stays in the prim's local Second Life space; the object
 /// entity's `Transform` carries the object's scale / rotation / position and the
 /// single Second Life → Bevy basis change for the whole prim.
+///
+/// The geometry is shared across identical instances through the
+/// [`GeometryCache`] keyed by `(shape, lod)` — tessellation only runs when no
+/// live instance already holds the same geometry.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs, plus the fetch priority and LOD"
@@ -2016,11 +2032,12 @@ fn build_prim_faces(
     prim_textures: &mut PrimTextures,
     priority: Priority,
     lod: PrimLod,
+    cache: &mut GeometryCache,
 ) -> Vec<Entity> {
-    let shape = PrimShapeFloat::from_params(&object.shape);
-    let prim = tessellate(&shape, lod);
-    spawn_prim_faces(
-        &prim,
+    let shape = object.shape;
+    spawn_cached_prim_faces(
+        GeometryKey::Prim { shape, lod },
+        || tessellate(&PrimShapeFloat::from_params(&shape), lod),
         &object.texture_entry,
         [object.scale.x, object.scale.y, object.scale.z],
         parent,
@@ -2030,6 +2047,7 @@ fn build_prim_faces(
         manager,
         prim_textures,
         priority,
+        cache,
     )
 }
 
@@ -2170,12 +2188,18 @@ fn apply_flexi_sim(
 /// entity, kept in the prim's local Second Life space — the object entity's
 /// `Transform` carries its scale / rotation / position and the single basis
 /// change, like a plain prim.
+///
+/// The geometry is shared across identical instances through the
+/// [`GeometryCache`] keyed by the map asset (`map_key`), sculpt type, and the
+/// decoded map's pixel size — copies of one sculpt stitch the map once, and a
+/// re-decode at another discard level is a clean different key.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
 )]
 fn build_sculpt_faces(
     map: &DecodedTexture,
+    map_key: TextureKey,
     sculpt_type: u8,
     texture_entry: &[u8],
     scale: [f32; 3],
@@ -2186,10 +2210,16 @@ fn build_sculpt_faces(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    cache: &mut GeometryCache,
 ) -> Vec<Entity> {
-    let prim = tessellate_sculpt(map, sculpt_type);
-    spawn_prim_faces(
-        &prim,
+    spawn_cached_prim_faces(
+        GeometryKey::Sculpt {
+            map: map_key,
+            sculpt_type,
+            width: map.width,
+            height: map.height,
+        },
+        || tessellate_sculpt(map, sculpt_type),
         texture_entry,
         scale,
         parent,
@@ -2199,6 +2229,7 @@ fn build_sculpt_faces(
         manager,
         prim_textures,
         priority,
+        cache,
     )
 }
 
@@ -2422,26 +2453,233 @@ fn spawn_prim_faces(
             scale,
         );
         let mesh = meshes.add(bevy_mesh);
-        let material = face_material(
+        let entity = spawn_face_entity(
+            mesh,
             texture_face,
+            face.face_id,
+            parent,
+            commands,
             materials,
             manager,
             prim_textures,
             priority,
-            TextureAlpha::Mask,
         );
-        let entity = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                PrimFaceEntity {
-                    face_id: face.face_id,
-                },
-                FaceTextureDebug(*texture_face),
-                ChildOf(parent),
-            ))
-            .id();
         face_entities.push(entity);
+    }
+    face_entities
+}
+
+/// Spawn one face child entity under `parent`, carrying `mesh` and the per-face
+/// diffuse material built from `texture_face` (via [`face_material`], which
+/// requests the texture through `manager` and parks the material in
+/// `prim_textures` until it decodes — the Phase 6 pipeline). The shared tail of
+/// every face-geometry build path, cached or not: the *material* is always
+/// per-instance (texture identity is not part of the geometry cache key); only
+/// the mesh handle may be shared.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the material build needs"
+)]
+fn spawn_face_entity(
+    mesh: Handle<Mesh>,
+    texture_face: &TextureFace,
+    face_id: PrimFaceId,
+    parent: Entity,
+    commands: &mut Commands,
+    materials: &mut Assets<FaceMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+) -> Entity {
+    let material = face_material(
+        texture_face,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        TextureAlpha::Mask,
+    );
+    commands
+        .spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            PrimFaceEntity { face_id },
+            FaceTextureDebug(*texture_face),
+            ChildOf(parent),
+        ))
+        .id()
+}
+
+/// Try to spawn `key`'s faces purely from the cross-instance [`GeometryCache`]:
+/// when **every** non-empty face revives a live shared mesh handle (the planar
+/// variant at this instance's quantized scale for a planar-texgen face, the
+/// scale-independent one otherwise), spawn the face entities with zero
+/// tessellation / conversion work and return them (`Ok`).
+///
+/// Otherwise return the partial revival (`Err`): the handles that *did* revive,
+/// keyed by face id, so the caller's geometry build reuses them and only builds
+/// the rest. An unrecorded key yields an empty map.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the face spawn needs"
+)]
+fn spawn_revived_faces(
+    key: &GeometryKey,
+    texture_entry: &[u8],
+    quantized: ScaleMm,
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+    cache: &mut GeometryCache,
+) -> Result<Vec<Entity>, HashMap<PrimFaceId, Handle<Mesh>>> {
+    let Some(face_count) = cache.cached_face_count(key) else {
+        return Err(HashMap::new());
+    };
+    let entry = decode_texture_entry(texture_entry, face_count);
+    // The slot every face falls back to when the object carries no texture entry:
+    // an untextured, opaque-white (untinted, non-planar) face.
+    let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
+    let Some(revived) = cache.revive(
+        key,
+        quantized,
+        |face_id| {
+            entry
+                .face(face_id.as_usize())
+                .unwrap_or(&default_face)
+                .is_planar_texgen()
+        },
+        meshes,
+    ) else {
+        return Err(HashMap::new());
+    };
+    if !revived.complete() {
+        return Err(revived
+            .faces
+            .into_iter()
+            .filter_map(|face| face.mesh.map(|mesh| (face.face_id, mesh)))
+            .collect());
+    }
+    cache.note_hit();
+    let face_entities = revived
+        .faces
+        .into_iter()
+        .filter_map(|face| {
+            let mesh = face.mesh?;
+            let texture_face = entry.face(face.face_id.as_usize()).unwrap_or(&default_face);
+            Some(spawn_face_entity(
+                mesh,
+                texture_face,
+                face.face_id,
+                parent,
+                commands,
+                materials,
+                manager,
+                prim_textures,
+                priority,
+            ))
+        })
+        .collect();
+    Ok(face_entities)
+}
+
+/// Spawn the face entities of a cacheable tessellated geometry (a plain prim or
+/// a sculpt), sharing mesh handles across identical instances through the
+/// [`GeometryCache`]: a full revival spawns without running
+/// `tessellate_geometry` at all; otherwise the geometry is produced once and
+/// only the faces without a live shared asset are converted and uploaded (and
+/// recorded for the next instance). A planar-texgen face bakes the object
+/// scale into its UVs ([`apply_planar_texgen`]), so it shares per quantized
+/// scale rather than unconditionally.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "threads the several ECS resources the geometry build needs"
+)]
+fn spawn_cached_prim_faces(
+    key: GeometryKey,
+    tessellate_geometry: impl FnOnce() -> PrimMesh,
+    texture_entry: &[u8],
+    scale: [f32; 3],
+    parent: Entity,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+    cache: &mut GeometryCache,
+) -> Vec<Entity> {
+    let quantized = scale_mm(scale);
+    let mut revived = match spawn_revived_faces(
+        &key,
+        texture_entry,
+        quantized,
+        parent,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        cache,
+    ) {
+        Ok(face_entities) => return face_entities,
+        Err(partial) => partial,
+    };
+    let any_revived = !revived.is_empty();
+    let prim = tessellate_geometry();
+    let entry = decode_texture_entry(texture_entry, prim.faces.len());
+    // The slot every face falls back to when the object carries no texture entry:
+    // an untextured, opaque-white (untinted) face.
+    let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
+    cache.ensure_entry(key, prim.faces.len());
+    let mut face_entities = Vec::new();
+    for face in &prim.faces {
+        if face.is_empty() {
+            continue;
+        }
+        let texture_face = entry.face(face.face_id.as_usize()).unwrap_or(&default_face);
+        let mesh = match revived.remove(&face.face_id) {
+            Some(mesh) => mesh,
+            None => {
+                let mut bevy_mesh = to_bevy_prim_mesh(face);
+                apply_planar_texgen(
+                    &mut bevy_mesh,
+                    &face.positions,
+                    &face.normals,
+                    texture_face,
+                    scale,
+                );
+                // Whether planar UVs were actually baked (the same condition
+                // `apply_planar_texgen` no-ops on): only then is the mesh a
+                // scale-dependent variant.
+                let planar =
+                    texture_face.is_planar_texgen() && face.normals.len() == face.positions.len();
+                let mesh = meshes.add(bevy_mesh);
+                cache.record_face(key, face.face_id, planar.then_some(quantized), mesh.id());
+                mesh
+            }
+        };
+        let entity = spawn_face_entity(
+            mesh,
+            texture_face,
+            face.face_id,
+            parent,
+            commands,
+            materials,
+            manager,
+            prim_textures,
+            priority,
+        );
+        face_entities.push(entity);
+    }
+    if any_revived {
+        cache.note_partial_hit();
+    } else {
+        cache.note_miss();
     }
     face_entities
 }
@@ -2459,12 +2697,19 @@ fn spawn_prim_faces(
 /// The mesh geometry stays in the object's local Second Life space; the object
 /// entity's `Transform` carries the object's scale / rotation / position and the
 /// single Second Life → Bevy basis change for the whole object.
+///
+/// The converted Bevy meshes are shared across identical instances through the
+/// [`GeometryCache`] keyed by `(mesh_key, decoded.lod)`: copies of one mesh
+/// asset (which already share the *decoded* geometry via `MeshManager`)
+/// additionally share one converted, GPU-uploaded mesh per submesh instead of
+/// each re-converting and re-uploading their own.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
 )]
 fn build_mesh_submeshes(
     decoded: &DecodedMesh,
+    mesh_key: MeshKey,
     texture_entry: &[u8],
     scale: [f32; 3],
     parent: Entity,
@@ -2474,47 +2719,82 @@ fn build_mesh_submeshes(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    cache: &mut GeometryCache,
 ) -> Vec<Entity> {
+    let key = GeometryKey::Mesh {
+        mesh: mesh_key,
+        lod: decoded.lod,
+    };
+    let quantized = scale_mm(scale);
+    let mut revived = match spawn_revived_faces(
+        &key,
+        texture_entry,
+        quantized,
+        parent,
+        commands,
+        meshes,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        cache,
+    ) {
+        Ok(face_entities) => return face_entities,
+        Err(partial) => partial,
+    };
+    let any_revived = !revived.is_empty();
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry:
     // an untextured, opaque-white (untinted) face.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
+    cache.ensure_entry(key, decoded.submeshes.len());
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
         if submesh.no_geometry {
             continue;
         }
         let texture_face = entry.face(index).unwrap_or(&default_face);
-        let mut bevy_mesh = to_bevy_mesh(submesh);
-        apply_planar_texgen(
-            &mut bevy_mesh,
-            &submesh.positions,
-            &submesh.normals,
+        // The submesh index is the Linden face index; a mesh has few faces, so the
+        // widening never saturates in practice (a clamp keeps it lint-clean).
+        let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
+        let mesh = match revived.remove(&face_id) {
+            Some(mesh) => mesh,
+            None => {
+                let mut bevy_mesh = to_bevy_mesh(submesh);
+                apply_planar_texgen(
+                    &mut bevy_mesh,
+                    &submesh.positions,
+                    &submesh.normals,
+                    texture_face,
+                    scale,
+                );
+                // Whether planar UVs were actually baked (the same condition
+                // `apply_planar_texgen` no-ops on): only then is the mesh a
+                // scale-dependent variant.
+                let planar = texture_face.is_planar_texgen()
+                    && submesh.normals.len() == submesh.positions.len();
+                let mesh = meshes.add(bevy_mesh);
+                cache.record_face(key, face_id, planar.then_some(quantized), mesh.id());
+                mesh
+            }
+        };
+        let entity = spawn_face_entity(
+            mesh,
             texture_face,
-            scale,
-        );
-        let mesh = meshes.add(bevy_mesh);
-        let material = face_material(
-            texture_face,
+            face_id,
+            parent,
+            commands,
             materials,
             manager,
             prim_textures,
             priority,
-            TextureAlpha::Mask,
         );
-        // The submesh index is the Linden face index; a mesh has few faces, so the
-        // widening never saturates in practice (a clamp keeps it lint-clean).
-        let face_id = PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX));
-        let entity = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                PrimFaceEntity { face_id },
-                FaceTextureDebug(*texture_face),
-                ChildOf(parent),
-            ))
-            .id();
         face_entities.push(entity);
+    }
+    if any_revived {
+        cache.note_partial_hit();
+    } else {
+        cache.note_miss();
     }
     face_entities
 }
@@ -2571,6 +2851,7 @@ fn apply_object(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
+    cache: &mut GeometryCache,
 ) -> bool {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
@@ -2693,6 +2974,7 @@ fn apply_object(
                     manager,
                     prim_textures,
                     mesh_manager,
+                    cache,
                 );
             // Seed or clear the flexi chain state (P32.2): a prim that is (still) flexi
             // gets a fresh chain at the new softness / geometry; one toggled rigid drops
@@ -2821,6 +3103,7 @@ fn apply_object(
         manager,
         prim_textures,
         mesh_manager,
+        cache,
     );
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
@@ -3119,6 +3402,7 @@ pub(crate) fn apply_object_meshes(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
+    mut cache: ResMut<GeometryCache>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
         let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
@@ -3184,6 +3468,7 @@ pub(crate) fn apply_object_meshes(
                 } else {
                     tracked.face_entities = build_mesh_submeshes(
                         &mesh,
+                        key,
                         &pending.texture_entry,
                         pending.scale,
                         tracked.geometry,
@@ -3193,6 +3478,7 @@ pub(crate) fn apply_object_meshes(
                         &mut manager,
                         &mut prim_textures,
                         pending.priority,
+                        &mut cache,
                     );
                     debug!(
                         "built mesh {key}: {} submesh entities",
@@ -3221,6 +3507,7 @@ pub(crate) fn apply_object_meshes(
                 despawn_prim_faces(&tracked.face_entities, &mut commands);
                 tracked.face_entities = build_mesh_submeshes(
                     &mesh,
+                    key,
                     &texture_entry,
                     scale,
                     geometry,
@@ -3230,6 +3517,7 @@ pub(crate) fn apply_object_meshes(
                     &mut manager,
                     &mut prim_textures,
                     priority,
+                    &mut cache,
                 );
                 debug!(
                     "rebuilt mesh {key} at new LOD: {} submesh entities",
@@ -3247,9 +3535,16 @@ pub(crate) fn apply_object_meshes(
 /// tessellation at the new level.
 ///
 /// The mirror of the mesh LOD swap in [`apply_object_meshes`], but with no async
-/// fetch: prim geometry is tessellated on the CPU here and now. A target for a
-/// non-prim, an untracked (removed) object, or a prim already at the desired
-/// level is a no-op — `prim_rebuild` is `Some` only for a plain prim.
+/// fetch: prim geometry is tessellated on the CPU here and now — through the
+/// cross-instance [`GeometryCache`], so a level another instance of the same
+/// shape already sits at revives its shared meshes instead of re-tessellating
+/// (the camera-move LOD-thrash win). A target for a non-prim, an untracked
+/// (removed) object, or a prim already at the desired level is a no-op —
+/// `prim_rebuild` is `Some` only for a plain prim.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading the LOD targets and the ECS resources the geometry build needs"
+)]
 pub(crate) fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
     mut state: ResMut<ObjectState>,
@@ -3258,6 +3553,7 @@ pub(crate) fn apply_prim_lod(
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut cache: ResMut<GeometryCache>,
 ) {
     for (scoped, desired) in targets.0.drain() {
         let Some(tracked) = state.objects.get_mut(&scoped) else {
@@ -3273,15 +3569,18 @@ pub(crate) fn apply_prim_lod(
         }
         // Clone the rebuild inputs out so the immutable borrow of `tracked` ends
         // before the mutable rebuild of its face entities below.
-        let shape = PrimShapeFloat::from_params(&rebuild.shape);
+        let shape = rebuild.shape;
         let texture_entry = rebuild.texture_entry.clone();
         let scale = rebuild.scale;
         let priority = rebuild.priority;
         let geometry = tracked.geometry;
-        let prim = tessellate(&shape, desired);
         despawn_prim_faces(&tracked.face_entities, &mut commands);
-        tracked.face_entities = spawn_prim_faces(
-            &prim,
+        tracked.face_entities = spawn_cached_prim_faces(
+            GeometryKey::Prim {
+                shape,
+                lod: desired,
+            },
+            || tessellate(&PrimShapeFloat::from_params(&shape), desired),
             &texture_entry,
             scale,
             geometry,
@@ -3291,6 +3590,7 @@ pub(crate) fn apply_prim_lod(
             &mut manager,
             &mut prim_textures,
             priority,
+            &mut cache,
         );
         tracked.prim_lod = desired;
         debug!(
@@ -3859,6 +4159,10 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
 /// flows through the shared [`TextureManager`] like any face texture — but keys off
 /// a *pending sculpt build* rather than a parked face material, so the two
 /// consumers never contend for the same decoded texture.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading decoded sculpt maps and the ECS resources the geometry build needs"
+)]
 pub(crate) fn apply_object_sculpts(
     mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<ObjectState>,
@@ -3867,6 +4171,7 @@ pub(crate) fn apply_object_sculpts(
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut cache: ResMut<GeometryCache>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
@@ -3883,6 +4188,7 @@ pub(crate) fn apply_object_sculpts(
                 Some(PendingGeometry::Sculpt(pending)) if pending.map == id => {
                     tracked.face_entities = build_sculpt_faces(
                         &map,
+                        pending.map,
                         pending.sculpt_type,
                         &pending.texture_entry,
                         pending.scale,
@@ -3893,6 +4199,7 @@ pub(crate) fn apply_object_sculpts(
                         &mut manager,
                         &mut prim_textures,
                         pending.priority,
+                        &mut cache,
                     );
                     debug!(
                         "built sculpt {id}: {} face entities",
