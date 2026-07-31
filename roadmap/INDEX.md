@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 261 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 13 |
-| done | 644 |
+| bugs | 15 |
+| done | 645 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1122** |
+| **total** | **1125** |
 
 ## ideas (56)
 
@@ -1125,7 +1125,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (13)
+## bugs (15)
 
 ### protocol
 
@@ -1152,8 +1152,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-own-bake-not-refreshed-on-outfit-change`](bugs/viewer-own-bake-not-refreshed-on-outfit-change.md)
+  — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
+- [`viewer-reattached-rigged-mesh-renders-static-mislocated`](bugs/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
+  — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1167,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (644)
+## done (645)
 
 ### protocol
 
@@ -1318,6 +1322,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
+- [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
+  — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
+  faces)
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)

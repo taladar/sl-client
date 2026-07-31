@@ -37,6 +37,42 @@ Investigate:
 - Whether any of these re-run redundantly (e.g. re-applying an unchanged bake)
   — the "build once, update in place" discipline applies here too.
 
+## `apply_own_local_bake` root cause + fix (confirmed 2026-07-31)
+
+The spike is the **client-side bake composite** (`build_local_bake` →
+`sl-bake::composite_region`): for each of ~5–6 body regions (`BakeRegion::ALL`)
+it blends the wearable layers (skin + tattoos + each clothing layer + alpha
+masks) into one `LOCAL_BAKE_SIZE = 512`² image, plus a per-region V-flip and an
+alpha-classification pass — all **single-threaded, in one frame** (`sl-bake` has
+no rayon/async; `build_local_bake` runs once when the inputs finish assembling).
+It is *not* a texture upload — the `images.add` at the end is the cheap part.
+
+Two fixes, composing:
+
+1. **Gate it on the server bake — at the input-fetch level, not just the
+   composite.** On SL / BoM our own avatar has a full server bake, which wins in
+   the draping loop (`state.baked_textures` per region), so the whole composite
+   is **built then discarded** — pure waste. Yet the only guard before
+   `build_local_bake` is `!local.built`; nothing checks our own agent's
+   `baked_textures` first. Gate earlier still: the local bake needs every
+   *layer* texture fetched + JPEG2000-decoded, whereas the server bake is one
+   already-composited texture per region — so assembling the local-bake inputs
+   is strictly *more* asset traffic + decode than the bake it supersedes and
+   cannot even show the avatar sooner. So on a server-bake avatar, don't fetch
+   the layer textures / assemble `OwnBakeInputs` for compositing at all. (Keep
+   the genuinely separate needs: wearable *params* for shape resolution in
+   `apply_own_shape_from_wearables`, and the inputs the appearance editor
+   mutates during a live edit.)
+2. **Background-worker the composite that remains (OpenSim).** Where no server
+   bake exists the composite is real; run it on an `AsyncComputeTaskPool` task
+   and install the resulting `Handle<Image>`s on completion instead of blocking
+   the frame thread — pure pixel work, no ECS access until the handles are
+   ready, and a one-shot (`local.built`) so there is no per-frame coordination.
+   rayon over the ~6 regions / scanlines is a further near-linear speedup.
+
+So the gate removes the cost where it is pure waste (SL), and the worker removes
+the *stall* where the work is real (OpenSim).
+
 Measure each system's per-event max (not just mean) before/after with a
 multi-minute capture while avatars are loading (the mean hides these; only the
 per-event spike distribution shows them — see `book/src/tools/profiling.md`).

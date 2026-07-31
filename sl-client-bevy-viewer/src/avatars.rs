@@ -2601,6 +2601,27 @@ pub(crate) fn bom_face_material(tint: [u8; 4], uv: Affine2) -> FaceMaterial {
     })
 }
 
+/// The [`AlphaMode`] for a mesh-body BoM face, from the face's TE tint alpha and
+/// whether the wearer's region bake carries alpha (a worn alpha layer carved it
+/// transparent — `BakeAlpha::Masked` / `Transparent`).
+///
+/// A translucent tint blends (the reference's `color_alpha` → alpha pool).
+/// Otherwise a **carved** bake masks at the reference cutoff so the hidden region
+/// (e.g. the feet under mesh boots) does not render, while bare skin — an
+/// opaque bake — stays opaque so it never goes see-through and no UV-seam ring
+/// appears on an un-alpha'd arm. That is the fix for the earlier blanket-opaque
+/// behaviour: R22d broke because it masked an *un-carved* bake; gating on
+/// `bake_has_alpha` masks only where a layer actually carved transparency.
+const fn bom_face_alpha_mode(tint_alpha: u8, bake_has_alpha: bool) -> AlphaMode {
+    if tint_alpha < 255 {
+        AlphaMode::Blend
+    } else if bake_has_alpha {
+        AlphaMode::Mask(BAKE_ALPHA_MASK_THRESHOLD)
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
 /// Drape a decoded baked texture over a region material: set its diffuse image,
 /// reset `base_color` to white so the composited bake (which already carries the
 /// skin / clothing colour) is shown unmodified rather than tinted by the fallback
@@ -3809,22 +3830,18 @@ pub(crate) fn apply_bom_face_materials(
         if *visibility == Visibility::Hidden {
             *visibility = Visibility::Inherited;
         }
-        // A mesh-body BoM face renders **opaque**, ignoring the bake's composited
-        // alpha channel. The reference proves this: a 5-channel server bake never
-        // satisfies `getPoolTypeFromTE`'s `getComponents()==4` alpha test, and with
-        // an opaque tint and no material the face has no renderable alpha — so it is
-        // batched into `sSimpleFaces` (`llvovolume.cpp`), the opaque simple pass,
-        // which does not alpha-test. The bake's alpha carves the *system* avatar
-        // body (and drives region hiding), not this attachment. Applying it here is
-        // what made bare skin see-through (R22d) and cut UV-seam rings into the arm.
-        // The per-face TE tint still applies: a non-opaque tint blends (the
-        // reference's `color_alpha` → alpha pool); a fully-transparent tint is
-        // hidden by visibility above.
-        let alpha_mode = if face.tint[3] < 255 {
-            AlphaMode::Blend
-        } else {
-            AlphaMode::Opaque
-        };
+        // A mesh-body BoM face is opaque for bare skin, but alpha-**masks** when a
+        // worn alpha layer has carved the bake transparent (`BakeAlpha::Masked` /
+        // `Transparent`), so a region the wearer hid — e.g. the feet under mesh
+        // boots — does not render. Only the *carved* case masks: bare skin
+        // classifies as `BakeAlpha::Opaque` and stays opaque, so it never goes
+        // see-through and no UV-seam ring appears on an un-alpha'd arm (the R22d
+        // regression came from masking an *un-carved* bake). The per-face TE tint
+        // still wins: a non-opaque tint blends (reference `color_alpha` → alpha
+        // pool); a fully-transparent tint is hidden by visibility above.
+        let bake = region_bake.get(&(face.agent, face.slot));
+        let bake_has_alpha = bake.is_some_and(|&(_, has_alpha)| has_alpha);
+        let alpha_mode = bom_face_alpha_mode(face.tint[3], bake_has_alpha);
         let (texture, base_color) = if debug_avatar_grid() {
             // Diagnostic (R22): render the mesh's UV mapping as a grid, so a broken
             // grid (UV-mapping problem) can be told apart from a continuous one
@@ -3836,8 +3853,8 @@ pub(crate) fn apply_bom_face_materials(
             // geometry/normals one (persists — still lit by the mesh normals).
             (None, Color::srgb(0.6, 0.6, 0.6))
         } else {
-            match region_bake.get(&(face.agent, face.slot)) {
-                Some((image, _bake_alpha)) => (Some(image.clone()), tint_color(face.tint)),
+            match bake {
+                Some((image, _)) => (Some(image.clone()), tint_color(face.tint)),
                 // No bake resolved yet: neutral fallback (reference IMG_DEFAULT), not
                 // the reddish skin placeholder.
                 None => (None, BOM_FALLBACK_COLOR),
@@ -3947,9 +3964,10 @@ pub(crate) fn position_name_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        AvatarState, BakeAlpha, BodySizeMetrics, PROVISIONAL_ID_CHARS, body_root_transform,
-        classify_bake_alpha, coarse_translation, invisible_body_slots, provisional_label,
-        root_drop_from_metrics, should_refetch_bakes, used_baked_slots, visible_body_bakes,
+        AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics, PROVISIONAL_ID_CHARS,
+        body_root_transform, bom_face_alpha_mode, classify_bake_alpha, coarse_translation,
+        invisible_body_slots, provisional_label, root_drop_from_metrics, should_refetch_bakes,
+        used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::sl_to_bevy_rotation;
@@ -4353,6 +4371,24 @@ mod tests {
         assert!(!BakeAlpha::Opaque.hides_region());
         assert!(!BakeAlpha::Masked.hides_region());
         assert!(BakeAlpha::Transparent.hides_region());
+    }
+
+    /// A BoM mesh-body face masks only when a worn alpha layer carved the bake:
+    /// bare skin (opaque bake, opaque tint) stays opaque so it is never
+    /// see-through (the R22d failure), a carved bake masks so the hidden region
+    /// (feet under boots) vanishes, and a translucent tint always blends.
+    #[test]
+    fn bom_face_alpha_mode_masks_only_carved_bakes() {
+        // Bare skin: opaque tint, no carved alpha in the bake -> stays opaque.
+        assert_eq!(bom_face_alpha_mode(255, false), AlphaMode::Opaque);
+        // A worn alpha layer carved the bake -> mask the carved (feet) region.
+        assert_eq!(
+            bom_face_alpha_mode(255, true),
+            AlphaMode::Mask(BAKE_ALPHA_MASK_THRESHOLD)
+        );
+        // A translucent TE tint blends regardless of the bake's alpha.
+        assert_eq!(bom_face_alpha_mode(128, false), AlphaMode::Blend);
+        assert_eq!(bom_face_alpha_mode(128, true), AlphaMode::Blend);
     }
 
     /// Bake re-fetch is gated on the COF version (P14.4): a first appearance and
