@@ -30,6 +30,32 @@ during rez, shadow specialization and cluster preparation scale up.
 covered by the existing probe tasks [[viewer-perf-probe-scheduling]],
 [[viewer-perf-probe-capture-shadows]] and siblings.)
 
+## Spike distribution — the real problem (2026-07-31, 2-min capture)
+
+A full 2-minute Tracy capture of aditi rezzing (4511 frames) re-measured these
+as **per-event durations**, not just the mean, and the mean badly under-sells
+them. Unwrapping the two shadow systems over the 39–88 s rez burst:
+
+| System | frames >50 ms | frames 20–50 ms | peak | mean |
+| --- | --- | --- | --- | --- |
+| `specialize_shadows` | **165** | 45 | 186 ms | 3.98 ms |
+| `queue_shadows` | **112** | 76 | 186 ms | 2.65 ms |
+
+The spikes are **recurring across the whole rez window (39–88 s), not a startup
+one-off**. Both run in the Render schedule, so a bad frame spends **300–370 ms
+on shadows alone** — which is what drives the aggregate `present_frames`
+(412 ms) and `RenderExtractApp` (418 ms) stalls in the same capture, i.e. the
+visible multi-hundred-ms hitches while the region fills in. Root cause: every
+new *material × mesh* combo that streams in needs a shadow pipeline variant
+**specialized** (a shader compile) — this is the shadow-view instance of the
+broader pipeline-specialization stall tracked in
+[[viewer-perf-pipeline-specialization-stalls]].
+
+Caveat: `queue_shadows` cost scales with *views × casters*, so part of it may
+overlap the known probe-capture-shadow work
+([[viewer-perf-probe-capture-shadows]]); `specialize_shadows` is genuinely
+content-driven and view-independent (the pipeline cache is shared).
+
 Investigate / tune:
 
 - How many SL point/spot lights cast real-time shadows at once, and whether they

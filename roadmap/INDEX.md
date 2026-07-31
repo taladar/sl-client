@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 259 |
+| ready | 262 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
 | done | 642 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1117** |
+| **total** | **1120** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (259)
+## ready (262)
 
 ### protocol
 
@@ -545,10 +545,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-perf-avatar-bake-apply-spikes`](ready/viewer-perf-avatar-bake-apply-spikes.md)
+  — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
+- [`viewer-perf-pipeline-specialization-stalls`](ready/viewer-perf-pipeline-specialization-stalls.md)
+  — Pre-warm / cache render-pipeline specialization to stop first-use compile
+  stalls
+- [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
+  — Throttle prim-texture application + GPU asset uploads during rez bursts
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
 - [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)

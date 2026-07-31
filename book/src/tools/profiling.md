@@ -114,6 +114,46 @@ filtered):
 tracy-csvexport -u -f composite_minimap trace.tracy
 ```
 
+#### Long (multi-minute) captures — do not use `-s`
+
+`tracy-grab.sh` uses `tracy-capture -s <seconds>`, which is fine for a short
+(≤~10 s) window but **corrupts a long / high-volume capture**. When the `-s`
+deadline fires, `tracy-capture` calls `worker.Disconnect()` and immediately
+serializes; at a high zone rate that cuts the network worker off mid-stream and
+writes a **truncated** trace (which the reader then rejects — see the note
+above). A 10 s window stays consistent; a 2-minute / ~24 M-zone one does not.
+
+For a multi-minute capture, run `tracy-capture` **without `-s`** and end the
+stream from the *client* side — let the viewer disconnect cleanly:
+
+```console
+tracy-capture -o trace.tracy -f # no -s; blocks until the client connects
+# … launch the viewer, keep its window visible, let it rez for ~2 min …
+# then close the viewer window normally (Quit -> AppExit); do NOT kill it
+```
+
+The capture loops `while (worker.IsConnected())` and only serializes once the
+viewer disconnects, which leaves the worker on a consistent boundary and writes
+a complete trace. A clean `AppExit` (normal window close) flushes the Tracy
+client; an abrupt `SIGKILL` does not — so close the window rather than killing
+the process. Keep the window **visible/unoccluded** the whole time or Bevy
+throttles rendering.
+
+Exporting a large trace has two more sharp edges:
+
+- **`tracy-csvexport` segfaults on large traces** in the parallel sort
+  (`ppqsort::execution::par` → `process_blocks_branchless`). Build the Tracy
+  utilities from a checkout that forces the **sequential** sort — the `taladar`
+  fork carries this as commit `d96fc51f` (`ppqsort::execution::par` → `::seq`
+  at every call site). Slower, but it completes; the stock parallel build
+  crashes on a ~24 M-zone trace.
+- **`-t` / `--truncated_mean` takes an *attached* argument** (`-t90`, not
+  `-t 90`); the space form is parsed as a bare `-t` plus a stray positional and
+  just prints usage. The `max_ns` / `mean_ns` / `std_ns` columns are always
+  present without `-t` anyway, and per-zone `max_ns ÷ mean_ns` is the outlier
+  metric — it finds the frames where a system runs far above its own average,
+  which the aggregate mean hides.
+
 ### Chrome / Perfetto (no-GUI fallback for bug reports)
 
 ```console
