@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 55 |
 | ready | 262 |
 | blocked | 112 |
-| in-progress | 10 |
+| in-progress | 11 |
 | bugs | 13 |
 | done | 642 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1120** |
+| **total** | **1121** |
 
 ## ideas (55)
 
@@ -551,9 +551,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
-- [`viewer-perf-pipeline-specialization-stalls`](ready/viewer-perf-pipeline-specialization-stalls.md)
-  — Pre-warm / cache render-pipeline specialization to stop first-use compile
-  stalls
 - [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
   — Throttle prim-texture application + GPU asset uploads during rez bursts
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
@@ -564,6 +561,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Filter probe cubemaps only on capture completion; blit only dirty faces
 - [`viewer-perf-probe-instrumentation`](ready/viewer-perf-probe-instrumentation.md)
   — Reflection-probe cost instrumentation (capture / blit / filter buckets)
+- [`viewer-perf-probe-material-respecialize`](ready/viewer-perf-probe-material-respecialize.md)
+  — Reflection-probe capture pays a redundant per-view material re-specialize
 - [`viewer-perf-probe-quality-knobs`](ready/viewer-perf-probe-quality-knobs.md)
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
@@ -1098,7 +1097,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (10)
+## in-progress (11)
 
 ### viewer
 
@@ -1106,6 +1105,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-perf-pipeline-specialization-stalls`](in-progress/viewer-perf-pipeline-specialization-stalls.md)
+  — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
   — Region / Estate floater — estate tab (blocked by
   `viewer-region-options-debug` (done))
