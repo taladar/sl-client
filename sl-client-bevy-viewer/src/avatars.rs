@@ -33,6 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bevy::app::Propagate;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
@@ -58,6 +59,7 @@ use crate::coords::{
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::physics::AvatarMotion;
+use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 use crate::ui_font::UiFont;
 
@@ -1474,6 +1476,12 @@ impl AvatarState {
                 Transform::from_translation(translation),
                 AvatarSphere,
                 AvatarAnchor,
+                // Avatars are dynamic content for reflection probes: this whole
+                // subtree (here just the placeholder sphere) rides the dynamic
+                // probe layer, so local probes capture it only when the setting
+                // includes dynamic content (the object entity's own `Propagate`
+                // does not reach here — the avatar body is a separate root).
+                Propagate(dynamic_render_layers()),
                 // The whole sphere *is* the avatar here, so a ray that hits it
                 // resolves straight to this agent.
                 AvatarPickTarget { agent },
@@ -1513,6 +1521,14 @@ impl AvatarState {
                 body_root_transform(object, root_drop),
                 Visibility::default(),
                 AvatarAnchor,
+                // Avatars are dynamic content for reflection probes: propagate the
+                // dynamic probe layer to the whole skeleton / body-part / worn-
+                // attachment subtree hanging off this body root (a separate root,
+                // so the object entity's own `Propagate` does not reach it). A worn
+                // attachment carries its own `Propagate` and so overrides this with
+                // the static-geometry layer — acceptable, and only visible when the
+                // dynamic-content setting is off.
+                Propagate(dynamic_render_layers()),
             ))
             .id();
         // A fresh joint entity per skeleton joint, parented in a second pass once

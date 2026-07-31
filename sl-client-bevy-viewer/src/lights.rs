@@ -248,6 +248,10 @@ const fn light_color(light: &ObjectLight) -> Color {
 /// transform, so the light sits at the prim's origin and a spotlight's forward
 /// already points down the prim's Second Life local `-Z` (see the module docs).
 fn spawn_local_light(commands: &mut Commands, object: Entity, light: &ObjectLight) -> Entity {
+    // The light rides its object entity, whose `Propagate(RenderLayers)` (set in
+    // `objects::apply_object`) reaches this child — so a prim light inherits the
+    // object's `{main + probe}` layers and illuminates both the main view and the
+    // local probe capture cameras, exactly as it did when both were on layer 0.
     let mut child = commands.spawn((Transform::IDENTITY, LocalLightChild, ChildOf(object)));
     match light.projection {
         Some(projection) => child.insert(spot_light(projection, light)),

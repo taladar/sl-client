@@ -174,6 +174,15 @@ fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
     )
     .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO));
 
+    // `scene_root()` propagates the reflection-probe render layers down the scene
+    // with `Propagate<RenderLayers>`, which needs this plugin (the full viewer adds
+    // it in `lib.rs`). Without it the probe capture cameras — which render the
+    // probe layers, not the main layer — would see an empty world and a mirror
+    // would reflect nothing.
+    app.add_plugins(bevy::app::HierarchyPropagatePlugin::<
+        bevy::camera::visibility::RenderLayers,
+    >::new(PostUpdate));
+
     // The viewer's real reflection probes, as the gallery runs them — without
     // these a mirror reflects nothing at all and the check is vacuous.
     app.add_plugins(ReflectionProbePlugin)

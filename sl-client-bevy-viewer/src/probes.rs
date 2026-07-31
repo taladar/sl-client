@@ -54,10 +54,16 @@
 //! applicable probe per fragment, falling back to the view's default probe outside
 //! every volume, exactly the layering the reference shader does.
 //!
-//! **Capture cadence.** The capture is amortized ([`CaptureSchedule`]): only one cube
-//! face anywhere in the scene is re-rendered per frame, in six-frame bursts, so a rig
-//! is refreshed every [`CAPTURE_PERIOD_FRAMES`] and the total cost stays proportional
-//! to the number of *live* probes rather than to the frame rate. A freshly assigned
+//! **Capture cadence.** The capture is amortized ([`CaptureSchedule`]) and tiered,
+//! mirroring the reference viewer's per-probe cadences rather than one flat period:
+//! only one cube face anywhere in the scene is re-rendered per frame, in six-frame
+//! bursts. The local probes run a continuous **oldest-first, distance-weighted**
+//! round-robin (the reference's `age - mDistance * 0.1` priority), so a nearer /
+//! staler probe refreshes first; the **default (ambient) probe** is environment-
+//! only and refreshes only every [`DEFAULT_PROBE_PERIOD_SECS`]
+//! (`RenderDefaultProbeUpdatePeriod`). Captures are **shadow-free** — the capture
+//! cameras render the reflection-probe layers only, so the shadow-casting sun
+//! builds no cascades for them (see [`crate::probe_layers`]). A freshly assigned
 //! rig jumps the queue ([`CaptureSchedule::urgent`]) so a probe entering the budget
 //! shows its own surroundings almost immediately instead of the previous tenant's.
 //!
@@ -108,8 +114,11 @@
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
 
 use crate::camera::ViewerCamera;
+use crate::probe_layers::{default_probe_camera_render_layers, local_probe_camera_render_layers};
+use crate::settings::ViewerSettings;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -123,6 +132,7 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags};
+use sl_settings::SettingValue;
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 
@@ -281,14 +291,18 @@ const MAX_LOCAL_PROBES: usize = 4;
 /// The total number of capture rigs: the default (global) probe plus the local pool.
 const RIG_COUNT: usize = MAX_LOCAL_PROBES.saturating_add(1);
 
-/// Frames between two refreshes of the *same* rig. The six faces of a rig are
-/// re-rendered one per frame in a burst, then the schedule moves on to the next rig
-/// — so the expensive six-face scene re-render (each with its own shadow pass) is
-/// paid only in brief bursts, and the whole scene's probes are refreshed on this
-/// period regardless of how many are live. The environment changes slowly, so the
-/// resulting staleness is imperceptible while the frame rate stays near the un-probed
-/// baseline.
-const CAPTURE_PERIOD_FRAMES: usize = 180;
+/// How long (seconds) the **default (ambient) probe** may go between refreshes —
+/// the reference viewer's `RenderDefaultProbeUpdatePeriod` (default `2 s`). The
+/// default probe is environment-only, so its contents change only with the sky /
+/// sun and this lazy cadence is imperceptible while it keeps the default probe off
+/// the per-frame round-robin the local probes run.
+const DEFAULT_PROBE_PERIOD_SECS: f32 = 2.0;
+
+/// Weight on a local probe's camera distance when picking the next rig to refresh,
+/// mirroring the reference's oldest-first priority (`age - mDistance * 0.1`): a
+/// nearer probe is refreshed a touch more eagerly than a distant one of the same
+/// age.
+const PROBE_DISTANCE_WEIGHT: f32 = 0.1;
 
 /// The smallest near-clip distance a probe's capture cameras may use, in metres —
 /// `LLReflectionMap::getNearClip`'s `MINIMUM_NEAR_CLIP`.
@@ -536,26 +550,29 @@ impl ProbeRigs {
     }
 }
 
-/// The amortized capture schedule: which rig is being re-rendered right now, and
-/// which is next. Only ever **one cube face in the whole scene** is re-rendered per
-/// frame, so the scene re-render cost is bounded no matter how many probes are live.
+/// The amortized capture schedule: which rig is being re-rendered right now.
+/// Only ever **one cube face in the whole scene** is re-rendered per frame, so the
+/// scene re-render cost is bounded no matter how many probes are live.
 ///
 /// A rig's six faces are captured over six consecutive frames (a *burst*); the
-/// schedule then idles ([`idle_frames`]) before starting the next rig's burst, sized
-/// so that each live rig comes round again every [`CAPTURE_PERIOD_FRAMES`].
+/// schedule then immediately starts the next rig's burst — the local probes cycle
+/// continuously (no idle), oldest-first with a small distance weight
+/// ([`select_next_rig`]), while the default probe is held back to
+/// [`DEFAULT_PROBE_PERIOD_SECS`]. This reproduces the reference viewer's tiered
+/// per-probe cadences instead of one flat period.
 #[derive(Resource, Default)]
 struct CaptureSchedule {
     /// The rig currently mid-burst and the next face of it to render, if any.
     active: Option<(usize, usize)>,
-    /// Frames still to idle before the next burst begins.
-    idle: usize,
+    /// Wall-clock time (seconds since startup) each rig's last burst began, indexed
+    /// by rig. Drives the oldest-first priority and the default-probe period; grown
+    /// to the rig count on first use, seeded to "never captured".
+    last_captured: Vec<f32>,
     /// Rigs needing an out-of-turn capture — a pool rig just assigned to a new probe,
     /// whose cube still holds the *previous* tenant's surroundings. Drained ahead of
     /// the round-robin so a probe entering the budget shows its own environment
     /// within a few frames rather than after a full period.
     urgent: VecDeque<usize>,
-    /// The round-robin cursor over the rig indices, for the routine refresh.
-    cursor: usize,
 }
 
 /// One probe's face-target → cube-layer copy mapping, snapshotted for the render
@@ -598,8 +615,9 @@ impl Plugin for ReflectionProbePlugin {
         app.init_resource::<ProbeCubeCopies>()
             .init_resource::<CaptureSchedule>()
             .init_resource::<ProbeTestSphere>()
+            .init_resource::<ProbeDynamicContent>()
             .add_plugins(ExtractResourcePlugin::<ProbeCubeCopies>::default())
-            .add_systems(Startup, setup_probe_rigs)
+            .add_systems(Startup, (setup_probe_rigs, register_probe_settings))
             .add_systems(
                 Update,
                 (
@@ -607,6 +625,8 @@ impl Plugin for ReflectionProbePlugin {
                     drive_local_probes,
                     calibrate_probe_intensity,
                     light_capture_cameras,
+                    sync_probe_dynamic_setting,
+                    update_probe_camera_layers,
                     drive_probe_captures,
                     spawn_probe_test_sphere,
                 )
@@ -666,6 +686,97 @@ fn create_cube_image(images: &mut Assets<Image>) -> Handle<Image> {
     images.add(image)
 }
 
+/// Whether **local** reflection probes capture **dynamic content** (avatars, …)
+/// in addition to static world geometry — the runtime mirror of the reference's
+/// `RenderReflectionProbe*` controls.
+///
+/// Default **on** during development, to measure the full performance cost of a
+/// faithful implementation; it may default off later, since dynamic content in a
+/// probe both costs a per-frame re-render and defeats change-detection (an
+/// animating avatar dirties its probe every frame). The **default (ambient)**
+/// probe never captures dynamic content regardless — it is environment-only.
+#[derive(Resource, Clone, Copy, Debug)]
+pub(crate) struct ProbeDynamicContent {
+    /// Whether local probes render the [`PROBE_DYNAMIC_LAYER`](crate::probe_layers)
+    /// (avatars, …).
+    pub(crate) include: bool,
+}
+
+impl Default for ProbeDynamicContent {
+    /// Include dynamic content by default (see the type docs).
+    fn default() -> Self {
+        Self { include: true }
+    }
+}
+
+/// The persistent settings key toggling dynamic-content capture in local probes
+/// ([`ProbeDynamicContent`]). Grouped under `[render]` in the settings file.
+const PROBE_DYNAMIC_SETTING: &str = "render_reflection_probe_dynamic_content";
+
+/// Register the reflection-probe settings' declared defaults (startup). Guarded on
+/// [`ViewerSettings`] existing, so the gallery / headless test apps that run the
+/// probe plugin without a settings store are unaffected.
+fn register_probe_settings(settings: Option<ResMut<ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.register_in(
+        &["render"],
+        PROBE_DYNAMIC_SETTING,
+        SettingValue::Bool(ProbeDynamicContent::default().include),
+        "Capture dynamic content (avatars) in local reflection probes. Costlier, and \
+         it defeats probe change-detection (an animating avatar dirties its probe \
+         every frame); the environment-only default probe is unaffected either way.",
+    );
+}
+
+/// Mirror the persistent [`PROBE_DYNAMIC_SETTING`] into the [`ProbeDynamicContent`]
+/// resource each frame (a no-op once they agree), so an edit in the settings file /
+/// a bound preferences control takes effect without a restart.
+fn sync_probe_dynamic_setting(
+    settings: Option<Res<ViewerSettings>>,
+    mut dynamic: ResMut<ProbeDynamicContent>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if let Ok(include) = settings.store().get_bool(PROBE_DYNAMIC_SETTING)
+        && dynamic.include != include
+    {
+        dynamic.include = include;
+    }
+}
+
+/// The render layers a capture camera for `rig` uses: the default probe (rig `0`)
+/// captures the environment only; every local probe also captures static world
+/// geometry, and dynamic content when `include_dynamic`.
+fn capture_camera_render_layers(rig: usize, include_dynamic: bool) -> RenderLayers {
+    if rig == 0 {
+        default_probe_camera_render_layers()
+    } else {
+        local_probe_camera_render_layers(include_dynamic)
+    }
+}
+
+/// Reconcile the local probe capture cameras' render layers with the current
+/// [`ProbeDynamicContent`] setting whenever it changes (and once on startup). The
+/// default probe's cameras (rig `0`) are always environment-only, so this only
+/// flips the [`PROBE_DYNAMIC_LAYER`](crate::probe_layers) bit on the pool rigs.
+fn update_probe_camera_layers(
+    setting: Res<ProbeDynamicContent>,
+    mut cameras: Query<(&ProbeCaptureCamera, &mut RenderLayers)>,
+) {
+    if !setting.is_changed() {
+        return;
+    }
+    for (capture, mut layers) in &mut cameras {
+        let desired = capture_camera_render_layers(capture.rig, setting.include);
+        if *layers != desired {
+            *layers = desired;
+        }
+    }
+}
+
 /// Spawn one cube-face capture camera: a 90°-FOV square HDR camera rendering the
 /// world into `face_image`, initially inactive (the schedule toggles it on when its
 /// rig's turn to re-capture comes round).
@@ -704,6 +815,14 @@ fn spawn_capture_camera(
         Hdr,
         Msaa::Off,
         Tonemapping::None,
+        // Render on the reflection-probe layers, never the main layer — so the
+        // shadow-casting sun (on the main layer) builds no shadow cascades for
+        // these cameras (viewer-perf-pipeline-specialization-stalls). The default
+        // probe (rig 0) captures the environment only; local probes also capture
+        // world geometry (and dynamic content, reconciled by
+        // [`update_probe_camera_layers`] from [`ProbeDynamicContent`]). The
+        // shadow-free mirror sun ([`SceneSunMirror`](crate::sky)) lights them.
+        capture_camera_render_layers(rig, true),
         ProbeCaptureCamera { rig, face },
     ));
 }
@@ -1006,18 +1125,62 @@ fn drive_local_probes(
     }
 }
 
-/// The frames to idle between two capture bursts, given how many rigs are `live`
-/// (the default probe plus the bound local probes). Sized so each live rig comes
-/// round again every [`CAPTURE_PERIOD_FRAMES`]: with `live` rigs each taking
-/// [`FACE_COUNT`] render frames plus this idle, one full cycle is
-/// `live * (FACE_COUNT + idle)` frames. So the capture cost scales with the number of
-/// *live* probes, and every probe refreshes on the same wall-clock cadence no matter
-/// how many there are.
-fn idle_frames(live: usize) -> usize {
-    CAPTURE_PERIOD_FRAMES
-        .checked_div(live.max(1))
-        .unwrap_or(CAPTURE_PERIOD_FRAMES)
-        .saturating_sub(FACE_COUNT)
+/// Pick the next rig to (re)capture, mirroring the reference viewer's oldest-first,
+/// distance-weighted priority (`age - mDistance * 0.1`): the live rig whose burst
+/// began longest ago wins, minus a small penalty for camera distance so a nearer
+/// probe of equal age refreshes first. The **default (ambient) probe** (rig `0`) is
+/// only eligible once [`DEFAULT_PROBE_PERIOD_SECS`] has elapsed since its last
+/// capture — it is environment-only and changes slowly, so it stays off the local
+/// probes' continuous round-robin. Returns `None` when nothing is due (only the
+/// default probe is live and it is still within its period).
+fn select_next_rig(
+    schedule: &CaptureSchedule,
+    live: &[usize],
+    rigs: &ProbeRigs,
+    eye: Vec3,
+    now: f32,
+    probes: &Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+) -> Option<usize> {
+    let candidates = live.iter().filter_map(|&rig| {
+        let last = schedule
+            .last_captured
+            .get(rig)
+            .copied()
+            .unwrap_or(f32::NEG_INFINITY);
+        let age = now - last;
+        let distance = if rig == 0 {
+            // The default probe is captured around the viewpoint — no camera
+            // distance to weigh.
+            0.0
+        } else {
+            // A local probe's distance is its prim's distance from the camera;
+            // skip a probe whose prim vanished this frame.
+            let (origin, _near) = rig_capture_pose(rig, rigs, eye, probes)?;
+            eye.distance(origin)
+        };
+        Some((rig, age, distance))
+    });
+    pick_next_rig(candidates)
+}
+
+/// The pure oldest-first, distance-weighted selection: among `(rig, age,
+/// distance)` candidates, the highest `age - distance * PROBE_DISTANCE_WEIGHT`
+/// wins, with the default probe (rig `0`) eligible only once its `age` has passed
+/// [`DEFAULT_PROBE_PERIOD_SECS`]. Split out from [`select_next_rig`] so the cadence
+/// policy is unit-testable without an ECS world.
+fn pick_next_rig(candidates: impl IntoIterator<Item = (usize, f32, f32)>) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (rig, age, distance) in candidates {
+        // The default probe waits out its period; every local probe is always due.
+        if rig == 0 && age < DEFAULT_PROBE_PERIOD_SECS {
+            continue;
+        }
+        let priority = age - distance * PROBE_DISTANCE_WEIGHT;
+        if best.is_none_or(|(_, best_priority)| priority > best_priority) {
+            best = Some((rig, priority));
+        }
+    }
+    best.map(|(rig, _priority)| rig)
 }
 
 /// Where a rig's capture cameras sit and how near they clip: the viewpoint (and the
@@ -1042,18 +1205,22 @@ fn rig_capture_pose(
     }
 }
 
-/// Drive the amortized environment capture across every live rig.
+/// Drive the tiered, amortized environment capture across every live rig.
 ///
 /// At most **one** cube face in the whole scene is re-rendered per frame: a rig's six
-/// faces are captured over six consecutive frames (a burst), then the schedule idles
-/// ([`idle_frames`]) before moving on to the next live rig, so every probe is
-/// refreshed every [`CAPTURE_PERIOD_FRAMES`] and the costly scene re-render (each
-/// with its own shadow pass) never spikes a frame with more than one face. A rig just
-/// handed to a new probe jumps the queue, so it does not show the previous probe's
-/// surroundings for a whole period.
+/// faces are captured over six consecutive frames (a burst), then the schedule
+/// immediately starts the next rig's burst. The next rig is chosen oldest-first with
+/// a small distance weight ([`select_next_rig`]) — so the local probes cycle
+/// continuously (near-real-time), while the default probe is held to
+/// [`DEFAULT_PROBE_PERIOD_SECS`]. A rig just handed to a new probe jumps the queue
+/// ([`CaptureSchedule::urgent`]), so it does not show the previous probe's
+/// surroundings while it waits its turn. Captures render only the reflection-probe
+/// layers, so no sun shadow cascade is built for their cameras (the periodic stall
+/// this replaced — viewer-perf-pipeline-specialization-stalls).
 fn drive_probe_captures(
     rigs: Res<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
+    time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut cameras: Query<(
@@ -1067,6 +1234,14 @@ fn drive_probe_captures(
         return;
     };
     let eye = view.translation();
+    let now = time.elapsed_secs();
+
+    // Seed / grow the per-rig capture timestamps to the current rig count.
+    if schedule.last_captured.len() < rigs.rigs.len() {
+        schedule
+            .last_captured
+            .resize(rigs.rigs.len(), f32::NEG_INFINITY);
+    }
 
     // The rigs worth capturing: the default probe and every bound local probe.
     let live: Vec<usize> = (0..rigs.rigs.len())
@@ -1079,14 +1254,10 @@ fn drive_probe_captures(
         })
         .collect();
 
-    // Pick the frame's work: continue the running burst, idle, or start the next
-    // rig's burst (a freshly bound rig first, else the round-robin).
+    // Pick the frame's work: continue the running burst, or start the next rig's
+    // burst — a freshly bound (urgent) rig first, else the oldest-first pick.
     let burst = match schedule.active {
         Some(active) => Some(active),
-        None if schedule.idle > 0 => {
-            schedule.idle = schedule.idle.saturating_sub(1);
-            None
-        }
         None => {
             let urgent = loop {
                 match schedule.urgent.pop_front() {
@@ -1097,11 +1268,15 @@ fn drive_probe_captures(
                     None => break None,
                 }
             };
-            let next = urgent.or_else(|| {
-                let cursor = schedule.cursor.checked_rem(live.len()).unwrap_or(0);
-                schedule.cursor = cursor.saturating_add(1);
-                live.get(cursor).copied()
-            });
+            let next =
+                urgent.or_else(|| select_next_rig(&schedule, &live, &rigs, eye, now, &probes));
+            // Stamp the burst's start time so the priority does not re-pick it while
+            // it is mid-burst and the default probe waits out its full period.
+            if let Some(rig) = next
+                && let Some(slot) = schedule.last_captured.get_mut(rig)
+            {
+                *slot = now;
+            }
             next.map(|rig| (rig, 0))
         }
     };
@@ -1132,17 +1307,13 @@ fn drive_probe_captures(
         }
     }
 
-    // Advance the burst: after the sixth face the rig is done, and the schedule idles
-    // long enough that every live rig is refreshed once per capture period.
+    // Advance the burst: after the sixth face the rig is done and the next frame
+    // starts the next rig's burst immediately (no idle) — the continuous
+    // round-robin the local probes run.
     schedule.active = match burst {
         Some((rig, face)) => {
             let next = face.saturating_add(1);
-            if next < FACE_COUNT {
-                Some((rig, next))
-            } else {
-                schedule.idle = idle_frames(live.len());
-                None
-            }
+            (next < FACE_COUNT).then_some((rig, next))
         }
         None => None,
     };
@@ -1303,8 +1474,8 @@ mod tests {
         }
     }
     use super::{
-        BOX_FALLOFF, CAPTURE_PERIOD_FRAMES, FACE_COUNT, MIN_NEAR_CLIP, ObjectReflectionProbe,
-        PROBE_GAIN, SPHERE_FALLOFF, idle_frames, probe_intensity, reflection_probe_from_object,
+        BOX_FALLOFF, DEFAULT_PROBE_PERIOD_SECS, MIN_NEAR_CLIP, ObjectReflectionProbe, PROBE_GAIN,
+        SPHERE_FALLOFF, pick_next_rig, probe_intensity, reflection_probe_from_object,
     };
     use bevy::camera::Exposure;
     use bevy::prelude::Vec3;
@@ -1504,22 +1675,37 @@ mod tests {
         assert!((intensity - probe_intensity(&Exposure::default())).abs() < 1.0e-3);
     }
 
-    /// However many probes are live, each one's rig comes round again once per
-    /// capture period: a rig's cycle is its six face frames plus the idle the
-    /// schedule waits between bursts, and all live rigs take a turn within it.
+    /// The default (ambient) probe stays off the local probes' continuous
+    /// round-robin until its period elapses: while it is younger than
+    /// [`DEFAULT_PROBE_PERIOD_SECS`] it is never picked even when it is the oldest
+    /// candidate, but once past the period it becomes eligible again.
     #[test]
-    fn every_live_rig_refreshes_once_per_period() {
-        for live in 1..=super::RIG_COUNT {
-            let cycle = FACE_COUNT
-                .saturating_add(idle_frames(live))
-                .saturating_mul(live);
-            // Integer division of the period among the rigs loses at most one frame
-            // per rig, so the cycle lands just at or below the nominal period.
-            assert!(cycle <= CAPTURE_PERIOD_FRAMES, "live={live} cycle={cycle}");
-            assert!(
-                cycle > CAPTURE_PERIOD_FRAMES.saturating_sub(live),
-                "live={live} cycle={cycle}"
-            );
-        }
+    fn default_probe_waits_out_its_period() {
+        // Default probe (rig 0) is the oldest but still within its period; a local
+        // probe that is barely due wins instead.
+        let within = DEFAULT_PROBE_PERIOD_SECS - 0.1;
+        assert_eq!(
+            pick_next_rig([(0, within, 0.0), (1, 0.05, 0.0)]),
+            Some(1),
+            "the default probe must not pre-empt a local probe within its period"
+        );
+        // Only the default probe is live and it is within its period: nothing is due.
+        assert_eq!(pick_next_rig([(0, within, 0.0)]), None);
+        // Past its period the default probe is eligible again.
+        let past = DEFAULT_PROBE_PERIOD_SECS + 0.1;
+        assert_eq!(pick_next_rig([(0, past, 0.0)]), Some(0));
+    }
+
+    /// Among local probes the oldest wins, but a nearer probe of equal age is
+    /// preferred by the distance weight — the reference's `age - distance * 0.1`.
+    #[test]
+    fn local_probes_pick_oldest_then_nearest() {
+        // Equal age: the nearer probe (smaller distance) has the higher priority.
+        assert_eq!(pick_next_rig([(1, 1.0, 50.0), (2, 1.0, 5.0)]), Some(2));
+        // A far older probe wins despite being farther: the distance weight is
+        // small (0.1), so a 45 m gap costs ~4.5 s of age — a 9 s age lead beats it.
+        assert_eq!(pick_next_rig([(1, 10.0, 50.0), (2, 1.0, 5.0)]), Some(1));
+        // No candidates: nothing to capture.
+        assert_eq!(pick_next_rig([]), None);
     }
 }

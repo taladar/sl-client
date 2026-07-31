@@ -56,6 +56,7 @@ use sl_client_bevy::{
 use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
+use crate::probe_layers::environment_render_layers;
 use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
@@ -197,6 +198,8 @@ pub(crate) fn setup_water(
         // Marks this as a water surface for the transparency-ordering re-sort, which
         // pins it to its own bucket between below- and above-water translucency.
         WaterSurface,
+        // Environment content: also visible to reflection-probe captures.
+        environment_render_layers(),
         WaterOcean,
     ));
 
@@ -376,6 +379,8 @@ fn reconcile_region_planes(
                         NotShadowCaster,
                         // See the ocean plane: pins this plane to the water bucket.
                         WaterSurface,
+                        // Environment content: also visible to probe captures.
+                        environment_render_layers(),
                         WaterRegionPlane { region, height },
                     ))
                     .id();

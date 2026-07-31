@@ -410,6 +410,13 @@ pub fn run() {
         // fine and the gallery was not running it. That is why the list is a plugin
         // now rather than a copy here.
         .add_plugins(SceneRuntimePlugin)
+        // `scene_root()` propagates the reflection-probe render layers with
+        // `Propagate<RenderLayers>`; that needs this plugin (the full viewer adds
+        // it in `lib.rs`), or the probe capture cameras — which render the probe
+        // layers, not the main layer — see nothing and reflections come back black.
+        .add_plugins(bevy::app::HierarchyPropagatePlugin::<
+            bevy::camera::visibility::RenderLayers,
+        >::new(PostUpdate))
         // The viewer's real reflection probes (P33): a capture rig that renders
         // the scene into a cubemap and binds it to the view as the default probe,
         // plus the per-object local probes. Entirely session-free — it captures

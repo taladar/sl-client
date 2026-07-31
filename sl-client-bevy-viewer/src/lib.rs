@@ -130,6 +130,7 @@ mod paths;
 mod people;
 mod physics;
 mod pie_menu;
+mod probe_layers;
 mod probes;
 mod procedural;
 mod reach;

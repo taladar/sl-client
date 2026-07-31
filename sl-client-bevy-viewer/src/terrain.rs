@@ -53,6 +53,7 @@ use sl_terrain::TerrainComposition;
 
 use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::probe_layers::environment_render_layers;
 use crate::textures::{TextureDecoded, TextureManager};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
@@ -363,6 +364,9 @@ fn spawn_or_replace_patch(
                     MeshMaterial3d(material),
                     transform,
                     TerrainSurface,
+                    // Environment content: also visible to reflection-probe
+                    // captures (including the environment-only default probe).
+                    environment_render_layers(),
                 ))
                 .id();
             state.patches.insert(key, entity);

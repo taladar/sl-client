@@ -62,13 +62,17 @@ use crate::camera::ViewerCamera;
 use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
 use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
-use crate::hud::{HudState, is_hud_point};
+use bevy::app::Propagate;
+use bevy::camera::visibility::RenderLayers;
+
+use crate::hud::{HUD_RENDER_LAYER, HudState, is_hud_point};
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::lights::{ObjectLight, light_from_object};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::particles::{apply_particles, particles_from_object};
 use crate::physics::apply_physics;
+use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
 use crate::render_priority::{AVATAR_BOOST_PRIORITY, HUD_BOOST_PRIORITY};
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
@@ -2574,6 +2578,15 @@ fn apply_object(
 
     // A new object: spawn its entity, parent it if its root is already present,
     // and adopt any of its children that arrived first.
+    // Tag the object's whole subtree with the reflection-probe render layers so
+    // probe capture cameras (which are off the main layer, to keep the sun from
+    // building shadow cascades for them) can see it: an avatar is dynamic content,
+    // everything else static world geometry. A HUD attachment overrides this back
+    // to the HUD layer when it is routed (see [`route_hud_attachment`]).
+    let probe_layers = match category {
+        ObjectCategory::Avatar => dynamic_render_layers(),
+        _ => world_geom_render_layers(),
+    };
     let entity = commands
         .spawn((
             SceneObject {
@@ -2587,6 +2600,7 @@ fn apply_object(
             // `Mesh3d`); the object entity needs it too so Bevy's visibility
             // propagation down the linkset hierarchy stays consistent.
             Visibility::default(),
+            Propagate(probe_layers),
         ))
         .id();
     let parented = match parent_entity {
@@ -2845,7 +2859,14 @@ fn route_hud_attachment(
 ) {
     match hud.point_entity(point_id).filter(|_node| own) {
         Some(node) => {
-            commands.entity(entity).insert(ChildOf(node));
+            // Override the world-geometry probe layers this object got at spawn
+            // with the HUD layer, so the HUD subtree renders on the HUD camera
+            // (not the world / probe cameras) — a child's own `Propagate` wins
+            // over the HUD screen's propagation, so it must be set explicitly.
+            commands.entity(entity).insert((
+                ChildOf(node),
+                Propagate(RenderLayers::layer(HUD_RENDER_LAYER)),
+            ));
             debug!("routed own HUD attachment {scoped} to HUD point {point_id}");
         }
         None => {

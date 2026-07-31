@@ -750,6 +750,13 @@ pub(crate) fn scene_root() -> impl Bundle {
         scene_root_transform(),
         Visibility::default(),
         Name::new("scene-root"),
+        // Put the whole synthetic scene — meshes and the scene's own lights — on
+        // the main layer plus every reflection-probe layer. The headless gallery /
+        // readback harnesses build scenes outside the real object / sky pipeline,
+        // so without this the probe capture cameras (which render the probe layers
+        // only, to stay off the sun's shadow path) would see an empty, unlit world
+        // and a mirror would reflect nothing.
+        bevy::app::Propagate(crate::probe_layers::all_render_layers()),
     )
 }
 

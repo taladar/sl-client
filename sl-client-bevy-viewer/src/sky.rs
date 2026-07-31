@@ -63,6 +63,7 @@ use sl_client_bevy::{
 use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
+use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
 use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::textures::{TextureDecoded, TextureManager};
 
@@ -268,6 +269,20 @@ pub(crate) struct SkyDome;
 /// colour it from the sky.
 #[derive(Component)]
 pub(crate) struct SceneSun;
+
+/// Marks the **shadow-free mirror sun** — a second directional light that copies
+/// [`SceneSun`]'s direction and colour every frame but casts **no** shadows and
+/// sits on the reflection-probe render layers only
+/// ([`mirror_sun_render_layers`](crate::probe_layers::mirror_sun_render_layers)).
+///
+/// It exists so reflection-probe capture cameras (which render the probe layers,
+/// not the main layer) are still lit by the sun without Bevy building — and, each
+/// capture cycle, re-specializing — a full set of sun shadow cascades for every
+/// capture camera, which was the periodic frame-stall this split removes
+/// (viewer-perf-pipeline-specialization-stalls). The real [`SceneSun`] stays on
+/// the main layer with shadows on, so the main view is unchanged.
+#[derive(Component)]
+pub(crate) struct SceneSunMirror;
 
 /// The viewer's sky-render state: the shared sky material and the decoded /
 /// requested rainbow / halo overlay textures.
@@ -481,6 +496,7 @@ pub(crate) fn setup_sky(
         // The sky never casts shadows (P24 adds cascaded shadow maps for the sun).
         NotShadowCaster,
         SkyDome,
+        environment_render_layers(),
     ));
     commands.spawn((
         DirectionalLight {
@@ -494,6 +510,20 @@ pub(crate) fn setup_sky(
         shadow_cascades(),
         Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
         SceneSun,
+    ));
+    // The shadow-free mirror sun: lights reflection-probe captures without
+    // building shadow cascades for their cameras (see [`SceneSunMirror`]). It
+    // carries no `CascadeShadowConfig` and `shadow_maps_enabled = false`, and
+    // renders only on the probe layers, so it never touches the main view.
+    commands.spawn((
+        DirectionalLight {
+            illuminance: SCENE_LIGHT_ILLUMINANCE,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
+        mirror_sun_render_layers(),
+        SceneSunMirror,
     ));
     commands.insert_resource(SkyState {
         material,
@@ -525,13 +555,23 @@ pub(crate) fn center_sky_on_camera(
 /// Fold the current environment + camera altitude into the sky material, the
 /// directional light, and the ambient light, and (re)request the sky's rainbow /
 /// halo overlay textures boosted.
+#[expect(
+    clippy::type_complexity,
+    reason = "one query over both directional lights (shadow sun + shadow-free mirror), tagged by which"
+)]
 pub(crate) fn drive_sky(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
     mut materials: ResMut<Assets<SkyMaterial>>,
     mut textures: ResMut<TextureManager>,
-    mut sun: Query<(&mut Transform, &mut DirectionalLight), With<SceneSun>>,
+    // Both the shadow-casting [`SceneSun`] and the shadow-free
+    // [`SceneSunMirror`], tagged by `Has<SceneSunMirror>` so each is aimed the
+    // right way in one pass.
+    mut suns: Query<
+        (&mut Transform, &mut DirectionalLight, Has<SceneSunMirror>),
+        Or<(With<SceneSun>, With<SceneSunMirror>)>,
+    >,
     mut ambient: ResMut<GlobalAmbientLight>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
@@ -552,21 +592,24 @@ pub(crate) fn drive_sky(
         material.params = resolved.params;
     }
 
-    if let Ok((mut transform, mut light)) = sun.single_mut() {
+    for (mut transform, mut light, is_mirror) in &mut suns {
         // The light travels *toward* its forward axis, i.e. away from the body, so
-        // its forward is the negated light direction. Snap the *shadow-caster*
-        // direction to a texel-equivalent angular grid first (R20): the real-time
-        // day cycle rotates the sun a hair every frame, which rotates the cascaded
-        // shadow map's light-space texel grid and makes the ground shadows shimmer
-        // / oscillate — Bevy already texel-snaps the cascade origin, but a
-        // per-frame-rotating light defeats it. Snapping holds the direction
-        // bit-stable between steps, so the shadow sits still, and each step moves
-        // it by at most ~one shadow-map texel (imperceptible). The visible sun
-        // disc, sky, and light colour keep the un-snapped direction, so only the
-        // shadow projection is affected. Pick a safe up when the body is near the
-        // zenith (forward near-parallel to +Y).
-        let shadow_dir = snap_shadow_direction(light_dir);
-        let forward = Vec3::new(-shadow_dir.x, -shadow_dir.y, -shadow_dir.z);
+        // its forward is the negated light direction. The **shadow-casting** sun
+        // snaps its direction to a texel-equivalent angular grid first (R20): the
+        // real-time day cycle rotates the sun a hair every frame, which rotates the
+        // cascaded shadow map's light-space texel grid and makes the ground shadows
+        // shimmer — Bevy texel-snaps the cascade origin, but a per-frame-rotating
+        // light defeats it. Snapping holds the direction bit-stable between steps.
+        // The **shadow-free mirror** sun (which only lights reflection-probe
+        // captures) has no cascade to stabilise, so it uses the un-snapped
+        // direction — as do the visible sun disc, sky, and light colour. Pick a
+        // safe up when the body is near the zenith (forward near-parallel to +Y).
+        let dir = if is_mirror {
+            light_dir
+        } else {
+            snap_shadow_direction(light_dir)
+        };
+        let forward = Vec3::new(-dir.x, -dir.y, -dir.z);
         let up = if forward.dot(Vec3::Y).abs() > 0.99 {
             Vec3::Z
         } else {
@@ -682,6 +725,7 @@ pub(crate) fn setup_sun_moon_discs(
         Visibility::Hidden,
         NotShadowCaster,
         SunDisc,
+        environment_render_layers(),
     ));
     commands.spawn((
         Mesh3d(quad),
@@ -690,6 +734,7 @@ pub(crate) fn setup_sun_moon_discs(
         Visibility::Hidden,
         NotShadowCaster,
         MoonDisc,
+        environment_render_layers(),
     ));
 
     commands.insert_resource(DiscState {
@@ -831,6 +876,7 @@ pub(crate) fn setup_clouds(
         // The cloud layer never casts shadows (like the sky dome).
         NotShadowCaster,
         CloudDome,
+        environment_render_layers(),
     ));
     commands.insert_resource(CloudState {
         material,
@@ -1025,6 +1071,7 @@ pub(crate) fn setup_stars(
         // The star field never casts shadows (like the sky / cloud domes).
         NotShadowCaster,
         StarField,
+        environment_render_layers(),
     ));
     commands.insert_resource(StarState {
         material,
