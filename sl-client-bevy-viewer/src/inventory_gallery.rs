@@ -599,6 +599,9 @@ fn on_tile_context(
         &clipboard,
         &worn,
         &gestures,
+        // The gallery is a flat single view with no Worn / Recent membership
+        // tabs, so it never offers the "Show in Main view" jump.
+        false,
         &mut target,
         &mut menus,
     );

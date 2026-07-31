@@ -120,6 +120,14 @@ impl VirtualList {
     pub(crate) const fn scroll_by(&mut self, delta: f32) {
         self.scroll = (self.scroll + delta).max(0.0);
     }
+
+    /// Scroll so the row at `index` sits at the top of the viewport — the jump
+    /// that reveals a specific row (the inventory "Show in Main view" action).
+    /// The far end is clamped by the layout system against the live viewport
+    /// height, exactly as the wheel path is.
+    pub(crate) fn scroll_to_index(&mut self, index: usize) {
+        self.scroll = row_top(index, self.row_height);
+    }
 }
 
 /// A pooled row entity: a child of a [`VirtualList`] viewport that is repeatedly

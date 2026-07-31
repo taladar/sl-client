@@ -74,6 +74,10 @@ pub(crate) const INVENTORY_MENU_ELEMENT: &str = "inventory-menu";
 // reference's on_enable). All are computed at open time from the model.
 // ---------------------------------------------------------------------------
 
+/// The row is shown on a flat membership tab (Worn / Recent) — offers "Show in
+/// Main view", the jump back to the item's real place in the folder tree.
+pub(crate) const CAN_SHOW_IN_MAIN: &str = "can-show-in-main";
+
 /// The target is a landmark — shows the Teleport / map block.
 pub(crate) const IS_LANDMARK: &str = "is-landmark";
 
@@ -432,6 +436,9 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(MenuCommand::new("Share", "share").enabled_when(CAN_SHARE)),
         MenuItemDef::Command(MenuCommand::new("Open", "open").enabled_when(CAN_OPEN)),
         MenuItemDef::Command(MenuCommand::new("Properties", "properties")),
+        MenuItemDef::Command(
+            MenuCommand::new("Show in Main view", "show-in-main").visible_when(CAN_SHOW_IN_MAIN),
+        ),
         MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
         MenuItemDef::Command(
             MenuCommand::new("Copy Asset UUID", "copy-asset-uuid").enabled_when(CAN_COPY_UUID),
@@ -668,7 +675,7 @@ pub(crate) fn is_worn(
 /// the computation is testable without a Bevy world.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "five independent yes/no facts about one row; they are consumed together by one \
+    reason = "six independent yes/no facts about one row; they are consumed together by one \
               pure function and a state machine would invent couplings that do not exist"
 )]
 #[derive(Debug, Clone, Copy, Default)]
@@ -683,6 +690,9 @@ pub(crate) struct ItemMenuFacts {
     pub(crate) worn: bool,
     /// The gesture is active this session (meaningful only for gestures).
     pub(crate) gesture_active: bool,
+    /// The row is shown on a flat membership tab (Worn / Recent) — offers the
+    /// "Show in Main view" jump back to its place in the folder tree.
+    pub(crate) in_membership_tab: bool,
 }
 
 /// The conditions that hold for an **item** row's context menu.
@@ -748,6 +758,9 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
         } else {
             GESTURE_INACTIVE
         });
+    }
+    if facts.in_membership_tab {
+        held.push(CAN_SHOW_IN_MAIN);
     }
     held
 }
@@ -1330,6 +1343,7 @@ fn resolve_row_target(
     clipboard: &InventoryClipboard,
     worn: &WornAttachments,
     gestures: &ActiveGestures,
+    in_membership_tab: bool,
 ) -> Option<(MenuTarget, Vec<&'static str>)> {
     let trash = model.folder_by_type(FolderType::Trash);
     let in_trash = |folder: InventoryFolderKey| {
@@ -1367,6 +1381,7 @@ fn resolve_row_target(
                     &worn.items,
                 ),
                 gesture_active: gestures.items.contains(&info.item_id),
+                in_membership_tab,
             };
             let conditions = item_conditions(&info, facts);
             Some((MenuTarget::Item(info), conditions))
@@ -1391,6 +1406,7 @@ pub(crate) fn open_inventory_context_menu(
     clipboard: &InventoryClipboard,
     worn: &WornAttachments,
     gestures: &ActiveGestures,
+    in_membership_tab: bool,
     target: &mut InventoryMenuTarget,
     menus: &mut MessageWriter<OpenContextMenu>,
 ) -> Option<()> {
@@ -1398,7 +1414,7 @@ pub(crate) fn open_inventory_context_menu(
     let mut condition_sets = Vec::new();
     for &key in keys {
         if let Some((snapshot, conditions)) =
-            resolve_row_target(key, model, clipboard, worn, gestures)
+            resolve_row_target(key, model, clipboard, worn, gestures, in_membership_tab)
         {
             snapshots.push(snapshot);
             condition_sets.push(conditions);
@@ -1438,6 +1454,7 @@ pub(crate) fn on_row_context(
     rows: Query<&VirtualRow>,
     view: Res<InventoryView>,
     model: Res<InventoryModel>,
+    state: Res<crate::inventory::InventoryState>,
     clipboard: Res<InventoryClipboard>,
     worn: Res<WornAttachments>,
     gestures: Res<ActiveGestures>,
@@ -1478,6 +1495,7 @@ pub(crate) fn on_row_context(
         &clipboard,
         &worn,
         &gestures,
+        state.tab().is_membership(),
         &mut target,
         &mut menus,
     );
@@ -1619,6 +1637,7 @@ fn handle_inventory_menu_actions(
         ResMut<crate::inventory::InlineRename>,
         ResMut<PendingShare>,
         ResMut<PendingWearableUploads>,
+        ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
     mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
@@ -1640,6 +1659,7 @@ fn handle_inventory_menu_actions(
         mut rename,
         mut pending_share,
         mut pending_wearables,
+        mut pending_reveal,
     ) = stashes;
     let (
         mut ui_actions,
@@ -1681,6 +1701,15 @@ fn handle_inventory_menu_actions(
                     properties.write(crate::inventory_properties::OpenItemProperties {
                         item: item.clone(),
                     });
+                }
+            }
+            "show-in-main" => {
+                // From the flat Worn / Recent tab: reveal the item where it
+                // really lives. The inventory module switches to the Everything
+                // tree, expands the item's ancestor folders and scrolls it into
+                // view ([`crate::inventory::apply_pending_reveal`]).
+                if let MenuTarget::Item(item) = &menu_target {
+                    pending_reveal.request(item.item_id);
                 }
             }
             "edit-wearable" => {
@@ -2784,10 +2813,10 @@ fn inventory_hotkeys(
 mod tests {
     use super::{
         CAN_COPY, CAN_CREATE, CAN_CUT, CAN_DELETE, CAN_PASTE, CAN_PASTE_LINK, CAN_RENAME,
-        ClipboardMode, FOLDER_HAS_WEARABLES, FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE,
-        GESTURE_INACTIVE, IN_TRASH, INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING,
-        IS_LANDMARK, IS_OBJECT, IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget,
-        NOT_IN_TRASH, NOT_WORN, WORN, folder_conditions, is_worn, item_conditions,
+        CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_WEARABLES, FOLDER_HAS_WORN, FolderMenuFacts,
+        GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH, INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU,
+        IS_CLOTHING, IS_LANDMARK, IS_OBJECT, IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts,
+        MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN, folder_conditions, is_worn, item_conditions,
         outfit_add_commands, outfit_remove_commands, paste_commands, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
@@ -2865,6 +2894,7 @@ mod tests {
             ("Share", "share"),
             ("Open", "open"),
             ("Properties", "properties"),
+            ("Show in Main view", "show-in-main"),
             ("Rename", "rename"),
             ("Copy Asset UUID", "copy-asset-uuid"),
             ("Copy", "copy"),
@@ -3049,6 +3079,25 @@ mod tests {
             expected,
             "a + (create) menu entry moved — if intended, bless it by editing this table"
         );
+    }
+
+    /// "Show in Main view" is offered only on the flat membership tabs (Worn /
+    /// Recent), where `in_membership_tab` is set; the Everything tree, which
+    /// already shows the item in place, never holds the condition.
+    #[test]
+    fn show_in_main_only_on_membership_tabs() {
+        let thing = item(1, InventoryType::Notecard, AssetType::Notecard, 0);
+        let on_tree = item_conditions(&thing, ItemMenuFacts::default());
+        assert!(!on_tree.contains(&CAN_SHOW_IN_MAIN));
+
+        let on_membership = item_conditions(
+            &thing,
+            ItemMenuFacts {
+                in_membership_tab: true,
+                ..ItemMenuFacts::default()
+            },
+        );
+        assert!(on_membership.contains(&CAN_SHOW_IN_MAIN));
     }
 
     /// Share is enabled for own transferable items and own folders, withheld

@@ -150,6 +150,7 @@ impl Plugin for InventoryPlugin {
             .init_resource::<InventoryView>()
             .init_resource::<InventorySelection>()
             .init_resource::<InlineRename>()
+            .init_resource::<PendingReveal>()
             .add_message::<InventoryUiAction>()
             .add_systems(
                 Startup,
@@ -171,6 +172,7 @@ impl Plugin for InventoryPlugin {
                     apply_ui_actions,
                     read_search_field,
                     rebuild_view,
+                    apply_pending_reveal,
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -800,11 +802,23 @@ impl InventoryModel {
         rows
     }
 
-    /// The worn set: each worn item's key with a display-name / type hint,
-    /// merged from the Current Outfit Folder's links (the modern worn set — a
-    /// link's asset id names the original item) and the legacy
-    /// `AgentWearables` set. Order: COF first, then wearables not already
-    /// present.
+    /// The worn set: each worn item's key with a display-name / type hint.
+    ///
+    /// The Current Outfit Folder is **authoritative** whenever it exists: its
+    /// links name every currently worn item, so it is used **alone**. The legacy
+    /// `AgentWearables` set is only a **fallback** for a grid that has no COF at
+    /// all — it additionally carries the built-in *system-default* shape / skin
+    /// / hair / eyes that back every avatar but are not real inventory items, so
+    /// mixing it in would list those defaults as worn: folderless phantoms the
+    /// reference viewer never shows. Hence fallback, not union.
+    ///
+    /// The fallback keys off the COF's **existence** (`self.cof`), not its
+    /// loaded contents, on purpose. The COF folder is in the login skeleton, so
+    /// `self.cof` is set well before its links are fetched — and its page can
+    /// even arrive momentarily empty (a cache-empty read) before repopulating.
+    /// Keying off contents would flash the legacy system defaults on the Worn
+    /// tab during either window; keying off existence shows an empty Worn tab
+    /// for that instant instead, then the real outfit — never the phantoms.
     fn worn_item_keys(&self) -> Vec<(InventoryKey, String, InventoryType)> {
         let mut keys: Vec<(InventoryKey, String, InventoryType)> = Vec::new();
         let mut seen: HashSet<InventoryKey> = HashSet::new();
@@ -821,7 +835,10 @@ impl InventoryModel {
                     keys.push((target, entry.name.clone(), entry.inv_type));
                 }
             }
+            return keys;
         }
+        // No COF at all (a grid that does not use the Current Outfit Folder):
+        // fall back to the legacy `AgentWearables` set.
         for worn in &self.wearables {
             if seen.insert(worn.item_id) {
                 keys.push((
@@ -1106,6 +1123,14 @@ impl InventoryTab {
             Self::Worn => "inventory-tab-worn",
         }
     }
+
+    /// Whether this is a **membership** tab — a flat, filtered view (Worn /
+    /// Recent) that shows items living elsewhere in the folder tree, as opposed
+    /// to the Everything tree itself. The "Show in Main view" context action is
+    /// offered only here (there is nowhere else to jump *from* on Everything).
+    pub(crate) const fn is_membership(self) -> bool {
+        matches!(self, Self::Recent | Self::Worn)
+    }
 }
 
 /// The window's transient UI state: which tab and the search query.
@@ -1115,7 +1140,7 @@ impl InventoryTab {
 /// from saved settings ([`crate::floater_persist`]) and toggling it with `Ctrl+I`
 /// go through the same flag and can never drift apart.
 #[derive(Resource, Default)]
-struct InventoryState {
+pub(crate) struct InventoryState {
     /// The active tab.
     tab: InventoryTab,
     /// The current search query.
@@ -1123,6 +1148,44 @@ struct InventoryState {
     /// The gear menu's sort order.
     sort: SortSpec,
 }
+
+impl InventoryState {
+    /// The active tab — read by the context-menu builder so the "Show in Main
+    /// view" action shows only on the flat membership tabs (Worn / Recent).
+    pub(crate) const fn tab(&self) -> InventoryTab {
+        self.tab
+    }
+}
+
+/// A pending **"Show in Main view"** jump: the item a Worn / Recent context
+/// action asked to reveal in the Everything folder tree. Set by the inventory
+/// context-menu dispatch ([`crate::inventory_actions`]) and consumed by
+/// [`apply_pending_reveal`], which switches to the Everything tab, expands the
+/// item's ancestor folders, selects it and scrolls it into view. The reveal is
+/// retried for a few frames (the item's folder page may still be loading), then
+/// abandoned so a never-loading item cannot pin the resource forever.
+#[derive(Resource, Default)]
+pub(crate) struct PendingReveal {
+    /// The item to reveal, or `None` when there is no pending jump.
+    item: Option<InventoryKey>,
+    /// Frames spent waiting for the item's row to appear, so a reveal that can
+    /// never resolve is dropped instead of retried indefinitely.
+    frames: u32,
+}
+
+impl PendingReveal {
+    /// Ask to reveal `item` in the main folder-tree view (a fresh jump resets
+    /// the retry budget).
+    pub(crate) const fn request(&mut self, item: InventoryKey) {
+        self.item = Some(item);
+        self.frames = 0;
+    }
+}
+
+/// How many frames [`apply_pending_reveal`] keeps retrying a jump before giving
+/// up — long enough for a folder page fetched on the jump to arrive, short
+/// enough that an item that never loads does not hold the tab switched.
+const REVEAL_MAX_FRAMES: u32 = 180;
 
 /// The flattened rows the window is currently drawing — recomputed from the
 /// model whenever it, the tab or the query changes, and read by the row binder
@@ -1961,6 +2024,98 @@ fn apply_ui_actions(
                 }
             }
         }
+    }
+}
+
+/// Carry out a pending **"Show in Main view"** jump ([`PendingReveal`]): switch
+/// to the Everything tab, expand the target item's ancestor folders (fetching
+/// any whose contents are not held), select it and scroll it into view.
+///
+/// The jump is retried across frames because the reveal chains through the view
+/// rebuild: expanding a folder changes the model, the next frame's
+/// [`rebuild_view`] re-flattens it, and only then can the item's row index be
+/// found to scroll to. A folder whose page must still be fetched resolves the
+/// same way once it arrives; a target that never appears is abandoned after
+/// [`REVEAL_MAX_FRAMES`] so it cannot hold the tab switched forever.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the pending jump, the \
+              window handles, the tab / model / view state, the selection, the strip and list \
+              queries and the fetch channel"
+)]
+fn apply_pending_reveal(
+    mut pending: ResMut<PendingReveal>,
+    ui: Option<Res<InventoryUi>>,
+    state: Res<InventoryState>,
+    mut model: ResMut<InventoryModel>,
+    view: Res<InventoryView>,
+    mut selection: ResMut<InventorySelection>,
+    mut focus: ResMut<InputFocus>,
+    mut strips: Query<&mut TabStrip>,
+    mut lists: Query<&mut VirtualList>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let Some(item) = pending.item else {
+        return;
+    };
+    let Some(ui) = ui else {
+        return;
+    };
+    // Give up on a reveal that has waited too long (its folder never loaded).
+    pending.frames = pending.frames.saturating_add(1);
+    if pending.frames > REVEAL_MAX_FRAMES {
+        pending.item = None;
+        return;
+    }
+    // Drive the tab strip to Everything; its own bridge turns this into the
+    // `SelectTab` that flips `InventoryState`, keeping the highlight in sync.
+    let everything = TAB_ORDER
+        .iter()
+        .position(|tab| *tab == InventoryTab::Everything)
+        .unwrap_or(0);
+    if let Ok(mut strip) = strips.get_mut(ui.tab_strip)
+        && strip.active != everything
+    {
+        strip.active = everything;
+    }
+    // The item must live in a loaded folder to be revealed; until it does, keep
+    // waiting (the folder page may still be in flight).
+    let Some(folder) = model.find_item(item).map(|info| info.folder_id) else {
+        return;
+    };
+    // Expand the item's folder and every ancestor up to the root, fetching any
+    // whose contents are not held so the row can actually render.
+    let mut current = Some(folder);
+    for _step in 0..64 {
+        let Some(key) = current else {
+            break;
+        };
+        model.expanded.insert(key);
+        if model.needs_fetch(key) {
+            request_folder(&mut model, key, &mut commands);
+        }
+        current = model.folders.get(&key).and_then(|info| info.parent_id);
+    }
+    // Only once the tab has actually settled on Everything can the item's row
+    // exist in the flattened view; find it and scroll it to the top, selecting
+    // it. Until then, keep the reveal pending.
+    if state.tab != InventoryTab::Everything {
+        return;
+    }
+    if let Some(index) = view
+        .rows()
+        .iter()
+        .position(|row| row.key() == RowKey::Item(item))
+    {
+        selection.select_single(RowKey::Item(item), index);
+        if let Ok(mut list) = lists.get_mut(ui.viewport) {
+            list.scroll_to_index(index);
+        }
+        // Focus the list so the wheel scrolls it immediately, exactly as a row
+        // click does — without this the reveal lands but the wheel keeps zooming
+        // the world camera until the user clicks a row to focus the list.
+        focus.set(ui.viewport, FocusCause::Navigated);
+        pending.item = None;
     }
 }
 
@@ -3106,6 +3261,104 @@ mod tests {
         assert_eq!(pants.map(|row| row.depth), Some(0));
         // The sibling "Objects" folder holds nothing worn and is not shown.
         assert!(!names(&rows).contains(&"Objects"));
+    }
+
+    /// When the Current Outfit Folder is present, it is authoritative: the worn
+    /// set is its links' targets **alone**, and the legacy `AgentWearables` set
+    /// (which carries the built-in system-default body parts) is **not** unioned
+    /// in — otherwise those folderless defaults would show as worn, which the
+    /// reference viewer never lists.
+    #[test]
+    fn cof_is_authoritative_and_legacy_wearables_are_not_unioned() {
+        let mut model = sample_model();
+        // A COF holding one link, to the Blue shirt (item 10, in Clothing).
+        model.merge_folders(
+            &[folder(
+                0xC0,
+                Some(1),
+                "Current Outfit",
+                FolderType::CurrentOutfit,
+            )],
+            false,
+        );
+        let mut link = item(0x11, 0xC0, "Blue shirt", InventoryType::Wearable);
+        // `AT_LINK` (24): the link's asset id names the worn original (item 10).
+        link.asset_type = sl_client_bevy::AssetType::Other(24);
+        link.asset_id = sl_client_bevy::Uuid::from_u128(10);
+        model.set_items(
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xC0)),
+            &[link],
+        );
+        // A legacy wearable for a *different* item (0x99), a system default with
+        // no folder — the kind that must NOT leak into the worn set now.
+        model.wearables = vec![sl_client_bevy::Wearable {
+            item_id: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x99)),
+            asset_id: None,
+            wearable_type: sl_client_bevy::WearableType::Skin,
+        }];
+        let worn = model.worn_set(&HashSet::new());
+        assert!(
+            worn.contains(&sl_client_bevy::InventoryKey::from(
+                sl_client_bevy::Uuid::from_u128(10)
+            )),
+            "the COF link's target is worn"
+        );
+        assert!(
+            !worn.contains(&sl_client_bevy::InventoryKey::from(
+                sl_client_bevy::Uuid::from_u128(0x99)
+            )),
+            "the legacy system-default wearable must not be unioned in when a COF exists"
+        );
+        // And the phantom default does not surface as a folderless worn row.
+        let rows = build(&model, InventoryTab::Worn, "", &HashSet::new());
+        assert!(
+            !names(&rows).contains(&"Skin"),
+            "the system-default Skin wearable must not appear as a folderless worn row"
+        );
+    }
+
+    /// The legacy fallback keys off the COF's *existence*, not its loaded
+    /// contents: a COF folder in the skeleton suppresses the fallback whether it
+    /// is unfetched or has arrived (momentarily) empty — otherwise the
+    /// system-default wearables would flash on the Worn tab in the window after
+    /// login before the real COF links arrive. Only a grid with **no** COF at
+    /// all falls back.
+    #[test]
+    fn cof_existence_suppresses_the_legacy_flash() {
+        let mut model = sample_model();
+        model.merge_folders(
+            &[folder(
+                0xC0,
+                Some(1),
+                "Current Outfit",
+                FolderType::CurrentOutfit,
+            )],
+            false,
+        );
+        let skin = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x99));
+        model.wearables = vec![sl_client_bevy::Wearable {
+            item_id: skin,
+            asset_id: None,
+            wearable_type: sl_client_bevy::WearableType::Skin,
+        }];
+        // COF known but not fetched: no legacy phantoms.
+        assert!(model.worn_set(&HashSet::new()).is_empty());
+        // COF page arrived empty (a transient cache-empty read): still no
+        // legacy phantoms — the COF stays authoritative.
+        model.set_items(
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xC0)),
+            &[],
+        );
+        assert!(!model.worn_set(&HashSet::new()).contains(&skin));
+
+        // A grid with no COF folder at all does fall back to the legacy set.
+        let mut legacy_grid = sample_model();
+        legacy_grid.wearables = vec![sl_client_bevy::Wearable {
+            item_id: skin,
+            asset_id: None,
+            wearable_type: sl_client_bevy::WearableType::Skin,
+        }];
+        assert!(legacy_grid.worn_set(&HashSet::new()).contains(&skin));
     }
 
     /// A recent item held in a loaded folder shows inside its expanded

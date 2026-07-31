@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 261 |
+| ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 16 |
-| done | 649 |
+| bugs | 15 |
+| done | 651 |
 | deferred | 20 |
 | wont-do | 6 |
 | **total** | **1130** |
@@ -144,7 +144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (261)
+## ready (260)
 
 ### protocol
 
@@ -377,8 +377,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-secondary-window`](ready/viewer-inventory-secondary-window.md)
   — Secondary inventory windows
-- [`viewer-inventory-show-in-main-from-worn-recent`](ready/viewer-inventory-show-in-main-from-worn-recent.md)
-  — '"Show in Main view" inventory menu action from the Worn / Recent tabs'
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
@@ -1125,7 +1123,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (16)
+## bugs (15)
 
 ### protocol
 
@@ -1150,8 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-inventory-worn-markers-show-early`](bugs/viewer-inventory-worn-markers-show-early.md)
   — Show (worn) / bold inventory markers early, without opening Current Outfit
-- [`viewer-inventory-worn-tab-items-without-folders`](bugs/viewer-inventory-worn-tab-items-without-folders.md)
-  — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1173,7 +1169,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (649)
+## done (651)
 
 ### protocol
 
@@ -1474,8 +1470,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory search / filter (blocked by `viewer-inventory-folder-tree` (done))
 - [`viewer-inventory-share-picker`](done/viewer-inventory-share-picker.md) —
   Share (give via avatar picker)
+- [`viewer-inventory-show-in-main-from-worn-recent`](done/viewer-inventory-show-in-main-from-worn-recent.md)
+  — '"Show in Main view" inventory menu action from the Worn / Recent tabs'
 - [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
+- [`viewer-inventory-worn-tab-items-without-folders`](done/viewer-inventory-worn-tab-items-without-folders.md)
+  — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
