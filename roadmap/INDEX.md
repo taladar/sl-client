@@ -12,13 +12,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 54 |
-| ready | 260 |
+| ready | 259 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 9 |
 | done | 664 |
 | deferred | 20 |
-| wont-do | 8 |
+| wont-do | 9 |
 | **total** | **1137** |
 
 ## ideas (54)
@@ -139,7 +139,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (260)
+## ready (259)
 
 ### protocol
 
@@ -165,8 +165,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   About Landmark floater — full detail view
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
-- [`viewer-ambient-occlusion`](ready/viewer-ambient-occlusion.md) — Screen-space
-  ambient occlusion
 - [`viewer-animation-explorer`](ready/viewer-animation-explorer.md) — Animation
   explorer — what is animating whom (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -2592,10 +2590,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (8)
+## wont-do (9)
 
 ### viewer
 
+- [`viewer-ambient-occlusion`](wont-do/viewer-ambient-occlusion.md) —
+  Screen-space ambient occlusion
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
 - [`viewer-perf-per-object-face-merge-entity-count`](wont-do/viewer-perf-per-object-face-merge-entity-count.md)
