@@ -62,10 +62,13 @@
 //! floating name tag — carries [`crate::avatars::AvatarPickTarget`] with the
 //! avatar's agent id. [`request_avatar_menu_on_right_click`] resolves a
 //! right-click to an agent two ways, mirroring the reference's "name tag or the
-//! avatar itself": a UI hit on the name tag (through the hover map) or the
+//! avatar itself": the screen-space tag rect test
+//! ([`crate::name_tag_overlay::NameTagHitTest`] — tags are `Text2d` on the tag
+//! overlay camera, not UI nodes, so no picking backend sees them) or the
 //! mesh-accurate world pick ([`crate::avatar_pick::AvatarPicker`]) against the
-//! avatar's **posed** geometry. That same picker is what a future **inventory
-//! drag-and-drop onto an avatar** will reuse to find its drop target, which is
+//! avatar's **posed** geometry. That same picker — and the same tag hit-test —
+//! is what a future **inventory drag-and-drop onto an avatar** will reuse to
+//! find its drop target, which is
 //! why the identity lives on the entities rather than in a menu-only lookup.
 //!
 //! Reference (Firestorm, read-only): `menu_pie_avatar_self.xml`,
@@ -92,6 +95,7 @@ use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::{OpenLandMenu, pick_land};
+use crate::name_tag_overlay::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
@@ -696,13 +700,14 @@ fn setup_pick_inspector(mut commands: Commands) {
 }
 
 /// Rewrite the pick inspector each frame with what a pick at the cursor would hit:
-/// the UI-occlusion verdict, the HUD-occlusion verdict, the nearest world-ray
-/// hit, and the resolved mesh-accurate avatar pick, so the failing stage is
-/// visible without a click.
+/// the name-tag hit, the UI-occlusion verdict, the HUD-occlusion verdict, the
+/// nearest world-ray hit, and the resolved mesh-accurate avatar pick, so the
+/// failing stage is visible without a click.
 #[expect(
     clippy::too_many_arguments,
     reason = "a debug system reading everything a pick reads: the window, the world and HUD \
-              cameras, render layers, the hover map / pickables / node sizes for UI occlusion, the \
+              cameras, render layers, the hover map / pickables / node sizes for UI occlusion, \
+              the name-tag hit test, the \
               name / parent / avatar-target queries to describe a hit, the ray caster, the avatar \
               picker, and the overlay node it writes"
 )]
@@ -713,6 +718,7 @@ fn update_pick_inspector(
     layers: Query<(Entity, &RenderLayers)>,
     hover_map: Res<HoverMap>,
     pickables: Query<&Pickable>,
+    tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
     names: Query<&Name>,
     parents: Query<&ChildOf>,
@@ -752,6 +758,10 @@ fn update_pick_inspector(
     let mut lines = vec![
         format!("cursor {:.0},{:.0}", cursor.x, cursor.y),
         format!("UI blocked={ui_blocked}  HUD={hud}"),
+        match tag_hit.agent_at(cursor) {
+            Some(agent) => format!("tag (2d)→ {agent}"),
+            None => "tag (2d)→ (none)".to_owned(),
+        },
     ];
     if let Ok((camera, camera_transform)) = camera.single()
         && let Ok(ray) = camera.viewport_to_world(camera_transform, cursor)
@@ -794,8 +804,9 @@ fn update_pick_inspector(
 /// Avatar resolution has two paths, matching the reference's "the name tag or
 /// the avatar itself":
 ///
-/// 1. **The name tag** — a `bevy_ui` node, so a hit shows up in the [`HoverMap`].
-///    Checked first, and it wins even over the body behind it.
+/// 1. **The name tag** — a screen-space `Text2d` on the tag overlay camera, hit
+///    by the [`NameTagHitTest`] cursor-vs-rect test (no picking backend covers
+///    `Text2d`). Checked first, and it wins even over the body behind it.
 /// 2. **The body / sphere** — no mesh-picking backend is installed (the viewer
 ///    raycasts on demand, like [`crate::hud_pick`]), so this casts a ray from the
 ///    world camera through the cursor and resolves it **mesh-accurately** via
@@ -828,7 +839,7 @@ fn update_pick_inspector(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
-              the UI occlusion + name-tag path, the avatar-identity query, the window for the \
+              the UI occlusion, the name-tag hit test, the window for the \
               cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
               pick, the mesh-accurate avatar picker, the object picker and the terrain-marker \
               query for the world pick, and the four open-request channels"
@@ -839,7 +850,7 @@ fn request_avatar_menu_on_right_click(
     mut gesture: ResMut<RightClickGesture>,
     hover_map: Res<HoverMap>,
     pickables: Query<&Pickable>,
-    pick_targets: Query<&AvatarPickTarget>,
+    tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
     camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
@@ -883,14 +894,12 @@ fn request_avatar_menu_on_right_click(
         return;
     };
 
-    // 1. The name tag: a hovered UI node carrying the avatar identity.
-    let tag_agent = hover_map
-        .values()
-        .flat_map(|hits| hits.keys())
-        .find_map(|entity| pick_targets.get(*entity).ok().map(AvatarPickTarget::agent));
+    // 1. The name tag: the screen-space rect test against the visible tags.
+    let tag_agent = tag_hit.agent_at(cursor);
 
-    // Occlusion order: UI, then HUD attachments, then the world (the reference's
-    // order too). The name tag above is the avatar's own UI and wins first.
+    // Occlusion order: tag, then UI, then HUD attachments, then the world (the
+    // reference's order too). The name tag above is the avatar's own overlay
+    // and wins first.
     let agent = if let Some(agent) = tag_agent {
         Some(agent)
     } else if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {

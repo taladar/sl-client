@@ -61,16 +61,19 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
-use crate::conversations::{BLINK_HZ, ConversationModel, ConversationsUi};
+use crate::conversations::{BLINK_HZ, CONVERSATIONS_FLOATER_ID, ConversationModel};
+use crate::edit_tool::BUILD_TOOLS_FLOATER_ID;
+use crate::floater::{Floater, floater_panel};
 use crate::i18n::Translated;
-use crate::inventory::InventoryUi;
-use crate::minimap::MinimapUi;
+use crate::inventory::INVENTORY_FLOATER_ID;
+use crate::minimap::MINIMAP_FLOATER_ID;
 use crate::nearby_chat_bar::NearbyChatBar;
-use crate::search::SearchUi;
+use crate::search::SEARCH_FLOATER_ID;
+use crate::snapshot_floater::SNAPSHOT_FLOATER_ID;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
-use crate::world_map::WorldMapUi;
+use crate::world_map::WORLD_MAP_FLOATER_ID;
 
 /// The `element` the bottom toolbar attributes its actions to — the tag
 /// [`handle_toolbar_actions`] filters on, so it routes *its* buttons' presses and
@@ -186,6 +189,28 @@ impl ToolbarTarget {
     /// interactive), as opposed to an unlanded placeholder.
     const fn is_wired(self) -> bool {
         !matches!(self, Self::Unlanded)
+    }
+
+    /// The stable floater id this button toggles, or `None` for the
+    /// non-floater targets (the nearby-chat bar, an unlanded placeholder).
+    ///
+    /// The id — not the module's `XUi` resource — is what the toolbar resolves
+    /// a floater through: a lazily-built floater
+    /// ([`crate::floater::DeferredFloaterContent`]) has chrome (and so a
+    /// [`Floater`] with this id) from startup, while its resource only appears
+    /// on first open, and the toolbar is exactly the opener that performs that
+    /// first open.
+    const fn floater_id(self) -> Option<&'static str> {
+        match self {
+            Self::Inventory => Some(INVENTORY_FLOATER_ID),
+            Self::Conversations => Some(CONVERSATIONS_FLOATER_ID),
+            Self::Minimap => Some(MINIMAP_FLOATER_ID),
+            Self::WorldMap => Some(WORLD_MAP_FLOATER_ID),
+            Self::Search => Some(SEARCH_FLOATER_ID),
+            Self::BuildTools => Some(BUILD_TOOLS_FLOATER_ID),
+            Self::Snapshot => Some(SNAPSHOT_FLOATER_ID),
+            Self::NearbyChat | Self::Unlanded => None,
+        }
     }
 }
 
@@ -499,23 +524,13 @@ fn build_button_box(
 /// Only the wired actions do anything today; an unlanded button emits no
 /// [`UiAction`] at all (it is not a [`Button`]), and any future action string
 /// added to [`TOOLBAR_BUTTONS`] before its handler simply falls through here — the
-/// same harmless dispatch the top menu bar relies on. A `match` will earn its keep
-/// once a second target is wired; today it is one equality check.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the action \
-              stream plus one read-model per toolbar-toggleable floater; each newly wired \
-              button adds one parameter"
-)]
+/// same harmless dispatch the top menu bar relies on. A floater is resolved by
+/// its stable id ([`ToolbarTarget::floater_id`]), never through its module's
+/// `XUi` resource: for a lazily-built floater the resource does not exist until
+/// this very toggle performs the first open.
 fn handle_toolbar_actions(
     mut actions: MessageReader<UiAction>,
-    inventory: Option<Res<InventoryUi>>,
-    conversations: Option<Res<ConversationsUi>>,
-    minimap: Option<Res<MinimapUi>>,
-    world_map: Option<Res<WorldMapUi>>,
-    search: Option<Res<SearchUi>>,
-    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
-    snapshot: Option<Res<crate::snapshot_floater::SnapshotUi>>,
+    floaters: Query<(Entity, &Floater)>,
     mut nearby_chat: Option<ResMut<NearbyChatBar>>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
@@ -523,49 +538,17 @@ fn handle_toolbar_actions(
         if action.element != BOTTOM_TOOLBAR_ELEMENT {
             continue;
         }
-        if action.action == "toggle-inventory"
-            && let Some(ui) = &inventory
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
+        let target = TOOLBAR_BUTTONS
+            .iter()
+            .find(|def| def.action == action.action)
+            .map(|def| def.target);
+        if let Some(id) = target.and_then(ToolbarTarget::floater_id)
+            && let Some(panel) = floater_panel(&floaters, id)
+            && let Ok(mut shown) = panels.get_mut(panel)
         {
             shown.0 = !shown.0;
         }
-        if action.action == "toggle-conversations"
-            && let Some(ui) = &conversations
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-minimap"
-            && let Some(ui) = &minimap
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-map"
-            && let Some(ui) = &world_map
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-search"
-            && let Some(ui) = &search
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-build-tools"
-            && let Some(ui) = &build_tools
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-snapshot"
-            && let Some(ui) = &snapshot
-            && let Ok(mut shown) = panels.get_mut(ui.panel())
-        {
-            shown.0 = !shown.0;
-        }
-        if action.action == "toggle-nearby-chat"
+        if target == Some(ToolbarTarget::NearbyChat)
             && let Some(bar) = nearby_chat.as_deref_mut()
         {
             bar.toggle();
@@ -574,68 +557,30 @@ fn handle_toolbar_actions(
 }
 
 /// Resolve whether a button's target floater is currently open, or `None` when the
-/// target is unlanded (so it stays disabled).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the resolver takes one read-model per toolbar-toggleable floater; each newly \
-              wired button adds one parameter"
-)]
+/// target is unlanded (so it stays disabled). Floaters resolve by stable id
+/// (see [`ToolbarTarget::floater_id`]).
 fn resolve_target_open(
     target: ToolbarTarget,
-    inventory: Option<&InventoryUi>,
-    conversations: Option<&ConversationsUi>,
-    minimap: Option<&MinimapUi>,
-    world_map: Option<&WorldMapUi>,
-    search: Option<&SearchUi>,
-    build_tools: Option<&crate::edit_tool::BuildToolsUi>,
-    snapshot: Option<&crate::snapshot_floater::SnapshotUi>,
+    floaters: &Query<(Entity, &Floater)>,
     nearby_chat: Option<&NearbyChatBar>,
     panels: &Query<&UiPanelShown>,
 ) -> Option<bool> {
     match target {
         ToolbarTarget::NearbyChat => nearby_chat.map(NearbyChatBar::is_shown),
-        ToolbarTarget::Inventory => inventory
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::Conversations => conversations
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::Minimap => minimap
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::WorldMap => world_map
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::Search => search
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::BuildTools => build_tools
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
-        ToolbarTarget::Snapshot => snapshot
-            .and_then(|ui| panels.get(ui.panel()).ok())
-            .map(|shown| shown.0),
         ToolbarTarget::Unlanded => None,
+        wired => wired
+            .floater_id()
+            .and_then(|id| floater_panel(floaters, id))
+            .and_then(|panel| panels.get(panel).ok())
+            .map(|shown| shown.0),
     }
 }
 
 /// Keep each toolbar button's look current: lit while its floater is open, resting
 /// while closed, greyed while unlanded — writing through change detection only on
 /// a real change so an idle bar does not re-trigger layout.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the bar's look reads the live floater targets (inventory / conversations / minimap \
-              / nearby chat), the conversation model and blink clock for the attention flash, \
-              plus the button, panel and label queries it writes — one coherent per-frame repaint"
-)]
 fn update_toolbar_button_states(
-    inventory: Option<Res<InventoryUi>>,
-    conversations: Option<Res<ConversationsUi>>,
-    minimap: Option<Res<MinimapUi>>,
-    world_map: Option<Res<WorldMapUi>>,
-    search: Option<Res<SearchUi>>,
-    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
-    snapshot: Option<Res<crate::snapshot_floater::SnapshotUi>>,
+    floaters: Query<(Entity, &Floater)>,
     conversation_model: Option<Res<ConversationModel>>,
     nearby_chat: Option<Res<NearbyChatBar>>,
     time: Res<Time>,
@@ -643,13 +588,6 @@ fn update_toolbar_button_states(
     panels: Query<&UiPanelShown>,
     mut labels: Query<&mut TextColor>,
 ) {
-    let inventory = inventory.as_deref();
-    let conversations = conversations.as_deref();
-    let minimap = minimap.as_deref();
-    let world_map = world_map.as_deref();
-    let search = search.as_deref();
-    let build_tools = build_tools.as_deref();
-    let snapshot = snapshot.as_deref();
     let nearby_chat = nearby_chat.as_deref();
     // The Conversations button flashes while the window is closed and an IM /
     // group / conference has unread lines — the reference's toolbar attention cue
@@ -659,18 +597,7 @@ fn update_toolbar_button_states(
         .is_some_and(ConversationModel::has_im_attention)
         && (time.elapsed_secs() * BLINK_HZ).fract() < 0.5;
     for (button, mut background) in &mut buttons {
-        let visual = match resolve_target_open(
-            button.target,
-            inventory,
-            conversations,
-            minimap,
-            world_map,
-            search,
-            build_tools,
-            snapshot,
-            nearby_chat,
-            &panels,
-        ) {
+        let visual = match resolve_target_open(button.target, &floaters, nearby_chat, &panels) {
             Some(true) => ToolbarButtonVisual::Active,
             Some(false) => ToolbarButtonVisual::Enabled,
             None => ToolbarButtonVisual::Disabled,

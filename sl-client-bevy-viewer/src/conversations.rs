@@ -61,7 +61,9 @@ use sl_client_bevy::{
 
 use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::i18n::{TransArgs, Translator};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::ui::{
@@ -688,18 +690,11 @@ fn tab_label(title: &str, unread: u32, active: bool) -> String {
 /// [`ConversationModel`].
 #[derive(Resource, Debug)]
 pub(crate) struct ConversationsUi {
-    /// The floater root (carries [`crate::ui::UiPanelShown`]); open / close by
-    /// flipping it.
-    panel: Entity,
     /// The vertical tab strip the tab buttons flow into.
     strip: Entity,
     /// The panel area the per-conversation panes stack in (only the active one
     /// is displayed).
     panel_area: Entity,
-    /// This floater's own dock host, anchored beside the nearby-chat bar at the
-    /// bottom leading corner ([`position_conversations_dock_host`]) — so docking
-    /// sends the window there rather than to the shared top-trailing host.
-    dock_host: Entity,
     /// The Nearby tab's local-chat input field, so its [`LocalChatSubmit`] is
     /// routed to `Command::Chat` (and not mistaken for an IM).
     nearby_field: Entity,
@@ -708,11 +703,6 @@ pub(crate) struct ConversationsUi {
 }
 
 impl ConversationsUi {
-    /// The floater root, for the toolbar / menu toggles.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.panel
-    }
-
     /// The vertical tab strip, so an external pane ([`crate::people`]) can add its
     /// own pinned tab button into the same strip as the conversation tabs.
     pub(crate) const fn strip(&self) -> Entity {
@@ -869,8 +859,15 @@ impl Plugin for ConversationsPlugin {
 // Spawn
 // ---------------------------------------------------------------------------
 
+/// Marker on the Conversations floater's own dock host, so
+/// [`position_conversations_dock_host`] can pin it without going through the
+/// (lazily-inserted) [`ConversationsUi`] resource.
+#[derive(Component, Debug, Clone, Copy)]
+struct ConversationsDockHost;
+
 /// Startup: spawn the Conversations floater's own dock host, then the floater
-/// (wired to that host) and seed the Nearby tab.
+/// chrome (wired to that host); the strip/pane content and the seeded Nearby
+/// tab are built on the first open ([`DeferredFloaterContent`]).
 fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
     // This floater's own dock host, at the bottom leading corner — an absolute,
     // bottom-pinned container the floater docks into instead of the shared
@@ -901,6 +898,7 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
 
+    commands.entity(dock_host).insert(ConversationsDockHost);
     let handle = spawn_floater(
         &mut commands,
         root.0,
@@ -925,7 +923,18 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(crate::i18n::Translated::new("conversations-title"));
+    let builder = commands.register_system(build_conversations_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
 
+/// First-open content build (see [`spawn_conversations_floater`]): the
+/// strip/divider/pane split and the seeded Nearby view, ending with the
+/// [`ConversationsUi`] insert — whose appearance wakes the
+/// `Option<Res<ConversationsUi>>` consumers, including the People/Groups pane
+/// builders that poll for it ([`crate::people`]).
+fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     // The content slot is a column; fill it with one row: [strip | divider | pane].
     let split = commands
         .spawn((
@@ -989,10 +998,8 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
     views.insert(ConversationKey::Nearby, view);
 
     commands.insert_resource(ConversationsUi {
-        panel: handle.root,
         strip,
         panel_area,
-        dock_host,
         nearby_field,
         views,
     });
@@ -1864,12 +1871,12 @@ fn scroll_active_transcript(
 /// [`crate::chat::position_chat_overlay`], which anchors the chat overlay above
 /// the same area.
 fn position_conversations_dock_host(
-    ui: Option<Res<ConversationsUi>>,
+    hosts: Query<Entity, With<ConversationsDockHost>>,
     bottom_area: Option<Res<BottomArea>>,
     computed: Query<&ComputedNode>,
     mut insets: Query<&mut LogicalInset>,
 ) {
-    let (Some(ui), Some(bottom_area)) = (ui, bottom_area) else {
+    let (Ok(host), Some(bottom_area)) = (hosts.single(), bottom_area) else {
         return;
     };
     let Ok(area_node) = computed.get(bottom_area.area) else {
@@ -1884,7 +1891,7 @@ fn position_conversations_dock_host(
         block_end: Val::Px(area_height),
         ..LogicalRect::AUTO
     });
-    if let Ok(mut inset) = insets.get_mut(ui.dock_host)
+    if let Ok(mut inset) = insets.get_mut(host)
         && *inset != wanted
     {
         *inset = wanted;

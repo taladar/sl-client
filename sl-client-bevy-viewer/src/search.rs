@@ -47,7 +47,9 @@ use sl_settings::SettingValue;
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
 use crate::conversations::{ConversationKey, OpenConversation};
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::group_profile::OpenGroupProfile;
 use crate::i18n::{Translated, UiLocale};
 use crate::media_engine::MediaSurfaces;
@@ -76,7 +78,7 @@ use crate::world_map::OpenWorldMap;
 // ---------------------------------------------------------------------------
 
 /// The floater's [`FloaterSpec::id`].
-const SEARCH_FLOATER_ID: &str = "search";
+pub(crate) const SEARCH_FLOATER_ID: &str = "search";
 
 /// The `[search]` settings section.
 const SEARCH_SECTION: &[&str] = &["search"];
@@ -895,8 +897,6 @@ struct CatTable {
 /// The floater's retained entity handles.
 #[derive(Resource)]
 pub(crate) struct SearchUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    root: Entity,
     /// The shared query text field.
     search_field: Entity,
     /// The category tab strip.
@@ -940,11 +940,6 @@ pub(crate) struct SearchUi {
 }
 
 impl SearchUi {
-    /// The floater root, for open-state checks and toggling from the menu.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.root
-    }
-
     /// The per-category table handles (mutable, to track last-seen revisions).
     const fn table_mut(&mut self, category: SearchCategory) -> &mut CatTable {
         match category {
@@ -1096,13 +1091,10 @@ impl Plugin for SearchFloaterPlugin {
 // Spawn.
 // ---------------------------------------------------------------------------
 
-/// Spawn the floater (hidden): the left column (query, maturity, tabs) and the
-/// shared details pane, built once.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one floater built once: the seven tab panels and the shared detail pane are laid \
-              out inline so every retained handle is gathered in one place"
-)]
+/// Spawn the floater's chrome (hidden); the left column (query, maturity,
+/// tabs) and the shared details pane are built once, on the first open
+/// ([`DeferredFloaterContent`]) — which also defers the embedded web-search
+/// browser view (and so its CEF browser) until the window is actually used.
 fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
@@ -1125,7 +1117,22 @@ fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("search-title"));
+    let builder = commands.register_system(build_search_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
 
+/// First-open content build (see the chrome spawn above): the split, the
+/// category tabs, the filter panels and the details pane, ending with the
+/// [`SearchUi`] insert whose appearance wakes the `Option<Res<SearchUi>>`
+/// consumers.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one floater built once: the seven tab panels and the shared detail pane are laid \
+              out inline so every retained handle is gathered in one place"
+)]
+fn build_search_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     // The content splits into the left column and the details pane.
     let split = commands
         .spawn((
@@ -1228,7 +1235,6 @@ fn spawn_search_floater(mut commands: Commands, root: Res<UiRoot>) {
     let detail = spawn_detail_pane(&mut commands, split);
 
     commands.insert_resource(SearchUi {
-        root: handle.root,
         search_field,
         tab_strip: tabs.strip,
         web_view,

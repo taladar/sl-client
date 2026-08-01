@@ -56,7 +56,10 @@ use sl_client_bevy::{
 
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatars::AvatarState;
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
+    spawn_floater,
+};
 use crate::groups::GroupsModel;
 use crate::i18n::{Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -466,8 +469,6 @@ struct AccessHandles {
 /// The floater's live entity handles.
 #[derive(Resource, Debug)]
 struct AboutRegionUi {
-    /// The floater root (carries `UiPanelShown`).
-    panel: Entity,
     /// The Region tab's handles.
     region: RegionHandles,
     /// The Debug tab's handles.
@@ -770,13 +771,18 @@ impl Plugin for AboutRegionPlugin {
 // Spawn.
 // ---------------------------------------------------------------------------
 
-/// Spawn the (hidden) Region / Estate floater and build every tab once.
+/// The Region / Estate floater's stable [`crate::floater::Floater::id`], the
+/// key [`open_about_region`] looks the panel up by.
+const ABOUT_REGION_FLOATER_ID: &str = "about-region";
+
+/// Spawn the (hidden) Region / Estate floater's chrome; every tab is built
+/// once, on the first open ([`DeferredFloaterContent`]).
 fn spawn_about_region_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "about-region",
+            id: ABOUT_REGION_FLOATER_ID,
             title: "Region / Estate".to_owned(),
             position: Vec2::new(400.0, 80.0),
             default_size: Some(Vec2::new(500.0, 500.0)),
@@ -796,6 +802,17 @@ fn spawn_about_region_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("about-region-title"));
+    let builder = commands.register_system(build_about_region_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build (see [`spawn_about_region_floater`]): the tab
+/// container and every tab, ending with the [`AboutRegionUi`] insert whose
+/// appearance wakes the `Option<Res<AboutRegionUi>>` populate systems (their
+/// [`AboutRegionDirty`] flags persist until then).
+fn build_about_region_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let labels: Vec<String> = [
         "about-region-tab-region",
         "about-region-tab-debug",
@@ -841,7 +858,6 @@ fn spawn_about_region_floater(mut commands: Commands, root: Res<UiRoot>) {
     );
 
     commands.insert_resource(AboutRegionUi {
-        panel: handle.root,
         region,
         debug,
         terrain,
@@ -1310,16 +1326,13 @@ fn open_about_region(
     mut requests: MessageReader<OpenAboutRegion>,
     mut state: ResMut<AboutRegionState>,
     mut dirty: ResMut<AboutRegionDirty>,
-    ui: Option<Res<AboutRegionUi>>,
+    floaters: Query<(Entity, &Floater)>,
     mut panels: Query<&mut UiPanelShown>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     if requests.read().last().is_none() {
         return;
     }
-    let Some(ui) = ui else {
-        return;
-    };
     state.requested = true;
     // Force a reseed of the drafts from the (refreshed) region / estate data.
     state.draft_seeded = false;
@@ -1329,7 +1342,11 @@ fn open_about_region(
     commands.write(SlCommand(Command::RequestEstateInfo));
     commands.write(SlCommand(Command::RequestEstateCovenant));
     dirty.mark_all();
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+    // By stable id, not `AboutRegionUi` — this very open may be the first,
+    // which is what triggers the deferred content build.
+    if let Some(panel) = floater_panel(&floaters, ABOUT_REGION_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
         shown.0 = true;
     }
 }

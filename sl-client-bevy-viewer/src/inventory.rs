@@ -50,7 +50,9 @@ use sl_client_bevy::{
     Wearable, WearableType,
 };
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::i18n::Translated;
 use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -1276,13 +1278,6 @@ pub(crate) struct InventoryUi {
 }
 
 impl InventoryUi {
-    /// The window's panel-root entity — carries [`UiPanelShown`], so the top
-    /// menu bar ([`crate::menu_bar`]) can toggle the window and read whether it
-    /// is open without reaching into this module's private fields.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.panel
-    }
-
     /// The scrolling viewport entity (carries [`VirtualList`]) — the drag-and-
     /// drop module maps pointer positions to rows against it.
     pub(crate) const fn viewport(&self) -> Entity {
@@ -1511,14 +1506,17 @@ struct InventoryGearHost;
 /// active, and whether the filters floater is open.
 fn update_gear_conditions(
     state: Res<InventoryState>,
-    filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     gallery_ui: Option<Res<crate::inventory_gallery::GalleryUi>>,
     panels: Query<&UiPanelShown>,
     mut hosts: Query<&mut MenuConditions, With<InventoryGearHost>>,
 ) {
-    let filters_open = filters_ui
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
+    // By stable id — the lazily-built filters floater has no resource until
+    // its first open.
+    let filters_open =
+        crate::floater::floater_panel(&floaters, crate::inventory_filters::FILTERS_FLOATER_ID)
+            .and_then(|panel| panels.get(panel).ok())
+            .is_some_and(|shown| shown.0);
     let gallery_open = gallery_ui
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
@@ -1560,6 +1558,9 @@ fn route_gear_menu(
     mut actions: MessageWriter<InventoryUiAction>,
     mut state: ResMut<InventoryState>,
     mut filter_state: ResMut<crate::inventory_filters::InventoryFilterState>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
+    // Still wanted alongside the by-id toggle: the field-text reset below only
+    // has fields to clear once the filters content is built.
     filters_ui: Option<Res<crate::inventory_filters::InventoryFiltersUi>>,
     model: Res<InventoryModel>,
     mut panels: Query<&mut UiPanelShown>,
@@ -1587,11 +1588,11 @@ fn route_gear_menu(
                 state.sort.system_folders_to_top = !state.sort.system_folders_to_top;
             }
             "show-filters" => {
-                if let Some(ui) = &filters_ui
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                crate::floater::toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::inventory_filters::FILTERS_FLOATER_ID,
+                );
             }
             "reset-filters" => {
                 crate::inventory_filters::apply_reset(
@@ -1700,7 +1701,7 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in the settings store
 /// ([`crate::floater_persist`]).
-const INVENTORY_FLOATER_ID: &str = "inventory";
+pub(crate) const INVENTORY_FLOATER_ID: &str = "inventory";
 
 /// `Ctrl+I` opens / closes the window, matching the reference viewer's shortcut.
 /// Ungated by the input-context (like the `F`-key overlay toggles) so it always
@@ -1733,7 +1734,8 @@ fn toggle_inventory(
 /// previous open, and folders can be created during the session.
 fn refresh_inventory_on_show(
     ui: Option<Res<InventoryUi>>,
-    shown: Query<&UiPanelShown, Changed<UiPanelShown>>,
+    changed: Query<&UiPanelShown, Changed<UiPanelShown>>,
+    panels: Query<&UiPanelShown>,
     state: Res<InventoryState>,
     mut model: ResMut<InventoryModel>,
     mut commands: MessageWriter<SlCommand>,
@@ -1742,11 +1744,15 @@ fn refresh_inventory_on_show(
         return;
     };
     // `get` on a `Changed` query yields the panel only on the frame its
-    // visibility flips; ignore the close transition.
-    let Ok(shown) = shown.get(ui.panel) else {
-        return;
-    };
-    if shown.0 {
+    // visibility flips (the close transition is filtered below). The **first**
+    // open needs the `is_added` arm instead: the lazily-built content inserts
+    // `InventoryUi` a frame *after* the flip, so the flip frame alone would
+    // miss it and this refresh — which the folder tree relies on, the login
+    // skeleton being only the roots — would never fire for a window restored
+    // open by the persisted settings.
+    let opened = changed.get(ui.panel).is_ok_and(|shown| shown.0)
+        || (ui.is_added() && panels.get(ui.panel).is_ok_and(|shown| shown.0));
+    if opened {
         commands.write(SlCommand(Command::QueryInventoryFolders));
         // The Worn tab wants the COF contents; harmless if already held.
         request_worn_source(&mut model, &mut commands);
@@ -2575,10 +2581,12 @@ fn depth_indent(depth: usize) -> f32 {
 // Spawn
 // ---------------------------------------------------------------------------
 
-/// Spawn the inventory window: a **floater** ([`crate::floater`]) whose content is
-/// the tab / expand / collapse toolbar, the search field, and the virtualized
-/// viewport. The floater supplies the title bar (drag), the close / minimize /
-/// dock chrome, and the resize grip; this fills its content slot. Starts hidden.
+/// Spawn the inventory window's **chrome**: a **floater** ([`crate::floater`])
+/// with title bar (drag), close / minimize / dock chrome and resize grip.
+/// Starts hidden; its content — the tab / expand / collapse toolbar, the
+/// search field, and the virtualized viewport — is deferred to the first open
+/// ([`DeferredFloaterContent`]), so the closed window costs bevy_ui's
+/// per-frame walks only its chrome.
 fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
@@ -2607,13 +2615,24 @@ fn spawn_inventory_panel(mut commands: Commands, root: Res<UiRoot>) {
             },
         },
     );
-    let panel = handle.root;
-    let content = handle.content;
     // Localize the floater's title bar: bind its text node to the Fluent key so
     // it tracks the active locale like the rest of the window.
     commands
         .entity(handle.title_text)
         .insert(Translated::new("inventory-title"));
+    let builder = commands.register_system(build_inventory_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build for the inventory window (see
+/// [`spawn_inventory_panel`]): fill the floater's content slot and insert
+/// [`InventoryUi`] — whose appearance wakes every `Option<Res<InventoryUi>>`
+/// consumer, exactly as the old startup build did.
+fn build_inventory_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+    let panel = handle.root;
+    let content = handle.content;
 
     // Tabs — the reusable strip widget ([`crate::ui_tab`]) in its horizontal
     // (top-edge) placement. One focus stop; the arrow keys move between the

@@ -53,7 +53,10 @@ use sl_client_bevy::{
 };
 
 use crate::avatars::AvatarState;
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
+    spawn_floater,
+};
 use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -714,8 +717,6 @@ struct GeneralHandles {
 /// per-rebuild field entities the action handlers read.
 #[derive(Resource)]
 pub(crate) struct GroupProfileUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
     /// The title text node (set to the group's name once known).
     title_text: Entity,
     /// The General tab panel (rebuilt on `general`).
@@ -898,14 +899,19 @@ fn register_group_profile_settings(settings: Option<ResMut<ViewerSettings>>) {
     register_table_settings(&mut settings, TABLE_SETTINGS_SECTION, &ROLES_TABLE);
 }
 
-/// Spawn the (hidden) group profile floater shell: the floater, the three-tab
-/// container, and the persistent list viewports + rebuild-target containers.
+/// The group-profile floater's stable [`crate::floater::Floater::id`], the key
+/// [`open_group_profile`] looks the panel up by.
+const GROUP_PROFILE_FLOATER_ID: &str = "group-profile";
+
+/// Spawn the (hidden) group profile floater's chrome; the three-tab container
+/// and the persistent list viewports + rebuild-target containers are built on
+/// the first open ([`DeferredFloaterContent`]).
 fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "group-profile",
+            id: GROUP_PROFILE_FLOATER_ID,
             title: "Group".to_owned(),
             position: Vec2::new(340.0, 90.0),
             default_size: Some(Vec2::new(520.0, 620.0)),
@@ -927,6 +933,17 @@ fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("group-profile-title"));
+    let builder = commands.register_system(build_group_profile_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build (see [`spawn_group_profile_floater`]): the tab
+/// container and the list scaffolds, ending with the [`GroupProfileUi`] insert
+/// whose appearance wakes the `Option<Res<GroupProfileUi>>` consumers (the
+/// [`GroupProfileDirty`] flags persist until then).
+fn build_group_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let labels: Vec<String> = [
         "group-profile-tab-general",
         "group-profile-tab-members",
@@ -968,7 +985,6 @@ fn spawn_group_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
         build_notices_scaffold(&mut commands, notices_panel);
 
     commands.insert_resource(GroupProfileUi {
-        panel: handle.root,
         title_text: handle.title_text,
         general_panel,
         members_table,
@@ -1203,6 +1219,7 @@ fn open_group_profile(
     mut state: ResMut<GroupProfileState>,
     mut dirty: ResMut<GroupProfileDirty>,
     ui: Option<ResMut<GroupProfileUi>>,
+    floaters: Query<(Entity, &Floater)>,
     groups: Res<GroupsModel>,
     children: Query<&Children>,
     mut panels: Query<&mut UiPanelShown>,
@@ -1210,9 +1227,6 @@ fn open_group_profile(
     mut commands: Commands,
 ) {
     let Some(open) = opens.read().last().copied() else {
-        return;
-    };
-    let Some(mut ui) = ui else {
         return;
     };
     let group = open.group;
@@ -1223,25 +1237,34 @@ fn open_group_profile(
         fetch_group(group, &mut sl_commands);
         // Clear the previous group's retained structure so each panel rebuilds for
         // the new subject (the settled old content is safe to despawn here — a
-        // single user-paced teardown, never a per-reply respawn).
-        despawn_children(&children, &mut commands, ui.general_panel);
-        ui.general_sig = None;
-        ui.general_handles = GeneralHandles::default();
-        ui.charter_field = None;
-        ui.fee_field = None;
-        // The roles table's pooled rows are the widget's — they rebind to the new
-        // group's roles (RolesView rebuilds on the fetch), so only the once-built
-        // New Role button is torn down here.
-        despawn_children(&children, &mut commands, ui.roles_new_container);
-        ui.roles_new_built = false;
-        // The details / compose / notice-body panels self-despawn+rebuild once via
-        // their guards; resetting the guards makes them rebuild for the new subject.
-        ui.details_built = None;
-        ui.compose_can_send = None;
-        ui.notice_body_built = None;
+        // single user-paced teardown, never a per-reply respawn). On the very
+        // first open the content (and so `GroupProfileUi`) does not exist yet —
+        // there is nothing to tear down, the deferred build starts fresh.
+        if let Some(mut ui) = ui {
+            despawn_children(&children, &mut commands, ui.general_panel);
+            ui.general_sig = None;
+            ui.general_handles = GeneralHandles::default();
+            ui.charter_field = None;
+            ui.fee_field = None;
+            // The roles table's pooled rows are the widget's — they rebind to the
+            // new group's roles (RolesView rebuilds on the fetch), so only the
+            // once-built New Role button is torn down here.
+            despawn_children(&children, &mut commands, ui.roles_new_container);
+            ui.roles_new_built = false;
+            // The details / compose / notice-body panels self-despawn+rebuild once
+            // via their guards; resetting the guards makes them rebuild for the
+            // new subject.
+            ui.details_built = None;
+            ui.compose_can_send = None;
+            ui.notice_body_built = None;
+        }
     }
     dirty.mark_all();
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+    // By stable id — this very open may be the first, which triggers the
+    // deferred content build.
+    if let Some(panel) = floater_panel(&floaters, GROUP_PROFILE_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
         shown.0 = true;
     }
 }
@@ -1551,7 +1574,7 @@ fn notice_column_ordering(column: usize, left: &NoticeRow, right: &NoticeRow) ->
 fn build_general_tab(
     mut dirty: ResMut<GroupProfileDirty>,
     mut state: ResMut<GroupProfileState>,
-    mut ui: ResMut<GroupProfileUi>,
+    ui: Option<ResMut<GroupProfileUi>>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
     mut textures: ResMut<TextureManager>,
@@ -1559,6 +1582,11 @@ fn build_general_tab(
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
 ) {
+    // Before the dirty consume: while the lazily-built content (and so the
+    // resource) does not exist yet, the flags must survive for the build.
+    let Some(mut ui) = ui else {
+        return;
+    };
     if !dirty.general && !dirty.general_values {
         return;
     }
@@ -2039,12 +2067,16 @@ fn on_role_row_press(
 /// selection focus (a member, a role, or nothing).
 fn rebuild_details_area(
     mut dirty: ResMut<GroupProfileDirty>,
-    mut ui: ResMut<GroupProfileUi>,
+    ui: Option<ResMut<GroupProfileUi>>,
     state: Res<GroupProfileState>,
     avatars: Res<AvatarState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
+    // Before the dirty consume — see `build_general_tab`.
+    let Some(mut ui) = ui else {
+        return;
+    };
     if !dirty.details {
         return;
     }
@@ -2246,11 +2278,15 @@ fn build_role_details(
 /// Send button, shown only to members who may send notices.
 fn rebuild_compose_area(
     mut dirty: ResMut<GroupProfileDirty>,
-    mut ui: ResMut<GroupProfileUi>,
+    ui: Option<ResMut<GroupProfileUi>>,
     state: Res<GroupProfileState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
+    // Before the dirty consume — see `build_general_tab`.
+    let Some(mut ui) = ui else {
+        return;
+    };
     if !dirty.compose {
         return;
     }
@@ -2306,11 +2342,15 @@ fn rebuild_compose_area(
 /// body (or a loading / hint line).
 fn rebuild_notice_body(
     mut dirty: ResMut<GroupProfileDirty>,
-    mut ui: ResMut<GroupProfileUi>,
+    ui: Option<ResMut<GroupProfileUi>>,
     state: Res<GroupProfileState>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
+    // Before the dirty consume — see `build_general_tab`.
+    let Some(mut ui) = ui else {
+        return;
+    };
     if !dirty.notice_body {
         return;
     }

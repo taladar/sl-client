@@ -50,7 +50,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 
 /// The floater's id (its geometry-persistence key and menu target).
-const EXPERIENCES_FLOATER_ID: &str = "experiences";
+pub(crate) const EXPERIENCES_FLOATER_ID: &str = "experiences";
 
 /// The element id the gallery specimen and its inert actions report under.
 const EXPERIENCES_ELEMENT: &str = "experiences-floater";

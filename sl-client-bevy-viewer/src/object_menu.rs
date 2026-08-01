@@ -1012,7 +1012,7 @@ fn handle_object_menu_actions(
     inventory: Res<InventoryModel>,
     mut ground_sit: ResMut<SelfGroundSit>,
     tool: Res<crate::edit_tool::EditToolState>,
-    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut crate::ui::UiPanelShown>,
     mut selection: ResMut<crate::edit_selection::SelectionSet>,
     state: Res<ObjectState>,
@@ -1039,8 +1039,11 @@ fn handle_object_menu_actions(
         // Edit (the reference's pie Edit): open the Build Tools floater —
         // which *is* edit mode — and make the picked object the selection.
         if action.action == "edit" {
-            if let Some(ui) = &build_tools
-                && let Ok(mut shown) = panels.get_mut(ui.panel())
+            // Resolved by stable id, not the module resource: a lazily-built
+            // Build Tools floater has no `BuildToolsUi` until this very open.
+            if let Some(panel) =
+                crate::floater::floater_panel(&floaters, crate::edit_tool::BUILD_TOOLS_FLOATER_ID)
+                && let Ok(mut shown) = panels.get_mut(panel)
             {
                 shown.0 = true;
             }

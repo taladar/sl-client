@@ -578,9 +578,16 @@ impl Plugin for EditContentsPlugin {
             .add_message::<ContentsActionRequest>()
             .add_systems(
                 Startup,
-                (spawn_contents_tab, spawn_open_object_floater)
-                    .after(crate::edit_params::spawn_param_tabs)
-                    .after(UiScaffoldSystems::SpawnRoot),
+                spawn_open_object_floater.after(UiScaffoldSystems::SpawnRoot),
+            )
+            // Fills the Build floater's Content page once its lazily-built
+            // content publishes the pages (`BuildTabPages` appears on first
+            // open); ordered after the general parameter tabs, as before.
+            .add_systems(
+                Update,
+                spawn_contents_tab
+                    .run_if(resource_added::<BuildTabPages>)
+                    .after(crate::edit_params::spawn_param_tabs),
             )
             .add_systems(
                 Update,

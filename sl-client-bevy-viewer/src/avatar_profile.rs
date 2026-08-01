@@ -47,7 +47,10 @@ use sl_client_bevy::{
 
 use crate::avatars::AvatarState;
 use crate::conversations::{ConversationKey, OpenConversation};
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
+    spawn_floater,
+};
 use crate::group_profile::OpenGroupProfile;
 use crate::groups::GroupsModel;
 use crate::i18n::Translated;
@@ -495,14 +498,19 @@ impl Plugin for AvatarProfilePlugin {
     }
 }
 
-/// Spawn the (hidden) profile floater shell: the floater and the six-tab
-/// container; tab contents are rebuilt per open.
+/// The profile floater's stable [`crate::floater::Floater::id`], the key
+/// [`open_profile`] looks the panel up by.
+const PROFILE_FLOATER_ID: &str = "avatar-profile";
+
+/// Spawn the (hidden) profile floater shell's chrome; the six-tab container
+/// is built on the first open ([`DeferredFloaterContent`]), and tab contents
+/// are rebuilt per open.
 fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "avatar-profile",
+            id: PROFILE_FLOATER_ID,
             title: "Profile".to_owned(),
             position: Vec2::new(300.0, 80.0),
             // A definite, resizable content area — the reference profile
@@ -529,6 +537,17 @@ fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("profile-title"));
+    let builder = commands.register_system(build_profile_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build (see [`spawn_profile_floater`]): the tab container,
+/// ending with the [`ProfileUi`] insert whose appearance wakes the
+/// `Option<Res<ProfileUi>>` consumers (their [`ProfileDirty`] flags persist
+/// until then).
+fn build_profile_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let labels: Vec<String> = [
         "profile-tab-second-life",
         "profile-tab-web",
@@ -587,19 +606,23 @@ fn spawn_profile_floater(mut commands: Commands, root: Res<UiRoot>) {
 
 /// Open the floater on an avatar: reset the state, fire the profile requests,
 /// and mark every tab for rebuild.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the open \
+              messages, the state and dirty flags, the name cache, the (lazily-built) UI \
+              handles, the by-id floater lookup, the panel-shown query, and the command sink"
+)]
 fn open_profile(
     mut opens: MessageReader<OpenAvatarProfile>,
     mut state: ResMut<ProfileState>,
     mut dirty: ResMut<ProfileDirty>,
     avatars: Res<AvatarState>,
     ui: Option<ResMut<ProfileUi>>,
+    floaters: Query<(Entity, &Floater)>,
     mut panels: Query<&mut UiPanelShown>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     let Some(open) = opens.read().last().copied() else {
-        return;
-    };
-    let Some(mut ui) = ui else {
         return;
     };
     let agent = open.agent;
@@ -616,12 +639,20 @@ fn open_profile(
         }
         // Invalidate the retained 2nd Life structure and the signature-skip tabs so
         // each rebuilds for the new subject (a single user-paced teardown, done by
-        // `rebuild_profile_tabs`, never a per-reply respawn).
-        ui.sl_built = None;
-        ui.tab_sig = [None; 6];
+        // `rebuild_profile_tabs`, never a per-reply respawn). On the very first
+        // open the content (and so `ProfileUi`) does not exist yet — nothing to
+        // invalidate, the deferred build starts fresh.
+        if let Some(mut ui) = ui {
+            ui.sl_built = None;
+            ui.tab_sig = [None; 6];
+        }
     }
     dirty.mark_all();
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+    // By stable id — this very open may be the first, which triggers the
+    // deferred content build.
+    if let Some(panel) = floater_panel(&floaters, PROFILE_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
         shown.0 = true;
     }
 }
@@ -786,7 +817,7 @@ fn track_list_selection(
 fn rebuild_profile_tabs(
     mut dirty: ResMut<ProfileDirty>,
     mut state: ResMut<ProfileState>,
-    mut ui: ResMut<ProfileUi>,
+    ui: Option<ResMut<ProfileUi>>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     friends: Res<FriendsModel>,
@@ -796,6 +827,11 @@ fn rebuild_profile_tabs(
     mut texts: Query<&mut Text>,
     mut commands: Commands,
 ) {
+    // Before the dirty consume: while the lazily-built content (and so the
+    // resource) does not exist yet, the flags must survive for the build.
+    let Some(mut ui) = ui else {
+        return;
+    };
     if !dirty.any() {
         return;
     }
@@ -2821,7 +2857,7 @@ fn poll_profile_textures(
               translator and the status label"
 )]
 fn update_profile_web_status(
-    ui: Res<ProfileUi>,
+    ui: Option<Res<ProfileUi>>,
     views: Query<&crate::browser_widget::BrowserView>,
     surfaces: bevy::ecs::system::NonSend<crate::media_engine::MediaSurfaces>,
     time: Res<Time>,
@@ -2830,7 +2866,10 @@ fn update_profile_web_status(
     mut texts: Query<&mut Text>,
     mut commands: Commands,
 ) {
-    let (Some(view_entity), Some(status_entity)) = (ui.web_view, ui.web_status) else {
+    let (Some(view_entity), Some(status_entity)) = ui
+        .as_deref()
+        .map_or((None, None), |ui| (ui.web_view, ui.web_status))
+    else {
         *tracked = None;
         return;
     };

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 15 |
-| done | 645 |
+| done | 646 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1125** |
+| **total** | **1126** |
 
 ## ideas (56)
 
@@ -552,6 +552,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
+- [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
+  — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
@@ -572,8 +574,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Change-driven probe capture scheduling (zero idle cost)
 - [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
   — Dirty-gate terrain::update_terrain (runs every frame)
-- [`viewer-perf-ui-layout-per-frame-relayout`](ready/viewer-perf-ui-layout-per-frame-relayout.md)
-  — Cut per-frame UI layout cost — structural bevy_ui floor
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
@@ -1171,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (645)
+## done (646)
 
 ### protocol
 
@@ -1743,6 +1743,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
+  — Cut per-frame UI layout cost — structural bevy_ui floor
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))

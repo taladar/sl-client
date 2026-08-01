@@ -77,6 +77,7 @@
 //! `llresizehandle.cpp` (`Resize_Corner`, `RESIZE_HANDLE_WIDTH = 11`),
 //! `llmultifloater.cpp` (docking / tear-off).
 
+use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -181,6 +182,7 @@ impl Plugin for FloaterPlugin {
             .add_systems(
                 Update,
                 (
+                    build_deferred_floater_content,
                     close_active_floater_shortcut,
                     apply_floater_commands,
                     // Clamp the (drag-updated) position *before* it is written to
@@ -549,6 +551,80 @@ pub(crate) struct FloaterHandle {
     /// floater's own active/inactive recolour only touches its colour, not its
     /// text, so the two coexist.
     pub(crate) title_text: Entity,
+}
+
+/// Deferred first-open content for a floater that spawns only its **chrome**
+/// at startup (`viewer-perf-ui-layout-per-frame-relayout`).
+///
+/// A hidden (`Display::None`) floater is skipped by taffy's layout maths but
+/// still walked every frame by bevy_ui's unconditional traversals (layout
+/// geometry, stack rebuild, clipping) and bevy_flair's style sweep — the live
+/// census put ~2300 of ~2600 UI nodes inside startup-hidden floaters. So the
+/// heavyweight ones build their content only when first opened: the Startup
+/// spawn puts this component on the floater root, holding a registered
+/// one-shot **content builder** (`commands.register_system(build_x_content)` —
+/// a full system, so a builder can take whatever params it needs, e.g.
+/// `Assets<Image>` for the world map) plus the chrome [`FloaterHandle`] to
+/// build into.
+///
+/// [`build_deferred_floater_content`] runs the builder on the first
+/// `UiPanelShown(true)` and removes this component — content is built **once**
+/// and kept alive thereafter (floaters are build-once, update-in-place; a
+/// close merely hides). The builder ends by inserting the module's `XUi`
+/// resource, exactly as the old startup build did — consumers of those
+/// resources already handle the pre-insert `None`, and data-driven populate
+/// systems (the conversations tab strip, the People panes) poll for the
+/// resource and start up on their own once it appears.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct DeferredFloaterContent {
+    /// The registered one-shot content builder, run with [`Self::handle`].
+    pub(crate) builder: SystemId<In<FloaterHandle>>,
+    /// The chrome handle the builder parents the content into.
+    pub(crate) handle: FloaterHandle,
+}
+
+/// Build a deferred floater's content on its first open: on a [`UiPanelShown`]
+/// flip to shown, run the registered builder once and drop the deferral
+/// marker.
+pub(crate) fn build_deferred_floater_content(
+    mut commands: Commands,
+    pending: Query<(Entity, &UiPanelShown, &DeferredFloaterContent), Changed<UiPanelShown>>,
+) {
+    for (entity, shown, deferred) in &pending {
+        if !shown.0 {
+            continue;
+        }
+        commands.entity(entity).remove::<DeferredFloaterContent>();
+        commands.run_system_with(deferred.builder, deferred.handle);
+    }
+}
+
+/// Look up a live floater's root entity by its stable [`Floater::id`].
+///
+/// The by-id lookup is how the openers (bottom toolbar, top menu bar) reach a
+/// floater whose module `XUi` resource does not exist yet: a deferred floater
+/// has chrome (and so a [`Floater`]) from startup, but its resource only
+/// appears on first open — an opener that waited for the resource could never
+/// perform that first open.
+pub(crate) fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> Option<Entity> {
+    floaters
+        .iter()
+        .find_map(|(entity, floater)| (floater.id == id).then_some(entity))
+}
+
+/// Toggle the floater with the given stable id, when its chrome exists — the
+/// shared open/close primitive for every by-id opener (toolbar, menu bar,
+/// module-internal open paths).
+pub(crate) fn toggle_floater(
+    floaters: &Query<(Entity, &Floater)>,
+    panels: &mut Query<&mut UiPanelShown>,
+    id: &str,
+) {
+    if let Some(panel) = floater_panel(floaters, id)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
+        shown.0 = !shown.0;
+    }
 }
 
 /// **Spawn a live floater** under `root`, starting hidden.
@@ -1394,10 +1470,12 @@ pub(crate) fn spawn_floater_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveFloater, DefaultDockHost, FloaterCaps, FloaterCommand, FloaterOp, FloaterParts,
-        FloaterSpec, FloaterZTop, MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands,
-        apply_floater_content, apply_floater_glyphs, apply_floater_inset, clamp_position,
-        drag_position, highlight_active_floater, resize_size, spawn_floater,
+        ActiveFloater, DefaultDockHost, DeferredFloaterContent, Floater, FloaterCaps,
+        FloaterCommand, FloaterHandle, FloaterOp, FloaterParts, FloaterSpec, FloaterZTop,
+        MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
+        apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content, clamp_position,
+        drag_position, floater_panel, highlight_active_floater, resize_size, spawn_floater,
+        toggle_floater,
     };
     use crate::ui::{UiDirection, UiPanelShown, UiRoot};
     use bevy::prelude::*;
@@ -1420,6 +1498,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
+                    build_deferred_floater_content,
                     apply_floater_commands,
                     apply_floater_inset,
                     apply_floater_content,
@@ -1695,6 +1774,86 @@ mod tests {
             Some(second),
             "the last floater raised is the active one"
         );
+        Ok(())
+    }
+
+    /// Marker the test content builder puts on the one node it spawns.
+    #[derive(Component)]
+    struct TestContent;
+
+    /// Marker resource the test content builder inserts (standing in for a
+    /// module's `XUi`).
+    #[derive(Resource)]
+    struct TestContentBuilt;
+
+    /// The stand-in for a module's first-open content builder.
+    fn build_test_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
+        commands.spawn((Node::default(), TestContent, ChildOf(handle.content)));
+        commands.insert_resource(TestContentBuilt);
+    }
+
+    /// The deferred-content lifecycle: chrome-only while closed (openable by
+    /// stable id even though no module resource exists), content built exactly
+    /// once on the first open, and kept alive — not rebuilt — across
+    /// close/reopen.
+    #[test]
+    fn deferred_content_builds_once_on_first_open() -> Result<(), TestError> {
+        let (mut app, root, _host) = floater_app();
+        let floater = spawn_one(&mut app, root);
+        let handle = {
+            let world = app.world();
+            let parts = world
+                .get::<FloaterParts>(floater)
+                .ok_or("the floater lost its parts")?;
+            FloaterHandle {
+                root: floater,
+                content: parts.content,
+                title_text: parts.title_text,
+            }
+        };
+        let builder = app.world_mut().register_system(build_test_content);
+        app.world_mut()
+            .entity_mut(floater)
+            .insert(DeferredFloaterContent { builder, handle });
+        app.update();
+
+        // Closed: chrome only — no content, no resource, but the by-id lookup
+        // (the opener's path) finds the panel.
+        assert!(!app.world().contains_resource::<TestContentBuilt>());
+        {
+            let world = app.world_mut();
+            let mut state = bevy::ecs::system::SystemState::<(
+                Query<(Entity, &Floater)>,
+                Query<&mut UiPanelShown>,
+            )>::new(world);
+            let (floaters_query, mut panels) = state.get_mut(world)?;
+            assert_eq!(floater_panel(&floaters_query, "test"), Some(floater));
+            // The opener: toggle by id (first open).
+            toggle_floater(&floaters_query, &mut panels, "test");
+        }
+        app.update();
+
+        // Open: built exactly once, deferral marker gone.
+        assert!(app.world().contains_resource::<TestContentBuilt>());
+        assert!(app.world().get::<DeferredFloaterContent>(floater).is_none());
+        let mut content = app.world_mut().query_filtered::<(), With<TestContent>>();
+        assert_eq!(content.iter(app.world()).count(), 1);
+
+        // Close and reopen: still exactly one content node (kept alive, not
+        // rebuilt).
+        for _ in 0..2 {
+            let world = app.world_mut();
+            let mut state = bevy::ecs::system::SystemState::<(
+                Query<(Entity, &Floater)>,
+                Query<&mut UiPanelShown>,
+            )>::new(world);
+            let (floaters_query, mut panels) = state.get_mut(world)?;
+            toggle_floater(&floaters_query, &mut panels, "test");
+            state.apply(world);
+            app.update();
+        }
+        let mut content = app.world_mut().query_filtered::<(), With<TestContent>>();
+        assert_eq!(content.iter(app.world()).count(), 1);
         Ok(())
     }
 }
