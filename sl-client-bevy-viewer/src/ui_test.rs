@@ -1160,6 +1160,154 @@ mod tests {
         );
     }
 
+    /// An inventory row's label, longer than the row is wide, must draw on a
+    /// **single line** clipped at the row bounds, and its clip box must report
+    /// the overflow that reveals the trailing `…` marker — while a short name
+    /// stays one line and reveals nothing (`viewer-inventory-long-names-wrap-\
+    /// overlap`).
+    ///
+    /// Two things are asserted against real layout with the real font:
+    ///
+    /// 1. **No wrap.** The over-long name in the real (`label_clip_node` +
+    ///    `TextLayout::no_wrap`) column comes out one line, and — self-calibrating,
+    ///    like the padding pair above — clearly shorter than the *same* name in a
+    ///    plain wrapping column, so the test has teeth (it would not pass vacuously
+    ///    if the name happened to fit).
+    /// 2. **Ellipsis trigger.** `ellipsis_visible` is true for the clip holding
+    ///    the long name (its content is wider than its shrunk box) and false for a
+    ///    clip holding a short one — the exact condition
+    ///    `apply_inventory_row_ellipsis` toggles the marker on.
+    #[test]
+    fn a_long_inventory_row_label_clips_and_flags_the_ellipsis() {
+        use crate::inventory::{ellipsis_visible, label_clip_node};
+
+        /// A name far wider than the bounded row, so wrapping (if it happened)
+        /// would take several lines and the clip must overflow.
+        const LONG_NAME: &str = "A ridiculously long inventory item name that is very much \
+                                 wider than the inventory panel row could ever hope to be";
+        /// A name that easily fits the column — no overflow, no marker.
+        const SHORT_NAME: &str = "Hat";
+        /// The row's bounded width and the font, mirroring the real row.
+        const ROW_WIDTH: f32 = 340.0;
+        const FONT_SIZE: f32 = 14.0;
+
+        /// Build one bounded flex row (icon spacer + a label column + a short
+        /// suffix), returning the label `Text` and its clip container entities.
+        fn spawn_row(
+            app: &mut App,
+            root: Entity,
+            name: &str,
+            label_column: Node,
+            no_wrap: bool,
+        ) -> (Entity, Entity) {
+            let row = app
+                .world_mut()
+                .spawn((
+                    Node {
+                        width: Val::Px(ROW_WIDTH),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    },
+                    ChildOf(root),
+                ))
+                .id();
+            // An icon spacer, so the label column has to share the row's width.
+            app.world_mut().spawn((
+                Node {
+                    min_width: Val::Px(20.0),
+                    ..default()
+                },
+                ChildOf(row),
+            ));
+            let clip = app.world_mut().spawn((label_column, ChildOf(row))).id();
+            let mut label =
+                app.world_mut()
+                    .spawn((Text::new(name), UiFont::Sans.at(FONT_SIZE), ChildOf(clip)));
+            if no_wrap {
+                // The text keeps its full width (as the real row does), so the
+                // clip is what shrinks and reports the overflow.
+                label.insert((
+                    TextLayout::no_wrap(),
+                    Node {
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ));
+            }
+            let label = label.id();
+            // A short trailing decoration, as the real row carries.
+            app.world_mut().spawn((
+                Text::new("(worn)"),
+                UiFont::Sans.at(FONT_SIZE),
+                ChildOf(row),
+            ));
+            (label, clip)
+        }
+
+        let test = LayoutTest::new();
+        let mut app = test.build();
+        settle(&mut app);
+        let root = app.world().resource::<crate::ui::UiRoot>().0;
+
+        // The real column: shrink-and-clip container + a no-wrap label.
+        let (fixed, fixed_clip) = spawn_row(&mut app, root, LONG_NAME, label_clip_node(), true);
+        // The same name in a plain wrapping column, to calibrate the no-wrap claim.
+        let (wrapping, _) = spawn_row(
+            &mut app,
+            root,
+            LONG_NAME,
+            Node {
+                min_width: Val::Px(0.0),
+                ..default()
+            },
+            false,
+        );
+        // A short name in the real column — must not overflow.
+        let (_short, short_clip) = spawn_row(&mut app, root, SHORT_NAME, label_clip_node(), true);
+        settle(&mut app);
+
+        let height = |app: &mut App, entity: Entity| -> f32 {
+            app.world()
+                .entity(entity)
+                .get::<ComputedNode>()
+                .map(|computed| computed.size.y * computed.inverse_scale_factor)
+                .unwrap_or_default()
+        };
+        let fixed_h = height(&mut app, fixed);
+        let wrapping_h = height(&mut app, wrapping);
+
+        // One line at 14 px is ~18 px; two lines are ~36. The fixed label must
+        // be a single line — comfortably under a line and a half.
+        assert!(
+            fixed_h < FONT_SIZE * 1.5,
+            "the no-wrap inventory label wrapped: {fixed_h} logical px tall (expected ~one line)"
+        );
+        // And the calibration must have actually wrapped, or the test proves
+        // nothing: the plain column takes several lines for the same name.
+        assert!(
+            wrapping_h > fixed_h + FONT_SIZE,
+            "the plain column did not wrap ({wrapping_h} vs {fixed_h} logical px), so this test \
+             would pass even without the fix — widen `LONG_NAME` or narrow `ROW_WIDTH`"
+        );
+
+        // The overflow condition that reveals / hides the `…` marker.
+        let overflows = |app: &App, entity: Entity| -> bool {
+            app.world()
+                .entity(entity)
+                .get::<ComputedNode>()
+                .is_some_and(ellipsis_visible)
+        };
+        assert!(
+            overflows(&app, fixed_clip),
+            "the long label must overflow its clip, so the `…` marker shows"
+        );
+        assert!(
+            !overflows(&app, short_clip),
+            "the short label fits its clip, so the `…` marker stays hidden"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // The matrix. Every registered element, in every cell.
     // -----------------------------------------------------------------------

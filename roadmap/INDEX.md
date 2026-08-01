@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 15 |
-| done | 651 |
+| bugs | 13 |
+| done | 653 |
 | deferred | 20 |
 | wont-do | 6 |
 | **total** | **1130** |
@@ -1123,7 +1123,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (15)
+## bugs (13)
 
 ### protocol
 
@@ -1142,10 +1142,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
-- [`viewer-inventory-clothing-layers-shirt-icon`](bugs/viewer-inventory-clothing-layers-shirt-icon.md)
-  — All clothing layers show the shirt icon instead of per-type icons
-- [`viewer-inventory-long-names-wrap-overlap`](bugs/viewer-inventory-long-names-wrap-overlap.md)
-  — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-inventory-worn-markers-show-early`](bugs/viewer-inventory-worn-markers-show-early.md)
   — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1169,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (651)
+## done (653)
 
 ### protocol
 
@@ -1428,6 +1424,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-attach-to-point`](done/viewer-inventory-attach-to-point.md)
   — "Attach To ▸ / Attach To HUD ▸ attachment-point submenus"
+- [`viewer-inventory-clothing-layers-shirt-icon`](done/viewer-inventory-clothing-layers-shirt-icon.md)
+  — All clothing layers show the shirt icon instead of per-type icons
 - [`viewer-inventory-cof-maintenance`](done/viewer-inventory-cof-maintenance.md)
   — Maintain COF links on wear / detach (accurate worn state)
 - [`viewer-inventory-context-actions`](done/viewer-inventory-context-actions.md)
@@ -1446,6 +1444,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-give-via-profile`](done/viewer-inventory-give-via-profile.md)
   — Give inventory by dropping onto a profile (blocked by
   `viewer-social-profiles` (done))
+- [`viewer-inventory-long-names-wrap-overlap`](done/viewer-inventory-long-names-wrap-overlap.md)
+  — Inventory rows with long names wrap to multiple lines and overlap
 - [`viewer-inventory-materials-not-shown`](done/viewer-inventory-materials-not-shown.md)
   — Material inventory items are not shown in the inventory window
 - [`viewer-inventory-multi-select-actions`](done/viewer-inventory-multi-select-actions.md)

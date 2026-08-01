@@ -51,7 +51,7 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use crate::i18n::Translated;
+use crate::i18n::{LocaleEllipsisMarker, Translated};
 use crate::menu::{MenuCommand, MenuConditions, MenuDef, MenuItemDef};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
@@ -130,6 +130,15 @@ const CHROME_FONT_SIZE: f32 = 14.0;
 /// A tree row's font size, in logical pixels.
 const ROW_FONT_SIZE: f32 = 14.0;
 
+/// The ellipsis shown on a truncated row label before any locale bundle has
+/// resolved `i18n`'s `ui-ellipsis` — the Latin single ellipsis, matching the
+/// table cells' and tab strips' default.
+const FALLBACK_ELLIPSIS: &str = "\u{2026}";
+
+/// The gap between a clipped row label and its trailing `…` marker, in logical
+/// pixels (mirrors the table cells' `ELLIPSIS_GAP`).
+const ELLIPSIS_GAP: f32 = 2.0;
+
 /// A selected row's background.
 const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
@@ -188,6 +197,12 @@ impl Plugin for InventoryPlugin {
                 )
                     .chain()
                     .after(layout_virtual_lists),
+            )
+            // The `…` marker toggles from the just-measured clip overflow, so it
+            // runs after layout — like the table cells' equivalent.
+            .add_systems(
+                PostUpdate,
+                apply_inventory_row_ellipsis.after(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -244,6 +259,9 @@ struct RecentItem {
     name: String,
     /// The inventory type, for the icon.
     inv_type: InventoryType,
+    /// The item flags, whose low byte carries a wearable's sub-type for the
+    /// per-`WearableType` icon.
+    flags: u32,
 }
 
 impl InventoryModel {
@@ -486,7 +504,13 @@ impl InventoryModel {
     }
 
     /// Record an item as recently received, newest first, deduped and bounded.
-    fn push_recent(&mut self, key: InventoryKey, name: String, inv_type: InventoryType) {
+    fn push_recent(
+        &mut self,
+        key: InventoryKey,
+        name: String,
+        inv_type: InventoryType,
+        flags: u32,
+    ) {
         if self.recent_seen.contains(&key) {
             return;
         }
@@ -497,6 +521,7 @@ impl InventoryModel {
                 key,
                 name,
                 inv_type,
+                flags,
             },
         );
         self.recent.truncate(RECENT_LIMIT);
@@ -796,7 +821,12 @@ impl InventoryModel {
                 && (needle.is_empty() || item.name.to_lowercase().contains(needle))
                 && !filter_active
             {
-                rows.push(item_row(item.key, &item.name, item.inv_type, 0));
+                rows.push(item_row(
+                    item.key,
+                    &item.name,
+                    item_glyph(item.inv_type, item.flags),
+                    0,
+                ));
             }
         }
         rows
@@ -819,8 +849,8 @@ impl InventoryModel {
     /// Keying off contents would flash the legacy system defaults on the Worn
     /// tab during either window; keying off existence shows an empty Worn tab
     /// for that instant instead, then the real outfit — never the phantoms.
-    fn worn_item_keys(&self) -> Vec<(InventoryKey, String, InventoryType)> {
-        let mut keys: Vec<(InventoryKey, String, InventoryType)> = Vec::new();
+    fn worn_item_keys(&self) -> Vec<(InventoryKey, String, &'static str)> {
+        let mut keys: Vec<(InventoryKey, String, &'static str)> = Vec::new();
         let mut seen: HashSet<InventoryKey> = HashSet::new();
         if let Some(cof) = self.cof {
             for entry in self.items_of(cof) {
@@ -832,19 +862,27 @@ impl InventoryModel {
                     entry.item_id
                 };
                 if seen.insert(target) {
-                    keys.push((target, entry.name.clone(), entry.inv_type));
+                    // Prefer the target item's own flags for the wearable
+                    // sub-type icon; fall back to the link entry's when the
+                    // target is not loaded (this is the unplaced-tail path).
+                    let icon = self.find_item(target).map_or_else(
+                        || item_glyph(entry.inv_type, entry.flags),
+                        |info| item_glyph(info.inv_type, info.flags),
+                    );
+                    keys.push((target, entry.name.clone(), icon));
                 }
             }
             return keys;
         }
         // No COF at all (a grid that does not use the Current Outfit Folder):
-        // fall back to the legacy `AgentWearables` set.
+        // fall back to the legacy `AgentWearables` set, whose entries carry the
+        // wearable type directly.
         for worn in &self.wearables {
             if seen.insert(worn.item_id) {
                 keys.push((
                     worn.item_id,
                     wearable_label(worn.wearable_type).to_owned(),
-                    InventoryType::Wearable,
+                    wearable_icon(worn.wearable_type),
                 ));
             }
         }
@@ -968,9 +1006,9 @@ impl InventoryModel {
             }
         }
         // The flat tail: worn items whose place in the tree is not loaded yet.
-        for (key, name, inv_type) in worn_keys {
+        for (key, name, icon) in worn_keys {
             if !placed.contains(&key) && matches(&name) {
-                rows.push(item_row(key, &name, inv_type, 0));
+                rows.push(item_row(key, &name, icon, 0));
             }
         }
         rows
@@ -1026,13 +1064,15 @@ fn item_matches(item: &ItemInfo, needle: &str, passes: &dyn Fn(&ItemInfo) -> boo
 }
 
 /// Build an item's display row at a given depth, undecorated (used where no
-/// [`ItemInfo`] is held — a Recent entry or an unplaced worn item).
-fn item_row(key: InventoryKey, name: &str, inv_type: InventoryType, depth: usize) -> DisplayRow {
+/// [`ItemInfo`] is held — a Recent entry or an unplaced worn item). The icon
+/// glyph is precomputed by the caller (via [`item_glyph`]) since the type-only
+/// icon cannot refine a wearable to its sub-type.
+fn item_row(key: InventoryKey, name: &str, icon: &'static str, depth: usize) -> DisplayRow {
     DisplayRow {
         key: RowKey::Item(key),
         depth,
         name: name.to_owned(),
-        icon: item_icon(inv_type),
+        icon,
         arrow: RowArrow::Leaf,
         suffix: String::new(),
         bold: false,
@@ -1048,7 +1088,7 @@ fn decorated_item_row(item: &ItemInfo, depth: usize, worn: &HashSet<InventoryKey
         key: RowKey::Item(item.item_id),
         depth,
         name: item.name.clone(),
-        icon: item_icon(item.inv_type),
+        icon: item_glyph(item.inv_type, item.flags),
         arrow: RowArrow::Leaf,
         suffix: item_suffix(item, is_worn),
         bold: is_worn,
@@ -1710,6 +1750,50 @@ pub(crate) const fn item_icon(inv_type: InventoryType) -> &'static str {
     }
 }
 
+/// The glyph for an inventory item, refining a clothing / body-part wearable to
+/// its per-[`WearableType`] icon. The reference viewer keys a wearable's icon on
+/// its type (`LLInventoryIcon`'s clothing / body-part sub-tables), which for an
+/// inventory item lives in the low byte of the item flags (LL's
+/// `II_FLAGS_SUBTYPE_MASK`). Non-wearable items key on the inventory type alone.
+pub(crate) fn item_glyph(inv_type: InventoryType, flags: u32) -> &'static str {
+    if matches!(inv_type, InventoryType::Wearable) {
+        let subtype = u8::try_from(flags & 0xff).unwrap_or_default();
+        wearable_icon(WearableType::from_code(subtype))
+    } else {
+        item_icon(inv_type)
+    }
+}
+
+/// A distinct emoji glyph per wearable slot, standing in for the reference
+/// viewer's per-type clothing / body-part icon textures (which we do not ship).
+/// Body parts (shape / skin / hair / eyes) and every clothing layer each read at
+/// a glance rather than collapsing to a single shirt.
+const fn wearable_icon(wearable_type: WearableType) -> &'static str {
+    match wearable_type {
+        // Body parts.
+        WearableType::Shape => "\u{1f9cd}", // 🧍 person standing
+        WearableType::Skin => "\u{1f9d1}",  // 🧑 person
+        WearableType::Hair => "\u{1f487}",  // 💇 haircut
+        WearableType::Eyes => "\u{1f440}",  // 👀 eyes
+        // Clothing layers.
+        WearableType::Shirt => "\u{1f455}",          // 👕 t-shirt
+        WearableType::Pants => "\u{1f456}",          // 👖 jeans
+        WearableType::Shoes => "\u{1f45f}",          // 👟 running shoe
+        WearableType::Socks => "\u{1f9e6}",          // 🧦 socks
+        WearableType::Jacket => "\u{1f9e5}",         // 🧥 coat
+        WearableType::Gloves => "\u{1f9e4}",         // 🧤 gloves
+        WearableType::Undershirt => "\u{1f3bd}",     // 🎽 running shirt
+        WearableType::Underpants => "\u{1fa72}",     // 🩲 briefs
+        WearableType::Skirt => "\u{1f457}",          // 👗 dress
+        WearableType::Alpha => "\u{1fae5}",          // 🫥 dotted-line face
+        WearableType::Tattoo => "\u{1f58b}\u{fe0f}", // 🖋️ fountain pen
+        WearableType::Physics => "\u{269b}\u{fe0f}", // ⚛️ atom
+        WearableType::Universal => "\u{1f310}",      // 🌐 globe
+        // An unknown / future wearable slot.
+        _ => "\u{1f9f5}", // 🧵 spool of thread
+    }
+}
+
 /// The emoji glyph for a folder, keyed on its type (with a distinct open glyph
 /// when expanded) — trash, current outfit, favourites and the rest read at a
 /// glance; a plain folder is the default.
@@ -1885,6 +1969,7 @@ fn ingest_inventory(
                         item.item_id,
                         item.name.clone(),
                         InventoryType::from_code(i32::from(item.inv_type)),
+                        item.flags,
                     );
                     // A bulk update is how a paste-copy, a give, or a created
                     // item lands; re-query its folder (if we hold it) so the
@@ -1899,6 +1984,7 @@ fn ingest_inventory(
                     item.item_id,
                     item.name.clone(),
                     InventoryType::from_code(i32::from(item.inv_type)),
+                    item.flags,
                 );
                 // The session cached the fresh item; re-query its folder so
                 // the tree shows it immediately (a New Notecard / Script /
@@ -2232,11 +2318,44 @@ struct RowParts {
     arrow: Entity,
     /// The type-icon glyph.
     icon: Entity,
+    /// The clip box the label sits in — its overflow drives the `…` marker.
+    label_clip: Entity,
     /// The label text.
     label: Entity,
+    /// The trailing `…` marker, revealed when the label overflows its clip.
+    ellipsis: Entity,
     /// The trailing decoration text (permissions / link / worn), dimmer than
     /// the label.
     suffix: Entity,
+}
+
+/// Whether a row's label overflows its clip box, so the trailing `…` marker
+/// should be revealed. The label `Text` is no-wrap and does not shrink, so when
+/// the name is wider than the (shrunk) clip the clip reports a `content_size`
+/// wider than its own `size` — the same overflow test the table cells use
+/// ([`crate::ui_table`]'s `apply_table_cell_ellipsis`). Pure so it is
+/// unit-testable without a running layout.
+pub(crate) fn ellipsis_visible(clip: &ComputedNode) -> bool {
+    clip.content_size.x > clip.size.x + f32::EPSILON
+}
+
+/// The `Node` for a row's label column: a clip box that **shrinks** to the
+/// width left over in the row (`min_width: 0`, no `flex_grow`, so a short name
+/// still sits at content width with its decorations right after it) and
+/// **clips** its overflow. Paired with a [`TextLayout::no_wrap`] label child,
+/// this is what keeps a name wider than the row on a single line with its tail
+/// hidden — instead of wrapping onto extra lines that, in a fixed-height row,
+/// overlap the neighbouring rows (`viewer-inventory-long-names-wrap-overlap`).
+/// The clip and the shrink live here, on the container, so the `Text` child
+/// stays bare and dodges the text-measure width loss
+/// (`viewer-text-node-padding-measure`).
+pub(crate) fn label_clip_node() -> Node {
+    Node {
+        min_width: Val::Px(0.0),
+        overflow: Overflow::clip(),
+        align_items: AlignItems::Center,
+        ..default()
+    }
 }
 
 /// Build the inner structure of a freshly-pooled row (once), and wire its click.
@@ -2296,11 +2415,47 @@ fn populate_new_rows(
                 ChildOf(row_entity),
             ))
             .id();
+        // The label sits in a shrink-and-clip container (see `label_clip_node`)
+        // with a no-wrap `Text` child, so a name wider than the row draws on a
+        // single line with its tail hidden rather than wrapping into the rows
+        // above and below.
+        let label_clip = commands
+            .spawn((label_clip_node(), Pickable::IGNORE, ChildOf(row_entity)))
+            .id();
         let label = commands
             .spawn((
                 Text::new(""),
+                TextLayout::no_wrap(),
                 UiFont::Sans.at(ROW_FONT_SIZE),
                 TextColor(LABEL_COLOR),
+                // The text keeps its full width; the clip container is what
+                // shrinks, so an over-long name overflows the clip and reveals
+                // the marker below.
+                Node {
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ChildOf(label_clip),
+            ))
+            .id();
+        // The trailing `…` marker, between the clipped label and the decoration,
+        // hidden until `apply_inventory_row_ellipsis` reveals it on overflow. It
+        // carries `LocaleEllipsisMarker`, so `i18n` sets its localised glyph.
+        let ellipsis = commands
+            .spawn((
+                Text::new(FALLBACK_ELLIPSIS.to_owned()),
+                TextLayout::no_wrap(),
+                UiFont::Sans.at(ROW_FONT_SIZE),
+                TextColor(LABEL_COLOR),
+                Node {
+                    display: Display::None,
+                    flex_shrink: 0.0,
+                    margin: UiRect::left(Val::Px(ELLIPSIS_GAP)),
+                    ..default()
+                },
+                LocaleEllipsisMarker,
+                Pickable::IGNORE,
                 ChildOf(row_entity),
             ))
             .id();
@@ -2318,7 +2473,9 @@ fn populate_new_rows(
                 indent,
                 arrow,
                 icon,
+                label_clip,
                 label,
+                ellipsis,
                 suffix,
             })
             .observe(on_row_press)
@@ -2395,6 +2552,33 @@ fn bind_rows(
         }
         if let Ok((mut text, _color)) = texts.get_mut(parts.suffix) {
             set_text(&mut text, &display.suffix);
+        }
+    }
+}
+
+/// Reveal or hide each row's trailing `…` marker from whether its label overflows
+/// its clip box ([`ellipsis_visible`]) — the same mechanism the table cells use.
+/// The marker itself carries [`crate::i18n::LocaleEllipsisMarker`], so `i18n`
+/// localises its glyph; this system only toggles its `Display`. Runs after layout
+/// (in `PostUpdate`) so it reads the freshly measured clip box.
+fn apply_inventory_row_ellipsis(
+    rows: Query<&RowParts>,
+    clips: Query<&ComputedNode>,
+    mut markers: Query<&mut Node>,
+) {
+    for parts in &rows {
+        let Ok(clip) = clips.get(parts.label_clip) else {
+            continue;
+        };
+        let wanted = if ellipsis_visible(clip) {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if let Ok(mut marker) = markers.get_mut(parts.ellipsis)
+            && marker.display != wanted
+        {
+            marker.display = wanted;
         }
     }
 }
@@ -3057,7 +3241,7 @@ fn spawn_sample_row(
 mod tests {
     use super::{
         DisplayRow, InventoryModel, InventoryTab, InventoryType, ItemInfo, RowArrow, RowKey,
-        depth_indent, folder_icon, item_icon, item_suffix,
+        depth_indent, folder_icon, item_glyph, item_icon, item_suffix,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{FolderInfo, FolderState, FolderType, Permissions};
@@ -3373,11 +3557,13 @@ mod tests {
             sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(10)),
             "Blue shirt".to_owned(),
             InventoryType::Wearable,
+            u32::from(sl_client_bevy::WearableType::Shirt.to_code()),
         );
         model.push_recent(
             sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(0x99)),
             "Unplaced".to_owned(),
             InventoryType::Object,
+            0,
         );
         let rows = build(&model, InventoryTab::Recent, "", &HashSet::new());
         assert_eq!(
@@ -3398,9 +3584,9 @@ mod tests {
         let mut model = InventoryModel::default();
         let a = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(100));
         let b = sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(101));
-        model.push_recent(a, "First".to_owned(), InventoryType::Object);
-        model.push_recent(b, "Second".to_owned(), InventoryType::Notecard);
-        model.push_recent(a, "First again".to_owned(), InventoryType::Object);
+        model.push_recent(a, "First".to_owned(), InventoryType::Object, 0);
+        model.push_recent(b, "Second".to_owned(), InventoryType::Notecard, 0);
+        model.push_recent(a, "First again".to_owned(), InventoryType::Object, 0);
         let rows = build(&model, InventoryTab::Recent, "", &HashSet::new());
         assert_eq!(names(&rows), vec!["Second", "First"]);
     }
@@ -3415,6 +3601,55 @@ mod tests {
         assert_eq!(
             folder_icon(FolderType::Trash, false),
             folder_icon(FolderType::Trash, true)
+        );
+    }
+
+    /// Every wearable slot resolves a distinct icon (the reference's per-type
+    /// clothing / body-part icons), rather than collapsing every clothing layer
+    /// to the shirt glyph. Exercised through `item_glyph`, which reads the
+    /// sub-type from the low byte of the item flags the way a wire item carries
+    /// it.
+    #[test]
+    fn wearable_icons_are_per_type() {
+        use sl_client_bevy::WearableType;
+        let types = [
+            WearableType::Shape,
+            WearableType::Skin,
+            WearableType::Hair,
+            WearableType::Eyes,
+            WearableType::Shirt,
+            WearableType::Pants,
+            WearableType::Shoes,
+            WearableType::Socks,
+            WearableType::Jacket,
+            WearableType::Gloves,
+            WearableType::Undershirt,
+            WearableType::Underpants,
+            WearableType::Skirt,
+            WearableType::Alpha,
+            WearableType::Tattoo,
+            WearableType::Physics,
+            WearableType::Universal,
+        ];
+        let icons: Vec<&'static str> = types
+            .iter()
+            .map(|wt| item_glyph(InventoryType::Wearable, u32::from(wt.to_code())))
+            .collect();
+        // All distinct: no two wearable types share a glyph.
+        for (i, a) in icons.iter().enumerate() {
+            for b in icons.iter().skip(i.saturating_add(1)) {
+                assert!(a != b, "duplicate wearable icon {a}");
+            }
+        }
+        // And in particular pants no longer render as the shirt glyph.
+        assert!(
+            item_glyph(
+                InventoryType::Wearable,
+                u32::from(WearableType::Pants.to_code())
+            ) != item_glyph(
+                InventoryType::Wearable,
+                u32::from(WearableType::Shirt.to_code())
+            )
         );
     }
 
