@@ -37,7 +37,9 @@ use crate::chat::LocalChatNotice;
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
 use crate::edit_params::set_disabled_class;
 use crate::edit_selection::SelectionSet;
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::input_context::InputContext;
@@ -53,6 +55,10 @@ use crate::web_floater::set_editor_text;
 
 /// The floater's font size, in logical pixels.
 pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
+
+/// The build-tools floater's stable [`crate::floater::Floater::id`], the key
+/// the openers (toolbar, menu bar, object pie) look the panel up by.
+pub(crate) const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
 
 /// The width of a numeric transform field, in `"0"`-glyph advances.
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
@@ -328,13 +334,6 @@ pub(crate) struct BuildToolsUi {
     tab_pages: [Entity; 5],
 }
 
-impl BuildToolsUi {
-    /// The floater root, for the menu-bar open state and toggle.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.panel
-    }
-}
-
 /// The tab-page container entities the per-aspect editors dock into, published
 /// by [`spawn_build_floater`] for the parameter-tab module
 /// ([`crate::edit_params`]) to populate.
@@ -367,9 +366,15 @@ impl Plugin for EditToolPlugin {
             .init_resource::<BuildFieldFocus>()
             .add_systems(
                 Startup,
-                (spawn_build_floater, crate::edit_params::spawn_param_tabs)
-                    .chain()
-                    .after(UiScaffoldSystems::SpawnRoot),
+                spawn_build_floater.after(UiScaffoldSystems::SpawnRoot),
+            )
+            // The parameter tabs fill the Build floater's pages once the
+            // lazily-built content publishes them ([`BuildTabPages`] appears on
+            // the floater's first open — `DeferredFloaterContent`); the texture
+            // / contents tabs order after this in their own plugins.
+            .add_systems(
+                Update,
+                crate::edit_params::spawn_param_tabs.run_if(resource_added::<BuildTabPages>),
             )
             // The two activation drivers stay ungated: `Ctrl+B` toggles the
             // floater and `mirror_floater_into_state` turns that shown/hidden
@@ -418,7 +423,7 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
         &mut commands,
         root,
         FloaterSpec {
-            id: "build-tools",
+            id: BUILD_TOOLS_FLOATER_ID,
             title: String::from("Build Tools"),
             position: Vec2::new(60.0, 80.0),
             // A definite, resizable content area (like the profile floater):
@@ -439,6 +444,18 @@ fn spawn_build_floater(mut commands: Commands, root: Option<Res<UiRoot>>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("build-tools-floater-title"));
+    let builder = commands.register_system(build_build_tools_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build for the Build Tools floater (see
+/// [`spawn_build_floater`] and
+/// [`DeferredFloaterContent`]): fill the content slot and insert
+/// [`BuildToolsUi`], whose appearance wakes its `Option<Res<BuildToolsUi>>`
+/// consumers.
+fn build_build_tools_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let content = commands
         .spawn((
             Node {
@@ -961,7 +978,7 @@ pub(crate) fn spawn_row_label(
 fn toggle_build_floater_on_ctrl_b(
     keyboard: Res<ButtonInput<KeyCode>>,
     context: Res<InputContext>,
-    ui: Option<Res<BuildToolsUi>>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut UiPanelShown>,
 ) {
     if *context == InputContext::TextEntry {
@@ -971,11 +988,9 @@ fn toggle_build_floater_on_ctrl_b(
     if !(ctrl && keyboard.just_pressed(KeyCode::KeyB)) {
         return;
     }
-    if let Some(ui) = ui
-        && let Ok(mut shown) = panels.get_mut(ui.panel)
-    {
-        shown.0 = !shown.0;
-    }
+    // By stable id, not `BuildToolsUi` — Ctrl+B may be the first open, before
+    // the lazily-built content (and so the resource) exists.
+    crate::floater::toggle_floater(&floaters, &mut panels, BUILD_TOOLS_FLOATER_ID);
 }
 
 /// Mirror the floater's visibility into [`EditToolState::active`] — an open

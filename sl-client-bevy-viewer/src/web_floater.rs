@@ -28,6 +28,10 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 /// The [`UiAction`] element name of the floater's toolbar.
 pub(crate) const WEB_BROWSER_ELEMENT: &str = "web-browser";
 
+/// The web-browser floater's stable [`crate::floater::Floater::id`], the key
+/// the openers (menu bar) look the panel up by.
+pub(crate) const WEB_FLOATER_ID: &str = "web-browser";
+
 /// The page a fresh floater opens on.
 const DEFAULT_HOME_URL: &str = "https://secondlife.com/";
 
@@ -72,13 +76,6 @@ pub(crate) struct WebFloaterUi {
     status_text: Entity,
 }
 
-impl WebFloaterUi {
-    /// The floater root, for the menu's open-state check.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.root
-    }
-}
-
 /// The web browser floater plugin.
 pub(crate) struct WebFloaterPlugin;
 
@@ -104,7 +101,7 @@ fn spawn_web_floater(mut commands: Commands, root: Res<UiRoot>) {
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "web-browser",
+            id: WEB_FLOATER_ID,
             title: String::from("Web Browser"),
             position: Vec2::new(160.0, 90.0),
             default_size: Some(Vec2::new(760.0, 520.0)),

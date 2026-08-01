@@ -45,7 +45,9 @@ use sl_client_bevy::{
 use sl_settings::{Scope, SettingValue};
 
 use crate::avatars::AvatarState;
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::minimap::{MapTracking, TrackTarget};
@@ -64,6 +66,10 @@ use crate::world_map_tiles::{TileKey, TileState, WorldMapTiles};
 
 /// The `element` tag the world map attributes its [`UiAction`]s to.
 pub(crate) const WORLD_MAP_ELEMENT: &str = "worldmap";
+
+/// The world-map floater's stable [`crate::floater::Floater::id`], the key the
+/// openers (toolbar, menu bar) look the panel up by.
+pub(crate) const WORLD_MAP_FLOATER_ID: &str = "worldmap";
 
 /// The settings section every world-map setting registers under.
 const WORLD_MAP_SECTION: &[&str] = &["worldmap"];
@@ -176,13 +182,6 @@ pub(crate) struct WorldMapUi {
     field_z: Entity,
     /// The pooled region-name label nodes (wrapper, text), grown on demand.
     labels: Vec<(Entity, Entity)>,
-}
-
-impl WorldMapUi {
-    /// The floater root, for open-state checks and toggling.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.root
-    }
 }
 
 /// Open the world-map floater centred on a global position — the hand-off
@@ -427,7 +426,6 @@ const MAX_LABELS: usize = 48;
 fn spawn_world_map(
     mut commands: Commands,
     root: Res<UiRoot>,
-    mut images: ResMut<Assets<Image>>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let position = windows.single().map_or(Vec2::new(120.0, 80.0), |window| {
@@ -440,7 +438,7 @@ fn spawn_world_map(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "worldmap",
+            id: WORLD_MAP_FLOATER_ID,
             title: String::from("World Map"),
             position,
             default_size: Some(DEFAULT_SIZE),
@@ -457,7 +455,19 @@ fn spawn_world_map(
     commands
         .entity(handle.title_text)
         .insert(Translated::new("worldmap-floater-title"));
+    let builder = commands.register_system(build_world_map_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
 
+/// First-open content build (see the chrome spawn above): the map surface and
+/// the search side panel, ending with the [`WorldMapUi`] insert.
+fn build_world_map_content(
+    In(handle): In<FloaterHandle>,
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+) {
     // The content row: the map surface (grows) and the search side panel.
     let content_row = commands
         .spawn((

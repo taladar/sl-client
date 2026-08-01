@@ -116,6 +116,7 @@ mod meshes;
 mod minimap;
 mod minimap_math;
 mod movement;
+mod name_tag_overlay;
 mod nearby_chat_bar;
 mod notification_host;
 mod notification_persist;
@@ -178,6 +179,7 @@ mod ui_combo;
 mod ui_element;
 mod ui_font;
 mod ui_name_link;
+mod ui_perf;
 mod ui_pseudoloc;
 mod ui_radio;
 mod ui_search;
@@ -1256,6 +1258,21 @@ fn run_session(
         PostUpdate,
         PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
     )
+    // Gate bevy_ui's unconditional full-tree stack rebuild and layout walk
+    // behind "did any of that system's inputs actually change (visibly)"
+    // (viewer-perf-ui-layout-per-frame-relayout); each gated system is its
+    // set's sole member, so this needs no fork. The conditions and their
+    // rationale live in `crate::ui_perf`.
+    .configure_sets(
+        PostUpdate,
+        bevy::ui::UiSystems::Stack.run_if(ui_perf::ui_stack_dirty),
+    )
+    .configure_sets(
+        PostUpdate,
+        bevy::ui::UiSystems::Layout.run_if(ui_perf::ui_layout_dirty),
+    )
+    // `SL_VIEWER_LOG_UI_DIRTY=1` names what tripped the layout gate per frame.
+    .add_plugins(ui_perf::UiPerfDiagnosticsPlugin)
     // Frame-time / FPS instruments — the smoothed FPS the status area
     // (`crate::status_bar`) shows and the frame budget the fetch/decode pipeline
     // work is watched against.
@@ -1412,6 +1429,10 @@ fn run_session(
                 // likewise parented to the scaffold's `UiRoot`.
                 setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
                 setup_avatar_body,
+                // The screen-space Text2d overlay camera avatar name tags render
+                // on, keeping them out of the bevy_ui tree
+                // (viewer-perf-ui-layout-per-frame-relayout).
+                name_tag_overlay::spawn_name_tag_overlay_camera,
                 // P35.1: the screen-space HUD screen + its attachment-point nodes, which
                 // a worn HUD is routed onto instead of a body joint.
                 setup_hud_screen,

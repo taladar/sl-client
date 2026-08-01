@@ -25,13 +25,15 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{InventoryType, ItemInfo};
 
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
+};
 use crate::i18n::Translated;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
-const FILTERS_FLOATER_ID: &str = "inventory-filters";
+pub(crate) const FILTERS_FLOATER_ID: &str = "inventory-filters";
 
 /// The chrome font size, in logical pixels.
 const FILTER_FONT_SIZE: f32 = 14.0;
@@ -354,19 +356,10 @@ impl InventoryFilterState {
 /// Entity handles for the floater's parts.
 #[derive(Resource)]
 pub(crate) struct InventoryFiltersUi {
-    /// The floater root (carries [`UiPanelShown`]).
-    panel: Entity,
     /// The hours numeric field.
     hours_field: Entity,
     /// The days numeric field.
     days_field: Entity,
-}
-
-impl InventoryFiltersUi {
-    /// The floater's panel root, for the gear menu's Show Filters toggle.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.panel
-    }
 }
 
 /// A type toggle row, tagged with the box it flips.
@@ -432,6 +425,15 @@ fn spawn_filters_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("inventory-filters-title"));
+    let builder = commands.register_system(build_filters_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build (see the chrome spawn above): the type boxes and
+/// date controls, ending with the [`InventoryFiltersUi`] insert.
+fn build_filters_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let content = handle.content;
 
     // The thirteen type boxes, in the reference finder's order.
@@ -591,7 +593,6 @@ fn spawn_filters_floater(mut commands: Commands, root: Res<UiRoot>) {
     );
 
     commands.insert_resource(InventoryFiltersUi {
-        panel: handle.root,
         hours_field,
         days_field,
     });

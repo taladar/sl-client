@@ -73,7 +73,7 @@ use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport, layout_virtual_lists};
 
 /// The stable id of the picker's floater, keying its persisted geometry.
-const EMOJI_FLOATER_ID: &str = "emoji-picker";
+pub(crate) const EMOJI_FLOATER_ID: &str = "emoji-picker";
 
 /// The `Ctrl` chord key that toggles the picker open / closed. The reference
 /// viewer opens it from the chat bar's emoji button; until that field-side button

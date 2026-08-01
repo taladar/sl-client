@@ -55,7 +55,10 @@ use sl_client_bevy::{
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatars::AvatarState;
 use crate::environment::EnvironmentState;
-use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::floater::{
+    DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
+    spawn_floater,
+};
 use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
@@ -695,9 +698,11 @@ impl AccessScope {
 
 /// The floater's live entity handles.
 #[derive(Resource, Debug)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "one per-tab handle group per field; the shared postfix is the point"
+)]
 struct AboutLandUi {
-    /// The floater root (carries `UiPanelShown`).
-    panel: Entity,
     /// The General tab's handles.
     general_handles: GeneralHandles,
     /// The Covenant tab's handles.
@@ -805,13 +810,18 @@ impl Plugin for AboutLandPlugin {
 // Spawn.
 // ---------------------------------------------------------------------------
 
-/// Spawn the (hidden) About Land floater and build every tab once.
+/// The About Land floater's stable [`crate::floater::Floater::id`], the key
+/// [`open_about_land`] looks the panel up by.
+const ABOUT_LAND_FLOATER_ID: &str = "about-land";
+
+/// Spawn the (hidden) About Land floater's chrome; every tab is built once, on
+/// the first open ([`DeferredFloaterContent`]).
 fn spawn_about_land_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = spawn_floater(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "about-land",
+            id: ABOUT_LAND_FLOATER_ID,
             title: "About Land".to_owned(),
             position: Vec2::new(360.0, 80.0),
             default_size: Some(Vec2::new(500.0, 480.0)),
@@ -831,6 +841,18 @@ fn spawn_about_land_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(Translated::new("about-land-title"));
+    let builder = commands.register_system(build_about_land_content);
+    commands
+        .entity(handle.root)
+        .insert(DeferredFloaterContent { builder, handle });
+}
+
+/// First-open content build (see [`spawn_about_land_floater`]): the tab
+/// container and every tab, ending with the [`AboutLandUi`] insert whose
+/// appearance wakes the `Option<Res<AboutLandUi>>` populate systems (their
+/// [`AboutLandDirty`] flags persist until then, so an open that raced the
+/// build loses nothing).
+fn build_about_land_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     let labels: Vec<String> = [
         "about-land-tab-general",
         "about-land-tab-covenant",
@@ -874,7 +896,6 @@ fn spawn_about_land_floater(mut commands: Commands, root: Res<UiRoot>) {
     let environment_handles = build_environment_tab(&mut commands, panel(8));
 
     commands.insert_resource(AboutLandUi {
-        panel: handle.root,
         general_handles,
         covenant_handles,
         object_handles,
@@ -1370,7 +1391,7 @@ fn open_about_land(
     mut requests: MessageReader<OpenAboutLand>,
     mut state: ResMut<AboutLandState>,
     mut dirty: ResMut<AboutLandDirty>,
-    ui: Option<Res<AboutLandUi>>,
+    floaters: Query<(Entity, &Floater)>,
     identity: Res<SlIdentity>,
     parcels: Query<&SlParcel>,
     regions: Query<&Children, With<SlCurrentRegion>>,
@@ -1379,9 +1400,6 @@ fn open_about_land(
     mut commands: MessageWriter<SlCommand>,
 ) {
     let Some(request) = requests.read().last().copied() else {
-        return;
-    };
-    let Some(ui) = ui else {
         return;
     };
     state.reset(request.read_only);
@@ -1433,7 +1451,12 @@ fn open_about_land(
     commands.write(SlCommand(Command::RequestEstateCovenant));
     dirty.mark_all();
 
-    if let Ok(mut shown) = panels.get_mut(ui.panel) {
+    // By stable id, not `AboutLandUi` — this very open may be the first, which
+    // is what triggers the deferred content build; the populate systems then
+    // consume the dirty flags set above once the UI exists.
+    if let Some(panel) = floater_panel(&floaters, ABOUT_LAND_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
         shown.0 = true;
     }
 }

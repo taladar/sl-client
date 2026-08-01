@@ -36,8 +36,7 @@
 
 use bevy::prelude::*;
 
-use crate::conversations::ConversationsUi;
-use crate::inventory::InventoryUi;
+use crate::floater::toggle_floater;
 use crate::menu::{
     MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, PrimaryMenuBar,
     spawn_menu_bar,
@@ -323,50 +322,29 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 /// Cheap — one small `Vec` and only written on a real change — and read only
 /// when a menu opens ([`crate::menu`] rebuilds a popup from the conditions that
 /// hold at open time), so nothing here needs to run against an open menu.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the condition recompute reads every toggleable floater's UI resource plus the \
-              environment state; each new checked menu entry adds one parameter"
-)]
 fn update_top_menu_conditions(
-    inventory: Option<Res<InventoryUi>>,
-    conversations: Option<Res<ConversationsUi>>,
-    web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
-    minimap: Option<Res<crate::minimap::MinimapUi>>,
-    world_map: Option<Res<crate::world_map::WorldMapUi>>,
-    search: Option<Res<crate::search::SearchUi>>,
-    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
-    experiences: Option<Res<crate::experiences_floater::ExperiencesUi>>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
     selection: Res<crate::edit_selection::SelectionSet>,
     edit_tool: Res<crate::edit_tool::EditToolState>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
-    let inventory_open = inventory
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let conversations_open = conversations
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let web_browser_open = web_browser
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let minimap_open = minimap
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let world_map_open = world_map
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let search_open = search
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let build_tools_open = build_tools
-        .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
-        .unwrap_or(false);
-    let experiences_open = experiences
-        .and_then(|ui| panels.get(ui.panel).ok().map(|shown| shown.0))
-        .unwrap_or(false);
+    // A floater's open state, resolved by stable id — not through its module's
+    // `XUi` resource, which a lazily-built floater only gains on first open.
+    let open = |id: &str| {
+        crate::floater::floater_panel(&floaters, id)
+            .and_then(|panel| panels.get(panel).ok())
+            .is_some_and(|shown| shown.0)
+    };
+    let inventory_open = open(crate::inventory::INVENTORY_FLOATER_ID);
+    let conversations_open = open(crate::conversations::CONVERSATIONS_FLOATER_ID);
+    let web_browser_open = open(crate::web_floater::WEB_FLOATER_ID);
+    let minimap_open = open(crate::minimap::MINIMAP_FLOATER_ID);
+    let world_map_open = open(crate::world_map::WORLD_MAP_FLOATER_ID);
+    let search_open = open(crate::search::SEARCH_FLOATER_ID);
+    let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
+    let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
     let mut wanted: Vec<&'static str> = Vec::new();
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -427,19 +405,13 @@ fn update_top_menu_conditions(
 /// entry to a `static` menu above and wire it here in one place.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the dispatcher fans out to every toggleable floater's UI resource; each new \
-              floater adds one parameter"
+    reason = "a Bevy system's parameters are its injected resources / queries: the action \
+              stream, the by-id floater lookup, the environment state, the parcel, the two \
+              open-request channels, the panel-shown query, and the exit writer"
 )]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
-    inventory: Option<Res<InventoryUi>>,
-    conversations: Option<Res<ConversationsUi>>,
-    web_browser: Option<Res<crate::web_floater::WebFloaterUi>>,
-    minimap: Option<Res<crate::minimap::MinimapUi>>,
-    world_map: Option<Res<crate::world_map::WorldMapUi>>,
-    search: Option<Res<crate::search::SearchUi>>,
-    build_tools: Option<Res<crate::edit_tool::BuildToolsUi>>,
-    experiences: Option<Res<crate::experiences_floater::ExperiencesUi>>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
     mut environment: Option<ResMut<crate::environment::EnvironmentState>>,
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
     mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
@@ -465,60 +437,48 @@ fn handle_top_menu_actions(
                 exit.write(AppExit::Success);
             }
             "toggle-inventory" => {
-                if let Some(ui) = &inventory
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::inventory::INVENTORY_FLOATER_ID,
+                );
             }
             "toggle-conversations" => {
-                if let Some(ui) = &conversations
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::conversations::CONVERSATIONS_FLOATER_ID,
+                );
             }
             "toggle-web-browser" => {
-                if let Some(ui) = &web_browser
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(&floaters, &mut panels, crate::web_floater::WEB_FLOATER_ID);
             }
             "toggle-minimap" => {
-                if let Some(ui) = &minimap
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(&floaters, &mut panels, crate::minimap::MINIMAP_FLOATER_ID);
             }
             "toggle-world-map" => {
-                if let Some(ui) = &world_map
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::world_map::WORLD_MAP_FLOATER_ID,
+                );
             }
             "toggle-search" => {
-                if let Some(ui) = &search
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(&floaters, &mut panels, crate::search::SEARCH_FLOATER_ID);
             }
             "toggle-build-tools" => {
-                if let Some(ui) = &build_tools
-                    && let Ok(mut shown) = panels.get_mut(ui.panel())
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::edit_tool::BUILD_TOOLS_FLOATER_ID,
+                );
             }
             "toggle-experiences" => {
-                if let Some(ui) = &experiences
-                    && let Ok(mut shown) = panels.get_mut(ui.panel)
-                {
-                    shown.0 = !shown.0;
-                }
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::experiences_floater::EXPERIENCES_FLOATER_ID,
+                );
             }
             "about-land" | "place-profile" => {
                 if let Some(current) = agent_parcel.current.as_ref() {

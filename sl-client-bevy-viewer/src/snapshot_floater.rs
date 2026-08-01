@@ -89,7 +89,7 @@ use crate::ui_tab::{
 use sl_settings::SettingValue;
 
 /// The floater's stable id (see [`crate::floater::Floater::id`]).
-const SNAPSHOT_FLOATER_ID: &str = "snapshot";
+pub(crate) const SNAPSHOT_FLOATER_ID: &str = "snapshot";
 
 /// The body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -393,8 +393,6 @@ impl LocalTimeZone {
 /// The floater's live entity handles.
 #[derive(Resource, Debug)]
 pub(crate) struct SnapshotUi {
-    /// The floater root (carries [`UiPanelShown`](crate::ui::UiPanelShown)).
-    panel: Entity,
     /// The preview [`ImageNode`], resized to the captured frame's aspect.
     preview: Entity,
     /// The "click Refresh" hint shown until the first capture.
@@ -409,14 +407,6 @@ pub(crate) struct SnapshotUi {
     format_combo: Entity,
     /// The transient status text node.
     status: Entity,
-}
-
-impl SnapshotUi {
-    /// The floater root, carrying [`UiPanelShown`](crate::ui::UiPanelShown) — the bottom-toolbar Snapshot
-    /// button toggles it (see [`crate::bottom_toolbar`]).
-    pub(crate) const fn panel(&self) -> Entity {
-        self.panel
-    }
 }
 
 /// A press on a control that requests a capture (Refresh or a destination's save).
@@ -443,7 +433,7 @@ enum SnapshotToggle {
 
 /// Spawn the (hidden) snapshot floater: the preview frame, the include toggles, the
 /// Refresh button, the format picker and the destination tabs.
-fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<SnapshotState>) {
+fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>) {
     let handle = crate::floater::spawn_floater(
         &mut commands,
         root.0,
@@ -465,7 +455,19 @@ fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<
     commands
         .entity(handle.title_text)
         .insert(Translated::new("snapshot-title"));
+    let builder = commands.register_system(build_snapshot_content);
+    commands
+        .entity(handle.root)
+        .insert(crate::floater::DeferredFloaterContent { builder, handle });
+}
 
+/// First-open content build (see the chrome spawn above): preview, toggles,
+/// format row and buttons, ending with the [`SnapshotUi`] insert.
+fn build_snapshot_content(
+    In(handle): In<crate::floater::FloaterHandle>,
+    mut commands: Commands,
+    state: Res<SnapshotState>,
+) {
     let content = commands
         .spawn((
             Node {
@@ -555,7 +557,6 @@ fn spawn_snapshot_floater(mut commands: Commands, root: Res<UiRoot>, state: Res<
     spawn_destination_tabs(&mut commands, content);
 
     commands.insert_resource(SnapshotUi {
-        panel: handle.root,
         preview,
         preview_hint,
         ui_glyph,

@@ -544,11 +544,14 @@ impl Plugin for EditTexturePlugin {
             .init_resource::<TexturePreview>()
             .init_resource::<MatModeState>()
             .init_resource::<MatModeSelected>()
+            // Fills the Build floater's Texture page once its lazily-built
+            // content publishes the pages (`BuildTabPages` appears on first
+            // open); ordered after the general parameter tabs, as before.
             .add_systems(
-                Startup,
+                Update,
                 spawn_texture_tab
-                    .after(crate::edit_params::spawn_param_tabs)
-                    .after(crate::ui::UiScaffoldSystems::SpawnRoot),
+                    .run_if(resource_added::<crate::edit_tool::BuildTabPages>)
+                    .after(crate::edit_params::spawn_param_tabs),
             )
             // Gated on build mode: the widget sync / commit systems already
             // bailed on `!active`, and the live-preview systems only ever have a

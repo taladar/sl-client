@@ -16,8 +16,9 @@
 //!   is left to the object path), and despawns a sphere the moment its avatar
 //!   drops out of the coarse list.
 //!
-//! Each avatar also carries a floating **name tag** — a `bevy_ui` text node
-//! positioned each frame over the sphere by projecting its world position to the
+//! Each avatar also carries a floating **name tag** — a screen-space `Text2d`
+//! on the tag overlay camera (see [`crate::name_tag_overlay`]), positioned each
+//! frame over the sphere by projecting its world position to the
 //! screen ([`position_name_tags`]). The legacy name is resolved once per agent via
 //! a `UUIDNameRequest` ([`Command::RequestAvatarNames`](sl_client_bevy::Command))
 //! and cached in [`AvatarState`], so a repeatedly-updated avatar is never
@@ -34,12 +35,13 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::app::Propagate;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bytes::Bytes;
 use sl_client_bevy::{
@@ -59,6 +61,7 @@ use crate::coords::{
     metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
+use crate::name_tag_overlay::{NAME_TAG_RENDER_LAYER, overlay_point_from_viewport};
 use crate::physics::AvatarMotion;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
@@ -157,10 +160,12 @@ pub(crate) struct AvatarAnchor;
 /// rigged base-body part, each **worn rigged-mesh submesh** (on a modern
 /// mesh-body avatar the base body is hidden, so the worn mesh *is* the
 /// silhouette), and the floating name tag. That breadth is the point — a ray
-/// that hits any body part, or a pointer over the name tag, resolves to the
+/// that hits any body part, or a pointer over the name tag (resolved by the
+/// [`crate::name_tag_overlay::NameTagHitTest`] rect test, tags being `Text2d`,
+/// not UI), resolves to the
 /// same agent through one component, so a caller never has to know *which* piece
 /// it hit. Kept separate from [`AvatarBodyPart`] (which also holds an agent) so
-/// non-mesh pieces (the sphere, the UI name tag) can carry the identity too, and
+/// non-mesh pieces (the sphere, the name tag) can carry the identity too, and
 /// so a future consumer — inventory **drag-and-drop onto an avatar** is the
 /// planned one — reads a single, purpose-named component rather than three
 /// different markers. The mesh-accurate pick over these pieces lives in
@@ -409,16 +414,17 @@ pub(crate) struct AvatarJoint {
     index: usize,
 }
 
-/// A `bevy_ui` name-tag text node, pointing back at the avatar anchor it floats
-/// over so [`position_name_tags`] can project the anchor's world position to the
-/// screen each frame.
+/// A name-tag [`Text2d`] on the tag overlay camera
+/// ([`crate::name_tag_overlay`]), pointing back at the avatar anchor it floats
+/// over so [`position_name_tags`] can project the anchor's world position to
+/// the screen each frame.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct NameTag {
     /// The avatar anchor entity (sphere or body root) this tag labels.
-    anchor: Entity,
+    pub(crate) anchor: Entity,
     /// The height, in metres above the anchor's world position, at which to
     /// float the tag (a sphere's top or a body's head).
-    tag_height: f32,
+    pub(crate) tag_height: f32,
 }
 
 /// The shared placeholder sphere mesh and material, built once and reused by
@@ -1424,8 +1430,9 @@ impl AvatarState {
             .map(|entities| entities.anchor)
     }
 
-    /// Spawn the floating name-tag text node for `agent`, anchored to `anchor`
-    /// and floating `tag_height` metres above it.
+    /// Spawn the floating name-tag `Text2d` for `agent`, anchored to `anchor`
+    /// and floating `tag_height` metres above it (on the tag overlay camera —
+    /// [`crate::name_tag_overlay`]).
     fn spawn_label(
         &self,
         agent: AgentKey,
@@ -1435,25 +1442,23 @@ impl AvatarState {
     ) -> Entity {
         commands
             .spawn((
-                Text::new(self.label_text(agent)),
+                Text2d::new(self.label_text(agent)),
                 UiFont::Sans.at(NAME_TAG_FONT_SIZE),
                 TextColor(Color::WHITE),
+                // The anchor point *is* the projected head position: the tag's
+                // bottom-centre sits on its translation, so `position_name_tags`
+                // needs no size-dependent centring (the old UI tag read its own
+                // previous-frame layout size for that, with a one-frame lag).
+                Anchor::BOTTOM_CENTER,
+                RenderLayers::layer(NAME_TAG_RENDER_LAYER),
                 // Positioned each frame by `position_name_tags`; hidden until the
                 // first projection so it never flashes at the origin.
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
                 Visibility::Hidden,
                 NameTag { anchor, tag_height },
                 // The name tag is a valid avatar pick target (a right-click on it
-                // opens the avatar menu, matching the reference). `is_hoverable`
-                // so it is picked, but *not* `should_block_lower` — a floating tag
-                // must not eat clicks meant for the world behind it.
-                Pickable {
-                    should_block_lower: false,
-                    is_hoverable: true,
-                },
+                // opens the avatar menu, matching the reference) — resolved by the
+                // `NameTagHitTest` rect test, since no picking backend covers
+                // `Text2d`.
                 AvatarPickTarget { agent },
             ))
             .id()
@@ -1944,14 +1949,14 @@ impl AvatarState {
 
     /// Record a resolved legacy name and refresh the tag text of any avatar
     /// currently rendered for that agent.
-    fn set_name(&mut self, name: &AvatarName, texts: &mut Query<&mut Text, With<NameTag>>) {
+    fn set_name(&mut self, name: &AvatarName, texts: &mut Query<&mut Text2d, With<NameTag>>) {
         let agent = name.id;
         let resolved = name.legacy_name();
         for map in [&self.objects, &self.coarse] {
             if let Some(entities) = map.get(&agent)
                 && let Ok(mut text) = texts.get_mut(entities.label)
             {
-                *text = Text::new(resolved.clone());
+                *text = Text2d::new(resolved.clone());
             }
         }
         debug!("resolved avatar name {agent} = {resolved:?}");
@@ -2270,7 +2275,7 @@ pub(crate) fn annotate_avatar_distances(
     state: Res<AvatarState>,
     identity: Res<SlIdentity>,
     anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
-    mut texts: Query<&mut Text, With<NameTag>>,
+    mut texts: Query<&mut Text2d, With<NameTag>>,
 ) {
     if !log_avatar_interest() {
         return;
@@ -2308,7 +2313,7 @@ pub(crate) fn annotate_avatar_distances(
             .cloned()
             .unwrap_or_else(|| provisional_label(*agent));
         if let Ok(mut text) = texts.get_mut(entities.label) {
-            *text = Text::new(format!("{name} ({distance:.0}m)"));
+            *text = Text2d::new(format!("{name} ({distance:.0}m)"));
         }
     }
 }
@@ -2318,7 +2323,7 @@ pub(crate) fn annotate_avatar_distances(
 pub(crate) fn apply_avatar_names(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<AvatarState>,
-    mut texts: Query<&mut Text, With<NameTag>>,
+    mut texts: Query<&mut Text2d, With<NameTag>>,
 ) {
     for event in events.read() {
         if let SlSessionEvent::AvatarNames(names) = &event.0 {
@@ -3982,15 +3987,17 @@ pub(crate) fn apply_bom_face_materials(
 }
 
 /// Position each avatar name tag over its anchor by projecting the anchor's world
-/// position (offset up by the tag's own height) to the screen and anchoring the
-/// tag's *bottom-centre* on that point, so the text is centred over the avatar
-/// and floats just above it; tags whose anchor is off-screen or behind the camera
-/// are hidden.
+/// position (offset up by the tag's own height) to the screen; the tag's
+/// [`Anchor::BOTTOM_CENTER`] puts its bottom-centre on that point, so the text is
+/// centred over the avatar and floats just above it. Tags whose anchor is
+/// off-screen or behind the camera are hidden.
 ///
-/// The projection ([`Camera::world_to_viewport`](sl_client_bevy::Camera)) and the
-/// UI `Val::Px` layout are both in logical pixels, but [`ComputedNode::size`] is
-/// physical, so the tag's own size is scaled by its
-/// [`inverse_scale_factor`](ComputedNode::inverse_scale_factor) before centring.
+/// Tags are `Text2d` on the tag overlay camera ([`crate::name_tag_overlay`]), so
+/// a move is a plain [`Transform`] write — it dirties nothing in `bevy_ui` /
+/// taffy (the previous UI-node tags relayouted every frame). Every write goes
+/// through an inequality guard, and the projected point is rounded to whole
+/// logical pixels (also avoiding sub-pixel text), so a stationary avatar under a
+/// stationary camera writes nothing at all.
 ///
 /// The camera query is qualified by [`ViewerCamera`](crate::camera::ViewerCamera): the
 /// world holds **more than one** camera since the reflection probes (P33.2) spawn
@@ -3998,15 +4005,20 @@ pub(crate) fn apply_bom_face_materials(
 /// hid every name tag until it was noticed.
 pub(crate) fn position_name_tags(
     cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
+    windows: Query<&Window>,
     anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
-    mut tags: Query<(&NameTag, &ComputedNode, &mut Node, &mut Visibility)>,
+    mut tags: Query<(&NameTag, &mut Transform, &mut Visibility)>,
 ) {
     let Ok((camera, camera_transform)) = cameras.single() else {
         return;
     };
-    for (tag, computed, mut node, mut visibility) in &mut tags {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let window_size = window.size();
+    for (tag, mut transform, mut visibility) in &mut tags {
         let Ok(anchor) = anchors.get(tag.anchor) else {
-            *visibility = Visibility::Hidden;
+            visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
         let base = anchor.translation();
@@ -4015,19 +4027,16 @@ pub(crate) fn position_name_tags(
         let head = Vec3::new(base.x, base.y + tag.tag_height, base.z);
         match camera.world_to_viewport(camera_transform, head) {
             Ok(screen) => {
-                // The tag's own logical size, to anchor its bottom-centre on the
-                // projected head point (previous frame's layout — one-frame lag is
-                // imperceptible; a just-spawned tag has zero size for one frame).
-                let size = computed.size();
-                let inverse_scale = computed.inverse_scale_factor();
-                let half_width = size.x * inverse_scale / 2.0;
-                let height = size.y * inverse_scale;
-                node.left = Val::Px(screen.x - half_width);
-                node.top = Val::Px(screen.y - height);
-                *visibility = Visibility::Inherited;
+                let target = overlay_point_from_viewport(screen, window_size)
+                    .round()
+                    .extend(0.0);
+                if transform.translation != target {
+                    transform.translation = target;
+                }
+                visibility.set_if_neq(Visibility::Inherited);
             }
             Err(_off_screen) => {
-                *visibility = Visibility::Hidden;
+                visibility.set_if_neq(Visibility::Hidden);
             }
         }
     }

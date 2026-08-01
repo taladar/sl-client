@@ -20,6 +20,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use bevy::diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic};
 use bevy::ecs::entity::Entities;
@@ -27,6 +28,7 @@ use bevy::prelude::*;
 use bevy::render::{Render, RenderApp};
 
 use crate::avatars::AvatarAnchor;
+use crate::floater::Floater;
 use crate::objects::{PrimFaceEntity, SceneObject};
 
 /// UI-node entities (`bevy_ui`).
@@ -80,6 +82,50 @@ fn measure_entity_breakdown(
     diagnostics.add_measurement(&ENTITY_MESH3D, || count_f64(n_meshes));
 }
 
+/// How long after startup the one-shot per-floater node census logs — late
+/// enough that startup spawning (and any deferred first-open content built
+/// during an early login) has settled into a representative tree.
+const FLOATER_CENSUS_DELAY: Duration = Duration::from_secs(10);
+
+/// Order census entries biggest subtree first (id as the tie-break so the
+/// output is stable).
+fn sorted_census(mut entries: Vec<(&'static str, usize)>) -> Vec<(&'static str, usize)> {
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    entries
+}
+
+/// Log, once, how many `Node` entities each floater's subtree holds (root
+/// included) plus the whole-world UI-node total — the "which floater is
+/// inflating the per-frame bevy_ui walks" census that decides where lazy
+/// content building pays off.
+fn log_floater_node_census(
+    mut done: Local<bool>,
+    time: Res<Time>,
+    floaters: Query<(Entity, &Floater)>,
+    children: Query<&Children>,
+    nodes: Query<(), With<Node>>,
+) {
+    if *done || time.elapsed() < FLOATER_CENSUS_DELAY {
+        return;
+    }
+    *done = true;
+    let entries = floaters
+        .iter()
+        .map(|(entity, floater)| {
+            let count = core::iter::once(entity)
+                .chain(children.iter_descendants(entity))
+                .filter(|&descendant| nodes.contains(descendant))
+                .count();
+            (floater.id, count)
+        })
+        .collect();
+    let total = nodes.iter().count();
+    info!("floater node census (total UI nodes: {total})");
+    for (id, count) in sorted_census(entries) {
+        info!("  {id}: {count} nodes");
+    }
+}
+
 /// Publish the render world's last-recorded entity count as a main-world
 /// diagnostic (reads the atomic the [`RenderApp`] system wrote).
 fn publish_render_entity_count(mut diagnostics: Diagnostics, shared: Res<RenderEntityCount>) {
@@ -114,7 +160,11 @@ impl Plugin for EntityDiagnosticsPlugin {
             .insert_resource(RenderEntityCount(Arc::new(AtomicU32::new(0))))
             .add_systems(
                 Update,
-                (measure_entity_breakdown, publish_render_entity_count),
+                (
+                    measure_entity_breakdown,
+                    publish_render_entity_count,
+                    log_floater_node_census,
+                ),
             );
     }
 
@@ -125,5 +175,32 @@ impl Plugin for EntityDiagnosticsPlugin {
                 .insert_resource(shared)
                 .add_systems(Render, record_render_entity_count);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sorted_census;
+    use pretty_assertions::assert_eq;
+
+    /// Biggest subtree first; equal counts fall back to id order so the log
+    /// output is stable run to run.
+    #[test]
+    fn census_sorts_biggest_first_then_by_id() {
+        let sorted = sorted_census(vec![
+            ("minimap", 19),
+            ("inventory", 240),
+            ("world_map", 19),
+            ("conversations", 310),
+        ]);
+        assert_eq!(
+            sorted,
+            vec![
+                ("conversations", 310),
+                ("inventory", 240),
+                ("minimap", 19),
+                ("world_map", 19),
+            ]
+        );
     }
 }

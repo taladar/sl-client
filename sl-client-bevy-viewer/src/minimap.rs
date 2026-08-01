@@ -69,6 +69,10 @@ use crate::water::WaterState;
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
 
+/// The minimap floater's stable [`crate::floater::Floater::id`], the key the
+/// openers (toolbar, menu bar) look the panel up by.
+pub(crate) const MINIMAP_FLOATER_ID: &str = "minimap";
+
 /// The settings section every minimap setting registers under.
 const MINIMAP_SECTION: &[&str] = &["minimap"];
 
@@ -267,13 +271,6 @@ pub(crate) struct MinimapUi {
     tooltip: Entity,
     /// The hover tooltip's text node.
     tooltip_text: Entity,
-}
-
-impl MinimapUi {
-    /// The floater root, for open-state checks and toggling.
-    pub(crate) const fn panel(&self) -> Entity {
-        self.root
-    }
 }
 
 /// One avatar dot as composited this frame — the hover / context-menu
@@ -690,7 +687,7 @@ fn spawn_minimap(
         &mut commands,
         root.0,
         FloaterSpec {
-            id: "minimap",
+            id: MINIMAP_FLOATER_ID,
             title: String::from("Mini-map"),
             position,
             default_size: Some(Vec2::splat(DEFAULT_SIZE)),
