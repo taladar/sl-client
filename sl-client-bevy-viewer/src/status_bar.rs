@@ -76,6 +76,7 @@ use sl_settings::SettingValue;
 use crate::i18n::{TransArgs, Translator};
 use crate::settings::ViewerSettings;
 use crate::ui_font::UiFont;
+use crate::ui_perf::FixedSlotContentSize;
 
 pub(crate) mod slt;
 
@@ -505,6 +506,15 @@ fn spawn_readout(
             ChildOf(slot_entity),
         ))
         .id();
+    // A fixed-width read-out's text sits in a fixed-width, clipping slot, so its
+    // measured length can never change the layout. Mark it so the PostUpdate
+    // layout gate ignores its per-frame `ContentSize` churn — without this the
+    // FPS integer re-measures at ~10 Hz and forces a full-tree relayout each
+    // time (`ui_perf::FixedSlotContentSize`). The flexible parcel name is not
+    // marked (it has no fixed width to absorb a change).
+    if width.is_some() {
+        commands.entity(text).insert(FixedSlotContentSize);
+    }
     // The parcel name is a click target: pressing it opens the About Land
     // floater on the current parcel (the reference viewer's location read-out).
     if readout == StatusReadout::ParcelName {

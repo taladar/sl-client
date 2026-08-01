@@ -32,6 +32,27 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, LineHeight};
 use bevy::ui::ContentSize;
 
+/// Opt-in marker: this node's [`ContentSize`] (its measured content) can never
+/// change the UI layout, so [`ui_layout_dirty`] ignores its per-frame
+/// `Changed<ContentSize>` the same way it ignores an [`EditableText`] field's.
+///
+/// The invariant the caller asserts by adding it: the node sits inside a
+/// **fixed-size** (`Val::Px`, non-shrinking) ancestor that **clips overflow**,
+/// so a longer/shorter measure neither resizes that ancestor (clip suppresses
+/// the min-content minimum; `flex_shrink: 0` stops flex shrinking it) nor
+/// escapes it to the outer tree — and the node is single-line, so its measured
+/// height is constant. The only residual is the node re-positioning *within*
+/// that fixed box (e.g. a trailing-aligned read-out shifting when its digit
+/// count changes); like the closed-floater carve-out that deferral is invisible
+/// enough to trade for never running the full-tree layout on its account.
+///
+/// An automatic "fixed-size ancestor" walk cannot replace this: the nodes that
+/// need it (the status-bar read-outs) live under content-derived (`Auto`)
+/// heights all the way up, so no ancestor is definite on *both* axes — the
+/// fixed-width-plus-clip guarantee is real but only the caller can vouch for it.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct FixedSlotContentSize;
+
 /// Run condition for [`bevy::ui::UiSystems::Stack`] (`ui_stack_system`): the
 /// stack — a full-tree walk plus per-level z-sorts, rebuilt from scratch every
 /// run — only needs rebuilding when one of its actual inputs changed. Those
@@ -137,6 +158,11 @@ pub(crate) fn ui_stack_dirty(
 /// the perma-changed `EditableText` itself and so cannot be watched; they are
 /// set at spawn, which `Added<Node>` covers). The upstream churn is filed in
 /// the roadmap as a candidate bevy fix.
+///
+/// A [`FixedSlotContentSize`]-marked node is likewise not a content-size
+/// trigger: the caller has vouched that it lives in a fixed-width, clipping
+/// slot where its measure cannot change the layout (the status-bar read-outs —
+/// the FPS integer re-measures at up to 10 Hz otherwise).
 #[expect(
     clippy::type_complexity,
     reason = "the Or<> filters ARE the documented trigger union; splitting them into named \
@@ -169,7 +195,12 @@ pub(crate) fn ui_layout_dirty(
     >,
     changed_measure: Query<
         (Entity, Option<&ChildOf>),
-        (With<Node>, Without<EditableText>, Changed<ContentSize>),
+        (
+            With<Node>,
+            Without<EditableText>,
+            Without<FixedSlotContentSize>,
+            Changed<ContentSize>,
+        ),
     >,
     changed_editable: Query<
         (Entity, Option<&ChildOf>),
@@ -241,15 +272,29 @@ fn log_ui_dirty_enabled() -> bool {
     clippy::type_complexity,
     reason = "one query per trigger category IS the diagnostic"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one query per trigger category IS the diagnostic — including the two carved-out \
+              (editable / fixed-slot) content-size categories logged for observability"
+)]
 fn log_ui_layout_dirty_causes(
     changed_node: Query<(Entity, Option<&Name>), (With<Node>, Or<(Added<Node>, Changed<Node>)>)>,
     changed_content: Query<
         (Entity, Option<&Name>),
-        (With<Node>, Without<EditableText>, Changed<ContentSize>),
+        (
+            With<Node>,
+            Without<EditableText>,
+            Without<FixedSlotContentSize>,
+            Changed<ContentSize>,
+        ),
     >,
     changed_editable_content: Query<
         (Entity, Option<&Name>),
         (With<Node>, With<EditableText>, Changed<ContentSize>),
+    >,
+    changed_fixed_content: Query<
+        (Entity, Option<&Name>),
+        (With<Node>, With<FixedSlotContentSize>, Changed<ContentSize>),
     >,
     changed_target: Query<
         (Entity, Option<&Name>),
@@ -286,6 +331,9 @@ fn log_ui_layout_dirty_causes(
     // `viewer-perf-editable-text-per-frame-churn`) is carved out of the gate;
     // logged separately so its volume stays observable.
     report("content-size(editable, ignored)", &changed_editable_content);
+    // Fixed-slot read-outs (the status bar) whose measure cannot affect layout
+    // are carved out too (see `FixedSlotContentSize`); logged separately.
+    report("content-size(fixed-slot, ignored)", &changed_fixed_content);
     report("render-target", &changed_target);
     report("ui-transform", &changed_transform);
     report("scroll", &changed_scroll);
@@ -467,6 +515,48 @@ mod tests {
             .insert(Node::default());
         app.update();
         assert_eq!(fires(&app), 3);
+    }
+
+    /// A [`FixedSlotContentSize`]-marked node (a fixed-width, clipping
+    /// status-bar read-out) does not fire the gate when it re-measures, while an
+    /// unmarked node's `ContentSize` change does — the FPS integer re-shaping at
+    /// ~10 Hz must not force a full-tree relayout.
+    #[test]
+    fn layout_gate_ignores_fixed_slot_content_size() {
+        use super::FixedSlotContentSize;
+        use bevy::ui::ContentSize;
+        let mut app = layout_gated_app();
+        let fixed = app
+            .world_mut()
+            .spawn((
+                Node::default(),
+                ContentSize::default(),
+                FixedSlotContentSize,
+            ))
+            .id();
+        let plain = app
+            .world_mut()
+            .spawn((Node::default(), ContentSize::default()))
+            .id();
+        app.update();
+        assert_eq!(fires(&app), 1);
+        app.update();
+        assert_eq!(fires(&app), 1);
+
+        // The fixed-slot read-out re-measures (its `ContentSize` changes): the
+        // carve-out keeps the gate closed.
+        app.world_mut()
+            .entity_mut(fixed)
+            .insert(ContentSize::default());
+        app.update();
+        assert_eq!(fires(&app), 1);
+
+        // An unmarked node's re-measure still fires.
+        app.world_mut()
+            .entity_mut(plain)
+            .insert(ContentSize::default());
+        app.update();
+        assert_eq!(fires(&app), 2);
     }
 
     /// Removals always fire the layout gate — the surface cleanup must never

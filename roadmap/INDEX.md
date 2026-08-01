@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 54 |
+| ideas | 55 |
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 656 |
+| done | 657 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1131** |
+| **total** | **1133** |
 
-## ideas (54)
+## ideas (55)
 
 ### viewer
 
@@ -87,6 +87,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
+- [`viewer-perf-world-frustum-culling-octree`](ideas/viewer-perf-world-frustum-culling-octree.md)
+  — Spatial (octree/BVH) frustum culling for world meshes
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
@@ -1160,7 +1162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (656)
+## done (657)
 
 ### protocol
 
@@ -1751,6 +1753,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-ui-layout-gate-open-widget-churn`](done/viewer-perf-ui-layout-gate-open-widget-churn.md)
+  — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
   — Cut per-frame UI layout cost — structural bevy_ui floor
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)

@@ -2177,8 +2177,19 @@ fn layout_minimap_compass(
             (half.y - label_logical.y / 2.0 - padding).max(4.0),
         );
         if let Ok(mut node) = nodes.get_mut(*wrapper) {
-            node.left = Val::Px(half.x + offset.x - label_logical.x / 2.0);
-            node.top = Val::Px(half.y + offset.y - label_logical.y / 2.0);
+            let left = Val::Px(half.x + offset.x - label_logical.x / 2.0);
+            let top = Val::Px(half.y + offset.y - label_logical.y / 2.0);
+            // Write through change detection only on a real move: this system
+            // runs every frame, but the offsets change only when the map
+            // rotates or resizes. An unconditional write would mark `Node`
+            // `Changed` every frame, tripping the PostUpdate layout gate
+            // (`ui_perf::ui_layout_dirty`) into a full-tree relayout on every
+            // frame the minimap is open — the dominant per-frame cost measured
+            // while rezzing with the minimap up.
+            if node.left != left || node.top != top {
+                node.left = left;
+                node.top = top;
+            }
         }
     }
 }
