@@ -64,13 +64,20 @@ pub(crate) struct ObjectTextureAnimation {
 }
 
 impl ObjectTextureAnimation {
-    /// Whether this animation targets the given Linden face index. The wire
-    /// `face` is `-1` for "all faces" (`llSetTextureAnim`'s `ALL_SIDES`), else the
-    /// single face it applies to — the target-face resolution the P28.2 driver
-    /// uses to pick which of an object's faces to fold the UV transform onto.
+    /// Whether this animation targets the given Linden face index — see
+    /// [`anim_applies_to_face`].
     pub(crate) fn applies_to_face(&self, face_id: u16) -> bool {
-        self.anim.face < 0 || u16::try_from(self.anim.face).is_ok_and(|target| target == face_id)
+        anim_applies_to_face(&self.anim, face_id)
     }
+}
+
+/// Whether `anim` targets the given Linden face index. The wire `face` is `-1`
+/// for "all faces" (`llSetTextureAnim`'s `ALL_SIDES`), else the single face it
+/// applies to — the target-face resolution the P28.2 driver uses to pick which
+/// of an object's faces to fold the UV transform onto, and the intern-decision
+/// check the [material cache](crate::material_cache) shares.
+pub(crate) fn anim_applies_to_face(anim: &TextureAnimation, face_id: u16) -> bool {
+    anim.face < 0 || u16::try_from(anim.face).is_ok_and(|target| target == face_id)
 }
 
 /// The object's running texture animation, if any: the decoded

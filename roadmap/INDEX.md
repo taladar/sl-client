@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
+| ideas | 54 |
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 13 |
-| done | 654 |
+| done | 656 |
 | deferred | 20 |
 | wont-do | 6 |
 | **total** | **1131** |
 
-## ideas (56)
+## ideas (54)
 
 ### viewer
 
@@ -72,11 +72,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
-- [`viewer-perf-material-intern`](ideas/viewer-perf-material-intern.md) — Intern
-  face materials by content for shared handles + draw batching (blocked by
-  `viewer-perf-prim-tessellation-cache`)
-- [`viewer-perf-prim-tessellation-cache`](ideas/viewer-perf-prim-tessellation-cache.md)
-  — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
@@ -1165,7 +1160,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (654)
+## done (656)
 
 ### protocol
 
@@ -1745,10 +1740,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
+  face materials by content for shared handles + draw batching (blocked by
+  `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
+- [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
+  — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)

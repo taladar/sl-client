@@ -38,6 +38,7 @@ use sl_client_bevy::{
 };
 
 use crate::face_material::{FaceMaterial, inert_face_material};
+use crate::material_cache::{MaterialCache, MaterialKey};
 
 /// The GLTF material-override "no texture" sentinel (all-`f`, the reference
 /// viewer's `LLGLTFMaterial::GLTF_OVERRIDE_NULL_UUID`): a face carrying it has no
@@ -842,7 +843,7 @@ pub(crate) enum DiffuseImage {
 /// ([`face_alpha_mode`]), and a face's `LLMaterial` diffuse alpha mode (fetched
 /// later over `RenderMaterials`) overrides it authoritatively
 /// ([`legacy_alpha_override`](crate::legacy_materials)).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TextureAlpha {
     /// Alpha-mask a texture-alpha face (ordinary prim / mesh / tree / grass faces).
     Mask,
@@ -889,6 +890,75 @@ pub(crate) fn face_material(
         texture_alpha,
     );
     handle
+}
+
+/// Build the diffuse material for one **internable** prim face through the
+/// cross-instance [`MaterialCache`] (roadmap `viewer-perf-material-intern`):
+/// when `internable` and an identical face's material is still alive, revive
+/// and share its handle (so Bevy batches the matching draws); otherwise
+/// compose a fresh material via [`face_material`] and — when internable —
+/// record it for the next identical face. Returns the handle plus whether it
+/// is (or seeded) a cache entry, so the caller can mark the face
+/// [`SharedFaceMaterial`](crate::material_cache::SharedFaceMaterial) for the
+/// copy-on-write detach net.
+///
+/// A **hit** skips [`compose_face_material`] entirely — the shared material
+/// already carries the composed state, including its diffuse texture if that
+/// has decoded (a bonus: no re-prep budget spent, the face appears textured
+/// immediately). While the texture is still undecoded the shared handle is
+/// re-parked in `prim_textures` **deduplicated by handle** (the original
+/// compose already parked it once; a duplicate would only waste a re-prep,
+/// since [`drape_face_texture`] is idempotent) and the texture re-requested —
+/// which both bumps the fetch priority for a boosted sharer and revives the
+/// retry after a failed decode consumed the original parking.
+pub(crate) fn intern_face_material(
+    face: &TextureFace,
+    internable: bool,
+    cache: &mut MaterialCache,
+    materials: &mut Assets<FaceMaterial>,
+    manager: &mut TextureManager,
+    prim_textures: &mut PrimTextures,
+    priority: Priority,
+) -> (Handle<FaceMaterial>, bool) {
+    if !internable {
+        cache.note_excluded();
+        let handle = face_material(
+            face,
+            materials,
+            manager,
+            prim_textures,
+            priority,
+            TextureAlpha::Mask,
+        );
+        return (handle, false);
+    }
+    let key = MaterialKey::new(face, TextureAlpha::Mask);
+    if let Some(handle) = cache.revive(&key, materials) {
+        cache.note_hit();
+        let texture_id = face.texture_id;
+        if !is_absent_texture(texture_id) && !prim_textures.images.contains_key(&texture_id) {
+            let parked = prim_textures.pending.entry(texture_id).or_default();
+            if !parked
+                .iter()
+                .any(|(parked_handle, _alpha)| *parked_handle == handle)
+            {
+                parked.push((handle.clone(), TextureAlpha::Mask));
+            }
+            manager.request_face(texture_id, priority);
+        }
+        return (handle, true);
+    }
+    cache.note_miss();
+    let handle = face_material(
+        face,
+        materials,
+        manager,
+        prim_textures,
+        priority,
+        TextureAlpha::Mask,
+    );
+    cache.record(key, handle.id());
+    (handle, true)
 }
 
 /// Compose the diffuse Blinn-Phong appearance of `face` **onto an existing**

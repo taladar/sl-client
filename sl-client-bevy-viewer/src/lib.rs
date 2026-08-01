@@ -77,6 +77,7 @@ mod floater;
 mod floater_persist;
 mod flycam_ui;
 pub mod gallery;
+mod geometry_cache;
 mod gizmos;
 mod ground;
 mod group_notice;
@@ -103,6 +104,7 @@ mod local_chat_input;
 mod locomotion;
 mod locomotion_ik;
 mod look_at;
+mod material_cache;
 mod material_preview;
 mod materials;
 mod media_controls;
@@ -1349,6 +1351,13 @@ fn run_session(
         .init_resource::<WaterLevel>()
         .init_resource::<PrimLodTargets>()
         .init_resource::<TreeLodTargets>()
+        // The cross-instance geometry cache: shared mesh handles for identical
+        // prim / sculpt / mesh geometry (`viewer-perf-prim-tessellation-cache`).
+        .init_resource::<geometry_cache::GeometryCache>()
+        // The cross-instance material cache: shared face-material handles for
+        // identical face content, so matched copies batch into instanced draws
+        // (`viewer-perf-material-intern`).
+        .init_resource::<material_cache::MaterialCache>()
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
@@ -1443,6 +1452,13 @@ fn run_session(
                 setup_particle_quad,
             ),
         )
+        // The material cache's copy-on-write detach net: give any interned
+        // (shared-material) face a private material before this frame's
+        // `Update` mutators — texture animation, PBR registration, HUD
+        // fullbright, the edit floaters' live previews — can write into the
+        // shared asset. Scheduled in `PreUpdate` so the swap's commands are
+        // applied at the schedule boundary, ahead of every mutator.
+        .add_systems(PreUpdate, material_cache::detach_shared_face_materials)
         .add_systems(
             Update,
             (
@@ -1677,10 +1693,25 @@ fn run_session(
                 // prim's tessellation level of detail (P21.3); `apply_prim_lod` then
                 // re-tessellates any prim whose level changed, so it runs after.
                 drive_render_priority,
-                apply_prim_lod.after(drive_render_priority),
-                // Tree level of detail (P26.2): regenerate any tree whose branching /
-                // billboard tier the driver changed, after it has picked the tiers.
-                apply_tree_lod.after(drive_render_priority),
+                // Nested into one tuple to stay within Bevy's per-tuple system
+                // limit: the LOD appliers rebuild geometry after the driver has
+                // picked the levels, and the geometry-cache prune periodically
+                // drops cache entries whose shared meshes all died (every face
+                // entity despawned) — the cache holds only weak asset ids, so
+                // that is bookkeeping, not asset freeing.
+                (
+                    apply_prim_lod.after(drive_render_priority),
+                    // Tree level of detail (P26.2): regenerate any tree whose
+                    // branching / billboard tier the driver changed, after it has
+                    // picked the tiers.
+                    apply_tree_lod.after(drive_render_priority),
+                    geometry_cache::prune_geometry_cache.run_if(
+                        bevy::time::common_conditions::on_timer(geometry_cache::PRUNE_INTERVAL),
+                    ),
+                    material_cache::prune_material_cache.run_if(
+                        bevy::time::common_conditions::on_timer(material_cache::PRUNE_INTERVAL),
+                    ),
+                ),
                 // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
                 // resource on the toggle key, then drive the panel's visibility and
                 // (while shown) its text from the live store snapshots.

@@ -16,6 +16,8 @@
 use bevy::prelude::*;
 use sl_client_bevy::{GateStats, StoreStats};
 
+use crate::geometry_cache::{GeometryCache, GeometryCacheStats};
+use crate::material_cache::{MaterialCache, MaterialCacheStats};
 use crate::meshes::MeshManager;
 use crate::textures::TextureManager;
 use crate::ui_font::UiFont;
@@ -23,8 +25,14 @@ use crate::ui_font::UiFont;
 /// The overlay font size, in logical pixels.
 const DIAG_FONT_SIZE: f32 = 15.0;
 
-/// The inset, in logical pixels, of the pipeline overlay from the top-left corner.
+/// The inset, in logical pixels, of the pipeline overlay from the left edge.
 const DIAG_INSET: f32 = 10.0;
+
+/// The inset, in logical pixels, of the pipeline overlay from the top of the
+/// window — larger than [`DIAG_INSET`] so the panel starts *below* the
+/// full-width top menu/status bar (which renders above floaters at `TOP_BAR_Z`
+/// and was covering the panel's first lines).
+const DIAG_TOP_INSET: f32 = 42.0;
 
 /// The key that toggles the pipeline-status overlay on and off.
 const PIPELINE_TOGGLE_KEY: KeyCode = KeyCode::F3;
@@ -65,7 +73,7 @@ pub(crate) fn setup_pipeline_overlay(mut commands: Commands) {
         TextColor(Color::WHITE),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(DIAG_INSET),
+            top: Val::Px(DIAG_TOP_INSET),
             left: Val::Px(DIAG_INSET),
             ..default()
         },
@@ -92,6 +100,8 @@ pub(crate) fn update_pipeline_overlay(
     visible: Res<PipelineOverlayVisible>,
     textures: Res<TextureManager>,
     meshes: Res<MeshManager>,
+    geometry: Res<GeometryCache>,
+    material: Res<MaterialCache>,
     mut panels: Query<(&mut Text, &mut Visibility), With<PipelineStatusText>>,
 ) {
     let Ok((mut text, mut visibility)) = panels.single_mut() else {
@@ -111,6 +121,8 @@ pub(crate) fn update_pipeline_overlay(
         textures.gate_stats(),
         meshes.stats(),
         meshes.gate_stats(),
+        geometry.stats(),
+        material.stats(),
     ));
 }
 
@@ -146,24 +158,53 @@ fn format_store_block(label: &str, stats: StoreStats, gate: GateStats) -> String
     )
 }
 
+/// Format the cross-instance geometry cache's one-line block: how many distinct
+/// geometries are cached and the cumulative spawn outcomes (full hits that
+/// skipped tessellation, partial hits that revived some faces, misses).
+fn format_geometry_block(stats: GeometryCacheStats) -> String {
+    format!(
+        "geom  entries {}  hit {}  partial {}  miss {}",
+        stats.entries, stats.hits, stats.partial_hits, stats.misses,
+    )
+}
+
+/// Format the cross-instance material cache's one-line block: how many distinct
+/// face materials are cached and the cumulative face outcomes (hits that shared
+/// an existing material, misses that composed and recorded a fresh one, faces
+/// excluded from interning).
+fn format_material_block(stats: MaterialCacheStats) -> String {
+    format!(
+        "mat   entries {}  hit {}  miss {}  excl {}",
+        stats.entries, stats.hits, stats.misses, stats.excluded,
+    )
+}
+
 /// Format the whole pipeline-status panel: a header, then one two-line block per
-/// pipeline (texture, then mesh).
+/// pipeline (texture, then mesh), then the geometry-cache and material-cache
+/// lines.
 fn format_pipeline(
     tex: StoreStats,
     tex_gate: GateStats,
     mesh: StoreStats,
     mesh_gate: GateStats,
+    geometry: GeometryCacheStats,
+    material: MaterialCacheStats,
 ) -> String {
     format!(
-        "PIPELINE  (F3)\n{}\n{}",
+        "PIPELINE  (F3)\n{}\n{}\n{}\n{}",
         format_store_block("tex", tex, tex_gate),
         format_store_block("mesh", mesh, mesh_gate),
+        format_geometry_block(geometry),
+        format_material_block(material),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GateStats, StoreStats, format_bytes, format_pipeline, format_store_block};
+    use super::{
+        GateStats, GeometryCacheStats, MaterialCacheStats, StoreStats, format_bytes,
+        format_geometry_block, format_material_block, format_pipeline, format_store_block,
+    };
     use pretty_assertions::assert_eq;
 
     /// Bytes render as MiB with one decimal via integer math, flooring the
@@ -206,7 +247,40 @@ mod tests {
         );
     }
 
-    /// The full panel carries the header and both store blocks in order.
+    /// The geometry-cache block renders its entry count and the three spawn
+    /// outcome counters on one line.
+    #[test]
+    fn geometry_block_is_one_line() {
+        let stats = GeometryCacheStats {
+            entries: 12,
+            hits: 340,
+            partial_hits: 5,
+            misses: 48,
+        };
+        assert_eq!(
+            format_geometry_block(stats),
+            "geom  entries 12  hit 340  partial 5  miss 48"
+        );
+    }
+
+    /// The material-cache block renders its entry count and the three face
+    /// outcome counters on one line.
+    #[test]
+    fn material_block_is_one_line() {
+        let stats = MaterialCacheStats {
+            entries: 9,
+            hits: 210,
+            misses: 33,
+            excluded: 17,
+        };
+        assert_eq!(
+            format_material_block(stats),
+            "mat   entries 9  hit 210  miss 33  excl 17"
+        );
+    }
+
+    /// The full panel carries the header, both store blocks, and the
+    /// geometry-cache and material-cache lines in order.
     #[test]
     fn pipeline_panel_has_header_and_both_blocks() {
         let panel = format_pipeline(
@@ -214,12 +288,17 @@ mod tests {
             GateStats::default(),
             StoreStats::default(),
             GateStats::default(),
+            GeometryCacheStats::default(),
+            MaterialCacheStats::default(),
         );
         let mut lines = panel.lines();
         assert_eq!(lines.next(), Some("PIPELINE  (F3)"));
-        // Header, then two lines per block for two blocks.
-        assert_eq!(panel.lines().count(), 5);
+        // Header, then two lines per store block for two blocks, then the
+        // geometry-cache and material-cache lines.
+        assert_eq!(panel.lines().count(), 7);
         assert!(panel.contains("tex   queued 0"));
         assert!(panel.contains("mesh  queued 0"));
+        assert!(panel.contains("geom  entries 0"));
+        assert!(panel.contains("mat   entries 0"));
     }
 }

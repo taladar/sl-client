@@ -2,7 +2,7 @@
 id: viewer-perf-prim-tessellation-cache
 title: Cross-instance prim tessellation cache + shared mesh handles
 topic: viewer
-status: ideas
+status: done
 origin: performance survey of the implemented viewer (2026-07-22)
 refs: [viewer-profiling]
 ---
@@ -92,3 +92,43 @@ Confidence: medium-high — absence of the cache verified; the
 scale-in-transform precondition needs the verification pass described
 above before handle sharing is switched on (the pure tessellation cache
 is safe regardless).
+
+## Done (2026-07-31)
+
+Implemented as the `GeometryCache` resource
+(`sl-client-bevy-viewer/src/geometry_cache.rs`): shared `Mesh` handles
+keyed `Prim(PrimShapeParams, PrimLod)` / `Sculpt(map, type, decoded
+w×h)` / `Mesh(MeshKey, MeshLod)`, wired into the prim spawn + prim-LOD
+paths (`spawn_cached_prim_faces`), the sculpt build, and the mesh-asset
+submesh build. The cache holds only weak `AssetId`s; a spawn *revives* a
+live shared asset via `Assets::get_strong_handle`, so asset lifetime
+stays tied to live face entities and a periodic prune drops dead
+entries — no teleport hook needed. `PrimShapeParams` gained `Hash`
+(all-integer). The verification pass confirmed scale rides the
+geometry-holder transform for prims/sculpts/meshes; the one leak found —
+planar-texgen faces bake object scale into UV0 — is handled by sharing
+those per quantized (mm) object scale instead of excluding them. Flexi
+(per-frame mesh mutation), grass/trees (scale baked / own path), and
+rigged meshes stay uncached. The F3 pipeline panel gained a
+`geom entries/hit/partial/miss` line (and now starts below the top menu
+bar, which used to cover its first lines).
+
+Measured on the local OpenSim (region seeded with 5× copies of the nine
+`rez_sample_prims` shapes, 3× mesh + sculpt OAR loads, 3 planar-texgen
+boxes at two scales):
+
+- A clean login: `entries 20, hit 127-128, partial 2, miss 31-32` —
+  ~79% of geometry spawns reuse a live shared mesh with zero
+  tessellation / conversion / GPU upload; under camera-motion LOD churn
+  the hit count grew to 402 vs 64 misses (~86%).
+- Worst single system invocation during the login rez-in spike
+  (Tracy, pacing-independent; system self time): `update_objects`
+  1503 µs → 694 µs, `apply_prim_lod` 882 µs → 419 µs (its command-apply
+  1425 µs → 691 µs), `apply_object_meshes` 135 µs → 29 µs. (Whole-run
+  self-time totals proved incomparable between runs — Wayland gates
+  frame callbacks for occluded windows, and ~2 µs/frame idle system
+  overhead × a 50× frame-count difference swamps the geometry work.)
+- Visual regression: baseline vs cached screenshot pairs at an
+  identical scripted camera are visually identical (prims of all seven
+  volume types, sculpts, meshes, trees, grass, planar-texgen boxes at
+  1 m and 2 m).
