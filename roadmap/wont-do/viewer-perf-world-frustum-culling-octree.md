@@ -2,7 +2,7 @@
 id: viewer-perf-world-frustum-culling-octree
 title: Spatial (octree/BVH) frustum culling for world meshes
 topic: viewer
-status: ideas
+status: wont-do
 origin: Tracy profiling of Aditi rezzing (2026-08-01) — frustum culling is the
   dominant sustained per-frame cost
 refs:
@@ -71,3 +71,37 @@ both counts: coarser cull unit **and** hierarchical rejection.
 Measure with the same rez capture (`scripts/tracy-grab.sh` self-time over a rez
 window; the `visibility` / `check_visibility` /
 `check_dir_light_mesh_visibility` zones) before/after.
+
+## Won't-do — the premise was a measurement artefact (2026-08-01)
+
+Investigated and dropped after wall-clock profiling on aditi (full writeup in
+`book/src/tools/profiling.md`; method note in the sl-client skill). **The "17 ms
+frustum culling" was summed self-time across ~11 worker threads, not frame
+time.** `tracy-csvexport`'s aggregate sums each zone across every thread, and
+`check_visibility` is a `par_for_each` that parallelises ~10× — its real
+wall-clock is **~1.4 ms**, on a worker thread partly hidden behind the main
+thread, **off the critical path**.
+
+Controlled A/B (same aditi spot, octree pre-cull off): Bevy's **entire** stock
+frustum culling is worth only **~2.5 ms/frame** (no-cull 31.7 ms → cull 29.3 ms,
+steady state). An octree only makes the *decision* cheaper; it produces the same
+visible set Bevy already computes, so its ceiling is **< 1 ms** of a ~29 ms
+frame. Not worth a substantial custom `check_visibility` replacement.
+
+Both directions were prototyped and reverted:
+
+- **Direction 1** (per-face → per-object via `NoFrustumCulling`) is unsound: the
+  shadow scan filters `With<Mesh3d>` and treats `NoFrustumCulling` faces as
+  *unconditional* casters in every cascade — it would regress shadows.
+- **Direction 2** (octree feeding a global-`Visibility` pre-cull) can only hide
+  linksets invisible to *every* view; the sun cascades keep most objects
+  globally visible, so it culls almost nothing. A full per-view
+  `check_visibility` replacement could cut the decision cost, but that decision
+  is only ~1.4 ms.
+
+The frame is a balanced ~27–30 ms main/render pipeline gated by **drawn-object
+count** (render-thread submit ~27 ms, extract ~7.4 ms) and PostUpdate's
+*non-visibility* work (~10 ms: transform propagation + UI layout). The real
+lever is fewer entities — see
+[[viewer-perf-per-object-face-merge-entity-count]] — and fewer views
+([[viewer-perf-probe-occlusion-skip]]), not a faster cull.

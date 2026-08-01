@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 13 |
+| bugs | 14 |
 | done | 657 |
 | deferred | 20 |
-| wont-do | 6 |
-| **total** | **1133** |
+| wont-do | 7 |
+| **total** | **1135** |
 
 ## ideas (55)
 
@@ -72,6 +72,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
+- [`viewer-perf-per-object-face-merge-entity-count`](ideas/viewer-perf-per-object-face-merge-entity-count.md)
+  — Cut per-frame CPU by reducing world-object entity count (face merge /
+  per-object cull unit)
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
@@ -87,8 +90,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
-- [`viewer-perf-world-frustum-culling-octree`](ideas/viewer-perf-world-frustum-culling-octree.md)
-  — Spatial (octree/BVH) frustum culling for world meshes
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
@@ -1120,7 +1121,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (13)
+## bugs (14)
 
 ### protocol
 
@@ -1139,6 +1140,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
+- [`viewer-fps-label-intermittent`](bugs/viewer-fps-label-intermittent.md) — FPS
+  status readout intermittently drops its "fps" label
 - [`viewer-inventory-worn-markers-show-early`](bugs/viewer-inventory-worn-markers-show-early.md)
   — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -2591,12 +2594,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (6)
+## wont-do (7)
 
 ### viewer
 
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
+- [`viewer-perf-world-frustum-culling-octree`](wont-do/viewer-perf-world-frustum-culling-octree.md)
+  — Spatial (octree/BVH) frustum culling for world meshes
 - [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
   Midnight is almost as bright as midday — NOT a viewer bug; the scenes had no
   night in them

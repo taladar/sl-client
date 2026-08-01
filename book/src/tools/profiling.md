@@ -84,9 +84,11 @@ captures a bounded window headlessly and exports it to tab-separated tables:
 scripts/tracy-grab.sh 10 # capture 10s -> tracy-grab-10s/*.tsv
 ```
 
-It writes `zones-self.tsv` (self time per zone, sorted — the view that surfaces
-which systems burn the frame), `zones-inclusive.tsv`, and `messages.tsv`, and
-prints the top self-time zones. It needs the `tracy-capture` and
+It writes `zones-self.tsv` (self time per zone, sorted), `zones-inclusive.tsv`,
+and `messages.tsv`, and prints the top self-time zones. **Do not read that
+sorted self-time list as "which systems burn the frame"** — it is summed across
+all threads and badly over-weights parallel work; see *Self-time sums across
+threads mislead* below. It needs the `tracy-capture` and
 `tracy-csvexport` utilities (from `$PATH`, or built under `$TRACY_DIR`; the
 script header has the `cmake` lines). Because Tracy accepts only **one**
 profiler connection, disconnect the GUI before capturing — or keep the GUI, use
@@ -153,6 +155,60 @@ Exporting a large trace has two more sharp edges:
   present without `-t` anyway, and per-zone `max_ns ÷ mean_ns` is the outlier
   metric — it finds the frames where a system runs far above its own average,
   which the aggregate mean hides.
+
+#### Self-time sums across threads mislead — rank by the wall-clock critical path
+
+`tracy-csvexport`'s default (aggregate) output — and `zones-self.tsv`'s sorted
+`total_ns` — **sums each zone across every thread**. That makes it a poor way to
+pick an optimization target, because Bevy runs each system on a **single**
+thread, and only explicit `par_for_each` / `par_iter` bodies spread across the
+~11 worker threads:
+
+- A `par_for_each` body with **6.3 ms summed** self-time is only ~**0.6 ms
+  wall-clock** — it parallelises ~10×, and one worker finishing early does not
+  shorten the frame.
+- A single-threaded system's summed self-time **is** its wall-clock.
+
+Ranking by summed self-time conflates the two and hugely inflates parallel work.
+Concretely, on an Aditi rez the "frustum culling" that looked like ~17 ms of the
+frame was **summed par-iter self-time**: `check_visibility_cpu_culling` is
+~**1.4 ms wall-clock**, runs on a *worker* thread overlapping the main thread,
+and is **off the critical path**. Optimising it (e.g. a spatial octree) could
+save at most ~1 ms — the summed number was a mirage.
+
+**Finding the real critical path.** The frame is **main-thread bound** and
+pipelined across two stages:
+
+- The **main thread** runs the top-level `schedule{name=…}` zones —
+  First → PreUpdate → Update → PostUpdate → Last — then the extract
+  `sub app{name=RenderExtractApp}`, **sequentially**. Identify it as the thread
+  that owns those zones (unwrap any of them and read the `thread` column).
+- The **render thread** runs `schedule{name=Render}` **concurrently** (Bevy's
+  pipelined rendering: it renders frame *N* while the main thread builds *N+1*).
+
+So `frame ≈ max(main-thread schedules, render-thread Render schedule)`, and
+neither stage is idle-waiting much when they are balanced. Rank targets by
+**per-instance wall-clock on the gating thread**, obtained with `-u`:
+
+```console
+# per-instance INCLUSIVE wall-clock + thread for a system, steady-state window
+tracy-csvexport -u -f check_dir_light_mesh_visibility trace.tracy |
+  awk -F, '$4>40e9 {n++; t+=$5} END{print (t/n)/1e6 " ms/frame"}'
+```
+
+A schedule stage is a **barrier**: it waits for its **slowest single system**,
+so a system's per-instance inclusive time (`exec_time_ns`, the `-u` column) —
+and which `thread` it ran on — is what matters, not the cross-thread sum. A slow
+system on a worker that overlaps the main thread may gate nothing. For an A/B
+comparison (culling on/off, before/after a change), compare **steady-state frame
+time and the main-thread schedule durations**, never summed self-times.
+
+Worked numbers from one no-culling Aditi trace (steady state, per frame): main
+thread 31.7 ms = PostUpdate 13.1 plus extract 8.1 plus Update 6.0 plus PreUpdate
+1.6 plus First/Last 0.6; render thread's Render schedule 29.9 ms in parallel;
+`present` 7 ms lives on the render thread. The levers were extract and the
+render-submit path (both scale with **drawn-object count**), not the cull
+algorithm.
 
 ### Chrome / Perfetto (no-GUI fallback for bug reports)
 
