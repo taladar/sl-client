@@ -69,6 +69,7 @@ use bevy::camera::visibility::RenderLayers;
 use crate::hud::{HUD_RENDER_LAYER, HudState, is_hud_point};
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::lights::{ObjectLight, light_from_object};
+use crate::material_cache::{MaterialCache, MaterialInternContext, SharedFaceMaterial};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::particles::{apply_particles, particles_from_object};
@@ -77,7 +78,9 @@ use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
 use crate::render_priority::{AVATAR_BOOST_PRIORITY, HUD_BOOST_PRIORITY};
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
-use crate::textures::{PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material};
+use crate::textures::{
+    PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
+};
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
@@ -496,6 +499,9 @@ struct PendingMesh {
     /// The request-time (base) fetch priority for this object's face textures — a
     /// boost for a worn attachment, else idle (P20.2).
     priority: Priority,
+    /// The object-level material-intern inputs, retained because this rebuild
+    /// runs without the live [`Object`] at hand.
+    intern: MaterialInternContext,
 }
 
 /// A worn rigged mesh attachment's deferred skinned build (P17.2): the decoded
@@ -528,6 +534,9 @@ struct PendingSculpt {
     /// The request-time (base) fetch priority for this object's face textures — a
     /// boost for a worn attachment, else idle (P20.2).
     priority: Priority,
+    /// The object-level material-intern inputs, retained because this rebuild
+    /// runs without the live [`Object`] at hand.
+    intern: MaterialInternContext,
 }
 
 /// A plain prim's deferred re-tessellation inputs (P21.3): the shape, texture
@@ -550,6 +559,9 @@ struct PendingPrim {
     /// The request-time (base) fetch priority for this object's face textures — a
     /// boost for a worn attachment, else idle (P20.2).
     priority: Priority,
+    /// The object-level material-intern inputs, retained because this rebuild
+    /// runs without the live [`Object`] at hand.
+    intern: MaterialInternContext,
 }
 
 /// The [`PrimLod`] a pixel-area-managed plain prim is first tessellated at
@@ -1258,6 +1270,7 @@ fn apply_pending_object_event(
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
     cache: &mut GeometryCache,
+    material_cache: &mut MaterialCache,
     event: PendingObjectEvent,
 ) -> bool {
     match event {
@@ -1271,6 +1284,7 @@ fn apply_pending_object_event(
             prim_textures,
             mesh_manager,
             cache,
+            material_cache,
         ),
         PendingObjectEvent::Remove(scoped) => {
             remove_object(state, scoped, commands);
@@ -1300,6 +1314,7 @@ pub(crate) fn update_objects(
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
     mut cache: ResMut<GeometryCache>,
+    mut material_cache: ResMut<MaterialCache>,
 ) {
     let mut budget = spawn_budget.per_frame;
     // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
@@ -1315,6 +1330,7 @@ pub(crate) fn update_objects(
             &mut prim_textures,
             &mut mesh_manager,
             &mut cache,
+            &mut material_cache,
             event,
         )
     });
@@ -1338,6 +1354,7 @@ pub(crate) fn update_objects(
                         &mut prim_textures,
                         &mut mesh_manager,
                         &mut cache,
+                        &mut material_cache,
                     )
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
@@ -1812,6 +1829,8 @@ fn build_object_geometry(
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> ObjectGeometryBuild {
     // A worn attachment's textures / mesh are boosted so they load with the
     // avatar rather than queued behind the surrounding scene (P20.2).
@@ -1831,6 +1850,8 @@ fn build_object_geometry(
                 manager,
                 prim_textures,
                 priority,
+                intern,
+                material_cache,
             );
             (faces, None, None, None, Some(chain))
         }
@@ -1846,6 +1867,8 @@ fn build_object_geometry(
                 priority,
                 INITIAL_MANAGED_PRIM_LOD,
                 cache,
+                intern,
+                material_cache,
             ),
             None,
             // Retain the re-tessellation inputs so the pixel-area LOD driver can
@@ -1856,6 +1879,7 @@ fn build_object_geometry(
                 texture_entry: object.texture_entry.clone(),
                 scale: [object.scale.x, object.scale.y, object.scale.z],
                 priority,
+                intern: intern.clone(),
             }),
             None,
             None,
@@ -1883,6 +1907,8 @@ fn build_object_geometry(
                         prim_textures,
                         priority,
                         cache,
+                        intern,
+                        material_cache,
                     ),
                     None,
                     None,
@@ -1896,6 +1922,7 @@ fn build_object_geometry(
                         texture_entry: object.texture_entry.clone(),
                         scale: [object.scale.x, object.scale.y, object.scale.z],
                         priority,
+                        intern: intern.clone(),
                     })),
                     None,
                     None,
@@ -1926,6 +1953,8 @@ fn build_object_geometry(
                         prim_textures,
                         priority,
                         cache,
+                        intern,
+                        material_cache,
                     ),
                     None,
                     None,
@@ -1940,6 +1969,7 @@ fn build_object_geometry(
                         texture_entry: object.texture_entry.clone(),
                         scale: [object.scale.x, object.scale.y, object.scale.z],
                         priority,
+                        intern: intern.clone(),
                     })),
                     None,
                     None,
@@ -2033,6 +2063,8 @@ fn build_prim_faces(
     priority: Priority,
     lod: PrimLod,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Vec<Entity> {
     let shape = object.shape;
     spawn_cached_prim_faces(
@@ -2048,6 +2080,8 @@ fn build_prim_faces(
         prim_textures,
         priority,
         cache,
+        intern,
+        material_cache,
     )
 }
 
@@ -2099,6 +2133,8 @@ fn build_flexi_faces(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> (Vec<Entity>, FlexiChain) {
     let shape = PrimShapeFloat::from_params(&object.shape);
     let attributes = object
@@ -2124,6 +2160,8 @@ fn build_flexi_faces(
     let chain = FlexiChain::new(&shape, &attributes, scale, base_position, base_rotation);
     let path = chain.path(base_position, base_rotation, scale);
     let prim = tessellate_with_path(&shape, FLEXI_LOD, &path);
+    // A flexi prim's per-frame deformation rewrites its *meshes*, not its
+    // materials, so its faces intern like any other prim's.
     let face_entities = spawn_prim_faces(
         &prim,
         &object.texture_entry,
@@ -2135,6 +2173,8 @@ fn build_flexi_faces(
         manager,
         prim_textures,
         priority,
+        intern,
+        material_cache,
     );
     (face_entities, chain)
 }
@@ -2211,6 +2251,8 @@ fn build_sculpt_faces(
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Vec<Entity> {
     spawn_cached_prim_faces(
         GeometryKey::Sculpt {
@@ -2230,6 +2272,8 @@ fn build_sculpt_faces(
         prim_textures,
         priority,
         cache,
+        intern,
+        material_cache,
     )
 }
 
@@ -2433,6 +2477,8 @@ fn spawn_prim_faces(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Vec<Entity> {
     let entry = decode_texture_entry(texture_entry, prim.faces.len());
     // The slot every face falls back to when the object carries no texture entry:
@@ -2463,6 +2509,8 @@ fn spawn_prim_faces(
             manager,
             prim_textures,
             priority,
+            intern,
+            material_cache,
         );
         face_entities.push(entity);
     }
@@ -2470,12 +2518,14 @@ fn spawn_prim_faces(
 }
 
 /// Spawn one face child entity under `parent`, carrying `mesh` and the per-face
-/// diffuse material built from `texture_face` (via [`face_material`], which
-/// requests the texture through `manager` and parks the material in
+/// diffuse material built from `texture_face` (via [`intern_face_material`],
+/// which requests the texture through `manager` and parks the material in
 /// `prim_textures` until it decodes — the Phase 6 pipeline). The shared tail of
-/// every face-geometry build path, cached or not: the *material* is always
-/// per-instance (texture identity is not part of the geometry cache key); only
-/// the mesh handle may be shared.
+/// every face-geometry build path, cached or not — and the interception point
+/// of the cross-instance [`MaterialCache`]: a face `intern` judges internable
+/// shares one material handle with every identical face (so matched-geometry
+/// copies batch into instanced draws) and is marked [`SharedFaceMaterial`] for
+/// the copy-on-write detach net; an excluded face keeps a private material.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the material build needs"
@@ -2490,24 +2540,29 @@ fn spawn_face_entity(
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Entity {
-    let material = face_material(
+    let (material, shared) = intern_face_material(
         texture_face,
+        intern.internable(face_id, texture_face),
+        material_cache,
         materials,
         manager,
         prim_textures,
         priority,
-        TextureAlpha::Mask,
     );
-    commands
-        .spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            PrimFaceEntity { face_id },
-            FaceTextureDebug(*texture_face),
-            ChildOf(parent),
-        ))
-        .id()
+    let mut face = commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        PrimFaceEntity { face_id },
+        FaceTextureDebug(*texture_face),
+        ChildOf(parent),
+    ));
+    if shared {
+        face.insert(SharedFaceMaterial);
+    }
+    face.id()
 }
 
 /// Try to spawn `key`'s faces purely from the cross-instance [`GeometryCache`]:
@@ -2535,6 +2590,8 @@ fn spawn_revived_faces(
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Result<Vec<Entity>, HashMap<PrimFaceId, Handle<Mesh>>> {
     let Some(face_count) = cache.cached_face_count(key) else {
         return Err(HashMap::new());
@@ -2580,6 +2637,8 @@ fn spawn_revived_faces(
                 manager,
                 prim_textures,
                 priority,
+                intern,
+                material_cache,
             ))
         })
         .collect();
@@ -2611,6 +2670,8 @@ fn spawn_cached_prim_faces(
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Vec<Entity> {
     let quantized = scale_mm(scale);
     let mut revived = match spawn_revived_faces(
@@ -2625,6 +2686,8 @@ fn spawn_cached_prim_faces(
         prim_textures,
         priority,
         cache,
+        intern,
+        material_cache,
     ) {
         Ok(face_entities) => return face_entities,
         Err(partial) => partial,
@@ -2673,6 +2736,8 @@ fn spawn_cached_prim_faces(
             manager,
             prim_textures,
             priority,
+            intern,
+            material_cache,
         );
         face_entities.push(entity);
     }
@@ -2720,6 +2785,8 @@ fn build_mesh_submeshes(
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
+    intern: &MaterialInternContext,
+    material_cache: &mut MaterialCache,
 ) -> Vec<Entity> {
     let key = GeometryKey::Mesh {
         mesh: mesh_key,
@@ -2738,6 +2805,8 @@ fn build_mesh_submeshes(
         prim_textures,
         priority,
         cache,
+        intern,
+        material_cache,
     ) {
         Ok(face_entities) => return face_entities,
         Err(partial) => partial,
@@ -2788,6 +2857,8 @@ fn build_mesh_submeshes(
             manager,
             prim_textures,
             priority,
+            intern,
+            material_cache,
         );
         face_entities.push(entity);
     }
@@ -2852,6 +2923,7 @@ fn apply_object(
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
     cache: &mut GeometryCache,
+    material_cache: &mut MaterialCache,
 ) -> bool {
     let scoped = object.scoped_id();
     let parent = object.scoped_parent_id();
@@ -2871,6 +2943,17 @@ fn apply_object(
     } else {
         state.objects.get(&parent).map(|root| root.entity)
     };
+    // Whether the object belongs to a HUD attachment — worn on a HUD point
+    // itself, or a linkset child of one (recognised via the tracked parent
+    // chain; a child whose HUD root arrives later is still caught by the
+    // detach net's HUD-layer sweep). A HUD face's material is mutated in place
+    // (forced fullbright), so HUD faces never intern.
+    let hud = attachment_point.is_some_and(is_hud_point)
+        || (!is_root && in_hud_attachment(state, parent));
+    // The object-level inputs of the per-face material-intern decision,
+    // threaded into every face build this update runs (and retained by the
+    // deferred mesh / sculpt / LOD rebuilds).
+    let intern = MaterialInternContext::for_object(object, hud);
 
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
@@ -2975,6 +3058,8 @@ fn apply_object(
                     prim_textures,
                     mesh_manager,
                     cache,
+                    &intern,
+                    material_cache,
                 );
             // Seed or clear the flexi chain state (P32.2): a prim that is (still) flexi
             // gets a fresh chain at the new softness / geometry; one toggled rigid drops
@@ -3104,6 +3189,8 @@ fn apply_object(
         prim_textures,
         mesh_manager,
         cache,
+        &intern,
+        material_cache,
     );
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
@@ -3403,6 +3490,7 @@ pub(crate) fn apply_object_meshes(
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
     mut cache: ResMut<GeometryCache>,
+    mut material_cache: ResMut<MaterialCache>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
         let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
@@ -3479,6 +3567,8 @@ pub(crate) fn apply_object_meshes(
                         &mut prim_textures,
                         pending.priority,
                         &mut cache,
+                        &pending.intern,
+                        &mut material_cache,
                     );
                     debug!(
                         "built mesh {key}: {} submesh entities",
@@ -3503,6 +3593,7 @@ pub(crate) fn apply_object_meshes(
                 let texture_entry = rebuild.texture_entry.clone();
                 let scale = rebuild.scale;
                 let priority = rebuild.priority;
+                let intern = rebuild.intern.clone();
                 let geometry = tracked.geometry;
                 despawn_prim_faces(&tracked.face_entities, &mut commands);
                 tracked.face_entities = build_mesh_submeshes(
@@ -3518,6 +3609,8 @@ pub(crate) fn apply_object_meshes(
                     &mut prim_textures,
                     priority,
                     &mut cache,
+                    &intern,
+                    &mut material_cache,
                 );
                 debug!(
                     "rebuilt mesh {key} at new LOD: {} submesh entities",
@@ -3554,6 +3647,7 @@ pub(crate) fn apply_prim_lod(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut cache: ResMut<GeometryCache>,
+    mut material_cache: ResMut<MaterialCache>,
 ) {
     for (scoped, desired) in targets.0.drain() {
         let Some(tracked) = state.objects.get_mut(&scoped) else {
@@ -3573,6 +3667,7 @@ pub(crate) fn apply_prim_lod(
         let texture_entry = rebuild.texture_entry.clone();
         let scale = rebuild.scale;
         let priority = rebuild.priority;
+        let intern = rebuild.intern.clone();
         let geometry = tracked.geometry;
         despawn_prim_faces(&tracked.face_entities, &mut commands);
         tracked.face_entities = spawn_cached_prim_faces(
@@ -3591,6 +3686,8 @@ pub(crate) fn apply_prim_lod(
             &mut prim_textures,
             priority,
             &mut cache,
+            &intern,
+            &mut material_cache,
         );
         tracked.prim_lod = desired;
         debug!(
@@ -4172,6 +4269,7 @@ pub(crate) fn apply_object_sculpts(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut cache: ResMut<GeometryCache>,
+    mut material_cache: ResMut<MaterialCache>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
@@ -4200,6 +4298,8 @@ pub(crate) fn apply_object_sculpts(
                         &mut prim_textures,
                         pending.priority,
                         &mut cache,
+                        &pending.intern,
+                        &mut material_cache,
                     );
                     debug!(
                         "built sculpt {id}: {} face entities",
@@ -4487,6 +4587,8 @@ mod tests {
         let (mut commands, mut meshes, mut materials, mut manager, mut prim_textures) = state
             .get_mut(&mut world)
             .map_err(|error| format!("system params: {error}"))?;
+        let intern = crate::material_cache::MaterialInternContext::for_object(&object, false);
+        let mut material_cache = crate::material_cache::MaterialCache::default();
         let (faces, _chain) = super::build_flexi_faces(
             &object,
             parent,
@@ -4496,6 +4598,8 @@ mod tests {
             &mut manager,
             &mut prim_textures,
             Priority::IDLE,
+            &intern,
+            &mut material_cache,
         );
         state.apply(&mut world);
 

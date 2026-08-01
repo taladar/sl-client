@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
-| ready | 262 |
+| ideas | 54 |
+| ready | 261 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 15 |
-| done | 646 |
+| done | 647 |
 | deferred | 20 |
 | wont-do | 6 |
-| **total** | **1126** |
+| **total** | **1125** |
 
-## ideas (55)
+## ideas (54)
 
 ### viewer
 
@@ -87,8 +87,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
-- [`viewer-perf-ui-static-relayout`](ideas/viewer-perf-ui-static-relayout.md) —
-  UI layout/text/styling runs every frame on a static UI
 - [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
@@ -141,7 +139,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (262)
+## ready (261)
 
 ### protocol
 
@@ -549,9 +547,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
-- [`viewer-perf-material-intern`](ready/viewer-perf-material-intern.md) — Intern
-  face materials by content for shared handles + draw batching (blocked by
-  `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
@@ -1171,7 +1166,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (646)
+## done (647)
 
 ### protocol
 
@@ -1737,6 +1732,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
+  face materials by content for shared handles + draw batching (blocked by
+  `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)

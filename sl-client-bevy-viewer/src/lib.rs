@@ -104,6 +104,7 @@ mod local_chat_input;
 mod locomotion;
 mod locomotion_ik;
 mod look_at;
+mod material_cache;
 mod material_preview;
 mod materials;
 mod media_controls;
@@ -1336,6 +1337,10 @@ fn run_session(
         // The cross-instance geometry cache: shared mesh handles for identical
         // prim / sculpt / mesh geometry (`viewer-perf-prim-tessellation-cache`).
         .init_resource::<geometry_cache::GeometryCache>()
+        // The cross-instance material cache: shared face-material handles for
+        // identical face content, so matched copies batch into instanced draws
+        // (`viewer-perf-material-intern`).
+        .init_resource::<material_cache::MaterialCache>()
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
@@ -1426,6 +1431,13 @@ fn run_session(
                 setup_particle_quad,
             ),
         )
+        // The material cache's copy-on-write detach net: give any interned
+        // (shared-material) face a private material before this frame's
+        // `Update` mutators — texture animation, PBR registration, HUD
+        // fullbright, the edit floaters' live previews — can write into the
+        // shared asset. Scheduled in `PreUpdate` so the swap's commands are
+        // applied at the schedule boundary, ahead of every mutator.
+        .add_systems(PreUpdate, material_cache::detach_shared_face_materials)
         .add_systems(
             Update,
             (
@@ -1674,6 +1686,9 @@ fn run_session(
                     apply_tree_lod.after(drive_render_priority),
                     geometry_cache::prune_geometry_cache.run_if(
                         bevy::time::common_conditions::on_timer(geometry_cache::PRUNE_INTERVAL),
+                    ),
+                    material_cache::prune_material_cache.run_if(
+                        bevy::time::common_conditions::on_timer(material_cache::PRUNE_INTERVAL),
                     ),
                 ),
                 // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its

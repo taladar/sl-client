@@ -2,7 +2,7 @@
 id: viewer-perf-material-intern
 title: Intern face materials by content for shared handles + draw batching
 topic: viewer
-status: ready
+status: done
 origin: profiling design discussion (2026-07-31)
 blocked_by: [viewer-perf-prim-tessellation-cache]
 refs: [viewer-perf-prim-tessellation-cache, viewer-profiling]
@@ -91,3 +91,52 @@ draw-call win on top of the geometry cache's tessellation/GPU-memory win.
   handle (see the mutation analysis above).
 - Eviction/generation tracking mirrors the geometry cache (release on region
   teardown / teleport falls out of the weak-id + prune pattern).
+
+## Done (2026-08-01)
+
+Implemented as planned, mirroring the geometry cache:
+`sl-client-bevy-viewer/src/material_cache.rs` holds the `MaterialCache`
+resource (weak `AssetId`s, `get_strong_handle` revive, 30 s prune) keyed
+by `MaterialKey` — the full decoded `TextureFace` content with the float
+fields as exact `f32::to_bits` patterns (wire dequantization is
+deterministic, so identical wire faces key equal with no float hashing)
+plus the `TextureAlpha` mode. `intern_face_material` (textures.rs)
+intercepts inside `spawn_face_entity`; on a hit while the texture is
+still undecoded the shared handle is re-parked deduplicated-by-handle
+and re-requested (priority boost + failed-decode retry both fall out).
+
+Two things went beyond the plan:
+
+- The exclusion inputs are object-level, but the deferred LOD / decode
+  rebuilds run without the `Object` — so a `MaterialInternContext`
+  (running texture animation, PBR-covered face indices, HUD membership)
+  is computed per build and carried in `PendingPrim` / `PendingMesh` /
+  `PendingSculpt`.
+- Spawn-time exclusion alone is not safe: a late `llSetTextureAnim`, PBR
+  data assigned to existing faces, HUD routing, and the edit floaters'
+  live previews all mutate a face material **without** a texture-entry
+  change (which would rebuild the faces and re-evaluate). Every interned
+  face carries a `SharedFaceMaterial` marker, and a `PreUpdate`
+  copy-on-write detach system gives any such face a private recompose
+  before the Update-schedule mutators run; the marker filter keeps the
+  steady-state sweep free. TE-carried mutators (legacy material id,
+  bump, media) stay excluded at spawn and self-heal via the existing
+  TE-change rebuild.
+
+Measured via the new F3 `mat entries/hit/miss/excl` line:
+
+- Local grid login: `entries 6, hit 652, miss 6, excl 22` — the
+  duplicate-heavy sample content collapses onto six distinct materials.
+- aditi (public sandbox, fully rezzed): `entries 2039, hit 18354,
+  miss 2043, excl 2351` — ~90% of internable face spawns revived a
+  shared material (~9× fewer material assets; only ~10% of faces are
+  excluded as mutation-prone), so the matched-content copies now share
+  both mesh and material handle, which is what Bevy's automatic
+  batching keys on.
+- No FPS regression attributable: three successive logins into the same
+  sandbox scored 7–9 fps (interned, cache-cold first login), 17–22 fps
+  (baseline, warmer cache), 35–58 fps (interned, warmest cache) — the
+  ordering tracks texture-cache warmth / rez progress, and the
+  interned build's fully-rezzed frames are the fastest of the set.
+- Visual A/B (baseline vs interned, same aditi viewpoint): identical
+  scene rendering, avatars (excluded path) included.
