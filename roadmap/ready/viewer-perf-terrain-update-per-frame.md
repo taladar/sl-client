@@ -24,5 +24,5 @@ frame:
   terrain revision (the minimap already tracks a `map_revision()` for the same
   data) so a stationary, fully-rezzed region costs ~0.
 
-Verify with a ≤10 s `tracy-grab.sh` capture while stationary and fully rezzed:
+Verify with a ≤10 s `tracy-capture` capture while stationary and fully rezzed:
 `update_terrain` self-time should fall to near-zero when nothing changes.

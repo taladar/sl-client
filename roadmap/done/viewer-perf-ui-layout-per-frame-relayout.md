@@ -131,7 +131,7 @@ Unit/headless tests: gate fire patterns (`ui_perf`), deferred-content
 lifecycle (`floater`), tag projection + guard and the viewport→overlay
 mapping (`name_tag_overlay`).
 
-**Live acceptance (owner-run):** a `tracy-grab.sh` pair (rez + idle) on
+**Live acceptance (owner-run):** a `tracy-capture` pair (rez + idle) on
 Aditi with the window focused — expect the layout/stack gates to skip on
 quiet frames (watch `SL_VIEWER_LOG_UI_DIRTY=1`'s "ran X of Y frames"
 line), tags tracking avatars with floaters above them, and every floater

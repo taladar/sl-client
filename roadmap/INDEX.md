@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 54 |
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 14 |
-| done | 657 |
+| done | 658 |
 | deferred | 20 |
-| wont-do | 7 |
-| **total** | **1135** |
+| wont-do | 8 |
+| **total** | **1136** |
 
-## ideas (55)
+## ideas (54)
 
 ### viewer
 
@@ -72,9 +72,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
-- [`viewer-perf-per-object-face-merge-entity-count`](ideas/viewer-perf-per-object-face-merge-entity-count.md)
-  — Cut per-frame CPU by reducing world-object entity count (face merge /
-  per-object cull unit)
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
@@ -1165,7 +1162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## done (657)
+## done (658)
 
 ### protocol
 
@@ -1896,6 +1893,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-social-profiles`](done/viewer-social-profiles.md) — Avatar profiles —
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
+  — SpaceNavigator drives the viewer even when its window is not focused
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
@@ -2594,12 +2593,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (7)
+## wont-do (8)
 
 ### viewer
 
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
+- [`viewer-perf-per-object-face-merge-entity-count`](wont-do/viewer-perf-per-object-face-merge-entity-count.md)
+  — Cut per-frame CPU by reducing world-object entity count (face merge /
+  per-object cull unit)
 - [`viewer-perf-world-frustum-culling-octree`](wont-do/viewer-perf-world-frustum-culling-octree.md)
   — Spatial (octree/BVH) frustum culling for world meshes
 - [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —

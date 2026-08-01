@@ -34,4 +34,4 @@ Investigate:
   / just-rezzed content.
 
 Measure `block_on_optimize_trees` + `ray culling` self-time before/after with a
-≤10 s `tracy-grab.sh` capture during an active rez.
+≤10 s `tracy-capture` capture during an active rez.

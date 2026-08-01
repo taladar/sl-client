@@ -56,7 +56,7 @@ Client-side logic unit-tested (`cargo test -p sl-client-bevy-viewer`):
 move/turn/new-region/avatar-move/appearing-avatar → rebuild) and
 `build_object_layer` (owned dot at centre, empty layer transparent).
 
-**Live acceptance (owner-run):** confirm with a ≤10 s `tracy-grab.sh` capture
+**Live acceptance (owner-run):** confirm with a ≤10 s `tracy-capture` capture
 during active rez on Aditi — `regen_minimap_layers` max/std should collapse to
 near its mean (the disc-plotting loop no longer runs on the frame thread; only
 the O(prims) transform-read snapshot remains), and the minimap must still update

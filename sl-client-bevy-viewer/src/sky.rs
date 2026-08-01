@@ -83,6 +83,19 @@ pub(crate) const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 /// (lux). The reference default ambient (`0.25` grey) lands at a soft fill.
 const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
 
+/// Read the `SL_VIEWER_SHADOW_CASCADES` experiment env: how many sun shadow
+/// cascades to build (clamped `1..=4`; default 4). The per-frame shadow-caster
+/// cull ([`check_dir_light_mesh_visibility`], ungated) and the shadow-map render
+/// both scale with the cascade count × caster count, so cutting cascades
+/// isolates how much the shadow *view count* costs — an entity/view lever
+/// distinct from the sun-movement churn one.
+fn shadow_cascade_count() -> usize {
+    std::env::var("SL_VIEWER_SHADOW_CASCADES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map_or(4, |count| count.clamp(1, 4))
+}
+
 /// Cascaded-shadow-map coverage for the scene sun / moon (P24.1). Tuned to a
 /// Second Life region's scale (256 m): the last cascade reaches to a region's
 /// diagonal (~362 m) so an avatar's shadow, nearby prims, and terrain relief all
@@ -91,7 +104,7 @@ const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
 /// `LLPipeline::renderShadow` uses four split sun cascades likewise.
 pub(crate) fn shadow_cascades() -> CascadeShadowConfig {
     CascadeShadowConfigBuilder {
-        num_cascades: 4,
+        num_cascades: shadow_cascade_count(),
         // The camera can push right up to an avatar's face (2 cm near plane), so
         // start the near cascade close.
         minimum_distance: 0.1,
@@ -501,8 +514,11 @@ pub(crate) fn setup_sky(
     commands.spawn((
         DirectionalLight {
             illuminance: SCENE_LIGHT_ILLUMINANCE,
-            // P24.1: cast cascaded shadow maps from the sun / moon.
-            shadow_maps_enabled: true,
+            // P24.1: cast cascaded shadow maps from the sun / moon. Disabled by the
+            // `SL_VIEWER_SUN_SHADOWS=0` experiment env to measure the total
+            // per-frame cost of the directional-shadow subsystem (the ungated
+            // caster cull plus the shadow-map render).
+            shadow_maps_enabled: sun_shadows_enabled(),
             ..default()
         },
         // Cascades tuned to region scale so shadows cover an avatar plus nearby
@@ -552,6 +568,37 @@ pub(crate) fn center_sky_on_camera(
     }
 }
 
+/// Read the `SL_VIEWER_SUN_UPDATE_INTERVAL` churn-diagnosis env (seconds): how
+/// often [`drive_sky`] is allowed to re-fold the environment into the sun /
+/// materials. `0` (the default — unset or unparsable) keeps the original
+/// every-frame behaviour. A positive value rate-limits the update so the sun's
+/// `Transform` stops being rewritten every frame — the write dirties
+/// [`SceneSun`] via `Mut` change-detection *even when* R20's texel-snap left the
+/// value unchanged, which recomputes the four shadow cascades and re-culls every
+/// outdoor caster each frame. Rate-limiting isolates whether that per-frame
+/// shadow re-cull is a dominant sustained cost (the sun then visibly steps —
+/// acceptable for the experiment; the real fix is to guard the write on an
+/// actual value change).
+fn sun_update_interval() -> f32 {
+    std::env::var("SL_VIEWER_SUN_UPDATE_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(0.0)
+}
+
+/// Whether the sun casts shadows (`SL_VIEWER_SUN_SHADOWS`, default on): set to
+/// `0` to disable `shadow_maps_enabled` on [`SceneSun`] at spawn, so an A/B
+/// (frame time via Tracy or the status bar) measures the total per-frame cost of
+/// the directional-shadow subsystem. That cost is the more decisive number than the
+/// sun-churn slice, because the shadow-caster cull runs every frame regardless
+/// of sun movement.
+fn sun_shadows_enabled() -> bool {
+    !matches!(
+        std::env::var("SL_VIEWER_SUN_SHADOWS").ok().as_deref(),
+        Some("0")
+    )
+}
+
 /// Fold the current environment + camera altitude into the sky material, the
 /// directional light, and the ambient light, and (re)request the sky's rainbow /
 /// halo overlay textures boosted.
@@ -559,7 +606,16 @@ pub(crate) fn center_sky_on_camera(
     clippy::type_complexity,
     reason = "one query over both directional lights (shadow sun + shadow-free mirror), tagged by which"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the sky/sun/ambient fold plus the rate-limit experiment's time + cached-interval locals"
+)]
 pub(crate) fn drive_sky(
+    time: Res<Time>,
+    // Accumulated real time since the last actual update, and the cached
+    // `SL_VIEWER_SUN_UPDATE_INTERVAL` (read once) — the churn experiment's gate.
+    mut since_last_update: Local<f32>,
+    mut update_interval: Local<Option<f32>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
@@ -574,6 +630,15 @@ pub(crate) fn drive_sky(
     >,
     mut ambient: ResMut<GlobalAmbientLight>,
 ) {
+    // Churn experiment: skip the whole fold (and so the per-frame sun-`Transform`
+    // rewrite) until the configured interval has elapsed. `0` = every frame.
+    let interval = *update_interval.get_or_insert_with(sun_update_interval);
+    *since_last_update += time.delta_secs();
+    if interval > 0.0 && *since_last_update < interval {
+        return;
+    }
+    *since_last_update = 0.0;
+
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment.settings);
     let Some(sky) = environment

@@ -45,7 +45,7 @@ spacenav = ["dep:evdev"]
 # (the "memory grows until a client connects" warning) — an untethered run grows
 # without bound, which on a CEF build eventually trips Chromium's memory-dump
 # `CHECK`. On-demand keeps memory flat between captures, so the build is safe to
-# leave running and connect to only when needed (see `scripts/tracy-grab.sh`).
+# leave running and connect to only when needed (see book/src/tools/profiling.md).
 profile-tracy = [
     "dep:tracing-tracy",
     "tracing-tracy/ondemand",

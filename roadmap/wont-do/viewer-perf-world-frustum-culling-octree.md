@@ -68,7 +68,7 @@ both counts: coarser cull unit **and** hierarchical rejection.
    [[viewer-perf-probe-occlusion-skip]] (fewer views to cull for) and the
    per-face → per-object change above (fewer leaves in the tree).
 
-Measure with the same rez capture (`scripts/tracy-grab.sh` self-time over a rez
+Measure with the same rez capture (`tracy-capture` self-time over a rez
 window; the `visibility` / `check_visibility` /
 `check_dir_light_mesh_visibility` zones) before/after.
 

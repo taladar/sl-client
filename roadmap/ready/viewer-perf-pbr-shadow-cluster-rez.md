@@ -66,4 +66,4 @@ Investigate / tune:
 - Whether `check_dir_light_mesh_visibility` can be gated / cheaper.
 
 Measure the main-view shadow/cluster self-time before/after with a ≤10 s
-`tracy-grab.sh` capture during active rez.
+`tracy-capture` capture during active rez.

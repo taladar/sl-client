@@ -470,6 +470,7 @@ mod device {
 
     use super::SpacenavInput;
     use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
     use evdev::{AbsoluteAxisCode, Device, EventSummary, KeyCode};
     use tracing::{info, warn};
 
@@ -617,11 +618,32 @@ mod device {
     pub(super) fn poll_device(
         device: Option<ResMut<SpacenavDevice>>,
         mut input: ResMut<SpacenavInput>,
+        windows: Query<&Window, With<PrimaryWindow>>,
     ) {
         input.toggle_flycam = false;
         let Some(mut device) = device else {
             return;
         };
+        // Keyboard / mouse input only reaches the focused window, but the
+        // SpaceNavigator is read straight off evdev — a global device — so without
+        // this guard it keeps driving the camera / avatar while the viewer is in
+        // the background. When the window is not focused, drain the evdev backlog
+        // (so it does not replay as a burst on refocus) and publish a zeroed input;
+        // the self-centring axes then rest at 0 until focus returns. Done here at
+        // the read so every `SpacenavInput` consumer inherits the gate.
+        if !windows.single().is_ok_and(|window| window.focused) {
+            match device.device.fetch_events() {
+                Ok(events) => {
+                    let _drained = events.count();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => warn!("spacenav: read error while unfocused: {error}"),
+            }
+            device.raw = [0.0; 6];
+            device.button_down = false;
+            input.axes = [0.0; 6];
+            return;
+        }
         let mut button_now = device.button_down;
         // Collect the pending events first (ending the `fetch_events` borrow) so the
         // axis / button state on `device` can be updated below without a second

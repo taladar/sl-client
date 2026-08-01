@@ -160,6 +160,6 @@ Investigate:
 - Whether the prepare cost tracks the number of *changed* materials (expected
   during rez) or a fixed per-frame set (a mutation bug).
 
-Measure with a ≤10 s `tracy-grab.sh` capture while **stationary and fully
+Measure with a ≤10 s `tracy-capture` capture while **stationary and fully
 rezzed** — if the prepare stays ~1 ms/frame with nothing new rezzing, something
 is mutating materials every frame.

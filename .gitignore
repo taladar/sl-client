@@ -35,7 +35,8 @@ __pycache__/
 viewer-settings.json
 viewer-settings.toml
 
-# Tracy machine-readable capture output (scripts/tracy-grab.sh)
+# Tracy capture output (trace.tracy + tracy-csvexport TSVs; see
+# book/src/tools/profiling.md)
 tracy-grab-*/
 # Tracy long-capture output (ad-hoc profiling runs)
 /tracy-captures/

@@ -35,12 +35,12 @@ its own overhead.
 cargo run --release -p sl-client-bevy-viewer --features profile-tracy
 ```
 
-Launch the [Tracy](https://github.com/wolfpld/tracy) GUI (or `tracy-capture -o
-capture.tracy` for a headless recording) and connect to the running viewer. The
-per-zone statistics view answers "which system runs how often, and for how
-long"; `bevy_render` emits a `tracy.frame_mark` event every frame so Tracy draws
-frame boundaries. (That event is filtered out of the human-readable log so it
-does not spam the terminal.)
+Launch the [Tracy](https://github.com/wolfpld/tracy) GUI and connect to the
+running viewer, or capture headlessly to a file (below). The per-zone statistics
+view answers "which system runs how often, and for how long"; `bevy_render`
+emits a `tracy.frame_mark` event every frame so Tracy draws frame boundaries.
+(That event is filtered out of the human-readable log so it does not spam the
+terminal.)
 
 **On-demand mode.** `profile-tracy` enables `tracing-tracy/ondemand`, so the
 Tracy client collects **nothing until a profiler connects** and discards on
@@ -74,74 +74,70 @@ cargo tree -p sl-client-bevy-viewer --features profile-tracy -i tracy-client-sys
 per-allocation lifetimes correlated with frame structure. It carries real
 overhead, so keep it opt-in.
 
-#### Machine-readable export (`scripts/tracy-grab.sh`)
+#### Capturing a trace to a file — one command, closed by the viewer
 
 The GUI is graphical and streams a lot of data fast, which is awkward when you
-want to grep, diff two runs, or hand the numbers to a tool. `tracy-grab.sh`
-captures a bounded window headlessly and exports it to tab-separated tables:
+want to grep, diff two runs, or hand the numbers to a tool. Capture headlessly
+to a file instead. The **only** reliable pattern is to run `tracy-capture` and
+the viewer **together**, and end the recording by **closing the viewer** so the
+*client* disconnects cleanly — never bound the capture with `-s` (see below):
 
 ```console
-scripts/tracy-grab.sh 10 # capture 10s -> tracy-grab-10s/*.tsv
+# Start the recorder, launch the viewer, drive it, then close the viewer window
+# (normal Quit -> AppExit) to flush a complete trace. Do NOT pass -s.
+tracy-capture -o trace.tracy -f &   # -f overwrites; blocks until the client connects
+BEVY_ASSET_ROOT=… SL_VIEWER_ASSETS=… RUST_LOG=info \
+  cargo run --release -p sl-client-bevy-viewer --features profile-tracy -- <args>
+wait   # tracy-capture serializes the complete trace once the viewer disconnects
 ```
 
-It writes `zones-self.tsv` (self time per zone, sorted), `zones-inclusive.tsv`,
-and `messages.tsv`, and prints the top self-time zones. **Do not read that
-sorted self-time list as "which systems burn the frame"** — it is summed across
-all threads and badly over-weights parallel work; see *Self-time sums across
-threads mislead* below. It needs the `tracy-capture` and
-`tracy-csvexport` utilities (from `$PATH`, or built under `$TRACY_DIR`; the
-script header has the `cmake` lines). Because Tracy accepts only **one**
-profiler connection, disconnect the GUI before capturing — or keep the GUI, use
-its **File -> Save trace**, and run `tracy-csvexport -e <file>` yourself.
-
-**Trace length is not a data-volume limit — a load that never finished was a
-Tracy bug on a truncated file.** An earlier version of this note claimed a 30 s
-/ ~6 M-zone / ~88 MB capture was simply too big for the shared `libTracyServer`
-**Worker load** to finish — that was a **misdiagnosis**. The 30 s trace that
-hung both `tracy-csvexport` (95 min, 99.9 % CPU, no output) **and the Tracy GUI
-(stuck at 91 %)** was **truncated** (the capture file did not finish writing /
-the profiler connection was cut before the stream closed); the loader had a bug
-where it spun indefinitely on a truncated file instead of erroring out. That
-**Tracy bug is now fixed** — `tracy-csvexport` and the GUI now **exit with an
-error** on a truncated file rather than hanging. A complete trace of the same
-length loads and exports fine — the amount of data is not the constraint. So if
-a capture fails to load, it is truncated (let `tracy-capture` run to the end and
-disconnect cleanly); the length is not the problem. A ~10 s window right after
-the region handshake is still the heaviest, most representative slice for the
-"loading / rezzing" question, so it stays a good default — just not a hard cap
-imposed by size. For a single zone's per-frame timeline (large, so always
-filtered):
-
-```console
-tracy-csvexport -u -f composite_minimap trace.tracy
-```
-
-#### Long (multi-minute) captures — do not use `-s`
-
-`tracy-grab.sh` uses `tracy-capture -s <seconds>`, which is fine for a short
-(≤~10 s) window but **corrupts a long / high-volume capture**. When the `-s`
-deadline fires, `tracy-capture` calls `worker.Disconnect()` and immediately
-serializes; at a high zone rate that cuts the network worker off mid-stream and
-writes a **truncated** trace (which the reader then rejects — see the note
-above). A 10 s window stays consistent; a 2-minute / ~24 M-zone one does not.
-
-For a multi-minute capture, run `tracy-capture` **without `-s`** and end the
-stream from the *client* side — let the viewer disconnect cleanly:
-
-```console
-tracy-capture -o trace.tracy -f # no -s; blocks until the client connects
-# … launch the viewer, keep its window visible, let it rez for ~2 min …
-# then close the viewer window normally (Quit -> AppExit); do NOT kill it
-```
-
-The capture loops `while (worker.IsConnected())` and only serializes once the
-viewer disconnects, which leaves the worker on a consistent boundary and writes
-a complete trace. A clean `AppExit` (normal window close) flushes the Tracy
-client; an abrupt `SIGKILL` does not — so close the window rather than killing
+`tracy-capture -f` records `while (worker.IsConnected())` and serializes only
+once the viewer disconnects, which leaves the worker on a consistent boundary
+and writes a complete file. A clean `AppExit` (normal window close) flushes the
+Tracy client; an abrupt `SIGKILL` does **not** — so close the window, never kill
 the process. Keep the window **visible/unoccluded** the whole time or Bevy
-throttles rendering.
+throttles rendering. Because Tracy accepts only **one** profiler connection,
+disconnect the GUI before capturing (or keep the GUI, use its **File -> Save
+trace**, and export from that file).
 
-Exporting a large trace has two more sharp edges:
+**Never use `tracy-capture -s <seconds>`.** When the `-s` deadline fires,
+`tracy-capture` calls `worker.Disconnect()` and immediately serializes; at a
+high zone rate that cuts the network worker off mid-stream and writes a
+**truncated** trace. A truncated file is the "capture won't load" failure —
+`tracy-csvexport` and older Tracy GUIs spin indefinitely on it (the loader bug
+is fixed in current Tracy, which now errors out instead). **Trace length is not
+a data-volume limit**: a complete trace of any length loads and exports fine, so
+let the viewer run as long as the question needs and end it by closing the
+window. `RUST_LOG` must stay at the `info` default — a stricter filter drops the
+spans and the capture shows `Zones: 0`.
+
+`tracy-capture` / `tracy-csvexport` come from `$PATH`, or a Tracy checkout
+(default `~/devel/3rdparty/tracy`), built with:
+
+```console
+cmake -S capture -B capture/build -DCMAKE_BUILD_TYPE=Release
+cmake -S csvexport -B csvexport/build -DCMAKE_BUILD_TYPE=Release
+cmake --build capture/build --build csvexport/build
+```
+
+#### Machine-readable export
+
+Export the completed `trace.tracy` to tab-separated tables with
+`tracy-csvexport` (tab separator so commas inside zone names stay intact):
+
+```console
+tracy-csvexport -e -s $'\t' trace.tracy >zones-self.tsv   # self time per zone
+tracy-csvexport -s $'\t' trace.tracy >zones-inclusive.tsv # inclusive time
+tracy-csvexport -m -s $'\t' trace.tracy >messages.tsv     # log messages
+# per-instance timeline for ONE zone (huge, so always filtered):
+tracy-csvexport -u -f check_dir_light_mesh_visibility trace.tracy
+```
+
+**Do not read the sorted self-time list as "which systems burn the frame"** — it
+is summed across all threads and badly over-weights parallel work; see the
+*Self-time sums across threads mislead* section below.
+
+Two sharp edges on large traces:
 
 - **`tracy-csvexport` segfaults on large traces** in the parallel sort
   (`ppqsort::execution::par` → `process_blocks_branchless`). Build the Tracy
