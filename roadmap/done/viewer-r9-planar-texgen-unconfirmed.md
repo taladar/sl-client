@@ -2,7 +2,7 @@
 id: viewer-r9
 title: Planar texgen, unconfirmed
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
@@ -31,3 +31,13 @@ material's `uv_transform` afterwards (the reference viewer's
 Worn **rigged** mesh attachments are not yet covered. **Open until verified in
 the running viewer against the reference viewer** — the fix may be incomplete
 or the real cause may differ.
+
+## Resolution (done)
+
+Verified live (2026-08-01, user): planar-texgen faces now render correctly in
+the running viewer. The candidate fix (`TextureFace::is_planar_texgen` in
+`sl-proto`, the `planar_texgen_uv` port in `sl-client-bevy`, and
+`apply_planar_texgen` in the viewer, wired through prims, sculpts and unrigged
+meshes) is confirmed. Worn **rigged** mesh attachments remain out of scope for
+the planar projection — if that surfaces as a visible problem it should be
+filed as its own task.

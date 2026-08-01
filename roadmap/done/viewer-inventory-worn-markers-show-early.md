@@ -2,7 +2,7 @@
 id: viewer-inventory-worn-markers-show-early
 title: Show (worn) / bold inventory markers early, without opening Current Outfit
 topic: viewer
-status: bugs
+status: done
 origin: user report (2026-07-31, aditi live testing)
 refs: [viewer-ais3-inventory-mutations-and-cof-reconverge]
 ---
@@ -44,3 +44,19 @@ Live on aditi: log in, open the inventory floater (not Current Outfit / Worn
 first), and confirm worn items show `(worn)` / bold promptly, and that Current
 Outfit + the Worn tab list the worn items — while take-off / detach still
 reconverge correctly.
+
+## Resolution (done)
+
+`InventoryModel::claim_cof_prefetch` — a one-shot claimed in the
+`InventoryFolders` ingest arm — issues `Command::RequestFolderContents(cof)`
+(a **direct** server descendents fetch) the first time the COF is known and
+unfetched. Marking the COF `requested` both makes it a genuine one-shot (a
+re-bake's repeated `InventoryFolders` cannot re-fire it) and opts the COF into
+the `InventoryDescendents` re-query path that adopts the arriving page. Using
+`RequestFolderContents` rather than the paged `query_folder_page` is the key:
+the paged query would synchronously write an **empty** cache page into
+`items[cof]` before the real contents land, which — as the earlier reverted
+attempt showed — could stick empty. Unit test
+`cof_prefetch_is_a_one_shot_that_primes_requested`. Verified live on aditi:
+worn items show `(worn)` / bold without first opening Current Outfit / the
+Worn tab.

@@ -2,7 +2,7 @@
 id: viewer-stretch-global-axis-object
 title: World-frame stretch still grows the object along its local axis
 topic: viewer
-status: bugs
+status: done
 origin: edit-gizmo live review (2026-07-23)
 refs: [viewer-transform-gizmos, viewer-build-grid-options]
 ---
@@ -38,3 +38,18 @@ the prim and its `scale` before/after):
 
 Fix `apply_face_scale` (and the snap-ladder labelling that assumes the
 single-axis fold) to match whatever the side-by-side establishes.
+
+## Resolution (done)
+
+The task's premise — that the reference viewer stretches the object along the
+chosen **global** axis — was **refuted** by the later live side-by-side that
+produced commit `4bf194ce` ("keep the stretch box object-local in World grid
+mode", 2026-07-28). That verification established that Firestorm's
+`LLManipScale` **ignores** the grid toggle for stretch and always mounts both
+the box and the drag on the object's **own local axes**, rendering World and
+Local grid modes identically. Our current `apply_face_scale` folds the drag
+onto the nearest local axis (delta ÷ alignment) and `manipulation_frame` keeps
+stretch on the primary selection's local frame — which is exactly the verified
+reference behaviour. A prim's scale is per-local-axis only (it cannot shear),
+so an oblique world stretch necessarily folds to a local axis; there is no
+distinct "global-axis object stretch" to reproduce. No code change needed.

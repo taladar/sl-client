@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 260 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 14 |
-| done | 658 |
+| bugs | 9 |
+| done | 664 |
 | deferred | 20 |
 | wont-do | 8 |
-| **total** | **1136** |
+| **total** | **1137** |
 
 ## ideas (54)
 
@@ -1118,7 +1118,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (9)
 
 ### protocol
 
@@ -1135,34 +1135,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rubberband)
 - [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
-- [`viewer-f3-overlay-covered-by-menu-bar`](bugs/viewer-f3-overlay-covered-by-menu-bar.md)
-  — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-fps-label-intermittent`](bugs/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
-- [`viewer-inventory-worn-markers-show-early`](bugs/viewer-inventory-worn-markers-show-early.md)
-  — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-music-controls-push-chat-bar`](bugs/viewer-music-controls-push-chat-bar.md)
+  — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
-- [`viewer-r9`](bugs/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
-  unconfirmed
-- [`viewer-stretch-global-axis-object`](bugs/viewer-stretch-global-axis-object.md)
-  — World-frame stretch still grows the object along its local axis
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-### aditi
-
-- [`aditi-2`](bugs/aditi-2-unhandled-inbound-udp-warnings.md) — Unhandled
-  inbound UDP messages (SimStats, SimulatorViewerTimeMessage) log warnings
-- [`aditi-3`](bugs/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
-  CAPS event AgentStateUpdate
-
-## done (658)
+## done (664)
 
 ### protocol
 
@@ -1384,6 +1371,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-f3-overlay-covered-by-menu-bar`](done/viewer-f3-overlay-covered-by-menu-bar.md)
+  — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-face-materials-pbr`](done/viewer-face-materials-pbr.md) — Texture tab
   — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -1471,6 +1460,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — '"Show in Main view" inventory menu action from the Worn / Recent tabs'
 - [`viewer-inventory-worn-actions`](done/viewer-inventory-worn-actions.md) —
   Worn-item detach / take-off actions
+- [`viewer-inventory-worn-markers-show-early`](done/viewer-inventory-worn-markers-show-early.md)
+  — Show (worn) / bold inventory markers early, without opening Current Outfit
 - [`viewer-inventory-worn-tab-items-without-folders`](done/viewer-inventory-worn-tab-items-without-folders.md)
   — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
@@ -1840,6 +1831,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Hollow / profile-cut prim tessellation (sl-prim)
 - [`viewer-r8`](done/viewer-r8-box-cap-centre-fan-cross-sl-prim.md) — Box-cap
   centre-fan cross (sl-prim)
+- [`viewer-r9`](done/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
+  unconfirmed
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
@@ -1895,6 +1888,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
   — SpaceNavigator drives the viewer even when its window is not focused
+- [`viewer-stretch-global-axis-object`](done/viewer-stretch-global-axis-object.md)
+  — World-frame stretch still grows the object along its local axis
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
@@ -2529,6 +2524,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`aditi-1`](done/aditi-1-regioninfo-formatter-circuitid.md) — RegionInfo
   formatter prints $circuitid instead of numeric values
+- [`aditi-2`](done/aditi-2-unhandled-inbound-udp-warnings.md) — Unhandled
+  inbound UDP messages (SimStats, SimulatorViewerTimeMessage) log warnings
+- [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
+  CAPS event AgentStateUpdate
 
 ## deferred (20)
 

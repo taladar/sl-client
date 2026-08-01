@@ -2,7 +2,7 @@
 id: aditi-3
 title: Unknown CAPS event AgentStateUpdate
 topic: aditi
-status: bugs
+status: done
 origin: KNOWN_ISSUES_ADITI.md — issue 3 (planned)
 refs: [missing-eq-batch-1]
 ---
@@ -24,3 +24,11 @@ parallel to the LLUDP gap: several CAPS EventQueue push events are unhandled
 catalogued and batched under the CAPS EventQueue gap in the `missing` topic;
 `AgentStateUpdate` is EQ batch 1 ([[missing-eq-batch-1]]), which closes
 this issue.
+
+## Resolution (done)
+
+Closed by [[missing-eq-batch-1]] (now done). The CAPS EventQueue push decodes
+into `Event::AgentStateUpdate { can_modify_navmesh }` via the
+`"AgentStateUpdate"` arm in `handle_caps_event` (`sl-proto`
+`session/methods.rs`, decoder in `session/conversions.rs`) — no more
+`UnknownCapsEvent` fallthrough; covered by `sl-proto/tests/lifecycle.rs`.

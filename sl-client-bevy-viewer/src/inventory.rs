@@ -535,6 +535,31 @@ impl InventoryModel {
         !self.requested.contains(&folder) && !self.items.contains_key(&folder)
     }
 
+    /// Claim the **one-shot** eager fetch of the Current Outfit Folder's
+    /// contents — the source of the `(worn)` / bold markers.
+    ///
+    /// Returns the COF key the first time it is known and unfetched, after
+    /// marking it `requested`: this both makes the guard a genuine one-shot (a
+    /// re-bake's repeated [`SlSessionEvent::InventoryFolders`] will not re-fire
+    /// it) and opts the COF into the [`SlSessionEvent::InventoryDescendents`]
+    /// re-query path that adopts the arriving page. Returns `None` when the COF
+    /// is unknown or already requested / held.
+    ///
+    /// The caller issues [`Command::RequestFolderContents`] for the returned key
+    /// — a *direct* server descendents fetch. A paged
+    /// [`query_folder_page`] would instead synchronously write an **empty** cache
+    /// page into `items[cof]` before the real contents land, which — interacting
+    /// with the COF re-fetch churn ([[viewer-ais3-inventory-mutations-and-cof-reconverge]])
+    /// — could leave that empty page stuck; the direct fetch skips the empty page
+    /// entirely.
+    fn claim_cof_prefetch(&mut self) -> Option<InventoryFolderKey> {
+        let cof = self.cof?;
+        self.needs_fetch(cof).then(|| {
+            self.requested.insert(cof);
+            cof
+        })
+    }
+
     /// Flatten the model into the linear row list for a tab and a view spec.
     ///
     /// The pure heart of the window: given the tab, the (possibly empty)
@@ -1930,6 +1955,15 @@ fn ingest_inventory(
                 let first_load = !model.folders_loaded;
                 model.merge_folders(folders, false);
                 model.folders_loaded = true;
+                // The COF is now (or already) known from the skeleton: fetch its
+                // contents once, up front, so the `(worn)` / bold markers appear
+                // without the user first opening Current Outfit / the Worn tab
+                // (and without waiting on the background crawl). A one-shot, so
+                // the repeated `InventoryFolders` a re-bake produces do not
+                // re-fire it.
+                if let Some(cof) = model.claim_cof_prefetch() {
+                    commands.write(SlCommand(Command::RequestFolderContents(cof)));
+                }
                 if first_load {
                     // Show the top level: expand the agent roots (not the huge
                     // read-only Library) and pull their items.
@@ -3562,6 +3596,51 @@ mod tests {
             wearable_type: sl_client_bevy::WearableType::Skin,
         }];
         assert!(legacy_grid.worn_set(&HashSet::new()).contains(&skin));
+    }
+
+    /// The eager COF prefetch is a genuine one-shot: it yields the COF the first
+    /// time the folder is known and unfetched (priming `requested`, so a paged
+    /// re-query would adopt the arriving descendents), then yields nothing on the
+    /// repeated `InventoryFolders` a re-bake produces. This is what makes the
+    /// worn markers show early without re-fetching the COF on every re-bake.
+    #[test]
+    fn cof_prefetch_is_a_one_shot_that_primes_requested() {
+        let cof_key =
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xC0));
+        let mut model = sample_model();
+        // No COF in the skeleton yet: nothing to prefetch.
+        assert_eq!(model.claim_cof_prefetch(), None);
+        // The COF arrives in the folder skeleton.
+        model.merge_folders(
+            &[folder(
+                0xC0,
+                Some(1),
+                "Current Outfit",
+                FolderType::CurrentOutfit,
+            )],
+            false,
+        );
+        // First claim: yields the COF and primes it `requested`.
+        assert_eq!(model.claim_cof_prefetch(), Some(cof_key));
+        assert!(
+            !model.needs_fetch(cof_key),
+            "the COF is marked requested by the claim"
+        );
+        // Second claim (a re-bake's repeated `InventoryFolders`): nothing.
+        assert_eq!(model.claim_cof_prefetch(), None);
+        // An already-held COF is likewise not re-prefetched.
+        let mut held = sample_model();
+        held.merge_folders(
+            &[folder(
+                0xC0,
+                Some(1),
+                "Current Outfit",
+                FolderType::CurrentOutfit,
+            )],
+            false,
+        );
+        held.set_items(cof_key, &[]);
+        assert_eq!(held.claim_cof_prefetch(), None);
     }
 
     /// A recent item held in a loaded folder shows inside its expanded

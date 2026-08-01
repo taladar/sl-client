@@ -2,7 +2,7 @@
 id: aditi-2
 title: Unhandled inbound UDP messages (SimStats, SimulatorViewerTimeMessage) log warnings
 topic: aditi
-status: bugs
+status: done
 origin: KNOWN_ISSUES_ADITI.md — issue 2 (planned)
 refs: [missing-batch-1]
 ---
@@ -33,3 +33,10 @@ bidirectional coverage is catalogued and batched under the `missing` topic.
 ([[missing-batch-1]]); implementing it
 closes this issue (the two messages become typed `Event`s instead of
 `WARN UnhandledMessage` noise).
+
+## Resolution (done)
+
+Closed by [[missing-batch-1]] (now done). Both messages decode into typed
+events with no fallthrough warning: `Event::SimStats(Box<RegionStats>)` and
+`Event::SimulatorTime(Box<SimulatorTime>)` (`sl-proto` `types/event.rs`,
+dispatched in `session/methods.rs`), covered by `sl-proto/tests/lifecycle.rs`.
