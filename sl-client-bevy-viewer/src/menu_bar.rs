@@ -83,6 +83,10 @@ const MINIMAP_OPEN: &str = "minimap-open";
 /// the check mark on the World ▸ World Map entry.
 const WORLD_MAP_OPEN: &str = "world-map-open";
 
+/// The condition key that holds while the in-world property lines are shown —
+/// drives the check mark on the World ▸ Property Lines entry.
+const PROPERTY_LINES_ON: &str = "property-lines-on";
+
 /// Condition key: the Build Tools floater (`crate::edit_tool`) is open.
 const BUILD_TOOLS_OPEN: &str = "build-tools-open";
 
@@ -179,6 +183,12 @@ static WORLD_MENU: MenuDef = MenuDef {
             MenuCommand::new("World Map", "toggle-world-map")
                 .accel("Ctrl+M")
                 .checked_when(WORLD_MAP_OPEN),
+        ),
+        // The in-world parcel property lines (viewer-parcel-borders-render),
+        // colour-coded by ownership; the reference's World ▸ Property Lines.
+        MenuItemDef::Command(
+            MenuCommand::new("Property Lines", "toggle-property-lines")
+                .checked_when(PROPERTY_LINES_ON),
         ),
         MenuItemDef::Separator,
         // The About Land floater (viewer-parcel-options-general) on the agent's
@@ -327,6 +337,7 @@ fn update_top_menu_conditions(
     environment: Option<Res<crate::environment::EnvironmentState>>,
     selection: Res<crate::edit_selection::SelectionSet>,
     edit_tool: Res<crate::edit_tool::EditToolState>,
+    settings: Res<crate::settings::ViewerSettings>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -369,6 +380,15 @@ fn update_top_menu_conditions(
     }
     if experiences_open {
         wanted.push(EXPERIENCES_OPEN);
+    }
+    // The World ▸ Property Lines check mark, from the in-world property-lines
+    // setting (default on).
+    if settings
+        .store()
+        .get_bool(crate::parcel_borders::SETTING_SHOW_PROPERTY_LINES)
+        .unwrap_or(true)
+    {
+        wanted.push(PROPERTY_LINES_ON);
     }
     // The Build ▸ Link / Unlink enable gates, from the current selection.
     if crate::edit_link::can_link(&selection, &edit_tool) {
@@ -416,6 +436,7 @@ fn handle_top_menu_actions(
     agent_parcel: Res<sl_client_bevy::SlAgentParcel>,
     mut about_land: MessageWriter<crate::about_land::OpenAboutLand>,
     mut about_region: MessageWriter<crate::about_region::OpenAboutRegion>,
+    mut settings: ResMut<crate::settings::ViewerSettings>,
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -461,6 +482,15 @@ fn handle_top_menu_actions(
                     &floaters,
                     &mut panels,
                     crate::world_map::WORLD_MAP_FLOATER_ID,
+                );
+            }
+            "toggle-property-lines" => {
+                let name = crate::parcel_borders::SETTING_SHOW_PROPERTY_LINES;
+                let current = settings.store().get_bool(name).unwrap_or(true);
+                settings.set(
+                    sl_settings::Scope::Global,
+                    name,
+                    sl_settings::SettingValue::Bool(!current),
                 );
             }
             "toggle-search" => {

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 9 |
-| done | 664 |
+| done | 665 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1137** |
+| **total** | **1138** |
 
 ## ideas (54)
 
@@ -522,9 +522,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-outfit-editor`](ready/viewer-outfit-editor.md) — Outfit editor — edit
   the current outfit, save to My Outfits
-- [`viewer-parcel-borders-render`](ready/viewer-parcel-borders-render.md) —
-  In-world parcel borders (property lines) (blocked by
-  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
   Flood-fill the parcel-overlay grid into per-parcel footprints
 - [`viewer-parcel-icon-hover-tips`](ready/viewer-parcel-icon-hover-tips.md) —
@@ -666,6 +663,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
+- [`viewer-terrain-region-edge-seam-slope`](ready/viewer-terrain-region-edge-seam-slope.md)
+  — Terrain seam / misalignment at region edges on slopes
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -1147,7 +1146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (664)
+## done (665)
 
 ### protocol
 
@@ -1707,6 +1706,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-p8-2`](done/viewer-p8-2-stitch-modes.md) — Stitch modes
 - [`viewer-p8-3`](done/viewer-p8-3-stitch-tests.md) — Stitch tests
 - [`viewer-p9-1`](done/viewer-p9-1-sculpt-objects.md) — Sculpt objects
+- [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
+  In-world parcel borders (property lines) (blocked by
+  `viewer-parcel-overlay-decode` (done))
 - [`viewer-parcel-options-access-media`](done/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general` (done))

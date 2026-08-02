@@ -207,6 +207,7 @@ impl FromWorld for ViewerSettings {
         };
         crate::spacenav::register_settings(&mut settings);
         crate::minimap::register_settings(&mut settings);
+        crate::parcel_borders::register_settings(&mut settings);
         crate::world_map::register_settings(&mut settings);
         crate::search::register_settings(&mut settings);
         crate::tonemap::register_settings(&mut settings);

@@ -127,6 +127,7 @@ mod object_menu;
 mod objects;
 mod offers_invites;
 mod parcel_audio;
+mod parcel_borders;
 mod particle_render;
 mod particles;
 mod paths;
@@ -1214,6 +1215,10 @@ fn run_session(
     .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     .add_plugins(ParticleRenderPlugin)
     .add_plugins(TerrainMaterialPlugin)
+    // In-world parcel borders / property lines (viewer-parcel-borders-render):
+    // colour-coded vertical bands draped along parcel boundaries, driven by the
+    // `parcel_borders` module's system below.
+    .add_plugins(crate::parcel_borders::ParcelBordersPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
     .add_plugins(SkyMaterialPlugin)
