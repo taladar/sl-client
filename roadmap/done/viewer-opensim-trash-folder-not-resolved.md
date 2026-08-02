@@ -2,7 +2,7 @@
 id: viewer-opensim-trash-folder-not-resolved
 title: OpenSim — object-pie Delete does nothing (Trash system folder never resolved)
 topic: viewer
-status: bugs
+status: done
 origin: user report (2026-07-26) while testing the Create tool on the local
   OpenSim; Delete works on aditi (SL) but not OpenSim
 refs: [viewer-object-context-menu, viewer-inventory-folder-tree]
@@ -44,3 +44,32 @@ folder when the grid does not advertise one, matching the reference viewer's
 Reference (Firestorm, read-only): `llinventorymodel.cpp`
 (`findCategoryUUIDForType` / `findCategoryUUIDForTypeInRoot`, and the
 create-on-missing fallback), `llviewermessage.cpp` derez handling.
+
+## Done
+
+Root cause was a **query-timing gap**, not a folder-type decode: OpenSim *does*
+advertise a correctly-typed Trash folder (`type_default = 14`) in the login
+skeleton (`XInventoryService.CreateUserInventory` → `GetInventorySkeleton`), and
+`FolderType::from_code(14)` maps it to `Trash`. But nothing populated the
+viewer's `InventoryModel` at login on OpenSim: the model's folders are snapshot
+(via `Command::QueryInventoryFolders`) only when the inventory window is opened
+(`refresh_inventory_on_show`) **or** when the central-baking capability appears
+(`appearance.rs` `drive_server_bake`). Second Life offers that capability, so
+its folders load at login and Delete finds the Trash; OpenSim offers no such
+capability, so the model stayed empty until the window was opened — and the
+object pie's Delete / Take (which read `folder_by_type` in `object_menu.rs`)
+found no Trash / Objects folder.
+
+Fix (`inventory.rs` `ingest_inventory`): on the grid-agnostic login
+`InventorySkeleton` event — which fires exactly once at login — issue a one-shot
+`Command::QueryInventoryFolders` (guarded by `folders_loaded`, so a re-bake's
+repeated skeleton does not restart the first-load expansion). Routing through
+the existing `InventoryFolders` handler reuses the first-load root expansion, so
+every grid now behaves the way Second Life already did. Since OpenSim genuinely
+advertises a Trash folder, the reference `findCategoryUUIDForType`
+create-on-missing fallback was **not** needed and was left unimplemented (it
+would be unexercised code).
+
+Client-side tests (`inventory.rs`): `folder_by_type` resolves the agent Trash
+over a same-typed Library folder; the login skeleton event writes the one-shot
+folder query; a second skeleton after load does not re-query.

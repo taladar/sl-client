@@ -2035,6 +2035,20 @@ fn ingest_inventory(
             SlSessionEvent::AgentWearables { wearables, .. } => {
                 model.wearables.clone_from(wearables);
             }
+            // The login inventory skeleton arrived: snapshot it into the model
+            // now, at login, so the system folders (Trash, Objects, …) that the
+            // object pie's derez needs are known even when the inventory window
+            // was never opened. On Second Life the server-bake handshake already
+            // queries the folders once its capability appears; OpenSim offers no
+            // such capability, so without this the model stayed empty until the
+            // window opened and object-menu Delete / Take found no Trash / Objects
+            // folder (viewer-opensim-trash-folder-not-resolved). Routing through
+            // `QueryInventoryFolders` — rather than merging the raw skeleton here —
+            // reuses the one `InventoryFolders` handler above, so the first-load
+            // root expansion happens identically on every grid.
+            SlSessionEvent::InventorySkeleton(_) if !model.folders_loaded => {
+                commands.write(SlCommand(Command::QueryInventoryFolders));
+            }
             _other => {}
         }
     }
@@ -3297,7 +3311,9 @@ mod tests {
         depth_indent, folder_icon, item_glyph, item_icon, item_suffix,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{FolderInfo, FolderState, FolderType, Permissions};
+    use sl_client_bevy::{
+        FolderInfo, FolderState, FolderType, Permissions, SlCommand, SlEvent, SlSessionEvent,
+    };
     use std::collections::HashSet;
 
     /// Build a folder-info skeleton entry.
@@ -4020,5 +4036,92 @@ mod tests {
         let folder = rows.iter().find(|row| row.name == "Clothing");
         assert_eq!(folder.map(|row| row.bold), Some(false));
         assert_eq!(folder.map(|row| row.suffix.as_str()), Some(""));
+    }
+
+    /// `folder_by_type` resolves the agent's Trash from a merged skeleton and
+    /// never returns a same-typed *Library* folder — the resolution the object
+    /// pie's Delete relies on.
+    #[test]
+    fn folder_by_type_finds_the_agent_trash_not_the_library() {
+        let mut model = InventoryModel::default();
+        model.merge_folders(
+            &[
+                folder(1, None, "My Inventory", FolderType::RootInventory),
+                folder(0x7, Some(1), "Trash", FolderType::Trash),
+            ],
+            false,
+        );
+        // A read-only Library tree that also carries a Trash-typed folder.
+        model.merge_library_folders(&[sl_client_bevy::InventoryFolder {
+            folder_id: sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(
+                0x50,
+            )),
+            parent_id: None,
+            name: "Library".to_owned(),
+            folder_type: FolderType::RootInventory.to_code(),
+            version: 1,
+        }]);
+        model.merge_library_folders(&[sl_client_bevy::InventoryFolder {
+            folder_id: sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(
+                0x51,
+            )),
+            parent_id: Some(sl_client_bevy::InventoryFolderKey::from(
+                sl_client_bevy::Uuid::from_u128(0x50),
+            )),
+            name: "Trash".to_owned(),
+            folder_type: FolderType::Trash.to_code(),
+            version: 1,
+        }]);
+        let agent_trash =
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0x7));
+        assert_eq!(model.folder_by_type(FolderType::Trash), Some(agent_trash));
+    }
+
+    /// Run [`ingest_inventory`] over one fed [`SlEvent`], returning whether it
+    /// wrote a [`Command::QueryInventoryFolders`] (`Command` is neither `Clone`
+    /// nor `PartialEq`, so it is matched by reference).
+    fn query_on_event(model: InventoryModel, event: SlSessionEvent) -> bool {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_message::<SlEvent>();
+        app.add_message::<SlCommand>();
+        app.insert_resource(model);
+        app.add_systems(Update, super::ingest_inventory);
+        app.world_mut()
+            .resource_mut::<Messages<SlEvent>>()
+            .write(SlEvent(event));
+        app.update();
+        let messages = app.world().resource::<Messages<SlCommand>>();
+        let mut cursor = messages.get_cursor();
+        cursor
+            .read(messages)
+            .any(|command| matches!(command.0, sl_client_bevy::Command::QueryInventoryFolders))
+    }
+
+    /// The login inventory skeleton triggers a one-shot folder snapshot, so the
+    /// system folders (Trash / Objects) the object pie's derez needs are known at
+    /// login even when the inventory window was never opened — the OpenSim gap in
+    /// `viewer-opensim-trash-folder-not-resolved` (Second Life reaches them via
+    /// the server-bake handshake; OpenSim offers no such capability).
+    #[test]
+    fn login_skeleton_snapshots_the_folders() {
+        assert!(query_on_event(
+            InventoryModel::default(),
+            SlSessionEvent::InventorySkeleton(Vec::new()),
+        ));
+    }
+
+    /// Once the folders have loaded, a repeated skeleton event does not re-query
+    /// (a re-bake / reconnect must not restart the first-load expansion).
+    #[test]
+    fn a_second_skeleton_after_load_does_not_requery() {
+        let model = InventoryModel {
+            folders_loaded: true,
+            ..Default::default()
+        };
+        assert!(!query_on_event(
+            model,
+            SlSessionEvent::InventorySkeleton(Vec::new()),
+        ));
     }
 }

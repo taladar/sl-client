@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 7 |
-| done | 669 |
+| bugs | 6 |
+| done | 670 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1140** |
@@ -1115,7 +1115,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (7)
+## bugs (6)
 
 ### protocol
 
@@ -1135,14 +1135,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
-  — OpenSim — object-pie Delete does nothing (Trash system folder never
-  resolved)
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (669)
+## done (670)
 
 ### protocol
 
@@ -1524,6 +1521,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-offline-im-drain`](done/viewer-offline-im-drain.md) — Drain stored
   offline instant messages at login
+- [`viewer-opensim-trash-folder-not-resolved`](done/viewer-opensim-trash-folder-not-resolved.md)
+  — OpenSim — object-pie Delete does nothing (Trash system folder never
+  resolved)
 - [`viewer-own-bake-not-refreshed-on-outfit-change`](done/viewer-own-bake-not-refreshed-on-outfit-change.md)
   — Own avatar bake not refreshed when worn layers change at runtime
 - [`viewer-p0-1`](done/viewer-p0-1-create-the-crate-skeletons.md) — Create the
