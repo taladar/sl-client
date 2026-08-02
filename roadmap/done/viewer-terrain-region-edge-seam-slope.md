@@ -64,6 +64,7 @@ Investigate:
 - Reference: `LLSurfacePatch` / `LLSurface` edge stitching
   (`updateNorthEdge` / `updateEastEdge`, `calcDrawInfo`).
 
-Repro: the OpenSim slope test scene ([[sl-client-opensim-slope-test-scene]])
-has a hill near spawn; view a region border that crosses the slope (a 2×2
+Repro: the OpenSim slope test scene (see the
+`sl-client-opensim-slope-test-scene` progress memory) has a hill near spawn;
+view a region border that crosses the slope (a 2×2
 local region layout), or any sloped sim crossing on aditi.

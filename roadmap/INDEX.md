@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 9 |
-| done | 666 |
+| done | 667 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1138** |
+| **total** | **1139** |
 
 ## ideas (54)
 
@@ -1135,16 +1135,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-music-controls-push-chat-bar`](bugs/viewer-music-controls-push-chat-bar.md)
-  — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
+- [`viewer-parcel-music-stream-internal-data-error`](bugs/viewer-parcel-music-stream-internal-data-error.md)
+  — Parcel music stream fails to play ("Internal data stream error")
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (666)
+## done (667)
 
 ### protocol
 
@@ -1500,6 +1500,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-parcel-overlay`](done/viewer-minimap-parcel-overlay.md) —
   Parcel fills & property lines on the minimap (blocked by `viewer-minimap`
   (done), `viewer-parcel-overlay-decode` (done))
+- [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
+  — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

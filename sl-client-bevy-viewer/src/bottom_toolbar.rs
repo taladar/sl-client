@@ -30,12 +30,20 @@
 //! ([[viewer-voice-audio]], signalling only), and quick preferences
 //! ([[viewer-quick-preferences]]) — each of which is its own task. This task owns
 //! the **layout host** they fill: [`spawn_bottom_toolbar`] builds a
-//! bottom-anchored column whose bottom-most row is the button bar and whose
-//! *upper* stack ([`BottomArea::upper`], published as a resource) is where those
-//! neighbour controls parent themselves, so they always sit above the buttons
-//! regardless of the order they land in. (The button bar's "Conversations" toggle
-//! opens the chat *window*; it is distinct from the always-visible nearby-chat
-//! *input* bar that will live in the upper stack.)
+//! bottom-anchored column whose bottom-most row is the button bar and, just above
+//! it, a single full-width **upper row** split into two fixed halves — a
+//! **leading** slot ([`BottomArea::upper_leading`]) that holds the nearby-chat
+//! bar and a **trailing** slot ([`BottomArea::upper_trailing`]) that holds the
+//! parcel music / nearby-media cluster (and the volume, voice and quick-prefs
+//! controls as they land). Both halves sit on the same row directly on top of the
+//! button bar and do not overlap horizontally, so a control appearing or
+//! disappearing in one half (e.g. the music cluster when a parcel has a stream)
+//! never moves the other — the bug `viewer-music-controls-push-chat-bar`, where a
+//! shared vertical stack let the music row shove the chat bar upward. The two
+//! slots are spawned in a fixed order, so which half a control lands in never
+//! depends on the order the neighbour plugins spawn in. (The button bar's
+//! "Conversations" toggle opens the chat *window*; it is distinct from the
+//! always-visible nearby-chat *input* bar in the leading slot.)
 //!
 //! # Content-sized, wrapping, mirrored
 //!
@@ -308,21 +316,30 @@ struct ToolbarButton {
 
 /// The bottom-area layout host, published so the neighbour bottom-edge controls
 /// (nearby chat bar, volume, voice, quick preferences — each its own task) parent
-/// themselves **above** the button bar by spawning into [`upper`](Self::upper).
+/// themselves into the row just above the button bar. That row is split into two
+/// non-overlapping halves — [`upper_leading`](Self::upper_leading) and
+/// [`upper_trailing`](Self::upper_trailing) — so a control appearing in one half
+/// never reflows the other.
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct BottomArea {
     /// The bottom-anchored column that holds the whole area — the chat overlay
     /// ([`crate::chat`]) reads its measured height to sit just above it.
     pub(crate) area: Entity,
-    /// The stack above the button bar the neighbour controls fill — the nearby-chat
-    /// bar ([`crate::nearby_chat_bar`]) spawns into it.
-    pub(crate) upper: Entity,
+    /// The **leading** half of the row directly above the button bar — the
+    /// nearby-chat bar ([`crate::nearby_chat_bar`]) spawns into it, so it always
+    /// rides in the same place at the bar's leading edge.
+    pub(crate) upper_leading: Entity,
+    /// The **trailing** half of that same row — the parcel music / nearby-media
+    /// cluster ([`crate::parcel_audio`]) spawns into it (as will the volume, voice
+    /// and quick-prefs controls). It sits beside the chat bar, not above it, so
+    /// toggling the music cluster's visibility never moves the chat bar.
+    pub(crate) upper_trailing: Entity,
     /// The button-bar row itself. Still awaiting a consumer (a future control that
-    /// needs the bar strip directly rather than the upper stack).
+    /// needs the bar strip directly rather than the upper row).
     #[expect(
         dead_code,
         reason = "the bar-strip handle is published for a future bottom-edge control that targets \
-                  the button row directly; `area` and `upper` are now consumed"
+                  the button row directly; `area` and the upper slots are consumed"
     )]
     pub(crate) bar: Entity,
 }
@@ -351,8 +368,12 @@ impl Plugin for BottomToolbarPlugin {
 ///
 /// The area is an **absolute**, full-width column pinned to the bottom edge (a
 /// [`LogicalInset`] at `block_end` / both inline edges zero, so it mirrors under
-/// RTL): an *upper* stack for the neighbour controls above, then the button-bar
-/// row below it. The bar wraps upward when it is too narrow for every button.
+/// RTL): an *upper row* for the neighbour controls above, then the button-bar row
+/// below it. The upper row is split into a leading and a trailing half so the
+/// nearby-chat bar and the parcel-audio cluster sit **side by side** on one line
+/// directly above the buttons — appearing or disappearing without shoving each
+/// other (`viewer-music-controls-push-chat-bar`). The bar wraps upward when it is
+/// too narrow for every button.
 fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
     let area = commands
         .spawn((
@@ -371,7 +392,7 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
             }),
             GlobalZIndex(BOTTOM_BAR_Z),
             // Transparent and non-blocking: only the visible bar strip below takes
-            // clicks off the world, so the (empty) upper stack does not swallow
+            // clicks off the world, so the (empty) upper row does not swallow
             // pointer hits aimed at the scene.
             Pickable {
                 should_block_lower: false,
@@ -382,13 +403,15 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
 
-    // The upper stack the neighbour controls parent into — above the button bar,
-    // full width, empty (and so zero-height) until one lands.
+    // The upper row the neighbour controls parent into — above the button bar,
+    // full width, its children bottom-aligned so each rides directly on the bar
+    // regardless of its height. Empty (zero-height) until a control lands.
     let upper = commands
         .spawn((
             Node {
                 width: Val::Percent(100.0),
-                ..column(Val::ZERO)
+                align_items: AlignItems::FlexEnd,
+                ..row(Val::ZERO)
             },
             Pickable {
                 should_block_lower: false,
@@ -398,6 +421,24 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
             ChildOf(area),
         ))
         .id();
+
+    // Two fixed non-overlapping halves of the upper row, spawned leading-then-
+    // trailing so their sides never depend on which neighbour plugin spawns first
+    // (both are one-shot `Update` systems). Each is half the width and bottom-
+    // aligns its own content onto the button bar; each half's occupant toggles
+    // independently without moving the other.
+    let upper_leading = spawn_upper_slot(
+        &mut commands,
+        upper,
+        JustifyContent::FlexStart,
+        "bottom-area-upper-leading",
+    );
+    let upper_trailing = spawn_upper_slot(
+        &mut commands,
+        upper,
+        JustifyContent::FlexEnd,
+        "bottom-area-upper-trailing",
+    );
 
     // The button bar itself — the bottom-most strip. A full-width surface (so it
     // reads as one bar the width of the window, the reference's arrangement) whose
@@ -431,7 +472,41 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
         spawn_live_button(&mut commands, bar, index, def);
     }
 
-    commands.insert_resource(BottomArea { area, upper, bar });
+    commands.insert_resource(BottomArea {
+        area,
+        upper_leading,
+        upper_trailing,
+        bar,
+    });
+}
+
+/// Spawn one half of the [upper row](spawn_bottom_toolbar): a fixed 50%-wide,
+/// non-blocking [`row`] whose content is bottom-aligned onto the button bar and
+/// pushed to the `justify` edge (leading or trailing). Fixed width — not
+/// flex-grown — so an empty or hidden half keeps its size and never lets the
+/// other half spread across it (the reflow the split exists to prevent).
+fn spawn_upper_slot(
+    commands: &mut Commands,
+    upper: Entity,
+    justify: JustifyContent,
+    name: &'static str,
+) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(50.0),
+                justify_content: justify,
+                align_items: AlignItems::FlexEnd,
+                ..row(Val::ZERO)
+            },
+            Pickable {
+                should_block_lower: false,
+                is_hoverable: true,
+            },
+            Name::new(name),
+            ChildOf(upper),
+        ))
+        .id()
 }
 
 /// Spawn one **live** toolbar button under the bar: the box, its Fluent-bound
@@ -699,7 +774,11 @@ pub(crate) fn spawn_bottom_toolbar_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{TOOLBAR_BUTTONS, ToolbarButtonVisual, ToolbarTarget};
+    use super::{
+        BottomArea, TOOLBAR_BUTTONS, ToolbarButtonVisual, ToolbarTarget, spawn_bottom_toolbar,
+    };
+    use crate::ui::UiRoot;
+    use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
 
     /// The wired toolbar buttons today are the leading nearby-chat toggle,
@@ -759,6 +838,122 @@ mod tests {
         for def in TOOLBAR_BUTTONS {
             assert!(!def.label_key.is_empty(), "{}: empty label key", def.action);
         }
+    }
+
+    /// The boxed-error alias the app-driven tests bubble failures through, so
+    /// they read `?` rather than the `expect`/`unwrap` the restriction lints ban.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// Run [`spawn_bottom_toolbar`] once in a headless app and return the
+    /// published [`BottomArea`], for the layout-structure assertions below.
+    fn spawn_area() -> Result<(App, BottomArea), TestError> {
+        let mut app = App::new();
+        let root = app.world_mut().spawn(Node::default()).id();
+        app.insert_resource(UiRoot(root));
+        app.add_systems(Startup, spawn_bottom_toolbar);
+        app.update();
+        let area = *app
+            .world()
+            .get_resource::<BottomArea>()
+            .ok_or("spawn_bottom_toolbar did not publish BottomArea")?;
+        Ok((app, area))
+    }
+
+    /// The ordered children of an entity, as a `Vec`.
+    fn children_of(app: &App, entity: Entity) -> Vec<Entity> {
+        app.world()
+            .entity(entity)
+            .get::<Children>()
+            .map(|c| c.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// The nearby-chat bar (leading) and the parcel-audio cluster (trailing) must
+    /// share **one row** directly above the button bar, split into two fixed halves
+    /// in a deterministic leading-then-trailing order — so the music cluster
+    /// appearing never pushes the chat bar (the bug this task fixes). A regression
+    /// that stacked them in a column again, dropped the fixed 50% width (letting one
+    /// half spread over the other), or reversed the slot order would trip here.
+    #[test]
+    fn upper_row_splits_into_fixed_leading_and_trailing_halves() -> Result<(), TestError> {
+        let (app, area) = spawn_area()?;
+
+        // The upper region is the shared parent of both slots — one row, not two
+        // stacked children.
+        let upper = app
+            .world()
+            .entity(area.upper_leading)
+            .get::<ChildOf>()
+            .map(ChildOf::parent)
+            .ok_or("the leading slot has no parent")?;
+        assert_eq!(
+            app.world()
+                .entity(area.upper_trailing)
+                .get::<ChildOf>()
+                .map(ChildOf::parent),
+            Some(upper),
+            "the trailing slot shares the upper row with the leading slot",
+        );
+
+        // That shared parent flows along the inline axis (side by side), not the
+        // block axis (stacked).
+        let upper_node = app
+            .world()
+            .entity(upper)
+            .get::<Node>()
+            .ok_or("the upper row has no Node")?;
+        assert_eq!(
+            upper_node.flex_direction,
+            FlexDirection::Row,
+            "the upper region is a row so its halves sit side by side",
+        );
+
+        // Leading before trailing, so the chat bar lands on the leading edge under
+        // LTR (and mirrors for free under RTL) regardless of spawn timing.
+        let upper_kids = children_of(&app, upper);
+        assert_eq!(
+            upper_kids,
+            vec![area.upper_leading, area.upper_trailing],
+            "the slots are ordered leading then trailing",
+        );
+
+        // Each half is a fixed 50% wide and bottom-aligned onto the button bar; a
+        // fixed (not flex-grown) width is what keeps a hidden half from letting the
+        // other spread across it.
+        for slot in [area.upper_leading, area.upper_trailing] {
+            let node = app
+                .world()
+                .entity(slot)
+                .get::<Node>()
+                .ok_or("a slot has no Node")?;
+            assert_eq!(
+                node.width,
+                Val::Percent(50.0),
+                "each half is fixed 50% wide"
+            );
+            assert_eq!(
+                node.align_items,
+                AlignItems::FlexEnd,
+                "each half bottom-aligns its content onto the button bar",
+            );
+        }
+
+        // The whole upper region sits above the button bar in the area column: the
+        // area holds the upper row then the button bar, in that order. (The bar is
+        // found by position, not the `dead_code`-expected `BottomArea::bar` field,
+        // so reading it here would not defeat that expectation.)
+        let area_kids = children_of(&app, area.area);
+        assert_eq!(
+            area_kids.first().copied(),
+            Some(upper),
+            "the upper row is the first (top) child of the area column",
+        );
+        assert_eq!(
+            area_kids.len(),
+            2,
+            "the area column holds exactly the upper row and the button bar below it",
+        );
+        Ok(())
     }
 
     /// The three visual states are visually distinct — the active button must not

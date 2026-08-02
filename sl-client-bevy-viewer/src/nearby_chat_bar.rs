@@ -8,9 +8,10 @@
 //! `/command` registry, the Shift/Ctrl+Enter volume overrides) lives in the widget;
 //! this module only does the three things a *live* bar adds:
 //!
-//! 1. **Placement** — one widget spawned into the bottom area's upper stack
-//!    ([`crate::bottom_toolbar::BottomArea::upper`]), so it always rides just above
-//!    the toolbar buttons.
+//! 1. **Placement** — one widget spawned into the bottom area's leading upper
+//!    slot ([`crate::bottom_toolbar::BottomArea::upper_leading`]), so it always
+//!    rides just above the toolbar buttons at their leading edge, beside (not
+//!    stacked with) the trailing-half controls.
 //! 2. **Send** — the widget's session-free [`LocalChatSubmit`] mapped to
 //!    `Command::Chat` (message / channel / chat type straight through).
 //! 3. **Focus & typing** — `Enter` while the **World** owns the keyboard focuses
@@ -45,13 +46,11 @@ use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::typing::TypingState;
 use crate::ui::row;
 
-/// The fraction of the screen width the bar spans, from the **leading** edge — the
-/// trailing half is left for the other bottom-edge controls (volume, voice, quick
-/// preferences) as they land, and the exact split can be tuned then.
-const BAR_WIDTH_FRACTION: f32 = 50.0;
-
 /// The bar's least width, in logical pixels — a floor so it stays usable on a very
-/// narrow window where half the screen would be too little.
+/// narrow window where half the screen would be too little. The leading/trailing
+/// split of the screen itself is owned by the bottom area's upper row (the bar
+/// fills its leading half); this is only the floor below which the field will not
+/// shrink.
 const BAR_MIN_WIDTH: f32 = 320.0;
 
 /// The bar's font size, in logical pixels.
@@ -104,14 +103,14 @@ impl Plugin for NearbyChatBarPlugin {
     }
 }
 
-/// Spawn the bar into the bottom area's upper stack, once — the [`Local`] latch
-/// makes this a one-shot even though it lives in `Update` (so it can wait for the
-/// bottom area without ordering against another plugin's `Startup`).
+/// Spawn the bar into the bottom area's leading upper slot, once — the [`Local`]
+/// latch makes this a one-shot even though it lives in `Update` (so it can wait for
+/// the bottom area without ordering against another plugin's `Startup`).
 ///
-/// A full-width, **leading-aligned** wrapper holds the widget, and the box itself
-/// spans [`BAR_WIDTH_FRACTION`] of the screen — so the bar starts at the leading
-/// edge (mirrored under RTL, the wrapper being a [`crate::ui::row`]) and covers the
-/// leading half, leaving the trailing half for the other bottom-edge controls.
+/// A wrapper that fills the leading slot holds the widget, and the box spans the
+/// whole wrapper — so the bar covers the bar's leading half (the split is the upper
+/// row's, mirrored under RTL for free), leaving the trailing half for the other
+/// bottom-edge controls.
 fn spawn_nearby_chat_bar(
     mut commands: Commands,
     area: Option<Res<BottomArea>>,
@@ -137,7 +136,7 @@ fn spawn_nearby_chat_bar(
                 is_hoverable: true,
             },
             Name::new("nearby-chat-bar"),
-            ChildOf(area.upper),
+            ChildOf(area.upper_leading),
         ))
         .id();
     let handle = spawn_local_chat_input(
@@ -146,7 +145,9 @@ fn spawn_nearby_chat_bar(
         &ChatInputSpec {
             font_size: BAR_FONT_SIZE,
             min_width: BAR_MIN_WIDTH,
-            width: Some(Val::Percent(BAR_WIDTH_FRACTION)),
+            // Fill the leading half of the upper row; that half is what carves out
+            // the leading portion of the screen, not this width.
+            width: Some(Val::Percent(100.0)),
             ..ChatInputSpec::new("nearby-chat")
         },
     );

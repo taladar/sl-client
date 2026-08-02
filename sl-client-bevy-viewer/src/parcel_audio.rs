@@ -184,9 +184,10 @@ fn spawn_parcel_audio_bar(
     let Some(area) = area else {
         return;
     };
-    // A full-width, trailing-aligned wrapper: the nearby-chat bar owns the
-    // leading half of this stack, the audio cluster sits on the trailing side
-    // (mirrored under RTL for free).
+    // Fill the trailing half of the upper row, right-aligned: the nearby-chat bar
+    // owns the leading half beside it, the audio cluster sits on the trailing side
+    // (mirrored under RTL for free). Because the two halves are fixed and side by
+    // side, showing / hiding this cluster never moves the chat bar.
     let wrapper = commands
         .spawn((
             Node {
@@ -201,7 +202,7 @@ fn spawn_parcel_audio_bar(
                 is_hoverable: true,
             },
             Name::new("parcel-audio-bar"),
-            ChildOf(area.upper),
+            ChildOf(area.upper_trailing),
         ))
         .id();
     let cluster = commands
