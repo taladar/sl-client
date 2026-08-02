@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 8 |
-| done | 668 |
+| bugs | 7 |
+| done | 669 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1140** |
@@ -1115,7 +1115,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (8)
+## bugs (7)
 
 ### protocol
 
@@ -1132,8 +1132,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rubberband)
 - [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
-- [`viewer-fps-label-intermittent`](bugs/viewer-fps-label-intermittent.md) — FPS
-  status readout intermittently drops its "fps" label
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1144,7 +1142,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (668)
+## done (669)
 
 ### protocol
 
@@ -1375,6 +1373,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
+  status readout intermittently drops its "fps" label
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))

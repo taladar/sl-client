@@ -495,11 +495,58 @@ fn spawn_readout(
     let slot_entity = commands
         .spawn((slot, Name::new("status-readout-slot"), ChildOf(parent)))
         .id();
+    // The text-node layout keeps the `fps` (and every other read-out's) unit
+    // label from intermittently vanishing (`viewer-fps-label-intermittent`).
+    //
+    // The read-outs are marked [`FixedSlotContentSize`] so a value ticking (the
+    // FPS at ~10 Hz) does **not** trip the layout gate into a full-tree relayout
+    // (`ui_perf::ui_layout_dirty`). But `bevy_ui`'s glyph pass (`text_system`, in
+    // the ungated `UiSystems::PostLayout`) still reflows on every text change, and
+    // it lays the glyphs out inside the node's **last computed** `content_box` —
+    // which, with layout gated off, is stale. The proportional font makes the
+    // same digit count a different width ("88 fps" is wider than "11 fps"), so a
+    // value wider than the one layout last sized the node for would, in the old
+    // config, be **word-wrapped into that stale-narrow box** — dropping the unit
+    // onto a second line the slot's clip then hid.
+    //
+    // The fix keeps the node's width **independent of its content** so the stale
+    // box is never too narrow, and pins the value to the correct edge:
+    //
+    // - **Trailing** read-outs (balance / time / FPS) fill the slot
+    //   (`flex_basis: 0` + `flex_grow: 1`, so the node is always the slot's full
+    //   width regardless of the text) and right-justify their glyphs, so the
+    //   trailing unit sits at the slot's trailing edge and any overflow clips the
+    //   *leading* digits instead.
+    // - **Leading** read-outs (region / coordinates / parcel name) keep their full
+    //   text width (`flex_shrink: 0`) and never wrap ([`TextLayout::no_wrap`]), so
+    //   an over-long value clips its trailing tail against the leading-anchored
+    //   slot rather than wrapping.
+    let (text_layout, text_node) = if trailing {
+        (
+            TextLayout::default().with_justify(Justify::Right),
+            Node {
+                flex_basis: Val::Px(0.0),
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                ..default()
+            },
+        )
+    } else {
+        (
+            TextLayout::no_wrap(),
+            Node {
+                flex_shrink: 0.0,
+                ..default()
+            },
+        )
+    };
     let text = commands
         .spawn((
             Text::new(String::new()),
             UiFont::Sans.at(STATUS_FONT_SIZE),
             TextColor(Color::WHITE),
+            text_layout,
+            text_node,
             ClassList::new_with_classes(["sk-status-readout"]),
             readout,
             Name::new("status-readout"),
@@ -838,6 +885,256 @@ mod tests {
             context(open_parcel(), RegionFlags::ESTATE_SKIP_SCRIPTS, true)
                 .shown(ParcelIcon::Scripts)
         );
+    }
+
+    /// **`viewer-fps-label-intermittent`.** A trailing read-out (balance / time /
+    /// FPS) must keep its unit label whatever its value ticks to.
+    ///
+    /// The read-outs carry [`FixedSlotContentSize`], so a value ticking — the FPS
+    /// at ~10 Hz — does **not** trip the layout gate ([`ui_perf::ui_layout_dirty`])
+    /// into a full-tree relayout; that gate is the whole reason the FPS box exists
+    /// as a fixed slot. But `bevy_ui`'s glyph pass (`text_system`, in the *ungated*
+    /// `UiSystems::PostLayout`) still reflows on each text change, and it lays the
+    /// glyphs inside the node's **last computed** `content_box` — stale while
+    /// layout is gated off. In the old config the text node's width tracked its
+    /// content, so a value wider than the one layout last sized the node for was
+    /// word-wrapped into a too-narrow stale box, dropping the unit onto a second
+    /// line the slot's clip then hid (the intermittent missing `fps`).
+    ///
+    /// This harness is layout-only — no glyph pass — so it cannot re-run
+    /// `text_system` against a stale box. It asserts the invariant that removes the
+    /// stale-narrow box altogether: **the trailing read-out's text node is the
+    /// slot's full width regardless of its value**, so the glyph pass' bounds never
+    /// shrink below the slot and the widest realistic value never wraps. A control
+    /// built the *old* way (a content-width node) is measured alongside to prove
+    /// the invariant has teeth: its width genuinely tracked the value.
+    #[test]
+    fn trailing_readout_width_does_not_track_its_value() -> Result<(), crate::ui_test::TestError> {
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::*;
+
+        use super::{FPS_WIDTH, STATUS_FONT_SIZE, StatusReadout, spawn_readout};
+        use crate::ui::UiRoot;
+        use crate::ui_font::UiFont;
+        use crate::ui_test::{LayoutTest, settle};
+
+        /// One text line at the read-out size is ~1 line-height; two are ~double.
+        const ONE_LINE_MAX: f32 = STATUS_FONT_SIZE * 1.5;
+        /// The node width is the slot width to within sub-pixel rounding.
+        const WIDTH_EPSILON: f32 = 1.0;
+
+        let mut app = LayoutTest::new().build();
+        settle(&mut app);
+        let root = app.world().resource::<UiRoot>().0;
+
+        // The real FPS read-out, spawned through the production path so the test
+        // tracks whatever node config `spawn_readout` actually gives it.
+        {
+            let world = app.world_mut();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, world);
+            spawn_readout(
+                &mut commands,
+                root,
+                StatusReadout::Fps,
+                Some(FPS_WIDTH),
+                true,
+            );
+            queue.apply(world);
+        }
+        let fps_text = {
+            let mut query = app.world_mut().query::<(Entity, &StatusReadout)>();
+            query
+                .iter(app.world())
+                .find(|(_, readout)| **readout == StatusReadout::Fps)
+                .map(|(entity, _)| entity)
+                .ok_or("spawn_readout did not spawn an FPS text node")?
+        };
+
+        // A control in an identical fixed-width, clipping slot but with the *old*
+        // config: a plain content-width text node (default `flex_shrink`, default
+        // line-break). Its width will be shown to track its content — the stale
+        // box the glyph pass used to wrap into.
+        let control_slot = app
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Px(FPS_WIDTH),
+                    flex_shrink: 0.0,
+                    justify_content: JustifyContent::FlexEnd,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                ChildOf(root),
+            ))
+            .id();
+        let control_text = app
+            .world_mut()
+            .spawn((
+                Text::new(String::new()),
+                UiFont::Sans.at(STATUS_FONT_SIZE),
+                ChildOf(control_slot),
+            ))
+            .id();
+
+        let logical = |app: &App, entity: Entity| -> Vec2 {
+            app.world()
+                .entity(entity)
+                .get::<ComputedNode>()
+                .map(|computed| computed.size * computed.inverse_scale_factor)
+                .unwrap_or_default()
+        };
+
+        let mut control_min = f32::MAX;
+        let mut control_max = 0.0_f32;
+        // One- to three-digit frame rates: every realistic value, plus enough of a
+        // margin that a fast display's 100+ fps is covered too.
+        for value in [1, 8, 11, 44, 60, 88, 99, 120, 240] {
+            let label = format!("{value} fps");
+            {
+                let Some(mut text) = app.world_mut().get_mut::<Text>(fps_text) else {
+                    return Err("the FPS text node vanished".into());
+                };
+                text.0 = label.clone();
+            }
+            {
+                let Some(mut text) = app.world_mut().get_mut::<Text>(control_text) else {
+                    return Err("the control text node vanished".into());
+                };
+                text.0 = label.clone();
+            }
+            settle(&mut app);
+
+            let fps = logical(&app, fps_text);
+            assert!(
+                (fps.x - FPS_WIDTH).abs() <= WIDTH_EPSILON,
+                "`{label}` sized the FPS text node to {} logical px, not the slot's {FPS_WIDTH} px \
+                 — a content-tracking width lets the gated glyph pass wrap the label into a stale \
+                 box",
+                fps.x,
+            );
+            assert!(
+                fps.y < ONE_LINE_MAX,
+                "`{label}` wrapped in the real read-out: {} logical px tall (one line is \
+                 ~{STATUS_FONT_SIZE} px) — the `fps` label would be clipped away",
+                fps.y,
+            );
+
+            let control = logical(&app, control_text).x;
+            control_min = control_min.min(control);
+            control_max = control_max.max(control);
+        }
+
+        // Teeth: the old content-width config really did vary with the value, so
+        // the invariant above is not vacuous — a narrower earlier layout is exactly
+        // the stale box the glyph pass wrapped `fps` into.
+        assert!(
+            control_max - control_min > 2.0,
+            "the control's width did not vary with its value ({control_min}..{control_max} px), so \
+             the old config could not have produced a stale-narrow box — this test proves nothing"
+        );
+        Ok(())
+    }
+
+    /// **`viewer-fps-label-intermittent`, leading half.** A leading read-out
+    /// (region / coordinates / parcel name) never wraps: an over-long value clips
+    /// its trailing tail against the leading-anchored slot rather than wrapping to
+    /// a second line the slot's clip would hide. Mirrors the trailing test's other
+    /// branch of the [`spawn_readout`] fix (`TextLayout::no_wrap`).
+    #[test]
+    fn leading_readout_clips_rather_than_wrapping() -> Result<(), crate::ui_test::TestError> {
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::*;
+
+        use super::{REGION_WIDTH, STATUS_FONT_SIZE, StatusReadout, spawn_readout};
+        use crate::ui::UiRoot;
+        use crate::ui_font::UiFont;
+        use crate::ui_test::{LayoutTest, settle};
+
+        /// One text line at the read-out size is ~1 line-height; two are ~double.
+        const ONE_LINE_MAX: f32 = STATUS_FONT_SIZE * 1.5;
+        /// A region name far wider than the fixed slot, so wrapping (if it
+        /// happened) would take several lines.
+        const LONG_NAME: &str = "A Very Long Region Name That Overflows The Slot By A Lot";
+
+        let mut app = LayoutTest::new().build();
+        settle(&mut app);
+        let root = app.world().resource::<UiRoot>().0;
+
+        {
+            let world = app.world_mut();
+            let mut queue = CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, world);
+            spawn_readout(
+                &mut commands,
+                root,
+                StatusReadout::Region,
+                Some(REGION_WIDTH),
+                false,
+            );
+            queue.apply(world);
+        }
+        let region_text = {
+            let mut query = app.world_mut().query::<(Entity, &StatusReadout)>();
+            query
+                .iter(app.world())
+                .find(|(_, readout)| **readout == StatusReadout::Region)
+                .map(|(entity, _)| entity)
+                .ok_or("spawn_readout did not spawn a region text node")?
+        };
+
+        // A control in an identical fixed-width slot but with the old wrapping
+        // config, to calibrate: the same name in a wrapping node takes several
+        // lines, so the no-wrap assertion is not vacuous.
+        let control_slot = app
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Px(REGION_WIDTH),
+                    flex_shrink: 0.0,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                ChildOf(root),
+            ))
+            .id();
+        let control_text = app
+            .world_mut()
+            .spawn((
+                Text::new(LONG_NAME),
+                UiFont::Sans.at(STATUS_FONT_SIZE),
+                ChildOf(control_slot),
+            ))
+            .id();
+
+        {
+            let Some(mut text) = app.world_mut().get_mut::<Text>(region_text) else {
+                return Err("the region text node vanished".into());
+            };
+            text.0 = LONG_NAME.to_owned();
+        }
+        settle(&mut app);
+
+        let height = |app: &App, entity: Entity| -> f32 {
+            app.world()
+                .entity(entity)
+                .get::<ComputedNode>()
+                .map(|computed| computed.size.y * computed.inverse_scale_factor)
+                .unwrap_or_default()
+        };
+        let region_h = height(&app, region_text);
+        let control_h = height(&app, control_text);
+        assert!(
+            region_h < ONE_LINE_MAX,
+            "the leading read-out wrapped: {region_h} logical px tall (one line is \
+             ~{STATUS_FONT_SIZE} px)"
+        );
+        assert!(
+            control_h > region_h + STATUS_FONT_SIZE,
+            "the wrapping control did not take more lines than the no-wrap read-out ({control_h} \
+             vs {region_h} px), so the no-wrap assertion proves nothing — widen `LONG_NAME`"
+        );
+        Ok(())
     }
 
     /// Push restriction lights from either the parcel flag or the region flag.
