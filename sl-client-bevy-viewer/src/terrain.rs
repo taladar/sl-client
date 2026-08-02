@@ -60,6 +60,10 @@ use crate::textures::{TextureDecoded, TextureManager};
 /// 256 m (16×16 patches of 16×16 cells).
 const REGION_SIZE_METRES: f32 = 256.0;
 
+/// The region edge length in metres as an integer, for the patch/region grid
+/// arithmetic that must stay in `u32` (mirrors [`REGION_SIZE_METRES`]).
+const REGION_SIZE_METRES_U32: u32 = 256;
+
 /// The world span, in metres, over which a detail texture repeats once. Terrain
 /// detail textures tile far more finely than the whole region, so the mesh's UVs
 /// wrap every few metres rather than stretching one texture across 256 m.
@@ -401,9 +405,11 @@ fn rebuild_existing(
     commands.entity(entity).insert(Mesh3d(mesh));
 }
 
-/// Rebuild the west / south / south-west neighbours of the patch at `key` (in
-/// the same region): they share their far edge with this one, so a newly arrived
-/// patch closes their seam.
+/// Rebuild the west / south / south-west neighbours of the patch at `key`: they
+/// share their far edge with this one, so a newly arrived patch closes their
+/// seam. The step crosses region boundaries — a patch on a region's west / south
+/// edge is the shared far edge of the **adjacent region's** east / north edge
+/// patch, so a border seam closes as the neighbouring region streams in.
 fn rebuild_neighbours(
     state: &TerrainState,
     key: PatchKey,
@@ -411,16 +417,38 @@ fn rebuild_neighbours(
     commands: &mut Commands,
 ) {
     let (region, patch_x, patch_y) = key;
-    let west = patch_x.checked_sub(1);
-    let south = patch_y.checked_sub(1);
-    if let Some(west_x) = west {
-        rebuild_existing(state, (region, west_x, patch_y), meshes, commands);
+    let Some(size) = state.raw_patches.get(&key).map(|patch| patch.size) else {
+        return;
+    };
+    let (global_x, global_y) = region.global_coordinates();
+    let west = step_back(global_x, patch_x, size);
+    let south = step_back(global_y, patch_y, size);
+    if let Some((west_metre, west_patch_x)) = west {
+        let west_region = RegionHandle::from_global(west_metre, global_y);
+        rebuild_existing(
+            state,
+            (west_region, west_patch_x, patch_y),
+            meshes,
+            commands,
+        );
     }
-    if let Some(south_y) = south {
-        rebuild_existing(state, (region, patch_x, south_y), meshes, commands);
+    if let Some((south_metre, south_patch_y)) = south {
+        let south_region = RegionHandle::from_global(global_x, south_metre);
+        rebuild_existing(
+            state,
+            (south_region, patch_x, south_patch_y),
+            meshes,
+            commands,
+        );
     }
-    if let (Some(west_x), Some(south_y)) = (west, south) {
-        rebuild_existing(state, (region, west_x, south_y), meshes, commands);
+    if let (Some((west_metre, west_patch_x)), Some((south_metre, south_patch_y))) = (west, south) {
+        let corner_region = RegionHandle::from_global(west_metre, south_metre);
+        rebuild_existing(
+            state,
+            (corner_region, west_patch_x, south_patch_y),
+            meshes,
+            commands,
+        );
     }
 }
 
@@ -632,8 +660,10 @@ pub(crate) fn placeholder_image() -> Image {
 /// The mesh is `(size + 1)`×`(size + 1)` vertices: a patch owns `size`×`size`
 /// height samples but spans `size` metres, so its far (north / east /
 /// north-east) edge is the *shared* boundary with the neighbouring patches. That
-/// extra edge is sampled from the same region's neighbours in `raw` (see
-/// [`sample_height`]) so adjacent patch meshes meet exactly and leave no seam.
+/// extra edge is sampled from the neighbour patches in `raw` (see
+/// [`sample_height`]) — including the **adjacent region's** patches at a region
+/// border — so adjacent patch meshes meet exactly and leave no seam, even where
+/// the ground is sloped across a region boundary.
 /// Each vertex carries computed normals, tiled detail UVs, and a four-component
 /// blend weight (from `composition`, or a flat default while it is unknown); the
 /// grid is two triangles per cell quad.
@@ -713,11 +743,20 @@ pub(crate) fn build_patch_mesh(
 
 /// The ground height for extended grid cell (`x`, `y`) of patch (`patch_x`,
 /// `patch_y`) in `region`: an own sample for `x`/`y` in `0..size`, or the shared
-/// boundary sample from the east / north / north-east neighbour patch in the
-/// same region for the extra `size` index. Falls back to this patch's own
-/// clamped edge sample when the neighbour is not loaded yet — a temporary 1 m
-/// flat strip, rebuilt seamlessly once the neighbour arrives. (A patch at the
-/// region's own far edge keeps that strip: its neighbour is in another region.)
+/// boundary sample (the extra `size` index) from the east / north / north-east
+/// neighbour patch — which may be **another region's** patch when this patch sits
+/// on its region's own far edge, so a sloped region border stitches to the
+/// neighbouring region's real edge instead of stepping.
+///
+/// When the neighbour patch is not loaded yet (or there is genuinely no neighbour
+/// — the outermost edge of the loaded world), the far edge **flat-extends** the
+/// nearest real line along *only* the missing axis, keeping the other axis's real
+/// value. That is what avoids the visible corner **fold**: an interior north-edge
+/// patch's east far edge follows the (in-region) east neighbour's rising slope,
+/// so its north-east corner must extend that same height northward, not collapse
+/// to the patch's own clamped `(size-1, size-1)` cell. A truly void far edge is
+/// then a flat 1 m lip; a border that later loads its neighbour rebuilds
+/// seamlessly ([`rebuild_neighbours`]).
 fn sample_height(
     raw: &HashMap<PatchKey, TerrainPatch>,
     region: RegionHandle,
@@ -727,27 +766,95 @@ fn sample_height(
     x: u32,
     y: u32,
 ) -> f32 {
-    let (neighbour_x, local_x) = if x < size {
-        (patch_x, x)
-    } else {
-        (patch_x.saturating_add(1), x.saturating_sub(size))
-    };
-    let (neighbour_y, local_y) = if y < size {
-        (patch_y, y)
-    } else {
-        (patch_y.saturating_add(1), y.saturating_sub(size))
-    };
-    if let Some(height) = raw
-        .get(&(region, neighbour_x, neighbour_y))
-        .and_then(|patch| patch.value(local_x, local_y))
+    // The exact sample, crossing into the neighbouring region if this patch is on
+    // its region's far edge.
+    if let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x, y) {
+        return height;
+    }
+    // No neighbour there. Flat-extend along the missing axis only, preferring to
+    // keep whichever far edge *does* resolve (so the corner tracks the sloped
+    // edge instead of folding down).
+    let x_back = x.min(size.saturating_sub(1));
+    let y_back = y.min(size.saturating_sub(1));
+    if y == size
+        && let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x, y_back)
     {
         return height;
     }
-    let clamped_x = x.min(size.saturating_sub(1));
-    let clamped_y = y.min(size.saturating_sub(1));
-    raw.get(&(region, patch_x, patch_y))
-        .and_then(|patch| patch.value(clamped_x, clamped_y))
-        .unwrap_or(0.0)
+    if x == size
+        && let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x_back, y)
+    {
+        return height;
+    }
+    // Both far edges void (or the diagonal corner): this patch's own clamped cell.
+    resolved_height(raw, region, patch_x, patch_y, size, x_back, y_back).unwrap_or(0.0)
+}
+
+/// The stored height for extended grid cell (`x`, `y`) of patch (`patch_x`,
+/// `patch_y`) in `region`, resolving the extra `size` far-edge index to the
+/// neighbour patch — crossing into the adjacent **region**'s first patch when this
+/// patch is on its region's far edge — or `None` when that patch is not loaded.
+///
+/// This is the exact (no-fallback) lookup [`sample_height`] tries first; the
+/// per-axis flat-extension fallback lives in `sample_height` so this stays a pure
+/// "is the real neighbour sample available?" query, reused for each flat-extend
+/// step.
+fn resolved_height(
+    raw: &HashMap<PatchKey, TerrainPatch>,
+    region: RegionHandle,
+    patch_x: u32,
+    patch_y: u32,
+    size: u32,
+    x: u32,
+    y: u32,
+) -> Option<f32> {
+    let (shift_x, neighbour_x, local_x) = resolve_axis(patch_x, size, x);
+    let (shift_y, neighbour_y, local_y) = resolve_axis(patch_y, size, y);
+    let (global_x, global_y) = region.global_coordinates();
+    let target = RegionHandle::from_global(
+        global_x.saturating_add(shift_x),
+        global_y.saturating_add(shift_y),
+    );
+    raw.get(&(target, neighbour_x, neighbour_y))
+        .and_then(|patch| patch.value(local_x, local_y))
+}
+
+/// Resolve one axis of the extended `0..=size` sample grid to a
+/// `(region_metre_shift, patch_index, local_offset)`: an owned sample (`shift 0`,
+/// this patch) for `index` in `0..size`; the shared far-edge sample (`index ==
+/// size`) borrows the next patch's first sample, staying in this region for an
+/// interior patch or crossing into the next region (`shift ==
+/// REGION_SIZE_METRES_U32`, that region's patch `0`) when this patch is the
+/// region's far-edge patch.
+const fn resolve_axis(patch: u32, size: u32, index: u32) -> (u32, u32, u32) {
+    if index < size {
+        return (0, patch, index);
+    }
+    let next = patch.saturating_add(1);
+    // The region-local metre of the next patch's first sample; at (or past) the
+    // region edge it belongs to the adjacent region's patch 0.
+    if next.saturating_mul(size) < REGION_SIZE_METRES_U32 {
+        (0, next, 0)
+    } else {
+        (REGION_SIZE_METRES_U32, 0, 0)
+    }
+}
+
+/// The patch one step west/south of `(region_metre, patch)` on one axis, in
+/// global patch space: this region's previous patch for an interior patch, else
+/// the previous region's far-edge patch. `region_metre` is the region's global
+/// south-west corner on that axis; returns `(previous_region_metre,
+/// previous_patch_index)`, or `None` when stepping before the grid origin.
+fn step_back(region_metre: u32, patch: u32, size: u32) -> Option<(u32, u32)> {
+    let this_metre = region_metre.checked_add(patch.saturating_mul(size))?;
+    let previous_metre = this_metre.checked_sub(size)?;
+    let region_start = previous_metre
+        .checked_div(REGION_SIZE_METRES_U32)?
+        .saturating_mul(REGION_SIZE_METRES_U32);
+    let patch_index = previous_metre
+        .saturating_sub(region_start)
+        .checked_div(size)?;
+    Some((region_start, patch_index))
 }
 
 /// The height at extended grid cell (`x`, `y`) in a `width`-wide, row-major grid.
@@ -844,8 +951,18 @@ mod tests {
 
     /// Build the mesh for [`KEY`], asserting it is present.
     fn mesh_for(map: &HashMap<PatchKey, TerrainPatch>, comp: Option<&TerrainComposition>) -> Mesh {
-        let mesh = build_patch_mesh(map, comp, KEY);
-        assert!(mesh.is_some(), "patch mesh should build for {KEY:?}");
+        mesh_at(map, comp, KEY)
+    }
+
+    /// Build the mesh for `key`, asserting it is present (an empty mesh stands in
+    /// on the impossible `None` so the restriction lints stay clear of `expect`).
+    fn mesh_at(
+        map: &HashMap<PatchKey, TerrainPatch>,
+        comp: Option<&TerrainComposition>,
+        key: PatchKey,
+    ) -> Mesh {
+        let mesh = build_patch_mesh(map, comp, key);
+        assert!(mesh.is_some(), "patch mesh should build for {key:?}");
         mesh.unwrap_or_else(|| {
             Mesh::new(
                 PrimitiveTopology::TriangleList,
@@ -976,6 +1093,119 @@ mod tests {
             (neighbour.translation.x - 256.0).abs() < 1.0e-3,
             "east neighbour at {neighbour:?}"
         );
+    }
+
+    /// Insert a land patch at `(region, patch_x, patch_y)` of edge `size` whose
+    /// height is `f(x, y)` into `map`.
+    fn insert_patch(
+        map: &mut HashMap<PatchKey, TerrainPatch>,
+        region: RegionHandle,
+        patch_x: u32,
+        patch_y: u32,
+        size: u32,
+        mut height: impl FnMut(u32, u32) -> f32,
+    ) {
+        let mut values = Vec::new();
+        for y in 0..size {
+            for x in 0..size {
+                values.push(height(x, y));
+            }
+        }
+        map.insert(
+            (region, patch_x, patch_y),
+            TerrainPatch {
+                region_handle: region,
+                layer: TerrainLayerType::Land,
+                patch_x,
+                patch_y,
+                size,
+                values,
+            },
+        );
+    }
+
+    /// The vertex positions of a built mesh (`[x, y, height]` in patch space), or
+    /// empty if the attribute is absent.
+    fn positions_of(mesh: &Mesh) -> Vec<[f32; 3]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(values)) => values.clone(),
+            _other => Vec::new(),
+        }
+    }
+
+    /// The far east far-edge column (`x == size`) of a `size`-patch mesh reaches
+    /// across the **region** boundary into the adjacent region's first patch, so a
+    /// sloped region border stitches to the neighbour's real edge height instead
+    /// of falling back to this region's flat clamped edge.
+    #[test]
+    fn far_edge_stitches_across_region_border() {
+        let west = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        let mut map = HashMap::new();
+        // West region's east-edge patch: low, rising gently east (10..=25).
+        insert_patch(&mut map, west, 15, 0, 16, |x, _y| {
+            10.0 + super::patch_coord_f32(x)
+        });
+        // East region's west-edge patch: far higher (a rising slope continues),
+        // so the sampled far edge is unmistakably the neighbour's, not the clamp.
+        insert_patch(&mut map, east, 0, 0, 16, |_x, _y| 100.0);
+        let mesh = mesh_at(&map, None, (west, 15, 0));
+        let positions = positions_of(&mesh);
+        let width = 17_usize;
+        // The whole far east column (x == 16) takes the east region's edge height.
+        for y in 0..width {
+            let index = y * width + 16;
+            let height = positions.get(index).map_or(0.0, |position| position[2]);
+            assert!(
+                (height - 100.0).abs() < 1.0e-4,
+                "far edge vertex (16, {y}) height {height} is not the neighbour region's 100"
+            );
+        }
+    }
+
+    /// A north-edge patch whose east neighbour (in-region) rises but whose north
+    /// neighbour region is not loaded must **flat-extend** its north-east corner
+    /// along the sloped east edge, not collapse it to the patch's own clamped
+    /// cell — the corner "fold" the region rim showed on a slope.
+    #[test]
+    fn void_north_edge_corner_does_not_fold() {
+        let region = RegionHandle::from_global(256_000, 256_000);
+        let mut map = HashMap::new();
+        // North-edge west-column patch: flat and low.
+        insert_patch(&mut map, region, 0, 15, 16, |_x, _y| 10.0);
+        // Its in-region east neighbour: high (the slope rises east).
+        insert_patch(&mut map, region, 1, 15, 16, |_x, _y| 100.0);
+        // No region to the north is loaded.
+        let mesh = mesh_at(&map, None, (region, 0, 15));
+        let positions = positions_of(&mesh);
+        let width = 17_usize;
+        let height_at = |x: usize, y: usize| {
+            positions
+                .get(y * width + x)
+                .map_or(f32::NAN, |position| position[2])
+        };
+        // The real east far edge (x == 16, y == 15) is the east neighbour's 100.
+        assert!((height_at(16, 15) - 100.0).abs() < 1.0e-4, "east far edge");
+        // The north-east corner (16, 16) flat-extends that 100 northward — without
+        // the fix it would clamp to this patch's own (15, 15) cell, i.e. 10.
+        assert!(
+            (height_at(16, 16) - 100.0).abs() < 1.0e-4,
+            "corner {} folded down instead of extending the sloped east edge",
+            height_at(16, 16)
+        );
+    }
+
+    /// [`super::step_back`] walks one patch west/south, crossing into the previous
+    /// region's far-edge patch at a region boundary and stopping at the grid
+    /// origin.
+    #[test]
+    fn step_back_crosses_region_boundary() {
+        // Interior: patch 5 → patch 4, same region metre.
+        assert_eq!(super::step_back(256_000, 5, 16), Some((256_000, 4)));
+        // West edge: patch 0 → the previous region's last patch (15).
+        assert_eq!(super::step_back(256_000, 0, 16), Some((255_744, 15)));
+        // At the grid origin there is nothing further west.
+        assert_eq!(super::step_back(0, 0, 16), None);
     }
 
     /// Global metres round-trip exactly through the 16-bit high/low split (the

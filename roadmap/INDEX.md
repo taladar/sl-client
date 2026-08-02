@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 54 |
-| ready | 259 |
+| ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 9 |
-| done | 665 |
+| done | 666 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1138** |
@@ -139,7 +139,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (259)
+## ready (258)
 
 ### protocol
 
@@ -663,8 +663,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
-- [`viewer-terrain-region-edge-seam-slope`](ready/viewer-terrain-region-edge-seam-slope.md)
-  — Terrain seam / misalignment at region edges on slopes
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -1146,7 +1144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (665)
+## done (666)
 
 ### protocol
 
@@ -1892,6 +1890,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-frame stretch still grows the object along its local axis
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
+- [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
+  — Terrain seam / misalignment at region edges on slopes
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))

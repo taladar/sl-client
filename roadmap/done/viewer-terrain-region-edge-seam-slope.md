@@ -2,9 +2,36 @@
 id: viewer-terrain-region-edge-seam-slope
 title: Terrain seam / misalignment at region edges on slopes
 topic: viewer
-status: ready
+status: done
 origin: user observation (2026-08-02), while reviewing viewer-parcel-borders-render
 ---
+
+**Done (2026-08-02).** Fixed in `sl-client-bevy-viewer/src/terrain.rs`. Two
+distinct bugs in `sample_height` produced the sloped-border seam:
+
+1. The shared far-edge sample only ever looked up patches within the **same
+   region**, so at a region border the north / east edge could never reach the
+   neighbouring region's real edge height — it fell back to this region's own
+   clamped edge (a flat strip), stepping on a slope.
+2. The missing-neighbour fallback clamped **both** axes to `(size-1, size-1)`.
+   This is what produced the visible per-chunk corner **fold**: an interior
+   north-edge patch's *east* far-edge column correctly follows the in-region
+   east neighbour's rising slope, but its north-east corner collapsed to the
+   patch's own low corner instead of extending that height northward — so the
+   corner folded down even on a genuinely void top edge (confirmed in-world on
+   the local 2×2 grid's NE region north edge, a slope rising east).
+
+Fix: `resolve_axis` computes whether a far-edge sample belongs to the next
+patch in-region or the adjacent region's patch 0 (region handle shifted by
+256 m); `resolved_height` looks it up in the right region. When no neighbour is
+loaded, `sample_height` now **flat-extends along only the missing axis**,
+keeping whichever far edge does resolve, so the corner tracks the sloped edge.
+`rebuild_neighbours` crosses region boundaries too (`step_back`), so a border
+seam closes as the neighbouring region streams in. Vertical placement already
+agreed (every patch transform sits at `z = 0` with absolute heights baked into
+the vertices), so no datum change was needed. Three unit tests pin the
+before/after (`far_edge_stitches_across_region_border`,
+`void_north_edge_corner_does_not_fold`, `step_back_crosses_region_boundary`).
 
 Context: [context/viewer.md](../context/viewer.md).
 
