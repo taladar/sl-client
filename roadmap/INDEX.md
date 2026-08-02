@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 54 |
+| ideas | 55 |
 | ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 9 |
-| done | 667 |
+| bugs | 8 |
+| done | 668 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1139** |
+| **total** | **1140** |
 
-## ideas (54)
+## ideas (55)
 
 ### viewer
 
@@ -50,6 +50,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   mesh from disk
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
   preprocessor (FS-compatible)
+- [`viewer-manual-music-stream-url`](ideas/viewer-manual-music-stream-url.md) —
+  Manually specify a music-stream URL (cruises / travel events)
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
@@ -1113,7 +1115,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (9)
+## bugs (8)
 
 ### protocol
 
@@ -1138,13 +1140,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-opensim-trash-folder-not-resolved`](bugs/viewer-opensim-trash-folder-not-resolved.md)
   — OpenSim — object-pie Delete does nothing (Trash system folder never
   resolved)
-- [`viewer-parcel-music-stream-internal-data-error`](bugs/viewer-parcel-music-stream-internal-data-error.md)
-  — Parcel music stream fails to play ("Internal data stream error")
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (667)
+## done (668)
 
 ### protocol
 
@@ -1709,6 +1709,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-borders-render`](done/viewer-parcel-borders-render.md) —
   In-world parcel borders (property lines) (blocked by
   `viewer-parcel-overlay-decode` (done))
+- [`viewer-parcel-music-stream-internal-data-error`](done/viewer-parcel-music-stream-internal-data-error.md)
+  — Parcel music stream fails to play ("Internal data stream error")
 - [`viewer-parcel-options-access-media`](done/viewer-parcel-options-access-media.md)
   — About Land floater — access / ban / media / sound (blocked by
   `viewer-parcel-options-general` (done))

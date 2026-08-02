@@ -108,6 +108,7 @@ mod material_cache;
 mod material_preview;
 mod materials;
 mod media_controls;
+mod media_diagnostics;
 mod media_engine;
 mod media_keys;
 mod media_prim;
@@ -1055,6 +1056,10 @@ fn run_session(
     // The Search floater: the protocol-backed legacy directory search
     // (people / groups / events / places / land / classifieds).
     .add_plugins(crate::search::SearchFloaterPlugin)
+    // Recovers the real DNS / TCP / TLS / HTTP reason a media stream failed,
+    // which GStreamer's souphttpsrc hides — shared by the parcel-audio and
+    // media-on-a-prim consumers below.
+    .add_plugins(crate::media_diagnostics::MediaDiagnosticsPlugin)
     // Media-on-a-prim (LLViewerMedia / LLViewerMediaFocus): ObjectMedia data
     // driving per-face surfaces, world input routing and the focus model.
     .add_plugins(crate::media_prim::MediaPrimPlugin)

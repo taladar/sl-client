@@ -263,9 +263,24 @@ impl SurfaceInner {
         }
         match message.view() {
             gstreamer::MessageView::Error(error) => {
+                // First error wins: a failing pipeline emits a cascade (e.g. an
+                // HTTP-source failure, then a typefind "not enough data"). The
+                // first names the real cause and carries the `network_diagnosable`
+                // flag; a later, vaguer one must not overwrite it.
+                if shared.playback().state == PlaybackState::Error {
+                    return;
+                }
                 let text = friendly_error(error, &shared.missing_plugins);
                 warn!("media pipeline error: {text}");
+                if let Some(debug_info) = error.debug() {
+                    // The full location/element prefix, for developers.
+                    debug!("media pipeline error debug: {debug_info}");
+                }
                 shared.status.load_error = Some(text);
+                // Flag the case where GStreamer hid the real network reason, so
+                // the owner can probe the URL to recover it.
+                shared.status.network_diagnosable = shared.missing_plugins.is_empty()
+                    && crate::messages::is_http_source_failure(error);
                 shared.status.loading = false;
                 shared.playback().state = PlaybackState::Error;
                 shared.touch();
@@ -478,6 +493,7 @@ impl MediaSurface for GstMediaSurface {
             shared.status.url = String::from(url);
             shared.status.title.clear();
             shared.status.load_error = None;
+            shared.status.network_diagnosable = false;
             shared.status.loading = true;
             shared.status.progress = 0.0;
             shared.missing_plugins.clear();

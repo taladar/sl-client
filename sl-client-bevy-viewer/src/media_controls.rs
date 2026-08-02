@@ -39,6 +39,7 @@ use sl_cef::PlaybackState;
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::camera::{CameraRig, FocusTarget, ViewerCamera};
+use crate::media_diagnostics::MediaDiagnostics;
 use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{
     MediaData, MediaFocus, MediaPrimState, MediaTarget, media_permission_allows,
@@ -519,6 +520,7 @@ fn update_media_controls(
     data: Res<MediaData>,
     prim_state: Res<MediaPrimState>,
     surfaces: NonSend<MediaSurfaces>,
+    mut diagnostics: ResMut<MediaDiagnostics>,
     objects: Res<ObjectState>,
     time: Res<Time>,
     mut cursor_moves: MessageReader<bevy::window::CursorMoved>,
@@ -724,9 +726,22 @@ fn update_media_controls(
         }
         if let Ok(mut text) = chrome.texts.get_mut(ui.status_text) {
             // Video surfaces put their "now playing" title (or their loud
-            // decoder-gap error) here; web surfaces their load progress.
+            // decoder-gap error) here; web surfaces their load progress. A
+            // generic HTTP-source error is refined with the precise reason a
+            // background probe recovers (GStreamer hides DNS / TCP / TLS / HTTP
+            // causes — see [`crate::media_diagnostics`]).
             let want = if video {
-                status.load_error.clone().unwrap_or_else(|| {
+                let load_error = status.load_error.clone().map(|generic| {
+                    if status.network_diagnosable {
+                        diagnostics.request(&status.url);
+                        diagnostics
+                            .reason(&status.url)
+                            .map_or(generic, String::from)
+                    } else {
+                        generic
+                    }
+                });
+                load_error.unwrap_or_else(|| {
                     if playback.is_some_and(|playback| playback.state == PlaybackState::Buffering) {
                         playback
                             .and_then(|playback| playback.buffering_percent)

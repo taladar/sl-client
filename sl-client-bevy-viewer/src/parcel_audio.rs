@@ -21,12 +21,14 @@
 //! # The controls
 //!
 //! One right-aligned row in the bottom area's upper stack (the counterpart
-//! of the nearby-chat bar on the leading side), shown only while the current
-//! parcel has a stream URL: `♫ <now playing / stream host> ⏵/⏹ 🔊/🔇 [volume]`.
-//! The volume slider is bound to the persisted `MusicStreamVolume` setting
-//! through [`crate::settings_binding`], so the preference survives restarts
-//! and any future volume panel ([[viewer-volume-panel]]) edits the same
-//! value.
+//! of the nearby-chat bar on the leading side), always shown:
+//! `♫ <now playing / stream host> ⏵/⏹ 🔊/🔇 [volume]`. While the current parcel
+//! has no stream URL the row is greyed and its play / mute buttons are
+//! disabled — the volume slider stays live, so a user can set it before
+//! entering a loud parcel. The volume slider is bound to the persisted
+//! `MusicStreamVolume` setting through [`crate::settings_binding`], so the
+//! preference survives restarts and any future volume panel
+//! ([[viewer-volume-panel]]) edits the same value.
 //!
 //! Audio goes straight to the system device for now (the `sl-gst` interim —
 //! see that crate's docs); when the shared mixer (`viewer-audio-backend`)
@@ -37,6 +39,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
 };
@@ -44,6 +47,7 @@ use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState};
 
 use crate::bottom_toolbar::BottomArea;
+use crate::media_diagnostics::MediaDiagnostics;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
 use crate::ui::{LogicalInset, LogicalRect, row};
@@ -90,6 +94,10 @@ const BAR_LABEL_DIM: Color = Color::srgb(0.62, 0.65, 0.72);
 const BUTTON_BORDER: Color = Color::srgb(0.3, 0.3, 0.35);
 /// Button fill.
 const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
+/// Button border while the cluster is disabled (no parcel stream).
+const BUTTON_BORDER_DISABLED: Color = Color::srgb(0.2, 0.2, 0.22);
+/// Button fill while the cluster is disabled (no parcel stream).
+const BUTTON_FILL_DISABLED: Color = Color::srgb(0.11, 0.12, 0.14);
 /// The slider track's fill.
 const TRACK_FILL: Color = Color::srgb(0.16, 0.19, 0.25);
 /// The slider thumb's fill.
@@ -115,12 +123,16 @@ pub(crate) struct ParcelAudio {
 /// The bar's entities.
 #[derive(Resource)]
 struct ParcelAudioUi {
-    /// The whole cluster (hidden while the parcel has no stream).
-    wrapper: Entity,
+    /// The leading `♫` glyph.
+    marker: Entity,
     /// The play / stop glyph label.
     play_label: Entity,
+    /// The play / stop button (disabled while the parcel has no stream).
+    play_button: Entity,
     /// The mute glyph label.
     mute_label: Entity,
+    /// The mute button (disabled while the parcel has no stream).
+    mute_button: Entity,
     /// The now-playing / status text.
     title: Entity,
 }
@@ -143,6 +155,7 @@ impl Plugin for ParcelAudioPlugin {
                     spawn_parcel_audio_bar,
                     drive_parcel_audio,
                     handle_parcel_audio_actions,
+                    request_parcel_audio_diagnosis,
                     sync_parcel_audio_ui,
                     drive_volume_thumb,
                 )
@@ -193,8 +206,6 @@ fn spawn_parcel_audio_bar(
             Node {
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::FlexEnd,
-                // Hidden until the parcel has a stream.
-                display: Display::None,
                 ..row(Val::ZERO)
             },
             Pickable {
@@ -220,13 +231,15 @@ fn spawn_parcel_audio_bar(
             ChildOf(wrapper),
         ))
         .id();
-    commands.spawn((
-        Text::new("♫"),
-        UiFont::Sans.at(BAR_FONT_SIZE),
-        TextColor(BAR_LABEL),
-        Pickable::IGNORE,
-        ChildOf(cluster),
-    ));
+    let marker = commands
+        .spawn((
+            Text::new("♫"),
+            UiFont::Sans.at(BAR_FONT_SIZE),
+            TextColor(BAR_LABEL),
+            Pickable::IGNORE,
+            ChildOf(cluster),
+        ))
+        .id();
     let title_clip = commands
         .spawn((
             Node {
@@ -246,8 +259,10 @@ fn spawn_parcel_audio_bar(
             ChildOf(title_clip),
         ))
         .id();
-    let play_label = spawn_glyph_button(&mut commands, cluster, "▶", "play-stop", 20);
-    let mute_label = spawn_glyph_button(&mut commands, cluster, "🔊", "mute-toggle", 21);
+    let (play_button, play_label) =
+        spawn_glyph_button(&mut commands, cluster, "▶", "play-stop", 20);
+    let (mute_button, mute_label) =
+        spawn_glyph_button(&mut commands, cluster, "🔊", "mute-toggle", 21);
     let slider = commands
         .spawn((
             bound_slider(
@@ -287,22 +302,24 @@ fn spawn_parcel_audio_bar(
         ChildOf(slider),
     ));
     commands.insert_resource(ParcelAudioUi {
-        wrapper,
+        marker,
         play_label,
+        play_button,
         mute_label,
+        mute_button,
         title,
     });
     *spawned = true;
 }
 
-/// One glyph button on the cluster; returns the label entity.
+/// One glyph button on the cluster; returns `(button, label)` entities.
 fn spawn_glyph_button(
     commands: &mut Commands,
     parent: Entity,
     glyph: &str,
     action: &'static str,
     tab_index: i32,
-) -> Entity {
+) -> (Entity, Entity) {
     let button = commands
         .spawn((
             Button,
@@ -327,7 +344,7 @@ fn spawn_glyph_button(
             },
         )
         .id();
-    commands
+    let label = commands
         .spawn((
             Text::new(glyph),
             UiFont::Sans.at(BAR_FONT_SIZE),
@@ -335,7 +352,8 @@ fn spawn_glyph_button(
             Pickable::IGNORE,
             ChildOf(button),
         ))
-        .id()
+        .id();
+    (button, label)
 }
 
 /// Whether the player is running (or trying to run) rather than stopped /
@@ -417,6 +435,12 @@ fn handle_parcel_audio_actions(
         if action.element != PARCEL_AUDIO_ELEMENT {
             continue;
         }
+        // The play / mute buttons are disabled (greyed) while the parcel has no
+        // stream; honour that here too, since `InteractionDisabled` is advisory
+        // for these custom buttons.
+        if audio.parcel_url.is_none() {
+            continue;
+        }
         match action.action {
             "play-stop" => {
                 if stream_running(audio.player.status().state) {
@@ -436,25 +460,83 @@ fn handle_parcel_audio_actions(
     }
 }
 
-/// Sync the cluster's chrome: visibility, the play / mute glyphs and the
-/// now-playing line.
+/// When the stream player reports a generic HTTP-source failure (GStreamer hid
+/// the real DNS / TCP / TLS / HTTP reason — see
+/// [`sl_gst::AudioStreamStatus::network_diagnosable`]), ask the shared
+/// [`MediaDiagnostics`] cache to probe the URL; the recovered reason is read
+/// back in [`sync_parcel_audio_ui`].
+fn request_parcel_audio_diagnosis(
+    audio: Res<ParcelAudio>,
+    mut diagnostics: ResMut<MediaDiagnostics>,
+) {
+    let status = audio.player.status();
+    if status.state == AudioStreamState::Error
+        && status.network_diagnosable
+        && let Some(url) = status.url.as_deref()
+    {
+        diagnostics.request(url);
+    }
+}
+
+/// Sync the cluster's chrome. The bar is always shown; while the parcel has no
+/// stream URL it is greyed and its play / mute buttons are disabled (the volume
+/// slider stays live, so a user can set it before entering a loud parcel).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the greyed-state sync touches text, colours, borders and the disable marker"
+)]
 fn sync_parcel_audio_ui(
     ui: Option<Res<ParcelAudioUi>>,
     audio: Res<ParcelAudio>,
-    mut nodes: Query<&mut Node>,
+    diagnostics: Res<MediaDiagnostics>,
+    disabled: Query<(), With<InteractionDisabled>>,
     mut texts: Query<&mut Text>,
+    mut text_colors: Query<&mut TextColor>,
+    mut fills: Query<&mut BackgroundColor>,
+    mut borders: Query<&mut BorderColor>,
+    mut commands: Commands,
 ) {
     let Some(ui) = ui else { return };
-    if let Ok(mut node) = nodes.get_mut(ui.wrapper) {
-        let want = if audio.parcel_url.is_some() {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if node.display != want {
-            node.display = want;
+    let active = audio.parcel_url.is_some();
+
+    // Grey the tintable glyphs (the ♫ marker and the ▶/■ play glyph; the mute
+    // 🔊/🔇 is a colour emoji that ignores tint, so the button chrome carries
+    // its greyed cue instead).
+    let glyph_color = if active { BAR_LABEL } else { BAR_LABEL_DIM };
+    for entity in [ui.marker, ui.play_label] {
+        if let Ok(mut color) = text_colors.get_mut(entity)
+            && color.0 != glyph_color
+        {
+            color.0 = glyph_color;
         }
     }
+
+    // Grey and disable the two buttons.
+    let (fill, border) = if active {
+        (BUTTON_FILL, BUTTON_BORDER)
+    } else {
+        (BUTTON_FILL_DISABLED, BUTTON_BORDER_DISABLED)
+    };
+    for button in [ui.play_button, ui.mute_button] {
+        if let Ok(mut background) = fills.get_mut(button)
+            && background.0 != fill
+        {
+            background.0 = fill;
+        }
+        if let Ok(mut edge) = borders.get_mut(button) {
+            let want = BorderColor::all(border);
+            if *edge != want {
+                *edge = want;
+            }
+        }
+        let is_disabled = disabled.contains(button);
+        if active && is_disabled {
+            commands.entity(button).remove::<InteractionDisabled>();
+        } else if !active && !is_disabled {
+            commands.entity(button).insert(InteractionDisabled);
+        }
+    }
+
     let status = audio.player.status();
     if let Ok(mut play) = texts.get_mut(ui.play_label) {
         // U+25A0/U+25B6, not U+23F9/U+23F5: the latter are in no bundled
@@ -475,18 +557,33 @@ fn sync_parcel_audio_ui(
         }
     }
     if let Ok(mut title) = texts.get_mut(ui.title) {
-        // The loud path first (a missing decoder / dead stream), then the ICY
-        // title, then the stream's host as a placeholder.
-        let want = status.error.clone().unwrap_or_else(|| {
-            status.title.clone().unwrap_or_else(|| {
-                audio
-                    .parcel_url
-                    .as_deref()
-                    .and_then(|url| url::Url::parse(url).ok())
-                    .and_then(|url| url.host_str().map(String::from))
-                    .unwrap_or_default()
-            })
-        });
+        // No stream: a plain placeholder. Otherwise the loud path first — only
+        // while the stream is actually in error, preferring the precise probed
+        // reason over GStreamer's generic one — then the ICY title, then the
+        // stream's host as a placeholder.
+        let want = if active {
+            status.error.clone().map_or_else(
+                || {
+                    status.title.clone().unwrap_or_else(|| {
+                        audio
+                            .parcel_url
+                            .as_deref()
+                            .and_then(|url| url::Url::parse(url).ok())
+                            .and_then(|url| url.host_str().map(String::from))
+                            .unwrap_or_default()
+                    })
+                },
+                |generic| {
+                    status
+                        .url
+                        .as_deref()
+                        .and_then(|url| diagnostics.reason(url))
+                        .map_or(generic, String::from)
+                },
+            )
+        } else {
+            String::from("No music stream")
+        };
         if title.0 != want {
             title.0 = want;
         }

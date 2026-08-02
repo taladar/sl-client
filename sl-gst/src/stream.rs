@@ -17,7 +17,9 @@
 use gstreamer::prelude::*;
 use tracing::{debug, warn};
 
-use crate::messages::{friendly_error, missing_plugin_description, title_from_tags};
+use crate::messages::{
+    friendly_error, is_http_source_failure, missing_plugin_description, title_from_tags,
+};
 
 /// Where the stream player currently is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,6 +49,12 @@ pub struct AudioStreamStatus {
     /// The failure description while [`state`](Self::state) is
     /// [`Error`](AudioStreamState::Error).
     pub error: Option<String>,
+    /// Whether the current failure is a generic HTTP-**source** error whose
+    /// real DNS / TCP / TLS / HTTP cause GStreamer did not report (a bare
+    /// `souphttpsrc` flow error). When set, the owner can probe
+    /// [`url`](Self::url) itself to replace [`error`](Self::error) with a
+    /// precise reason.
+    pub network_diagnosable: bool,
 }
 
 /// The one-stream audio player. Construct once, [`play`](Self::play) /
@@ -82,6 +90,7 @@ impl AudioStreamPlayer {
                 url: None,
                 title: None,
                 error: None,
+                network_diagnosable: false,
             },
             volume: 1.0,
             muted: false,
@@ -100,6 +109,7 @@ impl AudioStreamPlayer {
         self.status.url = Some(String::from(url));
         self.status.title = None;
         self.status.error = None;
+        self.status.network_diagnosable = false;
         self.missing_plugins.clear();
         let playbin = match gstreamer::ElementFactory::make("playbin3")
             .property("uri", url)
@@ -184,14 +194,29 @@ impl AudioStreamPlayer {
         }
         match message.view() {
             gstreamer::MessageView::Error(error) => {
+                // First error wins: a failing pipeline emits a cascade (e.g. an
+                // HTTP-source failure, then a typefind "not enough data"). The
+                // first names the real cause and carries the `network_diagnosable`
+                // flag; a later, vaguer one must not overwrite it.
+                if self.status.state == AudioStreamState::Error {
+                    return;
+                }
                 let text = friendly_error(error, &self.missing_plugins);
                 warn!("audio stream error: {text}");
+                if let Some(debug_info) = error.debug() {
+                    // The full location/element prefix, for developers.
+                    debug!("audio stream error debug: {debug_info}");
+                }
                 if let Some(playbin) = self.playbin.take() {
                     let _result = playbin.set_state(gstreamer::State::Null);
                 }
                 self.bus = None;
                 self.status.state = AudioStreamState::Error;
                 self.status.error = Some(text);
+                // Flag the case where GStreamer hid the real network reason, so
+                // the owner can probe the URL to recover it.
+                self.status.network_diagnosable =
+                    self.missing_plugins.is_empty() && is_http_source_failure(error);
             }
             gstreamer::MessageView::Eos(_eos) => {
                 // A radio stream ending means the server dropped us; report

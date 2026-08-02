@@ -233,6 +233,12 @@ pub struct SurfaceStatus {
     pub progress: f64,
     /// The last load error, if the most recent navigation failed.
     pub load_error: Option<String>,
+    /// Whether [`load_error`](Self::load_error) is a generic HTTP-**source**
+    /// failure whose real DNS / TCP / TLS / HTTP cause the engine could not
+    /// report (GStreamer's `souphttpsrc` hides it). When set, the owner can
+    /// probe [`url`](Self::url) itself to recover a precise reason. Always
+    /// `false` on browser (web) surfaces.
+    pub network_diagnosable: bool,
     /// The cursor the page currently requests.
     pub cursor: CursorKind,
     /// A URL the page asked to open in a new window (popups are suppressed;
