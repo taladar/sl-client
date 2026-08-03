@@ -140,6 +140,18 @@ impl EnvironmentState {
                 self.source = self.shared_source;
             }
         }
+
+        // Debug affordance: when `SL_VIEWER_SKY_DAY_POSITION` pins a day position
+        // (used by the screenshot harness and headless checks), install a full
+        // day cycle synthesised from the four legacy presets so the pinned
+        // position actually moves the sun — the local OpenSim grid ships a
+        // single-frame environment, which leaves the position nothing to
+        // interpolate (every value renders the same noon sky). A pinned fixed
+        // sky (the World ▸ Environment menu) already selects a specific frame and
+        // takes precedence, so the override only applies when none is pinned.
+        if self.fixed_sky.is_none() && std::env::var_os("SL_VIEWER_SKY_DAY_POSITION").is_some() {
+            crate::sky_presets::install_preset_day_cycle(&mut self.settings);
+        }
     }
 }
 

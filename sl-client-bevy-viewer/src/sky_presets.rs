@@ -9,10 +9,12 @@
 //! reference viewer's fixed-sky personal lighting
 //! (`LLEnvironment::setEnvironment(ENV_LOCAL, …)` on the same four presets).
 
+use std::collections::BTreeMap;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use sl_client_bevy::{
-    Color as SlColor, ColorAlpha, Glow, SkySettings, azimuth_altitude_to_rotation,
+    Color as SlColor, ColorAlpha, DayCycleFrame, EnvironmentSettings, Glow, SkySettings,
+    azimuth_altitude_to_rotation,
 };
 
 /// One of the four fixed times of day the World ▸ Environment menu offers —
@@ -49,6 +51,41 @@ impl FixedSky {
     pub(crate) const fn frame_name(self) -> &'static str {
         self.preset().label
     }
+}
+
+/// Replace the sky schedule of `settings` with a synthetic day cycle built from
+/// the four ported presets, keyframed `A-12AM` (Midnight) at `0.0`, `A-6AM`
+/// (Sunrise) at `0.25`, `A-12PM` (Midday) at `0.5`, and `A-6PM` (Sunset) at
+/// `0.75` — the natural placement of the reference's own presets across the day.
+///
+/// This backs the `SL_VIEWER_SKY_DAY_POSITION` debug override: a grid that
+/// supplies only a single-frame environment (the local OpenSim default, whose
+/// one midday frame leaves [`blended_sky_settings`](EnvironmentSettings::blended_sky_settings)
+/// nothing to interpolate) would otherwise render the same noon sky at every
+/// position. With this cycle installed, the override's position drives the sun
+/// smoothly through sunrise → midday → sunset → midnight on any grid. The water
+/// schedule is left untouched (the override only moves the sky).
+pub(crate) fn install_preset_day_cycle(settings: &mut EnvironmentSettings) {
+    // Placed one keyframe per quarter-day so the position reads intuitively:
+    // 0.25 sunrise, 0.5 noon, 0.75 sunset, 0.0/1.0 midnight.
+    let placed: [(f32, &SkyPreset); 4] = [
+        (0.0, &MIDNIGHT),
+        (0.25, &SUNRISE),
+        (0.5, &MIDDAY),
+        (0.75, &SUNSET),
+    ];
+    let mut track = Vec::with_capacity(placed.len());
+    let mut sky_frames = BTreeMap::new();
+    for (keyframe, preset) in placed {
+        let name = preset.label.to_owned();
+        track.push(DayCycleFrame {
+            keyframe,
+            name: name.clone(),
+        });
+        sky_frames.insert(name, sky_settings_from(preset));
+    }
+    settings.day_cycle.sky_tracks = vec![track];
+    settings.day_cycle.sky_frames = sky_frames;
 }
 
 /// One of Linden's four canonical WindLight sky presets, ported.
