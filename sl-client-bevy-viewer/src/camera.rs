@@ -376,6 +376,16 @@ impl CameraRig {
         self.pitch = dir.y.asin().clamp(-MAX_PITCH, MAX_PITCH);
     }
 
+    /// The rotation the rig's current yaw/pitch aims along (roll excluded) — the
+    /// same reconstruction mouselook uses, so `rotation * NEG_Z` is the aim
+    /// direction. A fixed flycam bakes this into its entity transform at spawn:
+    /// [`drive_flycam`] integrates input deltas onto the transform and never reads
+    /// the rig, so without this the transform keeps its identity (SL-north)
+    /// orientation and `--camera-look-at` has no effect.
+    pub(crate) fn aim_quat(&self) -> Quat {
+        Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0)
+    }
+
     /// Place the focus-on-point eye offset directly (world space, eye = point +
     /// offset). The media-controls **Zoom** ([`crate::media_controls`]) uses this
     /// to park the camera squarely in front of a media face — the counterpart of

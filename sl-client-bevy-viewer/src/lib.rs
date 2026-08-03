@@ -604,17 +604,26 @@ fn setup_scene(
     // Seed the third-person orbit from the debug framing envs (a no-op when unset):
     // orbit → azimuth, elevation → elevation, distance → distance.
     rig.seed_orbit_from_env();
-    let translation = if let Some(position) = camera_start.position {
+    let camera_transform = if let Some(position) = camera_start.position {
         // A fixed pose is a flycam pose: place and aim it, and leave it alone.
+        let mut transform = Transform::from_translation(position);
         if let Some(look) = camera_start.look {
             rig.aim_along(look);
+            // `drive_flycam` owns the flycam transform and only integrates input
+            // deltas onto it — it never reads the rig's yaw/pitch. So the initial
+            // facing has to be baked into the transform rotation here, or the camera
+            // keeps its identity (SL-north) orientation and `--camera-look-at` is
+            // silently ignored. Reconstruct the rotation from the rig exactly as
+            // mouselook does (`aim_quat` → forward along `look`), so the transform
+            // and rig agree from the first frame.
+            transform.rotation = rig.aim_quat();
         }
         *mode = CameraMode::Flycam;
-        position
+        transform
     } else {
         // A provisional pose near a region centre; `position_camera` moves it to
         // frame the avatar the moment one arrives.
-        Vec3::new(128.0, 30.0, -128.0)
+        Transform::from_translation(Vec3::new(128.0, 30.0, -128.0))
     };
     commands.spawn((
         // The underwater-fog post-process (P23.1) samples the scene depth, so make
@@ -635,7 +644,7 @@ fn setup_scene(
             far: 4096.0,
             ..default()
         }),
-        Transform::from_translation(translation),
+        camera_transform,
         ViewerCamera,
         rig,
         Msaa::Sample4,
