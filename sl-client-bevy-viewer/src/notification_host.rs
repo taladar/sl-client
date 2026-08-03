@@ -44,6 +44,7 @@ use std::cmp::Ordering;
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{SlEvent, SlSessionEvent};
@@ -62,6 +63,7 @@ use crate::settings::ViewerSettings;
 use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
@@ -295,6 +297,10 @@ struct Toast {
     /// [`age_and_fade_toasts`] does not write a second on the frame before the
     /// despawn is applied.
     resolved: bool,
+    /// The text-input field ([`EditableText`] node) for a template with a
+    /// [`NotificationTemplate::input`](crate::notifications::NotificationTemplate::input),
+    /// read on resolve into [`NotificationResponse::input`].
+    input_field: Option<Entity>,
 }
 
 /// Marks a node whose colours fade with its toast: the fade system scales the
@@ -439,6 +445,10 @@ struct ToastContent {
     closable: bool,
     /// The text size, in logical pixels.
     font_size: f32,
+    /// The resolved, `[KEY]`-substituted initial text for the single-line
+    /// input field (the reference `<input>`), or `None` for a form without
+    /// one.
+    input: Option<String>,
 }
 
 /// One button's resolved spec for [`build_toast_card`].
@@ -463,6 +473,9 @@ struct ToastCard {
     ignore: Option<(Entity, Entity)>,
     /// The close (×) button box, when the toast is [`closable`](ToastContent::closable).
     close: Option<Entity>,
+    /// The text-input field ([`EditableText`] node), when the content carries
+    /// an [`input`](ToastContent::input).
+    input: Option<Entity>,
 }
 
 /// Build a toast card's node tree (not yet parented) from resolved [`ToastContent`],
@@ -564,6 +577,30 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             base_text: None,
         });
     }
+
+    // The text-input row, if the form carries one (the reference `<input>`):
+    // a single-line field between the body and the buttons, filling the card
+    // width so the container — not the pre-filled text — decides its size.
+    let input = content.input.as_ref().map(|initial| {
+        let input_row = commands
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    ..row(Val::ZERO)
+                },
+                Name::new("toast-input-row"),
+                ChildOf(root),
+            ))
+            .id();
+        let spec = TextInputSpec {
+            initial: initial.clone(),
+            tab_index: 1,
+            font_size: content.font_size,
+            fill: true,
+            ..TextInputSpec::new("toast-input", TextInputKind::Line)
+        };
+        spawn_text_input(commands, input_row, &spec)
+    });
 
     // The button row, if any.
     let mut buttons = Vec::new();
@@ -679,6 +716,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
         buttons,
         ignore,
         close,
+        input,
     }
 }
 
@@ -724,6 +762,7 @@ pub(crate) fn adopt_toast(
             hovered: false,
             overflowed: false,
             resolved: false,
+            input_field: None,
         },
         ChildOf(channel.channel),
     ));
@@ -835,6 +874,13 @@ fn raise_notifications(
                 is_default: button.is_default,
             })
             .collect();
+        // The input field's pre-filled text resolves like the body: through
+        // i18n, then `[KEY]`-substituted with the raise's args (the reference
+        // defaults are templates like `[DESC] (new)`).
+        let input = tmpl.input.map(|input| {
+            let raw = translator.get(input.default_key);
+            substitute(&raw, &request.args)
+        });
         let content = ToastContent {
             kind: tmpl.kind,
             body: body.clone(),
@@ -845,6 +891,7 @@ fn raise_notifications(
             // close × so a fading tip / notify can be dismissed early.
             closable: !tmpl.kind.is_modal(),
             font_size: TOAST_FONT_SIZE,
+            input,
         };
         let card = build_toast_card(&mut commands, &content);
 
@@ -868,6 +915,7 @@ fn raise_notifications(
             hovered: false,
             overflowed: false,
             resolved: false,
+            input_field: card.input,
         });
 
         // Hovering pauses a fading toast's timer.
@@ -891,11 +939,15 @@ fn raise_notifications(
                 );
         }
 
-        // Wire each button to a resolve carrying its name.
+        // Wire each button to a resolve carrying its name. With an input field
+        // the field holds tab stop 1, so the buttons start after it.
+        let button_tab_base = if card.input.is_some() { 2 } else { 1 };
         for (index, (button, name)) in card.buttons.iter().enumerate() {
             let target = toast_entity;
             let name = *name;
-            let tab = i32::try_from(index).unwrap_or(0).saturating_add(1);
+            let tab = i32::try_from(index)
+                .unwrap_or(0)
+                .saturating_add(button_tab_base);
             commands
                 .entity(*button)
                 .insert((Button, TabIndex(tab)))
@@ -1049,7 +1101,8 @@ fn handle_dismiss(
 #[expect(
     clippy::too_many_arguments,
     reason = "a resolve needs the resolve queue, the manager, the toast + descendant \
-              queries for the ignore state, the response channel and the settings; each is distinct"
+              queries for the ignore state and the input field's text, the response channel \
+              and the settings; each is distinct"
 )]
 fn resolve_notifications(
     mut commands: Commands,
@@ -1058,6 +1111,7 @@ fn resolve_notifications(
     toasts: Query<&Toast>,
     children: Query<&Children>,
     checkboxes: Query<&IgnoreCheckbox>,
+    editors: Query<&EditableText>,
     mut responses: MessageWriter<NotificationResponse>,
     mut settings: Option<ResMut<ViewerSettings>>,
 ) {
@@ -1078,11 +1132,19 @@ fn resolve_notifications(
         }
         manager.record_response(toast.id, resolution.button);
         manager.clear_unique(toast.id);
+        // The input field's edited text, for a template that carries one —
+        // read only when a button was chosen (a dismissal submits nothing).
+        let input = resolution
+            .button
+            .and(toast.input_field)
+            .and_then(|field| editors.get(field).ok())
+            .map(|editor| editor.value().to_string());
         responses.write(NotificationResponse {
             id: toast.id,
             template: toast.template,
             button: resolution.button,
             ignored,
+            input,
         });
         commands.entity(resolution.toast).despawn();
     }
@@ -1275,6 +1337,7 @@ fn log_notification_responses(
                 recorded = ?record.response,
                 button = ?response.button,
                 ignored = response.ignored,
+                input = ?response.input,
                 "notification resolved"
             );
         } else {
@@ -1282,6 +1345,7 @@ fn log_notification_responses(
                 template = response.template,
                 button = ?response.button,
                 ignored = response.ignored,
+                input = ?response.input,
                 "notification resolved (not in history)"
             );
         }
@@ -1426,6 +1490,9 @@ pub(crate) fn spawn_notification_specimen(
         ignore_label: cx.text("Don't show me this again"),
         closable: true,
         font_size: cx.font_size,
+        // The input field rides the specimen so the harness's layout matrix
+        // sweeps the save-outfit-style prompt (body + field + buttons).
+        input: Some(cx.text("My Outfit (new)")),
     };
     let card = build_toast_card(commands, &content);
     commands.entity(card.root).insert(ChildOf(parent));
@@ -1465,3 +1532,77 @@ pub(crate) fn spawn_notification_specimen(
 /// matrix sweeps.
 const SPECIMEN_BODY: &str = "The region you are in now will restart in 5 minutes. If you stay in \
     this region you will be logged out until the restart is complete.";
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::{App, Messages, Update};
+    use bevy::text::EditableText;
+    use pretty_assertions::assert_eq;
+
+    use super::{ResolveNotification, Toast, resolve_notifications};
+    use crate::notifications::{NotificationManager, NotificationPriority, NotificationResponse};
+
+    /// Drive [`resolve_notifications`] through a throwaway app against a toast
+    /// whose [`Toast::input_field`] is a real [`EditableText`] holding
+    /// "Renamed Outfit", resolving it with `button`, and return the single
+    /// response written (`None` if none was) — the host-level round trip that
+    /// a form field's edited text reaches [`NotificationResponse::input`].
+    fn resolve_with_field(button: Option<&'static str>) -> Option<NotificationResponse> {
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>();
+        app.add_message::<NotificationResponse>();
+        app.init_resource::<NotificationManager>();
+        app.add_systems(Update, resolve_notifications);
+        let field = app
+            .world_mut()
+            .spawn(EditableText::new("Renamed Outfit"))
+            .id();
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let toast = app
+            .world_mut()
+            .spawn(Toast {
+                id,
+                template: "RenameOutfit",
+                priority: NotificationPriority::Normal,
+                default_button: Some("OK"),
+                age: 0.0,
+                lifetime: 0.0,
+                opacity: 1.0,
+                hovered: false,
+                overflowed: false,
+                resolved: false,
+                input_field: Some(field),
+            })
+            .id();
+        app.world_mut()
+            .write_message(ResolveNotification { toast, button });
+        app.update();
+        let messages = app.world().resource::<Messages<NotificationResponse>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).next().cloned()
+    }
+
+    /// Choosing a button submits the input field: its edited text arrives on
+    /// the response alongside the button name.
+    #[test]
+    fn resolving_a_button_returns_the_input_fields_text() {
+        let response = resolve_with_field(Some("OK"));
+        assert_eq!(
+            response.as_ref().and_then(|r| r.input.as_deref()),
+            Some("Renamed Outfit")
+        );
+        assert_eq!(response.as_ref().and_then(|r| r.button), Some("OK"));
+    }
+
+    /// A dismissal (no button chosen) submits nothing: the response carries no
+    /// input text even though the field exists.
+    #[test]
+    fn dismissing_returns_no_input() {
+        let response = resolve_with_field(None);
+        assert!(response.is_some(), "a dismissal still writes a response");
+        assert_eq!(response.and_then(|r| r.input), None);
+    }
+}

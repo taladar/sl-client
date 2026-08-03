@@ -1121,6 +1121,95 @@ notification-must-agree-to-login = You must agree to the Terms and Conditions, P
 notification-landmark-created = You have added "[LANDMARK_NAME]" to your [FOLDER_NAME] folder.
 notification-granted-modify-rights = [NAME] has given you permission to edit their objects.
 notification-teleport-to-person = To open a private conversation with someone, right-click on their avatar and choose 'IM' from the menu.
+## Appearance & wearables (viewer-notification-catalogue-appearance-wearables):
+## outfit / wearable / attachment notifications. Bodies follow the reference
+## notifications.xml; deviations are noted per entry.
+
+notification-button-yes = Yes
+notification-button-no = No
+notification-button-save = Save
+notification-button-save-all = Save All
+notification-button-dont-save = Don't Save
+notification-button-discard = Discard
+notification-button-keep-editing = Keep Editing
+notification-wearable-save = Save changes to current clothing/body part?
+notification-save-clothing-body-changes = Save all changes to clothing/body parts?
+notification-unsaved-wearable-changes = You have unsaved changes.
+notification-auto-wear-new-clothing = Would you like to automatically wear the clothing you are about to create?
+notification-save-wearable-as = Save item to my inventory as:
+notification-save-wearable-as-default = [DESC] (new)
+notification-save-outfit-as = Save what I'm wearing as a new Outfit:
+notification-save-outfit-as-default = [DESC] (new)
+notification-rename-outfit = New outfit name:
+notification-rename-outfit-default = [NAME]
+notification-confirm-overwrite-outfit = This will replace the items in the selected outfit with the items you are wearing now.
+notification-delete-outfits = Delete the selected outfit?
+notification-delete-outfits-with-name = Delete outfit "[NAME]"?
+notification-cant-delete-required-clothing = Some item(s) you wish to delete are required clothing layers (skin, shape, hair, eyes). You must replace those layers before deleting them.
+notification-my-outfits-paste-failed = One or more items can't be used inside "Outfits"
+notification-could-not-put-on-outfit = Could not put on outfit. The outfit folder contains no clothing, body parts, or attachments.
+notification-cannot-wear-trash = You cannot wear clothes or body parts that are in the trash.
+notification-cannot-wear-info-not-complete = You cannot wear this item because it has not yet loaded. Please try again in a minute.
+notification-cannot-change-appearance-until-loaded = Cannot change appearance until clothing and shape are loaded.
+# The reference body names the viewer via [APP_NAME]; nothing binds that token
+# here, so the body says "the viewer" instead.
+notification-clothing-loading = Your clothing is still downloading. You can use the viewer normally and other people will see you correctly.
+# The reference's second sentence points at Firestorm's debug-settings menu
+# (WearFolderLimit), which this viewer does not have; it is trimmed.
+notification-too-many-wearables = You can't wear a folder containing more than [AMOUNT] items.
+notification-max-attachments-on-outfit = Could not attach object. Exceeds the attachments limit of [MAX_ATTACHMENTS] objects. Please detach another object first.
+notification-cannot-save-wearable-out-of-space = Unable to save '[NAME]' to wearable file. You will need to free up some space on your computer and save the wearable again.
+notification-cannot-save-to-asset-store = Unable to save [NAME] to central asset store. This is usually a temporary failure. Please customize and save the wearable again in a few minutes.
+notification-thumbnail-outfit-photo = To add an image to an outfit, use the Outfit Gallery window, or right-click on the outfit folder and select "Image..."
+notification-outfit-photo-load-error = [REASON]
+notification-large-outfits-warning = A large number of outfits were detected: [AMOUNT]. This may cause viewer hangs or disconnects. Consider reducing the number of outfits for better performance (below [MAX]). THIS IS ONLY A SUGGESTION - if your computer is functioning normally, you can safely ignore it.
+notification-attachment-drop = You are about to drop your attachment. Are you sure you want to continue?
+notification-replace-attachment = There is already an object attached to this point on your body. Do you want to replace it with the selected object?
+notification-rigged-mesh-attached-to-hud = An object "[NAME]" attached to HUD point "[POINT]" contains rigged mesh. Rigged mesh objects are designed for attachment to the avatar. Neither you nor anyone else will see this object. If you want to see this object, remove it and re-attach it to an avatar attachment point.
+notification-cancelled-attach = Cancelled Attach.
+notification-replaced-missing-wearable = Replaced missing clothing/body part with default.
+notification-attachment-saved = Attachment has been saved.
+notification-failed-to-find-wearable-named = Failed to find [TYPE] named [DESC] in the database.
+# The reference body names the viewer via [APP_NAME]; nothing binds that token
+# here, so the body says "your viewer" instead.
+notification-invalid-wearable = The item you are trying to wear uses a feature that your viewer cannot read. Please upgrade your viewer to wear this item.
+notification-appearance-to-xml-saved = Appearance has been saved to XML to [PATH]
+notification-appearance-to-xml-failed = Failed to save appearance to XML.
+notification-shape-import-generic-fail = There was a problem importing [FILENAME]. Please see the log for more details.
+notification-shape-import-version-fail = Shape import failed. Are you sure [FILENAME] is an avatar file?
+notification-avatar-rez = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' declouded after [TIME] seconds.
+notification-avatar-rez-self-baked-done = ( [EXISTENCE] seconds alive ) You finished baking your outfit after [TIME] seconds.
+notification-avatar-rez-self-baked-update = ( [EXISTENCE] seconds alive ) You sent out an update of your appearance after [TIME] seconds. [STATUS]
+notification-avatar-rez-self-bake-force-update = The viewer has detected that you may appear as a cloud and is attempting to fix this automatically.
+notification-avatar-rez-cloud = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' became cloud.
+notification-avatar-rez-arrived = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' appeared.
+notification-avatar-rez-left-cloud = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' left after [TIME] seconds as cloud.
+notification-avatar-rez-entered-appearance = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' entered appearance mode.
+notification-avatar-rez-left-appearance = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' left appearance mode.
+notification-avatar-rez-left = ( [EXISTENCE] seconds alive ) Avatar '[NAME]' left as fully loaded.
+notification-avatar-rez-self-baked-texture-upload = ( [EXISTENCE] seconds alive ) You uploaded a [RESOLUTION] baked texture for '[BODYREGION]' after [TIME] seconds.
+notification-avatar-rez-self-baked-texture-update = ( [EXISTENCE] seconds alive ) You locally updated a [RESOLUTION] baked texture for '[BODYREGION]' after [TIME] seconds.
+notification-not-enough-resources-to-attach = Not enough script resources available to attach object!
+notification-attachment-has-too-much-inventory = Your attachments contain too much inventory to add more.
+notification-illegal-attachment = The attachment has requested a nonexistent point on the avatar. It has been attached to the chest instead.
+notification-cant-attach-multiple-obj-one-spot = You can't attach multiple objects to one spot.
+notification-no-perms-too-many-attached-animated-objects = Operation would cause the number of attached animated objects to exceed the limit.
+notification-cant-attach-object-avatar-sitting-on-it = Cannot attach object because an avatar is sitting on it.
+notification-why-are-you-trying-to-wear-shrubbery = Trees and grasses cannot be worn as attachments.
+notification-cant-attach-group-owned-objs = Cannot attach group-owned objects.
+notification-cant-attach-objects-not-owned = Cannot attach objects that you don't own.
+notification-cant-attach-navmesh-objects = Cannot attach objects that contribute to navmesh.
+notification-cant-attach-object-no-move-permissions = Cannot attach object because you do not have permission to move it.
+notification-cant-attach-not-enough-script-resources = Not enough script resources available to attach object!
+notification-cant-attach-object-being-removed = Cannot attach object because it is already being removed.
+notification-cant-drop-item-trial-user = You can't drop objects here; try the Free Trial area.
+notification-cant-drop-mesh-attachment = You can't drop mesh attachments. Detach to inventory and then rez in world.
+notification-cant-drop-attachment-no-permission = Failed to drop attachment: you don't have permission to drop there.
+notification-cant-drop-attachment-insufficient-land-resources = Failed to drop attachment: insufficient available land resource.
+notification-cant-drop-attachment-insufficient-resources = Failed to drop attachments: insufficient available resources.
+notification-cant-drop-object-full-parcel = Cannot drop object here. Parcel is full.
+notification-cant-create-outfit = Cannot create outfit right now. Try again in a minute.
+
 notification-overflow =
     { $count ->
         [one] { $count } more

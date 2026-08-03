@@ -194,6 +194,131 @@ pub(crate) const VIEW_IM_QUIT_FORM: &[NotificationButton] = &[
     },
 ];
 
+/// A Yes / No confirm — the reference `okcancelignore` with `yestext="Yes"` /
+/// `notext="No"` (the drop-attachment / auto-wear confirms). As with
+/// [`LEAVE_CANCEL_FORM`] the stable `OK` / `Cancel`
+/// [`name`](NotificationButton::name)s (the underlying reference template's
+/// button names) are what a consumer routes on; only the labels differ.
+pub(crate) const YES_NO_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "OK",
+        label_key: "notification-button-yes",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-no",
+        is_default: false,
+    },
+];
+
+/// The save-wearable-changes confirm's three buttons — the reference
+/// `yesnocancelbuttons` with `yestext="Save"` / `notext="Don't Save"`. The
+/// reference functor names `Yes` / `No` / `Cancel` stay stable under the
+/// localized labels.
+pub(crate) const SAVE_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "Yes",
+        label_key: "notification-button-save",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "No",
+        label_key: "notification-button-dont-save",
+        is_default: false,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-cancel",
+        is_default: false,
+    },
+];
+
+/// [`SAVE_DISCARD_CANCEL_FORM`] with the affirmative reading "Save All" — the
+/// reference `yesnocancelbuttons` with `yestext="Save All"` (the
+/// save-all-clothing-changes confirm).
+pub(crate) const SAVE_ALL_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "Yes",
+        label_key: "notification-button-save-all",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "No",
+        label_key: "notification-button-dont-save",
+        is_default: false,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-cancel",
+        is_default: false,
+    },
+];
+
+/// The discard-unsaved-changes confirm — the reference `okcancelignore` with
+/// `yestext="Discard"` / `notext="Keep Editing"`. Stable `OK` / `Cancel`
+/// names under the localized labels, as with [`LEAVE_CANCEL_FORM`].
+pub(crate) const DISCARD_KEEP_EDITING_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "OK",
+        label_key: "notification-button-discard",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-keep-editing",
+        is_default: false,
+    },
+];
+
+/// An OK / Cancel form whose affirmative reads "Save" — the reference
+/// `okcancelignore` with `yestext="Save"` (the overwrite-outfit confirm).
+pub(crate) const SAVE_CANCEL_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "OK",
+        label_key: "notification-button-save",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "Cancel",
+        label_key: "notification-button-cancel",
+        is_default: false,
+    },
+];
+
+/// The replace-attachment prompt's buttons: the reference declares this form
+/// explicitly with functor names `Yes` / `No` under `OK` / `Cancel` labels,
+/// so those are the stable names a consumer routes on.
+pub(crate) const REPLACE_ATTACHMENT_FORM: &[NotificationButton] = &[
+    NotificationButton {
+        name: "Yes",
+        label_key: "notification-button-ok",
+        is_default: true,
+    },
+    NotificationButton {
+        name: "No",
+        label_key: "notification-button-cancel",
+        is_default: false,
+    },
+];
+
+/// A single-line text-input field on a notification's form — the reference
+/// `<input>` element (the save-outfit / save-wearable / rename-outfit name
+/// prompts). The host pre-fills the field with the resolved
+/// [`default_key`](Self::default_key) text and returns the edited value on
+/// [`NotificationResponse::input`] when a button is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NotificationInput {
+    /// The stable field name a consumer routes on — the reference `<input
+    /// name=…>` (`"message"`, `"new_name"`). An identifier, not a label.
+    pub(crate) name: &'static str,
+    /// The Fluent key for the pre-filled text. Resolved through
+    /// [`crate::i18n`], then `[KEY]`-substituted with the raised
+    /// notification's [`NotificationArgs`] (the reference defaults are
+    /// substitution templates like `[DESC] (new)`).
+    pub(crate) default_key: &'static str,
+}
+
 /// A declarative notification template — one catalogue entry, mirroring the
 /// reference `LLNotificationTemplate`. See the [module documentation](self).
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +359,10 @@ pub(crate) struct NotificationTemplate {
     pub(crate) ignorable: bool,
     /// The buttons the toast offers (the reference `<form>` / `<usetemplate>`).
     pub(crate) form: &'static [NotificationButton],
+    /// An optional single-line text-input field (the reference `<input>`),
+    /// shown between the body and the button row. Its edited text comes back
+    /// on [`NotificationResponse::input`].
+    pub(crate) input: Option<NotificationInput>,
 }
 
 impl NotificationTemplate {
@@ -266,6 +395,10 @@ impl NotificationTemplate {
 ///   their owning feature, but the *entry* (text, buttons) belongs here.
 /// - **Info tips / notifies** not routed to nearby chat (landmark created,
 ///   granted-modify-rights, a help tip).
+/// - **The appearance & wearables family**
+///   (`viewer-notification-catalogue-appearance-wearables`): outfit / wearable
+///   editing confirms, attachment prompts, the avatar-rez diagnostics tips and
+///   the server-keyed attach / drop refusals.
 ///
 /// See `viewer-notification-catalogue`.
 pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
@@ -280,6 +413,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     // A generic informational toast — the fallback for a plain `AlertMessage`
     // string the simulator sends with no structured key.
@@ -293,6 +427,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     // A generic sticky alert that must be acknowledged — the fallback for a
     // non-modal `AlertMessage` / `AgentAlertMessage` that carries no form of its
@@ -307,6 +442,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     // A concrete keyed alert exercising `[KEY]` substitution and `unique` dedup —
     // the region-restart countdown the simulator sends as an `AlertInfo` key.
@@ -320,6 +456,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     // A modal confirm exercising the scrim path and the ignore checkbox — the
     // reference `ConfirmQuit`.
@@ -333,6 +470,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: true,
         form: OK_CANCEL_FORM,
+        input: None,
     },
     // ---- Keyed server alerts (raised by `ingest_alert_messages` when the
     // simulator's `AlertInfo` key names one of these). ----
@@ -352,6 +490,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "TeleportEntryAccessBlocked",
@@ -363,6 +502,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "LandClaimAccessBlocked",
@@ -374,6 +514,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "LandBuyAccessBlocked",
@@ -385,6 +526,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     // The non-modal maturity notice the reference shows on a soft block (a tip
     // that logs to chat), with the `[REGIONMATURITY]` substitution.
@@ -398,6 +540,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     // The seconds-granularity restart countdown — the companion to the existing
     // `RegionRestartMinutes`, with `[NAME]` / `[SECONDS]`.
@@ -411,6 +554,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     // Standalone failure notices the simulator sends by key.
     NotificationTemplate {
@@ -423,6 +567,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "FailedToPlaceObject",
@@ -434,6 +579,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "FailedToFindWearableUnnamed",
@@ -445,6 +591,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "HomePositionSet",
@@ -456,6 +603,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     // ---- Standard action-confirmation modals: shared `alertmodal` / `alert`
     // confirms raised by their owning feature (inventory / people / groups /
@@ -471,6 +619,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_CANCEL_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "RemoveFromFriends",
@@ -482,6 +631,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: OK_CANCEL_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "GroupLeaveConfirmMember",
@@ -493,6 +643,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: LEAVE_CANCEL_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "YouHaveBeenLoggedOut",
@@ -504,6 +655,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: false,
         form: VIEW_IM_QUIT_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "MustAgreeToLogIn",
@@ -515,6 +667,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: true,
         ignorable: false,
         form: OK_FORM,
+        input: None,
     },
     // ---- Info tips / notifies not routed to nearby chat. ----
     NotificationTemplate {
@@ -527,6 +680,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "GrantedModifyRights",
@@ -538,6 +692,7 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
     },
     NotificationTemplate {
         name: "TeleportToPerson",
@@ -549,6 +704,846 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
         unique: false,
         ignorable: false,
         form: NO_FORM,
+        input: None,
+    },
+    // ---- Appearance & wearables (viewer-notification-catalogue-appearance-wearables). ----
+    //
+    // Outfit / wearable editing confirms and failures, raised by the
+    // appearance / outfits features (data entries only; the owning
+    // feature raises each and reads the response).
+    NotificationTemplate {
+        name: "WearableSave",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-wearable-save",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: SAVE_DISCARD_CANCEL_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "SaveClothingBodyChanges",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-save-clothing-body-changes",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: SAVE_ALL_DISCARD_CANCEL_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "UsavedWearableChanges",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-unsaved-wearable-changes",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: DISCARD_KEEP_EDITING_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AutoWearNewClothing",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-auto-wear-new-clothing",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: YES_NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "SaveWearableAs",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-save-wearable-as",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+        input: Some(NotificationInput {
+            name: "message",
+            default_key: "notification-save-wearable-as-default",
+        }),
+    },
+    NotificationTemplate {
+        name: "SaveOutfitAs",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-save-outfit-as",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+        input: Some(NotificationInput {
+            name: "message",
+            default_key: "notification-save-outfit-as-default",
+        }),
+    },
+    NotificationTemplate {
+        name: "RenameOutfit",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-rename-outfit",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+        input: Some(NotificationInput {
+            name: "new_name",
+            default_key: "notification-rename-outfit-default",
+        }),
+    },
+    NotificationTemplate {
+        name: "ConfirmOverwriteOutfit",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-confirm-overwrite-outfit",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: true,
+        form: SAVE_CANCEL_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "DeleteOutfits",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-delete-outfits",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "DeleteOutfitsWithName",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-delete-outfits-with-name",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_CANCEL_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDeleteRequiredClothing",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cant-delete-required-clothing",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "MyOutfitsPasteFailed",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-my-outfits-paste-failed",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CouldNotPutOnOutfit",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-could-not-put-on-outfit",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CannotWearTrash",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cannot-wear-trash",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CannotWearInfoNotComplete",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cannot-wear-info-not-complete",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CanNotChangeAppearanceUntilLoaded",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cannot-change-appearance-until-loaded",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ClothingLoading",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-clothing-loading",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "TooManyWearables",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-too-many-wearables",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "MaxAttachmentsOnOutfit",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-max-attachments-on-outfit",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CannotSaveWearableOutOfSpace",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cannot-save-wearable-out-of-space",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CannotSaveToAssetStore",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-cannot-save-to-asset-store",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ThumbnailOutfitPhoto",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-thumbnail-outfit-photo",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "OutfitPhotoLoadError",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-outfit-photo-load-error",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: OK_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "FSLargeOutfitsWarningInThisSession",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-large-outfits-warning",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignorable: true,
+        form: OK_FORM,
+        input: None,
+    },
+    // Attachment prompts. `ReplaceAttachment`'s reference `save_option`
+    // (remember my choice) is approximated by the plain suppress flag: a
+    // suppressed raise shows nothing, rather than replaying the saved
+    // answer (the `ConfirmQuit` precedent).
+    NotificationTemplate {
+        name: "AttachmentDrop",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-attachment-drop",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: YES_NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ReplaceAttachment",
+        kind: NotificationKind::Alert,
+        message_key: "notification-replace-attachment",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: REPLACE_ATTACHMENT_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "RiggedMeshAttachedToHUD",
+        kind: NotificationKind::AlertModal,
+        message_key: "notification-rigged-mesh-attached-to-hud",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: true,
+        form: OK_FORM,
+        input: None,
+    },
+    // Appearance tips / notifies, including the avatar-rez diagnostic
+    // family (the reference's cloud / bake progress reporting).
+    NotificationTemplate {
+        name: "CancelledAttach",
+        kind: NotificationKind::Tip,
+        message_key: "notification-cancelled-attach",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ReplacedMissingWearable",
+        kind: NotificationKind::Tip,
+        message_key: "notification-replaced-missing-wearable",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AttachmentSaved",
+        kind: NotificationKind::Tip,
+        message_key: "notification-attachment-saved",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "FailedToFindWearable",
+        kind: NotificationKind::Notify,
+        message_key: "notification-failed-to-find-wearable-named",
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "InvalidWearable",
+        kind: NotificationKind::Notify,
+        message_key: "notification-invalid-wearable",
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AppearanceToXMLSaved",
+        kind: NotificationKind::Notify,
+        message_key: "notification-appearance-to-xml-saved",
+        priority: NotificationPriority::Normal,
+        persist: true,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AppearanceToXMLFailed",
+        kind: NotificationKind::Tip,
+        message_key: "notification-appearance-to-xml-failed",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ShapeImportGenericFail",
+        kind: NotificationKind::Tip,
+        message_key: "notification-shape-import-generic-fail",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "ShapeImportVersionFail",
+        kind: NotificationKind::Tip,
+        message_key: "notification-shape-import-version-fail",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezSelfBakedDoneNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-self-baked-done",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezSelfBakedUpdateNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-self-baked-update",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezSelfBakeForceUpdateNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-self-bake-force-update",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezCloudNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-cloud",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezArrivedNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-arrived",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezLeftCloudNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-left-cloud",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezEnteredAppearanceNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-entered-appearance",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezLeftAppearanceNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-left-appearance",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezLeftNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-left",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezSelfBakedTextureUploadNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-self-baked-texture-upload",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AvatarRezSelfBakedTextureUpdateNotification",
+        kind: NotificationKind::Tip,
+        message_key: "notification-avatar-rez-self-baked-texture-update",
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    // Server-keyed attach / drop refusals: the simulator sends these by
+    // `AlertInfo` key, so `ingest_alert_messages` resolves them from the
+    // catalogue automatically.
+    NotificationTemplate {
+        name: "NotEnoughResourcesToAttach",
+        kind: NotificationKind::Notify,
+        message_key: "notification-not-enough-resources-to-attach",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "AttachmentHasTooMuchInventory",
+        kind: NotificationKind::Notify,
+        message_key: "notification-attachment-has-too-much-inventory",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "IllegalAttachment",
+        kind: NotificationKind::Notify,
+        message_key: "notification-illegal-attachment",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttackMultipleObjOneSpot",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-multiple-obj-one-spot",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "NoPermsTooManyAttachedAnimatedObjects",
+        kind: NotificationKind::Notify,
+        message_key: "notification-no-perms-too-many-attached-animated-objects",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachObjectAvatarSittingOnIt",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-object-avatar-sitting-on-it",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "WhyAreYouTryingToWearShrubbery",
+        kind: NotificationKind::Notify,
+        message_key: "notification-why-are-you-trying-to-wear-shrubbery",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachGroupOwnedObjs",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-group-owned-objs",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachObjectsNotOwned",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-objects-not-owned",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachNavmeshObjects",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-navmesh-objects",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachObjectNoMovePermissions",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-object-no-move-permissions",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachNotEnoughScriptResources",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-not-enough-script-resources",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantAttachObjectBeingRemoved",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-attach-object-being-removed",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropItemTrialUser",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-item-trial-user",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropMeshAttachment",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-mesh-attachment",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropAttachmentNoPermission",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-attachment-no-permission",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropAttachmentInsufficientLandResources",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-attachment-insufficient-land-resources",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropAttachmentInsufficientResources",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-attachment-insufficient-resources",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantDropObjectFullParcel",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-drop-object-full-parcel",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
+    },
+    NotificationTemplate {
+        name: "CantCreateOutfit",
+        kind: NotificationKind::Notify,
+        message_key: "notification-cant-create-outfit",
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: false,
+        unique: false,
+        ignorable: false,
+        form: NO_FORM,
+        input: None,
     },
 ];
 
@@ -748,6 +1743,10 @@ pub(crate) struct NotificationResponse {
     /// Whether the "don't show me this again" checkbox was ticked — the host has
     /// already recorded the suppression; a consumer may act on it too.
     pub(crate) ignored: bool,
+    /// The text-input field's edited value, for a template with a
+    /// [`NotificationTemplate::input`] field — `None` for an inputless
+    /// template (or when the toast was dismissed without resolving).
+    pub(crate) input: Option<String>,
 }
 
 /// A request to dismiss a live notification programmatically (its underlying
@@ -876,8 +1875,10 @@ impl NotificationArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        LEAVE_CANCEL_FORM, NOTIFICATIONS, NotificationArgs, NotificationKind, NotificationManager,
-        VIEW_IM_QUIT_FORM, substitute, template,
+        DISCARD_KEEP_EDITING_FORM, LEAVE_CANCEL_FORM, NOTIFICATIONS, NotificationArgs,
+        NotificationKind, NotificationManager, REPLACE_ATTACHMENT_FORM,
+        SAVE_ALL_DISCARD_CANCEL_FORM, SAVE_CANCEL_FORM, SAVE_DISCARD_CANCEL_FORM,
+        VIEW_IM_QUIT_FORM, YES_NO_FORM, substitute, template,
     };
     use pretty_assertions::{assert_eq, assert_ne};
 
@@ -989,6 +1990,14 @@ mod tests {
                     button.label_key
                 );
             }
+            if let Some(input) = entry.input {
+                assert!(
+                    keys.contains(input.default_key),
+                    "{}: input default_key {} has no en/main.ftl entry",
+                    entry.name,
+                    input.default_key
+                );
+            }
         }
     }
 
@@ -1006,6 +2015,45 @@ mod tests {
             ("RegionRestartSeconds", NotificationKind::Alert),
             ("TooManyScripts", NotificationKind::Notify),
             ("FailedToPlaceObject", NotificationKind::Notify),
+            // The appearance & wearables attach / drop refusal family.
+            ("NotEnoughResourcesToAttach", NotificationKind::Notify),
+            ("AttachmentHasTooMuchInventory", NotificationKind::Notify),
+            ("IllegalAttachment", NotificationKind::Notify),
+            ("CantAttackMultipleObjOneSpot", NotificationKind::Notify),
+            (
+                "NoPermsTooManyAttachedAnimatedObjects",
+                NotificationKind::Notify,
+            ),
+            (
+                "CantAttachObjectAvatarSittingOnIt",
+                NotificationKind::Notify,
+            ),
+            ("WhyAreYouTryingToWearShrubbery", NotificationKind::Notify),
+            ("CantAttachGroupOwnedObjs", NotificationKind::Notify),
+            ("CantAttachObjectsNotOwned", NotificationKind::Notify),
+            ("CantAttachNavmeshObjects", NotificationKind::Notify),
+            (
+                "CantAttachObjectNoMovePermissions",
+                NotificationKind::Notify,
+            ),
+            (
+                "CantAttachNotEnoughScriptResources",
+                NotificationKind::Notify,
+            ),
+            ("CantAttachObjectBeingRemoved", NotificationKind::Notify),
+            ("CantDropItemTrialUser", NotificationKind::Notify),
+            ("CantDropMeshAttachment", NotificationKind::Notify),
+            ("CantDropAttachmentNoPermission", NotificationKind::Notify),
+            (
+                "CantDropAttachmentInsufficientLandResources",
+                NotificationKind::Notify,
+            ),
+            (
+                "CantDropAttachmentInsufficientResources",
+                NotificationKind::Notify,
+            ),
+            ("CantDropObjectFullParcel", NotificationKind::Notify),
+            ("CantCreateOutfit", NotificationKind::Notify),
         ] {
             let entry = template(name);
             assert!(entry.is_some(), "{name} not in catalogue");
@@ -1015,20 +2063,55 @@ mod tests {
         }
     }
 
-    /// The custom-labelled forms keep the stable `OK` / `Cancel` button names so a
-    /// consumer routes on the name, not the localized label, and each names one
-    /// default.
+    /// The custom-labelled forms keep their stable button names (the reference
+    /// functor names) so a consumer routes on the name, not the localized
+    /// label, and each names one default.
     #[test]
     fn custom_forms_route_on_stable_names() {
-        for form in [LEAVE_CANCEL_FORM, VIEW_IM_QUIT_FORM] {
+        for (form, expected) in [
+            (LEAVE_CANCEL_FORM, &["OK", "Cancel"][..]),
+            (VIEW_IM_QUIT_FORM, &["OK", "Cancel"][..]),
+            (YES_NO_FORM, &["OK", "Cancel"][..]),
+            (DISCARD_KEEP_EDITING_FORM, &["OK", "Cancel"][..]),
+            (SAVE_CANCEL_FORM, &["OK", "Cancel"][..]),
+            (SAVE_DISCARD_CANCEL_FORM, &["Yes", "No", "Cancel"][..]),
+            (SAVE_ALL_DISCARD_CANCEL_FORM, &["Yes", "No", "Cancel"][..]),
+            (REPLACE_ATTACHMENT_FORM, &["Yes", "No"][..]),
+        ] {
             let names: Vec<&str> = form.iter().map(|button| button.name).collect();
-            assert_eq!(names, vec!["OK", "Cancel"]);
+            assert_eq!(names, expected);
             assert_eq!(
                 form.iter().filter(|button| button.is_default).count(),
                 1,
                 "a form must name exactly one default"
             );
         }
+    }
+
+    /// A template with a text-input field must offer buttons to submit it with
+    /// (a bare input could never resolve), and its field name is a non-empty
+    /// stable identifier.
+    #[test]
+    fn input_templates_have_buttons_and_a_field_name() {
+        let mut input_count = 0_usize;
+        for entry in NOTIFICATIONS {
+            if let Some(input) = entry.input {
+                input_count += 1;
+                assert!(
+                    !entry.form.is_empty(),
+                    "{}: an input field needs buttons to submit it",
+                    entry.name
+                );
+                assert!(!input.name.is_empty(), "{}: empty input name", entry.name);
+                assert!(
+                    !input.default_key.is_empty(),
+                    "{}: empty input default_key",
+                    entry.name
+                );
+            }
+        }
+        // The save-outfit / save-wearable / rename-outfit prompts.
+        assert_eq!(input_count, 3, "unexpected number of input templates");
     }
 
     /// A tip never carries buttons and always auto-fades; a modal never fades.

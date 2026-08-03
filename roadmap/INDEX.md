@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 258 |
+| ready | 257 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 672 |
+| done | 673 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (258)
+## ready (257)
 
 ### protocol
 
@@ -413,9 +413,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
-- [`viewer-notification-catalogue-appearance-wearables`](ready/viewer-notification-catalogue-appearance-wearables.md)
-  — Notification catalogue — appearance & wearables entries (blocked by
-  `viewer-ui-notification-host` (done))
 - [`viewer-notification-catalogue-avatar-movement`](ready/viewer-notification-catalogue-avatar-movement.md)
   — Notification catalogue — avatar movement entries (blocked by
   `viewer-ui-notification-host` (done))
@@ -1145,7 +1142,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (672)
+## done (673)
 
 ### protocol
 
@@ -1517,6 +1514,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
   Notification catalogue — port the reference server-alert & confirm entries
   (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-appearance-wearables`](done/viewer-notification-catalogue-appearance-wearables.md)
+  — Notification catalogue — appearance & wearables entries (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-notification-persistence`](done/viewer-notification-persistence.md) —
   Persistent notifications — survive relog until answered (blocked by
   `viewer-ui-notification-host` (done), `viewer-group-notice-display` (done))
