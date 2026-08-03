@@ -1259,6 +1259,63 @@ notification-movelock-enabling = Enabling movelock...
 notification-movelock-disabling = Disabling movelock...
 notification-flight-assist-enabled = Flight Assist is enabled
 
+## Diagnostics (viewer-notification-catalogue-diagnostics): installation /
+## hardware warnings, file-handling failures and local-file watcher errors.
+## Bodies follow the reference notifications.xml; [APP_NAME] / "SL" viewer
+## self-references are reworded ("the viewer" / "your viewer") since nothing
+## binds that token, and bracketed knowledge-base URLs are trimmed (the [KEY]
+## engine reads [...] as a substitution token). Other deviations are noted per
+## entry.
+
+notification-button-send = Send
+notification-missing-alert = Your viewer does not know how to display the notification it just received. Please verify that you have the latest version of the viewer installed. Error details: The notification called '[_NAME]' was not found in notifications.xml.
+notification-floater-not-found = Floater error: Could not find the following controls: [CONTROLS]
+notification-bad-installation = Installation of the viewer is defective. Please download a new copy of the viewer and reinstall.
+notification-found-legacy-nsis-installation = The viewer found an installation of an older version [VERSION]. Please uninstall the older version.
+notification-message-template-not-found = Message Template [PATH] not found.
+notification-allow-multiple-viewers = Running multiple viewers is not supported. It can lead to texture cache collisions, corruption and degraded visuals and performance.
+notification-unsupported-hardware = Just so you know, your computer may not meet the viewer's minimum system requirements. You may experience poor performance. Unfortunately, the [SUPPORT_SITE] can't provide technical support for unsupported system configurations. [MINSPECS] Visit [_URL] for more information?
+notification-old-gpu-driver = There is likely a newer driver for your graphics chip. Updating graphics drivers can substantially improve performance. Visit [URL] to check for driver updates?
+# The reference points at Firestorm's "Avatar > Preferences > Graphics" menu
+# path; ours is Preferences > Graphics.
+notification-unknown-gpu = Your system contains a graphics card that the viewer doesn't recognize. This is often the case with new hardware that has not been tested yet with the viewer. It will probably be ok, but you may need to adjust your graphics settings. (Preferences > Graphics)
+notification-display-settings-no-shaders = The viewer crashed while initializing graphics drivers. Graphics Quality will be set to Low to avoid some common driver errors. This will disable some graphics features. We recommend updating your graphics card drivers. Graphics Quality can be raised in Preferences > Graphics.
+notification-no-havok = Some functions like [FEATURE] are not included in this version of the viewer. If you would like to use [FEATURE], please download a viewer containing Havok support from [DOWNLOAD_URL]
+notification-no-support-gltf-shader = GLTF scenes are not yet supported on your graphics hardware.
+notification-low-memory = Your memory pool is low. Some functions of the viewer are disabled to avoid crash. Please close other applications. Restart the viewer if this persists.
+notification-force-quit-due-to-low-memory = The viewer will quit in 30 seconds due to out of memory.
+notification-out-of-disk-space = The system is out of disk space. You will need to free up some space on your computer or clear the cache.
+notification-region-capability-request-error = Could not get region capability '[CAPABILITY]'.
+notification-missing-string = The string [STRING_NAME] is missing from strings.xml.
+notification-failed-requirements-check = The following required components are missing from [FLOATER]: [COMPONENTS]
+notification-compression-test-results = Test result for gzip level 6 file compression with [FILE] of size [SIZE] KB: Packing: [PACK_TIME]s [PSIZE]KB Unpacking: [UNPACK_TIME]s [USIZE]KB
+notification-send-sysinfo-to-im = This will send the following information to the current IM session: [SYSINFO]
+notification-firestorm-req-info = [NAME] is requesting that you send them information about your viewer setup. (This is the same information that can be found by going to Help > About) [REASON] Would you like to send them this information?
+# The reference wraps the token in literal brackets ([[FILE]]), which the
+# [KEY] engine would misparse; the plain token is kept instead.
+notification-cannot-write-file = Unable to write file [FILE]
+notification-no-file-extension = No file extension for the file: '[FILE]' Please make sure the file has a correct file extension.
+notification-invalid-file-extension = Invalid file extension [EXTENSION]. Expected [VALIDS].
+notification-problem-with-file = Problem with file [FILE]: [REASON]
+notification-cannot-encode-file = Unable to encode file: [FILE]
+notification-corrupt-resource-file = Corrupt resource file: [FILE]
+notification-unknown-resource-file-version = Unknown Linden resource file version in file: [FILE]
+notification-unable-to-create-output-file = Unable to create output file: [FILE]
+notification-cannot-upload-reason = Unable to upload [FILE] due to the following reason: [REASON] Please try again later.
+notification-cannot-open-file-too-big = Unable to open file. Viewer ran out of memory while opening file. File might be too big.
+notification-cannot-load = Unable to load [WHAT]. [REASON]
+notification-not-regular-file-error = Expected to find a regular file at: [FILE_NAME]
+notification-not-folder-error = Expected to find a regular folder at: [FILE_NAME]
+notification-generic-file-empty-error = File exists but is empty: [FILE_NAME] Error message: [ERROR_MESSAGE] ([ERROR_CODE])
+notification-generic-file-open-read-error = Could not open file for reading: [FILE_NAME] Error message: [ERROR_MESSAGE] ([ERROR_CODE])
+notification-generic-file-open-write-error = Could not open file for writing: [FILE_NAME] Error message: [ERROR_MESSAGE] ([ERROR_CODE])
+notification-generic-file-read-error = Could not read from file: [FILE_NAME] Error message: [ERROR_MESSAGE] ([ERROR_CODE])
+notification-generic-file-write-error = Could not write to file: [FILE_NAME] Error message: [ERROR_MESSAGE] ([ERROR_CODE])
+notification-local-bitmaps-update-file-not-found = [FNAME] could not be updated because the file could no longer be found. Disabling future updates for this file.
+notification-local-bitmaps-update-failed-final = [FNAME] could not be opened or decoded for [NRETRIES] attempts, and is now considered broken. Disabling future updates for this file.
+notification-local-bitmaps-verify-fail = Attempted to add an invalid or unreadable image file [FNAME] which could not be opened or decoded. Attempt canceled.
+notification-local-gltf-verify-fail = Attempted to add an invalid or unreadable GLTF material [FNAME] which could not be opened or decoded. Attempt cancelled.
+
 notification-overflow =
     { $count ->
         [one] { $count } more
