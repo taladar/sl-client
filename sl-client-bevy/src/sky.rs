@@ -89,6 +89,12 @@ pub struct SkyParams {
     /// (`SL_VIEWER_SKY_LINEARIZE`) to isolate the linearisation's effect, including
     /// on what the reflection-probe / environment-map capture sees of the sky.
     pub linearize: f32,
+    /// The sky's "fake HDR" scale (`SKY_HDR_SCALE`), applied to the linearised sky
+    /// colour before tone-mapping (the reference `softenLight` WL-sky branch,
+    /// `color *= sky_hdr_scale`). `1.0` for a legacy / classic-mode sky (the
+    /// shipped default); `sqrt(gamma) * 2` for an EEP sky with a non-zero
+    /// reflection-probe ambiance (the sl-proto `SkySettings::sky_hdr_scale`).
+    pub sky_hdr_scale: f32,
 }
 
 /// The atmospheric sky-dome material: one [`SkyParams`] uniform block plus the

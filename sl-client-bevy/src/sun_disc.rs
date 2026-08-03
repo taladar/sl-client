@@ -38,8 +38,8 @@ const SUN_DISC_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f9c6b41-8d05-4c7e-
 /// heavenly-body uniforms (moon brightness, day-cycle blend factor) plus the flag
 /// and up component that select the moon's near-horizon fade.
 ///
-/// Four scalars packed into a single 16-byte std140 uniform slot, so the layout
-/// matches the `sun_disc.wgsl` `SunDiscParams` exactly.
+/// Five scalars, so the layout matches the `sun_disc.wgsl` `SunDiscParams`
+/// exactly.
 #[derive(Clone, Copy, Debug, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
@@ -58,6 +58,14 @@ pub struct SunDiscParams {
     pub moon_mode: f32,
     /// The body's up component (Bevy `y`) for the moon's near-horizon alpha fade.
     pub up_component: f32,
+    /// The sky's "fake HDR" scale (`SKY_HDR_SCALE`), applied to the disc colour so
+    /// it sits in the same HDR range as the sky dome behind it (the reference
+    /// scales the whole WL sky, disc included, by `sky_hdr_scale` before
+    /// tone-mapping). `1.0` for a legacy / classic-mode sky; `sqrt(gamma) * 2` for
+    /// an EEP reflection-probe-ambiance sky, which pushes the disc above `1.0` so
+    /// it blows out instead of rendering a flat grey (the sl-proto
+    /// `SkySettings::sky_hdr_scale`).
+    pub sky_hdr_scale: f32,
 }
 
 /// The sun / moon disc material: one [`SunDiscParams`] uniform block plus the
@@ -96,7 +104,9 @@ impl Material for SunDiscMaterial {
         ShaderRef::Handle(SUN_DISC_SHADER_HANDLE)
     }
 
-    /// The disc is drawn as an alpha-blended billboard over the (opaque) sky dome.
+    /// The disc is drawn as an alpha-blended billboard over the (opaque) sky dome,
+    /// matching the reference's `BT_ALPHA` heavenly-body blend
+    /// (`LLGLSPipelineBlendSkyBox`).
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }

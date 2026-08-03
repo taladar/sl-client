@@ -3021,6 +3021,7 @@ fn spawn_sky_at(
                 // The reference fades the moon near the horizon by its up
                 // component; the sun ignores it.
                 up_component: direction.y,
+                sky_hdr_scale: sky.sky_hdr_scale(),
             },
             diffuse: placeholder.clone(),
             alt_diffuse: placeholder.clone(),

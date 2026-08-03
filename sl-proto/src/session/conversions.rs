@@ -8,20 +8,21 @@ use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
     ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha, DayCycle,
-    DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentSettings, EstateAccessKind,
-    EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails, GroupAccountDetailsEntry,
-    GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupMember, GroupMembership, GroupName, GroupNotice, GroupNoticeKey,
-    GroupProfile, GroupRole, GroupTitle, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage,
-    InventoryFolder, InventoryItem, InventoryType, LandingType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
-    MuteType, NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties,
-    OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo,
-    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
-    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings,
-    TaskInventoryItem, WaterSettings, avatar_texture,
+    DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
+    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
+    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
+    LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+    MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
+    NavMeshStatus, NeighborInfo, Object, ObjectProperties, OpenRegionInfo, ParcelCategory,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
+    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SetDisplayNameReply, SkySettings, TaskInventoryItem, WaterSettings,
+    avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -61,7 +62,7 @@ use sl_wire::messages::{
     UpdateCreateInventoryItemInventoryDataBlock,
 };
 use sl_wire::{Direction, GlobalCoordinates};
-use sl_wire::{Llsd, SkeletonFolder};
+use sl_wire::{Llsd, SkeletonFolder, parse_llsd_binary, parse_llsd_notation, parse_llsd_xml};
 use sl_wire::{Permissions, Permissions5};
 
 use crate::asset_keys::AssetKey;
@@ -652,6 +653,95 @@ pub(crate) fn environment_from_llsd(body: &Llsd) -> Option<EnvironmentSettings> 
     })
 }
 
+/// Decode a single **sky** settings asset (`AT_SETTINGS` — an `LLSettingsSky`
+/// serialized as LLSD, e.g. the reference viewer's `KNOWN_SKY_*` library skies)
+/// into [`SkySettings`], tagging the frame with `name`. Returns `None` when the
+/// payload is not a sky settings map (a water or day-cycle asset, or a failure
+/// reply).
+///
+/// A settings asset's LLSD is the same sky map the day-cycle decode reads per
+/// frame — `type` is `"sky"` plus the WindLight / EEP fields — so this shares the
+/// per-frame `sky_settings_from_llsd`. Fetching a sky asset by UUID and
+/// decoding it here lets the viewer render the *exact* skies Firestorm loads
+/// (the `World ▸ Environment` presets), so a renderer comparison uses identical
+/// input.
+#[must_use]
+pub fn sky_settings_from_asset(name: &str, llsd: &Llsd) -> Option<SkySettings> {
+    // A settings asset tags its kind (`LLSettingsBase::SETTING_TYPE`); only a sky
+    // asset yields a sky frame.
+    if string_member(llsd, "type") != "sky" {
+        return None;
+    }
+    Some(sky_settings_from_llsd(name, llsd))
+}
+
+/// Decode a single **water** settings asset (`AT_SETTINGS` — an `LLSettingsWater`
+/// serialized as LLSD) into [`WaterSettings`], tagging the frame with `name`.
+/// Returns `None` when the payload is not a water settings map. The water
+/// counterpart of [`sky_settings_from_asset`] — EEP settings assets come in
+/// `"sky"`, `"water"`, and `"daycycle"` kinds.
+#[must_use]
+pub fn water_settings_from_asset(name: &str, llsd: &Llsd) -> Option<WaterSettings> {
+    if string_member(llsd, "type") != "water" {
+        return None;
+    }
+    Some(water_settings_from_llsd(name, llsd))
+}
+
+/// Decode a downloaded EEP settings asset (`AT_SETTINGS`) into an
+/// [`EnvironmentAsset`] — a sky or a water frame — tagging it with `name`.
+/// Returns `None` when the bytes do not parse as LLSD, or are neither a sky nor a
+/// water settings map (a day-cycle asset, or a failure reply).
+///
+/// This is the viewer's entry point for the `World ▸ Environment` **Modern**
+/// presets: fetching one of the reference viewer's `KNOWN_SKY_*` library skies by
+/// UUID and decoding it here renders the *exact* environment Firestorm loads, so a
+/// renderer comparison uses byte-identical input.
+#[must_use]
+pub fn environment_asset_from_bytes(name: &str, bytes: &[u8]) -> Option<EnvironmentAsset> {
+    let llsd = settings_asset_llsd(bytes)?;
+    if let Some(sky) = sky_settings_from_asset(name, &llsd) {
+        return Some(EnvironmentAsset::Sky(Box::new(sky)));
+    }
+    water_settings_from_asset(name, &llsd).map(EnvironmentAsset::Water)
+}
+
+/// Parse a settings-asset payload into LLSD, handling the encodings one can arrive
+/// in — XML (self-describing), or binary / notation behind an optional
+/// `<? LLSD/… ?>` header line. Tries each in turn and returns the first that
+/// parses.
+fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
+    // XML carries its own `<?xml …?>` / `<llsd>` opening the parser expects.
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        let start = text.trim_start();
+        if (start.starts_with("<?xml") || start.starts_with("<llsd"))
+            && let Ok(llsd) = parse_llsd_xml(text)
+        {
+            return Some(llsd);
+        }
+    }
+    // Otherwise strip an optional `<? LLSD/Notation ?>` / `<? LLSD/Binary ?>`
+    // header line and try the binary then notation encodings.
+    let payload = strip_llsd_header_line(bytes);
+    if let Ok(llsd) = parse_llsd_binary(payload) {
+        return Some(llsd);
+    }
+    parse_llsd_notation(payload).ok()
+}
+
+/// Return `bytes` past a leading `<? … ?>` LLSD header line (up to and including
+/// its newline), or unchanged when there is none. An `<?xml` prolog is left in
+/// place — it is XML the caller parses whole, not an LLSD header to strip.
+fn strip_llsd_header_line(bytes: &[u8]) -> &[u8] {
+    if bytes.starts_with(b"<?")
+        && !bytes.starts_with(b"<?xml")
+        && let Some(newline) = bytes.iter().position(|&byte| byte == b'\n')
+    {
+        return bytes.get(newline.saturating_add(1)..).unwrap_or(bytes);
+    }
+    bytes
+}
+
 /// Parses a day-cycle `OSDMap` into a [`DayCycle`]: its tracks (track 0 water, the
 /// rest sky) and its named sky/water frames. An absent cycle yields an empty one.
 fn day_cycle_from_llsd(value: Option<&Llsd>) -> DayCycle {
@@ -732,6 +822,8 @@ fn sky_settings_from_llsd(name: &str, sky: &Llsd) -> SkySettings {
         distance_multiplier: haze_f32("distance_multiplier"),
         max_y: f32_member(sky, "max_y"),
         gamma: f32_member(sky, "gamma"),
+        // Top-level EEP-only setting; absent on a legacy sky, so `0.0` there.
+        reflection_probe_ambiance: f32_member(sky, "reflection_probe_ambiance"),
         cloud_color: color_from_llsd(sky.get("cloud_color")),
         cloud_pos_density1: cloud_pos_density_from_llsd(sky.get("cloud_pos_density1")),
         cloud_pos_density2: cloud_pos_density_from_llsd(sky.get("cloud_pos_density2")),
@@ -3987,7 +4079,7 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("density_multiplier", real(sky.density_multiplier)),
         ("distance_multiplier", real(sky.distance_multiplier)),
     ]);
-    llsd_map(vec![
+    let mut entries = vec![
         ("type", Llsd::String("sky".to_owned())),
         ("name", Llsd::String(sky.name.clone())),
         (
@@ -4043,7 +4135,18 @@ fn sky_settings_to_llsd(sky: &SkySettings) -> Llsd {
         ("bloom_id", optional_texture_to_llsd(sky.bloom_texture)),
         ("halo_id", optional_texture_to_llsd(sky.halo_texture)),
         ("rainbow_id", optional_texture_to_llsd(sky.rainbow_texture)),
-    ])
+    ];
+    // Only an EEP sky carries `reflection_probe_ambiance`; emitting it for a
+    // legacy sky (where it decoded as `0.0`) would flip the reference's
+    // `canAutoAdjust` (which keys off the setting's *presence*), so round-trip a
+    // legacy sky without it.
+    if sky.reflection_probe_ambiance != 0.0 {
+        entries.push((
+            "reflection_probe_ambiance",
+            real(sky.reflection_probe_ambiance),
+        ));
+    }
+    llsd_map(entries)
 }
 
 /// Encodes [`WaterSettings`] into a water-frame `OSDMap` (the inverse of

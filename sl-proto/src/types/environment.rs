@@ -118,6 +118,12 @@ pub struct SkySettings {
     pub max_y: f32,
     /// The gamma applied to the sky.
     pub gamma: f32,
+    /// The reflection-probe ambiance (`reflection_probe_ambiance`): an EEP-only
+    /// setting (absent on a legacy / classic-mode sky, decoded as `0.0`) that,
+    /// when non-zero, puts the sky into the reference's "fake HDR" path — the WL
+    /// sky, clouds, and sun / moon discs are scaled by `sqrt(gamma) * 2` before
+    /// tone-mapping (see [`SkySettings::sky_hdr_scale`]).
+    pub reflection_probe_ambiance: f32,
     /// The cloud colour, RGB.
     pub cloud_color: Color,
     /// The cloud layer 1 position (X, Y) and density (Z).
@@ -168,6 +174,24 @@ pub struct SkySettings {
     pub halo_texture: Option<TextureKey>,
     /// The rainbow texture (`None` for the viewer default).
     pub rainbow_texture: Option<TextureKey>,
+}
+
+/// A decoded EEP settings asset (`AT_SETTINGS`) — either a sky or a water frame.
+///
+/// A downloaded settings asset (e.g. the reference viewer's `KNOWN_SKY_*` library
+/// skies) tags its kind, so decoding one yields a sky *or* a water frame; the
+/// day-cycle kind is not modelled here (the World ▸ Environment presets are single
+/// fixed frames).
+///
+/// (Not `Eq`: the settings hold `f32` fields.)
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnvironmentAsset {
+    /// A sky settings asset (`type` == `"sky"`). Boxed: [`SkySettings`] is much
+    /// larger than [`WaterSettings`], so an unboxed variant makes every
+    /// `EnvironmentAsset` the size of a sky (`clippy::large_enum_variant`).
+    Sky(Box<SkySettings>),
+    /// A water settings asset (`type` == `"water"`).
+    Water(WaterSettings),
 }
 
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at
@@ -656,6 +680,11 @@ impl SkySettings {
             ),
             max_y: lerp_f32(self.max_y, other.max_y, factor),
             gamma: lerp_f32(self.gamma, other.gamma, factor),
+            reflection_probe_ambiance: lerp_f32(
+                self.reflection_probe_ambiance,
+                other.reflection_probe_ambiance,
+                factor,
+            ),
             cloud_color: lerp_color(self.cloud_color, other.cloud_color, factor),
             cloud_pos_density1: lerp_cloud_pos_density(
                 self.cloud_pos_density1,
@@ -692,6 +721,33 @@ impl SkySettings {
         }
     }
 
+    /// The sky's "fake HDR" scale (`SKY_HDR_SCALE`), applied to the WL sky,
+    /// clouds, and sun / moon discs after linearisation and before tone-mapping,
+    /// the reference `LLSettingsVOSky::applySpecial`
+    /// (`indra/newview/llsettingsvo.cpp`).
+    ///
+    /// With the shipped defaults (`RenderSkyAutoAdjustLegacy = false`) an EEP sky
+    /// whose `reflection_probe_ambiance` is non-zero is scaled by
+    /// `sqrt(gamma) * 2` — the "modifier so `1.0` maps to the most desirable
+    /// default and the maximum does not go off the rails" from the reference —
+    /// which pushes bright pixels (notably the sun disc) above `1.0` so they blow
+    /// out under tone-mapping. A legacy / classic-mode sky (`ambiance == 0`) keeps
+    /// `1.0`.
+    ///
+    /// The reference's third branch — auto-adjusting a *legacy* sky to
+    /// `RenderSkyAutoAdjustHDRScale` — only fires when the
+    /// `RenderSkyAutoAdjustLegacy` debug setting is enabled (it ships disabled, so
+    /// classic mode is the default), which the viewer does not model; that path
+    /// therefore also returns `1.0` here.
+    #[must_use]
+    pub fn sky_hdr_scale(&self) -> f32 {
+        if self.reflection_probe_ambiance == 0.0 {
+            1.0
+        } else {
+            self.gamma.max(0.0).sqrt() * 2.0
+        }
+    }
+
     /// The reference viewer's built-in default sky (`LLSettingsSky::defaults`,
     /// `indra/llinventory/llsettingssky.cpp`), including the legacy-haze fallbacks
     /// (`LLColor3`/`F32` defaults from `LLSettingsSky::loadValuesFromLLSD`). The
@@ -720,6 +776,10 @@ impl SkySettings {
             distance_multiplier: 0.8,
             max_y: 1605.0,
             gamma: 1.0,
+            // A legacy / classic-mode sky has no `reflection_probe_ambiance`
+            // setting, so it decodes as (and defaults to) `0.0` — the shipped
+            // `sky_hdr_scale = 1.0` path.
+            reflection_probe_ambiance: 0.0,
             cloud_color: Color::new(0.4099, 0.4099, 0.4099),
             cloud_pos_density1: CloudPosDensity::new(1.0, 0.526, 1.0),
             cloud_pos_density2: CloudPosDensity::new(1.0, 0.526, 1.0),
@@ -856,6 +916,31 @@ mod tests {
         assert_eq!(value.position_x().to_bits(), 1.0_f32.to_bits());
         assert_eq!(value.position_y().to_bits(), 0.5_f32.to_bits());
         assert_eq!(value.density().to_bits(), 0.25_f32.to_bits());
+    }
+
+    #[test]
+    fn sky_hdr_scale_is_one_for_a_legacy_sky() {
+        // A legacy / classic-mode sky has no `reflection_probe_ambiance`, so the
+        // shipped `SKY_HDR_SCALE = 1.0` path (the 2026-08-03 sky-colour fix's
+        // assumption).
+        let sky = SkySettings::legacy_windlight_default("Default");
+        assert_eq!(sky.reflection_probe_ambiance.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(sky.sky_hdr_scale().to_bits(), 1.0_f32.to_bits());
+    }
+
+    #[test]
+    fn sky_hdr_scale_follows_gamma_for_an_eep_probe_ambiance_sky() {
+        // An EEP sky with a non-zero `reflection_probe_ambiance` is scaled by
+        // `sqrt(gamma) * 2` (the reference `LLSettingsVOSky::applySpecial`), which
+        // pushes bright pixels — the sun disc — above 1.0 so they blow out.
+        let mut sky = SkySettings::legacy_windlight_default("Default");
+        sky.reflection_probe_ambiance = 0.5;
+        sky.gamma = 1.0;
+        // sqrt(1.0) * 2 == 2.0
+        assert_eq!(sky.sky_hdr_scale().to_bits(), 2.0_f32.to_bits());
+        sky.gamma = 4.0;
+        // sqrt(4.0) * 2 == 4.0
+        assert_eq!(sky.sky_hdr_scale().to_bits(), 4.0_f32.to_bits());
     }
 
     #[test]

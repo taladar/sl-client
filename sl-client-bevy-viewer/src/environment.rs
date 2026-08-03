@@ -17,10 +17,37 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, DayCycleFrame, EnvironmentSettings, SlCommand, SlEvent, SlSessionEvent,
+    AssetKey, Command, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, SkySettings,
+    SlCommand, SlEvent, SlSessionEvent,
 };
 
+use crate::environment_assets::EnvironmentAssetManager;
 use crate::sky_presets::FixedSky;
+
+/// A World ▸ Environment menu selection: a time of day
+/// ([`FixedSky`](crate::sky_presets::FixedSky)) within one of three groups.
+/// `None` on [`EnvironmentState`] means the region's shared environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FixedEnvironment {
+    /// The region / parcel's *own* EEP day cycle, frozen at this time (fixed sun,
+    /// the region's palette) — [`FixedSky::day_position`].
+    DayCycle(FixedSky),
+    /// A ported legacy Linden `A-*` WindLight preset — [`FixedSky::settings`].
+    Legacy(FixedSky),
+    /// A fetched reference `KNOWN_SKY_*` modern EEP library sky
+    /// ([`FixedSky::modern_asset`]), resolved via [`EnvironmentAssetManager`] so it
+    /// renders byte-identical input to Firestorm's matching preset.
+    Modern(FixedSky),
+}
+
+impl FixedEnvironment {
+    /// The time of day this selection pins, whichever group.
+    pub(crate) const fn time(self) -> FixedSky {
+        match self {
+            Self::DayCycle(time) | Self::Legacy(time) | Self::Modern(time) => time,
+        }
+    }
+}
 
 /// Where the current [`EnvironmentState::settings`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,8 +74,8 @@ pub(crate) struct EnvironmentState {
     /// The active environment settings — what the sky / water / shadow phases
     /// render. Begins at the legacy WindLight default, is replaced when the
     /// grid answers a [`Command::RequestEnvironment`], and is *pinned* to a
-    /// single preset frame while a fixed sky is selected
-    /// ([`set_fixed_sky`](Self::set_fixed_sky)).
+    /// single preset frame while a fixed environment is selected
+    /// ([`set_fixed`](Self::set_fixed)).
     pub(crate) settings: EnvironmentSettings,
     /// The provenance of [`Self::settings`].
     pub(crate) source: EnvironmentSource,
@@ -59,11 +86,17 @@ pub(crate) struct EnvironmentState {
     shared: EnvironmentSettings,
     /// The provenance of [`Self::shared`].
     shared_source: EnvironmentSource,
-    /// The fixed sky pinned by the World ▸ Environment menu, if any — the
+    /// The environment pinned by the World ▸ Environment menu, if any — the
     /// reference viewer's local fixed environment
     /// (`LLEnvironment::setEnvironment(ENV_LOCAL, …)`), which survives region
-    /// changes until "Use Shared Environment".
-    fixed_sky: Option<FixedSky>,
+    /// changes until "Use Shared Environment". One of three groups (Day Cycle,
+    /// Legacy, Modern) at a time of day.
+    fixed: Option<FixedEnvironment>,
+    /// The decoded sky for a pinned **Modern** selection, once its `KNOWN_SKY_*`
+    /// asset resolves (see [`resolve_modern_environment`]), keyed by the time so a
+    /// stale one is ignored after the selection changes. Until it resolves, a
+    /// Modern selection renders the region's cycle at that time as a placeholder.
+    modern_sky: Option<(FixedSky, SkySettings)>,
     /// Whether a region-environment request is still outstanding — the retry loop
     /// keeps re-requesting until the reply is ingested or [`MAX_ENV_ATTEMPTS`] is
     /// reached.
@@ -81,7 +114,8 @@ impl Default for EnvironmentState {
             source: EnvironmentSource::Default,
             shared: EnvironmentSettings::legacy_windlight_default(),
             shared_source: EnvironmentSource::Default,
-            fixed_sky: None,
+            fixed: None,
+            modern_sky: None,
             req_pending: false,
             req_attempts: 0,
             req_next_retry_at: 0.0,
@@ -90,19 +124,31 @@ impl Default for EnvironmentState {
 }
 
 impl EnvironmentState {
-    /// The fixed sky currently pinned by the World ▸ Environment menu, if any
+    /// The environment currently pinned by the World ▸ Environment menu, if any
     /// (drives the menu's check marks).
-    pub(crate) const fn fixed_sky(&self) -> Option<FixedSky> {
-        self.fixed_sky
+    pub(crate) const fn fixed(&self) -> Option<FixedEnvironment> {
+        self.fixed
     }
 
-    /// Pin the rendered environment to `fixed` — a single-frame day cycle
-    /// holding that preset sky over the shared environment's water — or restore
-    /// the shared (grid) environment with `None`. The reference's World ▸
-    /// Environment ▸ Sunrise / Midday / Sunset / Midnight / "Use Shared
-    /// Environment".
-    pub(crate) fn set_fixed_sky(&mut self, fixed: Option<FixedSky>) {
-        self.fixed_sky = fixed;
+    /// Pin the rendered environment to `fixed` — a single-frame day cycle holding
+    /// the selected sky over the shared environment's water — or restore the
+    /// shared (grid) environment with `None`. The reference's World ▸ Environment
+    /// local fixed sky (`setEnvironment(ENV_LOCAL, …)`).
+    pub(crate) fn set_fixed(&mut self, fixed: Option<FixedEnvironment>) {
+        self.fixed = fixed;
+        // A selection change invalidates any resolved Modern sky (a fresh Modern
+        // selection re-resolves; a non-Modern selection drops it).
+        if !matches!(fixed, Some(FixedEnvironment::Modern(_))) {
+            self.modern_sky = None;
+        }
+        self.apply();
+    }
+
+    /// Record the decoded sky for a resolved **Modern** selection and re-apply,
+    /// swapping the region-cycle placeholder for the real `KNOWN_SKY_*` sky.
+    /// Called by [`resolve_modern_environment`] once the asset arrives.
+    pub(crate) fn set_modern_sky(&mut self, time: FixedSky, sky: SkySettings) {
+        self.modern_sky = Some((time, sky));
         self.apply();
     }
 
@@ -118,25 +164,25 @@ impl EnvironmentState {
     /// Recompute the active [`Self::settings`] from the shared environment and
     /// the pinned fixed sky.
     fn apply(&mut self) {
-        match self.fixed_sky {
+        match self.fixed {
             None => {
                 self.settings = self.shared.clone();
                 self.source = self.shared_source;
             }
-            Some(fixed) => {
-                // The shared environment with its sky schedule replaced by one
-                // frame pinned at keyframe 0 on the surface track (the upper
-                // altitude tracks empty out, so every altitude falls back to
-                // it); the water keeps following the shared cycle.
-                let mut pinned = self.shared.clone();
-                let sky = fixed.settings();
-                let name = fixed.frame_name().to_owned();
-                pinned.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
-                    keyframe: 0.0,
-                    name: name.clone(),
-                }]];
-                pinned.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
-                self.settings = pinned;
+            Some(selection) => {
+                let time = selection.time();
+                // Each group supplies the fixed sky; only the source differs.
+                let sky = match selection {
+                    FixedEnvironment::Legacy(_) => time.settings(),
+                    // The region's own cycle frozen at this time — and the
+                    // placeholder a Modern selection shows until its asset loads.
+                    FixedEnvironment::DayCycle(_) => self.day_cycle_frame(time),
+                    FixedEnvironment::Modern(_) => match &self.modern_sky {
+                        Some((resolved, sky)) if *resolved == time => sky.clone(),
+                        _ => self.day_cycle_frame(time),
+                    },
+                };
+                self.settings = self.pin_sky(sky, time.frame_name().to_owned());
                 self.source = self.shared_source;
             }
         }
@@ -147,11 +193,60 @@ impl EnvironmentState {
         // position actually moves the sun — the local OpenSim grid ships a
         // single-frame environment, which leaves the position nothing to
         // interpolate (every value renders the same noon sky). A pinned fixed
-        // sky (the World ▸ Environment menu) already selects a specific frame and
-        // takes precedence, so the override only applies when none is pinned.
-        if self.fixed_sky.is_none() && std::env::var_os("SL_VIEWER_SKY_DAY_POSITION").is_some() {
+        // environment (the World ▸ Environment menu) already selects a specific
+        // frame and takes precedence, so the override only applies when none is
+        // pinned.
+        if self.fixed.is_none() && std::env::var_os("SL_VIEWER_SKY_DAY_POSITION").is_some() {
             crate::sky_presets::install_preset_day_cycle(&mut self.settings);
         }
+    }
+
+    /// The shared environment with its sky schedule replaced by a single `sky`
+    /// frame pinned at keyframe 0 on the surface track (the upper altitude tracks
+    /// empty out, so every altitude falls back to it); the water keeps following
+    /// the shared cycle. Shared by all three fixed-environment groups.
+    fn pin_sky(&self, sky: SkySettings, name: String) -> EnvironmentSettings {
+        let mut pinned = self.shared.clone();
+        pinned.day_cycle.sky_tracks = vec![vec![DayCycleFrame {
+            keyframe: 0.0,
+            name: name.clone(),
+        }]];
+        pinned.day_cycle.sky_frames = std::iter::once((name, sky)).collect();
+        pinned
+    }
+
+    /// The region's *own* day cycle sampled (frozen) at `time`'s canonical
+    /// position — the Day Cycle group's sky, and the placeholder a Modern
+    /// selection shows until its asset loads. Falls back to the legacy preset when
+    /// the shared environment defines no sky.
+    fn day_cycle_frame(&self, time: FixedSky) -> SkySettings {
+        self.shared
+            .blended_sky_settings(0.0, time.day_position())
+            .unwrap_or_else(|| time.settings())
+    }
+}
+
+/// Resolve a pinned **Modern** environment selection: request its `KNOWN_SKY_*`
+/// library sky asset and, once decoded, swap the decoded sky into the rendered
+/// environment (replacing the region-cycle placeholder). A no-op unless a Modern
+/// sky is pinned and not yet resolved for the pinned time.
+pub(crate) fn resolve_modern_environment(
+    mut state: ResMut<EnvironmentState>,
+    mut assets: ResMut<EnvironmentAssetManager>,
+) {
+    let Some(FixedEnvironment::Modern(time)) = state.fixed else {
+        return;
+    };
+    if state.modern_sky.as_ref().map(|(resolved, _)| *resolved) == Some(time) {
+        return;
+    }
+    let key = AssetKey::from(time.modern_asset());
+    assets.request(key);
+    if let Some(asset) = assets.get(key)
+        && let EnvironmentAsset::Sky(sky) = asset.as_ref()
+    {
+        let sky = sky.as_ref().clone();
+        state.set_modern_sky(time, sky);
     }
 }
 

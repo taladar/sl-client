@@ -32,6 +32,11 @@ struct SunDiscParams {
     moon_mode: f32,
     // The body's up component (Bevy y) for the moon's near-horizon alpha fade.
     up_component: f32,
+    // The "fake HDR" scale (`SKY_HDR_SCALE`): 1.0 for a legacy sky, sqrt(gamma)*2
+    // for an EEP reflection-probe-ambiance sky. The reference scales the whole WL
+    // sky (disc included) by this before tone-mapping, so a bright disc blows out
+    // instead of rendering a flat grey.
+    sky_hdr_scale: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> disc: SunDiscParams;
@@ -76,7 +81,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    var rgb = c.rgb * disc.brightness;
+    // The disc texture is uploaded sRGB, so `textureSample` already returns it in
+    // linear space; scaling by `sky_hdr_scale` matches the reference's
+    // `srgb_to_linear(color) * sky_hdr_scale` over the whole WL sky. 1.0 for a
+    // legacy sky (a no-op); > 1.0 for an EEP probe-ambiance sky so the disc blows
+    // out.
+    var rgb = c.rgb * disc.brightness * disc.sky_hdr_scale;
     var alpha = c.a;
 
     // `moonF.glsl`: restore the pre-EEP alpha fade of the moon near the horizon.

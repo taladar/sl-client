@@ -97,16 +97,33 @@ const CAN_LINK: &str = "can-link";
 const CAN_UNLINK: &str = "can-unlink";
 
 /// The condition keys that hold while the matching World ▸ Environment fixed
-/// sky is pinned — one per preset, plus the shared-environment default. Each
-/// drives the check mark on its entry.
-const ENV_SUNRISE_ACTIVE: &str = "env-sunrise-active";
-/// See [`ENV_SUNRISE_ACTIVE`].
-const ENV_MIDDAY_ACTIVE: &str = "env-midday-active";
-/// See [`ENV_SUNRISE_ACTIVE`].
-const ENV_SUNSET_ACTIVE: &str = "env-sunset-active";
-/// See [`ENV_SUNRISE_ACTIVE`].
-const ENV_MIDNIGHT_ACTIVE: &str = "env-midnight-active";
-/// See [`ENV_SUNRISE_ACTIVE`].
+/// environment is pinned — one per group × time (Day Cycle / Legacy / Modern ×
+/// Sunrise / Midday / Sunset / Midnight), plus the shared-environment default.
+/// Each drives the check mark on its entry; exactly one holds at a time.
+const ENV_DAYCYCLE_SUNRISE_ACTIVE: &str = "env-daycycle-sunrise-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_DAYCYCLE_MIDDAY_ACTIVE: &str = "env-daycycle-midday-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_DAYCYCLE_SUNSET_ACTIVE: &str = "env-daycycle-sunset-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_DAYCYCLE_MIDNIGHT_ACTIVE: &str = "env-daycycle-midnight-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_LEGACY_SUNRISE_ACTIVE: &str = "env-legacy-sunrise-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_LEGACY_MIDDAY_ACTIVE: &str = "env-legacy-midday-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_LEGACY_SUNSET_ACTIVE: &str = "env-legacy-sunset-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_LEGACY_MIDNIGHT_ACTIVE: &str = "env-legacy-midnight-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_MODERN_SUNRISE_ACTIVE: &str = "env-modern-sunrise-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_MODERN_MIDDAY_ACTIVE: &str = "env-modern-midday-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_MODERN_SUNSET_ACTIVE: &str = "env-modern-sunset-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
+const ENV_MODERN_MIDNIGHT_ACTIVE: &str = "env-modern-midnight-active";
+/// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
 const ENV_SHARED_ACTIVE: &str = "env-shared-active";
 
 /// The placeholder shown in a menu that has no wired entries yet — a single
@@ -145,24 +162,87 @@ static COMM_MENU: MenuDef = MenuDef {
     )],
 };
 
-/// The World ▸ Environment submenu — the reference viewer's fixed-sky times of
-/// day (its World ▸ Environment ▸ Sunrise / Midday / Sunset / Midnight over
-/// Linden's `A-*` presets) plus the return to the region's shared environment.
+/// The World ▸ Environment ▸ **Day Cycle** submenu — the region's / parcel's own
+/// EEP day cycle frozen at each of the four times (fixed sun, the region's
+/// palette).
+static ENV_DAYCYCLE_MENU: MenuDef = MenuDef {
+    label: "Day Cycle",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Sunrise", "env-daycycle-sunrise")
+                .checked_when(ENV_DAYCYCLE_SUNRISE_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midday", "env-daycycle-midday")
+                .checked_when(ENV_DAYCYCLE_MIDDAY_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sunset", "env-daycycle-sunset")
+                .checked_when(ENV_DAYCYCLE_SUNSET_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midnight", "env-daycycle-midnight")
+                .checked_when(ENV_DAYCYCLE_MIDNIGHT_ACTIVE),
+        ),
+    ],
+};
+
+/// The World ▸ Environment ▸ **Legacy** submenu — the ported Linden `A-*`
+/// WindLight presets (`reflection_probe_ambiance = 0`, the classic-mode path).
+static ENV_LEGACY_MENU: MenuDef = MenuDef {
+    label: "Legacy",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Sunrise", "env-legacy-sunrise")
+                .checked_when(ENV_LEGACY_SUNRISE_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midday", "env-legacy-midday").checked_when(ENV_LEGACY_MIDDAY_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sunset", "env-legacy-sunset").checked_when(ENV_LEGACY_SUNSET_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midnight", "env-legacy-midnight")
+                .checked_when(ENV_LEGACY_MIDNIGHT_ACTIVE),
+        ),
+    ],
+};
+
+/// The World ▸ Environment ▸ **Modern** submenu — the reference viewer's
+/// `KNOWN_SKY_*` library EEP skies, fetched by UUID so they render byte-identical
+/// input to Firestorm's matching presets.
+static ENV_MODERN_MENU: MenuDef = MenuDef {
+    label: "Modern",
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Sunrise", "env-modern-sunrise")
+                .checked_when(ENV_MODERN_SUNRISE_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midday", "env-modern-midday").checked_when(ENV_MODERN_MIDDAY_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Sunset", "env-modern-sunset").checked_when(ENV_MODERN_SUNSET_ACTIVE),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Midnight", "env-modern-midnight")
+                .checked_when(ENV_MODERN_MIDNIGHT_ACTIVE),
+        ),
+    ],
+};
+
+/// The World ▸ Environment submenu — three groups of the four fixed times of day
+/// (**Day Cycle** the region's own EEP frozen per time, **Legacy** the Linden
+/// `A-*` presets, **Modern** the fetched `KNOWN_SKY_*` EEP library skies) plus the
+/// return to the region's shared environment. The three groups let a legacy sky,
+/// a modern EEP sky, and the region's own be compared at the same time of day.
 static ENVIRONMENT_MENU: MenuDef = MenuDef {
     label: "Environment",
     items: &[
-        MenuItemDef::Command(
-            MenuCommand::new("Sunrise", "env-fixed-sunrise").checked_when(ENV_SUNRISE_ACTIVE),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Midday", "env-fixed-midday").checked_when(ENV_MIDDAY_ACTIVE),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Sunset", "env-fixed-sunset").checked_when(ENV_SUNSET_ACTIVE),
-        ),
-        MenuItemDef::Command(
-            MenuCommand::new("Midnight", "env-fixed-midnight").checked_when(ENV_MIDNIGHT_ACTIVE),
-        ),
+        MenuItemDef::Submenu(&ENV_DAYCYCLE_MENU),
+        MenuItemDef::Submenu(&ENV_LEGACY_MENU),
+        MenuItemDef::Submenu(&ENV_MODERN_MENU),
         MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Use Shared Environment", "env-shared")
@@ -401,19 +481,36 @@ fn update_top_menu_conditions(
     // the shared default holds. The gallery has no environment resource, so the
     // submenu simply shows no check there.
     if let Some(environment) = &environment {
-        use crate::sky_presets::FixedSky;
-        wanted.push(match environment.fixed_sky() {
-            Some(FixedSky::Sunrise) => ENV_SUNRISE_ACTIVE,
-            Some(FixedSky::Midday) => ENV_MIDDAY_ACTIVE,
-            Some(FixedSky::Sunset) => ENV_SUNSET_ACTIVE,
-            Some(FixedSky::Midnight) => ENV_MIDNIGHT_ACTIVE,
-            None => ENV_SHARED_ACTIVE,
-        });
+        wanted.push(environment_condition(environment.fixed()));
     }
     for mut conditions in &mut bars {
         if conditions.0 != wanted {
             conditions.0.clone_from(&wanted);
         }
+    }
+}
+
+/// The check-mark condition key for a pinned environment selection (or the shared
+/// default) — one per Day Cycle / Legacy / Modern × time of day.
+const fn environment_condition(
+    fixed: Option<crate::environment::FixedEnvironment>,
+) -> &'static str {
+    use crate::environment::FixedEnvironment::{DayCycle, Legacy, Modern};
+    use crate::sky_presets::FixedSky::{Midday, Midnight, Sunrise, Sunset};
+    match fixed {
+        None => ENV_SHARED_ACTIVE,
+        Some(DayCycle(Sunrise)) => ENV_DAYCYCLE_SUNRISE_ACTIVE,
+        Some(DayCycle(Midday)) => ENV_DAYCYCLE_MIDDAY_ACTIVE,
+        Some(DayCycle(Sunset)) => ENV_DAYCYCLE_SUNSET_ACTIVE,
+        Some(DayCycle(Midnight)) => ENV_DAYCYCLE_MIDNIGHT_ACTIVE,
+        Some(Legacy(Sunrise)) => ENV_LEGACY_SUNRISE_ACTIVE,
+        Some(Legacy(Midday)) => ENV_LEGACY_MIDDAY_ACTIVE,
+        Some(Legacy(Sunset)) => ENV_LEGACY_SUNSET_ACTIVE,
+        Some(Legacy(Midnight)) => ENV_LEGACY_MIDNIGHT_ACTIVE,
+        Some(Modern(Sunrise)) => ENV_MODERN_SUNRISE_ACTIVE,
+        Some(Modern(Midday)) => ENV_MODERN_MIDDAY_ACTIVE,
+        Some(Modern(Sunset)) => ENV_MODERN_SUNSET_ACTIVE,
+        Some(Modern(Midnight)) => ENV_MODERN_MIDNIGHT_ACTIVE,
     }
 }
 
@@ -440,13 +537,14 @@ fn handle_top_menu_actions(
     mut panels: Query<&mut UiPanelShown>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
-    // The World ▸ Environment picks share one shape: pin a fixed sky (or
+    // The World ▸ Environment picks share one shape: pin a fixed environment (or
     // restore the shared environment) on the environment state.
     let set_fixed = |environment: &mut Option<ResMut<crate::environment::EnvironmentState>>,
-                     fixed: Option<FixedSky>| {
+                     fixed: Option<FixedEnvironment>| {
         if let Some(environment) = environment {
-            environment.set_fixed_sky(fixed);
+            environment.set_fixed(fixed);
         }
     };
     for action in actions.read() {
@@ -523,10 +621,78 @@ fn handle_top_menu_actions(
             "about-region" => {
                 about_region.write(crate::about_region::OpenAboutRegion);
             }
-            "env-fixed-sunrise" => set_fixed(&mut environment, Some(FixedSky::Sunrise)),
-            "env-fixed-midday" => set_fixed(&mut environment, Some(FixedSky::Midday)),
-            "env-fixed-sunset" => set_fixed(&mut environment, Some(FixedSky::Sunset)),
-            "env-fixed-midnight" => set_fixed(&mut environment, Some(FixedSky::Midnight)),
+            "env-daycycle-sunrise" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::DayCycle(FixedSky::Sunrise)),
+                );
+            }
+            "env-daycycle-midday" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::DayCycle(FixedSky::Midday)),
+                );
+            }
+            "env-daycycle-sunset" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::DayCycle(FixedSky::Sunset)),
+                );
+            }
+            "env-daycycle-midnight" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::DayCycle(FixedSky::Midnight)),
+                );
+            }
+            "env-legacy-sunrise" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Legacy(FixedSky::Sunrise)),
+                );
+            }
+            "env-legacy-midday" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Legacy(FixedSky::Midday)),
+                );
+            }
+            "env-legacy-sunset" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Legacy(FixedSky::Sunset)),
+                );
+            }
+            "env-legacy-midnight" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Legacy(FixedSky::Midnight)),
+                );
+            }
+            "env-modern-sunrise" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Modern(FixedSky::Sunrise)),
+                );
+            }
+            "env-modern-midday" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Modern(FixedSky::Midday)),
+                );
+            }
+            "env-modern-sunset" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Modern(FixedSky::Sunset)),
+                );
+            }
+            "env-modern-midnight" => {
+                set_fixed(
+                    &mut environment,
+                    Some(FixedEnvironment::Modern(FixedSky::Midnight)),
+                );
+            }
             "env-shared" => set_fixed(&mut environment, None),
             _ => {}
         }

@@ -10390,6 +10390,9 @@ mod test {
             distance_multiplier: 4.0,
             max_y: 1605.0,
             gamma: 1.0,
+            // Non-zero so the round-trip exercises the EEP-only field (encoded
+            // only when non-zero) and the `sky_hdr_scale` path.
+            reflection_probe_ambiance: 0.75,
             cloud_color: Color::new(0.5, 0.5, 0.5),
             cloud_pos_density1: CloudPosDensity::new(1.0, 0.5, 0.25),
             cloud_pos_density2: CloudPosDensity::new(0.125, 0.25, 0.5),

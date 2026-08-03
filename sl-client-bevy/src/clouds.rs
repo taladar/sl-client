@@ -91,6 +91,11 @@ pub struct CloudParams {
     /// the tone mapper (`1.0` on, `0.0` off) — the `SL_VIEWER_SKY_LINEARIZE` A/B
     /// knob, matching the sky dome.
     pub linearize: f32,
+    /// The sky's "fake HDR" scale (`SKY_HDR_SCALE`), applied to the linearised
+    /// cloud colour before tone-mapping, matching the sky dome. `1.0` for a legacy
+    /// / classic-mode sky; `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance
+    /// sky (the sl-proto `SkySettings::sky_hdr_scale`).
+    pub sky_hdr_scale: f32,
 }
 
 /// The cloud-layer material: one [`CloudParams`] uniform block plus the current and

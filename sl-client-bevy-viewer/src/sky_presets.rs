@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use sl_client_bevy::{
-    Color as SlColor, ColorAlpha, DayCycleFrame, EnvironmentSettings, Glow, SkySettings,
+    Color as SlColor, ColorAlpha, DayCycleFrame, EnvironmentSettings, Glow, SkySettings, Uuid,
     azimuth_altitude_to_rotation,
 };
 
@@ -50,6 +50,33 @@ impl FixedSky {
     /// The frame name the fixed day cycle files this sky under.
     pub(crate) const fn frame_name(self) -> &'static str {
         self.preset().label
+    }
+
+    /// The normalised day-cycle position (`0.0..=1.0`) at which this time freezes
+    /// the region's *own* EEP day cycle — the reference's canonical placement
+    /// (`0.25` sunrise, `0.5` midday, `0.75` sunset, `0.0` midnight). Backs the
+    /// World ▸ Environment **Day Cycle** presets.
+    pub(crate) const fn day_position(self) -> f32 {
+        match self {
+            Self::Sunrise => 0.25,
+            Self::Midday => 0.5,
+            Self::Sunset => 0.75,
+            Self::Midnight => 0.0,
+        }
+    }
+
+    /// The reference viewer's `KNOWN_SKY_*` library sky asset for this time — the
+    /// exact modern EEP sky Firestorm's World ▸ Environment preset loads
+    /// (`LLEnvironment::KNOWN_SKY_{SUNRISE,MIDDAY,SUNSET,MIDNIGHT}`). Backs the
+    /// **Modern** presets: fetching and rendering this asset gives byte-identical
+    /// input to Firestorm, so a renderer comparison isolates the renderer.
+    pub(crate) const fn modern_asset(self) -> Uuid {
+        match self {
+            Self::Sunrise => Uuid::from_u128(0x01e4_1537_ff51_2f1f_8ef7_17e4_df76_0bfb),
+            Self::Midday => Uuid::from_u128(0xc462_26b4_0e43_5a56_9708_d27c_a1df_3292),
+            Self::Sunset => Uuid::from_u128(0x084e_26cd_a900_28e8_08d0_64a9_de5c_15e2),
+            Self::Midnight => Uuid::from_u128(0x8a01_b97a_cb20_c1ea_ac63_f7ea_84ad_0090),
+        }
     }
 }
 

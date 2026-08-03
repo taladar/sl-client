@@ -768,6 +768,9 @@ pub(crate) fn setup_sun_moon_discs(
             blend_factor: 0.0,
             moon_mode: 0.0,
             up_component: 0.0,
+            // Seeded at the legacy no-op; `drive_sun_moon_discs` sets the active
+            // sky frame's scale each frame.
+            sky_hdr_scale: 1.0,
         },
         diffuse: placeholder.clone(),
         alt_diffuse: placeholder.clone(),
@@ -778,6 +781,7 @@ pub(crate) fn setup_sun_moon_discs(
             blend_factor: 0.0,
             moon_mode: 1.0,
             up_component: 0.0,
+            sky_hdr_scale: 1.0,
         },
         diffuse: placeholder.clone(),
         alt_diffuse: placeholder.clone(),
@@ -816,6 +820,11 @@ pub(crate) fn setup_sun_moon_discs(
     clippy::type_complexity,
     reason = "two Bevy queries whose disjointness filters keep the sun / moon discs distinct"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries, plus two `Local` \
+              accumulators for the env-gated on-change sky/sun diagnostic"
+)]
 pub(crate) fn drive_sun_moon_discs(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
@@ -824,6 +833,8 @@ pub(crate) fn drive_sun_moon_discs(
     mut textures: ResMut<TextureManager>,
     mut sun: Query<(&mut Transform, &mut Visibility), (With<SunDisc>, Without<MoonDisc>)>,
     mut moon: Query<(&mut Transform, &mut Visibility), (With<MoonDisc>, Without<SunDisc>)>,
+    mut last_logged_hdr: Local<Option<f32>>,
+    mut last_logged_sun_y: Local<Option<f32>>,
 ) {
     let Ok(camera) = camera.single() else {
         return;
@@ -864,13 +875,47 @@ pub(crate) fn drive_sun_moon_discs(
 
     // The sun disc is untinted (the reference `sunDiscF` ignores its bound diffuse
     // colour); the moon disc is scaled by the sky's moon brightness and faded near
-    // the horizon by its up component (`moonF`).
+    // the horizon by its up component (`moonF`). Both are scaled by the sky's
+    // "fake HDR" factor so they sit in the same range as the sky dome behind them
+    // (1.0 for a legacy sky; > 1.0 for an EEP probe-ambiance sky, so the disc
+    // blows out instead of rendering a flat grey).
+    let hdr_scale = resolved_sky_hdr_scale(&sky);
+    // On-change diagnostic (env-gated, matching `SL_VIEWER_LOG_CLOUDS`): confirm
+    // whether the active sky is on the EEP "fake HDR" path — a non-zero
+    // `reflection_probe_ambiance` gives `sky_hdr_scale > 1.0`. A legacy sky logs
+    // `1.0` (a no-op).
+    if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok() && *last_logged_hdr != Some(hdr_scale) {
+        *last_logged_hdr = Some(hdr_scale);
+        info!(
+            "sky hdr: reflection_probe_ambiance={:.4} gamma={:.4} sky_hdr_scale={:.4}",
+            sky.reflection_probe_ambiance, sky.gamma, hdr_scale
+        );
+    }
+    // Log the sun's altitude (Bevy y = up component) when it moves — for
+    // comparing where a World ▸ Environment selection puts the sun (a Day Cycle
+    // frame sampled from the region's own cycle vs an authored Legacy / Modern
+    // preset). `sun_up` says whether the disc is drawn at all.
+    if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok()
+        && last_logged_sun_y.is_none_or(|prev| (prev - sun_dir.y).abs() > 0.02)
+    {
+        *last_logged_sun_y = Some(sun_dir.y);
+        info!(
+            "sun position: selection={:?} up_component={:.3} (sun_up={sun_up}) sun_dir=({:.3},{:.3},{:.3})",
+            environment.fixed(),
+            sun_dir.y,
+            sun_dir.x,
+            sun_dir.y,
+            sun_dir.z
+        );
+    }
     if let Some(mut material) = materials.get_mut(&state.sun_material) {
         material.params.up_component = sun_dir.y;
+        material.params.sky_hdr_scale = hdr_scale;
     }
     if let Some(mut material) = materials.get_mut(&state.moon_material) {
         material.params.brightness = sky.moon_brightness;
         material.params.up_component = moon_dir.y;
+        material.params.sky_hdr_scale = hdr_scale;
     }
 
     // Fetch the disc textures boosted (the sky frame's own, or the reference
@@ -1519,6 +1564,26 @@ fn sky_linearize() -> f32 {
     }
 }
 
+/// The active sky "fake HDR" scale (`SKY_HDR_SCALE`) for a sky frame: the value
+/// the reference computes from the frame ([`SkySettings::sky_hdr_scale`] —
+/// `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance sky, `1.0` for a legacy
+/// / classic-mode sky), unless the `SL_VIEWER_SKY_HDR_SCALE` A/B knob forces a
+/// value.
+///
+/// The override exists alongside `SL_VIEWER_SKY_LINEARIZE` so the EEP blow-out
+/// path can be exercised on *any* grid: the default aditi and OpenSim regions
+/// serve legacy skies (scale `1.0`, a no-op), so without the override there is no
+/// on-grid way to see the sun disc, clouds, and sky expand into HDR. A value `< 0`
+/// is clamped to `0`.
+fn resolved_sky_hdr_scale(sky: &SkySettings) -> f32 {
+    if let Ok(value) = std::env::var("SL_VIEWER_SKY_HDR_SCALE")
+        && let Ok(scale) = value.parse::<f32>()
+    {
+        return scale.max(0.0);
+    }
+    sky.sky_hdr_scale()
+}
+
 /// Build the sky-shader uniform block from a sky frame plus the per-frame light
 /// direction, day/night factor, and glow factor.
 fn sky_params(
@@ -1549,6 +1614,7 @@ fn sky_params(
         droplet_radius: sky.droplet_radius,
         ice_level: sky.ice_level,
         linearize: sky_linearize(),
+        sky_hdr_scale: resolved_sky_hdr_scale(sky),
     }
 }
 
@@ -1600,6 +1666,7 @@ pub(crate) fn cloud_params(
         cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
         blend_factor: 0.0,
         linearize: sky_linearize(),
+        sky_hdr_scale: resolved_sky_hdr_scale(sky),
     }
 }
 

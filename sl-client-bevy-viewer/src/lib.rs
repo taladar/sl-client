@@ -70,6 +70,7 @@ mod edit_wearable;
 mod emoji_complete;
 mod emoji_picker;
 mod environment;
+mod environment_assets;
 mod experience_permission;
 mod experiences_floater;
 mod face_material;
@@ -1417,6 +1418,7 @@ fn run_session(
         .init_resource::<WearableAssetManager>()
         .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
         .init_resource::<AnimationPlayback>()
+        .init_resource::<environment_assets::EnvironmentAssetManager>()
         .insert_resource(PipelineOverlayVisible::from_env())
         // The UI text & font foundation demo (viewer-ui-text-foundation): a
         // toggleable `EditableText` panel, seeded shown/hidden from
@@ -1494,7 +1496,14 @@ fn run_session(
                 // grid's reply into `EnvironmentState` (P22.1); the sky / water /
                 // shadow phases render from it. Nested into one tuple to stay within
                 // Bevy's per-tuple system limit.
-                (request_environment, ingest_environment),
+                (
+                    request_environment,
+                    ingest_environment,
+                    // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
+                    // asset decodes; after `ingest_environment` so the shared
+                    // environment (the Modern placeholder) is current.
+                    crate::environment::resolve_modern_environment,
+                ),
                 // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
                 drive_server_bake,
                 // Keep the texture store's `GetTexture` cap current, then poll
@@ -1852,6 +1861,10 @@ fn run_session(
             Update,
             (
                 update_animation_caps,
+                // Refresh the EEP settings-asset fetch cap and drain finished
+                // fetch+decode tasks for the World ▸ Environment Modern presets.
+                environment_assets::update_environment_asset_caps,
+                environment_assets::poll_environment_assets,
                 ingest_avatar_animations,
                 poll_animations,
                 // Client-side locomotion / state animations for the own avatar (P31.6):

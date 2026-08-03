@@ -36,3 +36,35 @@ EEP skies.
   404s there), with a Firestorm side-by-side.
 
 Not reproducible on the local grid; needs an aditi login.
+
+**Progress (2026-08-03) — `sky_hdr_scale` done; disc grey is broader; harness
+built:** `sky_hdr_scale` is implemented faithfully (`reflection_probe_ambiance`
+decoded in sl-proto; `sqrt(gamma)*2` for EEP / `1.0` legacy, per
+`llsettingsvo.cpp`; applied to the sky / cloud / sun-disc shaders as a new
+uniform + an `SL_VIEWER_SKY_HDR_SCALE` A/B override). But live-testing showed
+the grey disc is **broader than EEP**: it also reads grey on **legacy** skies
+(where `sky_hdr_scale = 1.0`), because the sun texture is a pure-white **LDR**
+sprite (linear ~1.0) that alpha-blends *over* the brighter near-sun **HDR** haze
+and so reads as a dim hole (on OpenSim the disc texture 404s, so the bug only
+shows where the disc actually loads). An additive/max-blend disc hack fixed noon
+but broke sunset (over-bloom), so it was reverted to the faithful
+`srgb_to_linear(texture) * sky_hdr_scale` alpha-blend — the fix has to be in the
+formulas, not the blend.
+
+To fix it against **byte-identical input** to Firestorm, built a **World >
+Environment comparison harness**: three groups x four times (Day Cycle = the
+region's own EEP frozen per time; Legacy = ported `A-*`; Modern = the real
+`KNOWN_SKY_*` EEP library skies Firestorm loads) + Use Shared. Needed a new
+`AT_SETTINGS` fetch/decode path: sl-proto `EnvironmentAsset` +
+`environment_asset_from_bytes` (LLSD-format-detecting), and the viewer
+`EnvironmentAssetManager` (fetch by UUID over `ViewerAsset`, decode, cache;
+mirrors `AnimationManager`). Live-validated on aditi: Modern fetch/decode works
+(sunset asset swaps in at the horizon, matching Legacy); Day Cycle is faithful
+(region cycle at 0.25/0.75 puts the sun mid-altitude, not the horizon — the
+region's authored cycle, not a bug).
+
+**Remaining:** port the reference dynamic exposure (`exposureF` /
+`generateExposure` — EEP range `1/hdr_scale..hdr_scale`, the `sky_hdr_scale`
+counterweight so EEP/Modern skies don't wash); audit `sky.wgsl` near-sun haze vs
+the reference for the **legacy** grey disc (exposure is a no-op on legacy) and
+the **disc-above-glow** alignment.

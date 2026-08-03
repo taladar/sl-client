@@ -62,6 +62,10 @@ struct CloudParams {
     // 1.0 to apply srgb_to_linear to the cloud colour (the default), 0.0 to skip
     // it (the `SL_VIEWER_SKY_LINEARIZE` A/B knob).
     linearize: f32,
+    // The "fake HDR" scale (`SKY_HDR_SCALE`): 1.0 for a legacy sky, sqrt(gamma)*2
+    // for an EEP reflection-probe-ambiance sky. Applied after linearisation to
+    // match the sky dome (the reference `softenLight` WL-sky branch).
+    sky_hdr_scale: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> cloud: CloudParams;
@@ -265,6 +269,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // `sky.wgsl`), so the cloud layer sits in the same space as the sky dome it
     // composites over and is not washed out by our linear tone mapper. Gated by the
     // `SL_VIEWER_SKY_LINEARIZE` A/B knob.
-    let out = select(color, srgb_to_linear(color), cloud.linearize > 0.5);
+    var out = select(color, srgb_to_linear(color), cloud.linearize > 0.5);
+    // Scale for fake HDR to match the sky dome (`softenLight`:
+    // `color *= sky_hdr_scale`) — 1.0 for a legacy sky (a no-op).
+    out = out * cloud.sky_hdr_scale;
     return vec4<f32>(out, alpha1);
 }

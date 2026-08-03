@@ -49,6 +49,10 @@ struct SkyParams {
     // 1.0 to apply srgb_to_linear to the sky colour (the default), 0.0 to skip it
     // (the `SL_VIEWER_SKY_LINEARIZE` A/B knob).
     linearize: f32,
+    // The "fake HDR" scale (`SKY_HDR_SCALE`): 1.0 for a legacy / classic-mode sky,
+    // sqrt(gamma)*2 for an EEP reflection-probe-ambiance sky. Applied after
+    // linearisation, matching the reference `softenLight` WL-sky branch.
+    sky_hdr_scale: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> sky: SkyParams;
@@ -194,6 +198,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // saturation. (The reference linearises the *composited* sky once; this forward
     // path linearises each sky element and blends in linear space — a documented
     // approximation that differs only slightly at element edges.)
-    let out = select(color, srgb_to_linear(color), sky.linearize > 0.5);
+    var out = select(color, srgb_to_linear(color), sky.linearize > 0.5);
+    // Scale for fake HDR (`softenLight`: `color *= sky_hdr_scale`) — 1.0 for a
+    // legacy sky (a no-op), > 1.0 for an EEP probe-ambiance sky so bright haze
+    // near the sun expands into HDR and blows out under the tone mapper.
+    out = out * sky.sky_hdr_scale;
     return vec4<f32>(out, 1.0);
 }
