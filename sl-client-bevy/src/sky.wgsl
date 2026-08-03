@@ -46,6 +46,9 @@ struct SkyParams {
     moisture_level: f32,
     droplet_radius: f32,
     ice_level: f32,
+    // 1.0 to apply srgb_to_linear to the sky colour (the default), 0.0 to skip it
+    // (the `SL_VIEWER_SKY_LINEARIZE` A/B knob).
+    linearize: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> sky: SkyParams;
@@ -85,6 +88,16 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position.z = 0.0;
     out.local_position = vertex.position;
     return out;
+}
+
+// The reference `srgb_to_linear` (`indra/newview/app_settings/shaders/class1/
+// deferred/deferredUtil.glsl`), applied to WL-sky pixels in `softenLight` before
+// the tone mapper. Defined over the full range (our sky reaches 5.0), so the high
+// branch expands bright haze into HDR.
+fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
+    let low = cs / 12.92;
+    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
+    return mix(low, high, step(vec3<f32>(0.04045), cs));
 }
 
 // Rainbow overlay (`skyF.glsl` `rainbow`): a moisture-scaled band sampled from the
@@ -171,5 +184,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = color * 2.0;
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(5.0));
 
-    return vec4<f32>(color, 1.0);
+    // Match the reference deferred `softenLight` SKIP_ATMOS branch, which runs the
+    // WL-sky colour through `srgb_to_linear` (× `sky_hdr_scale`, which is 1.0 for a
+    // legacy / classic-mode sky — the shipped default) before the tone mapper. The
+    // sky's colour settings are authored in sRGB/gamma space, so feeding the
+    // computed haze straight into our linear tone mapper (`tonemap.wgsl`) left the
+    // whole sky washed out and desaturated and stopped bright near-sun haze from
+    // expanding into HDR. Linearising here restores the reference's contrast and
+    // saturation. (The reference linearises the *composited* sky once; this forward
+    // path linearises each sky element and blends in linear space — a documented
+    // approximation that differs only slightly at element edges.)
+    let out = select(color, srgb_to_linear(color), sky.linearize > 0.5);
+    return vec4<f32>(out, 1.0);
 }

@@ -87,6 +87,10 @@ pub struct CloudParams {
     /// (`cloud_noise_next`) noise textures during a day-cycle transition. `0.0`
     /// until the day cycle drives it, so only `cloud_noise` is used for now.
     pub blend_factor: f32,
+    /// Whether to apply the reference `srgb_to_linear` to the cloud colour before
+    /// the tone mapper (`1.0` on, `0.0` off) — the `SL_VIEWER_SKY_LINEARIZE` A/B
+    /// knob, matching the sky dome.
+    pub linearize: f32,
 }
 
 /// The cloud-layer material: one [`CloudParams`] uniform block plus the current and

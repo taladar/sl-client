@@ -104,12 +104,12 @@ use sl_client_bevy::{
     JointOverrides, LegacyMaterial, MeshLod, MeshSkin, MorphWeights, PathCurve, PrimFaceId,
     PrimLod, PrimShapeFloat, ProfileCurve, RegionHandle, ResolvedParams, SkeletalDeformations,
     SkyMaterial, StarMaterial, StarParams, Submesh, SunDiscMaterial, SunDiscParams,
-    TerrainLayerType, TerrainMaterial, TerrainPatch, TextureAnimation, TextureFace, TextureKey,
-    TreeLod, Uuid, VolumeDeformations, WaterMaterial, WaterSettings, grass_geometry, grass_species,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
-    texture_anim_mode, to_bevy_base_mesh, to_bevy_grass_mesh, to_bevy_image, to_bevy_mesh,
-    to_bevy_morphed_mesh, to_bevy_prim_meshes, to_bevy_rigged_mesh, to_bevy_tree_mesh,
-    tree_billboard_geometry, tree_geometry, tree_species,
+    TerrainLayerType, TerrainLighting, TerrainMaterial, TerrainPatch, TextureAnimation,
+    TextureFace, TextureKey, TreeLod, Uuid, VolumeDeformations, WaterMaterial, WaterSettings,
+    grass_geometry, grass_species, rigged_inverse_bindposes, tessellate, tessellate_sculpt,
+    tessellate_with_path, texture_anim_mode, to_bevy_base_mesh, to_bevy_grass_mesh, to_bevy_image,
+    to_bevy_mesh, to_bevy_morphed_mesh, to_bevy_prim_meshes, to_bevy_rigged_mesh,
+    to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
 };
 use sl_terrain::TerrainComposition;
 
@@ -2298,11 +2298,18 @@ fn spawn_terrain(
     }
     let composition = terrain_composition();
     let placeholder = assets.images.add(terrain_placeholder_image());
+    // The harness renders the sky scenes; light the ground with a neutral midday
+    // sun / ambient (the viewer drives this per frame — see `drive_terrain_lighting`).
+    let terrain_lit = resolve_sky(&sky_settings_from(&MIDDAY));
     let material = assets.terrain_materials.add(TerrainMaterial {
         detail0: placeholder.clone(),
         detail1: placeholder.clone(),
         detail2: placeholder.clone(),
         detail3: placeholder,
+        lighting: TerrainLighting {
+            sun_color: Vec3::from_array(terrain_lit.diffuse),
+            ambient_color: Vec3::from_array(terrain_lit.ambient),
+        },
     });
     // Iterated over `grid` rather than the map, so the entities spawn in a stable
     // order whatever the hash seed — a failure that named a different patch on

@@ -59,6 +59,9 @@ struct CloudParams {
     // Blend factor between the current and next noise textures during a day-cycle
     // transition. 0.0 until the day cycle (P22.6) drives it.
     blend_factor: f32,
+    // 1.0 to apply srgb_to_linear to the cloud colour (the default), 0.0 to skip
+    // it (the `SL_VIEWER_SKY_LINEARIZE` A/B knob).
+    linearize: f32,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> cloud: CloudParams;
@@ -107,6 +110,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.local_position = vertex.position;
     out.uv = vertex.uv;
     return out;
+}
+
+// The reference `srgb_to_linear`, applied to WL-sky (including cloud) pixels in
+// the deferred `softenLight` SKIP_ATMOS branch before the tone mapper. See the
+// matching note in `sky.wgsl`.
+fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
+    let low = cs / 12.92;
+    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
+    return mix(low, high, step(vec3<f32>(0.04045), cs));
 }
 
 // Sample the cloud noise, mixing the current and next textures by the blend factor
@@ -249,5 +261,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
     color = color * 2.0;
 
-    return vec4<f32>(color, alpha1);
+    // Linearise like the reference `softenLight` SKIP_ATMOS branch (see the note in
+    // `sky.wgsl`), so the cloud layer sits in the same space as the sky dome it
+    // composites over and is not washed out by our linear tone mapper. Gated by the
+    // `SL_VIEWER_SKY_LINEARIZE` A/B knob.
+    let out = select(color, srgb_to_linear(color), cloud.linearize > 0.5);
+    return vec4<f32>(out, alpha1);
 }

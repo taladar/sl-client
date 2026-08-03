@@ -1507,9 +1507,21 @@ const fn visible_if(up: bool) -> Visibility {
     }
 }
 
+/// Whether to linearise the sky / cloud colour before the tone mapper: on by
+/// default (the reference behaviour), off when `SL_VIEWER_SKY_LINEARIZE=0` — an
+/// A/B knob to isolate the linearisation's effect, including on what the
+/// reflection-probe / environment-map capture reads of the sky.
+fn sky_linearize() -> f32 {
+    if std::env::var("SL_VIEWER_SKY_LINEARIZE").as_deref() == Ok("0") {
+        0.0
+    } else {
+        1.0
+    }
+}
+
 /// Build the sky-shader uniform block from a sky frame plus the per-frame light
 /// direction, day/night factor, and glow factor.
-const fn sky_params(
+fn sky_params(
     sky: &SkySettings,
     lightnorm: Vec3,
     sun_up_factor: f32,
@@ -1536,6 +1548,7 @@ const fn sky_params(
         moisture_level: sky.moisture_level,
         droplet_radius: sky.droplet_radius,
         ice_level: sky.ice_level,
+        linearize: sky_linearize(),
     }
 }
 
@@ -1586,6 +1599,7 @@ pub(crate) fn cloud_params(
         cloud_variance: sky.cloud_variance,
         cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
         blend_factor: 0.0,
+        linearize: sky_linearize(),
     }
 }
 

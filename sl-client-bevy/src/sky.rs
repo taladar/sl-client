@@ -84,6 +84,11 @@ pub struct SkyParams {
     pub droplet_radius: f32,
     /// The atmosphere's ice level (scales the halo overlay).
     pub ice_level: f32,
+    /// Whether to apply the reference `srgb_to_linear` to the sky colour before it
+    /// reaches the tone mapper (`1.0` on, `0.0` off) — an A/B knob
+    /// (`SL_VIEWER_SKY_LINEARIZE`) to isolate the linearisation's effect, including
+    /// on what the reflection-probe / environment-map capture sees of the sky.
+    pub linearize: f32,
 }
 
 /// The atmospheric sky-dome material: one [`SkyParams`] uniform block plus the

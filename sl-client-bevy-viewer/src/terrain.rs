@@ -47,8 +47,47 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SlEvent, SlIdentity, SlSessionEvent,
-    TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
+    TerrainLighting, TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
 };
+
+/// The terrain lighting to seed a material with before the first
+/// [`drive_terrain_lighting`] update: a neutral sun and a mid-grey ambient (the
+/// old flat fallback), replaced every frame from the sky frame.
+const fn default_terrain_lighting() -> TerrainLighting {
+    TerrainLighting {
+        sun_color: Vec3::splat(0.8),
+        ambient_color: Vec3::splat(0.35),
+    }
+}
+
+/// Drive every region's terrain material with the sky frame's atmospheric sun
+/// (`sunlit`) and ambient (`amblit`) colours each frame, so the ground is lit like
+/// the reference legacy terrain — warm at dawn / dusk, cool at night — rather than
+/// by the raw (blue) reflection-probe irradiance. The colours are the same
+/// [`resolve_sky`](crate::sky::resolve_sky) derives for the scene directional light
+/// and the sky ambient, so the terrain agrees with the rest of the scene lighting.
+pub(crate) fn drive_terrain_lighting(
+    environment: Res<crate::environment::EnvironmentState>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+) {
+    let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
+    let position = crate::sky::day_position(&environment.settings);
+    let Some(sky) = environment
+        .settings
+        .blended_sky_settings(altitude, position)
+    else {
+        return;
+    };
+    let resolved = crate::sky::resolve_sky(&sky);
+    let lighting = TerrainLighting {
+        sun_color: Vec3::from_array(resolved.diffuse),
+        ambient_color: Vec3::from_array(resolved.ambient),
+    };
+    for (_id, material) in materials.iter_mut() {
+        material.lighting = lighting;
+    }
+}
 use sl_terrain::TerrainComposition;
 
 use crate::camera::ViewerCamera;
@@ -326,6 +365,7 @@ fn ensure_region(
             detail1: placeholder.clone(),
             detail2: placeholder.clone(),
             detail3: placeholder,
+            lighting: default_terrain_lighting(),
         }));
     }
     reconcile_region(state, region, materials);

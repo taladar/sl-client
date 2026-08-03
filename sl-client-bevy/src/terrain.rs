@@ -17,13 +17,32 @@
 use bevy::app::{App, Plugin};
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
+use bevy::math::Vec3;
 use bevy::mesh::{Mesh, MeshVertexAttribute, MeshVertexBufferLayoutRef, VertexFormat};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
+
+/// The atmospheric lighting the terrain is lit by, updated per frame from the sky
+/// frame — the reference legacy terrain's `sunlit` (the sun's atmospheric diffuse
+/// colour, warm near dawn / dusk) and `amblit` (the sky's ambient colour). Using
+/// the *atmospheric* ambient rather than the raw reflection-probe irradiance is
+/// what keeps a sun-shaded slope reading the ground's own colour instead of going
+/// sky-blue at dawn / dusk — matching `softenLight`'s legacy branch.
+#[derive(Clone, Copy, Debug, ShaderType)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root as `TerrainLighting`, where the name reads clearly"
+)]
+pub struct TerrainLighting {
+    /// The sun / moon atmospheric diffuse colour (the reference `sunlit`).
+    pub sun_color: Vec3,
+    /// The sky's ambient colour (the reference `amblit`).
+    pub ambient_color: Vec3,
+}
 
 /// The mesh vertex attribute carrying a terrain vertex's four detail-texture
 /// blend weights (one per detail texture, as produced by
@@ -70,6 +89,10 @@ pub struct TerrainMaterial {
     #[texture(6)]
     #[sampler(7)]
     pub detail3: Handle<Image>,
+    /// The atmospheric sun / ambient colours the ground is lit by (updated per
+    /// frame from the sky frame). See [`TerrainLighting`].
+    #[uniform(8)]
+    pub lighting: TerrainLighting,
 }
 
 impl Material for TerrainMaterial {

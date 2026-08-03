@@ -274,7 +274,9 @@ pub use crate::stars::{StarMaterial, StarMaterialPlugin, StarParams};
 #[cfg(feature = "bevy_pbr")]
 pub use crate::sun_disc::{SunDiscMaterial, SunDiscMaterialPlugin, SunDiscParams};
 #[cfg(feature = "bevy_pbr")]
-pub use crate::terrain::{ATTRIBUTE_TERRAIN_WEIGHTS, TerrainMaterial, TerrainMaterialPlugin};
+pub use crate::terrain::{
+    ATTRIBUTE_TERRAIN_WEIGHTS, TerrainLighting, TerrainMaterial, TerrainMaterialPlugin,
+};
 pub use crate::textures::{
     BevyTextureFetcher, planar_texgen_uv, texture_face_uv_transform, texture_uv_transform,
     to_bevy_image,

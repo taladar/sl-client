@@ -1808,6 +1808,11 @@ fn run_session(
                 center_sky_on_camera.after(position_camera),
                 drive_sky.after(position_camera),
                 apply_sky_textures,
+                // Terrain lighting (viewer-clouds-sun-occlusion): drive each region's
+                // ground with the sky frame's atmospheric sun / ambient colours, like
+                // the reference legacy terrain, after the camera so it reads the
+                // current altitude's sky frame.
+                crate::terrain::drive_terrain_lighting.after(position_camera),
                 // Sun / moon discs (P22.3): aim and colour the billboards from the same
                 // active sky frame (after the fly-camera, so they track the viewpoint),
                 // then swap each decoded disc texture into its material.

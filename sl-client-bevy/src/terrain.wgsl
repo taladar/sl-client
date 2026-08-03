@@ -28,6 +28,14 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var detail3_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(7) var detail3_sampler: sampler;
 
+// The atmospheric sun / ambient colours the ground is lit by (the reference
+// `sunlit` / `amblit`), updated per frame from the sky frame.
+struct TerrainLighting {
+    sun_color: vec3<f32>,
+    ambient_color: vec3<f32>,
+};
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> lighting: TerrainLighting;
+
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
@@ -61,14 +69,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.uv = vertex.uv;
     out.weights = vertex.weights;
     return out;
-}
-
-// Rotate a direction by a quaternion — the reflection-probe view rotation applied
-// to an environment-map sample direction (a local copy of the reference
-// `bevy_pbr::environment_map::quat_rotate`, inlined to avoid importing that
-// `#ifdef`-heavy module).
-fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
-    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
 
 @fragment
@@ -116,46 +116,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // Ambient fill: the reflection-probe environment map's diffuse irradiance
-    // (P33) in the surface-normal direction when a probe is bound, so the ground's
-    // ambient tracks the captured surroundings (sky above, terrain around) and stays
-    // consistent with the probe-lit PBR objects. A flat grey fill otherwise.
-    var ambient = vec3<f32>(0.35);
-#ifdef ENVIRONMENT_MAP
-    if (view_bindings::light_probes.view_cubemap_index >= 0) {
-        var dir = quat_rotate(view_bindings::light_probes.view_rotation, normal);
-        // Cube maps are left-handed, so negate z (matching the reference sampler).
-        dir.z = -dir.z;
-#ifdef MULTIPLE_LIGHT_PROBES_IN_ARRAY
-        let cube = u32(view_bindings::light_probes.view_cubemap_index);
-        ambient = textureSampleLevel(
-            view_bindings::diffuse_environment_maps[cube],
-            view_bindings::environment_map_sampler,
-            dir,
-            0.0,
-        ).rgb;
-#else
-        ambient = textureSampleLevel(
-            view_bindings::diffuse_environment_map,
-            view_bindings::environment_map_sampler,
-            dir,
-            0.0,
-        ).rgb;
-#endif
-        // Scale by the probe intensity *and* the view exposure — the two factors the
-        // PBR path applies to an object's image-based lighting — so this ambient is
-        // the same physical quantity the probe gives a prim standing on this ground.
-        // The viewer calibrates the probe intensity to `gain / exposure` (P33.3), so
-        // this product is the gain: at the calibrated gain of 1 the ambient is exactly
-        // the irradiance the captured surroundings cast, in the linear space this
-        // shader writes and the tone mapper later reads.
-        ambient = ambient
-            * view_bindings::light_probes.intensity_for_view
-            * view_bindings::view.exposure;
-    }
-#endif
-    // Ambient fill plus the shadowed direct (sun / moon) term.
+    // Lighting, ported from the reference `softenLight` legacy branch: the sky's
+    // *atmospheric* ambient (`amblit`) plus the sun's atmospheric diffuse colour
+    // (`sunlit`) times N·L, both driven per frame from the sky frame. Using the
+    // atmospheric ambient rather than the raw reflection-probe irradiance is what
+    // keeps a sun-shaded slope reading the ground's own colour at dawn / dusk —
+    // the atmospheric ambient is a warm, low-saturation colour, where the raw blue
+    // sky the probe captures over-cools the ground (`viewer-clouds-sun-occlusion`).
+    // The reference's small additional reflection-probe term and its classic-mode
+    // gamma blend are not reproduced — a documented simplification.
     let diffuse = max(dot(normal, sun_dir), 0.0);
-    let light = ambient + vec3<f32>(0.65 * diffuse * shadow);
+    let light = lighting.ambient_color + lighting.sun_color * (diffuse * shadow);
     return vec4<f32>(base.rgb * light, 1.0);
 }
