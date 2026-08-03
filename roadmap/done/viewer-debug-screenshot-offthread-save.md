@@ -2,7 +2,7 @@
 id: viewer-debug-screenshot-offthread-save
 title: Offload the debug screenshot PNG encode off the main thread
 topic: viewer
-status: ideas
+status: done
 origin: viewer-clouds-sun-occlusion-horizon-contact capture runs (2026-08-03)
 refs: [viewer-clouds-sun-occlusion-horizon-contact]
 ---
@@ -23,3 +23,11 @@ affects capture runs, not normal use.
 `IoTaskPool` (as the user-facing Snapshot floater does) instead of Bevy's
 synchronous `save_to_disk`, so captures don't hitch the frame and the harness
 better reflects live behaviour. Purely a debug-tooling improvement.
+
+**Resolution:** `screenshot.rs` now observes `ScreenshotCaptured` with
+`save_off_thread`, which decodes the frame to RGB on the frame thread (dropping
+the HDR-brightness alpha, as `save_to_disk` did) and hands the PNG deflate +
+disk write to `IoTaskPool` as a `ScreenshotSaveTask`. `poll_screenshot_saves`
+drains finished writes each frame and logs the saved path / any write error. To
+keep a process-exit race from truncating the final PNG(s), `capture_screenshots`
+holds the post-capture logout until no `ScreenshotSaveTask` is still in flight.

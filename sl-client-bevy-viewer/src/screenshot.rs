@@ -7,11 +7,22 @@
 //! settle — then quits. This lets an animated avatar be inspected offline,
 //! frame by frame, without an operator sitting at the live window, and (since it
 //! leaves the cursor un-grabbed) without hijacking the desktop it runs on.
+//!
+//! The per-frame PNG encode + disk write is done **off the main thread** on Bevy's
+//! [`IoTaskPool`] (like the user-facing Snapshot floater), rather than with Bevy's
+//! synchronous `save_to_disk` observer. A full-resolution PNG deflate on the frame
+//! thread stalls the frame and spikes the next frame's `Time::delta`, which made
+//! time-based animations (the water surface, driven by `time.elapsed_secs()`) jump
+//! on the catch-up frame — the "water briefly accelerates then normal" artifact
+//! seen during capture runs. Off-thread, the capture costs the frame nothing past
+//! the (already off-thread) GPU read-back, so the harness better reflects live
+//! behaviour.
 
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::SlCommand;
 
 use crate::session::{ViewerSession, request_logout};
@@ -65,8 +76,19 @@ impl ScreenshotSchedule {
     }
 }
 
+/// A pending off-thread screenshot write, spawned by [`capture_screenshots`] and
+/// drained by [`poll_screenshot_saves`]. The task yields the written path on
+/// success, or a formatted error string, so a failed write surfaces in the log
+/// rather than being swallowed.
+#[derive(Component)]
+pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
+
 /// Capture the primary window to `frame_NNN.png` on the schedule, then request a
-/// clean grid logout once the last frame is taken.
+/// clean grid logout once the last frame is taken **and** its write has finished.
+///
+/// The PNG encode + disk write is offloaded to [`IoTaskPool`]; the logout is held
+/// until every pending [`ScreenshotSaveTask`] has drained so a race between the
+/// last frame's write and process exit can't truncate the final PNG(s).
 ///
 /// The logout (rather than an immediate `AppExit`) is what lets the run leave the
 /// avatar cleanly logged out: an abrupt process exit strands the grid session, and
@@ -79,6 +101,7 @@ pub(crate) fn capture_screenshots(
     mut commands: Commands,
     mut session: ResMut<ViewerSession>,
     mut sl_commands: MessageWriter<SlCommand>,
+    pending_saves: Query<(), With<ScreenshotSaveTask>>,
 ) {
     let now = time.elapsed_secs();
     let start_delay = schedule.start_delay;
@@ -87,6 +110,11 @@ pub(crate) fn capture_screenshots(
         return;
     }
     if schedule.index >= schedule.max_frames {
+        // Don't log out (and so quit) while a frame's PNG is still being written
+        // off-thread — dropping the task at exit would truncate the file.
+        if !pending_saves.is_empty() {
+            return;
+        }
         info!(
             "screenshot: captured {} frames; logging out",
             schedule.index
@@ -100,7 +128,59 @@ pub(crate) fn capture_screenshots(
     info!("screenshot: capturing {}", path.display());
     commands
         .spawn(Screenshot::primary_window())
-        .observe(save_to_disk(path));
+        .observe(save_off_thread(path));
     schedule.index = schedule.index.saturating_add(1);
     schedule.next_at = Some(now + schedule.interval);
+}
+
+/// Build the [`ScreenshotCaptured`] observer that writes one captured frame to
+/// `path` off the main thread.
+///
+/// The frame is decoded to an opaque RGB image on the frame thread (dropping the
+/// HDR alpha, which carries brightness — the same as Bevy's `save_to_disk`), then
+/// the heavy PNG deflate + disk write is handed to [`IoTaskPool`] via a
+/// [`ScreenshotSaveTask`] that [`poll_screenshot_saves`] drains.
+fn save_off_thread(path: PathBuf) -> impl FnMut(On<ScreenshotCaptured>, Commands) {
+    move |captured, mut commands| {
+        let capture_entity = captured.entity;
+        let dynamic = match captured.image.clone().try_into_dynamic() {
+            // Discard the alpha channel (HDR brightness) so the PNG looks right.
+            Ok(dynamic) => image::DynamicImage::ImageRgb8(dynamic.to_rgb8()),
+            Err(error) => {
+                error!("screenshot: cannot decode capture: {error}");
+                commands.entity(capture_entity).despawn();
+                return;
+            }
+        };
+        let path = path.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let format = image::ImageFormat::from_path(&path).map_err(|error| error.to_string())?;
+            dynamic
+                .save_with_format(&path, format)
+                .map_err(|error| error.to_string())?;
+            Ok(path)
+        });
+        commands.spawn(ScreenshotSaveTask(task));
+        // One-shot; drop the capture entity so a save does not leak one.
+        commands.entity(capture_entity).despawn();
+    }
+}
+
+/// Poll the off-thread screenshot writes; when one finishes, log the saved path
+/// (or the write error), then drop the task entity. Runs every frame; a write in
+/// flight costs one cheap non-blocking poll.
+pub(crate) fn poll_screenshot_saves(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &mut ScreenshotSaveTask)>,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = block_on(poll_once(&mut task.0)) else {
+            continue;
+        };
+        match result {
+            Ok(path) => info!("screenshot: saved {}", path.display()),
+            Err(error) => error!("screenshot: save failed: {error}"),
+        }
+        commands.entity(entity).despawn();
+    }
 }

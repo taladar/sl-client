@@ -334,7 +334,7 @@ use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
-use crate::screenshot::{ScreenshotSchedule, capture_screenshots};
+use crate::screenshot::{ScreenshotSchedule, capture_screenshots, poll_screenshot_saves};
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
@@ -1941,7 +1941,7 @@ fn run_session(
             warn!("failed to create screenshot dir {}: {error}", dir.display());
         }
         app.insert_resource(ScreenshotSchedule::new(dir.to_path_buf()))
-            .add_systems(Update, capture_screenshots);
+            .add_systems(Update, (capture_screenshots, poll_screenshot_saves));
     }
     let _exit = app.run();
     app.world_mut()

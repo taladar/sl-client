@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 58 |
+| ideas | 57 |
 | ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 671 |
+| done | 672 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
 
-## ideas (58)
+## ideas (57)
 
 ### viewer
 
@@ -32,8 +32,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
   Selection-beam customization
-- [`viewer-debug-screenshot-offthread-save`](ideas/viewer-debug-screenshot-offthread-save.md)
-  — Offload the debug screenshot PNG encode off the main thread
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
 - [`viewer-hdri-environment`](ideas/viewer-hdri-environment.md) — HDRI
@@ -1147,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (671)
+## done (672)
 
 ### protocol
 
@@ -1349,6 +1347,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
   — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
   specular
+- [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
+  — Offload the debug screenshot PNG encode off the main thread
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
   dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-dialog-offers-invites`](done/viewer-dialog-offers-invites.md) —
