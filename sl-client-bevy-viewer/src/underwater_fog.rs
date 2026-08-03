@@ -257,7 +257,13 @@ impl Plugin for UnderwaterFogPlugin {
                 underwater_fog_system
                     .in_set(Core3dSystems::PostProcess)
                     .in_set(UnderwaterFogPass)
-                    .before(tonemapping),
+                    .before(tonemapping)
+                    // Pin the post-process order fog → bloom → `SlTonemap` fully:
+                    // all three run in `PostProcess`, and without this edge fog and
+                    // bloom are unordered, so Bevy's parallel executor runs them in a
+                    // different order on random frames — flipping the view-target
+                    // ping-pong parity and flickering the whole screen.
+                    .before(bevy::post_process::bloom::bloom),
             );
     }
 }

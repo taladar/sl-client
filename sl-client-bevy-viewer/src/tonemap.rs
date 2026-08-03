@@ -264,7 +264,12 @@ impl Plugin for SlTonemapPlugin {
                 Core3d,
                 sl_tonemap_system
                     .in_set(Core3dSystems::PostProcess)
-                    .after(UnderwaterFogPass),
+                    .after(UnderwaterFogPass)
+                    // Bloom (the SL glow pass) also runs in `PostProcess`, but only
+                    // orders itself before Bevy's *own* tonemapping (which we disable),
+                    // so pin ours after it: bloom must add its glow to the linear HDR
+                    // scene before this tone map compresses it.
+                    .after(bevy::post_process::bloom::bloom),
             );
     }
 }

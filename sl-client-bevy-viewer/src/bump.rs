@@ -9,10 +9,11 @@
 //! * **Fullbright** — the face is unlit (shown at full texture brightness,
 //!   ignoring scene lighting). Maps exactly onto [`StandardMaterial::unlit`].
 //! * **Glow** (0..1) — the face emits into the reference viewer's glow buffer and
-//!   blooms. Approximated as an additive [`StandardMaterial::emissive`] tinted by
-//!   the face colour (the viewer has no bloom pass, so a glowing face simply reads
-//!   brighter; the glow is uniform across the face rather than following the
-//!   texture, a documented approximation).
+//!   blooms. Rendered as an additive [`StandardMaterial::emissive`] tinted by the
+//!   face colour and scaled so a glowing face reads above the glow pass's
+//!   luminance threshold, so it blooms through [`crate::bloom`] (the screen-space
+//!   port of the reference `RenderGlow` pipeline). The glow is uniform across the
+//!   face rather than following the texture, a documented approximation.
 //! * **Shiny** (none / low / medium / high) — an environment-reflection specular
 //!   sheen. The reference packs it as an environment intensity
 //!   (`SHININESS_TO_ALPHA` = `[0, .25, .5, .75]`) that a cube-map shiny pass
@@ -75,9 +76,10 @@ const SHINY_ROUGHNESS_MIN: f32 = 0.15;
 /// throws a brighter highlight.
 const SHINY_REFLECTANCE_GAIN: f32 = 0.5;
 
-/// Multiplier from a face's glow (0..1) to its emissive strength. The viewer has
-/// no bloom pass, so a modest boost keeps a fully-glowing face bright without
-/// blowing out.
+/// Multiplier from a face's glow (0..1) to its emissive strength. Sized so a
+/// fully-glowing face reads above the glow pass's luminance threshold
+/// ([`crate::bloom`], the reference `RenderGlowMinLuminance` = 1.0) and blooms,
+/// without blowing out at lower glow amounts.
 const GLOW_EMISSIVE_SCALE: f32 = 2.0;
 
 /// The per-texel height scale of the generated bump normal map: larger values
