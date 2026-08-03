@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 58 |
 | ready | 258 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 6 |
-| done | 670 |
+| bugs | 7 |
+| done | 671 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1140** |
+| **total** | **1145** |
 
-## ideas (55)
+## ideas (58)
 
 ### viewer
 
@@ -32,6 +32,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
   Selection-beam customization
+- [`viewer-debug-screenshot-offthread-save`](ideas/viewer-debug-screenshot-offthread-save.md)
+  — Offload the debug screenshot PNG encode off the main thread
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
 - [`viewer-hdri-environment`](ideas/viewer-hdri-environment.md) — HDRI
@@ -94,8 +96,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
+- [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
+  Linearize the star field like the sky / clouds
 - [`viewer-straddling-transparency-oit`](ideas/viewer-straddling-transparency-oit.md)
   — Per-pixel ordering for translucent objects straddling the waterline
+- [`viewer-terrain-ambient-probe-classic-fidelity`](ideas/viewer-terrain-ambient-probe-classic-fidelity.md)
+  — Terrain lighting — add the reference probe term + classic-mode blend
 
 ### server
 
@@ -1115,7 +1121,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (6)
+## bugs (7)
 
 ### protocol
 
@@ -1130,16 +1136,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
-- [`viewer-clouds-sun-occlusion-horizon-contact`](bugs/viewer-clouds-sun-occlusion-horizon-contact.md)
-  — Clouds wrong in front of the sun, and touch the water at the horizon
+- [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
+  — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-sun-disc-grey-aditi-hdr-scale`](bugs/viewer-sun-disc-grey-aditi-hdr-scale.md)
+  — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (670)
+## done (671)
 
 ### protocol
 
@@ -1334,6 +1342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   overlay fade / decay
 - [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
   Reusable clickable avatar-name / group-name widgets
+- [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
+  — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
