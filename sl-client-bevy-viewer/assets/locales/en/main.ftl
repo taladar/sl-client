@@ -1210,6 +1210,55 @@ notification-cant-drop-attachment-insufficient-resources = Failed to drop attach
 notification-cant-drop-object-full-parcel = Cannot drop object here. Parcel is full.
 notification-cant-create-outfit = Cannot create outfit right now. Try again in a minute.
 
+## Avatar movement (viewer-notification-catalogue-avatar-movement): animation
+## upload, the animation overrider (AO), movement-mode toggles and the sit /
+## stand refusals. Bodies follow the reference notifications.xml; deviations
+## are noted per entry.
+
+notification-button-remove = Remove
+notification-write-animation-fail = There was a problem writing animation data. Please try again later.
+# The reference body names the viewer via [APP_NAME]; nothing binds that token
+# here, so the body says "The viewer" instead.
+notification-do-not-support-bulk-animation-upload = The viewer does not currently support bulk upload of BVH format animation files.
+notification-new-ao-set = Specify a name for the new AO set: (The name may contain any ASCII character, except for ":" or "|")
+notification-new-ao-set-default = New AO Set
+notification-new-ao-cant-contain-non-ascii = Could not create new AO set "[AO_SET_NAME]". The name may only contain ASCII characters, excluding ":" and "|".
+notification-rename-ao-must-be-ascii = Could not rename AO set "[AO_SET_NAME]". The name may only contain ASCII characters, excluding ":" and "|".
+notification-new-ao-name-cant-exist = An animation set with this name already exists.
+notification-remove-ao-set = Remove AO set "[AO_SET_NAME]" from the list?
+notification-ao-foreign-items-found = The animation overrider found at least one item that did not belong in the configuration. Please check your "Lost and Found" folder for items that were moved out of the animation overrider configuration.
+notification-confirm-poser-overwrite = Overwrite existing pose “[POSE_NAME]”?
+notification-first-override-keys = Your movement keys are now being handled by an object. Try the arrow keys or AWSD to see what they do. Some objects (like guns) require you to go into mouselook to use them. Press 'M' to do this.
+notification-sit-fail-cant-move = You cannot sit because you cannot move at this time.
+notification-sit-fail-not-allowed-on-land = You cannot sit because you are not allowed on that land.
+notification-sit-fail-not-same-region = Try moving closer. Can't sit on object because it is not in the same region as you.
+notification-stand-denied-by-object = '[OBJECT_NAME]' will not allow you to stand at this time.
+notification-resit-denied-by-object = '[OBJECT_NAME]' will not allow you to change your seat at this time.
+notification-cant-sit-no-suitable-surface = There is no suitable surface to sit on, try another spot.
+notification-cant-sit-no-room = No room to sit here, try another spot.
+notification-ao-import-complete = Animation Overrider notecard import complete!
+notification-ao-import-set-already-exists = An animation set with this name already exists.
+notification-ao-import-permission-denied = Insufficient permissions to read notecard.
+notification-ao-import-create-set-failed = Error while creating import set.
+notification-ao-import-download-failed = Could not download notecard.
+notification-ao-import-no-text = Notecard is empty or unreadable.
+notification-ao-import-no-folder = Couldn't find folder to read the animations.
+notification-ao-import-no-state-prefix = Notecard line [LINE] has no valid [ state prefix.
+notification-ao-import-no-valid-delimiter = Notecard line [LINE] has no valid ] delimiter.
+notification-ao-import-state-name-not-found = State name [NAME] not found.
+notification-ao-import-animation-not-found = Couldn't find animation [NAME]. Please make sure it's present in the same folder as the import notecard.
+notification-ao-import-invalid = Notecard didn't contain any usable data. Aborting import.
+notification-ao-import-retry-create-set = Could not create import folder for animation set [NAME]. Retrying ...
+notification-ao-import-abort-create-set = Could not create import folder for animation set [NAME]. Giving up.
+notification-ao-import-link-failed = Creating animation link for animation "[NAME]" failed!
+notification-phantom-on = Phantom mode on.
+notification-phantom-off = Phantom mode off.
+notification-movelock-enabled = Movelock enabled. Use Avatar > Movement > Movelock to disable.
+notification-movelock-disabled = Movelock disabled.
+notification-movelock-enabling = Enabling movelock...
+notification-movelock-disabling = Disabling movelock...
+notification-flight-assist-enabled = Flight Assist is enabled
+
 notification-overflow =
     { $count ->
         [one] { $count } more

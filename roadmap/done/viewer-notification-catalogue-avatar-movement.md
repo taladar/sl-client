@@ -2,7 +2,7 @@
 id: viewer-notification-catalogue-avatar-movement
 title: Notification catalogue — avatar movement entries
 topic: viewer
-status: ready
+status: done
 origin: notification-host coverage audit (2026-07-29) — full notifications.xml
   accounting; one follow-up per feature family
 blocked_by: [viewer-ui-notification-host]
@@ -30,3 +30,23 @@ This is the **data** entry only; the owning feature raises each notification at
 its call-site and reads the response. Entries whose reference form carries a
 feature callback (the maturity `_Change` / `_AdultsOnlyContent` variants,
 dynamic button lists) wait on that feature's plumbing.
+
+## Done
+
+39 of the 40 manifest rows ported (flipped to `ported` in the coverage
+TSV): the animation-upload failures and AO set-management prompts
+(`NewAOSet` reuses the toast text-input field the appearance-wearables
+task added), the scripted-control notice, the server-keyed sit / stand
+refusals (pinned in the `keyed_server_alerts_are_catalogued` test), the
+15-entry AO notecard-import progress tips and the phantom / movelock /
+flight-assist toggle tips. One new button form, `REMOVE_CANCEL_FORM`
+(stable `OK` / `Cancel` names under a "Remove" label).
+
+The 40th row, `notifyignore`, turned out not to be a notification at all —
+it is a `<template>` element (an ignore-only form template) the coverage
+audit swept up; its TSV row is re-tagged with a new `excluded` status,
+documented in the TSV header.
+
+Deviations, commented at the entry: `[APP_NAME]` reworded ("The viewer")
+in `DoNotSupportBulkAnimationUpload`; `ConfirmPoserOverwrite`'s "Okay"
+label uses the shared OK button label.

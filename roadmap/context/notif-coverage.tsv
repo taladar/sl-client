@@ -2,7 +2,9 @@
 # Every reference notifications.xml entry -> owning family, status,
 # owning task. status: ported (in this task's catalogue) | done (a
 # bespoke dialog task already handles it) | followup (its family's
-# follow-up task owns porting it). Regenerate notes in the task file.
+# follow-up task owns porting it) | excluded (not actually a
+# notification: a form-template element the audit swept up).
+# Regenerate notes in the task file.
 name	family	status	owner
 MissingAlert	diagnostics	followup	viewer-notification-catalogue-diagnostics
 FloaterNotFound	diagnostics	followup	viewer-notification-catalogue-diagnostics
@@ -44,7 +46,7 @@ AlertMerchantListingActivateRequired	marketplace	followup	viewer-notification-ca
 AlertMerchantStockFolderSplit	marketplace	followup	viewer-notification-catalogue-marketplace
 AlertMerchantStockFolderEmpty	marketplace	followup	viewer-notification-catalogue-marketplace
 AlertMerchantVersionFolderEmpty	marketplace	followup	viewer-notification-catalogue-marketplace
-WriteAnimationFail	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+WriteAnimationFail	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 UploadAuctionSnapshotFail	snapshot-social	followup	viewer-notification-catalogue-snapshot-social
 UnableToViewContentsMoreThanOne	objects-edit	followup	viewer-notification-catalogue-objects-edit
 SaveClothingBodyChanges	appearance-wearables	ported	viewer-notification-catalogue-appearance-wearables
@@ -215,7 +217,7 @@ CorruptedProtectedDataStore	security	followup	viewer-notification-catalogue-secu
 CorruptResourceFile	diagnostics	followup	viewer-notification-catalogue-diagnostics
 UnknownResourceFileVersion	diagnostics	followup	viewer-notification-catalogue-diagnostics
 UnableToCreateOutputFile	diagnostics	followup	viewer-notification-catalogue-diagnostics
-DoNotSupportBulkAnimationUpload	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+DoNotSupportBulkAnimationUpload	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 CannotUploadReason	diagnostics	followup	viewer-notification-catalogue-diagnostics
 CannotUploadSnapshotEmailTooBig	snapshot-social	followup	viewer-notification-catalogue-snapshot-social
 CannotUploadSnapshotWebTooBig	snapshot-social	followup	viewer-notification-catalogue-snapshot-social
@@ -338,7 +340,7 @@ AvatarMovedDesired	teleport	followup	viewer-notification-catalogue-teleport
 AvatarMovedLast	teleport	followup	viewer-notification-catalogue-teleport
 AvatarMovedHome	teleport	followup	viewer-notification-catalogue-teleport
 ClothingLoading	appearance-wearables	ported	viewer-notification-catalogue-appearance-wearables
-notifyignore	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+notifyignore	avatar-movement	excluded	viewer-notification-catalogue-avatar-movement
 FirstRun	login-session	followup	viewer-notification-catalogue-login-session
 LoginCantRemoveUsername	login-session	followup	viewer-notification-catalogue-login-session
 LoginCantRemoveCurUsername	login-session	followup	viewer-notification-catalogue-login-session
@@ -776,7 +778,7 @@ ScriptDialogGroup	scripts	done	viewer-dialog-lldialog
 FirstBalanceIncrease	money-economy	followup	viewer-notification-catalogue-money-economy
 FirstBalanceDecrease	money-economy	followup	viewer-notification-catalogue-money-economy
 BuyLindenDollarSuccess	money-economy	followup	viewer-notification-catalogue-money-economy
-FirstOverrideKeys	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+FirstOverrideKeys	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 FirstSandbox	objects-edit	followup	viewer-notification-catalogue-objects-edit
 MaxListSelectMessage	misc	followup	viewer-notification-catalogue-misc
 VoiceInviteP2P	voice	followup	viewer-notification-catalogue-voice
@@ -920,38 +922,38 @@ ConfirmClearDebugSearchURL	preferences	followup	viewer-notification-catalogue-pr
 ConfirmPickDebugSearchURL	preferences	followup	viewer-notification-catalogue-preferences
 ConfirmRemoveGrid	login-session	followup	viewer-notification-catalogue-login-session
 CanNotRemoveConnectedGrid	login-session	followup	viewer-notification-catalogue-login-session
-NewAOSet	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-NewAOCantContainNonASCII	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-RenameAOMustBeASCII	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-NewAONameCantExist	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-RemoveAOSet	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOForeignItemsFound	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportComplete	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportSetAlreadyExists	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportPermissionDenied	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportCreateSetFailed	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportDownloadFailed	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportNoText	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportNoFolder	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportNoStatePrefix	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportNoValidDelimiter	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportStateNameNotFound	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportAnimationNotFound	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportInvalid	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportRetryCreateSet	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportAbortCreateSet	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-AOImportLinkFailed	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+NewAOSet	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+NewAOCantContainNonASCII	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+RenameAOMustBeASCII	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+NewAONameCantExist	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+RemoveAOSet	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOForeignItemsFound	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportComplete	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportSetAlreadyExists	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportPermissionDenied	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportCreateSetFailed	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportDownloadFailed	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportNoText	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportNoFolder	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportNoStatePrefix	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportNoValidDelimiter	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportStateNameNotFound	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportAnimationNotFound	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportInvalid	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportRetryCreateSet	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportAbortCreateSet	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+AOImportLinkFailed	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 SendSysinfoToIM	diagnostics	followup	viewer-notification-catalogue-diagnostics
 BlockLoginInfo	login-session	followup	viewer-notification-catalogue-login-session
 TestversionExpired	login-session	followup	viewer-notification-catalogue-login-session
 FireStormReqInfo	diagnostics	followup	viewer-notification-catalogue-diagnostics
-PhantomOn	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-PhantomOff	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-MovelockEnabled	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-MovelockDisabled	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-MovelockEnabling	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-MovelockDisabling	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-FlightAssistEnabled	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+PhantomOn	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+PhantomOff	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+MovelockEnabled	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+MovelockDisabled	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+MovelockEnabling	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+MovelockDisabling	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+FlightAssistEnabled	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 FirestormClearSettingsPrompt	preferences	followup	viewer-notification-catalogue-preferences
 SettingsWillClear	preferences	followup	viewer-notification-catalogue-preferences
 FSSetTitleRegion	groups	followup	viewer-notification-catalogue-groups
@@ -993,9 +995,9 @@ NowOwnObject	objects-edit	followup	viewer-notification-catalogue-objects-edit
 NowOwnObjectInv	objects-edit	followup	viewer-notification-catalogue-objects-edit
 CantRezOnLand	objects-edit	followup	viewer-notification-catalogue-objects-edit
 RezFailTooManyRequests	objects-edit	followup	viewer-notification-catalogue-objects-edit
-SitFailCantMove	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-SitFailNotAllowedOnLand	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-SitFailNotSameRegion	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+SitFailCantMove	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+SitFailNotAllowedOnLand	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+SitFailNotSameRegion	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 ChatHistoryIsBusyAlert	im-chat	followup	viewer-notification-catalogue-im-chat
 NoNewObjectRegionFull	objects-edit	followup	viewer-notification-catalogue-objects-edit
 FailedToPlaceObject	objects-edit	ported	viewer-notification-catalogue
@@ -1088,8 +1090,8 @@ TeleportedByAttachment	teleport	followup	viewer-notification-catalogue-teleport
 TeleportedByObjectOnParcel	teleport	followup	viewer-notification-catalogue-teleport
 TeleportedByObjectOwnedBy	teleport	followup	viewer-notification-catalogue-teleport
 TeleportedByObjectUnknownUser	teleport	followup	viewer-notification-catalogue-teleport
-StandDeniedByObject	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-ResitDeniedByObject	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+StandDeniedByObject	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+ResitDeniedByObject	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 CantCreateObjectRegionFull	objects-edit	followup	viewer-notification-catalogue-objects-edit
 CantCreateAnimatedObjectTooLarge	objects-edit	followup	viewer-notification-catalogue-objects-edit
 CantAttackMultipleObjOneSpot	appearance-wearables	ported	viewer-notification-catalogue-appearance-wearables
@@ -1161,8 +1163,8 @@ LandHasBeenDivided	land-parcel	followup	viewer-notification-catalogue-land-parce
 PassPurchased	land-parcel	followup	viewer-notification-catalogue-land-parcel
 RegionDisallowsClassifieds	landmarks-navigation	followup	viewer-notification-catalogue-landmarks-navigation
 LandPassExpireSoon	land-parcel	followup	viewer-notification-catalogue-land-parcel
-CantSitNoSuitableSurface	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
-CantSitNoRoom	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+CantSitNoSuitableSurface	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
+CantSitNoRoom	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 ClaimObjectFailedNoPermission	objects-edit	followup	viewer-notification-catalogue-objects-edit
 ClaimObjectFailedNoMoney	money-economy	followup	viewer-notification-catalogue-money-economy
 CantDeedGroupLand	land-parcel	followup	viewer-notification-catalogue-land-parcel
@@ -1316,7 +1318,7 @@ WarnScriptedCamera	scripts	followup	viewer-notification-catalogue-scripts
 UngroupFolder	inventory	followup	viewer-notification-catalogue-inventory
 ImageEmptyAlphaLayer	objects-edit	followup	viewer-notification-catalogue-objects-edit
 WhitelistReminder	misc	followup	viewer-notification-catalogue-misc
-ConfirmPoserOverwrite	avatar-movement	followup	viewer-notification-catalogue-avatar-movement
+ConfirmPoserOverwrite	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 FSLargeOutfitsWarningInThisSession	appearance-wearables	ported	viewer-notification-catalogue-appearance-wearables
 PrimfeedLoginRequestFailed	snapshot-social	followup	viewer-notification-catalogue-snapshot-social
 PrimfeedAuthorizationFailed	snapshot-social	followup	viewer-notification-catalogue-snapshot-social
