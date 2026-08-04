@@ -127,5 +127,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // gamma blend are not reproduced — a documented simplification.
     let diffuse = max(dot(normal, sun_dir), 0.0);
     let light = lighting.ambient_color + lighting.sun_color * (diffuse * shadow);
-    return vec4<f32>(base.rgb * light, 1.0);
+    // Alpha carries the SL glow mask (the viewer's `glow` pass): terrain never
+    // glows, so it writes 0. The surface is opaque, so this alpha is not a blend
+    // factor.
+    return vec4<f32>(base.rgb * light, 0.0);
 }

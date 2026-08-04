@@ -115,14 +115,21 @@ faithful glow port started:**
     (`SL_VIEWER_ENABLE_GLOW=1`), coexisting with the Bevy `Bloom` so the scene
     is unchanged until the mask is fed. Env knobs `SL_VIEWER_GLOW_STRENGTH` /
     `_WIDTH`.
-  - **Step 2 (next)** — feed the alpha glow mask: every **opaque** material
-    (`face_material` + a new `glow` scalar on `SlFaceExt` set from the face
-    glow, replacing the P27.4 glow→emissive hack; `sky`/`terrain`) writes the
-    mask (0 for non-glow) to `out.color.a`; every **alpha-blended** material
-    (`sun_disc`/`clouds`/`water`/`stars`/`particle`/`parcel_borders`) keeps
-    coverage for its colour blend but overrides the **alpha** blend component to
-    `(Zero, One)` (via each material's `specialize`) so it doesn't corrupt the
-    mask. Inert while glow stays disabled.
+  - **Step 2a DONE** — feed the alpha glow mask on the main paths: a `glow`
+    scalar on `SlFaceParams` (sentinel `< 0` = "leave alpha untouched", so a
+    **blend** face keeps its coverage), set to the face glow (`>= 0`) for an
+    **opaque / mask** face at build (`textures::face_material`, where the alpha
+    mode is known); `face_material.wgsl` writes it to `out.color.a`. `sky.wgsl`
+    and `terrain.wgsl` (both opaque) now write alpha `0`. All inert while glow
+    is disabled (nothing else reads the scene alpha). The P27.4 glow→emissive
+    stays for now so the current Bevy `Bloom` is unchanged; Step 3 removes it.
+  - **Step 2b (next)** — finish the mask so it is correct when enabled: the
+    other **opaque** face build sites (`avatars`, `edit_material`) must also set
+    `glow` (an untouched opaque face keeps alpha `1` and would bloom); and every
+    **alpha-blended** material (`sun_disc`/`clouds`/`water`/`stars`/`particle`/
+    `parcel_borders`) must override its **alpha** blend component to
+    `(Zero, One)` (via each material's `specialize`) so its coverage does not
+    corrupt the mask.
   - **Step 3 (next)** — flip the glow default on, remove the Bevy `Bloom`
     component + `bloom.rs`, retarget `exposure.rs`'s `.after(bloom)` ordering,
     register the `RenderGlow*` settings on the glow module. Live-verify on aditi

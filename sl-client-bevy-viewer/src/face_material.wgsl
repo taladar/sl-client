@@ -47,6 +47,12 @@ struct SlFaceParams {
     anim_mode: u32,
     glossiness: f32,
     env_intensity: f32,
+    // The faithful SL glow mask (glow.rs): the face's glow scalar, written into the
+    // fragment's alpha channel for an opaque / mask face so the glow pass blooms it.
+    // A negative value is the sentinel "leave alpha untouched" — used for a blend
+    // face, whose alpha is its coverage. Set on the CPU where the alpha mode is
+    // known (`textures::face_material`).
+    glow: f32,
 }
 
 // Must match the `MAP_FLAG_*` constants in face_material.rs.
@@ -504,5 +510,14 @@ fn fragment(
     }
 
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+
+    // The faithful SL glow mask (`glow.rs`): an opaque / mask face writes its glow
+    // scalar into alpha (`0` for a non-glowing face), which the glow pass reads as
+    // the per-face glow mask. A blend face's alpha is its coverage, so the sentinel
+    // `glow < 0` leaves it untouched (set on the CPU where the alpha mode is known).
+    // Inert until the glow pass is enabled — nothing else reads the scene alpha.
+    if sl.glow >= 0.0 {
+        out.color.a = sl.glow;
+    }
     return out;
 }

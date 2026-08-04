@@ -203,5 +203,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // legacy sky (a no-op), > 1.0 for an EEP probe-ambiance sky so bright haze
     // near the sun expands into HDR and blows out under the tone mapper.
     out = out * sky.sky_hdr_scale;
-    return vec4<f32>(out, 1.0);
+    // Alpha carries the SL glow mask (the viewer's `glow` pass): the sky never
+    // glows, so it writes 0 — matching the reference, where the WL sky's SKIP_ATMOS
+    // pixels get `frag_color.a = 0` and so feed nothing to the glow buffer. The dome
+    // is opaque, so this alpha is not a blend factor.
+    return vec4<f32>(out, 0.0);
 }

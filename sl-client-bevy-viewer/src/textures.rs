@@ -1040,6 +1040,14 @@ pub(crate) fn compose_face_material(
     // extension to inert (a fresh Blinn-Phong composition carries no per-map
     // transforms / legacy specular until the legacy pipeline populates it).
     *slot = inert_face_material(material);
+    // The faithful SL glow mask (`crate::glow`): an opaque / mask face writes its
+    // glow scalar into alpha for the glow pass to bloom (`0` for a non-glowing
+    // face); a blend face keeps the sentinel `-1` from `SlFaceParams::inert` so its
+    // coverage alpha is left untouched. Set here, where the resolved alpha mode is
+    // known. Inert until the glow pass is enabled.
+    if matches!(slot.base.alpha_mode, AlphaMode::Opaque | AlphaMode::Mask(_)) {
+        slot.extension.params.glow = face.glow;
+    }
     if has_texture {
         // Track this material so a later level-of-detail re-upload can mark it
         // changed and rebuild its bind group (P21.1) — see `PrimTextures::materials`.
