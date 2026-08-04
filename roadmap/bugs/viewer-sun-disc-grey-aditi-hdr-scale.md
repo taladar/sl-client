@@ -153,10 +153,14 @@ faithful glow port started:**
     gated `FaceMaterial`, `sky` and `terrain` (mask 0), so nothing over-blooms.
     Validated: `cargo check` + `clippy --all-targets` clean, bump + a
     render-readback face test pass.
-    - **Needs aditi live-verify** (the first step with a visible effect):
-      glow-flagged / fullbright / emissive builds should bloom like Firestorm
-      across sky settings. This is the in-world-fidelity goal — **not** the
-      grey-disc fix (the disc doesn't feed the SL glow).
+    - **Aditi live-verified (2026-08-04):** glow-flagged / fullbright / emissive
+      builds (neon signs, emissive prims, fullbright blobs) bloom like
+      Firestorm; distribution correct. Fixed one bug found live — the glow
+      samplers used wgpu's `SamplerDescriptor::default()` (**Nearest**), so the
+      512² buffer was point-sampled and the bloom looked blocky; switched to
+      **Linear** mag/min (the reference's trilinear glow sample) and it is
+      smooth. This is the in-world-fidelity goal — **not** the grey-disc fix
+      (the disc doesn't feed the SL glow).
     - **Follow-ups:** particle glow-mask handling (deferred, Step 2b); and the
       edit-mode overlays (`gizmos` / `edit_selection` / probe-debug
       `StandardMaterial`, opaque → alpha 1) will bloom when shown — a minor

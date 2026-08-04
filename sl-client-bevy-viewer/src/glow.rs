@@ -40,7 +40,7 @@ use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d, uniform_buffer};
 use bevy::render::render_resource::{
     BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedRenderPipelineId,
-    ColorTargetState, ColorWrites, Extent3d, FragmentState, Operations, PipelineCache,
+    ColorTargetState, ColorWrites, Extent3d, FilterMode, FragmentState, Operations, PipelineCache,
     RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler,
     SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
     SpecializedRenderPipelines, TextureDescriptor, TextureDimension, TextureFormat,
@@ -345,7 +345,19 @@ fn init_glow_pipeline(
             ),
         ),
     );
-    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+    // **Linear** filtering (the reference samples the glow buffer trilinearly): the
+    // glow buffer is a low-res 512² downsample of the scene, so the extract
+    // downsample, the sub-texel blur taps, and the upsample back to full screen must
+    // interpolate — a `Nearest` sampler (wgpu's `SamplerDescriptor::default`) point-
+    // samples it and the bloom shows the buffer's texels as blocky pixels. Clamp at
+    // the edges so the blur does not wrap.
+    let sampler = render_device.create_sampler(&SamplerDescriptor {
+        label: Some("sl_glow_sampler"),
+        mag_filter: FilterMode::Linear,
+        min_filter: FilterMode::Linear,
+        // The glow buffers have no mip chain, so `mipmap_filter` is left at default.
+        ..default()
+    });
 
     let view_a = glow_buffer_view(&render_device, "sl_glow_buffer_a");
     let view_b = glow_buffer_view(&render_device, "sl_glow_buffer_b");
