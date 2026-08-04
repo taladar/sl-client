@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 256 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 7 |
+| bugs | 8 |
 | done | 675 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1146** |
+| **total** | **1147** |
 
 ## ideas (57)
 
@@ -1116,7 +1116,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (7)
+## bugs (8)
 
 ### protocol
 
@@ -1135,6 +1135,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
+- [`viewer-command-despawned-entity-warnings`](bugs/viewer-command-despawned-entity-warnings.md)
+  — "\"Entity despawned\" command warnings during a plain scene run"
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
