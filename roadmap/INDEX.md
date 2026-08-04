@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 258 |
+| ready | 257 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 672 |
+| done | 673 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (258)
+## ready (257)
 
 ### protocol
 
@@ -325,7 +325,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gesture-runtime`](ready/viewer-gesture-runtime.md) — Gesture runtime
   — step sequencing + /-command triggers (blocked by
   `viewer-chat-channel-and-commands` (done))
-- [`viewer-glow-bloom`](ready/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-god-tools`](ready/viewer-god-tools.md) — God tools floater (blocked
   by `viewer-ui-widget-scaffold` (done))
 - [`viewer-grid-status-feed`](ready/viewer-grid-status-feed.md) — Grid status
@@ -1145,7 +1144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (672)
+## done (673)
 
 ### protocol
 
@@ -1382,6 +1381,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flexi prims re-settle after taking a snapshot
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
+- [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
