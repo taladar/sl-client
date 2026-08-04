@@ -212,6 +212,7 @@ impl FromWorld for ViewerSettings {
         crate::search::register_settings(&mut settings);
         crate::tonemap::register_settings(&mut settings);
         crate::bloom::register_settings(&mut settings);
+        crate::exposure::register_settings(&mut settings);
         crate::snapshot_floater::register_settings(&mut settings);
         settings.load_global();
         settings

@@ -264,6 +264,8 @@ impl Plugin for SlTonemapPlugin {
                 Core3d,
                 sl_tonemap_system
                     .in_set(Core3dSystems::PostProcess)
+                    // After the exposure pass, whose 1×1 map this samples.
+                    .after(crate::exposure::SlExposurePass)
                     .after(UnderwaterFogPass)
                     // Bloom (the SL glow pass) also runs in `PostProcess`, but only
                     // orders itself before Bevy's *own* tonemapping (which we disable),
@@ -305,6 +307,10 @@ fn init_tonemap_pipeline(
                 sampler(SamplerBindingType::Filtering),
                 // The tone-mapper settings (dynamic-offset uniform).
                 uniform_buffer::<SlTonemap>(true),
+                // The 1×1 dynamic-exposure map (the reference's `exposureMap`).
+                texture_2d(TextureSampleType::Float { filterable: true }),
+                // Its sampler.
+                sampler(SamplerBindingType::Filtering),
             ),
         ),
     );
@@ -373,6 +379,7 @@ fn sl_tonemap_system(
     )>,
     pipeline_cache: Res<PipelineCache>,
     pipeline_res: Res<SlTonemapPipeline>,
+    exposure_map: Res<crate::exposure::ExposureMap>,
     uniforms: Res<ComponentUniforms<SlTonemap>>,
     mut ctx: RenderContext,
 ) {
@@ -393,6 +400,8 @@ fn sl_tonemap_system(
             post_process.source,
             &pipeline_res.sampler,
             uniform_binding.clone(),
+            &exposure_map.view,
+            &exposure_map.sampler,
         )),
     );
 

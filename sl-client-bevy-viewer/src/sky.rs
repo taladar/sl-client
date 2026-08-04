@@ -629,6 +629,7 @@ pub(crate) fn drive_sky(
         Or<(With<SceneSun>, With<SceneSunMirror>)>,
     >,
     mut ambient: ResMut<GlobalAmbientLight>,
+    mut exposure_range: ResMut<crate::exposure::ExposureRange>,
 ) {
     // Churn experiment: skip the whole fold (and so the per-frame sun-`Transform`
     // rewrite) until the configured interval has elapsed. `0` = every frame.
@@ -647,6 +648,14 @@ pub(crate) fn drive_sky(
     else {
         return;
     };
+
+    // Publish the active sky's dynamic-exposure range (the `sky_hdr_scale`
+    // counterweight) so the exposure pass tracks the exact frame drawn here rather
+    // than re-deriving the altitude-blended sky.
+    let (exp_min, exp_max) =
+        crate::exposure::exposure_range(sky.reflection_probe_ambiance, sky.gamma);
+    exposure_range.exp_min = exp_min;
+    exposure_range.exp_max = exp_max;
 
     // Every derivation this system used to do inline. See `ResolvedSky`.
     let resolved = resolve_sky(&sky);

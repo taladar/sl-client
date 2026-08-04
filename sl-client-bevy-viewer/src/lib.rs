@@ -73,6 +73,7 @@ mod environment;
 mod environment_assets;
 mod experience_permission;
 mod experiences_floater;
+mod exposure;
 mod face_material;
 mod flexi;
 mod floater;
@@ -279,6 +280,7 @@ use crate::emoji_picker::EmojiPickerPlugin;
 use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::experience_permission::ExperiencePermissionPlugin;
 use crate::experiences_floater::ExperiencesPlugin;
+use crate::exposure::{SlExposure, SlExposurePlugin};
 use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
@@ -668,6 +670,10 @@ fn setup_scene(
         // `RenderExposure`) is this viewer's tone mapper, and two would double up.
         Tonemapping::None,
         SlTonemap::default(),
+        // The reference's dynamic exposure inputs (the `exp_min`/`exp_max` range is
+        // filled per frame from the active sky by `refresh_exposure`). Only on the
+        // main camera — the reflection-probe capture cameras stay linear.
+        SlExposure::default(),
         // Bevy's *photometric* exposure: what turns the sun's illuminance (lux) and a
         // prim light's lumens into the linear radiance the frame is composed in. It is
         // a distinct thing from the reference's `RenderExposure` (a plain scale on the
@@ -1262,6 +1268,12 @@ fn run_session(
     // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
     // fogs everything below the water surface (reference `getWaterFogView`).
     .add_plugins(UnderwaterFogPlugin)
+    // The reference viewer's dynamic exposure (`generateExposure` / `exposureF`):
+    // a fullscreen pass that reduces the composited scene's average luminance to a
+    // 1×1 exposure map the tone mapper multiplies in, and the `sky_hdr_scale`
+    // counterweight that keeps an EEP sky from washing out. Runs after the fog /
+    // glow, before the tone mapper.
+    .add_plugins(SlExposurePlugin)
     // The reference viewer's tone mapper (P33.3): the one transfer from the linear
     // HDR scene to displayable colour, over the whole composited frame (reference
     // `postDeferredTonemap` — ACES / Khronos Neutral, blended by `RenderTonemapMix`).

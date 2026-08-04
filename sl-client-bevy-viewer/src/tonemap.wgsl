@@ -36,6 +36,11 @@ struct SlTonemap {
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
 @group(0) @binding(1) var screen_sampler: sampler;
 @group(0) @binding(2) var<uniform> tonemap: SlTonemap;
+// The 1×1 dynamic-exposure map (`exposure.wgsl`): the reference's `exposureMap`,
+// the scene-luminance-driven scale multiplied onto the static exposure. `1.0`
+// (a no-op) for a legacy sky or when the dynamic exposure is disabled.
+@group(0) @binding(3) var exposure_texture: texture_2d<f32>;
+@group(0) @binding(4) var exposure_sampler: sampler;
 
 // sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT (the reference's `ACESInputMat`).
 // GLSL and WGSL both build a 3×3 from its *columns*, so the reference's rows of
@@ -99,10 +104,16 @@ fn tone_map_khronos_neutral(color: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let source = textureSample(screen_texture, screen_sampler, in.uv);
+    // The reference `toneMap`: `final_exposure = RenderExposure * exposureMap`. The
+    // 1×1 exposure map holds the scene-luminance-driven dynamic scale (`1.0` for a
+    // legacy sky / when disabled), so this multiply is the counterweight that keeps
+    // an EEP `sky_hdr_scale` sky from washing out.
+    let exp_scale = textureSample(exposure_texture, exposure_sampler, vec2<f32>(0.5, 0.5)).r;
+    let final_exposure = tonemap.exposure * exp_scale;
     // The tone curves assume a non-negative linear input; a negative channel (which
     // no pass should produce, but a filtered mip or a fit can undershoot into) would
     // otherwise come back out of `rrt_and_odt_fit` as a NaN.
-    let exposed = max(source.rgb, vec3<f32>(0.0)) * tonemap.exposure;
+    let exposed = max(source.rgb, vec3<f32>(0.0)) * final_exposure;
 
     var mapped = exposed;
     switch tonemap.tonemap_type {
