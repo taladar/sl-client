@@ -163,6 +163,35 @@ mod tests {
         Ok(())
     }
 
+    /// `get_override` reads exactly one scope's override layer: a global set is
+    /// visible at `Global` only, never falls through from the other scope or
+    /// the default, and disappears once reset.
+    #[test]
+    fn get_override_reads_one_scope() -> Result<(), TestError> {
+        let mut store = populated()?;
+        assert_eq!(
+            store.get_override(Scope::Global, "Count"),
+            None,
+            "a default is not an override"
+        );
+        assert_eq!(store.get_override(Scope::Account, "Count"), None);
+
+        store.set(Scope::Global, "Count", SettingValue::I32(10))?;
+        assert_eq!(
+            store.get_override(Scope::Global, "Count"),
+            Some(&SettingValue::I32(10))
+        );
+        assert_eq!(
+            store.get_override(Scope::Account, "Count"),
+            None,
+            "a global override must not leak into the account scope"
+        );
+
+        assert!(store.reset(Scope::Global, "Count"));
+        assert_eq!(store.get_override(Scope::Global, "Count"), None);
+        Ok(())
+    }
+
     /// Clearing the account scope drops every account override at once.
     #[test]
     fn clearing_account_scope_drops_all_overrides() -> Result<(), TestError> {

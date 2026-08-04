@@ -228,6 +228,19 @@ impl SettingsStore {
         self.account.contains_key(name) || self.global.contains_key(name)
     }
 
+    /// The override a single scope holds for `name`, if any — unlike
+    /// [`get`](SettingsStore::get) this does not fall through to the other
+    /// scope or the declared default.
+    ///
+    /// A caller that snapshots and later restores one scope's state (the
+    /// preferences floater's revert-on-cancel) reads this per scope so the
+    /// restore can distinguish "set the old override back" from "there was no
+    /// override — reset to default".
+    #[must_use]
+    pub fn get_override(&self, scope: Scope, name: &str) -> Option<&SettingValue> {
+        self.scope_map(scope).get(name)
+    }
+
     /// Write a value to a scope's override layer.
     ///
     /// The value's type must match the setting's declared type.

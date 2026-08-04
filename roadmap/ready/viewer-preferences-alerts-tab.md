@@ -2,7 +2,7 @@
 id: viewer-preferences-alerts-tab
 title: Preferences — alerts / popups tab
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-preferences-floater]
 refs: [viewer-ui-notification-host]

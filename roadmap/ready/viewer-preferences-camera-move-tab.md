@@ -2,7 +2,7 @@
 id: viewer-preferences-camera-move-tab
 title: Preferences — camera + move-and-view tab
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-preferences-ui
 blocked_by: [viewer-preferences-floater]
 ---

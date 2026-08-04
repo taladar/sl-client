@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 231 |
-| blocked | 112 |
+| ready | 242 |
+| blocked | 100 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 699 |
+| done | 700 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (231)
+## ready (242)
 
 ### protocol
 
@@ -409,6 +409,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags — world-space billboard renderer
 - [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
   Name tags — wire GetDisplayNames caps into the tag
+- [`viewer-name-tags-preferences`](ready/viewer-name-tags-preferences.md) — Name
+  tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
@@ -502,9 +504,29 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-floater`](ready/viewer-preferences-floater.md) —
-  Preferences floater shell + settings store binding (blocked by
-  `viewer-ui-settings-binding` (done))
+- [`viewer-preferences-alerts-tab`](ready/viewer-preferences-alerts-tab.md) —
+  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
+  (done))
+- [`viewer-preferences-audio-tab`](ready/viewer-preferences-audio-tab.md) —
+  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
+  — Preferences — camera + move-and-view tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-chat-privacy-tab`](ready/viewer-preferences-chat-privacy-tab.md)
+  — Preferences — chat / IM + privacy tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-colors-skins-tab`](ready/viewer-preferences-colors-skins-tab.md)
+  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
+  (done), `viewer-ui-color-picker` (done))
+- [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
+  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-general-tab`](ready/viewer-preferences-general-tab.md) —
+  Preferences — general tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-graphics-tab`](ready/viewer-preferences-graphics-tab.md)
+  — Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-network-cache-tab`](ready/viewer-preferences-network-cache-tab.md)
+  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
+  (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -513,6 +535,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
   quality-of-life toggles (blocked by `viewer-input-action-map` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-quick-preferences`](ready/viewer-quick-preferences.md) —
+  Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
@@ -566,6 +590,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
+  — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
@@ -697,7 +723,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (112)
+## blocked (100)
 
 ### protocol
 
@@ -856,38 +882,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-name-tags-decorations`](blocked/viewer-name-tags-decorations.md) —
   Name tags — title / state / colouring decorations (blocked by
   `viewer-name-tags-billboard-render`)
-- [`viewer-name-tags-preferences`](blocked/viewer-name-tags-preferences.md) —
-  Name tags — preference toggles (blocked by `viewer-preferences-floater`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-preferences-alerts-tab`](blocked/viewer-preferences-alerts-tab.md) —
-  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-audio-tab`](blocked/viewer-preferences-audio-tab.md) —
-  Preferences — audio tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-camera-move-tab`](blocked/viewer-preferences-camera-move-tab.md)
-  — Preferences — camera + move-and-view tab (blocked by
-  `viewer-preferences-floater`)
-- [`viewer-preferences-chat-privacy-tab`](blocked/viewer-preferences-chat-privacy-tab.md)
-  — Preferences — chat / IM + privacy tab (blocked by
-  `viewer-preferences-floater`)
-- [`viewer-preferences-colors-skins-tab`](blocked/viewer-preferences-colors-skins-tab.md)
-  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`,
-  `viewer-ui-color-picker` (done))
-- [`viewer-preferences-debug-settings-editor`](blocked/viewer-preferences-debug-settings-editor.md)
-  — Raw debug-settings editor (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-general-tab`](blocked/viewer-preferences-general-tab.md)
-  — Preferences — general tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-graphics-tab`](blocked/viewer-preferences-graphics-tab.md)
-  — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-network-cache-tab`](blocked/viewer-preferences-network-cache-tab.md)
-  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
-  Quick-preferences panel (blocked by `viewer-preferences-floater`)
 - [`viewer-realtime-mirrors`](blocked/viewer-realtime-mirrors.md) — Real-time
   mirrors (hero probes) (blocked by `viewer-perf-probe-scheduling`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
@@ -931,8 +932,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
-- [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
-  backup — export / import (blocked by `viewer-preferences-floater`)
 - [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
   Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
   (done), `viewer-image-upload`)
@@ -1064,7 +1063,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (699)
+## done (700)
 
 ### protocol
 
@@ -1767,6 +1766,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
+  Preferences floater shell + settings store binding (blocked by
+  `viewer-ui-settings-binding` (done))
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))

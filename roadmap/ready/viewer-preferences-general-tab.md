@@ -2,7 +2,7 @@
 id: viewer-preferences-general-tab
 title: Preferences — general tab
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-preferences-floater]
 refs: [viewer-i18n-locale-selection, viewer-do-not-disturb-away]

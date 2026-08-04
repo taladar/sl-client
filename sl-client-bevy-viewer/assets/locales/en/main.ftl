@@ -2879,3 +2879,30 @@ snapshot-tab-inventory = Inventory
 snapshot-postcard-todo = Sending a snapshot as a postcard / e-mail is coming in its own task.
 snapshot-profile-todo = Posting a snapshot to your profile feed is coming in its own task.
 snapshot-inventory-todo = Saving a snapshot to inventory as a texture is coming in its own task.
+
+## The Preferences floater shell (viewer-preferences-floater).
+
+preferences-title = Preferences
+preferences-search-placeholder = Search settings
+preferences-ok = OK
+preferences-cancel = Cancel
+# The tab strip.
+preferences-tab-world-ui = UI & world display
+# The UI & world display tab's section headings and rows.
+preferences-section-world = In-world display
+preferences-section-maps = Mini-map & world map
+preferences-row-property-lines = Show property lines
+preferences-row-status-coordinates = Show coordinates in the status bar
+preferences-row-minimap-rotate = Rotate mini-map with the camera
+preferences-row-minimap-auto-center = Auto-center the mini-map
+preferences-row-minimap-objects = Show objects on the mini-map
+preferences-row-minimap-property-lines = Show property lines on the mini-map
+preferences-row-minimap-for-sale = Show for-sale parcels on the mini-map
+preferences-row-minimap-chat-ring = Show chat range rings on the mini-map
+preferences-row-minimap-scale = Mini-map zoom
+preferences-row-minimap-opacity = Mini-map opacity
+preferences-row-worldmap-people = Show people on the world map
+preferences-row-worldmap-infohubs = Show infohubs on the world map
+preferences-row-worldmap-land-sale = Show land for sale on the world map
+preferences-row-worldmap-events = Show events on the world map
+preferences-row-worldmap-region-names = Show region names on the world map

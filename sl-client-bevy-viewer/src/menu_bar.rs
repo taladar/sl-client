@@ -59,6 +59,9 @@ const TOP_BAR_Z: i32 = 9_000;
 /// check mark on the Avatar ▸ Inventory entry.
 const INVENTORY_OPEN: &str = "inventory-open";
 
+/// Condition: the Preferences floater is open (drives its check mark).
+const PREFERENCES_OPEN: &str = "preferences-open";
+
 /// The condition key that holds while the Conversations floater is open — drives
 /// the check mark on the Comm ▸ Conversations entry.
 const CONVERSATIONS_OPEN: &str = "conversations-open";
@@ -116,10 +119,15 @@ static PLACEHOLDER_ITEMS: &[MenuItemDef] = &[MenuItemDef::Command(
     MenuCommand::new("(no entries yet)", "noop").enabled_when(NEVER_CONDITION),
 )];
 
-/// The Avatar (Me) menu — the two entries with a live target today.
+/// The Avatar (Me) menu — the entries with a live target today.
 static AVATAR_MENU: MenuDef = MenuDef {
     label: "Avatar",
     items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Preferences\u{2026}", "toggle-preferences")
+                .accel("Ctrl+P")
+                .checked_when(PREFERENCES_OPEN),
+        ),
         MenuItemDef::Command(
             MenuCommand::new("Inventory", "toggle-inventory")
                 .accel("Ctrl+I")
@@ -348,6 +356,7 @@ fn update_top_menu_conditions(
             .and_then(|panel| panels.get(panel).ok())
             .is_some_and(|shown| shown.0)
     };
+    let preferences_open = open(crate::preferences::PREFERENCES_FLOATER_ID);
     let inventory_open = open(crate::inventory::INVENTORY_FLOATER_ID);
     let conversations_open = open(crate::conversations::CONVERSATIONS_FLOATER_ID);
     let web_browser_open = open(crate::web_floater::WEB_FLOATER_ID);
@@ -357,6 +366,9 @@ fn update_top_menu_conditions(
     let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
     let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
     let mut wanted: Vec<&'static str> = Vec::new();
+    if preferences_open {
+        wanted.push(PREFERENCES_OPEN);
+    }
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
     }
@@ -456,6 +468,13 @@ fn handle_top_menu_actions(
         match action.action {
             "quit" => {
                 exit.write(AppExit::Success);
+            }
+            "toggle-preferences" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::preferences::PREFERENCES_FLOATER_ID,
+                );
             }
             "toggle-inventory" => {
                 toggle_floater(

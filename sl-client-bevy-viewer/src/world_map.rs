@@ -77,17 +77,18 @@ const WORLD_MAP_SECTION: &[&str] = &["worldmap"];
 /// The map scale setting (pixels per 256 m region).
 const SETTING_SCALE: &str = "WorldMapScale";
 
-/// Layer toggle: avatar ("people") markers.
-const SETTING_PEOPLE: &str = "WorldMapShowPeople";
+/// Layer toggle: avatar ("people") markers. `pub(crate)` for the preferences
+/// floater's bound controls, like the other promoted names below.
+pub(crate) const SETTING_PEOPLE: &str = "WorldMapShowPeople";
 
 /// Layer toggle: telehub / infohub markers.
-const SETTING_INFOHUBS: &str = "WorldMapShowInfohubs";
+pub(crate) const SETTING_INFOHUBS: &str = "WorldMapShowInfohubs";
 
 /// Layer toggle: land-for-sale markers.
-const SETTING_LAND_SALE: &str = "WorldMapShowLandForSale";
+pub(crate) const SETTING_LAND_SALE: &str = "WorldMapShowLandForSale";
 
 /// Layer toggle: PG event markers.
-const SETTING_EVENTS: &str = "WorldMapShowEvents";
+pub(crate) const SETTING_EVENTS: &str = "WorldMapShowEvents";
 
 /// Layer toggle: Moderate event markers.
 const SETTING_MATURE_EVENTS: &str = "WorldMapShowMatureEvents";
@@ -96,7 +97,7 @@ const SETTING_MATURE_EVENTS: &str = "WorldMapShowMatureEvents";
 const SETTING_ADULT_EVENTS: &str = "WorldMapShowAdultEvents";
 
 /// Whether region-name labels draw in the detail regime.
-const SETTING_REGION_NAMES: &str = "WorldMapShowRegionNames";
+pub(crate) const SETTING_REGION_NAMES: &str = "WorldMapShowRegionNames";
 
 /// Register every world-map setting (called from
 /// [`crate::settings::ViewerSettings`]'s `FromWorld`).

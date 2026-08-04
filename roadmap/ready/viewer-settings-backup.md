@@ -2,7 +2,7 @@
 id: viewer-settings-backup
 title: Settings backup — export / import
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-preferences-floater]
 ---

@@ -193,6 +193,14 @@ impl ViewerSettings {
             account_path: None,
         }
     }
+
+    /// Pretend the account scope has loaded (an empty in-memory path), so a
+    /// test can exercise a post-login gate ([`Self::account_loaded`], the
+    /// preferences floater's account guard) without a filesystem.
+    #[cfg(test)]
+    pub(crate) fn mark_account_loaded_for_test(&mut self) {
+        self.account_path = Some(PathBuf::new());
+    }
 }
 
 impl FromWorld for ViewerSettings {

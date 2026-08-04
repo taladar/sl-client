@@ -136,6 +136,7 @@ mod paths;
 mod people;
 mod physics;
 mod pie_menu;
+mod preferences;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -1226,6 +1227,12 @@ fn run_session(
     // selection and a save-to-disk destination that echoes the path to chat.
     // Opened from the bottom toolbar's Snapshot button.
     .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
+    // The Preferences floater shell (viewer-preferences-floater): the tabbed
+    // settings window over the typed store — snapshot on open, revert on
+    // Cancel / close, persist on OK, with the cross-tab search filter. The
+    // per-tab tasks plug their panels into its registry. After FloaterPlugin,
+    // whose spawn_floater and deferred-content build it rides.
+    .add_plugins(crate::preferences::PreferencesPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

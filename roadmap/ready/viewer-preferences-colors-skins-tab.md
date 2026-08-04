@@ -2,7 +2,7 @@
 id: viewer-preferences-colors-skins-tab
 title: Preferences — colors & skins tab
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-preferences-floater, viewer-ui-color-picker]
 refs: [viewer-name-tags-preferences]

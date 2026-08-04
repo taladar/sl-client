@@ -2,7 +2,7 @@
 id: viewer-quick-preferences
 title: Quick-preferences panel
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
 blocked_by: [viewer-preferences-floater]
 refs: [viewer-hover-height, viewer-volume-panel]
