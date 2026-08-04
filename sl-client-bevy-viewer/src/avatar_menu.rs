@@ -62,9 +62,9 @@
 //! floating name tag — carries [`crate::avatars::AvatarPickTarget`] with the
 //! avatar's agent id. [`request_avatar_menu_on_right_click`] resolves a
 //! right-click to an agent two ways, mirroring the reference's "name tag or the
-//! avatar itself": the screen-space tag rect test
-//! ([`crate::name_tag_overlay::NameTagHitTest`] — tags are `Text2d` on the tag
-//! overlay camera, not UI nodes, so no picking backend sees them) or the
+//! avatar itself": the on-screen tag rect test
+//! ([`crate::name_tag_billboard::NameTagHitTest`] — tags are world-space
+//! billboard meshes no picking backend covers) or the
 //! mesh-accurate world pick ([`crate::avatar_pick::AvatarPicker`]) against the
 //! avatar's **posed** geometry. That same picker — and the same tag hit-test —
 //! is what a future **inventory drag-and-drop onto an avatar** will reuse to
@@ -95,7 +95,7 @@ use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::{OpenLandMenu, pick_land};
-use crate::name_tag_overlay::NameTagHitTest;
+use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
@@ -804,9 +804,10 @@ fn update_pick_inspector(
 /// Avatar resolution has two paths, matching the reference's "the name tag or
 /// the avatar itself":
 ///
-/// 1. **The name tag** — a screen-space `Text2d` on the tag overlay camera, hit
-///    by the [`NameTagHitTest`] cursor-vs-rect test (no picking backend covers
-///    `Text2d`). Checked first, and it wins even over the body behind it.
+/// 1. **The name tag** — a world-space billboard whose on-screen bubble rect is
+///    hit by the [`NameTagHitTest`] cursor-vs-rect test (no picking backend
+///    covers the tag meshes). Checked first, and it wins even over the body
+///    behind it.
 /// 2. **The body / sphere** — no mesh-picking backend is installed (the viewer
 ///    raycasts on demand, like [`crate::hud_pick`]), so this casts a ray from the
 ///    world camera through the cursor and resolves it **mesh-accurately** via

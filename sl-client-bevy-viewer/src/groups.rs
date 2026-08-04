@@ -177,6 +177,10 @@ pub(crate) struct GroupsModel {
     insignia: BTreeMap<GroupKey, TextureKey>,
     /// The currently-active (worn) group, if any.
     active: Option<GroupKey>,
+    /// The own agent's active group **title** (e.g. `"Officer"`), from the
+    /// same `ActiveGroupChanged` push; `None` when no group is active or the
+    /// title is empty.
+    own_title: Option<String>,
     /// Bumped on each mutation; the view compares its last-built value to skip an
     /// unchanged rebuild.
     revision: u64,
@@ -273,11 +277,24 @@ impl GroupsModel {
     }
 
     /// Set the active (worn) group, bumping the revision only on a real change.
-    fn set_active(&mut self, active: Option<GroupKey>) {
-        if self.active != active {
+    fn set_active(&mut self, active: Option<GroupKey>, title: &str) {
+        let title = if title.is_empty() {
+            None
+        } else {
+            Some(title.to_owned())
+        };
+        if self.active != active || self.own_title != title {
             self.active = active;
+            self.own_title = title;
             self.touch();
         }
+    }
+
+    /// The own agent's active group title (from `ActiveGroupChanged`) — the
+    /// freshest source for the own tag's title line (the NameValue `Title`
+    /// only refreshes when the simulator re-streams the avatar object).
+    pub(crate) fn own_title(&self) -> Option<&str> {
+        self.own_title.as_deref()
     }
 
     /// Drop a group the agent is no longer in (left, ejected, or dissolved),
@@ -873,7 +890,10 @@ fn spawn_confirm_button(
 // ---------------------------------------------------------------------------
 
 /// Fold every group-relevant inbound event into [`GroupsModel`].
-fn ingest_group_events(mut events: MessageReader<SlEvent>, mut model: ResMut<GroupsModel>) {
+pub(crate) fn ingest_group_events(
+    mut events: MessageReader<SlEvent>,
+    mut model: ResMut<GroupsModel>,
+) {
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::GroupMemberships(memberships) => model.apply_memberships(memberships),
@@ -886,7 +906,9 @@ fn ingest_group_events(mut events: MessageReader<SlEvent>, mut model: ResMut<Gro
             SlSessionEvent::GroupProfileReceived(profile) => {
                 model.note_resolved_name(profile.group_id, &profile.name);
             }
-            SlSessionEvent::ActiveGroupChanged(active) => model.set_active(active.active_group_id),
+            SlSessionEvent::ActiveGroupChanged(active) => {
+                model.set_active(active.active_group_id, &active.group_title);
+            }
             // Both the UDP `AgentDropGroup` and its CAPS event-queue twin drop the
             // agent from a group (leaving, ejection, or dissolution).
             SlSessionEvent::DroppedFromGroup { group_id } => model.remove(*group_id),
@@ -1229,12 +1251,12 @@ mod tests {
         let mut model = GroupsModel::default();
         model.apply_memberships(&[membership(1, "One"), membership(2, "Two")]);
         let one = GroupKey::from(Uuid::from_u128(1));
-        model.set_active(Some(one));
+        model.set_active(Some(one), "");
         let active: Vec<bool> = model.ordered().into_iter().map(|row| row.active).collect();
         // Sorted "One" then "Two"; only "One" is active.
         assert_eq!(active, vec![true, false]);
         // Clearing the active group unmarks it.
-        model.set_active(None);
+        model.set_active(None, "");
         assert!(model.ordered().iter().all(|row| !row.active));
     }
 
@@ -1245,7 +1267,7 @@ mod tests {
         let mut model = GroupsModel::default();
         model.apply_memberships(&[membership(1, "One"), membership(2, "Two")]);
         let one = GroupKey::from(Uuid::from_u128(1));
-        model.set_active(Some(one));
+        model.set_active(Some(one), "");
         model.remove(one);
         assert_eq!(model.len(), 1);
         assert_eq!(model.active, None);
