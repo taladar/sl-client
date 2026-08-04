@@ -1,8 +1,8 @@
 ---
-id: viewer-notification-catalogue-im-chat
-title: Notification catalogue — IM & chat entries
+id: viewer-notification-catalogue-ui-hints
+title: Notification catalogue — UI hints entries
 topic: viewer
-status: ready
+status: done
 origin: notification-host coverage audit (2026-07-29) — full notifications.xml
   accounting; one follow-up per feature family
 blocked_by: [viewer-ui-notification-host]
@@ -11,13 +11,13 @@ refs: [viewer-notification-catalogue]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-Port the **IM & chat** notifications from the reference `notifications.xml` into
+Port the **UI hints** notifications from the reference `notifications.xml` into
 the declarative catalogue (`NOTIFICATIONS` in `src/notifications.rs`), the way
 [[viewer-notification-catalogue]] ported the generic server-alert and shared-
-confirm entries. These cover IM, nearby chat, the conversation log, autoresponse
-and typing.
+confirm entries. These cover first-use hints, help tips, the tutorial and UI
+onboarding.
 
-The exact entry set is the **32** rows tagged `family:im-chat` with
+The exact entry set is the **15** rows tagged `family:ui-hints` with
 `status=followup` in the coverage manifest — [context/notif-
 coverage.tsv](../context/notif-coverage.tsv), the complete accounting of every
 reference notification. Port each with its reference kind (`notify` /
@@ -30,3 +30,17 @@ This is the **data** entry only; the owning feature raises each notification at
 its call-site and reads the response. Entries whose reference form carries a
 feature callback (the maturity `_Change` / `_AdultsOnlyContent` variants,
 dynamic button lists) wait on that feature's plumbing.
+
+## Done
+
+Ported as part of the consolidated remaining-families port (16
+rows now `ported` in the coverage TSV): entries generated mechanically
+from the reference XML (kind / persist / unique / priority /
+`log_to_chat` / ignore flag / forms / text inputs / titles), bodies with
+the standard trims (bracketed URLs, `[APP_NAME]` / `[SECOND_LIFE]`
+self-references, `<nolink>` markup), and the server-keyed subset pinned
+in `keyed_server_alerts_are_catalogued`.
+
+The 11 reference `hint`-type entries render as tips until an
+anchored hint surface exists (comment per entry); their short labels
+(Chat, Stand, ...) are dropped — a tip renders no title.

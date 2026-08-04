@@ -44,6 +44,20 @@ lso = "lso"
 # itself is excluded (`*.ftl` above), but the i18n unit tests assert on the
 # formatted Polish string in Rust source; Polish, not a typo of "elementary".
 elementy = "elementy"
+# The notification catalogue (viewer-notification-catalogue-*) cites the
+# reference notifications.xml entry names verbatim in `NOTIFICATIONS` — wire /
+# template identifiers, several of them Linden's or Firestorm's own
+# misspellings, theirs to spell, not ours to correct. Our *derived* Fluent
+# keys are spelled correctly; only the cited names carry these. "CMO" is the
+# "can't move object" acronym (CMOParcelFull, ...), not a "COM" transposition,
+# and appears in the derived keys too.
+CMO = "CMO"
+cmo = "cmo"
+Acess = "Acess"
+Unsuported = "Unsuported"
+Wating = "Wating"
+Seach = "Seach"
+Dimentions = "Dimentions"
 
 [default.extend-identifiers]
 # `flate2` is the gzip crate (used for the inventory disk cache); not a typo

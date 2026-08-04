@@ -904,12 +904,15 @@ fn raise_notifications(
             .unwrap_or_else(|| translator.get(tmpl.message_key));
         let body = substitute(&raw, &request.args);
         let id = manager.allocate_id();
+        // Button labels are `[KEY]`-substituted like the body, so a dynamic
+        // reference label ("Create group for L$[COST]", "[ACTION] Now")
+        // resolves from the raise's args.
         let buttons = tmpl
             .form
             .iter()
             .map(|button| ToastButtonSpec {
                 name: button.name,
-                label: translator.get(button.label_key),
+                label: substitute(&translator.get(button.label_key), &request.args),
                 is_default: button.is_default,
             })
             .collect();
@@ -925,7 +928,11 @@ fn raise_notifications(
         });
         let content = ToastContent {
             kind: tmpl.kind,
-            title: tmpl.title_key.map(|key| translator.get(key)),
+            // The title substitutes too — the reference offer labels carry
+            // [NAME_LABEL].
+            title: tmpl
+                .title_key
+                .map(|key| substitute(&translator.get(key), &request.args)),
             body: body.clone(),
             buttons,
             ignorable: tmpl.ignorable,

@@ -1,8 +1,8 @@
 ---
-id: viewer-notification-catalogue-snapshot-social
-title: Notification catalogue — snapshot & social entries
+id: viewer-notification-catalogue-im-chat
+title: Notification catalogue — IM & chat entries
 topic: viewer
-status: ready
+status: done
 origin: notification-host coverage audit (2026-07-29) — full notifications.xml
   accounting; one follow-up per feature family
 blocked_by: [viewer-ui-notification-host]
@@ -11,13 +11,13 @@ refs: [viewer-notification-catalogue]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-Port the **snapshot & social** notifications from the reference
-`notifications.xml` into the declarative catalogue (`NOTIFICATIONS` in
-`src/notifications.rs`), the way [[viewer-notification-catalogue]] ported the
-generic server-alert and shared-confirm entries. These cover snapshot save /
-upload, postcards, the profile feed and sharing.
+Port the **IM & chat** notifications from the reference `notifications.xml` into
+the declarative catalogue (`NOTIFICATIONS` in `src/notifications.rs`), the way
+[[viewer-notification-catalogue]] ported the generic server-alert and shared-
+confirm entries. These cover IM, nearby chat, the conversation log, autoresponse
+and typing.
 
-The exact entry set is the **45** rows tagged `family:snapshot-social` with
+The exact entry set is the **32** rows tagged `family:im-chat` with
 `status=followup` in the coverage manifest — [context/notif-
 coverage.tsv](../context/notif-coverage.tsv), the complete accounting of every
 reference notification. Port each with its reference kind (`notify` /
@@ -30,3 +30,15 @@ This is the **data** entry only; the owning feature raises each notification at
 its call-site and reads the response. Entries whose reference form carries a
 feature callback (the maturity `_Change` / `_AdultsOnlyContent` variants,
 dynamic button lists) wait on that feature's plumbing.
+
+## Done
+
+Ported as part of the consolidated remaining-families port (32
+rows now `ported` in the coverage TSV): entries generated mechanically
+from the reference XML (kind / persist / unique / priority /
+`log_to_chat` / ignore flag / forms / text inputs / titles), bodies with
+the standard trims (bracketed URLs, `[APP_NAME]` / `[SECOND_LIFE]`
+self-references, `<nolink>` markup), and the server-keyed subset pinned
+in `keyed_server_alerts_are_catalogued`.
+
+`IMToast` (reference `notifytoast`) maps to the notify channel.
