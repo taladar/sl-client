@@ -44,6 +44,7 @@ use std::cmp::Ordering;
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{SlEvent, SlSessionEvent};
@@ -54,14 +55,16 @@ use crate::chat::LocalChatNotice;
 use crate::i18n::Translator;
 use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
-    DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationKind,
-    NotificationManager, NotificationPriority, NotificationRecord, NotificationResponse,
-    ShowNotification, TOAST_GAP, substitute, template,
+    DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationIgnore,
+    NotificationKind, NotificationManager, NotificationPriority, NotificationRecord,
+    NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP,
+    last_response_setting_name, substitute, template,
 };
 use crate::settings::ViewerSettings;
 use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
@@ -141,6 +144,10 @@ const CARD_CLASS: &str = "sk-toast";
 
 /// The CSS class on a toast's body text.
 const TEXT_CLASS: &str = "sk-toast-text";
+
+/// The CSS class on a toast's title header, so a skin can weight it against
+/// the body (falls back to the plain text colour unstyled).
+const TITLE_CLASS: &str = "sk-toast-title";
 
 /// The CSS class on a toast button — the shared push-button surface.
 const BUTTON_CLASS: &str = "sk-button";
@@ -295,6 +302,10 @@ struct Toast {
     /// [`age_and_fade_toasts`] does not write a second on the frame before the
     /// despawn is applied.
     resolved: bool,
+    /// The text-input field ([`EditableText`] node) for a template with a
+    /// [`NotificationTemplate::input`](crate::notifications::NotificationTemplate::input),
+    /// read on resolve into [`NotificationResponse::input`].
+    input_field: Option<Entity>,
 }
 
 /// Marks a node whose colours fade with its toast: the fade system scales the
@@ -338,21 +349,51 @@ pub(crate) struct ResolveNotification {
     pub(crate) button: Option<&'static str>,
 }
 
-/// Startup: declare each ignorable notification's "show again" flag (default on),
-/// so a stored suppression coerces against it and the Preferences alerts tab
-/// ([[viewer-preferences-alerts-tab]]) has a registered setting to bind.
+/// Startup: declare each suppressible notification's "show again" flag
+/// (default on), so a stored suppression coerces against it and the
+/// Preferences alerts tab ([[viewer-preferences-alerts-tab]]) has a
+/// registered setting to bind. The storage follows the template's
+/// [`NotificationIgnore`] kind: a session-only suppression registers as a
+/// transient (never-persisted) setting so it resets every run, and a
+/// [`NotificationIgnore::LastResponse`] template additionally gets the
+/// [`last_response_setting_name`] `String` holding the button to replay
+/// (the reference's `"Default" + name` ignores entry). A
+/// [`NotificationIgnore::CheckboxOnly`] template registers nothing — its
+/// checkbox state rides the [`NotificationResponse`] for the owner alone.
 fn register_notification_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
     for entry in NOTIFICATIONS {
-        if entry.ignorable {
-            settings.register_in(
-                &[NOTIFICATIONS_SECTION],
-                entry.name,
-                SettingValue::Bool(true),
-                "Show this notification (untick to suppress it)",
-            );
+        match entry.ignore {
+            NotificationIgnore::None | NotificationIgnore::CheckboxOnly => {}
+            NotificationIgnore::DefaultResponse
+            | NotificationIgnore::ShowAgain
+            | NotificationIgnore::LastResponse => {
+                settings.register_in(
+                    &[NOTIFICATIONS_SECTION],
+                    entry.name,
+                    SettingValue::Bool(true),
+                    "Show this notification (untick to suppress it)",
+                );
+                if entry.ignore == NotificationIgnore::LastResponse {
+                    settings.register_in(
+                        &[NOTIFICATIONS_SECTION],
+                        &last_response_setting_name(entry.name),
+                        SettingValue::String(String::new()),
+                        "The button name replayed when this suppressed \
+                         notification is raised (empty = the form's default)",
+                    );
+                }
+            }
+            NotificationIgnore::DefaultResponseSessionOnly => {
+                settings.register_transient(
+                    entry.name,
+                    SettingValue::Bool(true),
+                    "Show this notification (untick to suppress it for this \
+                     session)",
+                );
+            }
         }
     }
 }
@@ -424,6 +465,9 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
 struct ToastContent {
     /// The behaviour class (drives the accent and whether it fades).
     kind: NotificationKind,
+    /// The resolved dialog title (the reference `label`), rendered as a
+    /// header line above the body, or `None` for a card with no title.
+    title: Option<String>,
     /// The display-ready body text.
     body: String,
     /// The buttons, with resolved labels.
@@ -439,6 +483,10 @@ struct ToastContent {
     closable: bool,
     /// The text size, in logical pixels.
     font_size: f32,
+    /// The resolved, `[KEY]`-substituted initial text for the single-line
+    /// input field (the reference `<input>`), or `None` for a form without
+    /// one.
+    input: Option<String>,
 }
 
 /// One button's resolved spec for [`build_toast_card`].
@@ -463,6 +511,9 @@ struct ToastCard {
     ignore: Option<(Entity, Entity)>,
     /// The close (×) button box, when the toast is [`closable`](ToastContent::closable).
     close: Option<Entity>,
+    /// The text-input field ([`EditableText`] node), when the content carries
+    /// an [`input`](ToastContent::input).
+    input: Option<Entity>,
 }
 
 /// Build a toast card's node tree (not yet parented) from resolved [`ToastContent`],
@@ -535,6 +586,38 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
         None
     };
 
+    // The title header, when the content carries one (the reference `label`):
+    // its own width-bounded box above the body, same measure-safe shape.
+    if let Some(title) = &content.title {
+        let title_box = commands
+            .spawn((
+                Node {
+                    max_width: Val::Px(TEXT_MAX_WIDTH),
+                    ..default()
+                },
+                Name::new("toast-title"),
+                ChildOf(root),
+            ))
+            .id();
+        let title_text = commands
+            .spawn((
+                Text::new(title.clone()),
+                UiFont::Sans.at(content.font_size),
+                TextColor(TEXT_COLOR),
+                ClassList::new_with_classes([TITLE_CLASS]),
+                Name::new("toast-title-text"),
+                ChildOf(title_box),
+            ))
+            .id();
+        if fades {
+            commands.entity(title_text).insert(FadeColor {
+                toast: root,
+                base_bg: None,
+                base_text: None,
+            });
+        }
+    }
+
     // The body: a decoration-free, width-bounded box holding the paragraph as its
     // sole child (the measure-bug constraint).
     let body_box = commands
@@ -564,6 +647,30 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             base_text: None,
         });
     }
+
+    // The text-input row, if the form carries one (the reference `<input>`):
+    // a single-line field between the body and the buttons, filling the card
+    // width so the container — not the pre-filled text — decides its size.
+    let input = content.input.as_ref().map(|initial| {
+        let input_row = commands
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    ..row(Val::ZERO)
+                },
+                Name::new("toast-input-row"),
+                ChildOf(root),
+            ))
+            .id();
+        let spec = TextInputSpec {
+            initial: initial.clone(),
+            tab_index: 1,
+            font_size: content.font_size,
+            fill: true,
+            ..TextInputSpec::new("toast-input", TextInputKind::Line)
+        };
+        spawn_text_input(commands, input_row, &spec)
+    });
 
     // The button row, if any.
     let mut buttons = Vec::new();
@@ -679,6 +786,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
         buttons,
         ignore,
         close,
+        input,
     }
 }
 
@@ -724,6 +832,7 @@ pub(crate) fn adopt_toast(
             hovered: false,
             overflowed: false,
             resolved: false,
+            input_field: None,
         },
         ChildOf(channel.channel),
     ));
@@ -776,6 +885,62 @@ fn is_suppressed(settings: Option<&ViewerSettings>, name: &str) -> bool {
         .is_some_and(|show| !show)
 }
 
+/// The button a suppressed raise auto-responds with — the reference
+/// `handleIgnoredNotification` per [`NotificationIgnore`] kind: the form's
+/// default button for the default-response kinds, the saved
+/// [`last_response_setting_name`] button (falling back to the default when
+/// none is saved or the saved name no longer matches a form button) for
+/// [`NotificationIgnore::LastResponse`], and nothing for
+/// [`NotificationIgnore::ShowAgain`]. `None` / `CheckboxOnly` templates are
+/// never suppressed, so the answer for them is moot (`None`).
+fn auto_response_button(
+    tmpl: &NotificationTemplate,
+    settings: Option<&ViewerSettings>,
+) -> Option<&'static str> {
+    match tmpl.ignore {
+        NotificationIgnore::DefaultResponse | NotificationIgnore::DefaultResponseSessionOnly => {
+            tmpl.default_button()
+        }
+        NotificationIgnore::LastResponse => settings
+            .and_then(|settings| {
+                let setting = last_response_setting_name(tmpl.name);
+                let saved = settings.store().get_str(&setting).ok()?;
+                tmpl.form
+                    .iter()
+                    .find(|button| button.name == saved)
+                    .map(|button| button.name)
+            })
+            .or_else(|| tmpl.default_button()),
+        NotificationIgnore::ShowAgain
+        | NotificationIgnore::None
+        | NotificationIgnore::CheckboxOnly => None,
+    }
+}
+
+/// The label on the toast's ignore checkbox, by [`NotificationIgnore`] kind
+/// (the reference `LLToastPanel` variants): the plain "don't show me this
+/// again" for the default kinds, its session-only variant, "always choose
+/// this option" for [`NotificationIgnore::LastResponse`], and — for
+/// [`NotificationIgnore::CheckboxOnly`] — the template's own
+/// [`ignore_key`](NotificationTemplate::ignore_key) text, which in the
+/// reference *is* the checkbox label ("Remember this computer for 30
+/// days."). Templates with no checkbox resolve to the plain label, unused.
+fn ignore_checkbox_label(tmpl: &NotificationTemplate, translator: &Translator) -> String {
+    match tmpl.ignore {
+        NotificationIgnore::CheckboxOnly => tmpl.ignore_key.map_or_else(
+            || translator.get("notification-ignore-checkbox"),
+            |key| translator.get(key),
+        ),
+        NotificationIgnore::DefaultResponseSessionOnly => {
+            translator.get("notification-ignore-checkbox-session")
+        }
+        NotificationIgnore::LastResponse => translator.get("notification-ignore-choice"),
+        NotificationIgnore::None
+        | NotificationIgnore::DefaultResponse
+        | NotificationIgnore::ShowAgain => translator.get("notification-ignore-checkbox"),
+    }
+}
+
 /// Raise the queued [`ShowNotification`]s: look up the catalogue template, honour
 /// suppression and `unique` dedup, resolve the body + button labels through
 /// i18n, build the toast (corner card or modal scrim) and wire its buttons and
@@ -783,8 +948,8 @@ fn is_suppressed(settings: Option<&ViewerSettings>, name: &str) -> bool {
 #[expect(
     clippy::too_many_arguments,
     reason = "a raise needs the request queue, the manager, the channel/root, i18n, \
-              suppression settings, the dismiss channel and the persistence channel; each is \
-              distinct"
+              suppression settings, the dismiss channel, the persistence channel and the \
+              response channel (a suppressed raise auto-responds); each is distinct"
 )]
 fn raise_notifications(
     mut commands: Commands,
@@ -797,6 +962,7 @@ fn raise_notifications(
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,
     mut persist: MessageWriter<PersistNotification>,
+    mut responses: MessageWriter<NotificationResponse>,
 ) {
     let Some(channel) = channel else {
         return;
@@ -809,8 +975,19 @@ fn raise_notifications(
             );
             continue;
         };
-        if tmpl.ignorable && is_suppressed(settings.as_deref(), tmpl.name) {
+        // A suppressed raise is not shown, but it still *answers* — the
+        // reference `handleIgnoredNotification`: the default button (or the
+        // saved last response) fires so the confirmed action proceeds
+        // instead of silently doing nothing. `ShowAgain` alone stays mute.
+        if tmpl.ignore.is_suppressible() && is_suppressed(settings.as_deref(), tmpl.name) {
             debug!(template = tmpl.name, "notification suppressed");
+            responses.write(NotificationResponse {
+                id: manager.allocate_id(),
+                template: tmpl.name,
+                button: auto_response_button(tmpl, settings.as_deref()),
+                ignored: true,
+                input: None,
+            });
             continue;
         }
         // `unique`: a repeat with the same context replaces its predecessor.
@@ -826,25 +1003,44 @@ fn raise_notifications(
             .unwrap_or_else(|| translator.get(tmpl.message_key));
         let body = substitute(&raw, &request.args);
         let id = manager.allocate_id();
+        // Button labels are `[KEY]`-substituted like the body, so a dynamic
+        // reference label ("Create group for L$[COST]", "[ACTION] Now")
+        // resolves from the raise's args.
         let buttons = tmpl
             .form
             .iter()
             .map(|button| ToastButtonSpec {
                 name: button.name,
-                label: translator.get(button.label_key),
+                label: substitute(&translator.get(button.label_key), &request.args),
                 is_default: button.is_default,
             })
             .collect();
+        // The input field's pre-filled text resolves like the body: through
+        // i18n, then `[KEY]`-substituted with the raise's args (the reference
+        // defaults are templates like `[DESC] (new)`). A field with no
+        // default key starts empty (the announcement prompts).
+        let input = tmpl.input.map(|input| {
+            input
+                .default_key
+                .map(|key| substitute(&translator.get(key), &request.args))
+                .unwrap_or_default()
+        });
         let content = ToastContent {
             kind: tmpl.kind,
+            // The title substitutes too — the reference offer labels carry
+            // [NAME_LABEL].
+            title: tmpl
+                .title_key
+                .map(|key| substitute(&translator.get(key), &request.args)),
             body: body.clone(),
             buttons,
-            ignorable: tmpl.ignorable,
-            ignore_label: translator.get("notification-ignore-checkbox"),
+            ignorable: tmpl.ignore.offers_checkbox(),
+            ignore_label: ignore_checkbox_label(tmpl, &translator),
             // A modal is dismissed by choosing a button; every corner toast gets a
             // close × so a fading tip / notify can be dismissed early.
             closable: !tmpl.kind.is_modal(),
             font_size: TOAST_FONT_SIZE,
+            input,
         };
         let card = build_toast_card(&mut commands, &content);
 
@@ -868,6 +1064,7 @@ fn raise_notifications(
             hovered: false,
             overflowed: false,
             resolved: false,
+            input_field: card.input,
         });
 
         // Hovering pauses a fading toast's timer.
@@ -891,11 +1088,15 @@ fn raise_notifications(
                 );
         }
 
-        // Wire each button to a resolve carrying its name.
+        // Wire each button to a resolve carrying its name. With an input field
+        // the field holds tab stop 1, so the buttons start after it.
+        let button_tab_base = if card.input.is_some() { 2 } else { 1 };
         for (index, (button, name)) in card.buttons.iter().enumerate() {
             let target = toast_entity;
             let name = *name;
-            let tab = i32::try_from(index).unwrap_or(0).saturating_add(1);
+            let tab = i32::try_from(index)
+                .unwrap_or(0)
+                .saturating_add(button_tab_base);
             commands
                 .entity(*button)
                 .insert((Button, TabIndex(tab)))
@@ -1049,7 +1250,8 @@ fn handle_dismiss(
 #[expect(
     clippy::too_many_arguments,
     reason = "a resolve needs the resolve queue, the manager, the toast + descendant \
-              queries for the ignore state, the response channel and the settings; each is distinct"
+              queries for the ignore state and the input field's text, the response channel \
+              and the settings; each is distinct"
 )]
 fn resolve_notifications(
     mut commands: Commands,
@@ -1058,6 +1260,7 @@ fn resolve_notifications(
     toasts: Query<&Toast>,
     children: Query<&Children>,
     checkboxes: Query<&IgnoreCheckbox>,
+    editors: Query<&EditableText>,
     mut responses: MessageWriter<NotificationResponse>,
     mut settings: Option<ResMut<ViewerSettings>>,
 ) {
@@ -1073,16 +1276,41 @@ fn resolve_notifications(
         let ignored = children
             .iter_descendants(resolution.toast)
             .any(|node| checkboxes.get(node).is_ok_and(|checkbox| checkbox.checked));
-        if ignored && let Some(settings) = settings.as_deref_mut() {
+        // A ticked checkbox records what its kind means: a suppression for
+        // the suppressible kinds (plus, for `LastResponse`, the button to
+        // replay — the reference saves the response under `Default<name>`),
+        // and nothing at all for `CheckboxOnly`, whose state rides the
+        // response for the template's owner alone.
+        if ignored
+            && let Some(settings) = settings.as_deref_mut()
+            && let Some(tmpl) = template(toast.template)
+            && tmpl.ignore.is_suppressible()
+        {
             settings.set_account(toast.template, SettingValue::Bool(false));
+            if tmpl.ignore == NotificationIgnore::LastResponse
+                && let Some(button) = resolution.button
+            {
+                settings.set_account(
+                    &last_response_setting_name(toast.template),
+                    SettingValue::String(button.to_owned()),
+                );
+            }
         }
         manager.record_response(toast.id, resolution.button);
         manager.clear_unique(toast.id);
+        // The input field's edited text, for a template that carries one —
+        // read only when a button was chosen (a dismissal submits nothing).
+        let input = resolution
+            .button
+            .and(toast.input_field)
+            .and_then(|field| editors.get(field).ok())
+            .map(|editor| editor.value().to_string());
         responses.write(NotificationResponse {
             id: toast.id,
             template: toast.template,
             button: resolution.button,
             ignored,
+            input,
         });
         commands.entity(resolution.toast).despawn();
     }
@@ -1275,6 +1503,7 @@ fn log_notification_responses(
                 recorded = ?record.response,
                 button = ?response.button,
                 ignored = response.ignored,
+                input = ?response.input,
                 "notification resolved"
             );
         } else {
@@ -1282,6 +1511,7 @@ fn log_notification_responses(
                 template = response.template,
                 button = ?response.button,
                 ignored = response.ignored,
+                input = ?response.input,
                 "notification resolved (not in history)"
             );
         }
@@ -1409,6 +1639,8 @@ pub(crate) fn spawn_notification_specimen(
 ) -> Entity {
     let content = ToastContent {
         kind: NotificationKind::Alert,
+        // A title so the layout matrix sweeps the header line too.
+        title: Some(cx.text("Region restart")),
         body: cx.text(SPECIMEN_BODY),
         buttons: vec![
             ToastButtonSpec {
@@ -1426,6 +1658,9 @@ pub(crate) fn spawn_notification_specimen(
         ignore_label: cx.text("Don't show me this again"),
         closable: true,
         font_size: cx.font_size,
+        // The input field rides the specimen so the harness's layout matrix
+        // sweeps the save-outfit-style prompt (body + field + buttons).
+        input: Some(cx.text("My Outfit (new)")),
     };
     let card = build_toast_card(commands, &content);
     commands.entity(card.root).insert(ChildOf(parent));
@@ -1465,3 +1700,281 @@ pub(crate) fn spawn_notification_specimen(
 /// matrix sweeps.
 const SPECIMEN_BODY: &str = "The region you are in now will restart in 5 minutes. If you stay in \
     this region you will be logged out until the restart is complete.";
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::{App, Messages, Update};
+    use bevy::text::EditableText;
+    use pretty_assertions::assert_eq;
+    use sl_settings::{Scope, SettingValue, SettingsStore};
+
+    use super::{
+        IgnoreCheckbox, ResolveNotification, Toast, auto_response_button, resolve_notifications,
+    };
+    use crate::notifications::{
+        NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
+        NotificationManager, NotificationPriority, NotificationResponse, NotificationTemplate,
+        last_response_setting_name,
+    };
+    use crate::settings::ViewerSettings;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A two-button form for the synthetic templates: "OK" default, "Cancel".
+    const TEST_FORM: &[NotificationButton] = &[
+        NotificationButton {
+            name: "OK",
+            label_key: "k-ok",
+            is_default: true,
+        },
+        NotificationButton {
+            name: "Cancel",
+            label_key: "k-cancel",
+            is_default: false,
+        },
+    ];
+
+    /// A synthetic template with the given ignore kind over [`TEST_FORM`].
+    const fn synthetic(ignore: NotificationIgnore) -> NotificationTemplate {
+        NotificationTemplate {
+            name: "SyntheticIgnoreProbe",
+            kind: NotificationKind::Alert,
+            message_key: "k-body",
+            title_key: None,
+            priority: NotificationPriority::Normal,
+            persist: false,
+            log_to_chat: false,
+            unique: false,
+            ignore,
+            ignore_key: Some("k-ignore"),
+            form: TEST_FORM,
+            input: None,
+        }
+    }
+
+    /// The default-response kinds auto-answer with the form's default button;
+    /// show-again answers nothing — the reference `handleIgnoredNotification`
+    /// per kind, with no store involved.
+    #[test]
+    fn suppressed_kinds_pick_their_auto_response() {
+        let default = synthetic(NotificationIgnore::DefaultResponse);
+        assert_eq!(auto_response_button(&default, None), Some("OK"));
+        let session = synthetic(NotificationIgnore::DefaultResponseSessionOnly);
+        assert_eq!(auto_response_button(&session, None), Some("OK"));
+        let show_again = synthetic(NotificationIgnore::ShowAgain);
+        assert_eq!(auto_response_button(&show_again, None), None);
+    }
+
+    /// A last-response template replays the saved button; an unsaved (empty)
+    /// or no-longer-matching saved name falls back to the default button.
+    #[test]
+    fn last_response_replays_the_saved_button() -> Result<(), TestError> {
+        let tmpl = synthetic(NotificationIgnore::LastResponse);
+        let setting = last_response_setting_name(tmpl.name);
+        let mut store = SettingsStore::new();
+        store.register(&setting, SettingValue::String(String::new()), "saved")?;
+        let mut settings = ViewerSettings::from_store_for_test(store);
+        // Unsaved (the registered empty default): the default button.
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("OK"));
+        // Saved and still a form button: replayed.
+        settings.set_account(&setting, SettingValue::String("Cancel".to_owned()));
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("Cancel"));
+        // Saved but no longer a form button (a form edit since): the default.
+        settings.set_account(&setting, SettingValue::String("Gone".to_owned()));
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("OK"));
+        Ok(())
+    }
+
+    /// Drive [`resolve_notifications`] through a throwaway app against a toast
+    /// whose [`Toast::input_field`] is a real [`EditableText`] holding
+    /// "Renamed Outfit", resolving it with `button`, and return the single
+    /// response written (`None` if none was) — the host-level round trip that
+    /// a form field's edited text reaches [`NotificationResponse::input`].
+    fn resolve_with_field(button: Option<&'static str>) -> Option<NotificationResponse> {
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>();
+        app.add_message::<NotificationResponse>();
+        app.init_resource::<NotificationManager>();
+        app.add_systems(Update, resolve_notifications);
+        let field = app
+            .world_mut()
+            .spawn(EditableText::new("Renamed Outfit"))
+            .id();
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let toast = app
+            .world_mut()
+            .spawn(Toast {
+                id,
+                template: "RenameOutfit",
+                priority: NotificationPriority::Normal,
+                default_button: Some("OK"),
+                age: 0.0,
+                lifetime: 0.0,
+                opacity: 1.0,
+                hovered: false,
+                overflowed: false,
+                resolved: false,
+                input_field: Some(field),
+            })
+            .id();
+        app.world_mut()
+            .write_message(ResolveNotification { toast, button });
+        app.update();
+        let messages = app.world().resource::<Messages<NotificationResponse>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).next().cloned()
+    }
+
+    /// Drive [`resolve_notifications`] against a real catalogue template whose
+    /// toast carries a **ticked** ignore checkbox, over a store pre-seeded by
+    /// `register`, and return the app for store inspection.
+    fn resolve_ticked(
+        template: &'static str,
+        button: Option<&'static str>,
+        register: impl FnOnce(&mut SettingsStore),
+    ) -> App {
+        let mut store = SettingsStore::new();
+        register(&mut store);
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>();
+        app.add_message::<NotificationResponse>();
+        app.init_resource::<NotificationManager>();
+        app.insert_resource(ViewerSettings::from_store_for_test(store));
+        app.add_systems(Update, resolve_notifications);
+        let checkbox = app.world_mut().spawn(IgnoreCheckbox { checked: true }).id();
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let toast = app
+            .world_mut()
+            .spawn(Toast {
+                id,
+                template,
+                priority: NotificationPriority::Normal,
+                default_button: Some("OK"),
+                age: 0.0,
+                lifetime: 0.0,
+                opacity: 1.0,
+                hovered: false,
+                overflowed: false,
+                resolved: false,
+                input_field: None,
+            })
+            .add_child(checkbox)
+            .id();
+        app.world_mut()
+            .write_message(ResolveNotification { toast, button });
+        app.update();
+        app
+    }
+
+    /// The account-scope override a test's store holds for `name`, if any.
+    fn account_override(app: &App, name: &str) -> Option<SettingValue> {
+        app.world()
+            .resource::<ViewerSettings>()
+            .store()
+            .get_override(Scope::Account, name)
+            .cloned()
+    }
+
+    /// Ticking the box on a default-response template records the suppression
+    /// (the account-scope `Bool(false)` the raise path honours).
+    #[test]
+    fn ticked_default_response_records_a_suppression() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::DefaultResponse)
+            .ok_or("no DefaultResponse template in the catalogue")?;
+        let app = resolve_ticked(tmpl.name, None, |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "show")
+                .ok();
+        });
+        assert_eq!(
+            account_override(&app, tmpl.name),
+            Some(SettingValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    /// Ticking the box on a last-response template records the suppression
+    /// *and* the chosen button, so the next raise replays it.
+    #[test]
+    fn ticked_last_response_saves_the_chosen_button() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::LastResponse)
+            .ok_or("no LastResponse template in the catalogue")?;
+        let chosen = tmpl
+            .form
+            .first()
+            .map(|button| button.name)
+            .ok_or("a LastResponse template needs a form")?;
+        let saved_setting = last_response_setting_name(tmpl.name);
+        let app = resolve_ticked(tmpl.name, Some(chosen), |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "show")
+                .ok();
+            store
+                .register(&saved_setting, SettingValue::String(String::new()), "saved")
+                .ok();
+        });
+        assert_eq!(
+            account_override(&app, tmpl.name),
+            Some(SettingValue::Bool(false))
+        );
+        assert_eq!(
+            account_override(&app, &saved_setting),
+            Some(SettingValue::String(chosen.to_owned()))
+        );
+        Ok(())
+    }
+
+    /// Ticking the box on a checkbox-only template writes **no** setting — the
+    /// state rides the response's `ignored` flag for the owner alone.
+    #[test]
+    fn ticked_checkbox_only_writes_no_setting() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::CheckboxOnly)
+            .ok_or("no CheckboxOnly template in the catalogue")?;
+        let app = resolve_ticked(tmpl.name, None, |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "not written")
+                .ok();
+        });
+        assert_eq!(account_override(&app, tmpl.name), None);
+        let messages = app.world().resource::<Messages<NotificationResponse>>();
+        let mut cursor = messages.get_cursor();
+        let response = cursor.read(messages).next().cloned();
+        assert_eq!(response.map(|response| response.ignored), Some(true));
+        Ok(())
+    }
+
+    /// Choosing a button submits the input field: its edited text arrives on
+    /// the response alongside the button name.
+    #[test]
+    fn resolving_a_button_returns_the_input_fields_text() {
+        let response = resolve_with_field(Some("OK"));
+        assert_eq!(
+            response.as_ref().and_then(|r| r.input.as_deref()),
+            Some("Renamed Outfit")
+        );
+        assert_eq!(response.as_ref().and_then(|r| r.button), Some("OK"));
+    }
+
+    /// A dismissal (no button chosen) submits nothing: the response carries no
+    /// input text even though the field exists.
+    #[test]
+    fn dismissing_returns_no_input() {
+        let response = resolve_with_field(None);
+        assert!(response.is_some(), "a dismissal still writes a response");
+        assert_eq!(response.and_then(|r| r.input), None);
+    }
+}

@@ -164,7 +164,7 @@ pub(crate) const DEFAULT_ELLIPSIS: &str = "…";
 const ELLIPSIS_GAP: f32 = 2.0;
 
 /// A tab label's colour.
-const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub(crate) const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// The panel area's background — the "content" shade the active tab shares.
 const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);

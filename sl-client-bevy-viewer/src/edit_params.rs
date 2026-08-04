@@ -2108,12 +2108,8 @@ const PENDING_NAME: &str = "…";
 
 /// The display line for an agent: the resolved legacy name, or an ellipsis
 /// while the (deduplicated) name request is in flight.
-fn agent_label(
-    agent: AgentKey,
-    avatars: &mut AvatarState,
-    names: &mut MessageWriter<SlCommand>,
-) -> String {
-    avatars.request_name(agent, names);
+fn agent_label(agent: AgentKey, avatars: &mut AvatarState) -> String {
+    avatars.request_name(agent);
     avatars
         .name_of(agent)
         .map_or_else(|| PENDING_NAME.to_owned(), str::to_owned)
@@ -2153,10 +2149,10 @@ fn build_snapshot(
         |properties| (properties.name.clone(), properties.description.clone()),
     );
     let creator_label = properties.map_or_else(String::new, |properties| {
-        agent_label(properties.creator_id, avatars, names)
+        agent_label(properties.creator_id, avatars)
     });
     let owner_label = properties.map_or_else(String::new, |properties| match properties.owner {
-        OwnerKey::Agent(agent) => agent_label(agent, avatars, names),
+        OwnerKey::Agent(agent) => agent_label(agent, avatars),
         OwnerKey::Group(group) => group_label(group, groups, names),
     });
     let group = properties.and_then(|properties| properties.group);

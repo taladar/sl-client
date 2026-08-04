@@ -540,6 +540,13 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_tab::spawn_tabs_inline_start,
     },
     UiElement {
+        id: "preferences",
+        summary: "The preferences shell: a search box, a leading (RTL-mirroring) tab strip, \
+                  labelled setting rows and an OK / Cancel footer. Static — the live shell \
+                  (`crate::preferences`) adds the store binding, filter and snapshot/revert.",
+        spawn: crate::preferences::spawn_preferences_specimen,
+    },
+    UiElement {
         id: "tabs-trailing",
         summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
                   placement the reference viewer cannot express, usable for LTR too, not only as \

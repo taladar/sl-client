@@ -74,6 +74,27 @@ use crate::ui_font::UiFont;
 /// for its history / response bookkeeping).
 const GROUP_NOTICE_TEMPLATE: &str = "GroupNotice";
 
+/// The account setting gating group-notice toasts (the Preferences alerts
+/// tab's headline row; our own name — the reference has no single global
+/// gate). While off, a received notice raises no card and is not persisted
+/// for relogin re-raise (it stays readable in the group's Notices tab, which
+/// pulls from the server). Lives in the `[notifications]` section with the
+/// other notification preferences.
+pub(crate) const SETTING_GROUP_NOTICE_TOASTS: &str = "ShowGroupNoticeToasts";
+
+/// Startup: declare [`SETTING_GROUP_NOTICE_TOASTS`] (default on).
+fn register_group_notice_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.register_in(
+        &[crate::notifications::NOTIFICATIONS_SECTION],
+        SETTING_GROUP_NOTICE_TOASTS,
+        sl_settings::SettingValue::Bool(true),
+        "Show a toast when a group notice arrives",
+    );
+}
+
 /// The renderer id a persisted group-notice card ([`PersistedKind::Custom`])
 /// carries, so the persistent store routes its reload back here
 /// ([`reload_group_notices`]).
@@ -162,14 +183,15 @@ impl Plugin for GroupNoticePlugin {
     /// Ingest received notices (into the shared toast channel), re-raise ones
     /// persisted from a previous session, and poll their insignia textures.
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                ingest_group_notices,
-                reload_group_notices,
-                poll_group_notice_insignia,
-            ),
-        );
+        app.add_systems(Startup, register_group_notice_settings)
+            .add_systems(
+                Update,
+                (
+                    ingest_group_notices,
+                    reload_group_notices,
+                    poll_group_notice_insignia,
+                ),
+            );
     }
 }
 
@@ -187,11 +209,12 @@ struct PendingInsignia(TextureKey);
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the event \
               stream, the shared channel + manager it raises into, the group model + texture \
-              manager + translator it renders from, the requested-notice set it consults, and \
-              the command writer + commands it acts through"
+              manager + translator it renders from, the requested-notice set it consults, the \
+              toast-gate settings, and the command writer + commands it acts through"
 )]
 fn ingest_group_notices(
     mut events: MessageReader<SlEvent>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
     channel: Option<Res<NotificationChannelRoot>>,
     mut manager: ResMut<NotificationManager>,
     groups: Res<GroupsModel>,
@@ -216,6 +239,17 @@ fn ingest_group_notices(
         // for a notice the Notices tab pulled up to read itself.
         let notice_id = GroupNoticeKey::from(im.id);
         if requested.take_requested(notice_id) {
+            continue;
+        }
+        // The alerts-tab gate: while group-notice toasts are off, raise no
+        // card and skip the relogin persist too (a persisted notice would
+        // re-raise a card at the next login, defeating the setting); the
+        // notice stays readable in the group's server-side Notices tab.
+        let show_toasts = settings
+            .as_deref()
+            .and_then(|settings| settings.store().get_bool(SETTING_GROUP_NOTICE_TOASTS).ok())
+            .unwrap_or(true);
+        if !show_toasts {
             continue;
         }
         // Resolve the group name for the title; request it if this notice's group

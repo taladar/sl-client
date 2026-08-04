@@ -428,6 +428,23 @@ impl AnimationPlayback {
             .is_some_and(|anims| anims.values().any(|state| state.stopped_at.is_none()))
     }
 
+    /// Whether the simulator-signalled animation set of `agent` contains
+    /// `animation` as **active** (not easing out).
+    ///
+    /// This is a *state* query, not a visual one: the `AvatarAnimation`
+    /// broadcast is the signalled set — e.g. `ANIM_AGENT_AWAY` stays in it
+    /// while an agent is away even if an AO overrides what actually plays,
+    /// which is exactly how the reference derives another avatar's Away
+    /// status (`mSignaledAnimations`, and the protocol's only carrier of it).
+    #[must_use]
+    pub(crate) fn is_playing(&self, agent: AgentKey, animation: Uuid) -> bool {
+        self.playing.get(&agent).is_some_and(|anims| {
+            anims
+                .get(&animation)
+                .is_some_and(|state| state.stopped_at.is_none())
+        })
+    }
+
     /// Reconcile the own avatar's client-driven locomotion set (P31.6) to a single
     /// `desired` built-in animation, or `None` to ease out whatever is playing. An
     /// unchanged desire keeps its playback clock (so a continuous walk keeps

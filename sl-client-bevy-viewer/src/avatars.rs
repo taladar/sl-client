@@ -16,10 +16,10 @@
 //!   is left to the object path), and despawns a sphere the moment its avatar
 //!   drops out of the coarse list.
 //!
-//! Each avatar also carries a floating **name tag** — a screen-space `Text2d`
-//! on the tag overlay camera (see [`crate::name_tag_overlay`]), positioned each
-//! frame over the sphere by projecting its world position to the
-//! screen ([`position_name_tags`]). The legacy name is resolved once per agent via
+//! Each avatar also carries a floating **name tag** — a world-space billboard
+//! mesh (see [`crate::name_tag_billboard`]) that follows the avatar anchor and
+//! renders through the main world camera with occlusion, constant on-screen
+//! size and distance fade. The legacy name is resolved once per agent via
 //! a `UUIDNameRequest` ([`Command::RequestAvatarNames`](sl_client_bevy::Command))
 //! and cached in [`AvatarState`], so a repeatedly-updated avatar is never
 //! re-requested; until the reply arrives the tag shows a short id fragment so the
@@ -35,22 +35,21 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::app::Propagate;
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::morph::MeshMorphWeights;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
-use bevy::sprite::Anchor;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bytes::Bytes;
 use sl_client_bevy::{
     AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
     BodyPhysics, BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel,
-    JointOverrides, Layer, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask,
-    RUNTIME_MORPH_PARAMS, RegionHandle, ResolvedParams, ScopedObjectId, SkeletalDeformations,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey, Uuid,
-    VolumeDeformations, avatar_texture, composite_region, decode_texture_entry,
+    DisplayName, JointOverrides, Layer, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object,
+    PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle, ResolvedParams, ScopedObjectId,
+    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
+    Uuid, VolumeDeformations, avatar_texture, composite_region, decode_texture_entry,
     joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
     to_bevy_runtime_morph_targets,
 };
@@ -61,11 +60,11 @@ use crate::coords::{
     metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
-use crate::name_tag_overlay::{NAME_TAG_RENDER_LAYER, overlay_point_from_viewport};
+use crate::name_tag_billboard::name_tag_render_bundle;
+use crate::name_tag_content::TagContent;
 use crate::physics::AvatarMotion;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
-use crate::ui_font::UiFont;
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized). Read by [`crate::avatar_pick`] to
@@ -135,9 +134,6 @@ const BOM_FALLBACK_COLOR: Color = Color::srgb(0.75, 0.75, 0.75);
 /// sampling a bake's alpha for the clothing-morph masks (P14.5).
 const RGBA_CHANNELS: usize = 4;
 
-/// The name-tag font size, in logical pixels.
-const NAME_TAG_FONT_SIZE: f32 = 16.0;
-
 /// How many leading hex characters of the agent id to show as a provisional tag
 /// before the real name resolves.
 const PROVISIONAL_ID_CHARS: usize = 8;
@@ -148,7 +144,8 @@ pub(crate) struct AvatarSphere;
 
 /// A marker component on the transform-bearing *anchor* entity of an avatar —
 /// its placeholder sphere or the root of its rigged body — whose world position
-/// [`position_name_tags`] projects to place the floating name tag.
+/// the name-tag placement ([`crate::name_tag_billboard::follow_tag_anchors`])
+/// follows to float the tag.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarAnchor;
 
@@ -161,8 +158,8 @@ pub(crate) struct AvatarAnchor;
 /// mesh-body avatar the base body is hidden, so the worn mesh *is* the
 /// silhouette), and the floating name tag. That breadth is the point — a ray
 /// that hits any body part, or a pointer over the name tag (resolved by the
-/// [`crate::name_tag_overlay::NameTagHitTest`] rect test, tags being `Text2d`,
-/// not UI), resolves to the
+/// [`crate::name_tag_billboard::NameTagHitTest`] rect test — tags are custom
+/// billboard meshes no picking backend covers), resolves to the
 /// same agent through one component, so a caller never has to know *which* piece
 /// it hit. Kept separate from [`AvatarBodyPart`] (which also holds an agent) so
 /// non-mesh pieces (the sphere, the name tag) can carry the identity too, and
@@ -414,10 +411,9 @@ pub(crate) struct AvatarJoint {
     index: usize,
 }
 
-/// A name-tag [`Text2d`] on the tag overlay camera
-/// ([`crate::name_tag_overlay`]), pointing back at the avatar anchor it floats
-/// over so [`position_name_tags`] can project the anchor's world position to
-/// the screen each frame.
+/// A world-space name-tag billboard ([`crate::name_tag_billboard`]), pointing
+/// back at the avatar anchor it floats over so the placement system can
+/// follow the anchor's world position each frame.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct NameTag {
     /// The avatar anchor entity (sphere or body root) this tag labels.
@@ -425,6 +421,123 @@ pub(crate) struct NameTag {
     /// The height, in metres above the anchor's world position, at which to
     /// float the tag (a sphere's top or a body's head).
     pub(crate) tag_height: f32,
+}
+
+/// One agent's resolved names, merged from every source: the instant
+/// `ObjectUpdate` NameValue seed, the legacy `UUIDNameReply`, and the
+/// `GetDisplayNames` cap (SL only — OpenSim generally lacks the cap, so the
+/// legacy fields must always work on their own).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct NameRecord {
+    /// The legacy `"First Last"` name (`"First"` alone for a single-name
+    /// account), from whichever source arrived first.
+    pub(crate) legacy: Option<String>,
+    /// The immutable dotted SLID (`"first.last"`), display-name cap only.
+    pub(crate) username: Option<String>,
+    /// The chosen display name, display-name cap only (`None` on OpenSim).
+    pub(crate) display_name: Option<String>,
+    /// Whether the display name is just the legacy-derived default (a custom
+    /// display name shows with the username line under it, the reference's
+    /// `is_display_name_default` behaviour).
+    pub(crate) is_display_name_default: bool,
+}
+
+impl NameRecord {
+    /// The name the tag's main line shows: the display name when one
+    /// resolved, else the legacy name.
+    pub(crate) fn preferred_name(&self) -> Option<&str> {
+        self.display_name.as_deref().or(self.legacy.as_deref())
+    }
+}
+
+/// The master name-tag toggle (the preferences General tab's headline switch;
+/// the reference `AvatarNameTagMode` off/on axis). Honoured by
+/// [`crate::name_tag_billboard::follow_tag_anchors`]; the full reference toggle set is the separate
+/// `viewer-name-tags-preferences` task.
+pub(crate) const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
+
+/// Whether the logged-in avatar's own tag is shown (the reference
+/// `RenderNameShowSelf`). Honoured by
+/// [`crate::name_tag_billboard::follow_tag_anchors`].
+pub(crate) const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
+
+/// The settings section the name-tag toggles live in.
+const NAME_TAG_SECTION: &[&str] = &["nametags"];
+
+/// Register the name-tag settings.
+pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+    settings.register_in(
+        NAME_TAG_SECTION,
+        SETTING_SHOW_NAME_TAGS,
+        sl_settings::SettingValue::Bool(true),
+        "Show floating name tags over avatars",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        SETTING_SHOW_OWN_NAME_TAG,
+        sl_settings::SettingValue::Bool(true),
+        "Show the name tag over your own avatar too",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_DISPLAY_NAMES,
+        sl_settings::SettingValue::Bool(true),
+        "Show display names on name tags (off: legacy names only)",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_USERNAMES,
+        sl_settings::SettingValue::Bool(true),
+        "Show the username line under a custom display name",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_GROUP_TITLES,
+        sl_settings::SettingValue::Bool(true),
+        "Show the active group title line on name tags",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_FRIEND_COLOR,
+        sl_settings::SettingValue::Bool(true),
+        "Colour friends' name tags",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_DISTANCE,
+        sl_settings::SettingValue::Bool(true),
+        "Show the camera distance line on name tags",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_TYPING,
+        sl_settings::SettingValue::Bool(true),
+        "Show a Typing status line while an avatar is typing",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_COLOR_BY_DISTANCE,
+        sl_settings::SettingValue::Bool(false),
+        "Tint whole name tags by chat range (whisper/say/shout)",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_billboard::SETTING_FADE_START,
+        sl_settings::SettingValue::F32(crate::name_tag_billboard::DEFAULT_FADE_START_METRES),
+        "Distance in metres at which name tags start to fade",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_billboard::SETTING_FADE_RANGE,
+        sl_settings::SettingValue::F32(crate::name_tag_billboard::DEFAULT_FADE_RANGE_METRES),
+        "Metres past the fade start at which name tags are fully hidden",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_billboard::SETTING_BUBBLE_OPACITY,
+        sl_settings::SettingValue::F32(0.5),
+        "Opacity of the name-tag backdrop bubble",
+    );
 }
 
 /// The shared placeholder sphere mesh and material, built once and reused by
@@ -509,12 +622,24 @@ pub(crate) struct AvatarState {
     /// node for its point so it seats at the stored local offset from the joint.
     /// Absent for a sphere-only (no `--viewer-assets`) avatar.
     attachment_nodes: HashMap<AgentKey, HashMap<u8, Entity>>,
-    /// Resolved legacy names, keyed by agent id — the "simple name cache" that
-    /// keeps a repeatedly-seen avatar from being re-requested.
-    names: HashMap<AgentKey, String>,
-    /// Agents whose legacy name has already been requested (but has not
-    /// necessarily arrived), so the same `UUIDNameRequest` is not sent twice.
+    /// Resolved names, keyed by agent id — the "simple name cache" that keeps
+    /// a repeatedly-seen avatar from being re-requested; merged from the
+    /// NameValue seed, the legacy `UUIDNameReply` and the display-name cap.
+    names: HashMap<AgentKey, NameRecord>,
+    /// Group titles from each avatar object's NameValue `Title` — the classic
+    /// mechanism the reference reads for other avatars' tags. (The own
+    /// avatar's fresher title comes from `ActiveGroupChanged` via
+    /// [`crate::groups::GroupsModel`].)
+    titles: HashMap<AgentKey, String>,
+    /// Agents whose name has already been requested (but has not necessarily
+    /// arrived), so the same request is never sent twice.
     requested: HashSet<AgentKey>,
+    /// Agents queued for this frame's batched name request
+    /// ([`flush_name_requests`]): one `UUIDNameRequest` **and** one
+    /// `GetDisplayNames` cap call per frame, however many avatars appeared
+    /// (each cap call costs an HTTP request; cap absence — OpenSim — is a
+    /// silent no-op, which is why the legacy request always goes out too).
+    pending_name_requests: HashSet<AgentKey>,
     /// The latest `AvatarAppearance.visual_params` byte vector per avatar, kept so
     /// a body spawned after (or re-spawned) can be morphed from the last known
     /// appearance (P13.3).
@@ -1239,6 +1364,7 @@ pub(crate) fn fit_avatar_pick_colliders(
     avatars: Res<AvatarState>,
     globals: Query<&GlobalTransform>,
     mut colliders: Query<(&AvatarPickCollider, &mut Transform)>,
+    mut tags: Query<&mut NameTag>,
 ) {
     for (collider, mut transform) in &mut colliders {
         let agent = collider.agent;
@@ -1281,6 +1407,21 @@ pub(crate) fn fit_avatar_pick_colliders(
         }
         if transform.scale != size {
             transform.scale = size;
+        }
+        // The same posed head top drives the name tag's float height (the
+        // spawn-time `BODY_TAG_HEIGHT` guess sits *in* the head of a tall
+        // mesh body — the reference anchors the tag above the actual head).
+        // A small threshold keeps head-bob from churning the tag target.
+        if let Some(label) = avatars.label_of(agent)
+            && let Ok(mut tag) = tags.get_mut(label)
+        {
+            // `top` already carries the crown margin; a small extra clearance
+            // approximates the reference's 0.17×height ellipsoid offset
+            // (the +25 px screen lift rides in the tag mesh itself).
+            let desired = top + 0.1;
+            if (tag.tag_height - desired).abs() > 0.05 {
+                tag.tag_height = desired;
+            }
         }
     }
 }
@@ -1356,13 +1497,29 @@ impl AvatarState {
         (built.collider.clone(), built.collider_material.clone())
     }
 
-    /// The tag text for an agent: its resolved legacy name, or a provisional id
-    /// fragment until the name arrives.
-    fn label_text(&self, agent: AgentKey) -> String {
+    /// The tag text for an agent: its display name when resolved, else its
+    /// legacy name, else a provisional id fragment until either arrives.
+    pub(crate) fn label_text(&self, agent: AgentKey) -> String {
         self.names
             .get(&agent)
-            .cloned()
-            .unwrap_or_else(|| provisional_label(agent))
+            .and_then(NameRecord::preferred_name)
+            .map_or_else(|| provisional_label(agent), str::to_owned)
+    }
+
+    /// Every labelled avatar: `(agent, anchor entity, label entity)` — full
+    /// objects first, then the coarse-only spheres (the object path despawns
+    /// a coarse twin, but the filter keeps a mid-frame overlap harmless).
+    /// The tag-content composer iterates this.
+    pub(crate) fn labelled_avatars(&self) -> impl Iterator<Item = (AgentKey, Entity, Entity)> + '_ {
+        self.objects
+            .iter()
+            .map(|(agent, entities)| (*agent, entities.anchor, entities.label))
+            .chain(
+                self.coarse
+                    .iter()
+                    .filter(|(agent, _)| !self.objects.contains_key(agent))
+                    .map(|(agent, entities)| (*agent, entities.anchor, entities.label)),
+            )
     }
 
     /// This agent's resolved legacy name, if one has arrived yet.
@@ -1371,7 +1528,22 @@ impl AvatarState {
     /// (a mute entry names the muted avatar); a `None` means the name has not
     /// resolved, and the caller falls back to a provisional label.
     pub(crate) fn name_of(&self, agent: AgentKey) -> Option<&str> {
-        self.names.get(&agent).map(String::as_str)
+        self.names
+            .get(&agent)
+            .and_then(|record| record.legacy.as_deref())
+    }
+
+    /// This agent's full name record, if any of its sources answered yet —
+    /// the tag-content composer reads the display name / username / default
+    /// flag from it.
+    pub(crate) fn name_record(&self, agent: AgentKey) -> Option<&NameRecord> {
+        self.names.get(&agent)
+    }
+
+    /// This agent's group title (from its avatar object's NameValue `Title`),
+    /// if it has one.
+    pub(crate) fn title_of(&self, agent: AgentKey) -> Option<&str> {
+        self.titles.get(&agent).map(String::as_str)
     }
 
     /// Every avatar this viewer currently knows in-world, with the anchor
@@ -1430,35 +1602,29 @@ impl AvatarState {
             .map(|entities| entities.anchor)
     }
 
-    /// Spawn the floating name-tag `Text2d` for `agent`, anchored to `anchor`
-    /// and floating `tag_height` metres above it (on the tag overlay camera —
-    /// [`crate::name_tag_overlay`]).
+    /// Spawn the floating world-space name-tag billboard for `agent`, anchored
+    /// to `anchor`, floating `tag_height` metres above it, and pulled toward
+    /// the camera by `pull_radius` metres so the avatar's own body cannot
+    /// occlude it ([`crate::name_tag_billboard`]).
     fn spawn_label(
         &self,
         agent: AgentKey,
         anchor: Entity,
         tag_height: f32,
+        pull_radius: f32,
         commands: &mut Commands,
     ) -> Entity {
         commands
             .spawn((
-                Text2d::new(self.label_text(agent)),
-                UiFont::Sans.at(NAME_TAG_FONT_SIZE),
-                TextColor(Color::WHITE),
-                // The anchor point *is* the projected head position: the tag's
-                // bottom-centre sits on its translation, so `position_name_tags`
-                // needs no size-dependent centring (the old UI tag read its own
-                // previous-frame layout size for that, with a one-frame lag).
-                Anchor::BOTTOM_CENTER,
-                RenderLayers::layer(NAME_TAG_RENDER_LAYER),
-                // Positioned each frame by `position_name_tags`; hidden until the
-                // first projection so it never flashes at the origin.
-                Visibility::Hidden,
+                name_tag_render_bundle(pull_radius),
+                // The initial content: the resolved (or provisional) name as a
+                // plain white line; the content composer refines it.
+                TagContent::plain_name(self.label_text(agent)),
                 NameTag { anchor, tag_height },
                 // The name tag is a valid avatar pick target (a right-click on it
                 // opens the avatar menu, matching the reference) — resolved by the
-                // `NameTagHitTest` rect test, since no picking backend covers
-                // `Text2d`.
+                // `NameTagHitTest` rect test, since no picking backend covers the
+                // custom tag meshes.
                 AvatarPickTarget { agent },
             ))
             .id()
@@ -1493,7 +1659,13 @@ impl AvatarState {
                 AvatarPickTarget { agent },
             ))
             .id();
-        let label = self.spawn_label(agent, sphere, AVATAR_SPHERE_RADIUS + NAME_TAG_GAP, commands);
+        let label = self.spawn_label(
+            agent,
+            sphere,
+            AVATAR_SPHERE_RADIUS + NAME_TAG_GAP,
+            AVATAR_SPHERE_RADIUS,
+            commands,
+        );
         AvatarEntities {
             anchor: sphere,
             label,
@@ -1606,7 +1778,9 @@ impl AvatarState {
         if debug_visible {
             collider_entity.insert(MeshMaterial3d(collider_material));
         }
-        let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, commands);
+        // A rigged body is roughly half a metre across at head height — the
+        // camera pull that keeps the avatar's own head from occluding its tag.
+        let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, 0.5, commands);
         (
             AvatarEntities {
                 anchor: root,
@@ -1617,19 +1791,97 @@ impl AvatarState {
         )
     }
 
-    /// Request the legacy name of `agent` once — skipped if it is already cached
-    /// or already in flight. `pub(crate)` for the build floater's General tab,
-    /// which resolves a selected object's creator / owner through the same
-    /// cache.
-    pub(crate) fn request_name(
+    /// Seed the name cache and title map from an avatar object's NameValue
+    /// pairs (`FirstName` / `LastName` / `Title` — the classic mechanism; the
+    /// simulator sends them with every avatar `ObjectUpdate`, so the legacy
+    /// name and group title arrive *with the object*, zero round trips).
+    /// Never clobbers a legacy name another source already resolved, and only
+    /// touches the title when a `Title` pair is actually present (a present
+    /// but empty title means "title taken off").
+    fn seed_from_name_values(&mut self, agent: AgentKey, object: &Object) {
+        self.seed_name_fields(
+            agent,
+            object.name_value_data("FirstName"),
+            object.name_value_data("LastName"),
+            object.name_value_data("Title"),
+        );
+    }
+
+    /// The merge rules of [`Self::seed_from_name_values`], on the extracted
+    /// NameValue fields (split out so they are unit-testable without
+    /// constructing a full [`Object`]).
+    fn seed_name_fields(
         &mut self,
         agent: AgentKey,
-        commands: &mut MessageWriter<SlCommand>,
+        first: Option<String>,
+        last: Option<String>,
+        title: Option<String>,
     ) {
-        if self.names.contains_key(&agent) || !self.requested.insert(agent) {
+        if let Some(first) = first {
+            let legacy = match last {
+                Some(last) if !last.is_empty() && !last.eq_ignore_ascii_case("Resident") => {
+                    format!("{first} {last}")
+                }
+                _ => first,
+            };
+            if !legacy.is_empty() {
+                let record = self.names.entry(agent).or_default();
+                if record.legacy.is_none() {
+                    record.legacy = Some(legacy);
+                }
+            }
+        }
+        if let Some(title) = title {
+            // The reference strips control characters from titles.
+            let cleaned: String = title.chars().filter(|c| !c.is_control()).collect();
+            if cleaned.is_empty() {
+                self.titles.remove(&agent);
+            } else {
+                self.titles.insert(agent, cleaned);
+            }
+        }
+    }
+
+    /// Fold one display-name record from the `GetDisplayNames` cap (or a
+    /// pushed `DisplayNameUpdate`) into the cache. A `missing` placeholder
+    /// (the grid could not resolve the id) changes nothing — the legacy
+    /// fallback stays. (The tag refreshes via the content composer.)
+    fn set_display_name(&mut self, resolved: &DisplayName) {
+        if !self.merge_display_name_record(resolved) {
             return;
         }
-        commands.write(SlCommand(Command::RequestAvatarNames(vec![agent])));
+        debug!(
+            "resolved display name {} = {:?} (@{})",
+            resolved.id, resolved.display_name, resolved.username
+        );
+    }
+
+    /// Fold one non-`missing` display-name record into the name cache;
+    /// returns whether anything was (potentially) updated. Split from
+    /// [`Self::set_display_name`] so the merge rules are unit-testable
+    /// without an ECS world.
+    fn merge_display_name_record(&mut self, resolved: &DisplayName) -> bool {
+        if resolved.missing {
+            return false;
+        }
+        let record = self.names.entry(resolved.id).or_default();
+        record.legacy = Some(resolved.legacy_name());
+        record.username = Some(resolved.username.clone());
+        record.display_name = Some(resolved.display_name.clone());
+        record.is_display_name_default = resolved.is_display_name_default;
+        true
+    }
+
+    /// Queue a name request for `agent` once — a no-op if it is already in
+    /// flight or answered. The actual wire traffic goes out batched, once per
+    /// frame, in [`flush_name_requests`]. `pub(crate)` for the build
+    /// floater's General tab, which resolves a selected object's creator /
+    /// owner through the same cache.
+    pub(crate) fn request_name(&mut self, agent: AgentKey) {
+        if !self.requested.insert(agent) {
+            return;
+        }
+        self.pending_name_requests.insert(agent);
     }
 
     /// Spawn or move a full-object avatar (`pcode` 47): its rigged base body when
@@ -1644,10 +1896,10 @@ impl AvatarState {
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
-        writer: &mut MessageWriter<SlCommand>,
     ) {
         let agent = AgentKey::from(object.full_id.uuid());
         let scoped = object.scoped_id();
+        self.seed_from_name_values(agent, object);
         // The authoritative motion the P31.4 dead-reckoner (`drive_avatar_motion`)
         // extrapolates between updates; re-inserted on every update so its change
         // detection reseeds the prediction. A rigged body root carries the object
@@ -1677,7 +1929,7 @@ impl AvatarState {
                 .insert((transform, avatar_motion));
             return;
         }
-        self.request_name(agent, writer);
+        self.request_name(agent);
         let entities = match body {
             Some(body) => {
                 let (collider, collider_material) =
@@ -1759,6 +2011,16 @@ impl AvatarState {
     /// a worn rigged mesh's skinned submeshes are parented to so they despawn with
     /// the avatar and inherit its visibility. `None` if that avatar is not a tracked
     /// full-object avatar yet.
+    /// The name-tag (label) entity of `agent`, if it is currently rendered.
+    pub(crate) fn label_of(&self, agent: AgentKey) -> Option<Entity> {
+        self.objects
+            .get(&agent)
+            .or_else(|| self.coarse.get(&agent))
+            .map(|entities| entities.label)
+    }
+
+    /// The rigged-body root (anchor) entity of `agent`'s full-object avatar,
+    /// if one is rendered.
     pub(crate) fn body_root_of(&self, agent: AgentKey) -> Option<Entity> {
         self.objects.get(&agent).map(|entities| entities.anchor)
     }
@@ -1883,7 +2145,7 @@ impl AvatarState {
         clippy::too_many_arguments,
         reason = "reconciling one region's coarse dots needs the region + scene \
                   origin (to offset), the update's locations + you index, and the \
-                  Commands / mesh / material / command-writer sinks to spawn spheres"
+                  Commands / mesh / material sinks to spawn spheres"
     )]
     fn apply_coarse(
         &mut self,
@@ -1894,7 +2156,6 @@ impl AvatarState {
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
-        writer: &mut MessageWriter<SlCommand>,
     ) {
         // The neighbour region's south-west corner relative to the scene origin, in
         // Second Life east/north metres (0 for the root region itself).
@@ -1922,7 +2183,7 @@ impl AvatarState {
                     .entity(existing.anchor)
                     .insert(Transform::from_translation(translation));
             } else {
-                self.request_name(agent, writer);
+                self.request_name(agent);
                 let entities = self.spawn_sphere(agent, translation, commands, meshes, materials);
                 self.coarse.insert(agent, entities);
             }
@@ -1947,20 +2208,13 @@ impl AvatarState {
         }
     }
 
-    /// Record a resolved legacy name and refresh the tag text of any avatar
-    /// currently rendered for that agent.
-    fn set_name(&mut self, name: &AvatarName, texts: &mut Query<&mut Text2d, With<NameTag>>) {
+    /// Record a resolved legacy name. (The tag itself refreshes via the
+    /// content composer, which recomposes whenever this state changes.)
+    fn set_name(&mut self, name: &AvatarName) {
         let agent = name.id;
         let resolved = name.legacy_name();
-        for map in [&self.objects, &self.coarse] {
-            if let Some(entities) = map.get(&agent)
-                && let Ok(mut text) = texts.get_mut(entities.label)
-            {
-                *text = Text2d::new(resolved.clone());
-            }
-        }
+        self.names.entry(agent).or_default().legacy = Some(resolved.clone());
         debug!("resolved avatar name {agent} = {resolved:?}");
-        self.names.insert(agent, resolved);
     }
 
     /// Record the parenting of an in-world object and, once, scan its texture
@@ -2141,7 +2395,6 @@ pub(crate) fn update_avatar_objects(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
-    mut writer: MessageWriter<SlCommand>,
 ) {
     let body = body.as_deref();
     for event in events.read() {
@@ -2167,14 +2420,7 @@ pub(crate) fn update_avatar_objects(
                     } else {
                         state.ever_full_object.insert(agent);
                     }
-                    state.apply_object(
-                        object,
-                        body,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut writer,
-                    );
+                    state.apply_object(object, body, &mut commands, &mut meshes, &mut materials);
                 }
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
@@ -2198,7 +2444,6 @@ pub(crate) fn update_coarse_avatars(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
-    mut writer: MessageWriter<SlCommand>,
 ) {
     let origin = identity.region_handle;
     for event in events.read() {
@@ -2217,7 +2462,6 @@ pub(crate) fn update_coarse_avatars(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                &mut writer,
             );
         }
     }
@@ -2253,7 +2497,8 @@ pub(crate) fn log_avatar_interest_census(
         let name = state
             .names
             .get(agent)
-            .map_or("<unresolved>", String::as_str);
+            .and_then(NameRecord::preferred_name)
+            .unwrap_or("<unresolved>");
         let ever_object = state.ever_full_object.contains(agent);
         let pos = state.coarse_pos.get(agent);
         info!(
@@ -2262,76 +2507,47 @@ pub(crate) fn log_avatar_interest_census(
     }
 }
 
-/// R22b diagnostic: when `SL_VIEWER_LOG_AVATAR_INTEREST=1`, append each avatar's
-/// distance from the agent's own avatar to its floating name tag (e.g.
-/// `"Kamaeri (152m)"`), refreshed twice a second. Lets a live run read off exactly
-/// where a full-body avatar gives way to a coarse "blue sphere" — i.e. the radius the
-/// simulator streams full avatar objects within, and whether flying the camera moves
-/// that boundary. A no-op unless the flag is set (`apply_avatar_names` restores the
-/// plain tag on the next name refresh once it is off).
-pub(crate) fn annotate_avatar_distances(
-    time: Res<Time>,
-    mut next_at: Local<f32>,
-    state: Res<AvatarState>,
-    identity: Res<SlIdentity>,
-    anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
-    mut texts: Query<&mut Text2d, With<NameTag>>,
+/// Fold resolved legacy and display names into the name cache (the tags
+/// themselves refresh via the content composer, which watches this state).
+pub(crate) fn apply_avatar_names(
+    mut events: MessageReader<SlEvent>,
+    mut state: ResMut<AvatarState>,
 ) {
-    if !log_avatar_interest() {
-        return;
-    }
-    let now = time.elapsed_secs();
-    if now < *next_at {
-        return;
-    }
-    *next_at = now + 0.5;
-    let Some(own_agent) = identity.agent_id else {
-        return;
-    };
-    let Some(own_pos) = state
-        .objects
-        .get(&own_agent)
-        .and_then(|own| anchors.get(own.anchor).ok())
-        .map(GlobalTransform::translation)
-    else {
-        return;
-    };
-    for (agent, entities) in state.objects.iter().chain(state.coarse.iter()) {
-        if *agent == own_agent {
-            continue;
-        }
-        let Ok(pos) = anchors
-            .get(entities.anchor)
-            .map(GlobalTransform::translation)
-        else {
-            continue;
-        };
-        let distance = own_pos.distance(pos);
-        let name = state
-            .names
-            .get(agent)
-            .cloned()
-            .unwrap_or_else(|| provisional_label(*agent));
-        if let Ok(mut text) = texts.get_mut(entities.label) {
-            *text = Text2d::new(format!("{name} ({distance:.0}m)"));
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::AvatarNames(names) => {
+                for name in names {
+                    state.set_name(name);
+                }
+            }
+            SlSessionEvent::DisplayNames(names) => {
+                for name in names {
+                    state.set_display_name(name);
+                }
+            }
+            SlSessionEvent::DisplayNameUpdate(update) => {
+                state.set_display_name(&update.name);
+            }
+            _ => {}
         }
     }
 }
 
-/// Fold resolved legacy names (`UUIDNameReply`) into the name cache and refresh
-/// the tag text of any avatar already on screen.
-pub(crate) fn apply_avatar_names(
-    mut events: MessageReader<SlEvent>,
+/// Send this frame's queued name requests as **one** batched legacy
+/// `UUIDNameRequest` and **one** batched `GetDisplayNames` cap call (the cap
+/// spawns an HTTP request per command, so batching matters; on grids without
+/// the cap — OpenSim — the cap command is a silent no-op and the legacy reply
+/// carries the day).
+pub(crate) fn flush_name_requests(
     mut state: ResMut<AvatarState>,
-    mut texts: Query<&mut Text2d, With<NameTag>>,
+    mut commands: MessageWriter<SlCommand>,
 ) {
-    for event in events.read() {
-        if let SlSessionEvent::AvatarNames(names) = &event.0 {
-            for name in names {
-                state.set_name(name, &mut texts);
-            }
-        }
+    if state.pending_name_requests.is_empty() {
+        return;
     }
+    let batch: Vec<AgentKey> = state.pending_name_requests.drain().collect();
+    commands.write(SlCommand(Command::RequestAvatarNames(batch.clone())));
+    commands.write(SlCommand(Command::RequestDisplayNames(batch)));
 }
 
 /// Ingest each avatar's server-published baked textures (P14.1): on an
@@ -3986,62 +4202,6 @@ pub(crate) fn apply_bom_face_materials(
     }
 }
 
-/// Position each avatar name tag over its anchor by projecting the anchor's world
-/// position (offset up by the tag's own height) to the screen; the tag's
-/// [`Anchor::BOTTOM_CENTER`] puts its bottom-centre on that point, so the text is
-/// centred over the avatar and floats just above it. Tags whose anchor is
-/// off-screen or behind the camera are hidden.
-///
-/// Tags are `Text2d` on the tag overlay camera ([`crate::name_tag_overlay`]), so
-/// a move is a plain [`Transform`] write — it dirties nothing in `bevy_ui` /
-/// taffy (the previous UI-node tags relayouted every frame). Every write goes
-/// through an inequality guard, and the projected point is rounded to whole
-/// logical pixels (also avoiding sub-pixel text), so a stationary avatar under a
-/// stationary camera writes nothing at all.
-///
-/// The camera query is qualified by [`ViewerCamera`](crate::camera::ViewerCamera): the
-/// world holds **more than one** camera since the reflection probes (P33.2) spawn
-/// one per probe capture, and an unqualified `single()` then fails — which silently
-/// hid every name tag until it was noticed.
-pub(crate) fn position_name_tags(
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
-    windows: Query<&Window>,
-    anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
-    mut tags: Query<(&NameTag, &mut Transform, &mut Visibility)>,
-) {
-    let Ok((camera, camera_transform)) = cameras.single() else {
-        return;
-    };
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let window_size = window.size();
-    for (tag, mut transform, mut visibility) in &mut tags {
-        let Ok(anchor) = anchors.get(tag.anchor) else {
-            visibility.set_if_neq(Visibility::Hidden);
-            continue;
-        };
-        let base = anchor.translation();
-        // Float the tag just above the avatar's head (per-component add to avoid
-        // the `arithmetic_side_effects` lint on the glam `Vec3` operator).
-        let head = Vec3::new(base.x, base.y + tag.tag_height, base.z);
-        match camera.world_to_viewport(camera_transform, head) {
-            Ok(screen) => {
-                let target = overlay_point_from_viewport(screen, window_size)
-                    .round()
-                    .extend(0.0);
-                if transform.translation != target {
-                    transform.translation = target;
-                }
-                visibility.set_if_neq(Visibility::Inherited);
-            }
-            Err(_off_screen) => {
-                visibility.set_if_neq(Visibility::Hidden);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4160,6 +4320,95 @@ mod tests {
             coarse_translation(&location, 256.0, 256.0),
             Vec3::new(266.0, 24.0, -276.0)
         );
+    }
+
+    /// A NameValue seed fills the legacy name instantly, never clobbers a
+    /// record the display-name cap already resolved, and only touches the
+    /// title when a `Title` pair is present.
+    #[test]
+    fn name_value_seed_merges_without_clobbering() {
+        use sl_client_bevy::DisplayName;
+
+        let agent: super::AgentKey = super::Uuid::from_u128(0x51).into();
+        let mut state = AvatarState::default();
+
+        state.seed_name_fields(
+            agent,
+            Some("Avatar".to_owned()),
+            Some("Tester".to_owned()),
+            Some("Crew Chief".to_owned()),
+        );
+        assert_eq!(state.name_of(agent), Some("Avatar Tester"));
+        assert_eq!(state.title_of(agent), Some("Crew Chief"));
+        assert_eq!(state.label_text(agent), "Avatar Tester");
+
+        // The cap answers: display name + username take over, legacy refreshed.
+        let record = DisplayName {
+            id: agent,
+            username: "avatar.tester".to_owned(),
+            display_name: "Shiny Name".to_owned(),
+            legacy_first_name: "Avatar".to_owned(),
+            legacy_last_name: "Tester".to_owned(),
+            is_display_name_default: false,
+            ..DisplayName::default()
+        };
+        assert!(state.merge_display_name_record(&record));
+        assert_eq!(state.label_text(agent), "Shiny Name");
+        // `name_of` (the wire-facing accessor) still answers the LEGACY name.
+        assert_eq!(state.name_of(agent), Some("Avatar Tester"));
+
+        // A later NameValue seed must not clobber the cap record.
+        state.seed_name_fields(
+            agent,
+            Some("Avatar".to_owned()),
+            Some("Tester".to_owned()),
+            Some("Crew Chief".to_owned()),
+        );
+        assert_eq!(state.label_text(agent), "Shiny Name");
+
+        // A `Title`-less update leaves the title alone; an empty one clears it.
+        state.seed_name_fields(
+            agent,
+            Some("Avatar".to_owned()),
+            Some("Tester".to_owned()),
+            None,
+        );
+        assert_eq!(state.title_of(agent), Some("Crew Chief"));
+        state.seed_name_fields(agent, None, None, Some(String::new()));
+        assert_eq!(state.title_of(agent), None);
+    }
+
+    /// A `missing` display-name placeholder changes nothing — the legacy
+    /// fallback (OpenSim, unresolvable ids) stays authoritative.
+    #[test]
+    fn missing_display_name_keeps_legacy_fallback() {
+        use sl_client_bevy::DisplayName;
+
+        let agent: super::AgentKey = super::Uuid::from_u128(0x52).into();
+        let mut state = AvatarState::default();
+        state.names.entry(agent).or_default().legacy = Some("Old Timer".to_owned());
+        let record = DisplayName {
+            id: agent,
+            missing: true,
+            ..DisplayName::default()
+        };
+        assert!(!state.merge_display_name_record(&record));
+        assert_eq!(state.label_text(agent), "Old Timer");
+    }
+
+    /// A single-name ("Resident") account seeds as just the first name,
+    /// mirroring `legacy_name()`.
+    #[test]
+    fn resident_last_name_collapses_in_seed() {
+        let agent: super::AgentKey = super::Uuid::from_u128(0x53).into();
+        let mut state = AvatarState::default();
+        state.seed_name_fields(
+            agent,
+            Some("bobsmith123".to_owned()),
+            Some("Resident".to_owned()),
+            None,
+        );
+        assert_eq!(state.name_of(agent), Some("bobsmith123"));
     }
 
     /// The provisional tag is the agent id's leading hex fragment, so two distinct

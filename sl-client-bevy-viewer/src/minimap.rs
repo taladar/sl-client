@@ -77,19 +77,21 @@ pub(crate) const MINIMAP_FLOATER_ID: &str = "minimap";
 const MINIMAP_SECTION: &[&str] = &["minimap"];
 
 /// The map scale setting (pixels per 256 m region), shared by all instances.
-const SETTING_SCALE: &str = "MiniMapScale";
+/// `pub(crate)` for the preferences floater's bound controls, like every
+/// promoted setting name below.
+pub(crate) const SETTING_SCALE: &str = "MiniMapScale";
 
 /// Whether the map rotates so the camera heading points up.
-const SETTING_ROTATE: &str = "MiniMapRotate";
+pub(crate) const SETTING_ROTATE: &str = "MiniMapRotate";
 
 /// Whether the pan offset eases back to centre each frame.
-const SETTING_AUTO_CENTER: &str = "MiniMapAutoCenter";
+pub(crate) const SETTING_AUTO_CENTER: &str = "MiniMapAutoCenter";
 
 /// The minimap surface opacity.
-const SETTING_OPACITY: &str = "MiniMapOpacity";
+pub(crate) const SETTING_OPACITY: &str = "MiniMapOpacity";
 
 /// Whether the object layer draws at all.
-const SETTING_OBJECTS: &str = "MiniMapObjects";
+pub(crate) const SETTING_OBJECTS: &str = "MiniMapObjects";
 
 /// Accent toggle: highlight physical objects.
 const SETTING_PHYSICAL: &str = "NetMapPhysical";
@@ -104,13 +106,13 @@ const SETTING_TEMP_ON_REZ: &str = "NetMapTempOnRez";
 const SETTING_PHANTOM_OPACITY: &str = "NetMapPhantomOpacity";
 
 /// Whether the parcel layer (property lines) draws at all.
-const SETTING_PROPERTY_LINES: &str = "MiniMapShowPropertyLines";
+pub(crate) const SETTING_PROPERTY_LINES: &str = "MiniMapShowPropertyLines";
 
 /// Whether for-sale / auction parcels are filled.
-const SETTING_FOR_SALE: &str = "MiniMapForSaleParcels";
+pub(crate) const SETTING_FOR_SALE: &str = "MiniMapForSaleParcels";
 
 /// Master toggle for the chat-range rings.
-const SETTING_CHAT_RING: &str = "MiniMapChatRing";
+pub(crate) const SETTING_CHAT_RING: &str = "MiniMapChatRing";
 
 /// Per-ring toggle: the whisper-range ring.
 const SETTING_WHISPER_RING: &str = "MiniMapWhisperRing";

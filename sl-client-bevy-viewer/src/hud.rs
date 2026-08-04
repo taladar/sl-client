@@ -234,6 +234,14 @@ pub(crate) fn setup_hud_screen(
             // camera draws onto) and no underwater fog: the reference likewise skips
             // atmospherics on HUDs (`sRenderingHUDs`).
             Tonemapping::None,
+            // **Load-bearing**: bevy_ui renders on the `IsDefaultUiCamera`.
+            // Without an explicit default, bevy_ui falls back to "the" camera
+            // — ambiguous once the probe-capture cameras exist — and the whole
+            // UI can land on a probe target or nothing. This is the
+            // highest-order window camera, so floaters and menus draw over
+            // gizmos, the HUD and the in-world name tags, same stacking as
+            // when the (removed) tag overlay camera carried this marker.
+            IsDefaultUiCamera,
         ))
         .id();
     info!(

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 256 |
-| blocked | 112 |
+| ready | 241 |
+| blocked | 95 |
 | in-progress | 10 |
-| bugs | 7 |
-| done | 676 |
+| bugs | 8 |
+| done | 708 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1147** |
+| **total** | **1148** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (256)
+## ready (241)
 
 ### protocol
 
@@ -206,6 +206,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   debug & maintenance tools (incl. Rebake)
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
+- [`viewer-avatar-radar`](ready/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -250,6 +252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
   action commands (`cmd …`)
+- [`viewer-chat-bubbles`](ready/viewer-chat-bubbles.md) — Chat bubbles
 - [`viewer-chat-clickable-sender-names`](ready/viewer-chat-clickable-sender-names.md)
   — Clickable sender names in the chat / conversations transcript
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
@@ -339,6 +342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-hover-text`](ready/viewer-hover-text.md) — Object hover text
+  (llSetText floating text)
 - [`viewer-hover-tooltips`](ready/viewer-hover-tooltips.md) — In-world hover
   tooltips (object / avatar / land inspectors)
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
@@ -404,95 +409,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-name-tags-billboard-render`](ready/viewer-name-tags-billboard-render.md)
-  — Name tags — world-space billboard renderer
-- [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
-  Name tags — wire GetDisplayNames caps into the tag
+- [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
+  Name tags — click a tag to select the avatar
+- [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
+  tags — remaining decorations
+- [`viewer-name-tags-preferences`](ready/viewer-name-tags-preferences.md) — Name
+  tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
   / world debug tools
-- [`viewer-notification-catalogue-appearance-wearables`](ready/viewer-notification-catalogue-appearance-wearables.md)
-  — Notification catalogue — appearance & wearables entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-avatar-movement`](ready/viewer-notification-catalogue-avatar-movement.md)
-  — Notification catalogue — avatar movement entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-diagnostics`](ready/viewer-notification-catalogue-diagnostics.md)
-  — Notification catalogue — diagnostics entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-estate-region`](ready/viewer-notification-catalogue-estate-region.md)
-  — Notification catalogue — estate & region management entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-experiences`](ready/viewer-notification-catalogue-experiences.md)
-  — Notification catalogue — experiences entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-friends-people`](ready/viewer-notification-catalogue-friends-people.md)
-  — Notification catalogue — friends / people entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-groups`](ready/viewer-notification-catalogue-groups.md)
-  — Notification catalogue — groups entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-im-chat`](ready/viewer-notification-catalogue-im-chat.md)
-  — Notification catalogue — IM & chat entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-inventory`](ready/viewer-notification-catalogue-inventory.md)
-  — Notification catalogue — inventory entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-land-parcel`](ready/viewer-notification-catalogue-land-parcel.md)
-  — Notification catalogue — land / parcel entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-landmarks-navigation`](ready/viewer-notification-catalogue-landmarks-navigation.md)
-  — Notification catalogue — landmarks & navigation entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-login-session`](ready/viewer-notification-catalogue-login-session.md)
-  — Notification catalogue — login & session entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-marketplace`](ready/viewer-notification-catalogue-marketplace.md)
-  — Notification catalogue — marketplace entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-media-sound`](ready/viewer-notification-catalogue-media-sound.md)
-  — Notification catalogue — media & sound entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-misc`](ready/viewer-notification-catalogue-misc.md)
-  — Notification catalogue — miscellaneous entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-money-economy`](ready/viewer-notification-catalogue-money-economy.md)
-  — Notification catalogue — money / economy entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-objects-edit`](ready/viewer-notification-catalogue-objects-edit.md)
-  — Notification catalogue — object build / edit / rez entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-preferences`](ready/viewer-notification-catalogue-preferences.md)
-  — Notification catalogue — preferences & settings entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-premium-account`](ready/viewer-notification-catalogue-premium-account.md)
-  — Notification catalogue — premium / account entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-rlv`](ready/viewer-notification-catalogue-rlv.md)
-  — Notification catalogue — RLVa entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-scripts`](ready/viewer-notification-catalogue-scripts.md)
-  — Notification catalogue — scripts (LSL) entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-security`](ready/viewer-notification-catalogue-security.md)
-  — Notification catalogue — security entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-snapshot-social`](ready/viewer-notification-catalogue-snapshot-social.md)
-  — Notification catalogue — snapshot & social entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-teleport`](ready/viewer-notification-catalogue-teleport.md)
-  — Notification catalogue — teleport entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-ui-hints`](ready/viewer-notification-catalogue-ui-hints.md)
-  — Notification catalogue — UI hints entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-voice`](ready/viewer-notification-catalogue-voice.md)
-  — Notification catalogue — voice entries (blocked by
-  `viewer-ui-notification-host` (done))
-- [`viewer-notification-catalogue-web-browser`](ready/viewer-notification-catalogue-web-browser.md)
-  — Notification catalogue — embedded web / browser entries (blocked by
-  `viewer-ui-notification-host` (done))
 - [`viewer-notification-history`](ready/viewer-notification-history.md) —
   Notification list / history panel (blocked by `viewer-ui-notification-host`
   (done))
@@ -582,9 +508,24 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-floater`](ready/viewer-preferences-floater.md) —
-  Preferences floater shell + settings store binding (blocked by
-  `viewer-ui-settings-binding` (done))
+- [`viewer-preferences-audio-tab`](ready/viewer-preferences-audio-tab.md) —
+  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
+  — Preferences — camera + move-and-view tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-chat-privacy-tab`](ready/viewer-preferences-chat-privacy-tab.md)
+  — Preferences — chat / IM + privacy tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-colors-skins-tab`](ready/viewer-preferences-colors-skins-tab.md)
+  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
+  (done), `viewer-ui-color-picker` (done))
+- [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
+  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-graphics-tab`](ready/viewer-preferences-graphics-tab.md)
+  — Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-network-cache-tab`](ready/viewer-preferences-network-cache-tab.md)
+  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
+  (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -593,6 +534,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
   quality-of-life toggles (blocked by `viewer-input-action-map` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-quick-preferences`](ready/viewer-quick-preferences.md) —
+  Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
@@ -646,6 +589,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
+  — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
@@ -775,7 +720,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (112)
+## blocked (95)
 
 ### protocol
 
@@ -803,9 +748,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-ambient-wind-sound`](blocked/viewer-ambient-wind-sound.md) — Ambient
   wind sound (blocked by `viewer-audio-backend`)
-- [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
-  `viewer-name-tags-display-names`)
 - [`viewer-avatar-render-settings-manager`](blocked/viewer-avatar-render-settings-manager.md)
   — Per-avatar render-settings manager (blocked by
   `viewer-avatar-complexity-limit`)
@@ -818,8 +760,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-cef-audio-mixer-handoff`](blocked/viewer-cef-audio-mixer-handoff.md)
   — CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend`)
-- [`viewer-chat-bubbles`](blocked/viewer-chat-bubbles.md) — Chat bubbles
-  (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -859,8 +799,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
   — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
   by `viewer-audio-backend`)
-- [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
-  (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -925,47 +863,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
-- [`viewer-name-tags-click-select`](blocked/viewer-name-tags-click-select.md) —
-  Name tags — click a tag to select the avatar (blocked by
-  `viewer-name-tags-billboard-render`, `viewer-object-selection-core` (done))
 - [`viewer-name-tags-complexity-distance`](blocked/viewer-name-tags-complexity-distance.md)
-  — Name tags — complexity & distance lines (blocked by
-  `viewer-name-tags-billboard-render`, `viewer-avatar-complexity-limit`)
-- [`viewer-name-tags-decorations`](blocked/viewer-name-tags-decorations.md) —
-  Name tags — title / state / colouring decorations (blocked by
-  `viewer-name-tags-billboard-render`)
-- [`viewer-name-tags-preferences`](blocked/viewer-name-tags-preferences.md) —
-  Name tags — preference toggles (blocked by `viewer-preferences-floater`)
+  — Name tags — complexity (ARC) lines (blocked by
+  `viewer-avatar-complexity-limit`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-preferences-alerts-tab`](blocked/viewer-preferences-alerts-tab.md) —
-  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-audio-tab`](blocked/viewer-preferences-audio-tab.md) —
-  Preferences — audio tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-camera-move-tab`](blocked/viewer-preferences-camera-move-tab.md)
-  — Preferences — camera + move-and-view tab (blocked by
-  `viewer-preferences-floater`)
-- [`viewer-preferences-chat-privacy-tab`](blocked/viewer-preferences-chat-privacy-tab.md)
-  — Preferences — chat / IM + privacy tab (blocked by
-  `viewer-preferences-floater`)
-- [`viewer-preferences-colors-skins-tab`](blocked/viewer-preferences-colors-skins-tab.md)
-  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`,
-  `viewer-ui-color-picker` (done))
-- [`viewer-preferences-debug-settings-editor`](blocked/viewer-preferences-debug-settings-editor.md)
-  — Raw debug-settings editor (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-general-tab`](blocked/viewer-preferences-general-tab.md)
-  — Preferences — general tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-graphics-tab`](blocked/viewer-preferences-graphics-tab.md)
-  — Preferences — graphics tab (blocked by `viewer-preferences-floater`)
-- [`viewer-preferences-network-cache-tab`](blocked/viewer-preferences-network-cache-tab.md)
-  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-quick-preferences`](blocked/viewer-quick-preferences.md) —
-  Quick-preferences panel (blocked by `viewer-preferences-floater`)
 - [`viewer-realtime-mirrors`](blocked/viewer-realtime-mirrors.md) — Real-time
   mirrors (hero probes) (blocked by `viewer-perf-probe-scheduling`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
@@ -1009,8 +916,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
-- [`viewer-settings-backup`](blocked/viewer-settings-backup.md) — Settings
-  backup — export / import (blocked by `viewer-preferences-floater`)
 - [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
   Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
   (done), `viewer-image-upload`)
@@ -1116,7 +1021,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (7)
+## bugs (8)
 
 ### protocol
 
@@ -1138,11 +1043,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
+  — render_readback texture-animation test is flaky under load
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (676)
+## done (708)
 
 ### protocol
 
@@ -1509,6 +1416,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-parcel-overlay-decode` (done))
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
+- [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)
+  — Name tags — world-space billboard renderer
+- [`viewer-name-tags-display-names`](done/viewer-name-tags-display-names.md) —
+  Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras
@@ -1517,6 +1428,87 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
   Notification catalogue — port the reference server-alert & confirm entries
   (blocked by `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-appearance-wearables`](done/viewer-notification-catalogue-appearance-wearables.md)
+  — Notification catalogue — appearance & wearables entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-avatar-movement`](done/viewer-notification-catalogue-avatar-movement.md)
+  — Notification catalogue — avatar movement entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-diagnostics`](done/viewer-notification-catalogue-diagnostics.md)
+  — Notification catalogue — diagnostics entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-estate-region`](done/viewer-notification-catalogue-estate-region.md)
+  — Notification catalogue — estate & region management entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-experiences`](done/viewer-notification-catalogue-experiences.md)
+  — Notification catalogue — experiences entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-friends-people`](done/viewer-notification-catalogue-friends-people.md)
+  — Notification catalogue — friends / people entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-groups`](done/viewer-notification-catalogue-groups.md)
+  — Notification catalogue — groups entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-im-chat`](done/viewer-notification-catalogue-im-chat.md)
+  — Notification catalogue — IM & chat entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-inventory`](done/viewer-notification-catalogue-inventory.md)
+  — Notification catalogue — inventory entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-land-parcel`](done/viewer-notification-catalogue-land-parcel.md)
+  — Notification catalogue — land / parcel entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-landmarks-navigation`](done/viewer-notification-catalogue-landmarks-navigation.md)
+  — Notification catalogue — landmarks & navigation entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-login-session`](done/viewer-notification-catalogue-login-session.md)
+  — Notification catalogue — login & session entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-marketplace`](done/viewer-notification-catalogue-marketplace.md)
+  — Notification catalogue — marketplace entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-media-sound`](done/viewer-notification-catalogue-media-sound.md)
+  — Notification catalogue — media & sound entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-misc`](done/viewer-notification-catalogue-misc.md)
+  — Notification catalogue — miscellaneous entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-money-economy`](done/viewer-notification-catalogue-money-economy.md)
+  — Notification catalogue — money / economy entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-objects-edit`](done/viewer-notification-catalogue-objects-edit.md)
+  — Notification catalogue — object build / edit / rez entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-preferences`](done/viewer-notification-catalogue-preferences.md)
+  — Notification catalogue — preferences & settings entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-premium-account`](done/viewer-notification-catalogue-premium-account.md)
+  — Notification catalogue — premium / account entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-rlv`](done/viewer-notification-catalogue-rlv.md)
+  — Notification catalogue — RLVa entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-scripts`](done/viewer-notification-catalogue-scripts.md)
+  — Notification catalogue — scripts (LSL) entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-security`](done/viewer-notification-catalogue-security.md)
+  — Notification catalogue — security entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-snapshot-social`](done/viewer-notification-catalogue-snapshot-social.md)
+  — Notification catalogue — snapshot & social entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-teleport`](done/viewer-notification-catalogue-teleport.md)
+  — Notification catalogue — teleport entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-ui-hints`](done/viewer-notification-catalogue-ui-hints.md)
+  — Notification catalogue — UI hints entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-voice`](done/viewer-notification-catalogue-voice.md)
+  — Notification catalogue — voice entries (blocked by
+  `viewer-ui-notification-host` (done))
+- [`viewer-notification-catalogue-web-browser`](done/viewer-notification-catalogue-web-browser.md)
+  — Notification catalogue — embedded web / browser entries (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-notification-persistence`](done/viewer-notification-persistence.md) —
   Persistent notifications — survive relog until answered (blocked by
   `viewer-ui-notification-host` (done), `viewer-group-notice-display` (done))
@@ -1767,6 +1759,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
+  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
+  (done))
+- [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
+  Preferences floater shell + settings store binding (blocked by
+  `viewer-ui-settings-binding` (done))
+- [`viewer-preferences-general-tab`](done/viewer-preferences-general-tab.md) —
+  Preferences — general tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))

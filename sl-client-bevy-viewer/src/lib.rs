@@ -122,7 +122,9 @@ mod meshes;
 mod minimap;
 mod minimap_math;
 mod movement;
-mod name_tag_overlay;
+mod mutes;
+mod name_tag_billboard;
+mod name_tag_content;
 mod nearby_chat_bar;
 mod notification_host;
 mod notification_persist;
@@ -138,6 +140,9 @@ mod paths;
 mod people;
 mod physics;
 mod pie_menu;
+mod preferences;
+mod preferences_alerts;
+mod preferences_general;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -247,12 +252,12 @@ use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
 use crate::avatars::{
     AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
-    annotate_avatar_distances, apply_avatar_appearance, apply_avatar_bake_textures,
-    apply_avatar_names, apply_avatar_part_visibility, apply_avatar_runtime_morphs,
-    apply_bom_face_materials, apply_own_local_bake, apply_own_shape_from_wearables,
-    assign_avatar_bake_materials, fit_avatar_pick_colliders, focus_camera_on_volume_shape,
-    ingest_avatar_bakes, log_avatar_interest_census, position_name_tags, setup_avatar_body,
-    toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
+    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
+    apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
+    apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
+    fit_avatar_pick_colliders, focus_camera_on_volume_shape, ingest_avatar_bakes,
+    log_avatar_interest_census, setup_avatar_body, toggle_volume_morphs, update_avatar_objects,
+    update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -437,9 +442,11 @@ struct Options {
     /// An explicit XML-RPC login URI, overriding `--grid` and the avatar's own.
     #[clap(long)]
     login_uri: Option<String>,
-    /// The login start location (`last`, `home`, or `uri:Region&x&y&z`).
-    #[clap(long, default_value = "last")]
-    start: StartLocation,
+    /// The login start location (`last`, `home`, or `uri:Region&x&y&z`),
+    /// overriding the persisted preference (the General tab's default) for
+    /// this run.
+    #[clap(long)]
+    start: Option<StartLocation>,
     /// The viewer channel reported to the grid.
     #[clap(long, default_value = "sl-client-bevy-viewer")]
     channel: String,
@@ -1242,6 +1249,20 @@ fn run_session(
     // selection and a save-to-disk destination that echoes the path to chat.
     // Opened from the bottom toolbar's Snapshot button.
     .add_plugins(crate::snapshot_floater::SnapshotFloaterPlugin)
+    // The Preferences floater shell (viewer-preferences-floater): the tabbed
+    // settings window over the typed store — snapshot on open, revert on
+    // Cancel / close, persist on OK, with the cross-tab search filter. The
+    // per-tab tasks plug their panels into its registry. After FloaterPlugin,
+    // whose spawn_floater and deferred-content build it rides.
+    .add_plugins(crate::preferences::PreferencesPlugin)
+    // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
+    // refresh, row pool and binding behind the panel build_alerts_tab plugs
+    // into the shell's registry.
+    .add_plugins(crate::preferences_alerts::PreferencesAlertsPlugin)
+    // The general tab's appliers (viewer-preferences-general-tab): the live
+    // UI-scale write and the maturity-preference server conversation behind
+    // the panel build_general_tab plugs into the shell's registry.
+    .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1252,6 +1273,10 @@ fn run_session(
     // colour-coded vertical bands draped along parcel boundaries, driven by the
     // `parcel_borders` module's system below.
     .add_plugins(crate::parcel_borders::ParcelBordersPlugin)
+    // The world-space avatar name-tag billboards (viewer-name-tags-billboard-
+    // render): the embedded billboard shader + material pipeline; the tag
+    // systems themselves register with the avatar systems below.
+    .add_plugins(crate::name_tag_billboard::NameTagBillboardPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
     .add_plugins(SkyMaterialPlugin)
@@ -1411,6 +1436,8 @@ fn run_session(
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
+        .init_resource::<mutes::MuteModel>()
+        .init_resource::<name_tag_content::NameTagStatuses>()
         .init_resource::<AvatarRuntimeMorphs>()
         .init_resource::<look_at::LookAtTargets>()
         .init_resource::<look_at::LookAtMotion>()
@@ -1489,10 +1516,6 @@ fn run_session(
                 // likewise parented to the scaffold's `UiRoot`.
                 setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
                 setup_avatar_body,
-                // The screen-space Text2d overlay camera avatar name tags render
-                // on, keeping them out of the bevy_ui tree
-                // (viewer-perf-ui-layout-per-frame-relayout).
-                name_tag_overlay::spawn_name_tag_overlay_camera,
                 // P35.1: the screen-space HUD screen + its attachment-point nodes, which
                 // a worn HUD is routed onto instead of a body joint.
                 setup_hud_screen,
@@ -1622,12 +1645,41 @@ fn run_session(
                 // coarse-only ones (which dedupe against the full-object set); then
                 // fold resolved names in and float each name tag over its sphere.
                 (
-                    (update_avatar_objects, update_coarse_avatars).chain(),
-                    // R22b diagnostic census of unresolved coarse "blue sphere" avatars,
-                    // plus per-tag distance annotation (both gated by
-                    // `SL_VIEWER_LOG_AVATAR_INTEREST`; a no-op otherwise).
+                    (
+                        update_avatar_objects,
+                        update_coarse_avatars,
+                        // One batched legacy + display-name request per frame,
+                        // however many avatars just appeared.
+                        avatars::flush_name_requests,
+                    )
+                        .chain(),
+                    // The mute list (name-tag colouring + future block-list
+                    // UI): request once at session-up, ingest the Xfer'd
+                    // list, and mirror locally-issued mutes.
+                    (
+                        mutes::request_mute_list,
+                        mutes::ingest_mute_list,
+                        mutes::note_local_mutes,
+                    ),
+                    // Nearby-chat typing signals for the tag's Typing line,
+                    // then the content composer that assembles every tag's
+                    // lines from names / title / statuses / colours /
+                    // own-avatar distance (change-guarded; the PostUpdate
+                    // renderer chain reacts to `Changed<TagContent>`).
+                    (
+                        name_tag_content::ingest_tag_statuses,
+                        name_tag_content::compose_name_tags
+                            .after(update_avatar_objects)
+                            .after(update_coarse_avatars)
+                            .after(apply_avatar_names)
+                            .after(crate::animations::drive_avatar_skeletons)
+                            .after(crate::groups::ingest_group_events),
+                    )
+                        .chain(),
+                    // R22b diagnostic census of unresolved coarse "blue sphere"
+                    // avatars (gated by `SL_VIEWER_LOG_AVATAR_INTEREST`; a
+                    // no-op otherwise).
                     log_avatar_interest_census,
-                    annotate_avatar_distances,
                     // Fit each avatar's pick-collider box to its posed skeleton, after
                     // the bodies (and their skeleton instances) exist.
                     fit_avatar_pick_colliders.after(update_avatar_objects),
@@ -1685,7 +1737,6 @@ fn run_session(
                     // advertise them in an `AgentSetAppearance` (OpenSim-only path).
                     drive_bake_publish,
                 ),
-                position_name_tags,
                 // Append newly received local chat to the on-screen overlay, age each
                 // line so it fades and despawns once chat goes quiet
                 // (viewer-chat-overlay-fade), and keep the overlay pinned just above the
@@ -1960,6 +2011,30 @@ fn run_session(
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
                 pose_control_avatars.after(TransformSystems::Propagate),
             ),
+        )
+        // The world-space name-tag billboard chain
+        // (viewer-name-tags-billboard-render): materialise changed tag content
+        // as text spans, lay the spans out through the shared text pipeline,
+        // rebuild changed tag meshes, then place each tag over its avatar
+        // anchor (smoothed follow + distance cutoff + preference gates). All
+        // before transform propagation so page children inherit this frame's
+        // matrix; the layout step runs after the global span-change detector
+        // and after camera updates (its scale-factor source).
+        .add_systems(
+            PostUpdate,
+            (
+                name_tag_billboard::apply_name_tag_settings,
+                name_tag_billboard::sync_tag_spans,
+                name_tag_billboard::layout_tag_text
+                    .after(bevy::text::detect_text_needs_rerender)
+                    .after(bevy::camera::CameraUpdateSystems),
+                name_tag_billboard::build_tag_meshes,
+                name_tag_billboard::follow_tag_anchors,
+                name_tag_billboard::solve_tag_overlap,
+                name_tag_billboard::sync_tag_pages,
+            )
+                .chain()
+                .before(TransformSystems::Propagate),
         );
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
@@ -1993,11 +2068,23 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     let avatar = credentials.select(options.avatar.as_deref())?;
     let login_uri = resolve_login_uri(options, avatar)?;
 
+    // The persisted start-location preference (the preferences General tab) is
+    // read from a throwaway store load: the Bevy app — and with it the
+    // `ViewerSettings` resource — does not exist yet at login-request time.
+    let start = {
+        let settings = crate::settings::ViewerSettings::load();
+        let stored = settings
+            .store()
+            .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)
+            .ok()
+            .map(str::to_owned);
+        crate::preferences_general::resolve_start_location(options.start.clone(), stored.as_deref())
+    };
     let mut request = LoginRequest::new(
         avatar.first().to_owned(),
         avatar.last().to_owned(),
         avatar.password().expose().to_owned(),
-        options.start.clone(),
+        start,
         options.channel.clone(),
         options.version.clone(),
     );

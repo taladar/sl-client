@@ -98,6 +98,22 @@ const LOCALES_FOLDER: &str = "locales";
 /// exists. The value is a language tag (`en`, `ja`, `ar`, `pl`) or `pseudo`.
 const UI_LOCALE_ENV: &str = "SL_VIEWER_UI_LOCALE";
 
+/// The persisted interface-language setting the preferences General tab binds:
+/// a [`LocaleChoice`] value string (`en`, `ja`, `ar`, `pl`, `pseudo`), or empty
+/// for "no override" (keep the [`UI_LOCALE_ENV`] / English seed). Applied
+/// **live** by [`apply_locale_setting`] — no restart, unlike the reference.
+pub(crate) const SETTING_UI_LANGUAGE: &str = "UiLanguage";
+
+/// Register the i18n settings (the [`SETTING_UI_LANGUAGE`] override).
+pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+    settings.register_in(
+        &["i18n"],
+        SETTING_UI_LANGUAGE,
+        sl_settings::SettingValue::String(String::new()),
+        "The interface language (en, ja, ar, pl, pseudo); empty = system/default",
+    );
+}
+
 /// The [`UI_LOCALE_ENV`] value that selects the pseudolocale.
 const PSEUDO_LOCALE_VALUE: &str = "pseudo";
 
@@ -130,6 +146,9 @@ impl Plugin for ViewerI18nPlugin {
             .add_systems(
                 Update,
                 (
+                    // Apply the persisted language override before the lookup
+                    // rebuild, so a settings change relocalises the same frame.
+                    apply_locale_setting.before(maintain_localization),
                     // Rebuild the lookup when the folder loads or the locale
                     // changes, then propagate the locale's conventions.
                     maintain_localization,
@@ -229,6 +248,21 @@ impl LocaleChoice {
             _ => Self::English,
         }
     }
+
+    /// The choice a stored [`SETTING_UI_LANGUAGE`] value selects, or `None` for
+    /// the empty ("no override") value and anything unrecognised — unlike
+    /// [`Self::parse`], which folds unknowns into English, so a cleared setting
+    /// leaves the environment seed in charge.
+    fn from_setting(value: &str) -> Option<Self> {
+        match value.trim() {
+            "en" => Some(Self::English),
+            "ja" => Some(Self::Japanese),
+            "ar" => Some(Self::Arabic),
+            "pl" => Some(Self::Polish),
+            PSEUDO_LOCALE_VALUE => Some(Self::Pseudo),
+            _ => None,
+        }
+    }
 }
 
 /// The active UI locale as a resource, plus the conventions derived from it.
@@ -257,7 +291,7 @@ pub(crate) struct UiLocale {
 impl UiLocale {
     /// A locale resource for `choice`, with the ellipsis at its fallback until a
     /// bundle loads.
-    fn new(choice: LocaleChoice) -> Self {
+    pub(crate) fn new(choice: LocaleChoice) -> Self {
         let lang = choice.language();
         Self {
             direction: direction_of(&lang),
@@ -382,7 +416,7 @@ fn refresh_locale_ellipsis(localization: Res<Localization>, mut locale: ResMut<U
 /// fall back to an un-grouped render while it is, mirroring the string lookup's
 /// key-fallback.
 #[derive(Resource, Debug, Default)]
-struct LocaleFormatting {
+pub(crate) struct LocaleFormatting {
     /// The formatters for [`UiLocale::lang`], rebuilt on a locale change.
     formatters: Option<LocaleFormatters>,
 }
@@ -948,14 +982,51 @@ fn demo_button<M>(
 /// Observer: advance the active locale one step around [`LocaleChoice::next`].
 fn cycle_locale(_activate: On<Activate>, mut locale: ResMut<UiLocale>, mut fluent: ResMut<Locale>) {
     let choice = locale.choice.next();
+    set_locale_choice(&mut locale, &mut fluent, choice);
+}
+
+/// Switch the active locale to `choice`: update [`UiLocale`]'s derived
+/// conventions and drive the Fluent negotiation input, so
+/// [`maintain_localization`] rebuilds the lookup and
+/// [`refresh_locale_ellipsis`] re-reads the ellipsis. The one write path both
+/// the `F6` cycle and the persisted language setting go through.
+fn set_locale_choice(locale: &mut UiLocale, fluent: &mut Locale, choice: LocaleChoice) {
     let lang = choice.language();
     locale.choice = choice;
     locale.direction = direction_of(&lang);
     locale.pseudo = choice.is_pseudo();
     locale.lang = lang.clone();
-    // Drive the Fluent negotiation input too, so [`maintain_localization`]
-    // rebuilds the lookup and [`refresh_locale_ellipsis`] re-reads the ellipsis.
     *fluent = Locale::new(lang).with_default(langid!("en"));
+}
+
+/// Apply the persisted [`SETTING_UI_LANGUAGE`] override when its stored value
+/// *changes* (a combo pick, a Cancel revert, the account scope loading). The
+/// stored-string change guard keeps this from fighting the `F6` cycle, which
+/// moves the locale without touching the setting; an empty or unknown value
+/// changes nothing, leaving the environment seed in charge.
+fn apply_locale_setting(
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    mut locale: ResMut<UiLocale>,
+    mut fluent: ResMut<Locale>,
+    mut last_seen: Local<Option<String>>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let Ok(stored) = settings.store().get_str(SETTING_UI_LANGUAGE) else {
+        return;
+    };
+    if last_seen.as_deref() == Some(stored) {
+        return;
+    }
+    let stored = stored.to_owned();
+    let choice = LocaleChoice::from_setting(&stored);
+    *last_seen = Some(stored);
+    if let Some(choice) = choice
+        && locale.choice != choice
+    {
+        set_locale_choice(&mut locale, &mut fluent, choice);
+    }
 }
 
 /// Observer: advance the demo's plural count.
@@ -1232,6 +1303,23 @@ mod tests {
         assert_eq!(LocaleChoice::parse(" pl "), LocaleChoice::Polish);
         assert_eq!(LocaleChoice::parse("Pseudo"), LocaleChoice::Pseudo);
         assert_eq!(LocaleChoice::parse("klingon"), LocaleChoice::English);
+    }
+
+    /// The persisted-setting mapping is strict: exact known values select a
+    /// choice, the empty "no override" value and anything unrecognised select
+    /// nothing (rather than folding into English like the env seed does).
+    #[test]
+    fn locale_choice_from_setting_is_strict() {
+        assert_eq!(
+            LocaleChoice::from_setting("ja"),
+            Some(LocaleChoice::Japanese)
+        );
+        assert_eq!(
+            LocaleChoice::from_setting("pseudo"),
+            Some(LocaleChoice::Pseudo)
+        );
+        assert_eq!(LocaleChoice::from_setting(""), None);
+        assert_eq!(LocaleChoice::from_setting("klingon"), None);
     }
 
     /// The locale cycle is total and returns to its start, so the switcher can

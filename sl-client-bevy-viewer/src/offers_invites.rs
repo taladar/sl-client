@@ -79,6 +79,28 @@ use crate::ui_font::UiFont;
 /// `UserGiveItem` notification.
 const INVENTORY_OFFER_TEMPLATE: &str = "UserGiveItem";
 
+/// The account setting for silently accepting inventory offers (the reference
+/// `AutoAcceptNewInventory`, surfaced on the Preferences alerts tab; default
+/// **off**). While on, an inventory offer is filed into its type folder with
+/// no offer card; an offer whose destination cannot be resolved yet (the
+/// inventory skeleton still loading) falls back to the card — an offer is
+/// never dropped. Lives in the `[notifications]` section with the other
+/// notification preferences.
+pub(crate) const SETTING_AUTO_ACCEPT_INVENTORY: &str = "AutoAcceptNewInventory";
+
+/// Startup: declare [`SETTING_AUTO_ACCEPT_INVENTORY`] (default off).
+fn register_offers_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.register_in(
+        &[crate::notifications::NOTIFICATIONS_SECTION],
+        SETTING_AUTO_ACCEPT_INVENTORY,
+        sl_settings::SettingValue::Bool(false),
+        "Silently accept inventory offers into the type-appropriate folder",
+    );
+}
+
 /// The template sentinel a teleport-offer card reports as, named for the
 /// reference `TeleportOffered` notification.
 const TELEPORT_OFFER_TEMPLATE: &str = "TeleportOffered";
@@ -193,28 +215,63 @@ impl Plugin for OffersInvitesPlugin {
     /// Ingest received offer / invite `ImprovedInstantMessage`s into the shared
     /// toast channel.
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, ingest_offers_invites);
+        app.add_systems(Startup, register_offers_settings)
+            .add_systems(Update, ingest_offers_invites);
     }
 }
 
 /// Read the event stream; for each received offer / invite IM, build its card and
-/// raise it into the shared toast channel.
+/// raise it into the shared toast channel (or, for an inventory offer under
+/// [`SETTING_AUTO_ACCEPT_INVENTORY`], file it silently).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
+              shared channel + manager, i18n, the auto-accept setting with the inventory model \
+              + command writer it files through, and the commands the cards spawn with"
+)]
 fn ingest_offers_invites(
     mut events: MessageReader<SlEvent>,
     channel: Option<Res<NotificationChannelRoot>>,
     mut manager: ResMut<NotificationManager>,
     translator: Translator,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    inventory: Res<InventoryModel>,
+    mut sl: MessageWriter<SlCommand>,
     mut commands: Commands,
 ) {
     let Some(channel) = channel else {
         return;
     };
+    let auto_accept = settings
+        .as_deref()
+        .and_then(|settings| {
+            settings
+                .store()
+                .get_bool(SETTING_AUTO_ACCEPT_INVENTORY)
+                .ok()
+        })
+        .unwrap_or(false);
     for event in events.read() {
         let SlSessionEvent::InstantMessageReceived(im) = &event.0 else {
             continue;
         };
         match im.dialog {
             ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered => {
+                // The alerts-tab auto-accept (the reference
+                // `AutoAcceptNewInventory`): file the item silently instead of
+                // raising the card. An unresolvable destination (inventory
+                // skeleton still loading) falls back to the card so the offer
+                // is never dropped.
+                if auto_accept
+                    && let Some(offer) = im.inventory_offer()
+                    && let Some(folder_id) = inventory_destination(&inventory, offer.asset_type)
+                {
+                    sl.write(SlCommand(Command::AcceptInventoryOffer {
+                        offer,
+                        folder_id,
+                    }));
+                    continue;
+                }
                 spawn_inventory_offer_card(&mut commands, &channel, &mut manager, &translator, im);
             }
             ImDialog::LureUser => {

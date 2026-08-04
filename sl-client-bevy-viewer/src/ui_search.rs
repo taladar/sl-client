@@ -132,6 +132,10 @@ pub(crate) struct SearchFieldHandle {
     pub(crate) container: Entity,
     /// The inner [`EditableText`], whose value is the search term.
     pub(crate) field: Entity,
+    /// The placeholder text node, when the spec asked for one — exposed so a
+    /// consumer can bind it to a Fluent key ([`crate::i18n::Translated`]); the
+    /// show / hide toggling only touches its `Node`, so the two coexist.
+    pub(crate) placeholder: Option<Entity>,
 }
 
 /// Everything a search field is built from — a struct rather than a positional
@@ -254,8 +258,9 @@ pub(crate) fn spawn_search_field(
         .entity(field)
         .insert((SearchInputField, TextColor(TEXT_COLOR)));
 
+    let mut placeholder = None;
     if !spec.placeholder.is_empty() {
-        commands.spawn((
+        let node = commands.spawn((
             Text::new(spec.placeholder.clone()),
             // One line, clipped by the slot when longer than the box — never
             // wrapped tall, which (as an absolute node with no width bound) it
@@ -282,11 +287,16 @@ pub(crate) fn spawn_search_field(
             Name::new(format!("{}:search-placeholder", spec.element)),
             ChildOf(slot),
         ));
+        placeholder = Some(node.id());
     }
 
     spawn_clear_button(commands, container, field, spec.element);
 
-    SearchFieldHandle { container, field }
+    SearchFieldHandle {
+        container,
+        field,
+        placeholder,
+    }
 }
 
 /// Spawn the trailing clear (`×`) button, hidden until the field holds a term, and
