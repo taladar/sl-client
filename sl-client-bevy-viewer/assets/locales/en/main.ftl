@@ -1085,6 +1085,26 @@ notification-button-leave = Leave
 notification-button-quit = Quit
 notification-button-view-im-chat = View IM & Chat
 notification-ignore-checkbox = Don't show me this again
+
+## Dialog titles (the reference `label`): a header line on an alert / modal
+## card. Shared across the entries that share a reference label.
+
+notification-title-save-wearable = Save Wearable
+notification-title-save-outfit = Save Outfit
+notification-title-rename-outfit = Rename Outfit
+notification-title-replace-existing-attachment = Replace Existing Attachment
+notification-title-confirm-pose-overwrite = Confirm Pose Overwrite
+notification-title-unknown-notification-message = Unknown Notification Message
+notification-title-changed-region-maturity = Changed Region Maturity
+notification-title-confirm-restart = Confirm restart
+notification-title-message-everyone-in-this-region = Message everyone in this region
+notification-title-message-everyone-in-your-estate = Message everyone in your Estate
+notification-title-change-linden-estate = Change Linden Estate
+notification-title-change-linden-estate-access = Change Linden Estate Access
+notification-title-select-estate = Select estate
+notification-title-confirm-ban = Confirm Ban
+notification-title-confirm-kick = Confirm Kick
+notification-title-confirm-teleport-home = Confirm Teleport Home
 notification-system-tip = [MESSAGE]
 notification-system-message = [MESSAGE]
 notification-generic-alert = [MESSAGE]
@@ -1315,6 +1335,136 @@ notification-local-bitmaps-update-file-not-found = [FNAME] could not be updated 
 notification-local-bitmaps-update-failed-final = [FNAME] could not be opened or decoded for [NRETRIES] attempts, and is now considered broken. Disabling future updates for this file.
 notification-local-bitmaps-verify-fail = Attempted to add an invalid or unreadable image file [FNAME] which could not be opened or decoded. Attempt canceled.
 notification-local-gltf-verify-fail = Attempted to add an invalid or unreadable GLTF material [FNAME] which could not be opened or decoded. Attempt cancelled.
+
+## Estate & region management (viewer-notification-catalogue-estate-region):
+## region tools, terrain validation, estate access lists, admin / god tools,
+## pathfinding and the server-keyed freeze / eject / entry refusals. Bodies
+## follow the reference notifications.xml; deviations are noted per entry.
+
+notification-button-this-estate = This Estate
+notification-button-all-estates = All Estates
+notification-button-kick-all-residents = Kick All Residents
+notification-button-dont-ask = Don't ask
+notification-button-bake = Bake
+notification-button-rebake = Rebake
+notification-button-close = Close
+notification-button-rebake-region = Rebake region
+notification-return-all-top-objects = Are you sure you want to return all listed objects back to their owner's inventory? This will return ALL scripted objects in the region!
+notification-disable-all-top-objects = Are you sure you want to disable all objects in this region?
+notification-unable-to-disable-outside-scripts = Cannot disable scripts. This entire region is damage enabled. Scripts must be allowed to run for weapons to work.
+notification-region-no-terraforming = The region [REGION] does not allow terraforming.
+notification-flush-map-visibility-caches = This will flush the map caches on this region. This is really only useful for debugging. (In production, wait 5 minutes, then everyone's map will update after they relog.)
+notification-kick-users-from-region = Teleport all residents in this region home?
+notification-change-object-bonus-factor = Lowering the object bonus after builds have been established in a region may cause objects to be returned or deleted. Are you sure you want to change object bonus?
+notification-estate-object-return = Are you sure you want to return objects owned by [USER_NAME]?
+notification-raw-upload-started = Upload started. It may take up to two minutes, depending on your connection speed.
+notification-confirm-bake-terrain = Do you really want to bake the current terrain, make it the center for terrain raise/lower limits, and the default for the 'Revert' tool?
+notification-confirm-texture-heights = You're about to use low values greater than high ones for Elevation Ranges. Proceed?
+notification-finished-raw-download = Finished download of raw terrain file to: [DOWNLOAD_PATH].
+notification-region-maturity-change = The maturity rating for this region has been changed. It may take some time for this change to be reflected on the map.
+notification-confirm-restart = Do you really want to schedule this region to restart?
+notification-message-region = Type a short announcement which will be sent to everyone in this region.
+notification-invalid-terrain-bit-depth = Couldn't set region textures: Terrain texture [TEXTURE_NUM] has an invalid bit depth of [TEXTURE_BIT_DEPTH]. Replace texture [TEXTURE_NUM] with an RGB [MAX_SIZE]x[MAX_SIZE] or smaller image then click "Apply" again.
+notification-invalid-terrain-alpha-not-fully-loaded = Couldn't set region textures: Terrain texture [TEXTURE_NUM] is not fully loaded, but is assumed to contain transparency due to a bit depth of [TEXTURE_BIT_DEPTH]. Transparency is not currently supported for terrain textures. If texture [TEXTURE_NUM] is opaque, wait for the texture to fully load and then click "Apply" again. Alpha is only supported for terrain materials (PBR Metallic Roughness), when alphaMode="MASK" and doubleSided=false.
+notification-invalid-terrain-alpha = Couldn't set region textures: Terrain texture [TEXTURE_NUM] contains transparency. Transparency is not currently supported for terrain textures. Replace texture [TEXTURE_NUM] with an opaque RGB image, then click "Apply" again. Alpha is only supported for terrain materials (PBR Metallic Roughness), when alphaMode="MASK" and doubleSided=false.
+notification-invalid-terrain-size = Couldn't set region textures: Terrain texture [TEXTURE_NUM] is too large at [TEXTURE_SIZE_X]x[TEXTURE_SIZE_Y]. Replace texture [TEXTURE_NUM] with an RGB [MAX_SIZE]x[MAX_SIZE] or smaller image then click "Apply" again.
+notification-invalid-terrain-material-not-loaded = Couldn't set region materials: Terrain material [MATERIAL_NUM] is not loaded. Wait for the material to load, or replace material [MATERIAL_NUM] with a valid material.
+notification-invalid-terrain-material-load-failed = Couldn't set region materials: Terrain material [MATERIAL_NUM] failed to load. Replace material [MATERIAL_NUM] with a valid material.
+notification-invalid-terrain-material-double-sided = Couldn't set region materials: Terrain material [MATERIAL_NUM] is double-sided. Double-sided materials are not currently supported for PBR terrain. Replace material [MATERIAL_NUM] with a material with doubleSided=false.
+notification-invalid-terrain-material-alpha-mode = Couldn't set region materials: Terrain material [MATERIAL_NUM] is using the unsupported alphaMode="[MATERIAL_ALPHA_MODE]". Replace material [MATERIAL_NUM] with a material with alphaMode="OPAQUE" or alphaMode="MASK".
+notification-max-allowed-agent-on-region = You can only have [MAX_AGENTS] allowed residents.
+notification-max-banned-agents-on-region = You can only have [MAX_BANNED] banned residents.
+notification-max-agent-on-region-batch = Failure while attempting to add [NUM_ADDED] agents: Exceeds the [MAX_AGENTS] [LIST_TYPE] limit by [NUM_EXCESS].
+notification-max-allowed-groups-on-region = You can only have [MAX_GROUPS] groups.
+notification-max-managers-on-region = You can only have [MAX_MANAGER] estate managers.
+notification-owner-cannot-be-denied = Cannot add estate owner to estate 'Banned resident' list.
+notification-problem-adding-estate-manager-banned = Unable to add banned resident to estate manager list.
+notification-problem-banning-estate-manager = Unable to add estate manager [AGENT] to banned list.
+# The reference wraps the group name in <nolink> markup; linkification is not
+# ported yet, so the plain token is kept.
+notification-group-is-already-in-list = [GROUP] is already in the Allowed Groups list.
+notification-agent-is-already-in-list = [AGENT] is already in your [LIST_TYPE] list.
+notification-agents-are-already-in-list = [AGENT] are already in your [LIST_TYPE] list.
+notification-agent-was-added-to-list = [AGENT] was added to [LIST_TYPE] list of [ESTATE].
+notification-agents-were-added-to-list = [AGENT] were added to [LIST_TYPE] list of [ESTATE].
+notification-agent-was-removed-from-list = [AGENT] was removed from [LIST_TYPE] list of [ESTATE].
+notification-agents-were-removed-from-list = [AGENT] were removed from [LIST_TYPE] list of [ESTATE].
+notification-problem-importing-estate-covenant = Problem importing estate covenant.
+notification-problem-adding-estate-manager = Problems adding a new estate manager. One or more estates may have a full manager list.
+notification-problem-adding-estate-ban-manager = Unable to add estate owner or manager to ban list.
+notification-problem-adding-estate-generic = Problems adding to this estate list. One or more estates may have a full list.
+notification-estate-parcel-access-override = Unchecking this option may remove restrictions that parcel owners have added to prevent griefing, maintain privacy, or protect underage residents from adult material. Please discuss with your parcel owners as needed.
+notification-estate-parcel-environment-override = (Estate-wide change: [ESTATENAME]) Unchecking this option will remove any custom environments that parcel owners have added to their parcels. Please discuss with your parcel owners as needed. Do you wish to proceed?
+notification-estate-change-covenant = Are you sure you want to change the estate covenant?
+notification-region-entry-access-blocked-preferences-out-of-sync = We are having technical difficulties with your region entry because your preferences are out of sync with the server.
+notification-confirm-kick = Do you REALLY want to kick all residents off the grid?
+notification-kick-user = Kick this Resident with what message?
+notification-kick-user-default = An administrator has logged you off.
+notification-kick-all-users = Kick everyone currently on the grid with what message?
+notification-freeze-user = Freeze this Resident with what message?
+notification-freeze-user-default = You have been frozen. You cannot move or chat. An administrator will contact you via instant message (IM).
+notification-unfreeze-user = Unfreeze this Resident with what message?
+notification-unfreeze-user-default = You are no longer frozen.
+notification-message-estate = Type a short announcement which will be sent to everyone currently in your estate.
+notification-change-linden-estate = You are about to change a Linden owned estate (mainland, teen grid, orientation, etc.). This is EXTREMELY DANGEROUS because it can fundamentally affect the resident experience. On the mainland, it will change thousands of regions and make the spaceserver hiccup. Proceed?
+notification-change-linden-access = You are about to change the access list for a Linden owned estate (mainland, teen grid, orientation, etc.). This is DANGEROUS and should only be done to invoke the hack allowing objects/L$ to be transferred in/out of a grid. It will change thousands of regions and make the spaceserver hiccup.
+notification-estate-allowed-agent-add = Add to allowed list for this estate only or for [ALL_ESTATES]?
+notification-estate-allowed-agent-remove = Remove from allowed list for this estate only or for [ALL_ESTATES]?
+notification-estate-allowed-group-add = Add to group allowed list for this estate only or for [ALL_ESTATES]?
+notification-estate-allowed-group-remove = Remove from group allowed list for this estate only or [ALL_ESTATES]?
+notification-estate-banned-agent-add = Deny access for this estate only or for [ALL_ESTATES]?
+notification-estate-banned-agent-remove = Remove this Resident from the ban list for access for this estate only or for [ALL_ESTATES]?
+notification-estate-manager-add = Add estate manager for this estate only or for [ALL_ESTATES]?
+notification-estate-manager-remove = Remove estate manager for this estate only or for [ALL_ESTATES]?
+notification-estate-allowed-experience-add = Add to allowed list for this estate only or for [ALL_ESTATES]?
+notification-estate-allowed-experience-remove = Remove from allowed list for this estate only or for [ALL_ESTATES]?
+notification-estate-blocked-experience-add = Add to blocked list for this estate only or for [ALL_ESTATES]?
+notification-estate-blocked-experience-remove = Remove from blocked list for this estate only or for [ALL_ESTATES]?
+notification-estate-trusted-experience-add = Add to key list for this estate only or for [ALL_ESTATES]?
+notification-estate-trusted-experience-remove = Remove from key list for this estate only or for [ALL_ESTATES]?
+notification-estate-ban-user = Deny access for [EVIL_USER] for this estate only or for [ALL_ESTATES]?
+notification-estate-ban-user-multiple = Deny access for the following residents this estate only or for [ALL_ESTATES]? [RESIDENTS]
+notification-estate-kick-user = Kick [EVIL_USER] from this estate?
+notification-estate-kick-multiple = Kick the following residents from this estate? [RESIDENTS]
+notification-estate-teleport-home-user = Teleport [AVATAR_NAME] home?
+notification-estate-teleport-home-multiple = Teleport the following residents home? [RESIDENTS]
+notification-pathfinding-dirty = The region has pending pathfinding changes. If you have build rights, you may rebake the region by clicking on the "Rebake" button.
+notification-pathfinding-dirty-rebake = The region has pending pathfinding changes. If you have build rights, you may rebake the region by clicking on the "Rebake region" button.
+notification-dynamic-pathfinding-disabled = Dynamic pathfinding is not enabled on this region. Scripted objects using pathfinding LSL calls may not operate as expected on this region.
+notification-pathfinding-cannot-rebake-navmesh = An error occurred. There may be a network or server problem, or you may not have build rights. Sometimes logging out and back in will solve this problem.
+notification-region-about-to-shutdown = The region you're trying to enter is about to shut down.
+notification-ur-banned-from-region = You are banned from the region.
+notification-no-teen-grid-access = Your account cannot connect to this teen grid region.
+notification-improper-payment-status = You do not have proper payment status to enter this region.
+notification-must-get-age-region = You must be age 18 or over to enter this region.
+notification-region-restart-minutes-toast = The region "[NAME]" will restart in [MINUTES] minutes. If you stay in this region when it shuts down, you will be logged out.
+notification-region-restart-seconds-toast = The region "[NAME]" will restart in [SECONDS] seconds. If you stay in this region when it shuts down, you will be logged out.
+notification-avatar-frozen = [AV_FREEZER] has frozen you. You cannot move or interact with the world.
+notification-avatar-frozen-duration = [AV_FREEZER] has frozen you for [AV_FREEZE_TIME] seconds. You cannot move or interact with the world.
+notification-you-froze-avatar = Avatar frozen.
+notification-avatar-has-unfrozen-you = [AV_FREEZER] has unfrozen you.
+notification-avatar-unfrozen = Avatar unfrozen.
+notification-avatar-freeze-failure = Freeze failed because you don't have admin permission for that parcel.
+notification-avatar-freeze-thaw = Your freeze expired, go about your business.
+notification-avatar-cant-freeze = Sorry, can't freeze that user.
+notification-eject-coming-soon = You are no longer allowed here and have [EJECT_TIME] seconds to leave.
+notification-no-enter-region-maybe-full = You can't enter region "[NAME]". It may be full or restarting soon.
+notification-sorry-cant-eject-user = Sorry, can't eject that user.
+notification-avatar-eject-failed = Eject failed because you don't have admin permission for that parcel.
+notification-full-region-cant-enter = You can't enter this region because the region is full.
+notification-estate-manager-failed-ll-teleport-home = The object '[OBJECT_NAME]' at [SLURL] cannot teleport estate managers home.
+notification-cant-teleport-could-not-find-user = Could not find user to teleport home
+notification-terrain-upload-failed = Terrain upload failed.
+notification-terrain-file-written = Terrain file written.
+notification-terrain-file-written-starting-download = Terrain file written, starting download...
+notification-terrain-baked = Terrain baked.
+notification-god-beats-freeze = Your godlike powers break the freeze!
+notification-region-entry-access-blocked-notify-adults-only = The region you're trying to visit contains [REGIONMATURITY] content, which is accessible to adults only.
+notification-terrain-downloaded = Terrain.raw downloaded.
+notification-entering-god-mode = Entering god mode, level [LEVEL]
+notification-leaving-god-mode = Now leaving god mode, level [LEVEL]
+notification-avatar-ejected = Avatar ejected.
+notification-server-version-changed = The region you have entered is running a different simulator version. Current simulator: [NEWVERSION] Previous simulator: [OLDVERSION]
 
 notification-overflow =
     { $count ->

@@ -144,6 +144,10 @@ const CARD_CLASS: &str = "sk-toast";
 /// The CSS class on a toast's body text.
 const TEXT_CLASS: &str = "sk-toast-text";
 
+/// The CSS class on a toast's title header, so a skin can weight it against
+/// the body (falls back to the plain text colour unstyled).
+const TITLE_CLASS: &str = "sk-toast-title";
+
 /// The CSS class on a toast button — the shared push-button surface.
 const BUTTON_CLASS: &str = "sk-button";
 
@@ -430,6 +434,9 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
 struct ToastContent {
     /// The behaviour class (drives the accent and whether it fades).
     kind: NotificationKind,
+    /// The resolved dialog title (the reference `label`), rendered as a
+    /// header line above the body, or `None` for a card with no title.
+    title: Option<String>,
     /// The display-ready body text.
     body: String,
     /// The buttons, with resolved labels.
@@ -547,6 +554,38 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
     } else {
         None
     };
+
+    // The title header, when the content carries one (the reference `label`):
+    // its own width-bounded box above the body, same measure-safe shape.
+    if let Some(title) = &content.title {
+        let title_box = commands
+            .spawn((
+                Node {
+                    max_width: Val::Px(TEXT_MAX_WIDTH),
+                    ..default()
+                },
+                Name::new("toast-title"),
+                ChildOf(root),
+            ))
+            .id();
+        let title_text = commands
+            .spawn((
+                Text::new(title.clone()),
+                UiFont::Sans.at(content.font_size),
+                TextColor(TEXT_COLOR),
+                ClassList::new_with_classes([TITLE_CLASS]),
+                Name::new("toast-title-text"),
+                ChildOf(title_box),
+            ))
+            .id();
+        if fades {
+            commands.entity(title_text).insert(FadeColor {
+                toast: root,
+                base_bg: None,
+                base_text: None,
+            });
+        }
+    }
 
     // The body: a decoration-free, width-bounded box holding the paragraph as its
     // sole child (the measure-bug constraint).
@@ -876,13 +915,17 @@ fn raise_notifications(
             .collect();
         // The input field's pre-filled text resolves like the body: through
         // i18n, then `[KEY]`-substituted with the raise's args (the reference
-        // defaults are templates like `[DESC] (new)`).
+        // defaults are templates like `[DESC] (new)`). A field with no
+        // default key starts empty (the announcement prompts).
         let input = tmpl.input.map(|input| {
-            let raw = translator.get(input.default_key);
-            substitute(&raw, &request.args)
+            input
+                .default_key
+                .map(|key| substitute(&translator.get(key), &request.args))
+                .unwrap_or_default()
         });
         let content = ToastContent {
             kind: tmpl.kind,
+            title: tmpl.title_key.map(|key| translator.get(key)),
             body: body.clone(),
             buttons,
             ignorable: tmpl.ignorable,
@@ -1473,6 +1516,8 @@ pub(crate) fn spawn_notification_specimen(
 ) -> Entity {
     let content = ToastContent {
         kind: NotificationKind::Alert,
+        // A title so the layout matrix sweeps the header line too.
+        title: Some(cx.text("Region restart")),
         body: cx.text(SPECIMEN_BODY),
         buttons: vec![
             ToastButtonSpec {
