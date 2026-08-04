@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 257 |
+| ready | 256 |
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 673 |
+| done | 674 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (257)
+## ready (256)
 
 ### protocol
 
@@ -675,8 +675,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Texture preview floater — full reference feature set
 - [`viewer-texture-vram-budget`](ready/viewer-texture-vram-budget.md) — Texture
   VRAM budget & global discard bias
-- [`viewer-tonemap-auto-exposure`](ready/viewer-tonemap-auto-exposure.md) —
-  Automatic (luminance-driven) exposure for the tone mapper
 - [`viewer-toolbar-customization`](ready/viewer-toolbar-customization.md) —
   Toolbar customization (toybox) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
@@ -1144,7 +1142,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (673)
+## done (674)
 
 ### protocol
 
@@ -1911,6 +1909,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-texture-picker` (done))
 - [`viewer-third-person-cam-lag-vertical-flight`](done/viewer-third-person-cam-lag-vertical-flight.md)
   — Third-person camera lags behind an avatar flying up or down
+- [`viewer-tonemap-auto-exposure`](done/viewer-tonemap-auto-exposure.md) —
+  Automatic (luminance-driven) exposure for the tone mapper
 - [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))

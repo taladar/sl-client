@@ -31,9 +31,10 @@
 //! puts every material in the same linear space the probes capture, and the probe
 //! intensity then follows from the exposure alone ([`probes`](crate::probes)).
 //!
-//! Not ported: the reference's *automatic* exposure (its `exposureMap`, a
-//! luminance-driven `exp_scale` multiplying `RenderExposure`). The exposure here is
-//! the static setting alone.
+//! The reference's *automatic* exposure (its `exposureMap`, a luminance-driven
+//! `exp_scale` multiplying `RenderExposure`) is supplied by [`exposure`](crate::exposure),
+//! whose 1×1 map this pass samples; the static `RenderExposure` setting is the scale
+//! it multiplies.
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;

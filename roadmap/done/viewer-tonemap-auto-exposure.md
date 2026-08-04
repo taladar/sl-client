@@ -2,7 +2,7 @@
 id: viewer-tonemap-auto-exposure
 title: Automatic (luminance-driven) exposure for the tone mapper
 topic: viewer
-status: ready
+status: done
 origin: split out of viewer-p33-3 (2026-07)
 ---
 
@@ -43,8 +43,32 @@ into a 1×1 exposure map the tone mapper samples
 (inert) for a legacy sky — so, like the reference default, adaptation is only
 visible on EEP skies.
 
-**Remaining:** the **temporal adaptation** (`gExposureProgram`'s
-`USE_LAST_EXPOSURE` ease toward the previous frame's exposure, so a camera turn
-does not snap — this port is the no-fade `gExposureProgramNoFade` path); and the
-`RenderUseExposureSkySettings` branch (the sky's `getHDROffset` / `getHDRMin` /
-`getHDRMax`), which would let a legacy sky adapt too.
+**Done (2026-08-04) — both remaining pieces landed.**
+
+- **Temporal adaptation** (`gExposureProgram`'s `USE_LAST_EXPOSURE`): the
+  exposure pass now copies the previous frame's exposure into a second 1×1
+  `ExposureMap::last` texture (the reference's `mExposureMap` → `mLastExposure`
+  copy) and the shader eases the freshly-computed target toward it by
+  `1 - exp(-speed · dt)`, `speed = -ln(speed_error) / speed_target`, so a camera
+  turn glides over ~`speed_target` seconds instead of snapping. Both 1×1
+  textures are seeded to `1.0` (the reference clears `mExposureMap` to `1`) so
+  there is no black ramp-in. `RenderDynamicExposureSpeedError` /
+  `RenderDynamicExposureSpeedTarget` registered. `SL_VIEWER_EXPOSURE_NO_FADE`
+  pins the ease off (the reference's `gExposureProgramNoFade` path) so a
+  single-frame screenshot shows the converged exposure rather than one `dt` of
+  ramp.
+- **`RenderUseExposureSkySettings` + `RenderSkyAutoAdjustLegacy`:**
+  `exposure_range` is now a faithful port of the whole `generateExposure`
+  `exp_min` / `exp_max` block — the sky-settings branch (fixed
+  `getHDROffset`/`getHDRMin`/`getHDRMax` constants → `(0.5, 3.0)` for an
+  adapting sky), the auto-adjust-legacy lift of a legacy sky's probe ambiance,
+  and the shipped probe-ambiance `hdr_scale` path — resolved per frame from the
+  live settings in `refresh_exposure`. Both settings registered (default off).
+  `can_auto_adjust` is derived from `reflection_probe_ambiance == 0` (see the
+  code comment on the one degenerate EEP-authored-ambiance-of-0 case, which is
+  behaviourally identical).
+
+Client-side arithmetic (range across all branches + the ease decay/convergence)
+is pinned by unit tests in `exposure.rs`. The visible glide still wants an
+eyeball on a bright↔dim traverse on an EEP sky (adaptation is only non-inert on
+EEP skies, like the reference default).

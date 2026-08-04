@@ -649,13 +649,17 @@ pub(crate) fn drive_sky(
         return;
     };
 
-    // Publish the active sky's dynamic-exposure range (the `sky_hdr_scale`
+    // Publish the active sky's dynamic-exposure inputs (the `sky_hdr_scale`
     // counterweight) so the exposure pass tracks the exact frame drawn here rather
-    // than re-deriving the altitude-blended sky.
-    let (exp_min, exp_max) =
-        crate::exposure::exposure_range(sky.reflection_probe_ambiance, sky.gamma);
-    exposure_range.exp_min = exp_min;
-    exposure_range.exp_max = exp_max;
+    // than re-deriving the altitude-blended sky; `refresh_exposure` resolves them
+    // into a range with the live settings. `can_auto_adjust` is the reference's
+    // `mCanAutoAdjust` — true for a legacy sky, which our decode collapses to
+    // `reflection_probe_ambiance == 0` (an EEP sky that explicitly authors an ambiance
+    // of exactly 0 is declaring "no HDR", so treating it as legacy is behaviourally
+    // identical: both stay inert).
+    exposure_range.reflection_probe_ambiance = sky.reflection_probe_ambiance;
+    exposure_range.gamma = sky.gamma;
+    exposure_range.can_auto_adjust = sky.reflection_probe_ambiance == 0.0;
 
     // Every derivation this system used to do inline. See `ResolvedSky`.
     let resolved = resolve_sky(&sky);

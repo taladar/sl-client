@@ -16,6 +16,14 @@
 // For a legacy sky the exposure range is (1, 1), so `s == 1` for any luminance and
 // this pass is inert (matching the reference, where the dynamic exposure never
 // touches a classic-mode frame).
+//
+// Temporal adaptation (`gExposureProgram`'s `USE_LAST_EXPOSURE`): the instantaneous
+// target `s` is then eased toward the previous frame's exposure (sampled from the
+// `last_texture`, the reference's `mLastExposure`) by `1 - exp(-speed * dt)`, where
+// `speed = -log(speed_error) / speed_target` — so a camera turn glides to the new
+// exposure over ~`speed_target` seconds instead of snapping. `fade = 0` (the
+// `gExposureProgramNoFade` path / `SL_VIEWER_EXPOSURE_NO_FADE`) skips the ease for a
+// deterministic single-frame capture.
 
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
@@ -32,11 +40,26 @@ struct SlExposure {
     // 1.0 to run the dynamic exposure, 0.0 to force the scale to `1.0` (the
     // reference `RenderDynamicExposureEnabled = false`, and the A/B disable knob).
     enabled: f32,
+    // The frame interval, seconds (`gFrameIntervalSeconds`): how far the ease
+    // advances this frame. 0 (the first frame) leaves the exposure at the previous.
+    dt: f32,
+    // The reference `RenderDynamicExposureSpeedError` (`dynamic_exposure_params.w`):
+    // the fraction of the error still remaining after `speed_target` seconds.
+    speed_error: f32,
+    // The reference `RenderDynamicExposureSpeedTarget` (`dynamic_exposure_params2.w`):
+    // the ease time constant, seconds.
+    speed_target: f32,
+    // 1.0 to ease toward the previous exposure, 0.0 to snap to the instantaneous
+    // target (the `gExposureProgramNoFade` path).
+    fade: f32,
 }
 
 @group(0) @binding(0) var scene_texture: texture_2d<f32>;
 @group(0) @binding(1) var scene_sampler: sampler;
 @group(0) @binding(2) var<uniform> exposure: SlExposure;
+// The previous frame's exposure (`mLastExposure`), for the temporal ease.
+@group(0) @binding(3) var last_texture: texture_2d<f32>;
+@group(0) @binding(4) var last_sampler: sampler;
 
 // The NTSC luma weights the reference `lum()` uses (`exposureF.glsl` /
 // `luminanceF.glsl`).
@@ -82,7 +105,19 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
     let shaped = normalised * normalised;
     // `s = mix(exp_max, exp_min, L)`.
-    let s = mix(exposure.exp_max, exposure.exp_min, shaped);
+    var s = mix(exposure.exp_max, exposure.exp_min, shaped);
 
+    // Temporal adaptation: ease the target toward the previous frame's exposure.
+    // `speed = -log(speed_error) / speed_target` decays the error to `speed_error`
+    // after `speed_target` seconds; `1 - exp(-speed * dt)` is that decay over one
+    // frame. `fade = 0` (no-fade path) leaves `s` at the instantaneous target.
+    if (exposure.fade >= 0.5) {
+        let prev = textureSampleLevel(last_texture, last_sampler, vec2<f32>(0.5, 0.5), 0.0).r;
+        let speed = -log(exposure.speed_error) / exposure.speed_target;
+        s = mix(prev, s, 1.0 - exp(-speed * exposure.dt));
+    }
+
+    // The reference `max(vec4(s), 0.0)`: never write a negative exposure.
+    s = max(s, 0.0);
     return vec4<f32>(s, s, s, 1.0);
 }
