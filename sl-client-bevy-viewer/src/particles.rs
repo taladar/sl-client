@@ -315,6 +315,14 @@ struct Particle {
     color: [f32; 4],
     /// The current interpolated `(x, y)` billboard size, metres.
     scale: [f32; 2],
+    /// The start / end glow (`PSYS_PART_*_GLOW`, `0.0..=1.0`), interpolated across the
+    /// life like the colour.
+    start_glow: f32,
+    /// The end glow.
+    end_glow: f32,
+    /// The current interpolated glow, fed to the vertex so the additive path can write
+    /// it into the scene alpha (the glow mask).
+    glow: f32,
     /// The `FOLLOW_SRC` position offset from the source, retained between steps so
     /// the particle drifts *with* the moving source (`mPosOffset`).
     pos_offset: Vec3,
@@ -381,6 +389,14 @@ impl Particle {
             lerp_color(self.start_color, self.end_color, frac)
         } else {
             color_to_f32(self.start_color)
+        };
+
+        // Glow interpolates with the colour/alpha group (`INTERP_COLOR`), else holds the
+        // start glow — the reference lerps glow alongside the particle colour.
+        self.glow = if self.flags & part_flags::INTERP_COLOR != 0 {
+            lerp(self.start_glow, self.end_glow, frac)
+        } else {
+            self.start_glow
         };
 
         // Scale: interpolate start→end when flagged, else hold the start scale.
@@ -518,6 +534,9 @@ impl Emitter {
             end_scale: system.part_end_scale,
             color: color_to_f32(system.part_start_color),
             scale: system.part_start_scale,
+            start_glow: system.part_start_glow,
+            end_glow: system.part_end_glow,
+            glow: system.part_start_glow,
             pos_offset: Vec3::ZERO,
         }
     }
@@ -863,6 +882,7 @@ fn build_cloud_instances(particles: &[Particle]) -> Vec<ParticleInstance> {
             color: part.color,
             velocity: part.velocity.to_array(),
             flags: part.flags,
+            glow: part.glow,
         })
         .collect()
 }
@@ -1477,6 +1497,9 @@ mod tests {
             end_scale: [1.0, 1.0],
             color: [1.0; 4],
             scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
             pos_offset: Vec3::ZERO,
         };
         assert!(part.integrate(0.5, Vec3::ZERO, Vec3::ZERO));
@@ -1501,6 +1524,9 @@ mod tests {
             end_scale: [1.0, 1.0],
             color: [1.0; 4],
             scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
             pos_offset: Vec3::ZERO,
         };
         // A big step drives it below the source plane (y=0); it should reflect up.
@@ -1529,6 +1555,9 @@ mod tests {
             end_scale: [1.0, 1.0],
             color: [0.0, 0.0, 0.0, 1.0],
             scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
             pos_offset: Vec3::ZERO,
         };
         // Half a unit-life step → half-grey.
@@ -1560,6 +1589,9 @@ mod tests {
             end_scale: [2.0, 3.0],
             color: [0.25, 0.5, 0.75, 1.0],
             scale: [2.0, 3.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
             pos_offset: Vec3::ZERO,
         };
         let particles = vec![part.clone(), part];
@@ -1620,6 +1652,9 @@ mod tests {
             end_scale: [1.0, 1.0],
             color: [1.0; 4],
             scale: [1.0, 1.0],
+            start_glow: 0.0,
+            end_glow: 0.0,
+            glow: 0.0,
             pos_offset: Vec3::ZERO,
         };
         let particles = vec![

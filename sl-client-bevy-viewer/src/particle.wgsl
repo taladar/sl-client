@@ -39,6 +39,7 @@ struct Vertex {
     @location(5) i_color: vec4<f32>,
     @location(6) i_velocity: vec3<f32>,
     @location(7) i_flags: u32,
+    @location(8) i_glow: f32,
 };
 
 struct VertexOutput {
@@ -47,6 +48,7 @@ struct VertexOutput {
     @location(1) color: vec4<f32>,
     @location(2) world_position: vec4<f32>,
     @location(3) world_normal: vec3<f32>,
+    @location(4) glow: f32,
 };
 
 // Normalize `v`, or return `fallback` when it is too short to normalize stably (the WGSL
@@ -91,6 +93,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.position = view.clip_from_world * vec4<f32>(world, 1.0);
     out.uv = vertex.uv;
     out.color = vertex.i_color;
+    out.glow = vertex.i_glow;
     // The billboard faces the camera, so its normal points back toward the eye.
     out.world_normal = normalize_or(-at, vec3<f32>(0.0, 0.0, 1.0));
     return out;
@@ -127,5 +130,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 #endif
     // Fog / any in-shader post, exactly as the StandardMaterial and face-material paths do.
     color = pbr_functions::main_pass_post_lighting_processing(pbr_input, color);
+
+#ifdef PARTICLE_ADDITIVE
+    // The additive path carries the per-particle glow (`PSYS_PART_*_GLOW`) in alpha:
+    // the additive blend adds `color.rgb` (the fire look, which ignores alpha) and
+    // accumulates this alpha into the scene alpha — the glow mask (`crate::glow`) — so
+    // a glowing particle blooms and a non-glowing one (glow 0) does not.
+    color.a = clamp(in.glow, 0.0, 1.0);
+#endif
     return color;
 }

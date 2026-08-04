@@ -161,7 +161,31 @@ faithful glow port started:**
       **Linear** mag/min (the reference's trilinear glow sample) and it is
       smooth. This is the in-world-fidelity goal — **not** the grey-disc fix
       (the disc doesn't feed the SL glow).
-    - **Follow-ups:** particle glow-mask handling (deferred, Step 2b); and the
-      edit-mode overlays (`gizmos` / `edit_selection` / probe-debug
-      `StandardMaterial`, opaque → alpha 1) will bloom when shown — a minor
-      edit-mode cosmetic to give the `(Zero, One)` / mask-0 treatment.
+  - **Cleanups DONE (2026-08-04) — glow finished:**
+    - **Per-particle glow ported** — the decoded `PSYS_PART_*_GLOW` is now
+      interpolated per particle (`particles.rs`, like the colour), carried on
+      the `ParticleInstance` (`@location(8)`), and the **additive** particle
+      path writes it to alpha (`PARTICLE_ADDITIVE` in `particle.wgsl`) so its
+      `(One, One)` alpha blend accumulates it into the glow mask — a glowing
+      (fire/light) particle blooms, a plain one does not. A non-additive
+      (alpha-blend) particle preserves the mask (`preserve_glow_mask_alpha`) and
+      does not glow (a documented limitation — glowing particles are the
+      additive kind).
+    - **Transparent prim faces no longer bloom** — the fix that was missing:
+      `FaceMaterial`'s blend faces had no mask-preserve, so a transparent prim
+      (glass, etc.) fed its coverage to the mask. Added
+      `MaterialExtension::specialize` on `SlFaceExt` calling
+      `preserve_glow_mask_alpha` — a no-op for an opaque/mask face (no colour
+      blend, so its `glow` mask write still lands), the `(Zero, One)` override
+      for a blend face.
+    - **Editor overlays no longer bloom** — the selection outline
+      (`edit_selection` `HighlightAssets`, inverted-hull) and the Select-Face
+      grid cursor were translucent `StandardMaterial` on the main camera;
+      converted both to an inert `FaceMaterial` (bit-identical render), which
+      inherits the `SlFaceExt::specialize` mask-preserve. (`gizmos` already
+      render on a separate `GizmoCamera`/layer that the glow never touches; the
+      probe-debug `StandardMaterial` is a test fixture.)
+    - Validated: `cargo check` + `clippy --all-targets` clean; 21 particle
+      tests + a render-readback face test pass. Needs an
+      **edit-mode aditi eyeball** to confirm the overlays/particles look right
+      (can't verify headlessly).

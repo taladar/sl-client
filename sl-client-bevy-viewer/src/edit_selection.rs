@@ -57,6 +57,7 @@ use sl_client_bevy::{
 use crate::camera::ViewerCamera;
 use crate::edit_math::rect_selects;
 use crate::edit_tool::{EditTool, EditToolState};
+use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
 use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
@@ -497,22 +498,22 @@ struct SelectionHighlightOverlay {
 #[derive(Resource, Debug)]
 struct HighlightAssets {
     /// The primary selection's root outline material.
-    primary: Handle<StandardMaterial>,
+    primary: Handle<FaceMaterial>,
     /// A (non-primary) selected root's outline material.
-    root: Handle<StandardMaterial>,
+    root: Handle<FaceMaterial>,
     /// A linkset child's outline material.
-    child: Handle<StandardMaterial>,
+    child: Handle<FaceMaterial>,
     /// The tentative rubber-band outline material.
-    pending: Handle<StandardMaterial>,
+    pending: Handle<FaceMaterial>,
     /// The drag-drop accept (own / modify) outline material.
-    drop_accept: Handle<StandardMaterial>,
+    drop_accept: Handle<FaceMaterial>,
     /// The drag-drop foreign (not-owned, allow-drop) outline material.
-    drop_foreign: Handle<StandardMaterial>,
+    drop_foreign: Handle<FaceMaterial>,
 }
 
 impl HighlightAssets {
     /// The material for `kind`.
-    fn material(&self, kind: HighlightKind) -> Handle<StandardMaterial> {
+    fn material(&self, kind: HighlightKind) -> Handle<FaceMaterial> {
         match kind {
             HighlightKind::Primary => self.primary.clone(),
             HighlightKind::Root => self.root.clone(),
@@ -529,15 +530,19 @@ impl FromWorld for HighlightAssets {
     /// culled, so only the inflated shell's back-facing rim shows — an edge
     /// glow, not a fill.
     fn from_world(world: &mut World) -> Self {
-        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        let mut materials = world.resource_mut::<Assets<FaceMaterial>>();
         let mut outline = |color: Color| {
-            materials.add(StandardMaterial {
+            // An inert `FaceMaterial` (bit-identical to the bare `StandardMaterial`)
+            // so `SlFaceExt`'s `specialize` keeps this translucent outline's coverage
+            // out of the glow mask — an editor overlay must not bloom under the glow
+            // pass.
+            materials.add(inert_face_material(StandardMaterial {
                 base_color: color,
                 unlit: true,
                 alpha_mode: AlphaMode::Blend,
                 cull_mode: Some(bevy::render::render_resource::Face::Front),
                 ..Default::default()
-            })
+            }))
         };
         let primary = outline(PRIMARY_OUTLINE);
         let root = outline(ROOT_OUTLINE);
@@ -1501,7 +1506,7 @@ fn apply_face_cursor_highlight(
     scene: Query<(), With<SceneObject>>,
     cursor_faces: CursorFaceQuery,
     overlays: Query<(Entity, &ChildOf), With<FaceCursorOverlay>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
     mut commands: Commands,
 ) {
     // The desired cursor set: face entity → its texture placement.
@@ -1530,7 +1535,10 @@ fn apply_face_cursor_highlight(
         let Ok((mesh, _marker, _debug)) = cursor_faces.get(face) else {
             continue;
         };
-        let material = materials.add(StandardMaterial {
+        // An inert `FaceMaterial` (bit-identical to the bare `StandardMaterial`) so
+        // `SlFaceExt`'s `specialize` keeps this translucent grid cursor's coverage out
+        // of the glow mask — an editor overlay must not bloom under the glow pass.
+        let material = materials.add(inert_face_material(StandardMaterial {
             base_color: Color::WHITE,
             base_color_texture: Some(assets.grid.clone()),
             unlit: true,
@@ -1544,7 +1552,7 @@ fn apply_face_cursor_highlight(
             double_sided: true,
             depth_bias: FACE_CURSOR_DEPTH_BIAS,
             ..Default::default()
-        });
+        }));
         commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(material),

@@ -29,10 +29,16 @@
 use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
 use bevy::math::{Affine2, Vec4};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial};
+use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::pbr::{
+    ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    MaterialPlugin, StandardMaterial,
+};
 use bevy::prelude::{App, Plugin};
 use bevy::reflect::TypePath;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_resource::{
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+};
 use bevy::shader::{Shader, ShaderRef};
 
 /// The internal handle the face shader (`face_material.wgsl`) is loaded under, so
@@ -315,6 +321,23 @@ impl MaterialExtension for SlFaceExt {
     /// specular lobe); the vertex stage stays the base `StandardMaterial` mesh one.
     fn fragment_shader() -> ShaderRef {
         ShaderRef::Handle(FACE_SHADER_HANDLE)
+    }
+
+    /// Keep a **blend** (transparent) face's coverage out of the scene alpha — the
+    /// glow mask ([`crate::glow`]) — so a transparent prim does not bloom under the
+    /// glow pass: override the target's **alpha** blend component to `(Zero, One)`
+    /// (colour/coverage untouched), like the standalone alpha-blended materials. An
+    /// **opaque / mask** face's pipeline has no colour blend, so this is a no-op there
+    /// and its `out.color.a = glow` mask write (in `face_material.wgsl`) still reaches
+    /// the glow buffer.
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        sl_client_bevy::preserve_glow_mask_alpha(descriptor);
+        Ok(())
     }
 }
 

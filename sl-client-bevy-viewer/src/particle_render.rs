@@ -101,6 +101,10 @@ pub(crate) struct ParticleInstance {
     /// The per-particle flags (`part_flags::*`), read for `FOLLOW_VELOCITY`. Attribute
     /// `@location(7)`.
     pub(crate) flags: u32,
+    /// The per-particle glow (`PSYS_PART_*_GLOW`, `0.0..=1.0`), interpolated over the
+    /// particle's life. Fed into the scene alpha (the glow mask) by the **additive**
+    /// path so a glowing particle blooms under the glow pass. Attribute `@location(8)`.
+    pub(crate) glow: f32,
 }
 
 /// The per-cloud list of live particle instances, rebuilt each frame by
@@ -325,6 +329,12 @@ fn instance_buffer_layout() -> VertexBufferLayout {
                 offset: 48,
                 shader_location: 7,
             },
+            // glow: f32 @ offset 52
+            VertexAttribute {
+                format: VertexFormat::Float32,
+                offset: 52,
+                shader_location: 8,
+            },
         ],
     }
 }
@@ -356,22 +366,28 @@ impl SpecializedMeshPipeline for ParticlePipeline {
             if key.unlit {
                 fragment.shader_defs.push("PARTICLE_UNLIT".into());
             }
-            if key.blend == ParticleBlend::Additive
-                && let Some(Some(target)) = fragment.targets.first_mut()
-            {
-                // Additive (destination `ONE`): the glow / fire look.
-                target.blend = Some(BlendState {
-                    color: BlendComponent {
-                        src_factor: BlendFactor::One,
-                        dst_factor: BlendFactor::One,
-                        operation: BlendOperation::Add,
-                    },
-                    alpha: BlendComponent {
-                        src_factor: BlendFactor::One,
-                        dst_factor: BlendFactor::One,
-                        operation: BlendOperation::Add,
-                    },
-                });
+            if key.blend == ParticleBlend::Additive {
+                // The additive path carries the per-particle glow in alpha:
+                // `PARTICLE_ADDITIVE` makes the fragment write `glow` (not coverage) to
+                // alpha, and the additive alpha blend `(One, One)` accumulates it into the
+                // scene alpha — the glow mask — so a glowing particle blooms under the
+                // glow pass (`crate::glow`), weighted by particle density.
+                fragment.shader_defs.push("PARTICLE_ADDITIVE".into());
+                if let Some(Some(target)) = fragment.targets.first_mut() {
+                    // Additive (destination `ONE`): the glow / fire look.
+                    target.blend = Some(BlendState {
+                        color: BlendComponent {
+                            src_factor: BlendFactor::One,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        },
+                        alpha: BlendComponent {
+                            src_factor: BlendFactor::One,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        },
+                    });
+                }
             }
         }
         // Particles never write depth (they are unsorted transparent billboards); the
@@ -379,6 +395,15 @@ impl SpecializedMeshPipeline for ParticlePipeline {
         // override path too.
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(false);
+        }
+        // A non-additive (alpha-blend) particle keeps its coverage in alpha for the
+        // colour blend, so it must not corrupt the glow mask: override its alpha blend
+        // to `(Zero, One)`. Such a particle therefore does not glow (a documented
+        // limitation — glowing particles are the additive / emissive kind, handled
+        // above). The additive path deliberately keeps `(One, One)` to feed glow to the
+        // mask, so it is excluded here.
+        if key.blend != ParticleBlend::Additive {
+            sl_client_bevy::preserve_glow_mask_alpha(&mut descriptor);
         }
         Ok(descriptor)
     }
@@ -755,7 +780,7 @@ mod tests {
             .iter()
             .map(|attribute| attribute.shader_location)
             .collect();
-        assert_eq!(locations, vec![3, 4, 5, 6, 7]);
+        assert_eq!(locations, vec![3, 4, 5, 6, 7, 8]);
         // Each attribute begins exactly where the previous one ended.
         let mut expected_offset = 0_u64;
         for attribute in &layout.attributes {
