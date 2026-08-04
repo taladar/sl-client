@@ -31,19 +31,20 @@
 //! # Scrolling and the camera
 //!
 //! The wheel both zooms the world camera and scrolls a hovered list, so the two
-//! must not fire at once. They are kept apart by the input context
-//! ([`crate::input_context`]): the camera zoom runs only in
-//! [`InputContext::World`], and [`scroll_virtual_lists`] runs only when the world
-//! does *not* own input — i.e. after the list (a focusable widget) has been
-//! clicked into. Clicking the list focuses it (see the `Press` observer
-//! installed by the consumer), which is what flips the context; the wheel then
-//! scrolls the list under the pointer and the camera holds still.
+//! must not fire at once. They are kept apart by **hover**: a virtual-list
+//! viewport is a blocking [`Pickable`] node, so whenever the pointer is over
+//! one the camera's wheel zoom stands down (`pointer_over_blocking_ui` in
+//! [`crate::camera`]) and [`scroll_virtual_lists`] scrolls the hovered list —
+//! no click-into-the-list first (the old input-context gate left the wheel
+//! doing *nothing* over a not-yet-focused list, since the camera already
+//! ignored it there too). Away from any list the hover walk finds nothing and
+//! the wheel stays the camera's.
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 
-use crate::input_context::InputContext;
+use crate::ui::{LogicalInset, LogicalRect};
 
 /// How many extra rows to keep live just past each edge of the viewport, so a
 /// fast scroll does not flash blank rows before the pool catches up. Small on
@@ -64,7 +65,193 @@ impl Plugin for VirtualListPlugin {
     /// row positions they write are plain [`Node`] fields that the `PostUpdate`
     /// layout pass then resolves.
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (scroll_virtual_lists, layout_virtual_lists).chain());
+        app.add_systems(
+            Update,
+            (
+                scroll_virtual_lists,
+                layout_virtual_lists,
+                drive_virtual_scrollbars,
+            )
+                .chain(),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The overlay scrollbar.
+// ---------------------------------------------------------------------------
+
+/// The scrollbar track's thickness, in logical pixels (the tab strip's value).
+const SCROLLBAR_THICKNESS: f32 = 10.0;
+
+/// The thumb's shortest length, in logical pixels, so it stays grabbable on a
+/// very long list.
+const SCROLLBAR_MIN_THUMB: f32 = 24.0;
+
+/// The scrollbar track's colour (the tab-strip scrollbar palette).
+const SCROLLBAR_TRACK_COLOR: Color = Color::srgb(0.12, 0.14, 0.18);
+
+/// The scrollbar thumb's colour.
+const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.40, 0.48, 0.60);
+
+/// A [`VirtualList`] viewport's overlay scrollbar track, naming its viewport.
+/// Bevy's `Scrollbar` widget drives the native `ScrollPosition`, which a
+/// virtual list does not use (it owns its own clamped offset), so the bar is
+/// driven from [`VirtualList`] directly by [`drive_virtual_scrollbars`].
+#[derive(Component, Debug, Clone, Copy)]
+struct VirtualScrollbar {
+    /// The [`VirtualList`] viewport this bar reflects and drives.
+    viewport: Entity,
+}
+
+/// The draggable thumb inside a [`VirtualScrollbar`] track.
+#[derive(Component, Debug, Clone, Copy)]
+struct VirtualScrollbarThumb;
+
+/// Spawn the overlay scrollbar for a [`VirtualList`] `viewport`: a slim track
+/// pinned to the viewport's trailing inline edge (an *overlay*, so it never
+/// shifts the header / row layout), holding a thumb whose size and position
+/// [`drive_virtual_scrollbars`] keeps proportional to the scroll state.
+/// Hidden while the content fits. Dragging the thumb scrolls the list; the
+/// wheel path is untouched (hover on the bar still bubbles to the viewport).
+pub(crate) fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Entity {
+    let track = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(SCROLLBAR_THICKNESS),
+                ..default()
+            },
+            LogicalInset(LogicalRect {
+                inline_end: Val::Px(0.0),
+                block_start: Val::Px(0.0),
+                block_end: Val::Px(0.0),
+                ..LogicalRect::AUTO
+            }),
+            BackgroundColor(SCROLLBAR_TRACK_COLOR),
+            // Above the pooled rows, which are appended later in paint order.
+            ZIndex(1),
+            Visibility::Hidden,
+            VirtualScrollbar { viewport },
+            Name::new("virtual-list:scrollbar"),
+            ChildOf(viewport),
+        ))
+        .id();
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Px(SCROLLBAR_MIN_THUMB),
+                top: Val::Px(0.0),
+                ..default()
+            },
+            BackgroundColor(SCROLLBAR_THUMB_COLOR),
+            Pickable::default(),
+            VirtualScrollbarThumb,
+            Name::new("virtual-list:scrollbar-thumb"),
+            ChildOf(track),
+        ))
+        .observe(
+            move |mut drag: On<Pointer<Drag>>,
+                  mut lists: Query<(&mut VirtualList, &ComputedNode)>| {
+                drag.propagate(false);
+                if drag.button != PointerButton::Primary {
+                    return;
+                }
+                let Ok((mut list, computed)) = lists.get_mut(viewport) else {
+                    return;
+                };
+                let viewport_height = computed.size().y * computed.inverse_scale_factor();
+                let Some(geometry) =
+                    scrollbar_geometry(list.item_count, list.row_height, viewport_height)
+                else {
+                    return;
+                };
+                // A pointer step maps through the thumb's travel range to the
+                // scroll range, so the thumb tracks the pointer exactly.
+                let travel = (viewport_height - geometry.thumb_height).max(f32::EPSILON);
+                list.scroll_by(drag.delta.y * geometry.max_scroll / travel);
+            },
+        );
+    track
+}
+
+/// A scrollbar's derived geometry for one frame: how long the thumb is and how
+/// far the list can scroll. `None` while the content fits the viewport (the
+/// bar hides).
+struct ScrollbarGeometry {
+    /// The thumb's length, in logical pixels.
+    thumb_height: f32,
+    /// The largest legal scroll offset (see [`max_scroll`]).
+    max_scroll: f32,
+}
+
+/// The [`ScrollbarGeometry`] for a list of `item_count` rows of `row_height`
+/// in a `viewport_height` window — the track is the viewport-height overlay.
+fn scrollbar_geometry(
+    item_count: usize,
+    row_height: f32,
+    viewport_height: f32,
+) -> Option<ScrollbarGeometry> {
+    let content = content_height(item_count, row_height);
+    if viewport_height <= 0.0 || content <= viewport_height {
+        return None;
+    }
+    let thumb_height = (viewport_height * viewport_height / content)
+        .max(SCROLLBAR_MIN_THUMB)
+        .min(viewport_height);
+    Some(ScrollbarGeometry {
+        thumb_height,
+        max_scroll: max_scroll(item_count, row_height, viewport_height),
+    })
+}
+
+/// Keep every [`VirtualScrollbar`] agreeing with its list: hidden while the
+/// content fits, otherwise a thumb proportional to the visible fraction,
+/// positioned at the scroll fraction. Runs after [`layout_virtual_lists`] so
+/// it reads the frame's clamped offset.
+fn drive_virtual_scrollbars(
+    lists: Query<(&VirtualList, &ComputedNode)>,
+    mut tracks: Query<(&VirtualScrollbar, &mut Visibility, &Children)>,
+    mut thumbs: Query<&mut Node, With<VirtualScrollbarThumb>>,
+) {
+    for (bar, mut visibility, children) in &mut tracks {
+        let Ok((list, computed)) = lists.get(bar.viewport) else {
+            continue;
+        };
+        let viewport_height = computed.size().y * computed.inverse_scale_factor();
+        let geometry = scrollbar_geometry(list.item_count, list.row_height, viewport_height);
+        let want = if geometry.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != want {
+            *visibility = want;
+        }
+        let Some(geometry) = geometry else {
+            continue;
+        };
+        let fraction = if geometry.max_scroll > 0.0 {
+            (list.scroll / geometry.max_scroll).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let top = fraction * (viewport_height - geometry.thumb_height).max(0.0);
+        for child in children {
+            let Ok(mut node) = thumbs.get_mut(*child) else {
+                continue;
+            };
+            let want_height = Val::Px(geometry.thumb_height);
+            if node.height != want_height {
+                node.height = want_height;
+            }
+            let want_top = Val::Px(top);
+            if node.top != want_top {
+                node.top = want_top;
+            }
+        }
     }
 }
 
@@ -210,20 +397,17 @@ fn row_window(
     }
 }
 
-/// Route the wheel to the virtual list under the pointer, but only while a UI
-/// widget owns input (the list has been clicked into), so the world camera —
-/// which zooms only in [`InputContext::World`] — never zooms at the same time.
-///
-/// See the [module docs](self) for why the context gate is the whole of the
-/// coordination.
+/// Route the wheel to the virtual list under the pointer. The world camera
+/// never zooms at the same time: a list viewport is blocking UI, and the
+/// camera's wheel zoom ignores a scroll over blocking UI — see the
+/// [module docs](self) for the coordination.
 pub(crate) fn scroll_virtual_lists(
-    context: Res<InputContext>,
     wheel: Res<AccumulatedMouseScroll>,
     hover_map: Res<HoverMap>,
     child_of: Query<&ChildOf>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    if context.is_world() || wheel.delta.y.abs() < f32::EPSILON {
+    if wheel.delta.y.abs() < f32::EPSILON {
         return;
     }
     let delta = match wheel.unit {

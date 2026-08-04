@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 242 |
+| ready | 241 |
 | blocked | 100 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 700 |
+| done | 701 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1145** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (242)
+## ready (241)
 
 ### protocol
 
@@ -504,9 +504,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-alerts-tab`](ready/viewer-preferences-alerts-tab.md) —
-  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
-  (done))
 - [`viewer-preferences-audio-tab`](ready/viewer-preferences-audio-tab.md) —
   Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
@@ -1063,7 +1060,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (700)
+## done (701)
 
 ### protocol
 
@@ -1766,6 +1763,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Phase 31 — General physics foundation (avian3d)
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
+  Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
+  (done))
 - [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))

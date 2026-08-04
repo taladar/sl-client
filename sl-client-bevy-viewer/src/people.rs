@@ -249,6 +249,13 @@ const PEOPLE_SETTINGS_SECTION: &[&str] = &["people"];
 /// draggable columns).
 const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
 
+/// The account setting gating the friend online / offline toasts (the
+/// reference `ChatOnlineNotification`, surfaced on the Preferences alerts
+/// tab): while on, [`notify_friend_presence`] raises a `FriendOnlineOffline`
+/// tip as a friend's presence changes. Lives in the `[notifications]` section
+/// with the other notification preferences.
+pub(crate) const SETTING_FRIEND_NOTIFY: &str = "ChatOnlineNotification";
+
 /// The friends list, expressed for the reusable table widget. The Name and Status
 /// columns are widget-owned **text** cells (Name gains the locale ellipsis); the
 /// two permission groups are widget **custom** columns the People code fills with
@@ -1236,6 +1243,7 @@ impl Plugin for PeoplePlugin {
                 (
                     spawn_people_tab.after(UiScaffoldSystems::SpawnRoot),
                     ingest_friend_events,
+                    notify_friend_presence,
                     request_friend_names,
                     apply_people_selection,
                     seed_sort_from_settings.after(load_account_settings),
@@ -1891,6 +1899,61 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
     );
     // The widget-owned friends column widths (draggable columns).
     register_table_settings(&mut settings, PEOPLE_SETTINGS_SECTION, &FRIENDS_TABLE);
+    // The friend online / offline toast gate (the alerts tab's headline row).
+    settings.register_in(
+        &[crate::notifications::NOTIFICATIONS_SECTION],
+        SETTING_FRIEND_NOTIFY,
+        SettingValue::Bool(true),
+        "Show a toast when a friend comes online or goes offline",
+    );
+}
+
+/// Raise a `FriendOnlineOffline` tip as friends come and go — the reference's
+/// `ChatOnlineNotification` toasts — gated by [`SETTING_FRIEND_NOTIFY`]. A
+/// separate reader so [`ingest_friend_events`] stays a pure model feed; the
+/// per-agent context makes the `unique` template replace a stale
+/// opposite-state tip for the same friend instead of stacking. The name falls
+/// back to the short-id placeholder exactly like the list rows, so the
+/// post-login burst (one `OnlineNotification` per online friend) never blocks
+/// on name resolution.
+fn notify_friend_presence(
+    mut events: MessageReader<SlEvent>,
+    model: Res<FriendsModel>,
+    settings: Option<Res<ViewerSettings>>,
+    translator: Translator,
+    mut show: MessageWriter<crate::notifications::ShowNotification>,
+) {
+    let enabled = settings
+        .as_deref()
+        .and_then(|settings| settings.store().get_bool(SETTING_FRIEND_NOTIFY).ok())
+        .unwrap_or(true);
+    for event in events.read() {
+        let (friends, online) = match &event.0 {
+            SlSessionEvent::FriendsOnline(friends) => (friends, true),
+            SlSessionEvent::FriendsOffline(friends) => (friends, false),
+            _other => continue,
+        };
+        if !enabled {
+            continue;
+        }
+        let status = translator.get(if online {
+            "notification-friend-status-online"
+        } else {
+            "notification-friend-status-offline"
+        });
+        for friend in friends {
+            let agent = AgentKey::from(*friend);
+            let name = model
+                .name_of(agent)
+                .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
+            show.write(
+                crate::notifications::ShowNotification::new("FriendOnlineOffline")
+                    .arg("NAME", name)
+                    .arg("STATUS", status.clone())
+                    .with_context(agent.uuid().to_string()),
+            );
+        }
+    }
 }
 
 /// Seed the sort order from the persisted value, once, after the per-avatar

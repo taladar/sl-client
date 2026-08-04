@@ -646,6 +646,8 @@ pub(crate) fn spawn_table(
             ChildOf(root),
         ))
         .id();
+    // The overlay scrollbar every long table needs (hidden while content fits).
+    crate::virtual_list::spawn_virtual_scrollbar(commands, viewport);
     // Focus the viewport on a primary click, so the wheel scrolls it. The observed
     // entity is captured (not read from the event target, which bubbles up from a
     // clicked row), so a click on a row still focuses the viewport it lives in.

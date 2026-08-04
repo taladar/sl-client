@@ -55,9 +55,10 @@ use crate::chat::LocalChatNotice;
 use crate::i18n::Translator;
 use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
-    DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationKind,
-    NotificationManager, NotificationPriority, NotificationRecord, NotificationResponse,
-    ShowNotification, TOAST_GAP, substitute, template,
+    DismissNotification, NOTIFICATIONS, NOTIFICATIONS_SECTION, NotificationIgnore,
+    NotificationKind, NotificationManager, NotificationPriority, NotificationRecord,
+    NotificationResponse, NotificationTemplate, ShowNotification, TOAST_GAP,
+    last_response_setting_name, substitute, template,
 };
 use crate::settings::ViewerSettings;
 use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
@@ -348,21 +349,51 @@ pub(crate) struct ResolveNotification {
     pub(crate) button: Option<&'static str>,
 }
 
-/// Startup: declare each ignorable notification's "show again" flag (default on),
-/// so a stored suppression coerces against it and the Preferences alerts tab
-/// ([[viewer-preferences-alerts-tab]]) has a registered setting to bind.
+/// Startup: declare each suppressible notification's "show again" flag
+/// (default on), so a stored suppression coerces against it and the
+/// Preferences alerts tab ([[viewer-preferences-alerts-tab]]) has a
+/// registered setting to bind. The storage follows the template's
+/// [`NotificationIgnore`] kind: a session-only suppression registers as a
+/// transient (never-persisted) setting so it resets every run, and a
+/// [`NotificationIgnore::LastResponse`] template additionally gets the
+/// [`last_response_setting_name`] `String` holding the button to replay
+/// (the reference's `"Default" + name` ignores entry). A
+/// [`NotificationIgnore::CheckboxOnly`] template registers nothing — its
+/// checkbox state rides the [`NotificationResponse`] for the owner alone.
 fn register_notification_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
     for entry in NOTIFICATIONS {
-        if entry.ignorable {
-            settings.register_in(
-                &[NOTIFICATIONS_SECTION],
-                entry.name,
-                SettingValue::Bool(true),
-                "Show this notification (untick to suppress it)",
-            );
+        match entry.ignore {
+            NotificationIgnore::None | NotificationIgnore::CheckboxOnly => {}
+            NotificationIgnore::DefaultResponse
+            | NotificationIgnore::ShowAgain
+            | NotificationIgnore::LastResponse => {
+                settings.register_in(
+                    &[NOTIFICATIONS_SECTION],
+                    entry.name,
+                    SettingValue::Bool(true),
+                    "Show this notification (untick to suppress it)",
+                );
+                if entry.ignore == NotificationIgnore::LastResponse {
+                    settings.register_in(
+                        &[NOTIFICATIONS_SECTION],
+                        &last_response_setting_name(entry.name),
+                        SettingValue::String(String::new()),
+                        "The button name replayed when this suppressed \
+                         notification is raised (empty = the form's default)",
+                    );
+                }
+            }
+            NotificationIgnore::DefaultResponseSessionOnly => {
+                settings.register_transient(
+                    entry.name,
+                    SettingValue::Bool(true),
+                    "Show this notification (untick to suppress it for this \
+                     session)",
+                );
+            }
         }
     }
 }
@@ -854,6 +885,62 @@ fn is_suppressed(settings: Option<&ViewerSettings>, name: &str) -> bool {
         .is_some_and(|show| !show)
 }
 
+/// The button a suppressed raise auto-responds with — the reference
+/// `handleIgnoredNotification` per [`NotificationIgnore`] kind: the form's
+/// default button for the default-response kinds, the saved
+/// [`last_response_setting_name`] button (falling back to the default when
+/// none is saved or the saved name no longer matches a form button) for
+/// [`NotificationIgnore::LastResponse`], and nothing for
+/// [`NotificationIgnore::ShowAgain`]. `None` / `CheckboxOnly` templates are
+/// never suppressed, so the answer for them is moot (`None`).
+fn auto_response_button(
+    tmpl: &NotificationTemplate,
+    settings: Option<&ViewerSettings>,
+) -> Option<&'static str> {
+    match tmpl.ignore {
+        NotificationIgnore::DefaultResponse | NotificationIgnore::DefaultResponseSessionOnly => {
+            tmpl.default_button()
+        }
+        NotificationIgnore::LastResponse => settings
+            .and_then(|settings| {
+                let setting = last_response_setting_name(tmpl.name);
+                let saved = settings.store().get_str(&setting).ok()?;
+                tmpl.form
+                    .iter()
+                    .find(|button| button.name == saved)
+                    .map(|button| button.name)
+            })
+            .or_else(|| tmpl.default_button()),
+        NotificationIgnore::ShowAgain
+        | NotificationIgnore::None
+        | NotificationIgnore::CheckboxOnly => None,
+    }
+}
+
+/// The label on the toast's ignore checkbox, by [`NotificationIgnore`] kind
+/// (the reference `LLToastPanel` variants): the plain "don't show me this
+/// again" for the default kinds, its session-only variant, "always choose
+/// this option" for [`NotificationIgnore::LastResponse`], and — for
+/// [`NotificationIgnore::CheckboxOnly`] — the template's own
+/// [`ignore_key`](NotificationTemplate::ignore_key) text, which in the
+/// reference *is* the checkbox label ("Remember this computer for 30
+/// days."). Templates with no checkbox resolve to the plain label, unused.
+fn ignore_checkbox_label(tmpl: &NotificationTemplate, translator: &Translator) -> String {
+    match tmpl.ignore {
+        NotificationIgnore::CheckboxOnly => tmpl.ignore_key.map_or_else(
+            || translator.get("notification-ignore-checkbox"),
+            |key| translator.get(key),
+        ),
+        NotificationIgnore::DefaultResponseSessionOnly => {
+            translator.get("notification-ignore-checkbox-session")
+        }
+        NotificationIgnore::LastResponse => translator.get("notification-ignore-choice"),
+        NotificationIgnore::None
+        | NotificationIgnore::DefaultResponse
+        | NotificationIgnore::ShowAgain => translator.get("notification-ignore-checkbox"),
+    }
+}
+
 /// Raise the queued [`ShowNotification`]s: look up the catalogue template, honour
 /// suppression and `unique` dedup, resolve the body + button labels through
 /// i18n, build the toast (corner card or modal scrim) and wire its buttons and
@@ -861,8 +948,8 @@ fn is_suppressed(settings: Option<&ViewerSettings>, name: &str) -> bool {
 #[expect(
     clippy::too_many_arguments,
     reason = "a raise needs the request queue, the manager, the channel/root, i18n, \
-              suppression settings, the dismiss channel and the persistence channel; each is \
-              distinct"
+              suppression settings, the dismiss channel, the persistence channel and the \
+              response channel (a suppressed raise auto-responds); each is distinct"
 )]
 fn raise_notifications(
     mut commands: Commands,
@@ -875,6 +962,7 @@ fn raise_notifications(
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,
     mut persist: MessageWriter<PersistNotification>,
+    mut responses: MessageWriter<NotificationResponse>,
 ) {
     let Some(channel) = channel else {
         return;
@@ -887,8 +975,19 @@ fn raise_notifications(
             );
             continue;
         };
-        if tmpl.ignorable && is_suppressed(settings.as_deref(), tmpl.name) {
+        // A suppressed raise is not shown, but it still *answers* — the
+        // reference `handleIgnoredNotification`: the default button (or the
+        // saved last response) fires so the confirmed action proceeds
+        // instead of silently doing nothing. `ShowAgain` alone stays mute.
+        if tmpl.ignore.is_suppressible() && is_suppressed(settings.as_deref(), tmpl.name) {
             debug!(template = tmpl.name, "notification suppressed");
+            responses.write(NotificationResponse {
+                id: manager.allocate_id(),
+                template: tmpl.name,
+                button: auto_response_button(tmpl, settings.as_deref()),
+                ignored: true,
+                input: None,
+            });
             continue;
         }
         // `unique`: a repeat with the same context replaces its predecessor.
@@ -935,8 +1034,8 @@ fn raise_notifications(
                 .map(|key| substitute(&translator.get(key), &request.args)),
             body: body.clone(),
             buttons,
-            ignorable: tmpl.ignorable,
-            ignore_label: translator.get("notification-ignore-checkbox"),
+            ignorable: tmpl.ignore.offers_checkbox(),
+            ignore_label: ignore_checkbox_label(tmpl, &translator),
             // A modal is dismissed by choosing a button; every corner toast gets a
             // close × so a fading tip / notify can be dismissed early.
             closable: !tmpl.kind.is_modal(),
@@ -1177,8 +1276,25 @@ fn resolve_notifications(
         let ignored = children
             .iter_descendants(resolution.toast)
             .any(|node| checkboxes.get(node).is_ok_and(|checkbox| checkbox.checked));
-        if ignored && let Some(settings) = settings.as_deref_mut() {
+        // A ticked checkbox records what its kind means: a suppression for
+        // the suppressible kinds (plus, for `LastResponse`, the button to
+        // replay — the reference saves the response under `Default<name>`),
+        // and nothing at all for `CheckboxOnly`, whose state rides the
+        // response for the template's owner alone.
+        if ignored
+            && let Some(settings) = settings.as_deref_mut()
+            && let Some(tmpl) = template(toast.template)
+            && tmpl.ignore.is_suppressible()
+        {
             settings.set_account(toast.template, SettingValue::Bool(false));
+            if tmpl.ignore == NotificationIgnore::LastResponse
+                && let Some(button) = resolution.button
+            {
+                settings.set_account(
+                    &last_response_setting_name(toast.template),
+                    SettingValue::String(button.to_owned()),
+                );
+            }
         }
         manager.record_response(toast.id, resolution.button);
         manager.clear_unique(toast.id);
@@ -1590,9 +1706,86 @@ mod tests {
     use bevy::prelude::{App, Messages, Update};
     use bevy::text::EditableText;
     use pretty_assertions::assert_eq;
+    use sl_settings::{Scope, SettingValue, SettingsStore};
 
-    use super::{ResolveNotification, Toast, resolve_notifications};
-    use crate::notifications::{NotificationManager, NotificationPriority, NotificationResponse};
+    use super::{
+        IgnoreCheckbox, ResolveNotification, Toast, auto_response_button, resolve_notifications,
+    };
+    use crate::notifications::{
+        NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
+        NotificationManager, NotificationPriority, NotificationResponse, NotificationTemplate,
+        last_response_setting_name,
+    };
+    use crate::settings::ViewerSettings;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A two-button form for the synthetic templates: "OK" default, "Cancel".
+    const TEST_FORM: &[NotificationButton] = &[
+        NotificationButton {
+            name: "OK",
+            label_key: "k-ok",
+            is_default: true,
+        },
+        NotificationButton {
+            name: "Cancel",
+            label_key: "k-cancel",
+            is_default: false,
+        },
+    ];
+
+    /// A synthetic template with the given ignore kind over [`TEST_FORM`].
+    const fn synthetic(ignore: NotificationIgnore) -> NotificationTemplate {
+        NotificationTemplate {
+            name: "SyntheticIgnoreProbe",
+            kind: NotificationKind::Alert,
+            message_key: "k-body",
+            title_key: None,
+            priority: NotificationPriority::Normal,
+            persist: false,
+            log_to_chat: false,
+            unique: false,
+            ignore,
+            ignore_key: Some("k-ignore"),
+            form: TEST_FORM,
+            input: None,
+        }
+    }
+
+    /// The default-response kinds auto-answer with the form's default button;
+    /// show-again answers nothing — the reference `handleIgnoredNotification`
+    /// per kind, with no store involved.
+    #[test]
+    fn suppressed_kinds_pick_their_auto_response() {
+        let default = synthetic(NotificationIgnore::DefaultResponse);
+        assert_eq!(auto_response_button(&default, None), Some("OK"));
+        let session = synthetic(NotificationIgnore::DefaultResponseSessionOnly);
+        assert_eq!(auto_response_button(&session, None), Some("OK"));
+        let show_again = synthetic(NotificationIgnore::ShowAgain);
+        assert_eq!(auto_response_button(&show_again, None), None);
+    }
+
+    /// A last-response template replays the saved button; an unsaved (empty)
+    /// or no-longer-matching saved name falls back to the default button.
+    #[test]
+    fn last_response_replays_the_saved_button() -> Result<(), TestError> {
+        let tmpl = synthetic(NotificationIgnore::LastResponse);
+        let setting = last_response_setting_name(tmpl.name);
+        let mut store = SettingsStore::new();
+        store.register(&setting, SettingValue::String(String::new()), "saved")?;
+        let mut settings = ViewerSettings::from_store_for_test(store);
+        // Unsaved (the registered empty default): the default button.
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("OK"));
+        // Saved and still a form button: replayed.
+        settings.set_account(&setting, SettingValue::String("Cancel".to_owned()));
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("Cancel"));
+        // Saved but no longer a form button (a form edit since): the default.
+        settings.set_account(&setting, SettingValue::String("Gone".to_owned()));
+        assert_eq!(auto_response_button(&tmpl, Some(&settings)), Some("OK"));
+        Ok(())
+    }
 
     /// Drive [`resolve_notifications`] through a throwaway app against a toast
     /// whose [`Toast::input_field`] is a real [`EditableText`] holding
@@ -1635,6 +1828,133 @@ mod tests {
         let messages = app.world().resource::<Messages<NotificationResponse>>();
         let mut cursor = messages.get_cursor();
         cursor.read(messages).next().cloned()
+    }
+
+    /// Drive [`resolve_notifications`] against a real catalogue template whose
+    /// toast carries a **ticked** ignore checkbox, over a store pre-seeded by
+    /// `register`, and return the app for store inspection.
+    fn resolve_ticked(
+        template: &'static str,
+        button: Option<&'static str>,
+        register: impl FnOnce(&mut SettingsStore),
+    ) -> App {
+        let mut store = SettingsStore::new();
+        register(&mut store);
+        let mut app = App::new();
+        app.add_message::<ResolveNotification>();
+        app.add_message::<NotificationResponse>();
+        app.init_resource::<NotificationManager>();
+        app.insert_resource(ViewerSettings::from_store_for_test(store));
+        app.add_systems(Update, resolve_notifications);
+        let checkbox = app.world_mut().spawn(IgnoreCheckbox { checked: true }).id();
+        let id = app
+            .world_mut()
+            .resource_mut::<NotificationManager>()
+            .allocate_id();
+        let toast = app
+            .world_mut()
+            .spawn(Toast {
+                id,
+                template,
+                priority: NotificationPriority::Normal,
+                default_button: Some("OK"),
+                age: 0.0,
+                lifetime: 0.0,
+                opacity: 1.0,
+                hovered: false,
+                overflowed: false,
+                resolved: false,
+                input_field: None,
+            })
+            .add_child(checkbox)
+            .id();
+        app.world_mut()
+            .write_message(ResolveNotification { toast, button });
+        app.update();
+        app
+    }
+
+    /// The account-scope override a test's store holds for `name`, if any.
+    fn account_override(app: &App, name: &str) -> Option<SettingValue> {
+        app.world()
+            .resource::<ViewerSettings>()
+            .store()
+            .get_override(Scope::Account, name)
+            .cloned()
+    }
+
+    /// Ticking the box on a default-response template records the suppression
+    /// (the account-scope `Bool(false)` the raise path honours).
+    #[test]
+    fn ticked_default_response_records_a_suppression() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::DefaultResponse)
+            .ok_or("no DefaultResponse template in the catalogue")?;
+        let app = resolve_ticked(tmpl.name, None, |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "show")
+                .ok();
+        });
+        assert_eq!(
+            account_override(&app, tmpl.name),
+            Some(SettingValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    /// Ticking the box on a last-response template records the suppression
+    /// *and* the chosen button, so the next raise replays it.
+    #[test]
+    fn ticked_last_response_saves_the_chosen_button() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::LastResponse)
+            .ok_or("no LastResponse template in the catalogue")?;
+        let chosen = tmpl
+            .form
+            .first()
+            .map(|button| button.name)
+            .ok_or("a LastResponse template needs a form")?;
+        let saved_setting = last_response_setting_name(tmpl.name);
+        let app = resolve_ticked(tmpl.name, Some(chosen), |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "show")
+                .ok();
+            store
+                .register(&saved_setting, SettingValue::String(String::new()), "saved")
+                .ok();
+        });
+        assert_eq!(
+            account_override(&app, tmpl.name),
+            Some(SettingValue::Bool(false))
+        );
+        assert_eq!(
+            account_override(&app, &saved_setting),
+            Some(SettingValue::String(chosen.to_owned()))
+        );
+        Ok(())
+    }
+
+    /// Ticking the box on a checkbox-only template writes **no** setting — the
+    /// state rides the response's `ignored` flag for the owner alone.
+    #[test]
+    fn ticked_checkbox_only_writes_no_setting() -> Result<(), TestError> {
+        let tmpl = NOTIFICATIONS
+            .iter()
+            .find(|entry| entry.ignore == NotificationIgnore::CheckboxOnly)
+            .ok_or("no CheckboxOnly template in the catalogue")?;
+        let app = resolve_ticked(tmpl.name, None, |store| {
+            store
+                .register(tmpl.name, SettingValue::Bool(true), "not written")
+                .ok();
+        });
+        assert_eq!(account_override(&app, tmpl.name), None);
+        let messages = app.world().resource::<Messages<NotificationResponse>>();
+        let mut cursor = messages.get_cursor();
+        let response = cursor.read(messages).next().cloned();
+        assert_eq!(response.map(|response| response.ignored), Some(true));
+        Ok(())
     }
 
     /// Choosing a button submits the input field: its edited text arrives on

@@ -137,6 +137,7 @@ mod people;
 mod physics;
 mod pie_menu;
 mod preferences;
+mod preferences_alerts;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -1233,6 +1234,10 @@ fn run_session(
     // per-tab tasks plug their panels into its registry. After FloaterPlugin,
     // whose spawn_floater and deferred-content build it rides.
     .add_plugins(crate::preferences::PreferencesPlugin)
+    // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
+    // refresh, row pool and binding behind the panel build_alerts_tab plugs
+    // into the shell's registry.
+    .add_plugins(crate::preferences_alerts::PreferencesAlertsPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

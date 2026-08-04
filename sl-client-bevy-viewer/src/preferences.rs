@@ -90,10 +90,10 @@ const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 
 /// A control's border tone (the settings-binding demo's, kept for continuity).
-const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
+pub(crate) const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// A checkbox box's fill while unchecked.
-const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
+pub(crate) const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
 
 /// A checkbox box's fill while checked.
 const CHECK_ON: Color = Color::srgb(0.30, 0.70, 0.45);
@@ -114,7 +114,7 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 const BUTTON_CLASS: &str = "sk-button";
 
 /// A checkbox box's side length, in logical pixels.
-const CHECK_SIZE: f32 = 18.0;
+pub(crate) const CHECK_SIZE: f32 = 18.0;
 
 /// A slider track's width, in logical pixels.
 const TRACK_WIDTH: f32 = 180.0;
@@ -155,11 +155,18 @@ pub(crate) struct PreferencesTabDef {
 }
 
 /// The registered preference tabs, in strip order.
-pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[PreferencesTabDef {
-    id: "world-ui",
-    label_key: "preferences-tab-world-ui",
-    build: build_world_ui_tab,
-}];
+pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
+    PreferencesTabDef {
+        id: "world-ui",
+        label_key: "preferences-tab-world-ui",
+        build: build_world_ui_tab,
+    },
+    PreferencesTabDef {
+        id: "alerts",
+        label_key: "preferences-tab-alerts",
+        build: crate::preferences_alerts::build_alerts_tab,
+    },
+];
 
 // ---------------------------------------------------------------------------
 // State.
@@ -180,7 +187,7 @@ pub(crate) struct PreferencesUi {
 
 /// The shell's open / close and snapshot state.
 #[derive(Resource, Debug, Default)]
-struct PreferencesState {
+pub(crate) struct PreferencesState {
     /// Whether the floater was open last frame (edge detection).
     open: bool,
     /// Whether the account scope was already loaded when the snapshot was
@@ -196,6 +203,60 @@ struct PreferencesState {
     filter: String,
 }
 
+impl PreferencesState {
+    /// The lowercased active filter term (empty = no filter) — read by tab
+    /// modules with their own searchable surface (the alerts list) so they
+    /// match against the same term as the [`PrefSearchRow`]s.
+    pub(crate) fn filter(&self) -> &str {
+        &self.filter
+    }
+}
+
+/// Per tab index: whether a tab-owned searchable surface that is *not* made of
+/// [`PrefSearchRow`]s (the alerts tab's virtualized list) currently has filter
+/// hits. [`apply_preferences_filter`] ORs these into its per-tab hit counts,
+/// so such a tab is dimmed / jumped-to like any other; an entry is only
+/// meaningful while a filter term is active. Written by the owning tab's
+/// module (the alerts view refresh), keyed by the tab's [`PREF_TABS`] index.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PreferencesExtraHits(pub(crate) HashMap<usize, bool>);
+
+/// Debug: the [`PREF_TABS`] id to select once the floater's content builds —
+/// for the offline screenshot harness, which cannot click the tab strip (the
+/// `SL_VIEWER_UI_DEMO` idiom). Combine with the persisted open state
+/// (`preferences_visible`) to land a headless run on a chosen tab.
+const PREFERENCES_TAB_ENV: &str = "SL_VIEWER_PREFERENCES_TAB";
+
+/// Select the [`PREFERENCES_TAB_ENV`] tab once the shell's content exists; a
+/// missing / unknown value does nothing. One-shot.
+fn select_env_preferences_tab(
+    ui: Option<Res<PreferencesUi>>,
+    mut strips: Query<&mut TabStrip>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Some(wanted) = std::env::var_os(PREFERENCES_TAB_ENV) else {
+        *done = true;
+        return;
+    };
+    let Some(ui) = ui else {
+        return;
+    };
+    let Some(index) = PREF_TABS
+        .iter()
+        .position(|tab| Some(tab.id) == wanted.to_str())
+    else {
+        *done = true;
+        return;
+    };
+    if let Ok(mut strip) = strips.get_mut(ui.tab_strip) {
+        strip.active = index;
+        *done = true;
+    }
+}
+
 /// Written once per OK press, after the settings have been saved — the per-tab
 /// **apply hook**: a tab whose settings need a non-live side effect on commit
 /// (the reference's `LLPanelPreference::apply`) reads this from its own module
@@ -209,20 +270,20 @@ pub(crate) struct PreferencesApplied;
 
 /// Tags a row the preferences filter matches against, naming its label node.
 #[derive(Component, Debug, Clone, Copy)]
-struct PrefSearchRow {
+pub(crate) struct PrefSearchRow {
     /// The row's [`Translated`] label — the text matched and highlighted.
-    label: Entity,
+    pub(crate) label: Entity,
 }
 
 /// Marks a [`PrefSearchRow`]'s label node, so the filter re-runs when a locale
 /// switch (or the bundle first loading) rewrites the resolved label text.
 #[derive(Component, Debug, Clone, Copy)]
-struct PrefRowLabel;
+pub(crate) struct PrefRowLabel;
 
 /// Marks a preference checkbox's box node, so its fill tracks `Checked` (and
 /// the account guard).
 #[derive(Component, Debug, Clone, Copy)]
-struct PrefCheckboxBox;
+pub(crate) struct PrefCheckboxBox;
 
 /// Marks a preference slider's thumb node, so it slides to the bound value.
 #[derive(Component, Debug, Clone, Copy)]
@@ -365,6 +426,7 @@ pub(crate) struct PreferencesPlugin;
 impl Plugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PreferencesState>()
+            .init_resource::<PreferencesExtraHits>()
             .add_message::<PreferencesApplied>()
             .add_systems(
                 Startup,
@@ -380,6 +442,7 @@ impl Plugin for PreferencesPlugin {
                     track_preferences_open_close
                         .after(crate::floater::build_deferred_floater_content),
                     guard_account_bindings,
+                    select_env_preferences_tab,
                     mirror_preferences_filter,
                     apply_preferences_filter.after(mirror_preferences_filter),
                     drive_pref_checkbox_visual,
@@ -723,7 +786,7 @@ fn guard_account_bindings(
 /// Mirror the filter field's live text into [`PreferencesState::filter`]
 /// (lowercased, trimmed), the [`crate::menu_search`] idiom — written only on a
 /// real change so the filter pass's change guard works.
-fn mirror_preferences_filter(
+pub(crate) fn mirror_preferences_filter(
     ui: Option<Res<PreferencesUi>>,
     fields: Query<&EditableText>,
     mut state: ResMut<PreferencesState>,
@@ -755,9 +818,10 @@ fn mirror_preferences_filter(
               with their labels and colours, and the tab tree (panels, strip, buttons) the \
               per-tab hit counts and the selection jump need"
 )]
-fn apply_preferences_filter(
+pub(crate) fn apply_preferences_filter(
     ui: Option<Res<PreferencesUi>>,
     state: Res<PreferencesState>,
+    extra_hits: Res<PreferencesExtraHits>,
     changed_labels: Query<(), (Changed<Text>, With<PrefRowLabel>)>,
     mut rows: Query<(Entity, &PrefSearchRow, &mut Node)>,
     labels: Query<&Text>,
@@ -771,7 +835,7 @@ fn apply_preferences_filter(
     let Some(ui) = ui else {
         return;
     };
-    if !state.is_changed() && changed_labels.is_empty() {
+    if !state.is_changed() && !extra_hits.is_changed() && changed_labels.is_empty() {
         return;
     }
     let filtering = !state.filter.is_empty();
@@ -813,6 +877,18 @@ fn apply_preferences_filter(
             let entry = tab_has_match.entry(index).or_insert(false);
             *entry = *entry || hit;
             if hit {
+                first_match = Some(first_match.map_or(index, |first| first.min(index)));
+            }
+        }
+    }
+
+    // Merge the tab-owned extra surfaces (the alerts list) into the hit set,
+    // so their tabs dim and attract the jump like PrefSearchRow tabs.
+    if filtering {
+        for (&index, &hit) in &extra_hits.0 {
+            if hit {
+                let entry = tab_has_match.entry(index).or_insert(false);
+                *entry = true;
                 first_match = Some(first_match.map_or(index, |first| first.min(index)));
             }
         }
@@ -1069,7 +1145,7 @@ pub(crate) fn spawn_preferences_specimen(
         },
     );
 
-    let labels = [cx.text("General"), cx.text("Maps")];
+    let labels = [cx.text("General"), cx.text("Alerts")];
     let tabs = spawn_tab_container(
         commands,
         card,
@@ -1140,6 +1216,69 @@ pub(crate) fn spawn_preferences_specimen(
                 BackgroundColor(THUMB_FILL),
             ));
     }
+    if let Some(panel) = tabs.panels.get(1).copied() {
+        // The alerts tab stand-in: a headline toggle row over a static
+        // two-column popup list (checkbox column | ignoretext label), the
+        // live layout's shape without the virtualized table.
+        let headline_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
+        commands.spawn((
+            Node {
+                width: Val::Px(CHECK_SIZE),
+                height: Val::Px(CHECK_SIZE),
+                border: UiRect::all(Val::Px(2.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BorderColor::all(CONTROL_BORDER),
+            BackgroundColor(CHECK_ON),
+            ChildOf(headline_row),
+        ));
+        commands.spawn((
+            Text::new(cx.text("Notify me when my friends log in or out")),
+            cx.font(UiFont::Sans),
+            TextColor(LABEL_COLOR),
+            ChildOf(headline_row),
+        ));
+        let list_rows: [(&str, bool); 3] = [
+            ("About Land: unsaved changes", true),
+            ("Confirm before I pay an object", false),
+            ("Warn about script permissions", true),
+        ];
+        let header_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
+        commands.spawn((
+            Text::new(cx.text("Show")),
+            cx.font(UiFont::Sans),
+            TextColor(SECTION_COLOR),
+            ChildOf(header_row),
+        ));
+        commands.spawn((
+            Text::new(cx.text("Alert")),
+            cx.font(UiFont::Sans),
+            TextColor(SECTION_COLOR),
+            ChildOf(header_row),
+        ));
+        for (label, shown) in list_rows {
+            let list_row = commands.spawn((pref_row_node(), ChildOf(panel))).id();
+            commands.spawn((
+                Node {
+                    width: Val::Px(CHECK_SIZE),
+                    height: Val::Px(CHECK_SIZE),
+                    border: UiRect::all(Val::Px(2.0)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                BorderColor::all(CONTROL_BORDER),
+                BackgroundColor(if shown { CHECK_ON } else { CHECK_OFF }),
+                ChildOf(list_row),
+            ));
+            commands.spawn((
+                Text::new(cx.text(label)),
+                cx.font(UiFont::Sans),
+                TextColor(LABEL_COLOR),
+                ChildOf(list_row),
+            ));
+        }
+    }
 
     let footer = commands
         .spawn((
@@ -1184,8 +1323,9 @@ mod tests {
 
     use super::{
         FILTER_MATCH_COLOR, LABEL_COLOR, PrefRowLabel, PrefSearchRow, PreferencesApplied,
-        PreferencesState, PreferencesUi, apply_preferences_filter, guard_account_bindings,
-        on_preferences_cancel, on_preferences_ok, track_preferences_open_close,
+        PreferencesExtraHits, PreferencesState, PreferencesUi, apply_preferences_filter,
+        guard_account_bindings, on_preferences_cancel, on_preferences_ok,
+        track_preferences_open_close,
     };
     use crate::floater::FloaterCommand;
     use crate::settings::ViewerSettings;
@@ -1219,6 +1359,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(ViewerSettings::from_store_for_test(store))
             .init_resource::<PreferencesState>()
+            .init_resource::<PreferencesExtraHits>()
             .add_message::<PreferencesApplied>()
             .add_message::<FloaterCommand>()
             .add_systems(
@@ -1336,6 +1477,60 @@ mod tests {
             "a setting that rested on its default is reset, not re-overridden"
         );
         assert!((store(&app).get_f32("Level")? - 10.0).abs() < 1.0e-4);
+        Ok(())
+    }
+
+    /// A **widgetless** binding marker inside a `Display::None` container —
+    /// the alerts tab's snapshot markers for its virtualized popup list —
+    /// participates in the open-edge snapshot exactly like a live widget: an
+    /// account-scope suppression written while the floater is open is
+    /// reverted by a close without OK.
+    #[test]
+    fn hidden_widgetless_markers_participate_in_the_snapshot() -> Result<(), TestError> {
+        let mut app = app(|store| {
+            store
+                .register("SomePopup", SettingValue::Bool(true), "show")
+                .ok();
+        });
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .mark_account_loaded_for_test();
+        let fixture = spawn_fixture(
+            &mut app,
+            [
+                SettingBinding::global("SomePopup"),
+                SettingBinding::global("SomePopup"),
+            ],
+            ["row a", "row b"],
+        );
+        // The alerts-tab shape: a hidden container under the floater holding a
+        // bare (Node, SettingBinding) marker — no widget components at all.
+        let hidden = app
+            .world_mut()
+            .spawn((
+                Node {
+                    display: Display::None,
+                    ..Default::default()
+                },
+                ChildOf(fixture.root),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Node::default(),
+            SettingBinding::account("SomePopup"),
+            ChildOf(hidden),
+        ));
+        set_open(&mut app, fixture.root, true);
+        // The list's checkbox write while open: an account-scope suppression.
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .set_account("SomePopup", SettingValue::Bool(false));
+        set_open(&mut app, fixture.root, false);
+        assert_eq!(
+            store(&app).get_override(Scope::Account, "SomePopup"),
+            None,
+            "the close-without-OK revert reaches the marker's setting"
+        );
         Ok(())
     }
 
