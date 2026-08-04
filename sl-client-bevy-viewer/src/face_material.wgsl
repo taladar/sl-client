@@ -47,11 +47,10 @@ struct SlFaceParams {
     anim_mode: u32,
     glossiness: f32,
     env_intensity: f32,
-    // The faithful SL glow mask (glow.rs): the face's glow scalar, written into the
-    // fragment's alpha channel for an opaque / mask face so the glow pass blooms it.
-    // A negative value is the sentinel "leave alpha untouched" — used for a blend
-    // face, whose alpha is its coverage. Set on the CPU where the alpha mode is
-    // known (`textures::face_material`).
+    // The faithful SL glow mask (glow.rs): the face's glow scalar (0 = no glow),
+    // written into the fragment's alpha channel for an opaque / mask face so the
+    // glow pass blooms it. The shader gates the write on the alpha mode, so a blend
+    // face (whose alpha is its coverage) is left alone.
     glow: f32,
 }
 
@@ -511,12 +510,19 @@ fn fragment(
 
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
-    // The faithful SL glow mask (`glow.rs`): an opaque / mask face writes its glow
-    // scalar into alpha (`0` for a non-glowing face), which the glow pass reads as
-    // the per-face glow mask. A blend face's alpha is its coverage, so the sentinel
-    // `glow < 0` leaves it untouched (set on the CPU where the alpha mode is known).
-    // Inert until the glow pass is enabled — nothing else reads the scene alpha.
-    if sl.glow >= 0.0 {
+    // The faithful SL glow mask (`glow.rs`): write the face's glow scalar (`0` for a
+    // non-glowing face) into alpha, which the glow pass reads as the per-face glow
+    // mask — but only for an **opaque / mask** face, whose alpha is free after
+    // `alpha_discard`. A **blend** (or premultiplied / additive) face uses alpha as
+    // its coverage, so leave it untouched: that face keeps its transparency and
+    // simply feeds nothing to the glow (a documented limitation — SL's glow-flagged
+    // content is opaque). Gating in the shader means every opaque face writes the
+    // mask correctly without each CPU build site having to. Inert until the glow
+    // pass is enabled — nothing else reads the scene alpha.
+    let alpha_mode = pbr_input.material.flags
+        & pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    if alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE
+        || alpha_mode == pbr_types::STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK {
         out.color.a = sl.glow;
     }
     return out;

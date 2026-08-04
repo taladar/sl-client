@@ -176,6 +176,9 @@ impl Material for ParcelBorderMaterial {
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // Keep the border lines' coverage out of the scene alpha (the glow mask) so
+        // they do not bloom under the glow pass.
+        sl_client_bevy::preserve_glow_mask_alpha(descriptor);
         Ok(())
     }
 }

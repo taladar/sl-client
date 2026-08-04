@@ -126,6 +126,10 @@ impl Material for SunDiscMaterial {
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // Keep the disc's coverage out of the scene alpha (the glow mask) so the
+        // disc does not bloom — matching the reference, where the disc feeds nothing
+        // to the glow buffer.
+        crate::preserve_glow_mask_alpha(descriptor);
         Ok(())
     }
 }

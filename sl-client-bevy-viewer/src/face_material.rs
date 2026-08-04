@@ -116,11 +116,11 @@ pub(crate) struct SlFaceParams {
     pub(crate) glossiness: f32,
     /// Legacy environment-reflection intensity `0..=1` (`environment_intensity / 255`).
     pub(crate) env_intensity: f32,
-    /// The faithful SL glow mask ([`glow`](crate::glow)): the face's glow scalar,
-    /// written into the fragment's alpha for an opaque / mask face so the glow pass
-    /// blooms it. A negative value is the sentinel "leave alpha untouched" (a blend
-    /// face's alpha is its coverage), so it is set (`>= 0`) only for a non-blend
-    /// face, at build, where the alpha mode is known.
+    /// The faithful SL glow mask ([`glow`](crate::glow)): the face's glow scalar
+    /// (`0` = no glow), written into the fragment's alpha for an opaque / mask face
+    /// so the glow pass blooms it. The shader gates the write on the alpha mode, so
+    /// this defaults to `0` (a non-glowing opaque face writes mask `0`) and a blend
+    /// face — whose alpha is its coverage — is left alone regardless of this value.
     pub(crate) glow: f32,
 }
 
@@ -145,9 +145,9 @@ impl SlFaceParams {
             anim_mode: 0,
             glossiness: 0.0,
             env_intensity: 0.0,
-            // The sentinel: leave the fragment alpha untouched until a build site
-            // that knows the face is opaque / mask sets a real (`>= 0`) glow mask.
-            glow: -1.0,
+            // No glow by default; the shader writes this to alpha only for an
+            // opaque / mask face, so every non-glowing opaque face feeds mask `0`.
+            glow: 0.0,
         }
     }
 

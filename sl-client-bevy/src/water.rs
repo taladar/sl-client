@@ -172,6 +172,9 @@ impl Material for WaterMaterial {
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(true);
         }
+        // Keep the water surface's coverage out of the scene alpha (the glow mask)
+        // so it does not bloom under the viewer's glow pass.
+        crate::preserve_glow_mask_alpha(descriptor);
         Ok(())
     }
 }

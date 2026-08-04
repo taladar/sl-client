@@ -320,6 +320,37 @@ mod voice;
 #[cfg(feature = "bevy_pbr")]
 pub mod water;
 mod world;
+
+/// Override a material pipeline's **alpha** blend component to keep the destination
+/// (`Zero, One`), so an alpha-blended material's coverage does not overwrite the
+/// scene alpha channel — which the viewer's glow pass (`glow.rs`) uses as the
+/// per-face glow mask. The colour blend (coverage) is left untouched, so the
+/// material renders identically; only the target alpha (the glow mask, contributed
+/// by the opaque surface behind) is preserved, so a transparent surface (water,
+/// clouds, the sun / moon disc, stars, particles, parcel borders) does not bloom.
+/// Call from an alpha-blended material's `Material::specialize`.
+///
+/// Gated behind `bevy_pbr` like the material modules that use it — only the
+/// windowed viewer renders.
+#[cfg(feature = "bevy_pbr")]
+pub fn preserve_glow_mask_alpha(
+    descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+) {
+    use bevy::render::render_resource::{BlendComponent, BlendFactor, BlendOperation};
+    let Some(fragment) = descriptor.fragment.as_mut() else {
+        return;
+    };
+    for target in fragment.targets.iter_mut().flatten() {
+        if let Some(blend) = target.blend.as_mut() {
+            blend.alpha = BlendComponent {
+                src_factor: BlendFactor::Zero,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            };
+        }
+    }
+}
+
 use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};

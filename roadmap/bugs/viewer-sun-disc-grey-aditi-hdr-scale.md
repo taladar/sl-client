@@ -116,20 +116,29 @@ faithful glow port started:**
     is unchanged until the mask is fed. Env knobs `SL_VIEWER_GLOW_STRENGTH` /
     `_WIDTH`.
   - **Step 2a DONE** — feed the alpha glow mask on the main paths: a `glow`
-    scalar on `SlFaceParams` (sentinel `< 0` = "leave alpha untouched", so a
-    **blend** face keeps its coverage), set to the face glow (`>= 0`) for an
-    **opaque / mask** face at build (`textures::face_material`, where the alpha
-    mode is known); `face_material.wgsl` writes it to `out.color.a`. `sky.wgsl`
-    and `terrain.wgsl` (both opaque) now write alpha `0`. All inert while glow
-    is disabled (nothing else reads the scene alpha). The P27.4 glow→emissive
-    stays for now so the current Bevy `Bloom` is unchanged; Step 3 removes it.
-  - **Step 2b (next)** — finish the mask so it is correct when enabled: the
-    other **opaque** face build sites (`avatars`, `edit_material`) must also set
-    `glow` (an untouched opaque face keeps alpha `1` and would bloom); and every
-    **alpha-blended** material (`sun_disc`/`clouds`/`water`/`stars`/`particle`/
-    `parcel_borders`) must override its **alpha** blend component to
-    `(Zero, One)` (via each material's `specialize`) so its coverage does not
-    corrupt the mask.
+    scalar on `SlFaceParams`, carried into the extension at build
+    (`textures::face_material`); `face_material.wgsl` writes it to
+    `out.color.a`. `sky.wgsl` and `terrain.wgsl` (both opaque) now write alpha
+    `0`. Inert while glow is disabled. The P27.4 glow→emissive stays for now so
+    the current Bevy `Bloom` is unchanged; Step 3 removes it.
+  - **Step 2b DONE** — make the mask correct for **all** surfaces so it is right
+    when enabled:
+    - The glow write is now **gated in `face_material.wgsl` on the alpha mode**
+      (`pbr_input.material.flags` → `OPAQUE`/`MASK` write the mask, others leave
+      alpha), so `glow` defaults to `0` and **every** opaque face feeds mask `0`
+      without each CPU build site (`avatars`, `edit_material`, …) having to set
+      it — and a blend face keeps its coverage automatically. This replaced the
+      2a `< 0` sentinel.
+    - Alpha-blended materials preserve the mask: a shared
+      `sl_client_bevy::preserve_glow_mask_alpha` (gated `bevy_pbr`) overrides
+      the **alpha** blend component to `(Zero, One)` (colour/coverage
+      untouched), called from `sun_disc` / `water` / `stars` / `clouds`
+      (sl-client-bevy) and `parcel_borders` (viewer) `specialize`.
+      **Particles deferred** — their custom `particle_render` pipeline sets
+      per-blend-mode targets and glowing particles are a legitimate case; left
+      feeding coverage (a documented limitation) for a focused pass.
+    - Validated: `cargo check` + `clippy --all-targets` clean on both crates + a
+      render-readback face test passes (the alpha-mode-gated shader renders).
   - **Step 3 (next)** — flip the glow default on, remove the Bevy `Bloom`
     component + `bloom.rs`, retarget `exposure.rs`'s `.after(bloom)` ordering,
     register the `RenderGlow*` settings on the glow module. Live-verify on aditi

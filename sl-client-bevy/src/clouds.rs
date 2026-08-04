@@ -151,6 +151,9 @@ impl Material for CloudMaterial {
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // Keep the cloud layer's coverage out of the scene alpha (the glow mask) so
+        // it does not bloom under the viewer's glow pass.
+        crate::preserve_glow_mask_alpha(descriptor);
         Ok(())
     }
 }
