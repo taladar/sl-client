@@ -68,6 +68,11 @@ use crate::underwater_fog::UnderwaterFogPass;
 /// The internal handle the tone-map shader (`tonemap.wgsl`) is loaded under.
 const TONEMAP_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0c94-3a27-4d58-9c11-70b4e8d5a213");
 
+/// The render-schedule label for the tone-map pass, so later passes (the glow,
+/// which the reference runs after `tonemap`) can order themselves after it.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SlTonemapPass;
+
 /// The reference `RenderTonemapType` value selecting the Khronos PBR Neutral curve.
 const TONEMAP_KHRONOS_NEUTRAL: u32 = 0;
 /// The reference `RenderTonemapType` value selecting the ACES (Hill) curve — the
@@ -264,6 +269,7 @@ impl Plugin for SlTonemapPlugin {
                 Core3d,
                 sl_tonemap_system
                     .in_set(Core3dSystems::PostProcess)
+                    .in_set(SlTonemapPass)
                     // After the exposure pass, whose 1×1 map this samples.
                     .after(crate::exposure::SlExposurePass)
                     .after(UnderwaterFogPass)

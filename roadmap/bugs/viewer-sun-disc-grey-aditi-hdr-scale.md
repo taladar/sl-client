@@ -100,13 +100,32 @@ faithful glow port started:**
 
 - Isolate the grey-disc root cause on aditi (params vs tone-map vs disc texture)
   against a Firestorm side-by-side, using the A/B knobs.
-- **Faithful glow port** (in progress, user-approved): replace Bevy's mip-chain
-  `Bloom` (a tuned approximation whose strength never generalises) with SL's
-  alpha-mask separable-Gaussian glow — glow scalar in the scene alpha channel
-  (opaque materials write it; alpha-blended materials keep coverage for colour
-  but override the alpha blend to `(Zero, One)` so they don't corrupt the mask),
-  then extract `rgb·alpha` → `RenderGlowIterations` Gaussian passes
-  (`RenderGlowWidth`/`RenderGlowStrength`, the `[.25,.5,.8,1,…]` kernel) →
-  additive `scene + glow`. This makes glow-flagged / fullbright / emissive
-  in-world content bloom like Firestorm for all sky settings (its own goal, not
-  the disc fix).
+- **Faithful glow port** (user-approved) — replace Bevy's mip-chain `Bloom` (a
+  tuned approximation whose strength never generalises) with SL's alpha-mask
+  separable-Gaussian glow. Staged so every intermediate builds and runs:
+  - **Step 1 DONE** — the post-process core (`glow.rs` +
+    `glow_extract`/`glow_blur`/`glow_combine.wgsl`): extract `rgb·alpha` → a
+    512² ping-pong of `RenderGlowIterations·2 = 4` separable Gaussian passes
+    (the `[.25,.5,.8,1,1,.8,.5,.25]` kernel at `delta·[-3.5..3.5]`,
+    `delta = RenderGlowWidth/512`, `× RenderGlowStrength 0.325`) → additive
+    `scene + glow`. Ordered **after** the tone mapper (`SlTonemapPass`) — the
+    reference runs glow in `renderFinalize` after `tonemap`, over the
+    display-space frame × the alpha mask (which survives fog/exposure/tonemap,
+    each passing alpha through). **Disabled by default**
+    (`SL_VIEWER_ENABLE_GLOW=1`), coexisting with the Bevy `Bloom` so the scene
+    is unchanged until the mask is fed. Env knobs `SL_VIEWER_GLOW_STRENGTH` /
+    `_WIDTH`.
+  - **Step 2 (next)** — feed the alpha glow mask: every **opaque** material
+    (`face_material` + a new `glow` scalar on `SlFaceExt` set from the face
+    glow, replacing the P27.4 glow→emissive hack; `sky`/`terrain`) writes the
+    mask (0 for non-glow) to `out.color.a`; every **alpha-blended** material
+    (`sun_disc`/`clouds`/`water`/`stars`/`particle`/`parcel_borders`) keeps
+    coverage for its colour blend but overrides the **alpha** blend component to
+    `(Zero, One)` (via each material's `specialize`) so it doesn't corrupt the
+    mask. Inert while glow stays disabled.
+  - **Step 3 (next)** — flip the glow default on, remove the Bevy `Bloom`
+    component + `bloom.rs`, retarget `exposure.rs`'s `.after(bloom)` ordering,
+    register the `RenderGlow*` settings on the glow module. Live-verify on aditi
+    (glow-flagged / fullbright / emissive builds bloom like Firestorm across sky
+    settings). This is the in-world-fidelity goal — not the grey-disc fix (the
+    disc doesn't feed the SL glow).

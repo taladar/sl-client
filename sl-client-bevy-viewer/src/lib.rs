@@ -82,6 +82,7 @@ mod flycam_ui;
 pub mod gallery;
 mod geometry_cache;
 mod gizmos;
+mod glow;
 mod ground;
 mod group_notice;
 mod group_profile;
@@ -286,6 +287,7 @@ use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
 use crate::flycam_ui::FlycamButtonPlugin;
 use crate::gizmos::EditGizmoPlugin;
+use crate::glow::{SlGlow, SlGlowPlugin};
 use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
@@ -674,6 +676,9 @@ fn setup_scene(
         // filled per frame from the active sky by `refresh_exposure`). Only on the
         // main camera — the reflection-probe capture cameras stay linear.
         SlExposure::default(),
+        // The reference's glow pass inputs (disabled by default; see `glow.rs`).
+        // Only on the main camera.
+        SlGlow::default(),
         // Bevy's *photometric* exposure: what turns the sun's illuminance (lux) and a
         // prim light's lumens into the linear radiance the frame is composed in. It is
         // a distinct thing from the reference's `RenderExposure` (a plain scale on the
@@ -1279,6 +1284,12 @@ fn run_session(
     // `postDeferredTonemap` — ACES / Khronos Neutral, blended by `RenderTonemapMix`).
     // Runs after the fog, which the reference likewise applies in linear space.
     .add_plugins(SlTonemapPlugin)
+    // The reference viewer's glow (`generateGlow` / `combineGlow`): the faithful
+    // alpha-mask separable-Gaussian glow, replacing Bevy `Bloom`. Runs after the
+    // tone mapper, as the reference does. Disabled by default until the materials
+    // write the glow mask into their alpha (see `glow.rs`); the Bevy `Bloom` above
+    // stays active meanwhile.
+    .add_plugins(SlGlowPlugin)
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34
