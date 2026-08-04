@@ -188,16 +188,28 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = color * 2.0;
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(5.0));
 
+    // Emulate the reference's deferred G-buffer. `skyF` writes the sky colour to
+    // `deferredScreen` — an 8-bit `GL_RGBA` (UNORM, [0,1]) attachment
+    // (`pipeline.cpp`: `deferredScreen.allocate(.., GL_RGBA, ..)`) — which clamps it
+    // to [0,1] BEFORE `softenLight` reads it back and applies `srgb_to_linear`
+    // (× `sky_hdr_scale`). Our forward path linearises in-shader with no such
+    // buffer, so without this clamp the bright near-sun haze reaches
+    // `srgb_to_linear(5) ≈ 42` and dwarfs the (correctly ~1.0) sun disc, which then
+    // reads as a flat grey hole. Clamping the sky's sRGB colour here caps it at
+    // `1.0 · sky_hdr_scale` — the same ceiling the pure-white disc hits — so the two
+    // blend into one bright orb, faithfully, for every legacy / EEP sky.
+    color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+
     // Match the reference deferred `softenLight` SKIP_ATMOS branch, which runs the
     // WL-sky colour through `srgb_to_linear` (× `sky_hdr_scale`, which is 1.0 for a
     // legacy / classic-mode sky — the shipped default) before the tone mapper. The
     // sky's colour settings are authored in sRGB/gamma space, so feeding the
     // computed haze straight into our linear tone mapper (`tonemap.wgsl`) left the
-    // whole sky washed out and desaturated and stopped bright near-sun haze from
-    // expanding into HDR. Linearising here restores the reference's contrast and
-    // saturation. (The reference linearises the *composited* sky once; this forward
-    // path linearises each sky element and blends in linear space — a documented
-    // approximation that differs only slightly at element edges.)
+    // whole sky washed out and desaturated. Linearising here restores the
+    // reference's contrast and saturation. (The reference linearises the
+    // *composited* sky once; this forward path linearises each sky element and
+    // blends in linear space — a documented approximation that differs only
+    // slightly at element edges.)
     var out = select(color, srgb_to_linear(color), sky.linearize > 0.5);
     // Scale for fake HDR (`softenLight`: `color *= sky_hdr_scale`) — 1.0 for a
     // legacy sky (a no-op), > 1.0 for an EEP probe-ambiance sky so bright haze

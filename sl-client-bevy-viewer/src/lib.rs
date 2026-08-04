@@ -973,6 +973,12 @@ fn run_session(
     // reference land entry set and its dispatch, opened by right-clicking bare
     // terrain (the shared resolver lives with the avatar menu).
     .add_plugins(LandMenuPlugin)
+    // The custom material every prim/mesh/rigged/avatar/media face renders
+    // through (per-map UV transforms + legacy Blinn-Phong specular; inert where
+    // unused). Registered once here — and *before* the editor plugins below,
+    // whose `FromWorld` resources (the selection highlight / face-cursor overlay
+    // materials) build against `Assets<FaceMaterial>` at plugin-build time.
+    .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     // The build tool (viewer-object-edit-floater-shell): the Build Tools
     // floater, the edit-mode switch, and the numeric transform fields.
     .add_plugins(EditToolPlugin)
@@ -1240,10 +1246,6 @@ fn run_session(
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
     .add_plugins(FloaterPersistPlugin)
-    // The custom material every prim/mesh/rigged/avatar/media face renders
-    // through (per-map UV transforms + legacy Blinn-Phong specular; inert where
-    // unused). Registered once here.
-    .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     .add_plugins(ParticleRenderPlugin)
     .add_plugins(TerrainMaterialPlugin)
     // In-world parcel borders / property lines (viewer-parcel-borders-render):

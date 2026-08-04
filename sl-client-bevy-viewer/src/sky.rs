@@ -963,6 +963,47 @@ pub(crate) fn apply_disc_textures(
             // The fetch/decode failed; the disc keeps its (transparent) placeholder.
             continue;
         };
+        // Diagnostic (env-gated) for the grey sun-disc investigation
+        // (viewer-sun-disc-grey-aditi-hdr-scale): dump the decoded disc's
+        // dimensions, source component count (3 = no alpha ⇒ opaque, 4 = RGBA),
+        // and a few RGBA samples (centre / mid-radius / corner). The reference sun
+        // texture is a soft, low-alpha glow that lets the bright near-sun haze show
+        // through; if ours decodes as a hard opaque disc it reads as a grey hole.
+        if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok() {
+            let (w, h) = (decoded.width, decoded.height);
+            // Integer texel fetch (no `as` casts, per the workspace lints): clamp
+            // the requested texel into range and index the RGBA8 buffer.
+            let texel = |x: u32, y: u32| -> [u8; 4] {
+                let x = x.min(w.saturating_sub(1));
+                let y = y.min(h.saturating_sub(1));
+                let (Ok(x), Ok(y), Ok(w)) =
+                    (usize::try_from(x), usize::try_from(y), usize::try_from(w))
+                else {
+                    return [0, 0, 0, 0];
+                };
+                let off = y.saturating_mul(w).saturating_add(x).saturating_mul(4);
+                decoded
+                    .pixels
+                    .get(off..off.saturating_add(4))
+                    .and_then(|s| <[u8; 4]>::try_from(s).ok())
+                    .unwrap_or([0, 0, 0, 0])
+            };
+            // `checked_div` (not bare `/`) to satisfy the workspace
+            // `arithmetic_side_effects` lint: centre, ~0.85-radius, and a corner.
+            let half_w = w.checked_div(2).unwrap_or(0);
+            let half_h = h.checked_div(2).unwrap_or(0);
+            let mid_h = h.saturating_mul(17).checked_div(20).unwrap_or(0);
+            let edge_w = w.checked_div(50).unwrap_or(0);
+            let edge_h = h.checked_div(50).unwrap_or(0);
+            info!(
+                "disc texture {}: {w}x{h} components={} centre={:?} mid={:?} corner={:?}",
+                if is_sun { "SUN" } else { "MOON" },
+                decoded.components,
+                texel(half_w, half_h),
+                texel(half_w, mid_h),
+                texel(edge_w, edge_h),
+            );
+        }
         let handle = images.add(to_bevy_image(decoded));
         let target = if is_sun {
             &state.sun_material

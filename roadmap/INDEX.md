@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 112 |
 | in-progress | 10 |
 | bugs | 7 |
-| done | 674 |
+| done | 675 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1145** |
+| **total** | **1146** |
 
 ## ideas (57)
 
@@ -1131,18 +1131,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
+- [`viewer-avatar-tongue-protrudes`](bugs/viewer-avatar-tongue-protrudes.md) —
+  Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
-- [`viewer-sun-disc-grey-aditi-hdr-scale`](bugs/viewer-sun-disc-grey-aditi-hdr-scale.md)
-  — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (674)
+## done (675)
 
 ### protocol
 
@@ -1900,6 +1900,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator drives the viewer even when its window is not focused
 - [`viewer-stretch-global-axis-object`](done/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
+- [`viewer-sun-disc-grey-aditi-hdr-scale`](done/viewer-sun-disc-grey-aditi-hdr-scale.md)
+  — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)

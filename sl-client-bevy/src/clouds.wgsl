@@ -265,6 +265,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
     color = color * 2.0;
 
+    // Emulate the reference's 8-bit deferred G-buffer (see the note in `sky.wgsl`):
+    // `cloudsF` writes `clamp(color,0,1) * 2` to the `GL_RGBA` (UNORM, [0,1])
+    // `deferredScreen`, which clamps the `×2` result BACK to [0,1] before
+    // `softenLight` linearises it. Without this clamp our forward clouds reach
+    // `srgb_to_linear(2) ≈ 5` and glow far brighter than the reference. Clamp here
+    // so a lit cloud caps at `1.0 · sky_hdr_scale`, matching the sky dome.
+    color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+
     // Linearise like the reference `softenLight` SKIP_ATMOS branch (see the note in
     // `sky.wgsl`), so the cloud layer sits in the same space as the sky dome it
     // composites over and is not washed out by our linear tone mapper. Gated by the

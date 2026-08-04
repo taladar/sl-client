@@ -1597,7 +1597,10 @@ fn collect_own_face_ids(
 
 #[cfg(test)]
 mod tests {
-    use super::{SelectionSet, WireSelection};
+    use super::{HighlightAssets, SelectionSet, WireSelection};
+    use crate::face_material::FaceMaterial;
+    use bevy::app::{App, TaskPoolPlugin};
+    use bevy::asset::{AssetApp as _, AssetPlugin};
     use bevy::prelude::Entity;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{CircuitId, ObjectKey, RegionLocalObjectId, ScopedObjectId, Uuid};
@@ -1660,5 +1663,27 @@ mod tests {
         );
         assert_eq!(set.len(), 2);
         assert_eq!(set.primary().map(|node| node.scoped), Some(scoped(2)));
+    }
+
+    /// `HighlightAssets::from_world` builds the selection-outline materials from
+    /// `Assets<FaceMaterial>`, so that asset MUST be registered before this
+    /// resource is initialised. This guards the plugin-ordering regression where
+    /// `EditSelectionPlugin` (which `init_resource`s `HighlightAssets` at build
+    /// time) ran *before* `SlFaceMaterialPlugin`, panicking at every startup — the
+    /// editor overlays were switched from `StandardMaterial` to `FaceMaterial` for
+    /// the glow pass, so they no longer piggy-back on Bevy's always-present
+    /// `Assets<StandardMaterial>`. See the plugin ordering in `lib.rs`.
+    #[test]
+    fn highlight_assets_build_from_face_material_asset() {
+        let mut app = App::new();
+        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
+        // Register `Assets<FaceMaterial>` first (as `SlFaceMaterialPlugin` does),
+        // then build the resource — it must not panic.
+        app.init_asset::<FaceMaterial>();
+        app.init_resource::<HighlightAssets>();
+        assert!(
+            app.world().get_resource::<HighlightAssets>().is_some(),
+            "HighlightAssets should build once Assets<FaceMaterial> is registered"
+        );
     }
 }

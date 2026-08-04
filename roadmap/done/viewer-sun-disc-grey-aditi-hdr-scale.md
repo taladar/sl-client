@@ -2,7 +2,7 @@
 id: viewer-sun-disc-grey-aditi-hdr-scale
 title: Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 topic: viewer
-status: bugs
+status: done
 origin: viewer-clouds-sun-occlusion-horizon-contact investigation (2026-08-03)
 refs: [viewer-clouds-sun-occlusion-horizon-contact]
 ---
@@ -96,10 +96,44 @@ faithful glow port started:**
   decode vs tone-map vs disc-texture) needs an
   **aditi pixel comparison against Firestorm** to isolate — still OPEN.
 
-**Remaining:**
+**Progress (2026-08-04) — ROOT CAUSE FOUND + faithful fix (the 8-bit
+deferred G-buffer clamp):** a live aditi pass (all 12 World > Environment
+settings) made the diagnostic sharp: the **moon renders perfectly** (a real
+256² RGBA lunar disc on the black night sky) while the **sun is a flat grey
+circle** in every daytime setting — same shader, same code path, the only
+difference being *what sits behind the disc*. A decoded-pixel dump
+(`SL_VIEWER_LOG_SKY_HDR` now also logs the disc texture) confirmed the sun
+texture is a correct, pure-white **opaque** disc (`512²`, RGBA,
+centre `[255,255,255,255]`), so `srgb_to_linear(1.0) · hdr = 1.0` linear.
 
-- Isolate the grey-disc root cause on aditi (params vs tone-map vs disc texture)
-  against a Firestorm side-by-side, using the A/B knobs.
+The bug is on the **sky** side, and it is an architecture-faithfulness miss: the
+reference draws `skyF` / `cloudsF` / `sunDiscF` into `deferredScreen`, an
+**8-bit `GL_RGBA` (UNORM, [0,1]) G-buffer** (`pipeline.cpp`
+`deferredScreen.allocate(.., GL_RGBA, ..)`; `RenderEnableEmissiveBuffer`
+defaults false so the sky uses `frag_data[0]`, and even the optional emissive
+attachment is `GL_RGB` — all 8-bit). That buffer
+**clamps the sky's sRGB colour to [0,1] before** `softenLight` reads it back and
+applies `srgb_to_linear · sky_hdr_scale`. So the reference near-sun haze maxes
+at `1.0 · hdr` — exactly the white disc's ceiling — and the two blend into one
+bright orb. The disc is drawn `BT_ALPHA` (`llgl.cpp`
+`LLGLSPipelineBlendSkyBox`), not additive, so it genuinely replaces the
+(equally-bright) haze — no hole.
+
+Our forward sky has no such buffer and linearised `clamp(haze, 0, 5)` in float,
+so the near-sun haze reached `srgb_to_linear(5) ≈ 42` and dwarfed the 1.0 disc
+→ the grey hole. (The moon escaped it because a black night sky has nothing
+bright behind it.) **Fix:** clamp the sky (`sky.wgsl`) and cloud (`clouds.wgsl`)
+sRGB colour to `[0,1]` immediately before `srgb_to_linear`, emulating the 8-bit
+G-buffer. This caps haze / lit clouds at `1.0 · sky_hdr_scale` (the disc's
+ceiling) for **every** legacy / EEP sky — a faithful, general fix, not a
+per-case tweak. The sun disc itself is already faithful (`≤ 1 · hdr`), so it is
+unchanged; stars are additive and already `≤ 1`.
+
+**Verified (2026-08-04):** live aditi pass across all nine daytime World >
+Environment settings (Day-Cycle / Legacy / Modern × sunrise / noon / sunset) —
+the grey disc is gone in every one; the sun reads as a bright orb, and the
+clouds are not over-bright. The moon (night) was already correct. Resolved.
+
 - **Faithful glow port** (user-approved) — replace Bevy's mip-chain `Bloom` (a
   tuned approximation whose strength never generalises) with SL's alpha-mask
   separable-Gaussian glow. Staged so every intermediate builds and runs:
