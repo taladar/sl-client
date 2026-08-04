@@ -22,12 +22,12 @@
 //! the alpha mask the materials write (which survives the fog / exposure / tonemap
 //! passes, each of which passes alpha through).
 //!
-//! **Staging.** This module is the reusable post-process core. It is **disabled by
-//! default** (`SL_VIEWER_ENABLE_GLOW=1` turns it on) and coexists with the existing
-//! Bevy `Bloom` while the materials are migrated to write the glow mask into their
-//! alpha — until every opaque material feeds the mask, the scene alpha is ~1.0
-//! everywhere and an enabled glow would bloom the whole frame. Once the mask is fed,
-//! a follow-up flips the default on and removes the `Bloom` component.
+//! **Enabled by default.** Every surface now feeds the glow mask (opaque materials
+//! write it to alpha; alpha-blended ones preserve it via
+//! [`preserve_glow_mask_alpha`](sl_client_bevy::preserve_glow_mask_alpha)), so the
+//! glow is on by default and the Bevy `Bloom` it replaced is gone.
+//! `SL_VIEWER_DISABLE_GLOW=1` forces it off (an A/B knob); `SL_VIEWER_GLOW_STRENGTH`
+//! / `_WIDTH` and the `RenderGlow*` settings tune it.
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
@@ -51,6 +51,9 @@ use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::ViewTarget;
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
+use sl_settings::SettingValue;
+
+use crate::settings::ViewerSettings;
 use crate::tonemap::SlTonemapPass;
 
 /// The internal handle the glow extract shader (`glow_extract.wgsl`) loads under.
@@ -76,13 +79,85 @@ const DEFAULT_WIDTH: f32 = 1.3;
 /// passes (alternating horizontal / vertical).
 const DEFAULT_ITERATIONS: u32 = 2;
 
-/// The env var that turns the glow pass **on** (it is off by default while the
-/// materials are migrated to write the alpha glow mask; see the module docs).
-const ENV_ENABLE: &str = "SL_VIEWER_ENABLE_GLOW";
+/// The env var that force-**disables** the glow pass (an A/B knob; the glow is on
+/// by default now the alpha mask is fed on every surface).
+const ENV_DISABLE: &str = "SL_VIEWER_DISABLE_GLOW";
 /// The env var overriding the glow strength (`RenderGlowStrength`).
 const ENV_STRENGTH: &str = "SL_VIEWER_GLOW_STRENGTH";
 /// The env var overriding the glow width (`RenderGlowWidth`).
 const ENV_WIDTH: &str = "SL_VIEWER_GLOW_WIDTH";
+
+/// The persisted-file section the glow settings are grouped under (`[render.glow]`),
+/// matching the reference's `RenderGlow*` naming.
+const GLOW_SECTION: &[&str] = &["render", "glow"];
+/// The reference `RenderGlow` setting name (the master enable).
+const SETTING_ENABLED: &str = "RenderGlow";
+/// The reference `RenderGlowStrength` setting name.
+const SETTING_STRENGTH: &str = "RenderGlowStrength";
+/// The reference `RenderGlowIterations` setting name.
+const SETTING_ITERATIONS: &str = "RenderGlowIterations";
+/// The reference `RenderGlowWidth` setting name.
+const SETTING_WIDTH: &str = "RenderGlowWidth";
+
+/// Register the glow settings on the store with the reference defaults, so a user's
+/// Firestorm `RenderGlow*` port across and the (future) preferences UI has something
+/// to bind to. Called from [`ViewerSettings`]'s `FromWorld`. (Replaces the settings
+/// the removed Bevy-`Bloom` module registered.)
+pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        GLOW_SECTION,
+        SETTING_ENABLED,
+        SettingValue::Bool(true),
+        "Render the Second Life glow / bloom pass",
+    );
+    settings.register_in(
+        GLOW_SECTION,
+        SETTING_STRENGTH,
+        SettingValue::F32(DEFAULT_STRENGTH),
+        "Additive strength of the glow, applied each blur pass",
+    );
+    settings.register_in(
+        GLOW_SECTION,
+        SETTING_ITERATIONS,
+        SettingValue::U32(DEFAULT_ITERATIONS),
+        "Number of separable-Gaussian blur iterations (each is two passes)",
+    );
+    settings.register_in(
+        GLOW_SECTION,
+        SETTING_WIDTH,
+        SettingValue::F32(DEFAULT_WIDTH),
+        "Blur width (the per-pass step is this over the glow-buffer resolution)",
+    );
+}
+
+/// Refresh each camera's live [`SlGlow`] from the settings store each frame (cheap
+/// reads), so a `RenderGlow*` changed in the (future) preferences UI takes effect at
+/// once. An environment override (`SL_VIEWER_DISABLE_GLOW` / `SL_VIEWER_GLOW_*`),
+/// used by the screenshot harness, **wins** over the stored value.
+pub(crate) fn refresh_glow(store: Res<ViewerSettings>, mut cameras: Query<&mut SlGlow>) {
+    let store = store.store();
+    let disabled_by_env = std::env::var_os(ENV_DISABLE).is_some();
+    for mut glow in &mut cameras {
+        glow.enabled = if disabled_by_env {
+            false
+        } else {
+            store.get_bool(SETTING_ENABLED).unwrap_or(true)
+        };
+        if std::env::var_os(ENV_STRENGTH).is_none()
+            && let Ok(value) = store.get_f32(SETTING_STRENGTH)
+        {
+            glow.strength = value;
+        }
+        if std::env::var_os(ENV_WIDTH).is_none()
+            && let Ok(value) = store.get_f32(SETTING_WIDTH)
+        {
+            glow.delta = value / GLOW_RESOLUTION_F32;
+        }
+        if let Ok(value) = store.get_u32(SETTING_ITERATIONS) {
+            glow.iterations = value;
+        }
+    }
+}
 
 /// Read an `f32` knob from the environment, falling back to `default` when unset or
 /// unparsable.
@@ -113,7 +188,7 @@ impl Default for SlGlow {
     /// variable so a capture can sweep the glow without a rebuild.
     fn default() -> Self {
         Self {
-            enabled: std::env::var_os(ENV_ENABLE).is_some(),
+            enabled: std::env::var_os(ENV_DISABLE).is_none(),
             strength: env_f32(ENV_STRENGTH, DEFAULT_STRENGTH),
             delta: env_f32(ENV_WIDTH, DEFAULT_WIDTH) / GLOW_RESOLUTION_F32,
             iterations: DEFAULT_ITERATIONS,
@@ -169,7 +244,8 @@ impl Plugin for SlGlowPlugin {
             "glow_combine.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(ExtractComponentPlugin::<SlGlow>::default());
+        app.add_plugins(ExtractComponentPlugin::<SlGlow>::default())
+            .add_systems(Update, refresh_glow);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

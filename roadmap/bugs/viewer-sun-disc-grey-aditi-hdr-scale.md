@@ -139,9 +139,25 @@ faithful glow port started:**
       feeding coverage (a documented limitation) for a focused pass.
     - Validated: `cargo check` + `clippy --all-targets` clean on both crates + a
       render-readback face test passes (the alpha-mode-gated shader renders).
-  - **Step 3 (next)** — flip the glow default on, remove the Bevy `Bloom`
-    component + `bloom.rs`, retarget `exposure.rs`'s `.after(bloom)` ordering,
-    register the `RenderGlow*` settings on the glow module. Live-verify on aditi
-    (glow-flagged / fullbright / emissive builds bloom like Firestorm across sky
-    settings). This is the in-world-fidelity goal — not the grey-disc fix (the
-    disc doesn't feed the SL glow).
+  - **Step 3 DONE (code) — glow enabled by default; Bevy `Bloom` removed.** The
+    glow pass is on by default (`SlGlow::default().enabled`, off via
+    `SL_VIEWER_DISABLE_GLOW`); the Bevy `Bloom` component + `bloom.rs` are gone;
+    the P27.4 glow→emissive hack is removed from `bump::apply_surface_flags` (a
+    glowing face now feeds the alpha mask, not `emissive`); and the `RenderGlow`
+    / `RenderGlowStrength` / `RenderGlowIterations` / `RenderGlowWidth` settings
+    are registered on the glow module with a `refresh_glow` system (env
+    overrides win). The `.after(bevy::post_process::bloom::bloom)` orderings on
+    exposure / fog / tonemap are left as-is — Bevy's bloom *system* still exists
+    in the schedule (just does nothing without the component), so the labels
+    resolve. All materials audited: the only opaque main-scene materials are the
+    gated `FaceMaterial`, `sky` and `terrain` (mask 0), so nothing over-blooms.
+    Validated: `cargo check` + `clippy --all-targets` clean, bump + a
+    render-readback face test pass.
+    - **Needs aditi live-verify** (the first step with a visible effect):
+      glow-flagged / fullbright / emissive builds should bloom like Firestorm
+      across sky settings. This is the in-world-fidelity goal — **not** the
+      grey-disc fix (the disc doesn't feed the SL glow).
+    - **Follow-ups:** particle glow-mask handling (deferred, Step 2b); and the
+      edit-mode overlays (`gizmos` / `edit_selection` / probe-debug
+      `StandardMaterial`, opaque → alpha 1) will bloom when shown — a minor
+      edit-mode cosmetic to give the `(Zero, One)` / mask-0 treatment.

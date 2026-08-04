@@ -9,11 +9,13 @@
 //! * **Fullbright** — the face is unlit (shown at full texture brightness,
 //!   ignoring scene lighting). Maps exactly onto [`StandardMaterial::unlit`].
 //! * **Glow** (0..1) — the face emits into the reference viewer's glow buffer and
-//!   blooms. Rendered as an additive [`StandardMaterial::emissive`] tinted by the
-//!   face colour and scaled so a glowing face reads above the glow pass's
-//!   luminance threshold, so it blooms through [`crate::bloom`] (the screen-space
-//!   port of the reference `RenderGlow` pipeline). The glow is uniform across the
-//!   face rather than following the texture, a documented approximation.
+//!   blooms. Handled by the faithful glow pass ([`crate::glow`]): the glow scalar is
+//!   carried on the face material's [`SlFaceExt`](crate::face_material::SlFaceExt)
+//!   extension and written into the scene alpha (the per-face glow mask), which
+//!   [`crate::glow`] extracts, blurs, and adds back — the port of the reference
+//!   `RenderGlow` pipeline. So [`apply_surface_flags`] does **not** touch it (it is
+//!   no longer approximated as `emissive`). The glow is uniform across the face
+//!   rather than following the texture, a documented approximation.
 //! * **Shiny** (none / low / medium / high) — an environment-reflection specular
 //!   sheen. The reference packs it as an environment intensity
 //!   (`SHININESS_TO_ALPHA` = `[0, .25, .5, .75]`) that a cube-map shiny pass
@@ -75,12 +77,6 @@ const SHINY_ROUGHNESS_MIN: f32 = 0.15;
 /// dielectric default of `0.5`, reaching `1.0` at high shiny), so a shiny face
 /// throws a brighter highlight.
 const SHINY_REFLECTANCE_GAIN: f32 = 0.5;
-
-/// Multiplier from a face's glow (0..1) to its emissive strength. Sized so a
-/// fully-glowing face reads above the glow pass's luminance threshold
-/// ([`crate::bloom`], the reference `RenderGlowMinLuminance` = 1.0) and blooms,
-/// without blowing out at lower glow amounts.
-const GLOW_EMISSIVE_SCALE: f32 = 2.0;
 
 /// The per-texel height scale of the generated bump normal map: larger values
 /// tilt the surface normals more, deepening the relief.
@@ -163,26 +159,16 @@ fn reflectance_from_shiny(shiny: u8) -> f32 {
     0.5 + env * (SHINY_REFLECTANCE_GAIN / 0.75)
 }
 
-/// The emissive colour a glowing face reads at: its tint colour (linear) scaled by
-/// the glow amount and the emissive boost. A zero-glow face gets no emission.
-fn emissive_from_glow(base_color: Color, glow: f32) -> LinearRgba {
-    let LinearRgba {
-        red, green, blue, ..
-    } = base_color.to_linear();
-    let factor = glow * GLOW_EMISSIVE_SCALE;
-    LinearRgba::rgb(red * factor, green * factor, blue * factor)
-}
-
-/// Apply a face's legacy scalar surface flags — fullbright, glow, and shiny — onto
-/// the [`StandardMaterial`] being built for it. Bump is handled separately (it
-/// needs the decoded diffuse) by [`register_bump_faces`] / [`apply_bump_normals`].
-/// A face with none of these flags set is left untouched.
+/// Apply a face's legacy scalar surface flags — fullbright and shiny — onto the
+/// [`StandardMaterial`] being built for it. Bump is handled separately (it needs the
+/// decoded diffuse) by [`register_bump_faces`] / [`apply_bump_normals`], and **glow**
+/// is handled by the faithful glow pass ([`crate::glow`]): the face's glow scalar is
+/// carried on the [`SlFaceExt`](crate::face_material::SlFaceExt) extension and
+/// written into the scene alpha (the glow mask) by `face_material.wgsl`, so it is not
+/// set here. A face with none of these flags set is left untouched.
 pub(crate) fn apply_surface_flags(material: &mut StandardMaterial, face: &TextureFace) {
     if face.fullbright() {
         material.unlit = true;
-    }
-    if face.glow > 0.0 {
-        material.emissive = emissive_from_glow(material.base_color, face.glow);
     }
     let shiny = face.shininess();
     if shiny > 0 {
@@ -479,28 +465,18 @@ mod tests {
     }
 
     #[test]
-    fn glow_scales_emissive_by_tint() {
-        // No glow → no emission; full glow of white → the boost on every channel.
-        let none = emissive_from_glow(Color::WHITE, 0.0);
-        assert_eq!((none.red, none.green, none.blue), (0.0, 0.0, 0.0));
-        let full = emissive_from_glow(Color::WHITE, 1.0);
-        assert!((full.red - GLOW_EMISSIVE_SCALE).abs() < 1e-5);
-    }
-
-    #[test]
-    fn surface_flags_set_fullbright_and_glow() {
+    fn surface_flags_set_fullbright_and_shiny() {
         let mut material = StandardMaterial {
             base_color: Color::WHITE,
             perceptual_roughness: SHINY_ROUGHNESS_MAX,
             ..default()
         };
         let mut face = TextureFace::new(TextureKey::from(Uuid::nil()));
-        // Fullbright + glow + high shiny all fold in.
+        // Fullbright + high shiny both fold in. (Glow is no longer set here — it
+        // rides the face-material extension into the glow-mask alpha, `crate::glow`.)
         face.bump_shiny_fullbright = 0b1110_0000; // shiny high (bits 6-7) + fullbright (bit 5)
-        face.glow = 0.5;
         apply_surface_flags(&mut material, &face);
         assert!(material.unlit);
-        assert!(material.emissive.red > 0.0);
         assert!((material.perceptual_roughness - SHINY_ROUGHNESS_MIN).abs() < 1e-6);
     }
 

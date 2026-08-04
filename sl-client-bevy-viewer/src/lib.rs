@@ -42,7 +42,6 @@ mod avatar_profile;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
-mod bloom;
 mod body_physics;
 mod bottom_toolbar;
 mod browser_widget;
@@ -687,12 +686,11 @@ fn setup_scene(
         // derived from it (`probes::probe_intensity`), so a probe reproduces the
         // radiance it captured instead of re-scaling it.
         Exposure::default(),
-        // The Second Life / Firestorm glow pass (`RenderGlow*`): Bevy's screen-space
-        // bloom, tuned to the reference glow settings and ordered before `SlTonemap`
-        // so it blooms the HDR scene (the sun, glow-flagged prims, fullbright) ahead
-        // of the tone map. Only on the main camera — the reflection-probe capture
-        // cameras must stay linear.
-        bloom::sl_bloom(),
+        // The Second Life / Firestorm glow pass (`RenderGlow*`) is [`SlGlow`] above
+        // (the faithful alpha-mask separable-Gaussian glow, `glow.rs`), which runs
+        // after the tone mapper as the reference does — it replaced the Bevy
+        // screen-space `Bloom` this camera used to carry.
+        //
         // The `UnderwaterFog` component both carries the per-frame fog parameters
         // and selects this camera for the fog pass.
         UnderwaterFog::default(),
@@ -1823,10 +1821,6 @@ fn run_session(
                 // then reset a face to its static placement when the animation stops.
                 drive_texture_animations,
                 restore_stopped_animations,
-                // Glow / bloom (`RenderGlow*`): keep the main camera's `Bloom`
-                // strength / threshold in sync with the settings store (env
-                // overrides still win, for the screenshot harness).
-                bloom::refresh_bloom_settings,
             ),
         )
         // Atmospheric sky (P22.2): keep the sky dome centred on the camera, then fold
