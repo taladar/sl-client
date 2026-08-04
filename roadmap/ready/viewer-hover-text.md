@@ -2,10 +2,9 @@
 id: viewer-hover-text
 title: Object hover text (llSetText floating text)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
-blocked_by: [viewer-name-tags-billboard-render]
-refs: [viewer-preferences-floater]
+refs: [viewer-name-tags-billboard-render, viewer-preferences-floater]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

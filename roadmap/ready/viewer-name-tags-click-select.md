@@ -2,9 +2,9 @@
 id: viewer-name-tags-click-select
 title: Name tags — click a tag to select the avatar
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-name-tags
-blocked_by: [viewer-name-tags-billboard-render, viewer-object-selection-core]
+refs: [viewer-name-tags-billboard-render, viewer-object-selection-core]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

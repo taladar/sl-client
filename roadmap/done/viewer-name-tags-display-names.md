@@ -2,14 +2,26 @@
 id: viewer-name-tags-display-names
 title: Name tags — wire GetDisplayNames caps into the tag
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-name-tags
 refs: [viewer-name-tags-billboard-render]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
-The viewer today draws a **debug-grade** name tag: `avatars.rs` spawns one
+**Done (2026-08-05).** `AvatarState` now keeps a full `NameRecord` per agent
+(legacy + username + display name + default flag), merged from three
+sources: instant `ObjectUpdate` NameValue seeding (`FirstName`/`LastName`),
+the legacy `UUIDNameRequest`, and the `GetDisplayNames` cap — both requests
+go out batched once per frame, and a pushed `DisplayNameUpdate` refreshes
+the live tag. The cap is a silent no-op on OpenSim, so the legacy path
+stays authoritative there. The tag shows the display name over the
+`@username` line; `name_of` (the wire-facing accessor) still answers the
+legacy name.
+
+The original task statement:
+
+The viewer previously drew a **debug-grade** name tag: `avatars.rs` spawns one
 plain-white `bevy_ui` text node per avatar (`NameTag`, `spawn_label`,
 `position_name_tags`) showing only the **legacy** name
 (`AvatarName::legacy_name()`), resolved once per agent over UDP

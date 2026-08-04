@@ -2,9 +2,9 @@
 id: viewer-chat-bubbles
 title: Chat bubbles
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
-blocked_by: [viewer-name-tags-billboard-render]
+refs: [viewer-name-tags-billboard-render]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

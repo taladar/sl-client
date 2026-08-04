@@ -2,10 +2,10 @@
 id: viewer-avatar-radar
 title: Avatar radar (nearby-avatar list)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07)
-blocked_by: [viewer-ui-virtualized-list, viewer-name-tags-display-names]
-refs: [viewer-minimap, viewer-social-people-panel, viewer-beacons-control]
+refs: [viewer-ui-virtualized-list, viewer-name-tags-display-names,
+  viewer-minimap, viewer-social-people-panel, viewer-beacons-control]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

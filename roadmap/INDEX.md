@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 240 |
-| blocked | 100 |
+| ready | 243 |
+| blocked | 95 |
 | in-progress | 10 |
 | bugs | 8 |
-| done | 702 |
+| done | 704 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1146** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (240)
+## ready (243)
 
 ### protocol
 
@@ -206,6 +206,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   debug & maintenance tools (incl. Rebake)
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
+- [`viewer-avatar-radar`](ready/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -250,6 +252,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
   action commands (`cmd …`)
+- [`viewer-chat-bubbles`](ready/viewer-chat-bubbles.md) — Chat bubbles
 - [`viewer-chat-clickable-sender-names`](ready/viewer-chat-clickable-sender-names.md)
   — Clickable sender names in the chat / conversations transcript
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
@@ -340,6 +343,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-hover-text`](ready/viewer-hover-text.md) — Object hover text
+  (llSetText floating text)
 - [`viewer-hover-tooltips`](ready/viewer-hover-tooltips.md) — In-world hover
   tooltips (object / avatar / land inspectors)
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
@@ -405,10 +410,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-name-tags-billboard-render`](ready/viewer-name-tags-billboard-render.md)
-  — Name tags — world-space billboard renderer
-- [`viewer-name-tags-display-names`](ready/viewer-name-tags-display-names.md) —
-  Name tags — wire GetDisplayNames caps into the tag
+- [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
+  Name tags — click a tag to select the avatar
+- [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
+  tags — remaining decorations
 - [`viewer-name-tags-preferences`](ready/viewer-name-tags-preferences.md) — Name
   tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
@@ -718,7 +723,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (100)
+## blocked (95)
 
 ### protocol
 
@@ -746,9 +751,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-ambient-wind-sound`](blocked/viewer-ambient-wind-sound.md) — Ambient
   wind sound (blocked by `viewer-audio-backend`)
-- [`viewer-avatar-radar`](blocked/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list) (blocked by `viewer-ui-virtualized-list` (done),
-  `viewer-name-tags-display-names`)
 - [`viewer-avatar-render-settings-manager`](blocked/viewer-avatar-render-settings-manager.md)
   — Per-avatar render-settings manager (blocked by
   `viewer-avatar-complexity-limit`)
@@ -761,8 +763,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-cef-audio-mixer-handoff`](blocked/viewer-cef-audio-mixer-handoff.md)
   — CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend`)
-- [`viewer-chat-bubbles`](blocked/viewer-chat-bubbles.md) — Chat bubbles
-  (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -802,8 +802,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
   — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
   by `viewer-audio-backend`)
-- [`viewer-hover-text`](blocked/viewer-hover-text.md) — Object hover text
-  (llSetText floating text) (blocked by `viewer-name-tags-billboard-render`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -868,15 +866,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
-- [`viewer-name-tags-click-select`](blocked/viewer-name-tags-click-select.md) —
-  Name tags — click a tag to select the avatar (blocked by
-  `viewer-name-tags-billboard-render`, `viewer-object-selection-core` (done))
 - [`viewer-name-tags-complexity-distance`](blocked/viewer-name-tags-complexity-distance.md)
-  — Name tags — complexity & distance lines (blocked by
-  `viewer-name-tags-billboard-render`, `viewer-avatar-complexity-limit`)
-- [`viewer-name-tags-decorations`](blocked/viewer-name-tags-decorations.md) —
-  Name tags — title / state / colouring decorations (blocked by
-  `viewer-name-tags-billboard-render`)
+  — Name tags — complexity (ARC) lines (blocked by
+  `viewer-avatar-complexity-limit`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
@@ -1060,7 +1052,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (702)
+## done (704)
 
 ### protocol
 
@@ -1424,6 +1416,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-parcel-overlay-decode` (done))
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
+- [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)
+  — Name tags — world-space billboard renderer
+- [`viewer-name-tags-display-names`](done/viewer-name-tags-display-names.md) —
+  Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras

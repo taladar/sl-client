@@ -2,12 +2,25 @@
 id: viewer-name-tags-billboard-render
 title: Name tags — world-space billboard renderer
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-name-tags
 refs: [viewer-name-tags-display-names]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Done (2026-08-05).** Tags are world-space billboard meshes drawn by the
+main camera: manual `bevy_text` layout over span children, glyph-quad
+meshes (SDF rounded-rect bubble, drop-shadowed glyphs, one mesh per glyph
+atlas page), a shader that expands them camera-facing at constant on-screen
+size, pulls them toward the camera past the avatar's head, and applies the
+distance fade in-shader; a CPU cutoff hides tags past fade start + range,
+placement follows the posed head top with the reference's dead-band +
+smoothing, and a bounded screen-space spring solver separates overlapping
+tags (per the user's no-drift constraint, no time-based tag destruction).
+`sl-client-bevy-viewer/src/name_tag_billboard.rs` + `name_tag.wgsl`.
+
+The original task statement:
 
 Promote the debug name tag to the reference feature's **rendering**. The viewer
 today projects a screen-space `Text2d` with `Camera::world_to_viewport` and
