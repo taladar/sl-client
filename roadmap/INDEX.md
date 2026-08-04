@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 256 |
 | blocked | 112 |
 | in-progress | 10 |
-| bugs | 8 |
-| done | 675 |
+| bugs | 7 |
+| done | 676 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1147** |
@@ -1116,7 +1116,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (8)
+## bugs (7)
 
 ### protocol
 
@@ -1135,8 +1135,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
-- [`viewer-command-despawned-entity-warnings`](bugs/viewer-command-despawned-entity-warnings.md)
-  — "\"Entity despawned\" command warnings during a plain scene run"
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1144,7 +1142,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (675)
+## done (676)
 
 ### protocol
 
@@ -1341,6 +1339,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
+- [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
+  — "\"Entity despawned\" command warnings during a plain scene run"
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)

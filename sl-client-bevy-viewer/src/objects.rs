@@ -2950,6 +2950,28 @@ fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Comman
     }
 }
 
+/// Drop the tracked object under `scoped` when its entity has been despawned out
+/// from under the map — a linkset child or worn attachment that Bevy's recursive
+/// despawn took with its parent (a removed linkset root, or a departed avatar whose
+/// skeleton-joint node it hangs off), with no `remove_object` to clean the entry.
+///
+/// `is_alive` reports whether an entity is still spawned (in the viewer,
+/// `Commands::get_entity(..).is_ok()`). A live entity is left untouched — this never
+/// drops an object still on screen, so no live transform / material write is lost.
+/// Returns the dropped entity when a stale entry was removed, else `None`.
+fn drop_stale_tracked_entity(
+    state: &mut ObjectState,
+    scoped: ScopedObjectId,
+    mut is_alive: impl FnMut(Entity) -> bool,
+) -> Option<Entity> {
+    let entity = state.objects.get(&scoped)?.entity;
+    if is_alive(entity) {
+        return None;
+    }
+    let _stale = state.objects.remove(&scoped);
+    Some(entity)
+}
+
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
 #[expect(
@@ -3048,6 +3070,25 @@ fn apply_object(
         is_root,
         attachment: attachment_point.is_some(),
     };
+
+    // A tracked object whose entity was despawned out from under us leaves a stale
+    // entry: Bevy's recursive despawn takes a linkset child — or a worn attachment
+    // hanging off an avatar's skeleton-joint node — the instant its parent despawns
+    // (a linkset root removed, or an avatar that left), and that hierarchy despawn
+    // does not run our own `remove_object`, so nothing drops the entry from the map.
+    // Re-inserting on its dead (and, once the slot is reused, generation-mismatched)
+    // entity is the `bevy_ecs::error::handler` "Entity despawned" warning this fixes.
+    // An objects.rs entity only dies via `remove_object` (which cleans the map) or a
+    // parent's hierarchy despawn, so a dead tracked entity means the object's parent
+    // is gone: drop the stale entry and fall through to the spawn path, re-creating
+    // it if the simulator still streams it (else its imminent `KillObject` reaps it).
+    if let Some(stale) =
+        drop_stale_tracked_entity(state, scoped, |entity| commands.get_entity(entity).is_ok())
+    {
+        debug!(
+            "object {scoped}: tracked entity {stale:?} was despawned externally (parent hierarchy gone); respawning"
+        );
+    }
 
     if let Some(existing) = state.objects.get_mut(&scoped) {
         // A known object: re-place it and refresh its classification (a
@@ -3487,7 +3528,11 @@ fn remove_object(state: &mut ObjectState, scoped: ScopedObjectId, commands: &mut
         return;
     };
     // Bevy despawns the parented sub-hierarchy together with the root entity.
-    commands.entity(removed.entity).despawn();
+    // `try_despawn` because this entity may already be dead — a linkset child or
+    // attachment can be taken by its parent's hierarchy despawn before its own
+    // `KillObject` arrives here (the same race [`drop_stale_tracked_entity`] guards
+    // on the update path), and a plain `despawn` on it would itself warn.
+    commands.entity(removed.entity).try_despawn();
     // A rigged mesh's skinned faces hang off the *avatar body root*, not this
     // object entity (P17.2), so Bevy's hierarchy despawn above does not take them —
     // despawn them explicitly (a no-op for a static mesh's faces, already gone with
@@ -4707,5 +4752,237 @@ mod tests {
         let builds = drain_budgeted(&mut queue, 10, |item| item);
         assert_eq!(builds, 2);
         assert!(queue.is_empty(), "the backlog fully drains");
+    }
+
+    /// A [`TrackedObject`](super::TrackedObject) stub for the stale-guard tests: a
+    /// plain-prim root at `entity` / `geometry`, every other field at its spawn
+    /// default. Only the `entity` field is under test.
+    fn tracked_stub(
+        object: &Object,
+        entity: bevy::prelude::Entity,
+        geometry: bevy::prelude::Entity,
+    ) -> super::TrackedObject {
+        super::TrackedObject {
+            entity,
+            full_key: object.full_id,
+            geometry,
+            shape: ShapeFingerprint::of(object),
+            parent: object.scoped_id(),
+            is_root: true,
+            parented: false,
+            attachment_point: None,
+            update_flags: 0,
+            material: 0,
+            extra: sl_client_bevy::ObjectExtraParams::default(),
+            face_entities: Vec::new(),
+            pending: None,
+            mesh_rebuild: None,
+            prim_rebuild: None,
+            prim_lod: super::INITIAL_MANAGED_PRIM_LOD,
+            tree_rebuild: None,
+            tree_tier: super::INITIAL_TREE_TIER,
+            animated: false,
+            texture_entry: Vec::new(),
+            media_url: None,
+        }
+    }
+
+    /// The stale-entity guard drops a tracked object whose entity Bevy's recursive
+    /// despawn has already taken with its parent — the linkset-child / worn-attachment
+    /// race behind the `bevy_ecs::error::handler` "Entity despawned" warning. The
+    /// entry must be gone so a later update respawns the object cleanly instead of
+    /// queuing an insert on a dead (later generation-mismatched) entity.
+    #[test]
+    fn stale_guard_drops_a_hierarchy_despawned_tracked_object() {
+        use bevy::prelude::{ChildOf, World};
+
+        let mut world = World::new();
+        // A linkset: a root, its child, and the child's geometry holder. Bevy's
+        // recursive despawn takes the child (and holder) with the root, exactly how an
+        // objects.rs entity dies without our own `remove_object` cleaning the map.
+        let root = world.spawn_empty().id();
+        let child = world.spawn(ChildOf(root)).id();
+        let geometry = world.spawn(ChildOf(child)).id();
+
+        let object = bare_object(pcode::PRIMITIVE);
+        let scoped = object.scoped_id();
+        let mut state = super::ObjectState::default();
+        let _absent = state
+            .objects
+            .insert(scoped, tracked_stub(&object, child, geometry));
+
+        world.entity_mut(root).despawn();
+        assert!(
+            world.get_entity(child).is_err(),
+            "the child dies with its root — the premise of the race"
+        );
+
+        let dropped =
+            super::drop_stale_tracked_entity(&mut state, scoped, |e| world.get_entity(e).is_ok());
+        assert_eq!(dropped, Some(child), "the stale entry is reported dropped");
+        assert!(
+            state.objects.is_empty(),
+            "the stale entry is gone so a later update respawns the object"
+        );
+    }
+
+    /// The guard leaves a live tracked object untouched: it must never drop an object
+    /// still on screen, or a real live transform / material write would be lost (the
+    /// warning's fix must not become a rendering bug of its own).
+    #[test]
+    fn stale_guard_keeps_a_live_tracked_object() {
+        use bevy::prelude::World;
+
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let geometry = world.spawn_empty().id();
+
+        let object = bare_object(pcode::PRIMITIVE);
+        let scoped = object.scoped_id();
+        let mut state = super::ObjectState::default();
+        let _absent = state
+            .objects
+            .insert(scoped, tracked_stub(&object, entity, geometry));
+
+        let dropped =
+            super::drop_stale_tracked_entity(&mut state, scoped, |e| world.get_entity(e).is_ok());
+        assert_eq!(dropped, None, "a live entity is not dropped");
+        assert!(
+            state.objects.contains_key(&scoped),
+            "the live object is retained"
+        );
+    }
+
+    /// End-to-end guard on the real [`apply_object`](super::apply_object) path: a
+    /// linkset child whose entity was despawned out from under the map (Bevy's
+    /// recursive despawn taking it with a parent, without our `remove_object`) is
+    /// **respawned** on its next update — a fresh, live entity re-parented to its
+    /// still-live root — rather than queuing an insert on the dead entity (the
+    /// `bevy_ecs::error::handler` "Entity despawned" warning this task fixes).
+    #[test]
+    fn apply_object_respawns_a_child_despawned_out_from_under_the_map()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use crate::face_material::FaceMaterial;
+        use crate::geometry_cache::GeometryCache;
+        use crate::material_cache::MaterialCache;
+        use crate::meshes::MeshManager;
+        use crate::textures::{PrimTextures, TextureManager};
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{Assets, ChildOf, Commands, Mesh, ResMut, World};
+
+        /// The resources [`apply_object`](super::apply_object) takes, as one
+        /// `SystemState` tuple (named to satisfy `type_complexity`).
+        type ApplyParams<'w, 's> = (
+            Commands<'w, 's>,
+            ResMut<'w, Assets<Mesh>>,
+            ResMut<'w, Assets<FaceMaterial>>,
+            ResMut<'w, TextureManager>,
+            ResMut<'w, PrimTextures>,
+            ResMut<'w, MeshManager>,
+            ResMut<'w, GeometryCache>,
+            ResMut<'w, MaterialCache>,
+        );
+
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<FaceMaterial>>();
+        world.init_resource::<TextureManager>();
+        world.init_resource::<PrimTextures>();
+        world.init_resource::<MeshManager>();
+        world.init_resource::<GeometryCache>();
+        world.init_resource::<MaterialCache>();
+
+        let mut state = super::ObjectState::default();
+        let root_obj = bare_object(pcode::PRIMITIVE);
+        let mut child_obj = bare_object(pcode::PRIMITIVE);
+        child_obj.local_id = RegionLocalObjectId(2);
+        // A linkset child: its parent is the root prim (local id 1).
+        child_obj.parent_id = RegionLocalObjectId(1);
+        let root_scoped = root_obj.scoped_id();
+        let child_scoped = child_obj.scoped_id();
+
+        // Runs one `apply_object` and flushes its commands into `world`. Takes
+        // `world` as a parameter (rather than capturing it) so the world stays free
+        // to inspect / despawn between invocations.
+        let apply = |world: &mut World,
+                     state: &mut super::ObjectState,
+                     object: &Object|
+         -> Result<(), Box<dyn core::error::Error>> {
+            let mut params: SystemState<ApplyParams> = SystemState::new(world);
+            let (
+                mut commands,
+                mut meshes,
+                mut materials,
+                mut manager,
+                mut prim_textures,
+                mut mesh_manager,
+                mut cache,
+                mut material_cache,
+            ) = params
+                .get_mut(world)
+                .map_err(|error| format!("system params: {error}"))?;
+            super::apply_object(
+                state,
+                object,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                &mut mesh_manager,
+                &mut cache,
+                &mut material_cache,
+            );
+            params.apply(world);
+            Ok(())
+        };
+
+        // Spawn the root then the child; the child parents to the root's entity.
+        apply(&mut world, &mut state, &root_obj)?;
+        apply(&mut world, &mut state, &child_obj)?;
+        let root_entity = state
+            .objects
+            .get(&root_scoped)
+            .ok_or("root tracked")?
+            .entity;
+        let child_entity = state
+            .objects
+            .get(&child_scoped)
+            .ok_or("child tracked")?
+            .entity;
+        assert!(world.get_entity(child_entity).is_ok(), "child spawned live");
+
+        // Kill just the child entity — standing in for the hierarchy despawn that
+        // takes a child / attachment with its parent (a linkset root or an avatar's
+        // joint node) with no `remove_object` to clean the map. The stale entry stays.
+        world.entity_mut(child_entity).despawn();
+        assert!(
+            world.get_entity(child_entity).is_err(),
+            "the child entity is now dead"
+        );
+        assert!(
+            state.objects.contains_key(&child_scoped),
+            "but the map still tracks it (no remove_object ran) — the stale entry"
+        );
+
+        // A later ObjectUpdated for the child: the guard drops the stale entry and the
+        // spawn path re-creates the object, re-parented to the still-live root.
+        apply(&mut world, &mut state, &child_obj)?;
+        let new_child = state
+            .objects
+            .get(&child_scoped)
+            .ok_or("child re-tracked")?
+            .entity;
+        assert_ne!(new_child, child_entity, "respawned as a fresh entity");
+        assert!(
+            world.get_entity(new_child).is_ok(),
+            "the respawned child entity is live"
+        );
+        assert_eq!(
+            world.get::<ChildOf>(new_child).map(ChildOf::parent),
+            Some(root_entity),
+            "the respawned child re-parents to its still-live root"
+        );
+        Ok(())
     }
 }
