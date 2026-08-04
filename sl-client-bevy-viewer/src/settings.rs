@@ -201,13 +201,13 @@ impl ViewerSettings {
     pub(crate) fn mark_account_loaded_for_test(&mut self) {
         self.account_path = Some(PathBuf::new());
     }
-}
 
-impl FromWorld for ViewerSettings {
     /// Build the store, register every feature's settings, and load any saved
     /// global overrides. The account scope loads later, at login
-    /// ([`load_account_settings`]).
-    fn from_world(_world: &mut World) -> Self {
+    /// ([`load_account_settings`]). Split out of [`FromWorld`] so pre-app code
+    /// (the login-request construction in `run_viewer`, which needs the stored
+    /// start location before the Bevy [`World`] exists) reads the same store.
+    pub(crate) fn load() -> Self {
         let mut settings = Self {
             store: SettingsStore::new(),
             global_path: crate::paths::global_settings_file(),
@@ -221,8 +221,17 @@ impl FromWorld for ViewerSettings {
         crate::tonemap::register_settings(&mut settings);
         crate::bloom::register_settings(&mut settings);
         crate::snapshot_floater::register_settings(&mut settings);
+        crate::i18n::register_settings(&mut settings);
+        crate::avatars::register_settings(&mut settings);
+        crate::preferences_general::register_settings(&mut settings);
         settings.load_global();
         settings
+    }
+}
+impl FromWorld for ViewerSettings {
+    /// [`ViewerSettings::load`], as the resource initialiser.
+    fn from_world(_world: &mut World) -> Self {
+        Self::load()
     }
 }
 

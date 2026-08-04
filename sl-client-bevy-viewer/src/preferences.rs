@@ -56,8 +56,9 @@ use crate::floater::{
 };
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
-use crate::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
+use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
@@ -65,18 +66,19 @@ use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TAB_LABEL_COLOR, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip,
     fill_tab_container, spawn_tab_container,
 };
+use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
 pub(crate) const PREFERENCES_FLOATER_ID: &str = "preferences";
 
 /// The shell's body font size, in logical pixels.
-const FONT: f32 = 13.0;
+pub(crate) const FONT: f32 = 13.0;
 
 /// A section heading's font size, a step up from the rows it heads.
 const SECTION_FONT: f32 = 14.0;
 
 /// A row label's resting colour (the shared panel label tone).
-const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub(crate) const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// A section heading's colour — same tone as the labels; the size difference
 /// carries the hierarchy.
@@ -156,6 +158,11 @@ pub(crate) struct PreferencesTabDef {
 
 /// The registered preference tabs, in strip order.
 pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
+    PreferencesTabDef {
+        id: "general",
+        label_key: "preferences-tab-general",
+        build: crate::preferences_general::build_general_tab,
+    },
     PreferencesTabDef {
         id: "world-ui",
         label_key: "preferences-tab-world-ui",
@@ -402,6 +409,83 @@ pub(crate) fn spawn_pref_slider(
     row
 }
 
+/// Spawn a searchable row holding a translated label and a settings-bound
+/// **combo**: each `(label_key, value)` option pair maps one translated option
+/// label to the [`SettingValue`] it writes / matches. Returns the row node
+/// (see [`spawn_pref_checkbox`]).
+pub(crate) fn spawn_pref_combo(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    options: &[(&str, SettingValue)],
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = spawn_row_label(commands, row, label_key);
+    let option_labels: Vec<String> = options.iter().map(|(key, _)| String::from(*key)).collect();
+    let anchor = spawn_combo(
+        commands,
+        row,
+        &ComboSpec {
+            element: label_key,
+            labels: &option_labels,
+            active: 0,
+            tab_index: 0,
+            font_size: FONT,
+            translate_labels: true,
+        },
+    );
+    commands.entity(anchor).insert((
+        binding,
+        ComboBindingValues(options.iter().map(|(_, value)| value.clone()).collect()),
+    ));
+    commands.entity(row).insert(PrefSearchRow { label });
+    row
+}
+
+/// Spawn a searchable **text-field** row: a translated label above a
+/// settings-bound text input (single-line or multiline per `kind` /
+/// `visible_lines`). Returns the outer node the filter hides / shows (see
+/// [`spawn_pref_checkbox`]).
+pub(crate) fn spawn_pref_text(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    kind: TextInputKind,
+    visible_lines: f32,
+) -> Entity {
+    let row = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Start,
+                ..column(Val::Px(ROW_GAP / 2.0))
+            },
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = spawn_row_label(commands, row, label_key);
+    let field = spawn_text_input(
+        commands,
+        row,
+        &TextInputSpec {
+            visible_lines,
+            fill: true,
+            ..TextInputSpec::new(label_key, kind)
+        },
+    );
+    commands.entity(field).insert(binding);
+    commands.entity(row).insert(PrefSearchRow { label });
+    row
+}
+
 /// Spawn a (non-searchable) section heading over a group of rows.
 pub(crate) fn spawn_pref_section(commands: &mut Commands, parent: Entity, key: &'static str) {
     commands.spawn((
@@ -572,7 +656,7 @@ fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Comman
 }
 
 /// Spawn a translated-label footer button, returning its clickable box.
-fn spawn_footer_button(
+pub(crate) fn spawn_footer_button(
     commands: &mut Commands,
     parent: Entity,
     label_key: &'static str,

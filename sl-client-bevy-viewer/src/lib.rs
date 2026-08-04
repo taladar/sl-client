@@ -138,6 +138,7 @@ mod physics;
 mod pie_menu;
 mod preferences;
 mod preferences_alerts;
+mod preferences_general;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -435,9 +436,11 @@ struct Options {
     /// An explicit XML-RPC login URI, overriding `--grid` and the avatar's own.
     #[clap(long)]
     login_uri: Option<String>,
-    /// The login start location (`last`, `home`, or `uri:Region&x&y&z`).
-    #[clap(long, default_value = "last")]
-    start: StartLocation,
+    /// The login start location (`last`, `home`, or `uri:Region&x&y&z`),
+    /// overriding the persisted preference (the General tab's default) for
+    /// this run.
+    #[clap(long)]
+    start: Option<StartLocation>,
     /// The viewer channel reported to the grid.
     #[clap(long, default_value = "sl-client-bevy-viewer")]
     channel: String,
@@ -1238,6 +1241,10 @@ fn run_session(
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.
     .add_plugins(crate::preferences_alerts::PreferencesAlertsPlugin)
+    // The general tab's appliers (viewer-preferences-general-tab): the live
+    // UI-scale write and the maturity-preference server conversation behind
+    // the panel build_general_tab plugs into the shell's registry.
+    .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1973,11 +1980,23 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     let avatar = credentials.select(options.avatar.as_deref())?;
     let login_uri = resolve_login_uri(options, avatar)?;
 
+    // The persisted start-location preference (the preferences General tab) is
+    // read from a throwaway store load: the Bevy app — and with it the
+    // `ViewerSettings` resource — does not exist yet at login-request time.
+    let start = {
+        let settings = crate::settings::ViewerSettings::load();
+        let stored = settings
+            .store()
+            .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)
+            .ok()
+            .map(str::to_owned);
+        crate::preferences_general::resolve_start_location(options.start.clone(), stored.as_deref())
+    };
     let mut request = LoginRequest::new(
         avatar.first().to_owned(),
         avatar.last().to_owned(),
         avatar.password().expose().to_owned(),
-        options.start.clone(),
+        start,
         options.channel.clone(),
         options.version.clone(),
     );

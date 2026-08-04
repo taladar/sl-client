@@ -424,14 +424,27 @@ fn host_floater_id(
     .and_then(|(floater, exempt)| (!exempt).then_some(floater.id))
 }
 
-/// **Register** each newly-spawned resizable tab strip's split setting, with its
-/// current width as the declared default. A strip outside any floater is skipped
-/// (nothing to key it by).
+/// Marks a tab strip whose split setting has been registered, so
+/// [`register_tab_split_settings`] stops retrying it.
+#[derive(Component, Debug, Clone, Copy)]
+struct TabSplitRegistered;
+
+/// **Register** each resizable tab strip's split setting, with its current
+/// width as the declared default. Retries every frame until it succeeds
+/// (rather than keying off `Added<TabStripWidth>`): a strip spawned by a
+/// deferred content build earlier in the same frame only becomes visible at
+/// the chain's first command-sync point — which is *after* this system ran —
+/// so an `Added` window (and this pass) first sees it a frame later. The
+/// write-back is gated on [`TabSplitRegistered`], so nothing can write the
+/// setting before this pass has declared it. A strip that genuinely lives
+/// outside any floater just stays unmatched (a no-op scan of a handful of
+/// entities).
 fn register_tab_split_settings(
     settings: Option<ResMut<ViewerSettings>>,
-    strips: Query<(Entity, &TabStrip, &TabStripWidth), Added<TabStripWidth>>,
+    strips: Query<(Entity, &TabStrip, &TabStripWidth), Without<TabSplitRegistered>>,
     parents: Query<&ChildOf>,
     floaters: Query<(&Floater, Has<FloaterPersistExempt>)>,
+    mut commands: Commands,
 ) {
     let Some(mut settings) = settings else {
         return;
@@ -446,6 +459,7 @@ fn register_tab_split_settings(
             SettingValue::F32(width.0),
             "Tab widget's strip / content split width (logical px)",
         );
+        commands.entity(entity).insert(TabSplitRegistered);
     }
 }
 
@@ -481,10 +495,17 @@ fn seed_tab_splits_from_settings(
 /// The query filter [`persist_tab_split_changes`] runs on: a seeded strip whose
 /// width changed this frame. Aliased to keep the signature clear of
 /// `clippy::type_complexity`, mirroring [`ChangedSeededFloater`].
-type ChangedSeededTabSplit = (With<TabSplitSeeded>, Changed<TabStripWidth>);
+type ChangedSeededTabSplit = (
+    With<TabSplitSeeded>,
+    With<TabSplitRegistered>,
+    Changed<TabStripWidth>,
+);
 
 /// **Persist** a seeded strip's split whenever it is dragged, and mark the store
-/// dirty for the shared flush.
+/// dirty for the shared flush. Gated on [`TabSplitRegistered`] so the seed
+/// frame's width write (which races the registration pass on the strip's
+/// first visible frame) is skipped rather than warned about — a skipped seed
+/// write loses nothing, it re-writes the value that was just read.
 fn persist_tab_split_changes(
     settings: Option<ResMut<ViewerSettings>>,
     strips: Query<(Entity, &TabStrip, &TabStripWidth), ChangedSeededTabSplit>,

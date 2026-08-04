@@ -427,6 +427,35 @@ pub(crate) struct NameTag {
     pub(crate) tag_height: f32,
 }
 
+/// The master name-tag toggle (the preferences General tab's headline switch;
+/// the reference `AvatarNameTagMode` off/on axis). Honoured by
+/// [`position_name_tags`]; the full reference toggle set is the separate
+/// `viewer-name-tags-preferences` task.
+pub(crate) const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
+
+/// Whether the logged-in avatar's own tag is shown (the reference
+/// `RenderNameShowSelf`). Honoured by [`position_name_tags`].
+pub(crate) const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
+
+/// The settings section the name-tag toggles live in.
+const NAME_TAG_SECTION: &[&str] = &["nametags"];
+
+/// Register the name-tag settings.
+pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+    settings.register_in(
+        NAME_TAG_SECTION,
+        SETTING_SHOW_NAME_TAGS,
+        sl_settings::SettingValue::Bool(true),
+        "Show floating name tags over avatars",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        SETTING_SHOW_OWN_NAME_TAG,
+        sl_settings::SettingValue::Bool(true),
+        "Show the name tag over your own avatar too",
+    );
+}
+
 /// The shared placeholder sphere mesh and material, built once and reused by
 /// every avatar sphere.
 struct AvatarAssets {
@@ -4007,7 +4036,14 @@ pub(crate) fn position_name_tags(
     cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
     windows: Query<&Window>,
     anchors: Query<&GlobalTransform, With<AvatarAnchor>>,
-    mut tags: Query<(&NameTag, &mut Transform, &mut Visibility)>,
+    mut tags: Query<(
+        &NameTag,
+        Option<&AvatarPickTarget>,
+        &mut Transform,
+        &mut Visibility,
+    )>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    identity: Option<Res<SlIdentity>>,
 ) {
     let Ok((camera, camera_transform)) = cameras.single() else {
         return;
@@ -4015,8 +4051,24 @@ pub(crate) fn position_name_tags(
     let Ok(window) = windows.single() else {
         return;
     };
+    // The preferences gates (optional resources, so the headless overlay test's
+    // bare world runs ungated): a store without the keys means "shown".
+    let show_tags = settings
+        .as_ref()
+        .and_then(|settings| settings.store().get_bool(SETTING_SHOW_NAME_TAGS).ok())
+        .unwrap_or(true);
+    let show_own = settings
+        .as_ref()
+        .and_then(|settings| settings.store().get_bool(SETTING_SHOW_OWN_NAME_TAG).ok())
+        .unwrap_or(true);
+    let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     let window_size = window.size();
-    for (tag, mut transform, mut visibility) in &mut tags {
+    for (tag, pick, mut transform, mut visibility) in &mut tags {
+        let is_own = own_agent.is_some() && pick.map(AvatarPickTarget::agent) == own_agent;
+        if !show_tags || (is_own && !show_own) {
+            visibility.set_if_neq(Visibility::Hidden);
+            continue;
+        }
         let Ok(anchor) = anchors.get(tag.anchor) else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;

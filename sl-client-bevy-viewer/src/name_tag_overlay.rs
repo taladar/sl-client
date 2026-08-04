@@ -249,6 +249,101 @@ mod tests {
         assert_eq!(app.world().resource::<TagWrites>().0, 0);
     }
 
+    /// The preferences gates hide tags: the master toggle hides every tag, the
+    /// own-tag toggle hides only the logged-in avatar's.
+    #[test]
+    fn preference_toggles_gate_tags() {
+        use crate::avatars::{AvatarPickTarget, SETTING_SHOW_NAME_TAGS, SETTING_SHOW_OWN_NAME_TAG};
+        use crate::settings::ViewerSettings;
+        use sl_client_bevy::{AgentKey, SlIdentity, Uuid};
+        use sl_settings::{Scope, SettingValue, SettingsStore};
+
+        let own: AgentKey = Uuid::from_u128(7).into();
+        let other: AgentKey = Uuid::from_u128(9).into();
+        let mut store = SettingsStore::new();
+        store
+            .register(SETTING_SHOW_NAME_TAGS, SettingValue::Bool(true), "tags")
+            .ok();
+        store
+            .register(SETTING_SHOW_OWN_NAME_TAG, SettingValue::Bool(true), "own")
+            .ok();
+
+        let mut app = App::new();
+        app.add_systems(Update, position_name_tags);
+        app.insert_resource(ViewerSettings::from_store_for_test(store));
+        app.insert_resource(SlIdentity {
+            agent_id: Some(own),
+            ..default()
+        });
+        app.world_mut().spawn(Window {
+            resolution: UVec2::new(1280, 720).into(),
+            ..default()
+        });
+        app.world_mut().spawn((
+            ViewerCamera,
+            Camera {
+                computed: ComputedCameraValues {
+                    clip_from_view: Mat4::orthographic_rh(-640.0, 640.0, -360.0, 360.0, 0.1, 100.0),
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(1280, 720),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+            GlobalTransform::IDENTITY,
+        ));
+        let anchor = app
+            .world_mut()
+            .spawn((
+                AvatarAnchor,
+                GlobalTransform::from_translation(Vec3::new(0.0, 0.0, -10.0)),
+            ))
+            .id();
+        let spawn_tag = |app: &mut App, agent: AgentKey| {
+            app.world_mut()
+                .spawn((
+                    Transform::default(),
+                    Visibility::Hidden,
+                    NameTag {
+                        anchor,
+                        tag_height: 0.0,
+                    },
+                    AvatarPickTarget::new(agent),
+                ))
+                .id()
+        };
+        let own_tag = spawn_tag(&mut app, own);
+        let other_tag = spawn_tag(&mut app, other);
+        let visibility = |app: &App, tag: Entity| app.world().get::<Visibility>(tag).copied();
+
+        // Both toggles on: both tags show.
+        app.update();
+        assert_eq!(visibility(&app, own_tag), Some(Visibility::Inherited));
+        assert_eq!(visibility(&app, other_tag), Some(Visibility::Inherited));
+
+        // Own-tag toggle off: only the logged-in avatar's tag hides.
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_SHOW_OWN_NAME_TAG,
+            SettingValue::Bool(false),
+        );
+        app.update();
+        assert_eq!(visibility(&app, own_tag), Some(Visibility::Hidden));
+        assert_eq!(visibility(&app, other_tag), Some(Visibility::Inherited));
+
+        // Master toggle off: every tag hides.
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_SHOW_NAME_TAGS,
+            SettingValue::Bool(false),
+        );
+        app.update();
+        assert_eq!(visibility(&app, own_tag), Some(Visibility::Hidden));
+        assert_eq!(visibility(&app, other_tag), Some(Visibility::Hidden));
+    }
+
     /// The viewport→overlay mapping recentres on the middle of the window and
     /// flips Y: top-left → (-w/2, +h/2), centre → origin, bottom-right →
     /// (+w/2, -h/2).

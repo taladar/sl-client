@@ -32,20 +32,29 @@
 //!
 //! # What binds today
 //!
-//! The two headless primitives `bevy_ui_widgets` ships that carry a scalar the
-//! store can hold: [`Checkbox`] (a [`SettingValue::Bool`]) and [`Slider`] (a
-//! [`SettingValue::F32`], or an integer [`SettingValue::I32`] / [`SettingValue::U32`]
-//! widened to the slider's `f32` and rounded back on write). A combo / dropdown
-//! and a text field are their own widget-composite tasks
-//! ([[viewer-ui-text-input-widget]] and the menu/list composites); this layer is
-//! ready to grow a `ValueChange` observer + sync pass for each as it lands.
+//! - [`Checkbox`] (a [`SettingValue::Bool`]) and [`Slider`] (a
+//!   [`SettingValue::F32`], or an integer [`SettingValue::I32`] /
+//!   [`SettingValue::U32`] widened to the slider's `f32` and rounded back on
+//!   write) — the two headless `bevy_ui_widgets` primitives.
+//! - A [combo](crate::ui_combo) whose anchor carries a [`ComboBindingValues`]
+//!   beside its [`SettingBinding`]: each option index maps to one
+//!   [`SettingValue`], a user pick writes that value, and the sync pass moves
+//!   [`ComboSelection`] to the option matching the store (an external value no
+//!   option covers leaves the combo untouched).
+//! - A [text input](crate::ui_text_input) (an [`EditableText`] entity) bound to
+//!   a [`SettingValue::String`]: edits made **while the field holds focus**
+//!   write live (matching the checkbox/slider live-edit model the preferences
+//!   snapshot relies on), and the sync pass seeds / follows external changes,
+//!   skipping the focused or IME-composing field so it never clobbers typing.
 //!
 //! Reference (Firestorm, read-only): `llui` `control_name` handling, `lluictrl`
 //! `setControlName`, `llviewercontrol` connections.
 
 use bevy::ecs::relationship::RelatedSpawnerCommands;
+use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{
     Activate, Button, Checkbox, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
@@ -58,6 +67,7 @@ use crate::settings::ViewerSettings;
 use crate::ui::{
     LogicalInset, LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
+use crate::ui_combo::{ComboChanged, ComboSelection};
 use crate::ui_font::UiFont;
 
 /// Names a setting a widget edits, and the override [`Scope`] a user edit is
@@ -104,6 +114,15 @@ impl SettingBinding {
     }
 }
 
+/// The option-index → setting-value map of a bound [combo](crate::ui_combo):
+/// entry *i* is the value written when the user picks option *i*, and the value
+/// the sync pass matches to show option *i*.
+///
+/// Attach it beside a [`SettingBinding`] on the combo's anchor entity (the one
+/// carrying [`ComboSelection`]); its length must equal the combo's option count.
+#[derive(Component, Debug, Clone)]
+pub(crate) struct ComboBindingValues(pub(crate) Vec<SettingValue>);
+
 /// The bundle for a checkbox bound to a boolean setting: the headless
 /// [`Checkbox`] widget plus its [`SettingBinding`]. The caller adds the node's
 /// styling, a [`TabIndex`] and any label.
@@ -140,7 +159,10 @@ pub(crate) struct SettingsBindingPlugin;
 
 impl Plugin for SettingsBindingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SettingsBindingDemoVisible::from_env())
+        // `ComboWidgetPlugin` also registers this message; doing it here too
+        // (idempotent) keeps the binding layer safe to add standalone (tests).
+        app.add_message::<ComboChanged>()
+            .insert_resource(SettingsBindingDemoVisible::from_env())
             .add_observer(on_bound_checkbox_change)
             .add_observer(on_bound_slider_change)
             .add_systems(
@@ -157,6 +179,10 @@ impl Plugin for SettingsBindingPlugin {
                     apply_settings_binding_demo_visibility.after(toggle_settings_binding_demo),
                     sync_bound_checkboxes,
                     sync_bound_sliders,
+                    write_bound_combo_changes,
+                    sync_bound_combos.after(write_bound_combo_changes),
+                    write_bound_text_edits,
+                    sync_bound_text_inputs.after(write_bound_text_edits),
                     drive_demo_checkbox_visual.after(sync_bound_checkboxes),
                     drive_demo_slider_visual.after(sync_bound_sliders),
                     update_settings_binding_demo_labels,
@@ -224,6 +250,88 @@ fn on_bound_slider_change(
     }
 }
 
+/// A **user** pick on a bound combo writes the picked option's value to the
+/// binding's scope. Programmatic [`ComboSelection`] writes emit no
+/// [`ComboChanged`], so the sync pass never loops through here.
+fn write_bound_combo_changes(
+    mut changes: MessageReader<ComboChanged>,
+    combos: Query<(&SettingBinding, &ComboBindingValues)>,
+    mut settings: Option<ResMut<ViewerSettings>>,
+) {
+    for change in changes.read() {
+        let Ok((binding, values)) = combos.get(change.combo) else {
+            continue;
+        };
+        let Some(value) = values.0.get(change.active) else {
+            warn!(
+                "settings_binding: combo bound to {} picked option {} but only {} values are mapped",
+                binding.name(),
+                change.active,
+                values.0.len()
+            );
+            continue;
+        };
+        if let Some(settings) = settings.as_mut() {
+            settings.set(binding.scope(), binding.name(), value.clone());
+        }
+    }
+}
+
+/// The last text the binding layer itself processed for a bound field — set on
+/// first sight and on every [`sync_bound_text_inputs`] write. A `Changed`
+/// flag whose text still equals this shadow is an echo of the layer's own
+/// write (or focus churn), not a user edit, so [`write_bound_text_edits`]
+/// ignores it; only a genuine divergence counts.
+#[derive(Component, Debug, Clone)]
+struct BoundTextShadow(String);
+
+/// An edit to a bound text field **while it holds focus** writes the field's
+/// text to the binding's scope — the same live-edit model as the checkbox and
+/// slider, so the preferences snapshot/revert covers it. The
+/// [`BoundTextShadow`] comparison keeps the seeding pass
+/// ([`sync_bound_text_inputs`]) from echoing its own writes back as user
+/// edits — the focused/unfocused frames alone cannot tell the two apart,
+/// because a `Changed` flag from an unfocused-frame seed is only *observed*
+/// a frame later, by which time the field may have gained focus.
+fn write_bound_text_edits(
+    focus: Option<Res<InputFocus>>,
+    mut fields: Query<
+        (
+            Entity,
+            &EditableText,
+            &SettingBinding,
+            Option<&mut BoundTextShadow>,
+        ),
+        Changed<EditableText>,
+    >,
+    mut settings: Option<ResMut<ViewerSettings>>,
+    mut commands: Commands,
+) {
+    let focused = focus.as_ref().and_then(|focus| focus.get());
+    for (entity, editable, binding, shadow) in &mut fields {
+        let value = editable.value().to_string();
+        let Some(mut shadow) = shadow else {
+            // First sight (the spawn frame): remember the text, write nothing —
+            // the sync pass seeds the field from the store.
+            commands.entity(entity).insert(BoundTextShadow(value));
+            continue;
+        };
+        if shadow.0 == value {
+            continue;
+        }
+        if focused != Some(entity) || editable.is_composing() {
+            // Not a user edit (some other writer moved the text): note it so a
+            // later comparison is against the current text, but do not write.
+            shadow.0 = value;
+            continue;
+        }
+        shadow.0.clone_from(&value);
+        if let Some(settings) = settings.as_mut() {
+            settings.set(binding.scope(), binding.name(), SettingValue::String(value));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Read / react side: the store flows store → widget, idempotently.
 // ---------------------------------------------------------------------------
@@ -273,6 +381,74 @@ fn sync_bound_sliders(
         let want = range.clamp(value);
         if (want - current.0).abs() > SLIDER_SYNC_EPSILON {
             commands.entity(entity).insert(SliderValue(want));
+        }
+    }
+}
+
+/// Keep every bound combo showing the option whose mapped value equals the
+/// setting's effective value. Idempotent: a combo already agreeing is left
+/// untouched, and a stored value no option maps (e.g. a hand-edited config)
+/// leaves the combo where it is rather than snapping to a wrong option.
+fn sync_bound_combos(
+    settings: Option<Res<ViewerSettings>>,
+    mut combos: Query<(&SettingBinding, &ComboBindingValues, &mut ComboSelection)>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    for (binding, values, mut selection) in &mut combos {
+        let Some(current) = settings.store().get(binding.name()) else {
+            continue;
+        };
+        let Some(want) = values.0.iter().position(|value| value == current) else {
+            continue;
+        };
+        if selection.active != want {
+            selection.active = want;
+        }
+    }
+}
+
+/// Keep every bound text field's content equal to its string setting's
+/// effective value, skipping the focused or IME-composing field so an active
+/// edit is never clobbered. Also the seeding pass for a freshly-spawned field.
+#[expect(
+    clippy::cmp_owned,
+    reason = "the editor's SplitString has no borrow-free comparison against &str; the guard \
+              keeps the per-frame pass write-free when nothing changed"
+)]
+fn sync_bound_text_inputs(
+    settings: Option<Res<ViewerSettings>>,
+    focus: Option<Res<InputFocus>>,
+    mut fields: Query<(
+        Entity,
+        &mut EditableText,
+        &SettingBinding,
+        Option<&mut BoundTextShadow>,
+    )>,
+    mut commands: Commands,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let focused = focus.as_ref().and_then(|focus| focus.get());
+    for (entity, mut editable, binding, shadow) in &mut fields {
+        if focused == Some(entity) || editable.is_composing() {
+            continue;
+        }
+        let Ok(want) = settings.store().get_str(binding.name()) else {
+            continue;
+        };
+        if editable.value().to_string() != want {
+            editable.editor_mut().set_text(want);
+            match shadow {
+                Some(mut shadow) => want.clone_into(&mut shadow.0),
+                None => {
+                    commands
+                        .entity(entity)
+                        .insert(BoundTextShadow(want.to_owned()));
+                }
+            }
         }
     }
 }
@@ -753,18 +929,22 @@ fn update_settings_binding_demo_labels(
 
 #[cfg(test)]
 mod tests {
+    use bevy::input_focus::InputFocus;
     use bevy::prelude::*;
+    use bevy::text::EditableText;
     use bevy::ui::Checked;
     use bevy::ui_widgets::{SliderRange, SliderStep, SliderValue, ValueChange};
     use pretty_assertions::assert_eq;
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        SettingBinding, bound_checkbox, bound_slider, f32_to_i32, f32_to_u32,
+        ComboBindingValues, SettingBinding, bound_checkbox, bound_slider, f32_to_i32, f32_to_u32,
         on_bound_checkbox_change, on_bound_slider_change, setting_as_slider_value,
-        slider_value_as_setting, sync_bound_checkboxes, sync_bound_sliders,
+        slider_value_as_setting, sync_bound_checkboxes, sync_bound_combos, sync_bound_sliders,
+        sync_bound_text_inputs, write_bound_combo_changes, write_bound_text_edits,
     };
     use crate::settings::ViewerSettings;
+    use crate::ui_combo::{ComboChanged, ComboSelection};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -776,14 +956,27 @@ mod tests {
         let mut store = SettingsStore::new();
         register(&mut store);
         let mut app = App::new();
-        // The mechanism is driven by triggering `ValueChange` directly (the
-        // widget plugins' pointer/focus path is theirs to test), so the harness
-        // needs only a schedule runner and the store.
+        // The mechanism is driven by triggering `ValueChange` / writing
+        // `ComboChanged` / editing the field directly (the widget plugins'
+        // pointer/focus path is theirs to test), so the harness needs only a
+        // schedule runner and the store.
         app.add_plugins(MinimalPlugins)
+            .add_message::<ComboChanged>()
+            .init_resource::<InputFocus>()
             .insert_resource(ViewerSettings::from_store_for_test(store))
             .add_observer(on_bound_checkbox_change)
             .add_observer(on_bound_slider_change)
-            .add_systems(Update, (sync_bound_checkboxes, sync_bound_sliders));
+            .add_systems(
+                Update,
+                (
+                    sync_bound_checkboxes,
+                    sync_bound_sliders,
+                    write_bound_combo_changes,
+                    sync_bound_combos.after(write_bound_combo_changes),
+                    write_bound_text_edits,
+                    sync_bound_text_inputs.after(write_bound_text_edits),
+                ),
+            );
         app
     }
 
@@ -952,6 +1145,188 @@ mod tests {
         app.update();
         assert!(app.world().entity(a).contains::<Checked>());
         assert!(app.world().entity(b).contains::<Checked>());
+        Ok(())
+    }
+
+    /// The three-option string combo the combo tests bind: PG / M / A.
+    fn spawn_maturity_combo(app: &mut App, active: usize) -> Entity {
+        app.world_mut()
+            .spawn((
+                ComboSelection {
+                    element: "test-combo",
+                    active,
+                },
+                SettingBinding::global("Maturity"),
+                ComboBindingValues(vec![
+                    SettingValue::String("PG".to_owned()),
+                    SettingValue::String("M".to_owned()),
+                    SettingValue::String("A".to_owned()),
+                ]),
+            ))
+            .id()
+    }
+
+    /// Register the string setting the combo tests use.
+    fn register_maturity(store: &mut SettingsStore, default: &str) {
+        store
+            .register(
+                "Maturity",
+                SettingValue::String(default.to_owned()),
+                "a rating",
+            )
+            .ok();
+    }
+
+    /// A bound combo moves to the option matching the stored value on the first
+    /// sync pass.
+    #[test]
+    fn combo_reads_setting_on_build() -> Result<(), TestError> {
+        let mut app = app(|store| register_maturity(store, "M"));
+        let combo = spawn_maturity_combo(&mut app, 0);
+        app.update();
+        assert_eq!(
+            app.world()
+                .entity(combo)
+                .get::<ComboSelection>()
+                .map(|s| s.active),
+            Some(1)
+        );
+        Ok(())
+    }
+
+    /// A user pick writes the picked option's mapped value to the store.
+    #[test]
+    fn combo_user_pick_writes_setting() -> Result<(), TestError> {
+        let mut app = app(|store| register_maturity(store, "PG"));
+        let combo = spawn_maturity_combo(&mut app, 0);
+        app.update();
+        app.world_mut()
+            .write_message(ComboChanged { combo, active: 2 });
+        app.update();
+        assert_eq!(store(&app).get_str("Maturity")?, "A");
+        Ok(())
+    }
+
+    /// An external store change moves the combo's selection.
+    #[test]
+    fn combo_follows_external_change() -> Result<(), TestError> {
+        let mut app = app(|store| register_maturity(store, "PG"));
+        let combo = spawn_maturity_combo(&mut app, 0);
+        app.update();
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            "Maturity",
+            SettingValue::String("A".to_owned()),
+        );
+        app.update();
+        assert_eq!(
+            app.world()
+                .entity(combo)
+                .get::<ComboSelection>()
+                .map(|s| s.active),
+            Some(2)
+        );
+        Ok(())
+    }
+
+    /// A stored value no option maps (a hand-edited config) leaves the combo
+    /// showing what it showed.
+    #[test]
+    fn combo_ignores_unknown_stored_value() -> Result<(), TestError> {
+        let mut app = app(|store| register_maturity(store, "made-up"));
+        let combo = spawn_maturity_combo(&mut app, 1);
+        app.update();
+        assert_eq!(
+            app.world()
+                .entity(combo)
+                .get::<ComboSelection>()
+                .map(|s| s.active),
+            Some(1)
+        );
+        Ok(())
+    }
+
+    /// Register the string setting the text tests use.
+    fn register_reply(store: &mut SettingsStore, default: &str) {
+        store
+            .register(
+                "Reply",
+                SettingValue::String(default.to_owned()),
+                "a reply text",
+            )
+            .ok();
+    }
+
+    /// A bound text field is seeded from the store while unfocused.
+    #[test]
+    fn text_seeds_from_store_when_unfocused() -> Result<(), TestError> {
+        let mut app = app(|store| register_reply(store, "stored text"));
+        let field = app
+            .world_mut()
+            .spawn((EditableText::new(""), SettingBinding::account("Reply")))
+            .id();
+        app.update();
+        let text = app
+            .world()
+            .entity(field)
+            .get::<EditableText>()
+            .map(|editable| editable.value().to_string());
+        assert_eq!(text.as_deref(), Some("stored text"));
+        Ok(())
+    }
+
+    /// An edit made while the field holds focus writes to the store.
+    #[test]
+    fn text_focused_edit_writes_setting() -> Result<(), TestError> {
+        let mut app = app(|store| register_reply(store, "before"));
+        let field = app
+            .world_mut()
+            .spawn((EditableText::new(""), SettingBinding::account("Reply")))
+            .id();
+        app.update();
+        app.world_mut()
+            .insert_resource(InputFocus::from_entity(field));
+        if let Some(mut editable) = app.world_mut().get_mut::<EditableText>(field) {
+            editable.editor_mut().set_text("after");
+        }
+        app.update();
+        assert_eq!(store(&app).get_str("Reply")?, "after");
+        Ok(())
+    }
+
+    /// An external store change does not clobber a focused field's edit in
+    /// progress, and lands once focus leaves.
+    #[test]
+    fn text_focused_field_not_clobbered() -> Result<(), TestError> {
+        let mut app = app(|store| register_reply(store, "original"));
+        let field = app
+            .world_mut()
+            .spawn((EditableText::new(""), SettingBinding::account("Reply")))
+            .id();
+        app.update();
+        app.world_mut()
+            .insert_resource(InputFocus::from_entity(field));
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Account,
+            "Reply",
+            SettingValue::String("external".to_owned()),
+        );
+        app.update();
+        let while_focused = app
+            .world()
+            .entity(field)
+            .get::<EditableText>()
+            .map(|editable| editable.value().to_string());
+        assert_eq!(while_focused.as_deref(), Some("original"));
+
+        app.world_mut().insert_resource(InputFocus::default());
+        app.update();
+        let after_blur = app
+            .world()
+            .entity(field)
+            .get::<EditableText>()
+            .map(|editable| editable.value().to_string());
+        assert_eq!(after_blur.as_deref(), Some("external"));
         Ok(())
     }
 

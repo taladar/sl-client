@@ -3041,8 +3041,46 @@ preferences-search-placeholder = Search settings
 preferences-ok = OK
 preferences-cancel = Cancel
 # The tab strip.
+preferences-tab-general = General
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
+# The general tab (viewer-preferences-general-tab): language, maturity, start
+# location, UI scale, name-tag basics, away timeout, busy responses.
+preferences-section-language = Language
+preferences-row-language = Interface language
+preferences-locale-default = System default
+preferences-locale-english = English
+preferences-locale-japanese = 日本語 (Japanese)
+preferences-locale-arabic = العربية (Arabic)
+preferences-locale-polish = Polski (Polish)
+preferences-locale-pseudo = Pseudolocale (testing)
+preferences-section-content-rating = Content rating
+preferences-row-maturity = I want to access content rated
+preferences-maturity-general = General
+preferences-maturity-moderate = Moderate
+preferences-maturity-adult = Adult
+preferences-section-start-location = Start location
+preferences-row-start-location = Log in to
+preferences-start-last = My last location
+preferences-start-home = My home
+preferences-section-interface = Interface
+preferences-row-ui-scale = UI size
+preferences-ui-scale-reset = Reset
+preferences-section-name-tags = Name tags
+preferences-row-name-tags = Show name tags
+preferences-row-own-name-tag = Show my own name tag
+preferences-section-away = Away
+preferences-row-afk-timeout = Mark me as away after
+preferences-afk-never = Never
+preferences-afk-2-min = 2 minutes
+preferences-afk-5-min = 5 minutes
+preferences-afk-10-min = 10 minutes
+preferences-afk-30-min = 30 minutes
+preferences-afk-60-min = 60 minutes
+preferences-section-busy-response = Automatic replies
+preferences-row-busy-response = Do Not Disturb reply
+preferences-row-autorespond-response = Autorespond reply
+preferences-row-autorespond-non-friends-response = Autorespond reply to non-friends
 # The UI & world display tab's section headings and rows.
 preferences-section-world = In-world display
 preferences-section-maps = Mini-map & world map

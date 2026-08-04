@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 241 |
+| ready | 240 |
 | blocked | 100 |
 | in-progress | 10 |
-| bugs | 7 |
-| done | 701 |
+| bugs | 8 |
+| done | 702 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1145** |
+| **total** | **1146** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (241)
+## ready (240)
 
 ### protocol
 
@@ -517,8 +517,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-ui-color-picker` (done))
 - [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
   — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
-- [`viewer-preferences-general-tab`](ready/viewer-preferences-general-tab.md) —
-  Preferences — general tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-graphics-tab`](ready/viewer-preferences-graphics-tab.md)
   — Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-network-cache-tab`](ready/viewer-preferences-network-cache-tab.md)
@@ -1034,7 +1032,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (7)
+## bugs (8)
 
 ### protocol
 
@@ -1054,13 +1052,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
+  — render_readback texture-animation test is flaky under load
 - [`viewer-sun-disc-grey-aditi-hdr-scale`](bugs/viewer-sun-disc-grey-aditi-hdr-scale.md)
   — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (701)
+## done (702)
 
 ### protocol
 
@@ -1769,6 +1769,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))
+- [`viewer-preferences-general-tab`](done/viewer-preferences-general-tab.md) —
+  Preferences — general tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))
