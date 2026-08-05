@@ -2,7 +2,7 @@
 id: viewer-hover-text
 title: Object hover text (llSetText floating text)
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07)
 refs: [viewer-name-tags-billboard-render, viewer-preferences-floater]
 ---

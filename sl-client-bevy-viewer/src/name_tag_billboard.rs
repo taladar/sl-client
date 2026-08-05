@@ -232,6 +232,12 @@ impl Material for NameTagMaterial {
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         descriptor.primitive.cull_mode = None;
+        // The SL glow pass extracts `scene_rgb * scene.a`, reading the frame's
+        // alpha channel as the per-face glow mask (`glow_extract.wgsl`). A
+        // blended overlay would otherwise write its text alpha into that channel
+        // and bloom — so leave the glow mask untouched, exactly as the other
+        // transparent world overlays (parcel borders, particles, prim faces) do.
+        sl_client_bevy::preserve_glow_mask_alpha(descriptor);
         Ok(())
     }
 }
@@ -570,16 +576,71 @@ pub(crate) struct NameTagMaterials {
 
 impl Default for NameTagMaterials {
     fn default() -> Self {
-        Self {
-            by_atlas: bevy::platform::collections::HashMap::default(),
-            fade_start: DEFAULT_FADE_START_METRES,
-            fade_range: DEFAULT_FADE_RANGE_METRES,
-            bubble_opacity: 0.5,
-        }
+        Self::with_fade(DEFAULT_FADE_START_METRES, DEFAULT_FADE_RANGE_METRES, 0.5)
     }
 }
 
+/// The floating object-text (`llSetText`) materials — the same per-atlas
+/// billboard materials as the name tags, but a **separate** registry so hover
+/// text carries its own (shorter) fade distances (`LLHUDText`'s 8 m / 4 m,
+/// against the name-tag 20 m / 5 m). Bare text draws no bubble, so the opacity
+/// is unused. See [`crate::hover_text`].
+#[derive(Resource, Debug)]
+pub(crate) struct HoverTextMaterials(pub(crate) NameTagMaterials);
+
+impl Default for HoverTextMaterials {
+    fn default() -> Self {
+        Self(NameTagMaterials::with_fade(
+            crate::hover_text::DEFAULT_HOVER_FADE_START_METRES,
+            crate::hover_text::DEFAULT_HOVER_FADE_RANGE_METRES,
+            0.0,
+        ))
+    }
+}
+
+/// How a world-anchored text entity's mesh is built and which fade registry it
+/// samples: avatar name tags draw a chat-bubble backdrop lifted 25 px above the
+/// anchor and fade at name-tag range; object floating text draws bare text at
+/// the anchor and fades at the shorter `LLHUDText` range. A tag entity without
+/// this component is treated as a name tag (the historical default).
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct WorldTextStyle {
+    /// Whether to draw the rounded-rect bubble backdrop.
+    pub(crate) draw_bubble: bool,
+    /// The screen-space lift above the anchor, **logical** px.
+    pub(crate) lift_px: f32,
+    /// Sample the [`HoverTextMaterials`] registry (shorter fade) instead of the
+    /// name-tag one.
+    pub(crate) use_hover_registry: bool,
+}
+
+impl WorldTextStyle {
+    /// The avatar name-tag style: bubble on, lifted 25 px, name-tag fade.
+    pub(crate) const NAME_TAG: Self = Self {
+        draw_bubble: true,
+        lift_px: BASE_LIFT_PX,
+        use_hover_registry: false,
+    };
+
+    /// The object floating-text style: bare text at the anchor, `LLHUDText` fade.
+    pub(crate) const HOVER_TEXT: Self = Self {
+        draw_bubble: false,
+        lift_px: 0.0,
+        use_hover_registry: true,
+    };
+}
+
 impl NameTagMaterials {
+    /// An empty registry with the given fade distances and bubble opacity.
+    pub(crate) fn with_fade(fade_start: f32, fade_range: f32, bubble_opacity: f32) -> Self {
+        Self {
+            by_atlas: bevy::platform::collections::HashMap::default(),
+            fade_start,
+            fade_range,
+            bubble_opacity,
+        }
+    }
+
     /// The shared material for one atlas page, created on first use. The
     /// default [`Handle<Image>`] (bevy's built-in 1×1 white) serves the
     /// bubble-only mesh of a tag with no glyphs.
@@ -712,6 +773,12 @@ pub(crate) struct TagMeshData {
 /// `[lift_px, lift_px + bubble height]`. The resulting off-origin AABB centre
 /// shifts the transparent-phase sort point by well under a metre (px ÷ 1024),
 /// which is negligible for ordering.
+///
+/// `draw_bubble` toggles the rounded-rect backdrop quad: avatar name tags draw
+/// it, but object floating text ([`crate::hover_text`]) has no background in the
+/// reference (`LLHUDText` renders bare text + drop shadow), so it passes `false`.
+/// The bubble-sized padding is kept either way, so the text keeps its small
+/// breathing room and the bottom-anchored geometry is identical.
 #[expect(
     clippy::arithmetic_side_effects,
     reason = "finite pixel-space layout geometry; the glam / float operators are the \
@@ -723,6 +790,7 @@ pub(crate) fn build_tag_mesh_data(
     scale_factor: f32,
     bubble_opacity: f32,
     lift_px: f32,
+    draw_bubble: bool,
 ) -> TagMeshData {
     // No glyphs → no tag at all (not even the bubble): an empty page keeps the
     // mesh valid while the composer has nothing to show.
@@ -760,8 +828,11 @@ pub(crate) fn build_tag_mesh_data(
     let bubble_center = Vec2::new(0.0, lift_px + bubble_half.y);
 
     // Bubble, on page 0: constant negative-half-extent sentinel in UV0, the
-    // corner offsets (the SDF sample points) in UV1.
-    if let Some(page0) = pages.first_mut() {
+    // corner offsets (the SDF sample points) in UV1. Skipped for bare object
+    // floating text, which has no backdrop.
+    if let Some(page0) = pages.first_mut()
+        && draw_bubble
+    {
         let sentinel = [-bubble_half.x, -bubble_half.y];
         let corner_offsets = [
             [-bubble_half.x, -bubble_half.y],
@@ -864,6 +935,7 @@ pub(crate) fn build_tag_meshes(
     mut materials: ResMut<Assets<NameTagMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut registry: ResMut<NameTagMaterials>,
+    mut hover_registry: ResMut<HoverTextMaterials>,
     mut changed: Query<
         (
             Entity,
@@ -873,13 +945,26 @@ pub(crate) fn build_tag_meshes(
             &mut NameTagPixelSize,
             Option<&Mesh3d>,
             Option<&Children>,
+            Option<&WorldTextStyle>,
         ),
         (Changed<TextLayoutInfo>, With<TagText>),
     >,
     colors: Query<&TextColor>,
     pages: Query<(), With<NameTagPage>>,
 ) {
-    for (entity, layout, computed, pull_radius, mut pixel_size, mesh3d, children) in &mut changed {
+    for (entity, layout, computed, pull_radius, mut pixel_size, mesh3d, children, style) in
+        &mut changed
+    {
+        // Absent style = name tag (the historical default).
+        let style = style.copied().unwrap_or(WorldTextStyle::NAME_TAG);
+        // Select the fade registry this entity samples; a bare `&mut` to the
+        // chosen `ResMut`'s inner value, so `material_for` / `bubble_opacity`
+        // read through one binding below.
+        let registry: &mut NameTagMaterials = if style.use_hover_registry {
+            &mut hover_registry.0
+        } else {
+            &mut registry
+        };
         let scale_factor = if layout.scale_factor > 0.0 {
             layout.scale_factor
         } else {
@@ -931,7 +1016,8 @@ pub(crate) fn build_tag_meshes(
             pull_radius.0,
             scale_factor,
             registry.bubble_opacity,
-            BASE_LIFT_PX * scale_factor,
+            style.lift_px * scale_factor,
+            style.draw_bubble,
         );
         pixel_size.set_if_neq(NameTagPixelSize(data.bubble_size));
 
@@ -1836,7 +1922,7 @@ mod tests {
     /// padding.
     #[test]
     fn mesh_data_orders_bubble_shadow_glyph() {
-        let data = build_tag_mesh_data(&[one_glyph()], 0.5, 1.0, 0.5, 0.0);
+        let data = build_tag_mesh_data(&[one_glyph()], 0.5, 1.0, 0.5, 0.0, true);
         assert_eq!(data.pages.len(), 1);
         let page = data.pages.first().cloned().unwrap_or_default();
         // Three quads: 12 vertices, 18 indices.
@@ -1873,7 +1959,7 @@ mod tests {
     /// to physical pixels.
     #[test]
     fn shadow_offset_scales_with_scale_factor() {
-        let data = build_tag_mesh_data(&[one_glyph()], 0.0, 2.0, 0.5, 0.0);
+        let data = build_tag_mesh_data(&[one_glyph()], 0.0, 2.0, 0.5, 0.0, true);
         let page = data.pages.first().cloned().unwrap_or_default();
         let shadow_center: Vec2 = page
             .positions
@@ -1898,7 +1984,7 @@ mod tests {
         emoji.page = 1;
         emoji.center = Vec2::new(20.0, 20.0);
         emoji.color = LinearRgba::WHITE;
-        let data = build_tag_mesh_data(&[one_glyph(), emoji], 0.5, 1.0, 0.5, 0.0);
+        let data = build_tag_mesh_data(&[one_glyph(), emoji], 0.5, 1.0, 0.5, 0.0, true);
         assert_eq!(data.pages.len(), 2);
         let page1 = data.pages.get(1).cloned().unwrap_or_default();
         // Shadow + glyph only: 8 vertices.
@@ -2143,7 +2229,7 @@ mod tests {
     /// No glyphs → one empty page and a zero footprint (no floating bubble).
     #[test]
     fn empty_content_builds_empty_mesh() {
-        let data = build_tag_mesh_data(&[], 0.5, 1.0, 0.5, 0.0);
+        let data = build_tag_mesh_data(&[], 0.5, 1.0, 0.5, 0.0, true);
         assert_eq!(data.pages.len(), 1);
         assert_eq!(data.pages.first().map(|p| p.positions.len()), Some(0));
         assert_eq!(data.bubble_size, Vec2::ZERO);

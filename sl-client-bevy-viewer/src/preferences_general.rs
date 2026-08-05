@@ -258,6 +258,75 @@ pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
         "preferences-row-own-name-tag",
         SettingBinding::global(crate::avatars::SETTING_SHOW_OWN_NAME_TAG),
     );
+    // The full name-tag toggle set (viewer-name-tags-preferences): line choices,
+    // status lines, colouring and the fade distances the billboard renderer and
+    // content composer already honour, bound here to persisted settings.
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-display-names",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_DISPLAY_NAMES),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-usernames",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_USERNAMES),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-group-titles",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_GROUP_TITLES),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-typing",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_TYPING),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-distance",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_DISTANCE),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-friend-color",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_FRIEND_COLOR),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-color-by-distance",
+        SettingBinding::global(crate::name_tag_content::SETTING_COLOR_BY_DISTANCE),
+    );
+    spawn_pref_slider(
+        commands,
+        panel,
+        "preferences-row-name-tag-fade-start",
+        SettingBinding::global(crate::name_tag_billboard::SETTING_FADE_START),
+        SliderRange::new(0.0, 128.0),
+        SliderStep(1.0),
+    );
+    spawn_pref_slider(
+        commands,
+        panel,
+        "preferences-row-name-tag-fade-range",
+        SettingBinding::global(crate::name_tag_billboard::SETTING_FADE_RANGE),
+        SliderRange::new(0.0, 64.0),
+        SliderStep(1.0),
+    );
+    spawn_pref_slider(
+        commands,
+        panel,
+        "preferences-row-name-tag-bubble-opacity",
+        SettingBinding::global(crate::name_tag_billboard::SETTING_BUBBLE_OPACITY),
+        SliderRange::new(0.0, 1.0),
+        SliderStep(0.05),
+    );
 
     spawn_pref_section(commands, panel, "preferences-section-away");
     spawn_pref_combo(

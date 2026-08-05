@@ -20,21 +20,20 @@ use sl_proto::{
     CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
     CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    ChatSessionKind, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse,
-    MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor,
+    RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_get_object_cost_request,
     build_get_object_physics_data_request, build_modify_material_params_request,
     build_object_media_navigate_request, build_object_media_update_request,
@@ -134,6 +133,7 @@ pub use sl_proto::{CAP_GET_MESH, CAP_GET_MESH2};
 // the cap URL from an [`SlCapabilities`] map and hands it to a
 // [`BevyAssetFetcher`] (used to fetch worn wearable assets for client-side
 // baking).
+pub use sl_proto::CAP_GET_OBJECT_COST;
 pub use sl_proto::CAP_UPLOAD_BAKED_TEXTURE;
 pub use sl_proto::CAP_VIEWER_ASSET;
 pub use sl_proto::{DisconnectReason as SessionDisconnectReason, Event as SlSessionEvent};

@@ -68,6 +68,11 @@ const UNITS_TO_PIXELS: f32 = 1024.0;
 // The bias added to each signed 16-bit `MeshTag` offset component.
 const TAG_OFFSET_BIAS: f32 = 32768.0;
 
+// The minimum distance, metres, the pulled billboard is kept from the camera, so
+// the camera-pull never drags it behind the near plane (Bevy's default near is
+// 0.1 m) — a fixed margin standing in for the reference's `near + 0.1` clamp.
+const MIN_CAMERA_DIST: f32 = 0.2;
+
 @vertex
 fn vertex(in: Vertex) -> VertexOutput {
     var out: VertexOutput;
@@ -78,9 +83,13 @@ fn vertex(in: Vertex) -> VertexOutput {
     let anchor_dist = distance(anchor, camera);
 
     // Pull the billboard origin toward the camera by the baked radius so the
-    // avatar's own body cannot occlude its tag, clamping so a very close
-    // camera never pulls it behind the near plane (nor past itself).
-    let pull = min(in.position.z, max(anchor_dist - 0.05, 0.0));
+    // source object's own body cannot occlude its text, clamping so the pulled
+    // point stays comfortably in front of the near plane. A large pull (a big
+    // object's floating text) would otherwise yank the billboard behind the near
+    // clip and vanish as the camera approaches — the reference clamps the push
+    // to `near + 0.1` (`llhudtext.cpp` `updateVisibility`); `MIN_CAMERA_DIST` is
+    // that guard, a fixed margin beyond Bevy's default 0.1 m near plane.
+    let pull = min(in.position.z, max(anchor_dist - MIN_CAMERA_DIST, 0.0));
     let to_camera = select(
         vec3<f32>(0.0, 0.0, 0.0),
         (camera - anchor) / max(anchor_dist, 0.001),

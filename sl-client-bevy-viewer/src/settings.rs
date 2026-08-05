@@ -224,6 +224,8 @@ impl ViewerSettings {
         crate::snapshot_floater::register_settings(&mut settings);
         crate::i18n::register_settings(&mut settings);
         crate::avatars::register_settings(&mut settings);
+        crate::hover_text::register_settings(&mut settings);
+        crate::hover_tooltip::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
         settings.load_global();
         settings

@@ -46,6 +46,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::input_focus::InputFocus;
 use bevy::light::NotShadowCaster;
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -1190,6 +1191,7 @@ fn apply_selection_highlight(
     children: Query<&Children>,
     scene: Query<(), With<SceneObject>>,
     faces: Query<&Mesh3d, With<PrimFaceEntity>>,
+    skinned_faces: Query<(), (With<PrimFaceEntity>, With<SkinnedMesh>)>,
     overlays: Query<(Entity, &ChildOf, &SelectionHighlightOverlay)>,
     mut commands: Commands,
 ) {
@@ -1249,6 +1251,16 @@ fn apply_selection_highlight(
         let Ok(mesh) = faces.get(face) else {
             continue;
         };
+        // A skinned face (an animesh, or any rigged in-world mesh) cannot take
+        // the inverted-hull shell: the shell reuses the face's mesh, which
+        // carries joint attributes, so the renderer specialises it into the
+        // skinned pipeline — but a shell has no `SkinnedMesh`, so it is handed
+        // the non-skinned (`model_only`) bind group. That mismatch is a wgpu
+        // validation error the render layer quits on. (The entity-scale inflate
+        // could not skin-deform the rim anyway.) Skip the outline for it.
+        if skinned_faces.get(face).is_ok() {
+            continue;
+        }
         commands.spawn((
             Mesh3d(mesh.0.clone()),
             MeshMaterial3d(assets.material(kind)),

@@ -863,6 +863,8 @@ enum InfoText {
     Creator,
     /// The owner's resolved name (an agent, or a group for a deeded object).
     Owner,
+    /// The selected linkset's land impact (`GetObjectCost`).
+    LandImpact,
     /// What the agent can do with the object, from the update flags' agent-
     /// relative permission bits.
     YouCan,
@@ -1188,6 +1190,7 @@ pub(crate) fn spawn_param_tabs(mut commands: Commands, pages: Option<Res<BuildTa
     for (info, key) in [
         (InfoText::Creator, "build-info-creator"),
         (InfoText::Owner, "build-info-owner"),
+        (InfoText::LandImpact, "build-info-land-impact"),
         (InfoText::YouCan, "build-info-you-can"),
     ] {
         spawn_info_row(&mut commands, general, info, key);
@@ -2019,6 +2022,10 @@ struct SnapshotData {
     group_label: String,
     /// The five permission masks, once the properties reply landed.
     permissions: Option<Permissions5>,
+    /// The selected linkset's land-impact state (`GetObjectCost`): a value once
+    /// the reply lands, pending while it is in flight, or unavailable on a grid
+    /// without the cap.
+    land_impact: crate::object_cost::LandImpact,
 }
 
 /// The shape-row visibility query (aliased for clippy's type-complexity cap);
@@ -2139,10 +2146,15 @@ fn build_snapshot(
     objects: &ObjectState,
     avatars: &mut AvatarState,
     groups: &GroupsModel,
+    costs: &mut crate::object_cost::ObjectCostModel,
     names: &mut MessageWriter<SlCommand>,
 ) -> Option<SnapshotData> {
     let primary = selection.primary()?;
     let data = owned_edit_data(objects, &primary.scoped)?;
+    // The selected linkset's land impact (`GetObjectCost`): the shared model
+    // sends the request once for the primary root and shares the reply with the
+    // hover tooltip (no duplicate requests).
+    let land_impact = costs.resolve(primary.full, names);
     let properties = primary.properties.as_ref();
     let (name, description) = properties.map_or_else(
         || (String::new(), String::new()),
@@ -2170,6 +2182,7 @@ fn build_snapshot(
         group,
         group_label: group.map_or_else(String::new, |group| group_label(group, groups, names)),
         permissions: properties.map(|properties| properties.permissions),
+        land_impact,
     })
 }
 
@@ -2284,6 +2297,7 @@ fn sync_param_widgets(
     objects: Res<ObjectState>,
     mut avatars: ResMut<AvatarState>,
     groups: Res<GroupsModel>,
+    mut costs: ResMut<crate::object_cost::ObjectCostModel>,
     translator: Translator,
     localization: Res<Localization>,
     locale: Res<crate::i18n::UiLocale>,
@@ -2298,7 +2312,14 @@ fn sync_param_widgets(
     if !state.active {
         return;
     }
-    let current = build_snapshot(&selection, &objects, &mut avatars, &groups, &mut names);
+    let current = build_snapshot(
+        &selection,
+        &objects,
+        &mut avatars,
+        &groups,
+        &mut costs,
+        &mut names,
+    );
     if snapshot.shown.as_ref() == current.as_ref()
         && !localization.is_changed()
         && !locale.is_changed()
@@ -2475,6 +2496,12 @@ fn sync_param_widgets(
             InfoText::Owner => data
                 .filter(|d| !d.owner_label.is_empty())
                 .map(|d| d.owner_label.clone()),
+            InfoText::LandImpact => data.and_then(|d| match d.land_impact {
+                crate::object_cost::LandImpact::Known(li) => Some(format!("{li:.0}")),
+                crate::object_cost::LandImpact::Pending => Some(PENDING_NAME.to_owned()),
+                crate::object_cost::LandImpact::CapUnavailable
+                | crate::object_cost::LandImpact::NotRequested => None,
+            }),
             InfoText::YouCan => data.map(|d| {
                 let mut abilities = Vec::new();
                 for (bit, key) in [

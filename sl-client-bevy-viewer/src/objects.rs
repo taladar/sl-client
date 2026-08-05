@@ -2926,6 +2926,25 @@ fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
     }
 }
 
+/// Mirror the object's `llSetText` floating text onto its entity as an
+/// [`ObjectFloatingText`], which [`crate::hover_text`] renders as a world-space
+/// billboard. Removed when the text is cleared (`llSetText("")` — an empty
+/// string) or when the object is a HUD attachment (whose floating text renders
+/// in HUD screen space, not the world, and is out of scope here). Refreshed on
+/// every update; a terse motion update carries the cached text unchanged, so
+/// the mirrored value stays put and the change-guarded renderer stays quiet.
+fn apply_floating_text(entity: Entity, object: &Object, is_hud: bool, commands: &mut Commands) {
+    use crate::hover_text::ObjectFloatingText;
+    if is_hud || object.text.is_empty() {
+        commands.entity(entity).remove::<ObjectFloatingText>();
+    } else {
+        commands.entity(entity).insert(ObjectFloatingText {
+            text: object.text.clone(),
+            raw_color: object.text_color,
+        });
+    }
+}
+
 /// Reconcile an object entity's [`ObjectLight`] component (P25.1) with its current
 /// light block: insert / refresh it when the object is a light source, remove it
 /// when the light was cleared in-world. Called on both the spawn and update paths
@@ -3116,6 +3135,9 @@ fn apply_object(
         // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
         // physical (or moved by this terse update) is driven kinematically.
         apply_physics(existing.entity, object, commands);
+        // Mirror the object's floating text (`llSetText`, viewer-hover-text) so a
+        // script setting / changing / clearing it is reflected live.
+        apply_floating_text(existing.entity, object, is_hud, commands);
         // A texture-only change (same shape, a new `TextureEntry` from a retexture
         // in-world or the sim's echo of the build floater's `ObjectImage` send)
         // re-tessellates too: the per-face materials (tint / repeats / offset /
@@ -3252,6 +3274,9 @@ fn apply_object(
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
     apply_physics(entity, object, commands);
+    // Mirror the object's floating text (`llSetText`, viewer-hover-text) onto the
+    // fresh entity so [`crate::hover_text`] spawns its billboard.
+    apply_floating_text(entity, object, is_hud, commands);
     // The geometry holder: a child of the object entity carrying only the object's
     // scale, so the object's own faces are scaled while linkset children (which
     // parent to the object entity, not this) are not.

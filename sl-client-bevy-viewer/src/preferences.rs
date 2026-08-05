@@ -1106,6 +1106,12 @@ fn build_world_ui_tab(commands: &mut Commands, panel: Entity) {
         "preferences-row-status-coordinates",
         SettingBinding::global(crate::status_bar::SHOW_COORDINATES_KEY),
     );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-hover-text",
+        SettingBinding::global(crate::hover_text::SETTING_SHOW_HOVER_TEXT),
+    );
 
     spawn_pref_section(commands, panel, "preferences-section-maps");
     spawn_pref_checkbox(

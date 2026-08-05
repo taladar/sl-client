@@ -87,6 +87,8 @@ mod group_notice;
 mod group_profile;
 mod groups;
 mod hand_pose;
+mod hover_text;
+mod hover_tooltip;
 mod hud;
 mod hud_pick;
 mod i18n;
@@ -129,6 +131,7 @@ mod nearby_chat_bar;
 mod notification_host;
 mod notification_persist;
 mod notifications;
+mod object_cost;
 mod object_menu;
 mod objects;
 mod offers_invites;
@@ -1277,6 +1280,14 @@ fn run_session(
     // render): the embedded billboard shader + material pipeline; the tag
     // systems themselves register with the avatar systems below.
     .add_plugins(crate::name_tag_billboard::NameTagBillboardPlugin)
+    // Object floating text (`llSetText`) reuses the name-tag billboard renderer
+    // with its own fade registry + lifetime map (viewer-hover-text).
+    .add_plugins(crate::hover_text::HoverTextPlugin)
+    // In-world hover tooltips over objects / avatars / land (viewer-hover-tooltips).
+    .add_plugins(crate::hover_tooltip::HoverTooltipPlugin)
+    // Shared object land-impact model (GetObjectCost), read by the hover tooltip
+    // and the build floater.
+    .add_plugins(crate::object_cost::ObjectCostPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
     // environment by the `sky` module's systems below.
     .add_plugins(SkyMaterialPlugin)
@@ -1700,6 +1711,15 @@ fn run_session(
                         .after(apply_object_meshes)
                         .after(update_avatar_objects),
                 ),
+                // Object floating text (`llSetText`, viewer-hover-text): reap
+                // billboards whose object cleared its text or despawned, then
+                // (re)compose the rest from the mirrored `ObjectFloatingText`.
+                // The PostUpdate world-text chain lays out the changed content.
+                (
+                    hover_text::despawn_removed_hover_text.after(update_objects),
+                    hover_text::sync_object_hover_text.after(update_objects),
+                )
+                    .chain(),
                 apply_avatar_names,
                 // Re-shape each rigged body from its avatar's visual params — morph
                 // targets (P13.3) and skeletal proportions (P13.4) — show/hide whole
@@ -2010,6 +2030,13 @@ fn run_session(
             (
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
                 pose_control_avatars.after(TransformSystems::Propagate),
+                // Object floating text placement (viewer-hover-text): read the
+                // object's freshly-propagated world pose and lift the text by
+                // 0.6 × the prim's Z scale in world up (the billboard's own
+                // transform then propagates next frame — a 1-frame trail on a
+                // moving object, imperceptible for the stationary vendors /
+                // signs floating text lives on, and never an origin flash).
+                hover_text::follow_hover_text.after(TransformSystems::Propagate),
             ),
         )
         // The world-space name-tag billboard chain
@@ -2024,6 +2051,7 @@ fn run_session(
             PostUpdate,
             (
                 name_tag_billboard::apply_name_tag_settings,
+                hover_text::apply_hover_text_settings,
                 name_tag_billboard::sync_tag_spans,
                 name_tag_billboard::layout_tag_text
                     .after(bevy::text::detect_text_needs_rerender)

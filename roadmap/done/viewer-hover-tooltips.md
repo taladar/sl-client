@@ -2,7 +2,7 @@
 id: viewer-hover-tooltips
 title: In-world hover tooltips (object / avatar / land inspectors)
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-22) — only llSetText hover *text* had a
   task (viewer-hover-text); the hover *tooltip* had none
 refs: [viewer-hover-text, viewer-name-tags-billboard-render]

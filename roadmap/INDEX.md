@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 241 |
+| ready | 238 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 8 |
-| done | 708 |
+| bugs | 10 |
+| done | 711 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1148** |
+| **total** | **1150** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (241)
+## ready (238)
 
 ### protocol
 
@@ -342,10 +342,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
-- [`viewer-hover-text`](ready/viewer-hover-text.md) — Object hover text
-  (llSetText floating text)
-- [`viewer-hover-tooltips`](ready/viewer-hover-tooltips.md) — In-world hover
-  tooltips (object / avatar / land inspectors)
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
@@ -413,8 +409,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Name tags — click a tag to select the avatar
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
   tags — remaining decorations
-- [`viewer-name-tags-preferences`](ready/viewer-name-tags-preferences.md) — Name
-  tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
   Neighbour-region parcel tracking (About Land on neighbours)
 - [`viewer-network-debug-tools`](ready/viewer-network-debug-tools.md) — Network
@@ -1021,7 +1015,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (8)
+## bugs (10)
 
 ### protocol
 
@@ -1040,16 +1034,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
+- [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
+  — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-sit-target-and-stand-button`](bugs/viewer-sit-target-and-stand-button.md)
+  — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (708)
+## done (711)
 
 ### protocol
 
@@ -1292,6 +1290,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
+- [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
+  (llSetText floating text)
+- [`viewer-hover-tooltips`](done/viewer-hover-tooltips.md) — In-world hover
+  tooltips (object / avatar / land inspectors)
 - [`viewer-hud-context-menu`](done/viewer-hud-context-menu.md) — HUD context /
   pie menu entries (blocked by `viewer-ui-radial-menu` (done))
 - [`viewer-i18n-fluent-scaffold`](done/viewer-i18n-fluent-scaffold.md) — i18n
@@ -1423,6 +1425,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)
   — Avatar name tags (and render priority, and object pick) lost to the probe
   cameras
+- [`viewer-name-tags-preferences`](done/viewer-name-tags-preferences.md) — Name
+  tags — preference toggles (blocked by `viewer-preferences-floater` (done))
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —

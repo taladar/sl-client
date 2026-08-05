@@ -2,7 +2,7 @@
 id: viewer-name-tags-preferences
 title: Name tags — preference toggles
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07); split from viewer-name-tags
 blocked_by: [viewer-preferences-floater]
 ---

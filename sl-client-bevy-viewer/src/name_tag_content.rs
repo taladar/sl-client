@@ -237,6 +237,9 @@ pub(crate) struct TagInputs<'a> {
     pub(crate) is_typing: bool,
     /// Whether the avatar's signalled animation set carries the AWAY entry.
     pub(crate) is_away: bool,
+    /// Whether the avatar is editing its appearance (the CUSTOMIZE signalled
+    /// animation), shown as the reference's `(Editing Appearance)` status.
+    pub(crate) is_editing_appearance: bool,
     /// Own-avatar→avatar distance, metres; `None` suppresses the distance
     /// line (the own tag, or the own avatar not being placed yet).
     pub(crate) distance_m: Option<f32>,
@@ -377,6 +380,11 @@ pub(crate) fn compose_tag(inputs: &TagInputs<'_>, toggles: &TagToggles) -> TagCo
     if inputs.is_away {
         states.push("Away");
     }
+    // The reference shows this for the own and other avatars alike (the CUSTOMIZE
+    // animation is signalled either way).
+    if inputs.is_editing_appearance {
+        states.push("(Editing Appearance)");
+    }
     if inputs.is_muted && !inputs.is_self {
         states.push("Blocked");
     }
@@ -452,6 +460,13 @@ pub(crate) fn compose_tag(inputs: &TagInputs<'_>, toggles: &TagToggles) -> TagCo
 static AWAY_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
     std::sync::LazyLock::new(|| {
         sl_anim::registry::builtin_animation_by_name("away").map(|animation| animation.id)
+    });
+
+/// The CUSTOMIZE built-in animation's id, resolved once — its presence in an
+/// avatar's signalled set is the protocol's carrier of "editing appearance".
+static CUSTOMIZE_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
+    std::sync::LazyLock::new(|| {
+        sl_anim::registry::builtin_animation_by_name("customize").map(|animation| animation.id)
     });
 
 /// How often the avatar-distance inputs refresh, seconds (avatars move most
@@ -548,6 +563,8 @@ pub(crate) fn compose_name_tags(
                 .is_some_and(|mutes| mutes.is_muted(agent.uuid())),
             is_typing: statuses.is_typing(agent),
             is_away: AWAY_ANIM.is_some_and(|away| playback.is_playing(agent, away)),
+            is_editing_appearance: CUSTOMIZE_ANIM
+                .is_some_and(|customize| playback.is_playing(agent, customize)),
             distance_m: if is_self {
                 None
             } else {
@@ -716,6 +733,25 @@ mod tests {
         };
         let content = compose_tag(&own, &TagToggles::default());
         assert_eq!(texts(&content), vec!["Shiny Name", "avatar.tester"],);
+    }
+
+    /// The `(Editing Appearance)` status shows for the own avatar too (only
+    /// Blocked / Typing are self-suppressed), joined after Away.
+    #[test]
+    fn editing_appearance_status_shows() {
+        let record = custom_record();
+        let inputs = TagInputs {
+            record: Some(&record),
+            is_self: true,
+            is_away: true,
+            is_editing_appearance: true,
+            ..TagInputs::default()
+        };
+        let content = compose_tag(&inputs, &TagToggles::default());
+        assert_eq!(
+            content.lines.first().map(|line| line.text.as_str()),
+            Some("Away, (Editing Appearance)"),
+        );
     }
 
     /// The distance bands at their boundaries, and the two-decimal format.
