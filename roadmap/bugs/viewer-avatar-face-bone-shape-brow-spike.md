@@ -26,10 +26,35 @@ their authored rest position (now applied correctly as an absolute after the
 [[viewer-avatar-tongue-protrudes]] fix), snapping the brow back; between blinks
 it returns to the shape-deformed rest and spikes again.
 
-To investigate: which **transmitted** shape params deform the face-bone chain
-(head size / face shear vs the group-1 face params that are *not* transmitted
-for other avatars), whether our `SkeletalDeformations` over-applies that
-deformation to the deep face bones vs the reference, and whether the reference
-simply does not propagate that deformation to a BoM mesh head the way we do.
-Needs the specific avatar live (it left before this could be pinned) or the
-[[viewer-avatar-state-dump-replay]] capture to reproduce its shape offline.
+Mechanism (traced through `avatar_lad.xml`): every face-chain `param_skeleton`
+is a **group-1** (non-transmitted) param — `Head Size` (655), `Forehead Angle`
+(31629), `Egg_Head` (30646), `Big_Brow` (30001), `Square_Head`, `Head Length`
+(30772)… — but each is **driven by a transmitted group-0 slider** (`Head Size`
+id 682 → 655, `Big_Brow` id 1 → 30001, `Forehead Angle` id 629 → 31629,
+`Egg_Head` id 646, `Head Shape` id 193, `Head Length` id 773). So a wearer's
+shape **does** reach these skeletal deforms via the driver, for any avatar.
+`Head Size` scales `mSkull`/`mHead`/`mFaceRoot`/forehead **uniformly** (the
+whole head scales coherently — no spike on its own); the spike comes from the
+**differential** forehead deforms — chiefly **`Big_Brow`** (offsets
+`mFaceForeheadCenter` +0.007 m **forward**) and `Forehead Angle` / `Egg_Head` —
+which push the forehead bone forward relative to the rest of the head. A
+large-man shape (big head + prominent brow) sets these; medium-woman shapes
+leave them ~neutral, which is why only one avatar showed it. Standard
+forehead-from-`mHead` ≈ 0.145 m; his ≈ 0.164.
+
+Why it may be viewer-specific — the open question: an offline scan of the mesh
+cache (classifying a head by **geometry actually weighted to face bones**, not
+merely listing them — bodies/clothing list the whole skeleton) found
+**288 of 344 real head parts ship no joint positions** (no
+`alt_inverse_bind_matrix`), so most mesh heads cannot compensate for a
+shape-deformed skeleton at all. If the reference genuinely renders his brow
+fine, either his head is one of the 56 that **do** ship joint positions (and we
+fail to apply the forehead override, or double-count it against our scale
+inheritance — check `joint_position_overrides` on the `mFace*` bones and the
+`deformed_world_matrices` scale path), or the reference does **not** propagate
+the shape's face-bone `param_skeleton` to a BoM mesh-head avatar the way we do.
+Decide between these by capturing his shape param values (esp.
+`Head Size`/`Big_Brow`/ `Forehead Angle`) and his head-mesh's
+`alt_inverse_bind_matrix` — needs the avatar live (he left) or the
+[[viewer-avatar-state-dump-replay]] capture, then compare our forehead deform to
+the reference's `LLPolySkeletalDistortion` for those exact values.
