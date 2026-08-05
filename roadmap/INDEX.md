@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 238 |
+| ready | 239 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 10 |
-| done | 711 |
+| bugs | 9 |
+| done | 712 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1150** |
+| **total** | **1151** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (238)
+## ready (239)
 
 ### protocol
 
@@ -583,6 +583,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-seated-region-crossing`](ready/viewer-seated-region-crossing.md) —
+  Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
@@ -1015,7 +1017,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (10)
+## bugs (9)
 
 ### protocol
 
@@ -1041,13 +1043,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
-- [`viewer-sit-target-and-stand-button`](bugs/viewer-sit-target-and-stand-button.md)
-  — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (711)
+## done (712)
 
 ### protocol
 
@@ -1876,6 +1876,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
+  — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)
   — Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 - [`viewer-snapshot-floater`](done/viewer-snapshot-floater.md) — Snapshot

@@ -26,7 +26,8 @@
 //!   handles touch ([`TARGET_TOUCHABLE`], the reference's `Object.EnableTouch`
 //!   without its click-action refinements).
 //! - **Sit Here / Stand Up** → [`Command::Sit`] on the picked prim (offset =
-//!   the clicked point, object-local, as the reference sends) /
+//!   the reference's `calcFocusOffset` in region axes, [`crate::sit_offset`],
+//!   so a no-sit-target seat lands where the reference puts it) /
 //!   [`Command::Stand`]. Declared as the reference declares them: an
 //!   **autohide chain** sharing one compass position
 //!   ([`PieContent::Chain`]), showing whichever applies to the current seated
@@ -96,7 +97,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_client_bevy::{
     Command, DeRezDestination, FolderType, MuteFlags, MuteType, ScopedObjectId, SlAgentParcel,
-    SlCommand, SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid,
+    SlCommand, SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid, Vector,
 };
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit, UNIMPLEMENTED};
@@ -1016,6 +1017,8 @@ fn handle_object_menu_actions(
     mut panels: Query<&mut crate::ui::UiPanelShown>,
     mut selection: ResMut<crate::edit_selection::SelectionSet>,
     state: Res<ObjectState>,
+    seat_poses: Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
+    seat_cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
     mut open_contents: MessageWriter<crate::edit_contents::OpenObjectContents>,
 ) {
@@ -1084,7 +1087,7 @@ fn handle_object_menu_actions(
             }),
             "sit-here" => Some(Command::Sit {
                 target: hit.summary.picked_full,
-                offset: hit.surface.position.clone(),
+                offset: sit_here_offset(hit, &state, &seat_poses, &seat_cameras),
             }),
             "stand" => {
                 ground_sit.sitting = false;
@@ -1111,6 +1114,67 @@ fn handle_object_menu_actions(
             commands.write(SlCommand(command));
         }
     }
+}
+
+/// The `AgentRequestSit` offset for a "Sit Here" on `hit`: the reference's
+/// `calcFocusOffset` ([`crate::sit_offset`]) in Second Life region axes, computed
+/// from the seat prim's world pose + scale and the camera.
+///
+/// Falls back to the raw object-local surface point (the old behaviour) when the
+/// seat prim's entity / pose or the camera is not available — the sit still goes
+/// out, just without the faithful offset. When a prim has a real sit target the
+/// simulator ignores this offset entirely, so the fallback is harmless there.
+fn sit_here_offset(
+    hit: &ObjectRayHit,
+    state: &ObjectState,
+    seat_poses: &Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
+    seat_cameras: &Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
+) -> Vector {
+    let fallback = || hit.surface.position.clone();
+    let Some(entity) = state.entity_by_scoped(&hit.summary.picked_scoped) else {
+        return fallback();
+    };
+    let (Ok((object_global, sl_motion)), Ok(camera_global)) =
+        (seat_poses.get(entity), seat_cameras.single())
+    else {
+        return fallback();
+    };
+
+    let obj_pos = object_global.translation();
+    let cam_pos = camera_global.translation();
+    // The world surface-hit point, recovered from the object-local surface point.
+    let hit_world = object_global.transform_point(Vec3::new(
+        hit.surface.position.x,
+        hit.surface.position.y,
+        hit.surface.position.z,
+    ));
+
+    // The prim's Second Life world rotation, recovered from its Bevy world
+    // rotation (`R_bevy = basis · q_sl`), so it rotates the Second Life-packed
+    // vectors below. Works for a linkset-child seat too (the global transform
+    // already composes the parent).
+    let obj_rotation = crate::coords::sl_to_bevy_rotation()
+        .inverse()
+        .mul_quat(object_global.rotation());
+    let extents = Vec3::new(sl_motion.scale.x, sl_motion.scale.y, sl_motion.scale.z);
+
+    crate::sit_offset::sit_focus_offset(
+        obj_rotation,
+        extents,
+        bevy_delta_to_sl(crate::sit_offset::vsub(cam_pos, obj_pos)),
+        bevy_delta_to_sl(crate::sit_offset::vsub(hit_world, cam_pos)).normalize_or_zero(),
+        bevy_delta_to_sl(crate::sit_offset::vsub(hit_world, obj_pos)),
+        bevy_delta_to_sl(camera_global.forward().as_vec3()),
+    )
+}
+
+/// A Bevy-space delta [`Vec3`] as a Second Life-packed [`Vec3`] (Second Life
+/// components in `x`/`y`/`z`) — the vector form of
+/// [`bevy_to_sl_vec`](crate::coords::bevy_to_sl_vec), for a direction / offset
+/// (no region origin). Inverting `(x, y, z) -> (x, z, -y)` gives
+/// `(bx, by, bz) -> (bx, -bz, by)`.
+const fn bevy_delta_to_sl(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, -v.z, v.y)
 }
 
 #[cfg(test)]

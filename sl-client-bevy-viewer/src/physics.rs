@@ -195,6 +195,13 @@ impl Plugin for PhysicsPlugin {
                     // P31.4: dead-reckon avatars between updates (the avatars.rs
                     // path), after `apply_object` has refreshed the [`AvatarMotion`].
                     drive_avatar_motion.after(update_avatar_objects),
+                    // Seated avatars ride their seat, not the region: place them from
+                    // the seat's world transform after the dead-reckoner (whose write
+                    // it overrides for a seated anchor) and before the camera follow
+                    // reads the own avatar's pose.
+                    crate::avatars::place_seated_avatars
+                        .after(drive_avatar_motion)
+                        .before(crate::camera::position_camera),
                     // P31.3: replace the placeholder cuboid with a shape-aware
                     // collider once the physics data and geometry are available.
                     refine_physical_colliders
@@ -1177,17 +1184,27 @@ impl AvatarInterp {
 /// terrain. The avatar stays kinematic (sim-authoritative); the predicted motion is
 /// applied to the anchor as a translation *delta* (plus, for a rigged body, the
 /// predicted orientation), leaving the root-drop render offset intact.
+#[expect(
+    clippy::type_complexity,
+    reason = "the dead-reckoner's avatar query — motion, interpolation state and anchor transform \
+              — with a `Without<Seated>` filter so a seat-driven avatar is left alone"
+)]
 pub(crate) fn drive_avatar_motion(
     time: Res<Time>,
     liveness: Res<CircuitLiveness>,
     dilations: Res<RegionTimeDilation>,
     terrain: Res<TerrainState>,
-    mut avatars: Query<(
-        Entity,
-        Ref<AvatarMotion>,
-        Option<&mut AvatarInterp>,
-        &mut Transform,
-    )>,
+    mut avatars: Query<
+        (
+            Entity,
+            Ref<AvatarMotion>,
+            Option<&mut AvatarInterp>,
+            &mut Transform,
+        ),
+        // A seated avatar rides its seat, not the region: `place_seated_avatars`
+        // drives its anchor, so the region-space dead-reckoner must leave it be.
+        Without<crate::avatars::Seated>,
+    >,
     mut commands: Commands,
 ) {
     let now = time.elapsed_secs_f64();

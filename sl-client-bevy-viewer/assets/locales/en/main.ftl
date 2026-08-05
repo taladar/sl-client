@@ -551,6 +551,13 @@ bottom-toolbar-camera = Camera
 # The snapshot (photo) floater toggle — the reference's toolbar "Snapshot"
 # command (singular).
 bottom-toolbar-snapshot = Snapshot
+
+## The Stand Up / Stop flycam state button (viewer-sit-target-and-stand-button) —
+## the reference's combined stand / stop-flying panel, in the toolbar's reserved
+## leading slot. Only one is ever shown: Stand while seated, Stop flycam in flycam.
+
+stand-button-stand = Stand Up
+stand-button-stop-flycam = Stop flycam
 ## The inventory filters floater (viewer-inventory-advanced-filters).
 
 inventory-filters-title = Inventory Filters

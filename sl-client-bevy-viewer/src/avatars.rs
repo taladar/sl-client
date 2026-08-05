@@ -57,11 +57,13 @@ use sl_client_bevy::{
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{
-    metres_to_f32, sl_euler_deg_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
+    metres_to_f32, sl_euler_deg_to_quat, sl_rotation_to_quat, sl_to_bevy_object_rotation,
+    sl_to_bevy_vec,
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::name_tag_billboard::name_tag_render_bundle;
 use crate::name_tag_content::TagContent;
+use crate::objects::ObjectState;
 use crate::physics::AvatarMotion;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
@@ -724,6 +726,15 @@ pub(crate) struct AvatarState {
     /// shape's [`AvatarBody::rest_root_drop`] applies) until an appearance
     /// resolves, or for a sphere-only avatar.
     root_drops: HashMap<AgentKey, f32>,
+    /// Each avatar's resolved **seat drop** (R23 counterpart): the pelvis's
+    /// shape-scaled local height above the body root (`pelvis_local_z`), keyed by
+    /// agent. A sit offset targets the avatar **root** (hips), so a seated avatar's
+    /// anchor is dropped by this so the hips land on the sit target
+    /// ([`place_seated_avatars`]) — unlike the standing [`root_drops`](Self::root_drops),
+    /// which also folds in the capsule-centre correction that does not apply while
+    /// seated. Absent (the rest [`AvatarBody::rest_seat_drop`] applies, seeded on
+    /// body spawn) until an appearance resolves, or for a sphere-only avatar.
+    seat_drops: HashMap<AgentKey, f32>,
     /// R22b diagnostic: every agent the session has *ever* surfaced a full avatar
     /// object (`pcode` 47) for, so the [`log_avatar_interest`]-gated census can
     /// tell a "the simulator never streamed this avatar" case (agent absent here)
@@ -737,9 +748,45 @@ pub(crate) struct AvatarState {
     /// simulators means the same. Read by the R22b census diagnostic and by the
     /// minimap's dot layer (the unknown-altitude glyph).
     coarse_pos: HashMap<AgentKey, (u8, u8, u16)>,
+    /// Avatars currently **seated on an object** (their full-object `ObjectUpdate`
+    /// carries a non-zero `ParentID`), keyed by agent id — self and others alike
+    /// (several avatars share one boat). The value is the seat and the avatar's
+    /// pose **in the seat's frame** (the parent-relative wire transform, the
+    /// `llSitTarget` offset): [`place_seated_avatars`] composes it onto the seat's
+    /// live world transform each frame so the avatar rides the moving seat, and
+    /// [`drive_avatar_motion`](crate::physics::drive_avatar_motion) leaves a
+    /// [`Seated`] anchor alone (its motion is the seat's, not region dead-reckoned).
+    /// Entries clear the instant an update arrives with `ParentID` zero (a stand).
+    seated: HashMap<AgentKey, SeatedTarget>,
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
+
+/// Where a seated avatar sits: the seat object and the avatar's pose **relative to
+/// the seat**, both taken from the seated avatar's `ObjectUpdate` (whose
+/// `ParentID` is the seat and whose `motion` is parent-relative — the reference's
+/// `sitOnObject` `rel_pos` / `rel_rot`). Kept in pure Second Life space (no axis
+/// swap): the seat entity carries the single SL→Bevy basis change, so composing
+/// this onto the seat's world transform places the avatar exactly as a linkset
+/// child prim at the same offset would sit. **No root drop** is applied — the
+/// reference skips the pelvis/capsule correction entirely while sitting on an
+/// object (`LLVOAvatar::updateRootPositionAndRotation` takes the parent transform
+/// directly).
+#[derive(Debug, Clone, Copy)]
+struct SeatedTarget {
+    /// The seat object's scoped id — resolved to its scene entity through
+    /// [`ObjectState::entity_by_scoped`](crate::objects::ObjectState::entity_by_scoped)
+    /// each frame (the seat may stream in after, or independently of, the avatar).
+    seat: ScopedObjectId,
+    /// The avatar's pose in the seat's local frame, as a pure-SL [`Transform`].
+    offset: Transform,
+}
+
+/// Marker on a seated avatar's anchor: its world pose is driven by
+/// [`place_seated_avatars`] from its seat, so the region-space dead-reckoner
+/// ([`drive_avatar_motion`](crate::physics::drive_avatar_motion)) must leave it be.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct Seated;
 
 /// The maximum attachment/linkset depth chased when attributing an object's
 /// `IMG_USE_BAKED_*` hide to its avatar, a guard against a malformed parent cycle.
@@ -771,6 +818,15 @@ pub(crate) struct AvatarBody {
     /// [`root_drop_from_metrics`] of the rest-skeleton `computeBodySize`
     /// quantities, with no hover.
     rest_root_drop: f32,
+    /// The rest shape's **seat drop** (Second Life Z, metres): how far below the
+    /// avatar root (hips / `mPelvis`) the body-root entity sits — the pelvis's
+    /// local rest height above the root (`pelvis_local_z`), until the avatar's own
+    /// appearance resolves. A sit offset targets the avatar **root** (hips), not
+    /// the feet, so a seated avatar's anchor is dropped by this so the hips land on
+    /// the sit target ([`place_seated_avatars`]) — the seated counterpart of
+    /// [`rest_root_drop`](Self::rest_root_drop) (which also corrects for the
+    /// standing capsule centre, irrelevant when seated).
+    rest_seat_drop: f32,
     /// Each attachment point's raw numeric id mapped to the joint it hangs from
     /// and its fixed local offset node (P16.1/P16.2). Built from the
     /// `avatar_lad.xml` `<attachment_point>` table; a HUD point (whose `mScreen`
@@ -951,6 +1007,12 @@ pub(crate) fn setup_avatar_body(
                 || library.pelvis_height(),
                 |metrics| root_drop_from_metrics(&metrics, 0.0),
             ),
+        // The rest-shape seat drop: the pelvis's rest height above the body root
+        // (the sit offset targets the hips, so a seated body drops by this). The
+        // pelvis rest height is the same fallback the root drop uses.
+        rest_seat_drop: skeleton
+            .body_size_metrics(&SkeletalDeformations::default(), &JointOverrides::default())
+            .map_or_else(|| library.pelvis_height(), |metrics| metrics.pelvis_local_z),
         attachment_points: library
             .attachment_points()
             .into_iter()
@@ -1000,6 +1062,61 @@ fn body_root_transform(object: &Object, root_drop: f32) -> Transform {
         translation: Vec3::new(translation.x, translation.y - root_drop, translation.z),
         rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
         scale: Vec3::ONE,
+    }
+}
+
+/// A seated avatar's pose **in its seat's local frame**, as a pure Second Life
+/// [`Transform`] (no axis swap, no root drop) — the parent-relative wire position
+/// and rotation of an avatar `ObjectUpdate` whose `ParentID` is the seat. The seat
+/// entity carries the single SL→Bevy basis change for the whole subtree, so
+/// [`place_seated_avatars`] composes this onto the seat's world transform exactly
+/// as a linkset child prim at the same offset would compose (`objects.rs`'s child
+/// branch). The reference (`LLVOAvatar::sitOnObject`) parents the avatar root at
+/// this same seat-relative `rel_pos` / `rel_rot` and applies **no** pelvis / root
+/// correction while seated.
+///
+/// Because no root drop is applied, the shoe / heel-platform offset (R17) — which
+/// rides the `pelvis_to_foot` term of the drop ([`root_drop_from_metrics`]) — is
+/// **excluded** while seated, matching the reference: its
+/// `updateRootPositionAndRotation` takes the `!(isSitting() && getParent())` branch
+/// for an object sit and never folds the foot correction in.
+fn seated_offset(object: &Object) -> Transform {
+    Transform {
+        translation: Vec3::new(
+            object.motion.position.x,
+            object.motion.position.y,
+            object.motion.position.z,
+        ),
+        rotation: sl_rotation_to_quat(&object.motion.rotation),
+        scale: Vec3::ONE,
+    }
+}
+
+/// Drop a seated avatar's seat-relative pose so the **hips** (avatar root) land on
+/// the sit target rather than the body root.
+///
+/// A sit offset targets the avatar root (the `mPelvis` hips), but our anchor is the
+/// body root, which sits `seat_drop` (the pelvis's local rest height) below the
+/// pelvis. Lower the anchor by `seat_drop` along the **avatar's** up (the sit
+/// rotation's local up, so a reclined / tilted seat drops correctly), all in the
+/// seat's pure-Second-Life frame — `place_seated_avatars` then composes it onto the
+/// seat's world transform. The reference reaches the same placement differently
+/// (its `mRoot` *is* the pelvis, so it needs no such drop —
+/// `LLVOAvatar::updateRootPositionAndRotation` skips the standing correction while
+/// seated).
+fn drop_to_hips(offset: Transform, seat_drop: f32) -> Transform {
+    // The pelvis-above-root offset, rotated into the sit orientation (pure SL).
+    let drop = offset.rotation.mul_vec3(Vec3::new(0.0, 0.0, seat_drop));
+    Transform {
+        // Per-component subtract to avoid the `arithmetic_side_effects` lint on the
+        // glam `Vec3` operator.
+        translation: Vec3::new(
+            offset.translation.x - drop.x,
+            offset.translation.y - drop.y,
+            offset.translation.z - drop.z,
+        ),
+        rotation: offset.rotation,
+        scale: offset.scale,
     }
 }
 
@@ -1905,28 +2022,55 @@ impl AvatarState {
         // detection reseeds the prediction. A rigged body root carries the object
         // rotation, a placeholder sphere does not.
         let avatar_motion = AvatarMotion::from_object(object, body.is_some());
+        // Seated on an object? A non-zero `ParentID` means this avatar's wire
+        // position / rotation are **relative to the seat**, not region-local, and
+        // it rides the seat. Record the seat + seat-relative pose so
+        // [`place_seated_avatars`] drives the anchor from the seat's live world
+        // transform; a `ParentID` of zero (a stand) clears it, restoring region
+        // placement. Self and others alike — several avatars can share one seat.
+        let seated = object.parent_id.get() != 0;
+        if seated {
+            self.seated.insert(
+                agent,
+                SeatedTarget {
+                    seat: object.scoped_parent_id(),
+                    offset: seated_offset(object),
+                },
+            );
+        } else {
+            self.seated.remove(&agent);
+        }
         // A precise full object takes over from any coarse dot for this agent.
         if let Some(entities) = self.coarse.remove(&agent) {
             despawn_avatar(entities, commands);
         }
         self.coarse_region.remove(&agent);
         if let Some(existing) = self.objects.get(&agent) {
-            // Move the existing anchor: a body root gets the full position +
-            // orientation transform, a sphere just its translation.
-            let transform = match body {
-                Some(body) => {
-                    let root_drop = self
-                        .root_drops
-                        .get(&agent)
-                        .copied()
-                        .unwrap_or(body.rest_root_drop);
-                    body_root_transform(object, root_drop)
-                }
-                None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
-            };
-            commands
-                .entity(existing.anchor)
-                .insert((transform, avatar_motion));
+            let mut anchor = commands.entity(existing.anchor);
+            anchor.insert(avatar_motion);
+            if seated {
+                // The seat owns the anchor's world pose; just tag it so
+                // `place_seated_avatars` drives it and the dead-reckoner leaves it
+                // be. The transform is written each frame from the seat, so none is
+                // set here.
+                anchor.insert(Seated);
+            } else {
+                // Move the existing anchor: a body root gets the full position +
+                // orientation transform, a sphere just its translation. Standing up
+                // drops the seated tag so the dead-reckoner resumes.
+                let transform = match body {
+                    Some(body) => {
+                        let root_drop = self
+                            .root_drops
+                            .get(&agent)
+                            .copied()
+                            .unwrap_or(body.rest_root_drop);
+                        body_root_transform(object, root_drop)
+                    }
+                    None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
+                };
+                anchor.insert(transform).remove::<Seated>();
+            }
             return;
         }
         self.request_name(agent);
@@ -1952,6 +2096,17 @@ impl AvatarState {
             ),
         };
         commands.entity(entities.anchor).insert(avatar_motion);
+        if seated {
+            // A freshly-streamed avatar that is already seated: tag it so
+            // `place_seated_avatars` drives its world pose from the seat.
+            commands.entity(entities.anchor).insert(Seated);
+        }
+        // Seed the seat drop with the rest pelvis height for a rigged body, so a
+        // seated body lands hips-on-target before its own appearance resolves (a
+        // sphere has no skeleton, so no drop — its centre sits on the target).
+        if let Some(body) = body {
+            self.seat_drops.entry(agent).or_insert(body.rest_seat_drop);
+        }
         self.by_scoped.insert(scoped, agent);
         self.objects.insert(agent, entities);
         debug!(
@@ -1978,7 +2133,58 @@ impl AvatarState {
         let _dropped_deform = self.deformations.remove(&agent);
         let _dropped_volumes = self.volume_deformations.remove(&agent);
         let _dropped_physics = self.body_physics.remove(&agent);
+        let _dropped_seat = self.seated.remove(&agent);
+        let _dropped_seat_drop = self.seat_drops.remove(&agent);
         self.clear_joint_overrides(agent);
+    }
+
+    /// Whether `agent`'s avatar is currently seated on an object — its latest
+    /// full-object update carried a non-zero `ParentID`. The camera reads this to
+    /// take a seated own avatar's world pose from its (seat-driven) global
+    /// transform rather than its region-space motion.
+    pub(crate) fn is_seated(&self, agent: AgentKey) -> bool {
+        self.seated.contains_key(&agent)
+    }
+
+    /// Unseat any avatars seated on the object `seat` that was just removed
+    /// (`ObjectRemoved`) — drop their seated state and the [`Seated`] tag so the
+    /// dead-reckoner resumes owning their anchor. Their anchor stays at its last
+    /// seat-driven world pose until the simulator's own stand / motion update lands.
+    ///
+    /// The simulator normally unseats a rider before (or as) it kills the seat, so
+    /// the avatar's own `ObjectUpdate` (with `ParentID` zero) already cleared the
+    /// seat; this covers the seat vanishing — deleted, or culled from the interest
+    /// list — *without* or *before* that update, so an avatar is never left frozen,
+    /// invisibly parented, to a seat that no longer exists. Returns the agents it
+    /// unseated (empty when the removed object was not anyone's seat).
+    fn unseat_from_seat(&mut self, seat: ScopedObjectId, commands: &mut Commands) {
+        let riders: Vec<AgentKey> = self
+            .seated
+            .iter()
+            .filter(|(_agent, target)| target.seat == seat)
+            .map(|(agent, _target)| *agent)
+            .collect();
+        for agent in riders {
+            let _unseated = self.seated.remove(&agent);
+            if let Some(entities) = self.objects.get(&agent) {
+                commands.entity(entities.anchor).remove::<Seated>();
+            }
+        }
+    }
+
+    /// Each seated avatar's `(anchor entity, seat scoped id, seat-relative pose,
+    /// seat drop)`, for [`place_seated_avatars`] to drive the anchor from its seat's
+    /// live world transform. The seat drop is the pelvis's height above the body
+    /// root (zero for a sphere), applied so the hips land on the sit target. Skips
+    /// any avatar whose anchor is not (yet) a tracked full object.
+    fn seated_placements(
+        &self,
+    ) -> impl Iterator<Item = (Entity, ScopedObjectId, Transform, f32)> + '_ {
+        self.seated.iter().filter_map(|(agent, target)| {
+            let anchor = self.objects.get(agent)?.anchor;
+            let seat_drop = self.seat_drops.get(agent).copied().unwrap_or(0.0);
+            Some((anchor, target.seat, target.offset, seat_drop))
+        })
     }
 
     /// The agent whose avatar is tracked under the scoped object id `avatar_scoped`
@@ -2425,9 +2631,59 @@ pub(crate) fn update_avatar_objects(
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
                 state.forget_object(*local_id);
+                // A removed object might be someone's seat: unseat its riders so
+                // they are not left frozen to a seat that no longer exists.
+                state.unseat_from_seat(*local_id, &mut commands);
                 state.remove_object(*local_id, &mut commands);
             }
             _other => {}
+        }
+    }
+}
+
+/// Drive every **seated** avatar's world pose from its seat each frame — self and
+/// others alike, so a boat full of avatars rides together.
+///
+/// A seated avatar's wire transform is relative to its seat, not the region, so
+/// its anchor is left out of the region-space dead-reckoner ([`Seated`], skipped by
+/// [`drive_avatar_motion`](crate::physics::drive_avatar_motion)) and placed here
+/// instead: compose the avatar's seat-relative pose ([`SeatedTarget::offset`]) onto
+/// the seat object's live world transform, exactly as a linkset child prim at the
+/// same offset composes. The seat is resolved from the object scene
+/// ([`ObjectState`]) — the seat may stream in after, or independently of, the
+/// avatar, so a not-yet-tracked seat simply defers a frame. Mirrors the reference's
+/// `LLVOAvatar::sitOnObject` parenting (the avatar root rides the seat's transform,
+/// with no pelvis / root correction while seated).
+///
+/// Ordered after [`drive_avatar_motion`](crate::physics::drive_avatar_motion)
+/// (whose write it overrides for a seated anchor) and before the camera follow, so
+/// a seated own avatar's world pose is current when the camera reads it. The seat's
+/// `GlobalTransform` is last frame's propagated value, so a seated avatar trails a
+/// fast-moving seat by a single frame — invisible for ordinary seats, and vehicles
+/// that move fast enough to matter typically drive the camera from the seat itself
+/// (a scripted sit camera / forced mouselook).
+pub(crate) fn place_seated_avatars(
+    state: Res<AvatarState>,
+    objects: Res<ObjectState>,
+    seats: Query<&GlobalTransform>,
+    // Narrowed to avatar anchors (not every entity with a `Transform`) so this
+    // mutable query conflicts with as few other systems as the scheduler allows.
+    mut anchors: Query<&mut Transform, With<AvatarAnchor>>,
+) {
+    for (anchor, seat_scoped, offset, seat_drop) in state.seated_placements() {
+        let Some(seat_entity) = objects.entity_by_scoped(&seat_scoped) else {
+            continue;
+        };
+        let Ok(seat_global) = seats.get(seat_entity) else {
+            continue;
+        };
+        // Drop the anchor by the pelvis height so the hips land on the sit target.
+        let seated = drop_to_hips(offset, seat_drop);
+        let world = seat_global.mul_transform(seated).compute_transform();
+        if let Ok(mut transform) = anchors.get_mut(anchor)
+            && *transform != world
+        {
+            *transform = world;
         }
     }
 }
@@ -3489,6 +3745,9 @@ pub(crate) fn apply_avatar_appearance(
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
     // The per-avatar root drop resolved from the shape (R23).
     let mut root_drops: HashMap<AgentKey, f32> = HashMap::new();
+    // The per-avatar seat drop (pelvis rest height above the root) resolved from
+    // the shape — the seated placement drops the anchor by this (hips on target).
+    let mut seat_drops: HashMap<AgentKey, f32> = HashMap::new();
     // The shape's collision-volume displacements per avatar (P34.3).
     let mut volumes: HashMap<AgentKey, VolumeDeformations> = HashMap::new();
     // The ingested body-physics configuration per avatar (P34.1).
@@ -3551,6 +3810,7 @@ pub(crate) fn apply_avatar_appearance(
             if let Some(metrics) = library.skeleton().body_size_metrics(&deform, &overrides) {
                 let hover = resolved.weight(AVATAR_HOVER_PARAM).unwrap_or(0.0);
                 root_drops.insert(agent, root_drop_from_metrics(&metrics, hover));
+                seat_drops.insert(agent, metrics.pelvis_local_z);
             }
             if log_geometry {
                 world_matrices.insert(
@@ -3593,6 +3853,11 @@ pub(crate) fn apply_avatar_appearance(
         {
             transform.translation.y -= drop - previous;
         }
+    }
+    // The seat drop needs no re-plant: a seated avatar's anchor is rewritten every
+    // frame by `place_seated_avatars`, which reads this straight back.
+    for (agent, drop) in seat_drops {
+        let _previous = state.seat_drops.insert(agent, drop);
     }
     // …and its resolved collision-volume displacements, which the same per-frame
     // recurrence folds into the volume joints a rigged mesh body rides (P34.3).
@@ -4205,15 +4470,16 @@ pub(crate) fn apply_bom_face_materials(
 #[cfg(test)]
 mod tests {
     use super::{
-        AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics, PROVISIONAL_ID_CHARS,
-        body_root_transform, bom_face_alpha_mode, classify_bake_alpha, coarse_translation,
-        invisible_body_slots, provisional_label, root_drop_from_metrics, should_refetch_bakes,
+        AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
+        PROVISIONAL_ID_CHARS, Seated, SeatedTarget, body_root_transform, bom_face_alpha_mode,
+        classify_bake_alpha, coarse_translation, drop_to_hips, invisible_body_slots,
+        provisional_label, root_drop_from_metrics, seated_offset, should_refetch_bakes,
         used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
-    use crate::coords::sl_to_bevy_rotation;
-    use bevy::math::Vec3;
-    use bevy::prelude::AlphaMode;
+    use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
+    use bevy::math::{Quat, Vec3};
+    use bevy::prelude::{AlphaMode, Transform};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, BakeRegion, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
@@ -4285,6 +4551,153 @@ mod tests {
             joint_pivot: zero(),
             joint_axis_or_anchor: zero(),
         }
+    }
+
+    /// A seated avatar's offset is its wire pose in **pure Second Life space** — the
+    /// parent-relative position with no axis swap and no root drop, plus the SL
+    /// rotation — so composing it under the seat entity's basis change places it
+    /// exactly like a linkset child prim at the same offset (the reference's
+    /// `sitOnObject` `rel_pos` / `rel_rot`). A regression that applied the SL→Bevy
+    /// axis swap here (double-swapping under the seat) or subtracted a root drop (the
+    /// pelvis correction the reference skips while seated) would trip this.
+    #[test]
+    fn seated_offset_is_pure_sl_with_no_root_drop() {
+        let mut object = avatar_object_at(Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        });
+        // A quarter turn about Second Life Z, to check the rotation is the SL
+        // quaternion, not the axis-swapped object rotation.
+        let rotation = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: core::f32::consts::FRAC_1_SQRT_2,
+            s: core::f32::consts::FRAC_1_SQRT_2,
+        };
+        object.motion.rotation = rotation.clone();
+        let offset = seated_offset(&object);
+        assert_eq!(
+            offset.translation,
+            Vec3::new(1.0, 2.0, 3.0),
+            "pure Second Life translation — no axis swap, no root drop",
+        );
+        assert_eq!(
+            offset.rotation,
+            sl_rotation_to_quat(&rotation),
+            "the Second Life rotation, not the axis-swapped object rotation",
+        );
+        assert_eq!(offset.scale, Vec3::ONE);
+    }
+
+    /// Removing a seat object unseats exactly its riders: their seated state clears
+    /// and the [`Seated`] tag is stripped (so the dead-reckoner resumes), while an
+    /// avatar seated on a *different* object is untouched. This is the guard against
+    /// an avatar left frozen, invisibly parented, to a seat that was deleted or
+    /// culled without the simulator's own stand update.
+    #[test]
+    fn removing_a_seat_unseats_only_its_riders() -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::{App, Commands, Transform};
+
+        let mut app = App::new();
+        // A dummy anchor tagged `Seated`, standing in for the rider's body root.
+        let rider_anchor = app.world_mut().spawn(Seated).id();
+        let rider_label = app.world_mut().spawn_empty().id();
+        let other_anchor = app.world_mut().spawn(Seated).id();
+        let other_label = app.world_mut().spawn_empty().id();
+
+        let seat = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(42));
+        let other_seat = ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId(99));
+        let rider = AgentKey::from(Uuid::from_u128(7));
+        let other = AgentKey::from(Uuid::from_u128(8));
+
+        let mut state = AvatarState::default();
+        state.seated.insert(
+            rider,
+            SeatedTarget {
+                seat,
+                offset: Transform::IDENTITY,
+            },
+        );
+        state.objects.insert(
+            rider,
+            AvatarEntities {
+                anchor: rider_anchor,
+                label: rider_label,
+            },
+        );
+        state.seated.insert(
+            other,
+            SeatedTarget {
+                seat: other_seat,
+                offset: Transform::IDENTITY,
+            },
+        );
+        state.objects.insert(
+            other,
+            AvatarEntities {
+                anchor: other_anchor,
+                label: other_label,
+            },
+        );
+
+        // Remove the seat and apply the deferred `Seated`-tag removal.
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, app.world());
+            state.unseat_from_seat(seat, &mut commands);
+        }
+        queue.apply(app.world_mut());
+
+        assert!(!state.is_seated(rider), "the seat's rider was unseated");
+        assert!(
+            app.world().get::<Seated>(rider_anchor).is_none(),
+            "the rider's Seated tag was stripped",
+        );
+        assert!(
+            state.is_seated(other),
+            "an avatar on a different seat is untouched",
+        );
+        assert!(
+            app.world().get::<Seated>(other_anchor).is_some(),
+            "the untouched rider keeps its Seated tag",
+        );
+        Ok(())
+    }
+
+    /// The seated pose drops by the pelvis height along the **sit orientation's
+    /// up**, so the hips land on the sit target. Upright (identity sit rotation),
+    /// the drop is straight down Second Life Z; the sit rotation is preserved. A
+    /// regression that dropped along world up (ignoring a reclined seat) or by the
+    /// wrong amount — the ~1 m "avatar floats above the seat" bug — would trip here.
+    #[test]
+    fn drop_to_hips_lowers_by_the_pelvis_height_along_the_sit_up() {
+        let seat_drop = 1.067;
+        // Upright sit at (1, 2, 3) in the seat frame.
+        let upright = Transform {
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        };
+        let dropped = drop_to_hips(upright, seat_drop);
+        // Pure-SL space: up is +Z, so the drop subtracts from Z only.
+        assert_eq!(dropped.translation, Vec3::new(1.0, 2.0, 3.0 - seat_drop));
+        assert_eq!(dropped.rotation, Quat::IDENTITY, "the sit rotation is kept");
+
+        // A quarter-turn about SL X tips the avatar's up (+Z) onto +Y, so the drop
+        // moves along Y instead — the reclined-seat case.
+        let tipped = Transform {
+            rotation: Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2),
+            ..upright
+        };
+        let dropped = drop_to_hips(tipped, seat_drop);
+        assert!(
+            (dropped.translation.y - (2.0 - seat_drop)).abs() < 1.0e-5
+                && (dropped.translation.z - 3.0).abs() < 1.0e-5,
+            "a tilted seat drops along the avatar's up, got {:?}",
+            dropped.translation,
+        );
     }
 
     /// A coarse location maps its whole-metre region-relative position through the

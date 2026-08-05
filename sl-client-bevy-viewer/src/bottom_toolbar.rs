@@ -102,6 +102,15 @@ const TOOLBAR_FONT_SIZE: f32 = 13.0;
 /// The gap between adjacent toolbar buttons, in logical pixels.
 const BUTTON_GAP: f32 = 4.0;
 
+/// The fixed width of the reserved **state slot** at the bar's leading edge (and
+/// the matching trailing spacer that balances it), in logical pixels. Wide enough
+/// for the "Stand Up" / "Stop flycam" state button ([`crate::stand_stop_button`])
+/// it hosts on **one line** (the longer "Stop flycam" plus the button's padding).
+/// A fixed width — occupied or empty — so the button appearing or disappearing
+/// never reflows the centred toolbar buttons, and the trailing spacer keeps that
+/// centre truly centred rather than nudged by the leading slot.
+const STATE_SLOT_WIDTH: f32 = 140.0;
+
 /// The bar strip's fallback background, used when no skin is loaded — the skin's
 /// `.sk-toolbar-bar` (`var(--surface-bg)`) overrides it. A dark, mostly-opaque
 /// neutral so the buttons read against the world behind them.
@@ -342,6 +351,11 @@ pub(crate) struct BottomArea {
                   the button row directly; `area` and the upper slots are consumed"
     )]
     pub(crate) bar: Entity,
+    /// The reserved **state slot** at the bar's leading edge — a fixed-width host
+    /// the Stand Up / Stop flycam state button ([`crate::stand_stop_button`])
+    /// parents into. Its fixed width (matched by a trailing spacer) keeps the state
+    /// button from ever reflowing the centred toolbar buttons.
+    pub(crate) state_slot: Entity,
 }
 
 /// The bottom toolbar's runtime: spawn the bar, route its presses, and keep each
@@ -468,16 +482,71 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
         ))
         .id();
 
+    // The reserved leading state slot, spawned first so it sits at the button
+    // group's leading edge, then the toolbar buttons, then a trailing spacer of the
+    // same fixed width. The two fixed-width bookends keep the centred buttons truly
+    // centred and stop the state button (which appears / disappears with the seated
+    // / flycam state) from ever reflowing the row.
+    let state_slot = spawn_state_slot(&mut commands, bar);
+
     for (index, def) in TOOLBAR_BUTTONS.iter().enumerate() {
         spawn_live_button(&mut commands, bar, index, def);
     }
+
+    spawn_state_spacer(&mut commands, bar);
 
     commands.insert_resource(BottomArea {
         area,
         upper_leading,
         upper_trailing,
         bar,
+        state_slot,
     });
+}
+
+/// Spawn the reserved leading [state slot](STATE_SLOT_WIDTH) under the button bar —
+/// a fixed-width, non-blocking box the Stand Up / Stop flycam state button parents
+/// into. Fixed width so its (dis)appearing occupant never reflows the centred
+/// buttons; centres its own child so the button reads centred within the slot.
+fn spawn_state_slot(commands: &mut Commands, bar: Entity) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Px(STATE_SLOT_WIDTH),
+                flex_shrink: 0.0,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            // Transparent and non-blocking when empty; the state button itself takes
+            // clicks once it is spawned in.
+            Pickable {
+                should_block_lower: false,
+                is_hoverable: true,
+            },
+            Name::new("bottom-toolbar-state-slot"),
+            ChildOf(bar),
+        ))
+        .id()
+}
+
+/// Spawn the trailing spacer that balances the leading [state slot](spawn_state_slot):
+/// an empty fixed-width box of the same width, so the toolbar buttons stay centred
+/// on the window rather than nudged rightward by the leading slot.
+fn spawn_state_spacer(commands: &mut Commands, bar: Entity) {
+    commands.spawn((
+        Node {
+            width: Val::Px(STATE_SLOT_WIDTH),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        Pickable {
+            should_block_lower: false,
+            is_hoverable: true,
+        },
+        Name::new("bottom-toolbar-state-spacer"),
+        ChildOf(bar),
+    ));
 }
 
 /// Spawn one half of the [upper row](spawn_bottom_toolbar): a fixed 50%-wide,

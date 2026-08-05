@@ -1108,6 +1108,8 @@ pub(crate) fn position_camera(
     focus_target: Res<FocusTarget>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
+    objects: Res<crate::objects::ObjectState>,
+    sit_camera: Res<crate::sit_camera::SitCamera>,
     body: Option<Res<AvatarBody>>,
     time: Res<Time>,
     globals: AvatarPoseQuery,
@@ -1125,7 +1127,7 @@ pub(crate) fn position_camera(
     // The own avatar's live world position and stable (heading-derived) facing, if
     // it has arrived. Read from the current-frame anchor `Transform`, not the
     // frame-late `GlobalTransform`, so the follow does not trail by a frame.
-    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions);
+    let avatar_pose = own_avatar_pose(&identity, &avatars, &globals, &transforms, &motions);
 
     match *mode {
         CameraMode::Flycam => {
@@ -1182,21 +1184,33 @@ pub(crate) fn position_camera(
             *transform = posed;
         }
         CameraMode::ThirdPerson => {
-            let (mut eye, focus, follow_avatar) = match *focus_target {
+            // A scripted sit camera (the seat set `llSetCamera*Offset`) overrides the
+            // ordinary follow while seated and focused on the avatar: the eye and
+            // focus ride the seat at the script's offsets. It is not collided (the
+            // script's placement is authoritative — e.g. a camera inside a vehicle).
+            let sit_pose = matches!(*focus_target, FocusTarget::Avatar)
+                .then(|| sit_camera_pose(&sit_camera, &objects, &globals))
+                .flatten();
+            let (mut eye, focus, follow_avatar, collide) = match (sit_pose, *focus_target) {
+                // Scripted sit camera: fixed offsets from the (moving) seat, tracked
+                // rigidly like a follow, never collided.
+                (Some((eye, focus)), _) => (eye, focus, true, false),
                 // Focus on a picked point: the camera keeps the world offset it had
                 // when the point was picked (and as orbit / zoom has changed it
                 // since), so alt-clicking re-pivots around the object *without*
                 // moving the camera — the reference's `setFocusGlobal` behaviour. A
                 // fixed world point is smoothed in world space (there is nothing to
                 // trail), so it is not an avatar follow.
-                FocusTarget::Point(point) => (vadd(point, rig.point_offset), point, false),
+                (None, FocusTarget::Point(point)) => {
+                    (vadd(point, rig.point_offset), point, false, true)
+                }
                 // Rear-view follow: orbit around the avatar's **head**, so zooming
                 // in converges on the back of the head (and into mouselook), not the
                 // avatar root. The focus is recomputed from the live avatar every
                 // frame and followed **rigidly** (only the orbit offset is smoothed),
                 // so the camera and avatar stay a locked pair — no trailing on a
                 // sustained vertical flight.
-                FocusTarget::Avatar => {
+                (None, FocusTarget::Avatar) => {
                     let Some((anchor, facing)) = avatar_pose else {
                         return;
                     };
@@ -1210,12 +1224,14 @@ pub(crate) fn position_camera(
                     let focus = third_person_focus(head, anchor, facing);
                     let eye =
                         third_person_eye(focus, facing, rig.azimuth, rig.elevation, rig.distance);
-                    (eye, focus, true)
+                    (eye, focus, true, true)
                 }
             };
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
-            eye = collide_camera(&mut ray_cast, focus, eye);
+            if collide {
+                eye = collide_camera(&mut ray_cast, focus, eye);
+            }
             apply_pose(
                 &mut transform,
                 &mut rig,
@@ -1319,20 +1335,52 @@ fn collide_camera(ray_cast: &mut MeshRayCast, focus: Vec3, eye: Vec3) -> Vec3 {
 fn own_avatar_pose(
     identity: &SlIdentity,
     avatars: &AvatarState,
+    globals: &AvatarPoseQuery,
     transforms: &AvatarTransformQuery,
     motions: &Query<&AvatarMotion>,
 ) -> Option<(Vec3, Vec3)> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
-    // The anchor is a root entity, so its local `Transform` is its world pose — and
-    // it is this frame's value (unlike the frame-late `GlobalTransform`), so the
-    // camera follows the avatar's live position without a frame of drift.
+    // Seated on an object, the anchor is **not** a region-space root: its world pose
+    // is composed each frame from its seat ([`place_seated_avatars`]), so read the
+    // world `GlobalTransform` (its local `Transform` is the seat-relative offset)
+    // and take the facing from that world orientation. A seat that moves fast enough
+    // for the one-frame `GlobalTransform` lag to show typically drives the camera
+    // from the seat itself (a scripted sit camera / forced mouselook).
+    if avatars.is_seated(agent) {
+        let global = globals.get(anchor).ok()?;
+        let (_scale, rotation, translation) = global.to_scale_rotation_translation();
+        return Some((translation, rotation.mul_vec3(Vec3::X)));
+    }
+    // Standing, the anchor is a root entity, so its local `Transform` is its world
+    // pose — and it is this frame's value (unlike the frame-late `GlobalTransform`),
+    // so the camera follows the avatar's live position without a frame of drift.
     let transform = transforms.get(anchor).ok()?;
     let facing = motions.get(anchor).map_or_else(
         |_error| transform.rotation.mul_vec3(Vec3::X),
         |motion| facing_from_yaw(motion.yaw()),
     );
     Some((transform.translation, facing))
+}
+
+/// The scripted sit camera's world `(eye, focus)`, or `None` when no sit camera is
+/// set or its seat is not currently in the scene. The seat set eye / at offsets in
+/// its own Second Life frame; the seat entity's world transform carries the single
+/// SL→Bevy basis change, so [`GlobalTransform::transform_point`] composes each
+/// offset onto the seat's live world pose — the reference's `object_pos +
+/// mSitCameraPos * object_rot` / `object_pos + mSitCameraFocus * object_rot`.
+fn sit_camera_pose(
+    sit_camera: &crate::sit_camera::SitCamera,
+    objects: &crate::objects::ObjectState,
+    globals: &AvatarPoseQuery,
+) -> Option<(Vec3, Vec3)> {
+    let (seat, eye_offset, at_offset) = sit_camera.offsets()?;
+    let seat_entity = objects.entity_of(seat)?;
+    let seat_global = globals.get(seat_entity).ok()?;
+    Some((
+        seat_global.transform_point(eye_offset),
+        seat_global.transform_point(at_offset),
+    ))
 }
 
 /// The own avatar's head-joint (`mHead`) world position, for the third-person

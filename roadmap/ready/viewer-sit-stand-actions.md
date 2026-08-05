@@ -9,6 +9,13 @@ blocked_by: [viewer-object-selection-core]
 
 Context: [context/viewer.md](../context/viewer.md).
 
+**Largely completed** by [[viewer-sit-target-and-stand-button]] (done
+2026-08-05, verified on aditi): sit-target placement (parenting + hips drop),
+the scripted sit camera, `ForceMouselook` drop-in / restore-on-stand, the Stand
+affordance, the "Sit Here" / ground-sit / stand actions, and the no-sit-target
+offset. What may remain here is any residual polish (e.g. sit-animation nuances,
+unsit-on-teleport edge cases) — audit against that task before reopening scope.
+
 Sitting and standing: sit on an object (click / context "Sit Here"), ground-sit,
 and stand up — driving the sit-target placement, the sit animation, and the
 camera adjustment, then releasing on stand. Sitting on an object needs a

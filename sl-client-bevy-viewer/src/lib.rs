@@ -77,7 +77,6 @@ mod face_material;
 mod flexi;
 mod floater;
 mod floater_persist;
-mod flycam_ui;
 pub mod gallery;
 mod geometry_cache;
 mod gizmos;
@@ -164,11 +163,14 @@ mod search;
 mod session;
 mod settings;
 mod settings_binding;
+mod sit_camera;
+mod sit_offset;
 mod skin;
 mod sky;
 mod sky_presets;
 mod snapshot_floater;
 mod spacenav;
+mod stand_stop_button;
 mod status_bar;
 mod terrain;
 mod texture_anim;
@@ -292,7 +294,6 @@ use crate::exposure::{SlExposure, SlExposurePlugin};
 use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
-use crate::flycam_ui::FlycamButtonPlugin;
 use crate::gizmos::EditGizmoPlugin;
 use crate::glow::{SlGlow, SlGlowPlugin};
 use crate::group_notice::GroupNoticePlugin;
@@ -355,12 +356,14 @@ use crate::session::{
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
+use crate::sit_camera::SitCameraPlugin;
 use crate::sky::{
     apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
     center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
     setup_sky, setup_stars, setup_sun_moon_discs,
 };
 use crate::spacenav::SpacenavPlugin;
+use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
@@ -959,11 +962,17 @@ fn run_session(
     // `CameraMode` state machine (mouselook / third-person / flycam), replacing the
     // debug fly-camera. Every `.after(position_camera)` consumer reads its pose.
     .add_plugins(CameraPlugin)
+    // Scripted sit camera + forced mouselook a seat imposes on sit
+    // (viewer-sit-target-and-stand-button): tracked here, applied by
+    // `position_camera`.
+    .add_plugins(SitCameraPlugin)
     // SpaceNavigator / 6-DOF device input (viewer-input-spacenav-*): publishes the
     // device state (Linux, behind the `spacenav` feature) for the flycam to consume.
     .add_plugins(SpacenavPlugin)
-    // The on-screen "Stop flycam" button (shown only in flycam mode).
-    .add_plugins(FlycamButtonPlugin)
+    // The Stand Up / Stop flycam state button in the bottom toolbar's reserved
+    // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
+    // while in flycam.
+    .add_plugins(StandStopButtonPlugin)
     // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
     // which entries a given pie holds is per-domain and belongs with the domain.
     .add_plugins(PieMenuPlugin)

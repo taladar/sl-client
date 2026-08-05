@@ -19,6 +19,13 @@ Firestorm's Quick Preferences is the model, including that its **contents are
 user-configurable** — the panel is a curated view over the settings store, not a
 fixed list.
 
+Placement (user request 2026-08-05): the panel lives in the
+**bottom-right corner** of the screen — the bottom toolbar's trailing area
+([`BottomArea::upper_trailing`], where the parcel-audio cluster already sits) is
+its natural home, not the bottom-centre tray. (The bottom bar's *leading* slot
+is taken by the Stand Up / Stop flycam state button,
+[[viewer-sit-target-and-stand-button]].)
+
 Vintage note (2026-07-22 skin survey): the Vintage bottom bar surfaces a
 quick-prefs button (and the AO toggles) inline —
 [[viewer-vintage-bottom-bar]] reserves the slot this panel opens from;
