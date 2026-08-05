@@ -31,8 +31,8 @@ use bevy::mesh::morph::MorphAttributes;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{
-    BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh, SkeletalDeformations, Skeleton,
-    VolumeDeformations,
+    AttachmentPoints, BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh,
+    SkeletalDeformations, Skeleton, VolumeDeformations,
 };
 use sl_mesh::MeshSkin;
 
@@ -640,17 +640,28 @@ impl BevySkeleton {
                     local.translation.z + deform_offset[2],
                 ),
             };
-            // A position track (chiefly `mPelvis`) is stored *relative* to the
-            // joint's rest position — the reference viewer's animation position is
-            // an offset, not an absolute — so it is added to the base, not replacing
-            // it (replacing would collapse the pelvis ~1 m to its parent origin).
+            // A position track's meaning depends on the joint. It is an *offset*
+            // from rest — added to the base — for **`mPelvis`** (the historical
+            // pre-Bento pelvis translation, over ±`LL_MAX_PELVIS_OFFSET`; replacing
+            // would collapse the pelvis ~1 m to its parent origin) and for a
+            // **collision volume** (the body-physics breast / belly / butt
+            // displacements this pipeline writes into the pose as deltas, P34.2). For
+            // every **other** joint it is the joint's *absolute local position*,
+            // which replaces the rest (the reference's `LLJointState::setPosition` on
+            // a non-pelvis joint): a neutral-face Bento animation stores each face
+            // bone's own rest position, so adding it would double the offset and push
+            // the tongue / brow out of the face (viewer-avatar-tongue-protrudes). A
+            // rig's joint-position override (fitted mesh) still wins, as an
+            // attachment override does in the reference.
+            let is_volume = self.is_volume.get(index).copied().unwrap_or(false);
             let position = match pose.position(index) {
-                Some(delta) => Vec3::new(
-                    base_position.x + delta.x,
-                    base_position.y + delta.y,
-                    base_position.z + delta.z,
+                Some(key) if is_volume || name == "mPelvis" => Vec3::new(
+                    base_position.x + key.x,
+                    base_position.y + key.y,
+                    base_position.z + key.z,
                 ),
-                None => base_position,
+                Some(key) if override_pos.is_none() => key,
+                _ => base_position,
             };
             let (rotation, translation) = match self.parents.get(index).copied().flatten() {
                 Some(parent) => {
@@ -724,6 +735,58 @@ impl BevySkeleton {
         self.support.push(JointSupport::Base);
         self.is_volume.push(false);
         let _prev = self.lookup.insert(name.to_owned(), new_index);
+    }
+
+    /// Append each world-space attachment point as a bindable joint, mirroring the
+    /// reference viewer's `LLViewerJointAttachment` nodes — every `avatar_lad.xml`
+    /// `<attachment_point>` is a real joint parented to the bone it hangs from, at
+    /// its authored `position` / `rotation` local offset, and a rigged mesh may
+    /// bind vertices to it by name (`Mouth`, `Chin`, `Nose`, `Tongue`, …).
+    ///
+    /// Without these, a mesh head that rigs mouth / nose / chin / tongue geometry
+    /// to a face attachment point resolves that name to nothing and the client
+    /// falls the vertices back to `mPelvis` — dragging them into long spikes out of
+    /// the face (the "tongue sticks straight out" / "eyebrows spike to the chin"
+    /// artefacts). Appended after every bone, collision volume, and the synthetic
+    /// root, so all existing joint indices — and the base-mesh skin maps and
+    /// inverse-bindpose order that depend on them — stay valid.
+    ///
+    /// A HUD point (`is_hud`, anchored to the pseudo-joint `mScreen`) and any point
+    /// whose parent joint is not in the skeleton are skipped, as is a name already
+    /// present (so a real bone/volume is never shadowed). Call after
+    /// [`insert_synthetic_root`](Self::insert_synthetic_root) so a point anchored
+    /// to `mRoot` (the avatar-centre `Center` point) resolves its parent.
+    pub fn insert_attachment_points(&mut self, attachments: &AttachmentPoints) {
+        for point in attachments.all() {
+            if point.is_hud || self.lookup.contains_key(&point.name) {
+                continue;
+            }
+            let Some(parent) = self.lookup.get(&point.joint).copied() else {
+                continue;
+            };
+            let local = Transform {
+                translation: Vec3::from_array(point.position),
+                rotation: euler_deg_to_quat(point.rotation),
+                scale: Vec3::ONE,
+            };
+            let parent_global = self
+                .bind_globals
+                .get(parent)
+                .copied()
+                .unwrap_or(Mat4::IDENTITY);
+            let new_index = self.locals.len();
+            self.bind_globals
+                .push(parent_global.mul_mat4(&local.to_matrix()));
+            self.parents.push(Some(parent));
+            self.names.push(point.name.clone());
+            // An attachment point is never a base joint's ancestor, so it takes the
+            // non-base support that keeps the base-ancestor walk honest (like a
+            // collision volume).
+            self.support.push(JointSupport::Extended);
+            self.is_volume.push(false);
+            self.locals.push(local);
+            let _prev = self.lookup.insert(point.name.clone(), new_index);
+        }
     }
 
     /// The index of the joint with the given canonical name or alias.
@@ -1120,7 +1183,8 @@ mod tests {
     use bevy::transform::components::Transform;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_avatar::{
-        BaseMesh, ResolvedParams, SkeletalDeformations, Skeleton, VisualParams, VolumeDeformations,
+        AttachmentPoints, BaseMesh, ResolvedParams, SkeletalDeformations, Skeleton, VisualParams,
+        VolumeDeformations,
     };
     use sl_mesh::MeshSkin;
 
@@ -1162,6 +1226,10 @@ mod tests {
     /// The committed minimal base-mesh fixture (four vertices, two faces, joints
     /// `mPelvis` / `mTorso`), reused from `sl-avatar`'s test assets.
     const MINI_BASEMESH: &[u8] = include_bytes!("../../sl-avatar/tests/fixtures/mini_basemesh.llm");
+    /// The committed minimal `avatar_lad.xml` fixture, whose `<skeleton>` carries a
+    /// `Chest` attachment point (joint `mChest`, present), a `Skull` point (joint
+    /// `mHead`, absent from the mini skeleton), and a `Center` HUD point.
+    const MINI_LAD: &str = include_str!("../../sl-avatar/tests/fixtures/mini_lad.xml");
 
     /// A skeleton with a single 90° yaw (about Z) bone, to check the Euler
     /// conversion in isolation.
@@ -1784,6 +1852,124 @@ mod tests {
         skin2.alt_inverse_bind_matrix.pop();
         assert!(
             joint_position_overrides(&skin2, bevy.lookup(), bevy.local_transforms()).is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_points_become_bindable_joints() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let mut bevy = BevySkeleton::from_skeleton(&skeleton);
+        let before = bevy.len();
+        let chest = bevy.find("mChest").ok_or("mChest present")?;
+        let attachments = AttachmentPoints::from_xml(MINI_LAD)?;
+        bevy.insert_attachment_points(&attachments);
+        // `Chest` (parent bone `mChest`, present) becomes a bindable joint; `Skull`
+        // (parent `mHead`, absent from the mini skeleton) and `Center` (a HUD point)
+        // are both skipped — exactly one joint is appended.
+        assert_eq!(bevy.len(), before + 1);
+        assert!(bevy.find("Skull").is_none(), "absent-parent point skipped");
+        assert!(bevy.find("Center").is_none(), "HUD point skipped");
+        let point = bevy.find("Chest").ok_or("Chest attachment resolves")?;
+        // Appended, so every pre-existing joint index is unchanged.
+        assert!(point >= before, "appended after existing joints");
+        // It hangs off its parent bone at the authored local offset (Second Life
+        // Z-up), so a rigid or rigged binding seats where the reference does.
+        assert_eq!(bevy.parents().get(point).copied().flatten(), Some(chest));
+        let local = bevy
+            .local_transforms()
+            .get(point)
+            .ok_or("point local rest")?;
+        assert!(
+            local
+                .translation
+                .abs_diff_eq(Vec3::new(0.15, 0.0, -0.1), 1e-6),
+            "attachment local offset preserved"
+        );
+        // Its world bind pose composes with the parent bone's: mChest_world · local.
+        let chest_world = bevy.inverse_bindpose(chest).ok_or("chest bind")?.inverse();
+        let point_world = bevy.inverse_bindpose(point).ok_or("point bind")?.inverse();
+        let expected = chest_world.mul_mat4(&local.to_matrix());
+        assert!(
+            point_world.abs_diff_eq(expected, 1e-5),
+            "attachment world bind = parent bone world · local offset"
+        );
+        // A second call is idempotent — the names already resolve, so nothing new is
+        // appended.
+        bevy.insert_attachment_points(&attachments);
+        assert_eq!(bevy.len(), before + 1, "re-adding is a no-op");
+        Ok(())
+    }
+
+    #[test]
+    fn animation_position_track_is_absolute_for_bones_and_offset_for_pelvis_and_volumes()
+    -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let bevy = BevySkeleton::from_skeleton(&skeleton);
+        let chest = bevy.find("mChest").ok_or("mChest")?;
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis")?;
+        let belly = bevy.find("BELLY").ok_or("BELLY volume")?;
+        let rest = bevy.deformed_world_matrices(
+            &SkeletalDeformations::default(),
+            &VolumeDeformations::default(),
+            &JointOverrides::default(),
+            &AnimationPose::default(),
+        );
+        let world_of = |index: usize, pose: &AnimationPose| {
+            bevy.deformed_world_matrices(
+                &SkeletalDeformations::default(),
+                &VolumeDeformations::default(),
+                &JointOverrides::default(),
+                pose,
+            )
+            .get(index)
+            .map(|matrix| matrix.w_axis.truncate())
+        };
+        let rest_pos = |index: usize| rest.get(index).map(|m| m.w_axis.truncate());
+
+        // A regular bone's position track is its ABSOLUTE local position (it
+        // *replaces* the rest): posing mChest AT its own rest local position leaves
+        // its world unchanged. The old behaviour added it, doubling the offset — the
+        // protruding-tongue bug (a neutral-face Bento animation poses each face bone
+        // at its rest, e.g. mFaceTongueBase at 0.039).
+        let chest_rest_local = bevy
+            .local_transforms()
+            .get(chest)
+            .ok_or("chest local")?
+            .translation;
+        assert!(
+            chest_rest_local.length() > 0.1,
+            "fixture chest has a real offset"
+        );
+        let mut chest_pose = AnimationPose::new();
+        chest_pose.set_position(chest, chest_rest_local);
+        assert!(
+            world_of(chest, &chest_pose)
+                .ok_or("chest")?
+                .abs_diff_eq(rest_pos(chest).ok_or("chest")?, 1e-5),
+            "a bone posed at its rest local position does not move (absolute/replace)"
+        );
+
+        // The pelvis position track is an OFFSET added to the rest (the historical
+        // pre-Bento pelvis translation); mPelvis is the root, so its world shifts by
+        // exactly the offset.
+        let delta = Vec3::new(0.0, 0.1, 0.05);
+        let mut pelvis_pose = AnimationPose::new();
+        pelvis_pose.set_position(pelvis, delta);
+        assert!(
+            (world_of(pelvis, &pelvis_pose).ok_or("pelvis")? - rest_pos(pelvis).ok_or("pelvis")?)
+                .abs_diff_eq(delta, 1e-5),
+            "the pelvis position track adds as an offset"
+        );
+
+        // A collision volume's position track (the body-physics breast/belly/butt
+        // displacement this pipeline writes as a pose delta) also adds as an offset.
+        let mut belly_pose = AnimationPose::new();
+        belly_pose.set_position(belly, delta);
+        assert!(
+            (world_of(belly, &belly_pose).ok_or("belly")? - rest_pos(belly).ok_or("belly")?)
+                .abs_diff_eq(delta, 1e-5),
+            "a collision volume's position track adds as an offset"
         );
         Ok(())
     }

@@ -290,6 +290,13 @@ impl AvatarAssetLibrary {
         let params = VisualParams::from_xml(&lad)?;
         let masks = MorphMasks::from_xml(&lad)?;
         let attachment_points = AttachmentPoints::from_xml(&lad)?;
+        // Register every world-space attachment point (`Mouth`, `Chin`, `Nose`,
+        // `Tongue`, …) as a bindable skeleton joint, as the reference viewer does:
+        // some mesh heads rig facial geometry to these points, and without them the
+        // rig falls those vertices back to `mPelvis`, spiking them out of the face
+        // (viewer-avatar-tongue-protrudes). Done after the synthetic `mRoot` so a
+        // point anchored to it resolves.
+        skeleton.insert_attachment_points(&attachment_points);
 
         let mut parts = Vec::with_capacity(BASE_PARTS.len());
         for spec in BASE_PARTS {

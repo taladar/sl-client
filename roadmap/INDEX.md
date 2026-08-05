@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 239 |
+| ready | 240 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 9 |
-| done | 712 |
+| bugs | 14 |
+| done | 713 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1151** |
+| **total** | **1158** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (239)
+## ready (240)
 
 ### protocol
 
@@ -210,6 +210,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
+- [`viewer-avatar-state-dump-replay`](ready/viewer-avatar-state-dump-replay.md)
+  — Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
@@ -1017,7 +1019,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (9)
+## bugs (14)
 
 ### protocol
 
@@ -1032,22 +1034,33 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
-- [`viewer-avatar-tongue-protrudes`](bugs/viewer-avatar-tongue-protrudes.md) —
-  Avatar tongue protrudes (rigged mesh + base-system head)
+- [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
+  — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
+- [`viewer-facelight-too-bright`](bugs/viewer-facelight-too-bright.md) —
+  Facelights render far brighter than in Firestorm
+- [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
+  — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
+  Some worn mesh hair does not render (visible in Firestorm)
+- [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
+  — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-seated-avatar-vehicle-rubberband`](bugs/viewer-seated-avatar-vehicle-rubberband.md)
+  — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
+  parenting
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 
-## done (712)
+## done (713)
 
 ### protocol
 
@@ -1200,6 +1213,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
+- [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —
+  Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)
