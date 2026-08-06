@@ -228,6 +228,7 @@ use bevy::camera::{Exposure, Hdr};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
 use bevy::light::DirectionalLightShadowMap;
+use bevy::light::cluster::{ClusterConfig, ClusterFarZMode, ClusterZConfig};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
@@ -688,6 +689,29 @@ fn setup_scene(
         camera_transform,
         ViewerCamera,
         rig,
+        // A clustered-forward Z config tuned for a viewer that pushes the camera
+        // right up to avatars wearing small local lights (facelights). Bevy's
+        // default `ClusterZConfig` keeps a **special first Z-slice** spanning
+        // `[near_plane, first_slice_depth=5 m]`, and its default
+        // `MaxClusterableObjectRange` far mode derives the grid's far plane from the
+        // visible lights' own reach. Together those drop a worn light out of a
+        // mid-distance band: the light and the surface it lights sit inside that 5 m
+        // special slice, whose light handling fails, so a facelight only reaches the
+        // face when the camera is inside the light sphere (a separate special case)
+        // and goes dark across the rest of the near field. Shrinking the special
+        // slice to `0.5 m` puts the whole avatar-viewing range into ordinary
+        // well-conditioned logarithmic slices (which light correctly), and pinning
+        // the far plane to a constant stops a lone small light from collapsing the
+        // grid's depth range. The XY/Z counts stay at Bevy's defaults.
+        ClusterConfig::FixedZ {
+            total: 4096,
+            z_slices: 24,
+            z_config: ClusterZConfig {
+                first_slice_depth: 0.5,
+                far_z_mode: ClusterFarZMode::Constant(512.0),
+            },
+            dynamic_resizing: true,
+        },
         Msaa::Sample4,
         // P33.3: render the scene into a floating-point target and tonemap it once,
         // at the end, with the reference viewer's own tone mapper (`tonemap`).

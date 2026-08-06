@@ -35,6 +35,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{LightData, Object, TextureKey};
 
 use crate::camera::ViewerCamera;
+use crate::sky::SCENE_LIGHT_ILLUMINANCE;
 
 /// The maximum number of local prim lights rendered at once (P25.2). Second
 /// Life's legacy fixed-function path capped hardware lights at
@@ -44,12 +45,68 @@ use crate::camera::ViewerCamera;
 /// nearest / brightest prims each frame.
 const MAX_LOCAL_LIGHTS: usize = 32;
 
-/// The luminous power (lumens) of a full-intensity (`intensity == 1.0`) local
-/// light. Second Life light intensity is `0.0..=1.0`; this scales it into Bevy's
-/// photometric lumens. Set to Bevy's own `VERY_LARGE_CINEMA_LIGHT` default so a
-/// full-strength prim light reads brightly at the scene's default exposure
-/// without washing out the sunlit `SCENE_LIGHT_ILLUMINANCE` (10,000 lux).
-const LOCAL_LIGHT_LUMENS: f32 = 1_000_000.0;
+/// Second Life scales a local light's reach past its nominal radius: the deferred
+/// renderer's light-volume `size` uniform is `getLightRadius() * 1.5`
+/// (`LLPipeline::renderDeferredLighting`), and the surface is unlit past it. Our
+/// Bevy `range` mirrors that so a light reaches exactly as far as it does in
+/// Firestorm.
+const SL_RADIUS_TO_RANGE: f32 = 1.5;
+
+/// The falloff "fudge factor" Second Life folds into the shader falloff:
+/// `getLightFalloff(DEFERRED_LIGHT_FALLOFF)` with `DEFERRED_LIGHT_FALLOFF == 0.5`
+/// (`pipeline.cpp`). So the wire falloff (`0.0..=2.0`) becomes a shader falloff of
+/// `0.0..=1.0` before entering [`legacy_distance_attenuation`].
+const DEFERRED_LIGHT_FALLOFF: f32 = 0.5;
+
+/// The fraction of a local light's reach (`size`) at which its Bevy lumens are
+/// calibrated to match Second Life's surface contribution — half the reach, a
+/// representative "surface being lit" distance. Calibrating here (rather than at
+/// the light's centre) keeps Bevy's inverse-square point light from reading as the
+/// wildly-over-bright facelight the un-scaled `VERY_LARGE_CINEMA_LIGHT` default
+/// produced: at the reference distance the light matches Firestorm, and only the
+/// unavoidable near-field of the inverse-square curve (which Second Life's bounded
+/// falloff does not have) rises above it.
+const REFERENCE_REACH_FRACTION: f32 = 0.5;
+
+/// Second Life's local-light distance attenuation, ported verbatim from
+/// `calcLegacyDistanceAttenuation` (`deferredUtil.glsl`): a clamped quadratic that
+/// falls to zero at the light's reach, peaking near the centre — **bounded**,
+/// unlike a physical inverse-square. `dist` is the surface distance normalised by
+/// the light's `size` (`0.0` at the centre, `1.0` at the reach); `falloff` is the
+/// already-fudged shader falloff (`wire_falloff * DEFERRED_LIGHT_FALLOFF`).
+fn legacy_distance_attenuation(dist: f32, falloff: f32) -> f32 {
+    // `(distance + falloff) / (1 + falloff)`, clamped, then squared and doubled —
+    // the reference's "tweak falloff slightly to match pre-EEP attenuation".
+    let ramp = ((dist + falloff) / (1.0 + falloff)).clamp(0.0, 1.0);
+    let atten = 1.0 - ramp;
+    atten * atten * 2.0
+}
+
+/// The Bevy photometric power (lumens) for a local light, calibrated so its
+/// illuminance at [`REFERENCE_REACH_FRACTION`] of the light's reach matches Second
+/// Life's surface contribution there relative to the scene sun
+/// ([`SCENE_LIGHT_ILLUMINANCE`]).
+///
+/// Second Life's contribution to a lit surface is
+/// `linear_color * intensity * legacy_distance_attenuation(dist, falloff)` — a
+/// bounded, dimensionless add competing with the sun in the same linear space. A
+/// Bevy point light's illuminance is `lumens / (4π d²)`, so matching the two at the
+/// reference distance `d_ref = size * REFERENCE_REACH_FRACTION` gives
+/// `lumens = 4π d_ref² * SCENE_LIGHT_ILLUMINANCE * intensity * atten`. The result
+/// scales with the light's `size²` (bigger lights reach proportionally brighter)
+/// and with its falloff, exactly as Firestorm does — and is dramatically dimmer
+/// than the old flat `VERY_LARGE_CINEMA_LIGHT` constant, which read a worn
+/// facelight as a floodlight.
+fn local_light_lumens(light: &ObjectLight) -> f32 {
+    let size = light.radius * SL_RADIUS_TO_RANGE;
+    let falloff = light.falloff * DEFERRED_LIGHT_FALLOFF;
+    let atten = legacy_distance_attenuation(REFERENCE_REACH_FRACTION, falloff);
+    let d_ref = size * REFERENCE_REACH_FRACTION;
+    // `4π d_ref² · sun · intensity · atten` — the illuminance-match solved for
+    // lumens, written as a straight product (plain `f32` locals).
+    let sphere = 4.0 * core::f32::consts::PI * d_ref * d_ref;
+    sphere * SCENE_LIGHT_ILLUMINANCE * light.intensity * atten
+}
 
 /// The smallest spotlight cone half-angle (radians) handed to a Bevy
 /// [`SpotLight`]: Bevy requires a positive outer angle, so a near-zero projector
@@ -200,10 +257,13 @@ fn luminance(color: [f32; 3]) -> f32 {
 fn point_light(light: &ObjectLight) -> PointLight {
     PointLight {
         color: light_color(light),
-        // The colour carries the hue; the intensity (the wire alpha) rides the
-        // photometric power, so radiance stays proportional to the emitted colour.
-        intensity: LOCAL_LIGHT_LUMENS * light.intensity,
-        range: light.radius,
+        // The colour carries the hue; the intensity (the wire alpha) is folded into
+        // the calibrated photometric power, so radiance stays proportional to the
+        // emitted colour and matches Firestorm's surface contribution.
+        intensity: local_light_lumens(light),
+        // Second Life unlits the surface past `radius * 1.5` (the deferred `size`);
+        // Bevy's smooth range window mirrors that reach.
+        range: light.radius * SL_RADIUS_TO_RANGE,
         radius: 0.0,
         ..default()
     }
@@ -221,8 +281,8 @@ fn spot_light(projection: LightProjection, light: &ObjectLight) -> SpotLight {
     let inner = outer * projection.focus.clamp(0.0, 1.0);
     SpotLight {
         color: light_color(light),
-        intensity: LOCAL_LIGHT_LUMENS * light.intensity,
-        range: light.radius,
+        intensity: local_light_lumens(light),
+        range: light.radius * SL_RADIUS_TO_RANGE,
         radius: 0.0,
         inner_angle: inner,
         outer_angle: outer,
@@ -368,7 +428,9 @@ pub(crate) fn drive_local_lights(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectLight, light_from_object, luminance};
+    use super::{
+        ObjectLight, legacy_distance_attenuation, light_from_object, local_light_lumens, luminance,
+    };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{LightData, LightImage, Object, TextureKey, Uuid, Vector};
 
@@ -536,6 +598,73 @@ mod tests {
             projection: None,
         };
         assert!(close3(light.effective_linear_color(), [1.0, 1.0, 1.0]));
+    }
+
+    /// `legacy_distance_attenuation` matches the reference `deferredUtil.glsl`
+    /// curve: bounded, zero at the reach, and peaking at the centre — never the
+    /// unbounded inverse-square that made facelights blow out.
+    #[test]
+    fn legacy_attenuation_is_bounded_reference_curve() {
+        // At the centre (`dist == 0`) with zero falloff: `(1 - 0)² * 2 == 2`.
+        assert!(close(legacy_distance_attenuation(0.0, 0.0), 2.0));
+        // Halfway with zero falloff: `(1 - 0.5)² * 2 == 0.5`.
+        assert!(close(legacy_distance_attenuation(0.5, 0.0), 0.5));
+        // At the reach it is exactly zero regardless of falloff.
+        assert!(close(legacy_distance_attenuation(1.0, 0.0), 0.0));
+        assert!(close(legacy_distance_attenuation(1.0, 1.0), 0.0));
+        // Past the reach it stays clamped at zero (never negative).
+        assert!(close(legacy_distance_attenuation(2.0, 0.5), 0.0));
+        // A sharper falloff dims the mid-range: higher falloff → smaller value.
+        assert!(legacy_distance_attenuation(0.5, 1.0) < legacy_distance_attenuation(0.5, 0.0));
+    }
+
+    /// The worn facelight from the captured dump (white, intensity `153/255`,
+    /// radius `1.0`, falloff `0.75`) now reads as a gentle fill: its calibrated
+    /// lumens are a tiny fraction of the old flat `1_000_000 * intensity`
+    /// (≈ 600 000) that blew out the face.
+    #[test]
+    fn facelight_lumens_are_a_gentle_fill_not_a_floodlight() {
+        let facelight = ObjectLight {
+            linear_color: [1.0, 1.0, 1.0],
+            intensity: 153.0 / 255.0,
+            radius: 1.0,
+            falloff: 0.75,
+            cutoff: 0.0,
+            projection: None,
+        };
+        let lumens = local_light_lumens(&facelight);
+        // Far below the old `VERY_LARGE_CINEMA_LIGHT * intensity` (≈ 600 000).
+        assert!(
+            lumens < 50_000.0,
+            "facelight lumens {lumens} still floodlight-bright"
+        );
+        // Still a positive, meaningful contribution (not extinguished).
+        assert!(lumens > 1_000.0, "facelight lumens {lumens} vanished");
+    }
+
+    /// The calibrated lumens rise with both the light's radius (a bigger light
+    /// reaches proportionally brighter, `∝ size²`) and its intensity.
+    #[test]
+    fn lumens_scale_with_radius_and_intensity() {
+        let base = ObjectLight {
+            linear_color: [1.0, 1.0, 1.0],
+            intensity: 0.5,
+            radius: 2.0,
+            falloff: 1.0,
+            cutoff: 0.0,
+            projection: None,
+        };
+        let mut bigger = base;
+        bigger.radius = 4.0;
+        let mut brighter = base;
+        brighter.intensity = 1.0;
+        assert!(local_light_lumens(&bigger) > local_light_lumens(&base));
+        assert!(local_light_lumens(&brighter) > local_light_lumens(&base));
+        // Doubling the intensity doubles the power (it is a linear factor); a
+        // relative tolerance, as the kilolumen magnitudes exceed `EPS`.
+        let doubled = local_light_lumens(&base) * 2.0;
+        let got = local_light_lumens(&brighter);
+        assert!((got - doubled).abs() < doubled * 1.0e-5);
     }
 
     /// White is brighter than any single primary, and green outweighs red /

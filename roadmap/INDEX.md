@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 241 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 15 |
-| done | 714 |
+| bugs | 16 |
+| done | 715 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1162** |
+| **total** | **1164** |
 
 ## ideas (58)
 
@@ -1023,7 +1023,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (15)
+## bugs (16)
 
 ### protocol
 
@@ -1035,17 +1035,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
+- [`viewer-attachment-earrings-not-rigged`](bugs/viewer-attachment-earrings-not-rigged.md)
+  — Worn earrings (and a brand-label mesh) float beside the head instead of
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-avatar-mesh-hair-and-hairbase-both-render`](bugs/viewer-avatar-mesh-hair-and-hairbase-both-render.md)
+  — Avatar shows mesh hair and a legacy hairbase at the same time
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
-- [`viewer-facelight-too-bright`](bugs/viewer-facelight-too-bright.md) —
-  Facelights render far brighter than in Firestorm
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1067,7 +1069,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists
 
-## done (714)
+## done (715)
 
 ### protocol
 
@@ -1304,6 +1306,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-face-materials-pbr`](done/viewer-face-materials-pbr.md) — Texture tab
   — Blinn-Phong normal/specular maps + PBR (GLTF) materials (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
+- [`viewer-facelight-too-bright`](done/viewer-facelight-too-bright.md) —
+  Facelights render far brighter than in Firestorm
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
