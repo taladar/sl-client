@@ -15,9 +15,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 241 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 15 |
+| bugs | 14 |
 | done | 716 |
-| deferred | 20 |
+| deferred | 21 |
 | wont-do | 9 |
 | **total** | **1164** |
 
@@ -1023,7 +1023,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (15)
+## bugs (14)
 
 ### protocol
 
@@ -1040,8 +1040,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rubberband)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-avatar-mesh-hair-and-hairbase-both-render`](bugs/viewer-avatar-mesh-hair-and-hairbase-both-render.md)
-  — Avatar shows mesh hair and a legacy hairbase at the same time
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
@@ -2581,7 +2579,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (20)
+## deferred (21)
 
 ### protocol
 
@@ -2596,6 +2594,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))
+- [`viewer-avatar-mesh-hair-and-hairbase-both-render`](deferred/viewer-avatar-mesh-hair-and-hairbase-both-render.md)
+  — Avatar shows mesh hair and a legacy hairbase at the same time
 - [`viewer-bevy-material-inplace-reprepare`](deferred/viewer-bevy-material-inplace-reprepare.md)
   — Bevy material in-place re-prepare (fast path for buffer-only changes)
 - [`viewer-build-ui-firestorm-audit`](deferred/viewer-build-ui-firestorm-audit.md)

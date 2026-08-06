@@ -211,6 +211,67 @@ impl AvatarPicker<'_, '_> {
         best
     }
 
+    /// Every worn-attachment object the ray passes through, nearest first — a
+    /// debug companion to [`pick`](Self::pick), which returns only the nearest.
+    /// A mesh hair with overlapping layers (an invisible tint-0 colour variant in
+    /// front of the drawn one) is impossible to inspect through `pick` alone; this
+    /// reports the whole stack so a wrongly rendered inner layer can be identified.
+    /// Deduplicated by worn object (keeping its nearest submesh hit).
+    pub(crate) fn all_worn_hits(&self, ray: Ray3d) -> Vec<(f32, ScopedObjectId)> {
+        let mut nearest: std::collections::HashMap<ScopedObjectId, f32> =
+            std::collections::HashMap::new();
+        for (_target, mesh3d, visibility, skinned, global, worn) in &self.parts {
+            let Some(scoped) = worn.map(|target| target.scoped) else {
+                continue;
+            };
+            if !visibility.get() {
+                continue;
+            }
+            let Some(mesh) = self.meshes.get(&mesh3d.0) else {
+                continue;
+            };
+            let Some(VertexAttributeValues::Float32x3(positions)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            else {
+                continue;
+            };
+            let world_positions: Vec<Vec3> = match skinned {
+                Some(skin) => {
+                    let Some(palette) = self.palette(skin) else {
+                        continue;
+                    };
+                    let (
+                        Some(VertexAttributeValues::Uint16x4(joint_indices)),
+                        Some(VertexAttributeValues::Float32x4(joint_weights)),
+                    ) = (
+                        mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX),
+                        mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT),
+                    )
+                    else {
+                        continue;
+                    };
+                    skinned_world_positions(positions, joint_indices, joint_weights, &palette)
+                }
+                None => positions
+                    .iter()
+                    .map(|position| global.transform_point(Vec3::from_array(*position)))
+                    .collect(),
+            };
+            if let Some(distance) = nearest_triangle_entry(&world_positions, mesh.indices(), ray) {
+                nearest
+                    .entry(scoped)
+                    .and_modify(|best| *best = best.min(distance))
+                    .or_insert(distance);
+            }
+        }
+        let mut hits: Vec<(f32, ScopedObjectId)> = nearest
+            .into_iter()
+            .map(|(scoped, dist)| (dist, scoped))
+            .collect();
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        hits
+    }
+
     /// Ray test one avatar's visible mesh pieces against their **posed**
     /// world-space triangles: CPU-skin each skinned piece from its live joint
     /// palette, place each rigid piece by its (posed) `GlobalTransform`, and

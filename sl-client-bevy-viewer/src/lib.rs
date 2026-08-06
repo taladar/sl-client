@@ -341,7 +341,7 @@ use crate::objects::{
     ObjectState, PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets,
     adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
     apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
-    prune_control_avatars, spawn_animesh_control_avatars, update_objects,
+    pick_worn_attachment, prune_control_avatars, spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1863,6 +1863,7 @@ fn run_session(
             (
                 log_suspicious_objects,
                 pick_object.run_if(world_has_keyboard),
+                pick_worn_attachment.run_if(world_has_keyboard),
                 // The screen-space HUD (P35.2): keep each HUD point anchored to its
                 // corner of the viewport as the window's aspect changes, and render every
                 // HUD face fullbright (the reference forces `LLFace::FULLBRIGHT` on a HUD

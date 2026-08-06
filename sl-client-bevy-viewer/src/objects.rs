@@ -1731,6 +1731,74 @@ pub(crate) fn pick_object(
     }
 }
 
+/// Crosshair pick tool for **worn rigged attachments** (press **`P`**), the
+/// companion to [`pick_object`]: a worn attachment (mesh hair, clothing) renders
+/// skinned to the skeleton, so the prim-face [`MeshRayCast`] in [`pick_object`]
+/// (which tests the static bind-pose geometry, positioned nowhere near where the
+/// vertices actually skin to) cannot reliably hit it. The mesh-accurate skinned
+/// [`AvatarPicker`](crate::avatar_pick::AvatarPicker) can, and resolves the hit to
+/// the worn object; this reports that object's identity and every face's texture /
+/// tint — the ground truth for a wrongly rendered attachment (e.g. a dark hair
+/// piece) that `pick_object` cannot reach. A separate system (not extra parameters
+/// on `pick_object`) to stay within Bevy's system-parameter tuple limit.
+pub(crate) fn pick_worn_attachment(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    avatar_picker: crate::avatar_pick::AvatarPicker,
+    state: Res<ObjectState>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyP) {
+        return;
+    }
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let ray = Ray3d::new(camera.translation(), camera.forward());
+    // Every worn attachment the ray passes through, nearest first — a mesh hair's
+    // overlapping layers (an invisible tint-0 variant in front of the drawn one)
+    // mean the nearest hit is often not the layer being looked at.
+    let hits = avatar_picker.all_worn_hits(ray);
+    if hits.is_empty() {
+        return;
+    }
+    warn!(
+        "pick worn stack: {} attachment(s) along the ray",
+        hits.len()
+    );
+    for (distance, worn) in hits {
+        let Some(tracked) = state.objects.get(&worn) else {
+            continue;
+        };
+        let entry = decode_texture_entry(&tracked.texture_entry, sl_client_bevy::MAX_FACES);
+        // Summarise the object by its distinct (texture, tint) faces, so a layer's
+        // colour intent (a tint-0 hidden variant, a black-tinted lowlight) is legible
+        // without 64 near-identical lines.
+        let mut combos: Vec<([u8; 4], sl_client_bevy::Uuid)> = entry
+            .faces
+            .iter()
+            .map(|face| (face.color, face.texture_id.uuid()))
+            .collect();
+        combos.sort();
+        combos.dedup();
+        warn!(
+            "  @{distance:.2}m object {} — {} face(s):",
+            tracked.full_key,
+            entry.faces.len(),
+        );
+        for (color, texture) in combos {
+            let count = entry
+                .faces
+                .iter()
+                .filter(|face| face.color == color && face.texture_id.uuid() == texture)
+                .count();
+            warn!(
+                "      {count}x texture={texture} tint=[{},{},{},{}]",
+                color[0], color[1], color[2], color[3],
+            );
+        }
+    }
+}
+
 /// The mesh asset key of a mesh object, or `None` if the object is not a mesh.
 fn mesh_key(object: &Object) -> Option<MeshKey> {
     match object.extra.sculpt.map(|sculpt| sculpt.texture) {
