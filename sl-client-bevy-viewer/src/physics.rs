@@ -296,6 +296,26 @@ const REGION_MAX_HEIGHT_M: f32 = 4096.0;
 /// scale axis still gets a valid, non-panicking avian cuboid.
 const MIN_COLLIDER_EXTENT_M: f32 = 0.01;
 
+/// Exponential-smoothing time constant (seconds) for easing a physical object's
+/// *rendered* pose toward its authoritative / dead-reckoned pose — the object
+/// counterpart of [`ROTATION_SMOOTHING_TAU_SECS`]. Unlike the avatar rotation
+/// ease (which slerps the absolute facing toward a mostly-static target), the
+/// object path eases the per-update *correction* as a decaying residual
+/// ([`PhysicsInterp::render_offset`] / [`PhysicsInterp::render_rot_offset`]), so a
+/// steadily dead-reckoned vehicle carries no velocity-proportional standing lag —
+/// only the divergence between prediction and the next authoritative update is
+/// smoothed away. A ~100 ms constant hides the per-update snap (the object
+/// rubberband) while staying responsive, and turns a keyframed
+/// (velocity-less) vehicle's discrete per-update jumps into a continuous glide.
+const OBJECT_SMOOTHING_TAU_SECS: f32 = 0.1;
+
+/// If an authoritative update leaves a rendered-vs-truth residual larger than this
+/// (metres), the object is **snapped** rather than eased: a region crossing /
+/// rebase or a scripted teleport, where easing would visibly slide the object
+/// across the gap. A normal per-update prediction correction is far smaller than a
+/// region-scale jump, so this cleanly separates the two.
+const OBJECT_SNAP_DISTANCE_M: f32 = 32.0;
+
 /// Whether `object` is a server-flagged **physical root prim** the viewer drives
 /// kinematically: it carries [`FLAGS_USE_PHYSICS`], is a linkset root (its
 /// children ride along via the Bevy hierarchy), and is not a worn attachment (the
@@ -471,6 +491,19 @@ pub(crate) struct PhysicsInterp {
     last_interp_secs: f64,
     /// The collider's current extents (metres), to detect a resize.
     collider_scale: [f32; 3],
+    /// The residual between the last *rendered* position and the authoritative /
+    /// dead-reckoned position (Bevy space), decayed toward zero each frame so a
+    /// per-update correction eases in instead of snapping (the translation
+    /// counterpart of the avatar's P31.7 rotation ease). Zero in steady
+    /// dead-reckoned motion (prediction ≈ truth); non-zero only just after a
+    /// divergent update, then absorbed over [`OBJECT_SMOOTHING_TAU_SECS`].
+    render_offset: Vec3,
+    /// The residual between the last *rendered* orientation and the authoritative /
+    /// dead-reckoned orientation (a Bevy-space world-rotation correction applied as
+    /// `render_rot_offset * predicted`), decayed toward identity each frame — the
+    /// rotation counterpart of [`PhysicsInterp::render_offset`], so a turning
+    /// vehicle's per-update rotation snap eases away too.
+    render_rot_offset: Quat,
 }
 
 impl PhysicsInterp {
@@ -488,6 +521,9 @@ impl PhysicsInterp {
             last_message_secs: now,
             last_interp_secs: now,
             collider_scale: collider_extents(&phys.scale),
+            // A freshly-seeded object renders exactly at truth (no correction yet).
+            render_offset: Vec3::ZERO,
+            render_rot_offset: Quat::IDENTITY,
         }
     }
 
@@ -659,14 +695,21 @@ fn bevy_rotation_of(motion: &MotionState) -> Quat {
 /// standing lag.
 const ROTATION_SMOOTHING_TAU_SECS: f32 = 0.08;
 
+/// The framerate-independent exponential-smoothing blend factor for a frame of
+/// length `dt` seconds and time constant `tau_secs` (`1 - e^(-dt/τ)`). A
+/// non-positive `dt` blends fully (snap) so a paused / first frame cannot stall.
+fn smoothing_alpha(dt: f32, tau_secs: f32) -> f32 {
+    if dt <= 0.0 {
+        return 1.0;
+    }
+    1.0 - (-dt / tau_secs).exp()
+}
+
 /// The exponential-smoothing blend factor for a frame of length `dt` seconds
 /// (`1 - e^(-dt/τ)`), the framerate-independent easing toward the target facing. A
 /// non-positive `dt` blends fully (snap) so a paused / first frame cannot stall.
 fn rotation_smoothing_alpha(dt: f32) -> f32 {
-    if dt <= 0.0 {
-        return 1.0;
-    }
-    1.0 - (-dt / ROTATION_SMOOTHING_TAU_SECS).exp()
+    smoothing_alpha(dt, ROTATION_SMOOTHING_TAU_SECS)
 }
 
 /// Ease the avatar anchor's rendered orientation toward its current authoritative /
@@ -895,12 +938,26 @@ pub(crate) fn drive_physical_objects(
             continue;
         };
 
-        // A fresh server update: snap the prediction back to truth and restart. The
-        // collider itself (including a rebuild on resize) is owned by
+        // A fresh server update: reseed the prediction to truth and restart the
+        // timers. Rather than *snapping* the rendered pose to truth (the visible
+        // per-update rubberband), re-aim the decaying residual so the object eases
+        // toward truth from wherever it was rendered last frame — the translation +
+        // rotation counterpart of the avatar's P31.7 rotation ease. The collider
+        // itself (including a rebuild on resize) is owned by
         // [`refine_physical_colliders`]; `reseed` only refreshes the cached scale.
         if phys.is_changed() {
+            let predicted_pos = bevy_position_of(&interp.motion);
+            let rendered_pos_before = Vec3::new(
+                predicted_pos.x + interp.render_offset.x,
+                predicted_pos.y + interp.render_offset.y,
+                predicted_pos.z + interp.render_offset.z,
+            );
+            let rendered_rot_before = interp
+                .render_rot_offset
+                .mul_quat(bevy_rotation_of(&interp.motion));
             interp.reseed(&phys, now);
-            place(&mut transform, &phys.position, &interp.motion.rotation);
+            reaim_residual(&mut interp, rendered_pos_before, rendered_rot_before);
+            place_smoothed(&mut interp, &mut transform, dt_raw);
             continue;
         }
 
@@ -911,6 +968,8 @@ pub(crate) fn drive_physical_objects(
         let time_since_last_update = now - interp.last_message_secs;
         if dt <= 0.0 || time_since_last_update <= 0.0 {
             interp.last_interp_secs = now;
+            // Keep easing any outstanding residual even on a stalled physics frame.
+            place_smoothed(&mut interp, &mut transform, dt_raw);
             continue;
         }
 
@@ -948,12 +1007,9 @@ pub(crate) fn drive_physical_objects(
             },
         );
         interp.last_interp_secs = now;
-
-        place(
-            &mut transform,
-            &array_to_vector(interp.motion.position),
-            &interp.motion.rotation,
-        );
+        // Render the freshly dead-reckoned pose, easing away any residual left over
+        // from the last authoritative correction (zero in steady prediction).
+        place_smoothed(&mut interp, &mut transform, dt_raw);
     }
 }
 
@@ -972,6 +1028,64 @@ const fn array_to_vector(array: [f32; 3]) -> Vector {
 fn place(transform: &mut Transform, position: &Vector, sl_rotation: &Quat) {
     transform.translation = sl_to_bevy_vec(position);
     transform.rotation = sl_to_bevy_rotation().mul_quat(*sl_rotation);
+}
+
+/// The Bevy-world position of a predicted motion: its Second Life region-local
+/// position carried through the single Second Life → Bevy basis change (the same
+/// mapping [`place`] applies).
+fn bevy_position_of(motion: &MotionState) -> Vec3 {
+    sl_to_bevy_vec(&array_to_vector(motion.position))
+}
+
+/// Decay a physical object's render residual one frame and write the resulting
+/// **rendered** pose (predicted pose composed with the decaying residual) into its
+/// [`Transform`]. `dt` is the real (undilated) frame time — the smoothing is a
+/// visual concern, independent of the physics clock. In steady dead-reckoned
+/// motion the residual is zero, so the rendered pose is the prediction; just after
+/// a divergent authoritative update it eases the correction in over
+/// [`OBJECT_SMOOTHING_TAU_SECS`] instead of snapping (the object rubberband fix).
+fn place_smoothed(interp: &mut PhysicsInterp, transform: &mut Transform, dt: f32) {
+    let alpha = smoothing_alpha(dt, OBJECT_SMOOTHING_TAU_SECS);
+    // Decay the residual toward zero (position) / identity (rotation).
+    interp.render_offset = interp.render_offset.lerp(Vec3::ZERO, alpha);
+    interp.render_rot_offset = interp.render_rot_offset.slerp(Quat::IDENTITY, alpha);
+    let predicted_pos = bevy_position_of(&interp.motion);
+    let predicted_rot = bevy_rotation_of(&interp.motion);
+    transform.translation = Vec3::new(
+        predicted_pos.x + interp.render_offset.x,
+        predicted_pos.y + interp.render_offset.y,
+        predicted_pos.z + interp.render_offset.z,
+    );
+    transform.rotation = interp.render_rot_offset.mul_quat(predicted_rot).normalize();
+}
+
+/// Re-aim a physical object's render residual so its rendered pose stays continuous
+/// across an authoritative re-seed: the residual is set to the gap between the pose
+/// rendered *last* frame (`rendered_*_before`) and the fresh truth
+/// (`interp.motion`, already re-seeded), so the ease continues from where the object
+/// visibly was rather than jumping to truth. A gap larger than
+/// [`OBJECT_SNAP_DISTANCE_M`] is a discontinuity (region crossing / rebase /
+/// teleport): the residual is zeroed so the object snaps to truth instead of sliding.
+fn reaim_residual(
+    interp: &mut PhysicsInterp,
+    rendered_pos_before: Vec3,
+    rendered_rot_before: Quat,
+) {
+    let predicted_pos = bevy_position_of(&interp.motion);
+    let predicted_rot = bevy_rotation_of(&interp.motion);
+    let offset = Vec3::new(
+        rendered_pos_before.x - predicted_pos.x,
+        rendered_pos_before.y - predicted_pos.y,
+        rendered_pos_before.z - predicted_pos.z,
+    );
+    if offset.length() > OBJECT_SNAP_DISTANCE_M {
+        // A region-scale jump: snap (render at truth), don't slide across the gap.
+        interp.render_offset = Vec3::ZERO;
+        interp.render_rot_offset = Quat::IDENTITY;
+    } else {
+        interp.render_offset = offset;
+        interp.render_rot_offset = rendered_rot_before.mul_quat(predicted_rot.inverse());
+    }
 }
 
 /// Strip the kinematic body from an entity that is no longer a physical root (its
@@ -1606,16 +1720,19 @@ pub(crate) fn refine_physical_colliders(
 #[cfg(test)]
 mod tests {
     use super::{
-        ClampInput, MAX_INTERP_SECS, MotionState, PHASE_OUT_START_SECS, REGION_MAX_HEIGHT_M,
-        REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS, SL_GRAVITY_Z, advance_motion, angular_step,
-        append_triangles, avatar_ground_floor, clamp_dilation, clamp_prediction, dead_reckon,
-        extents_differ, ground_floor, neighbours_known, phase_out_factor, rotation_smoothing_alpha,
-        shape_wants_geometry, sl_gravity,
+        ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, PHASE_OUT_START_SECS,
+        PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS,
+        SL_GRAVITY_Z, advance_motion, angular_step, append_triangles, avatar_ground_floor,
+        bevy_position_of, bevy_rotation_of, clamp_dilation, clamp_prediction, dead_reckon,
+        extents_differ, ground_floor, neighbours_known, phase_out_factor, place_smoothed,
+        reaim_residual, rotation_smoothing_alpha, shape_wants_geometry, sl_gravity,
+        smoothing_alpha,
     };
     use crate::physics::RegionTimeDilation;
     use avian3d::prelude::{Collider, SimpleCollider as _};
     use bevy::math::{Quat, Vec3};
     use bevy::mesh::Indices;
+    use bevy::transform::components::Transform;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{PhysicsShapeType, RegionHandle, Rotation, Vector};
 
@@ -2047,5 +2164,135 @@ mod tests {
             rendered = rendered.slerp(target, alpha);
         }
         assert!(rendered.angle_between(target) < 1.0e-3);
+    }
+
+    /// A test region handle shared by the object-residual tests.
+    fn test_region() -> RegionHandle {
+        RegionHandle::from_global(1000 * 256, 1000 * 256)
+    }
+
+    /// Build a [`PhysicsInterp`] whose prediction sits at a Second Life region-local
+    /// position with the identity facing and a zero residual (rendered exactly at
+    /// truth) — the starting point for the object-easing tests.
+    fn interp_at(position: [f32; 3]) -> PhysicsInterp {
+        let [x, y, z] = position;
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        PhysicsInterp {
+            motion: MotionState::new(
+                &Vector { x, y, z },
+                &zero,
+                &zero,
+                &identity_rotation(),
+                &zero,
+                test_region(),
+            ),
+            last_message_secs: 0.0,
+            last_interp_secs: 0.0,
+            collider_scale: [1.0, 1.0, 1.0],
+            render_offset: Vec3::ZERO,
+            render_rot_offset: Quat::IDENTITY,
+        }
+    }
+
+    /// Re-seed an interp's prediction to a fresh authoritative position (the reseed a
+    /// new `ObjectUpdate` performs), leaving the residual for [`reaim_residual`].
+    fn reseed_to(interp: &mut PhysicsInterp, position: [f32; 3]) {
+        let [x, y, z] = position;
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        interp.motion = MotionState::new(
+            &Vector { x, y, z },
+            &zero,
+            &zero,
+            &identity_rotation(),
+            &zero,
+            test_region(),
+        );
+    }
+
+    /// The rendered position `predicted + residual` (the pose [`place_smoothed`] writes
+    /// before decaying the residual).
+    fn rendered_of(interp: &PhysicsInterp) -> Vec3 {
+        let p = bevy_position_of(&interp.motion);
+        Vec3::new(
+            p.x + interp.render_offset.x,
+            p.y + interp.render_offset.y,
+            p.z + interp.render_offset.z,
+        )
+    }
+
+    /// The generic exponential-smoothing blend is `1` for a non-positive frame and
+    /// reaches ~63 % at one time constant, for any tau (the object path uses its own
+    /// [`OBJECT_SMOOTHING_TAU_SECS`], distinct from the avatar rotation tau).
+    #[test]
+    fn smoothing_alpha_reaches_63pct_at_one_tau() {
+        near(smoothing_alpha(0.0, OBJECT_SMOOTHING_TAU_SECS), 1.0);
+        near(smoothing_alpha(-1.0, OBJECT_SMOOTHING_TAU_SECS), 1.0);
+        near(
+            smoothing_alpha(OBJECT_SMOOTHING_TAU_SECS, OBJECT_SMOOTHING_TAU_SECS),
+            1.0 - core::f32::consts::E.recip(),
+        );
+    }
+
+    /// A divergent authoritative update does not snap the rendered object: after
+    /// re-seeding to the new truth, [`reaim_residual`] sets the residual so the rendered
+    /// pose (`predicted + residual`) stays exactly where it was last frame — the object
+    /// rubberband fix. The residual then eases to zero, converging the render onto truth.
+    #[test]
+    fn reaim_residual_keeps_render_continuous_then_eases_to_truth() {
+        let mut interp = interp_at([10.0, 20.0, 30.0]);
+        // Rendered last frame exactly at the old prediction (zero residual).
+        let rendered_before = bevy_position_of(&interp.motion);
+        let rendered_rot_before = bevy_rotation_of(&interp.motion);
+        // A new update corrects the position by 1 m (prediction diverged from truth).
+        reseed_to(&mut interp, [11.0, 20.0, 30.0]);
+        reaim_residual(&mut interp, rendered_before, rendered_rot_before);
+        // The rendered pose is unchanged across the reseed (no visible snap).
+        let rendered = rendered_of(&interp);
+        near3(
+            [rendered.x, rendered.y, rendered.z],
+            [rendered_before.x, rendered_before.y, rendered_before.z],
+        );
+        // Easing many frames drives the residual to zero — the render converges to truth.
+        let mut transform = Transform::IDENTITY;
+        for _ in 0..300 {
+            place_smoothed(&mut interp, &mut transform, 0.016);
+        }
+        let truth = bevy_position_of(&interp.motion);
+        assert!(
+            transform.translation.distance(truth) < 1.0e-3,
+            "render should converge onto truth, got {:?} vs {truth:?}",
+            transform.translation
+        );
+        assert!(interp.render_offset.length() < 1.0e-3);
+    }
+
+    /// A region-scale gap (a crossing / rebase / teleport) is snapped, not eased:
+    /// [`reaim_residual`] zeroes the residual so the object renders at truth immediately
+    /// rather than sliding hundreds of metres across the region.
+    #[test]
+    fn reaim_residual_snaps_a_region_scale_gap() {
+        let mut interp = interp_at([250.0, 20.0, 30.0]);
+        let rendered_before = bevy_position_of(&interp.motion);
+        let rendered_rot_before = bevy_rotation_of(&interp.motion);
+        // The object crosses a region border: its region-local X wraps ~245 m, well
+        // past [`OBJECT_SNAP_DISTANCE_M`].
+        reseed_to(&mut interp, [5.0, 20.0, 30.0]);
+        reaim_residual(&mut interp, rendered_before, rendered_rot_before);
+        assert!(
+            interp.render_offset.length() < f32::EPSILON,
+            "a region-scale gap should snap (zero residual), got {:?}",
+            interp.render_offset
+        );
+        // The rendered pose is truth, not the pre-crossing position.
+        let truth = bevy_position_of(&interp.motion);
+        assert!(rendered_of(&interp).distance(truth) < 1.0e-4);
     }
 }

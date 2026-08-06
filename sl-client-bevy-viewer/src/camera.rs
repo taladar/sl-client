@@ -55,7 +55,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
-use crate::avatars::{AvatarBody, AvatarState};
+use crate::avatars::{AvatarBody, AvatarState, SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::input_context::InputContext;
@@ -1114,7 +1114,13 @@ pub(crate) fn position_camera(
     time: Res<Time>,
     globals: AvatarPoseQuery,
     transforms: AvatarTransformQuery,
+    // The seat and its linkset ancestors, to compose a scripted sit camera's seat
+    // pose from current-frame local transforms (see [`sit_camera_pose`]).
+    seat_chain: SeatChainQuery,
     motions: Query<&AvatarMotion>,
+    // Tracks whether the scripted-sit-camera path was active last frame, so the
+    // diagnostic below logs only on the transition.
+    mut sit_camera_active: Local<bool>,
     mut ray_cast: MeshRayCast,
     mut aim_out: ResMut<CameraAim>,
     mut cameras: Query<(&mut Transform, &mut CameraRig), With<ViewerCamera>>,
@@ -1189,8 +1195,24 @@ pub(crate) fn position_camera(
             // focus ride the seat at the script's offsets. It is not collided (the
             // script's placement is authoritative — e.g. a camera inside a vehicle).
             let sit_pose = matches!(*focus_target, FocusTarget::Avatar)
-                .then(|| sit_camera_pose(&sit_camera, &objects, &globals))
+                .then(|| sit_camera_pose(&sit_camera, &objects, &seat_chain))
                 .flatten();
+            // Log only when the scripted-sit-camera path engages / disengages (not
+            // every frame), so a live run reveals whether the seat a driver rides uses
+            // a scripted sit camera (this rigid-seat path) or the ordinary rear-view
+            // follow — the two track the vehicle differently.
+            let sit_now = sit_pose.is_some();
+            if sit_now != *sit_camera_active {
+                *sit_camera_active = sit_now;
+                debug!(
+                    "camera: scripted sit-camera path {}",
+                    if sit_now {
+                        "engaged (rigid seat follow)"
+                    } else {
+                        "disengaged"
+                    }
+                );
+            }
             let (mut eye, focus, follow_avatar, collide) = match (sit_pose, *focus_target) {
                 // Scripted sit camera: fixed offsets from the (moving) seat, tracked
                 // rigidly like a follow, never collided.
@@ -1364,20 +1386,32 @@ fn own_avatar_pose(
 /// The scripted sit camera's world `(eye, focus)`, or `None` when no sit camera is
 /// set or its seat is not currently in the scene. The seat set eye / at offsets in
 /// its own Second Life frame; the seat entity's world transform carries the single
-/// SL→Bevy basis change, so [`GlobalTransform::transform_point`] composes each
-/// offset onto the seat's live world pose — the reference's `object_pos +
-/// mSitCameraPos * object_rot` / `object_pos + mSitCameraFocus * object_rot`.
+/// SL→Bevy basis change, so [`Transform::transform_point`] composes each offset onto
+/// the seat's live world pose — the reference's `object_pos + mSitCameraPos *
+/// object_rot` / `object_pos + mSitCameraFocus * object_rot`.
+///
+/// The seat's world pose is composed **this frame** from the chain of local
+/// [`Transform`]s up its `ChildOf` parents ([`seat_world_transform`]), *not* the
+/// seat's [`GlobalTransform`] (which Bevy only recomputes in `PostUpdate`, so it is a
+/// frame stale). Reading the stale global made the scripted sit camera trail the
+/// vehicle by a frame, so the vehicle **wobbled in the driver's view** on each of the
+/// object's dead-reckon / snap corrections — the sit-camera counterpart of the
+/// seated-rider fix ([[viewer-seated-avatar-vehicle-rubberband]]), which already
+/// composes the rider from the current-frame seat locals. Composing the camera the
+/// same way locks the driver's viewpoint rigidly to the seat, so the vehicle holds
+/// its place on screen and only the world jitters past it
+/// ([[viewer-physical-object-motion-not-smooth]]).
 fn sit_camera_pose(
     sit_camera: &crate::sit_camera::SitCamera,
     objects: &crate::objects::ObjectState,
-    globals: &AvatarPoseQuery,
+    chain: &SeatChainQuery,
 ) -> Option<(Vec3, Vec3)> {
     let (seat, eye_offset, at_offset) = sit_camera.offsets()?;
     let seat_entity = objects.entity_of(seat)?;
-    let seat_global = globals.get(seat_entity).ok()?;
+    let seat_world = seat_world_transform(seat_entity, chain)?;
     Some((
-        seat_global.transform_point(eye_offset),
-        seat_global.transform_point(at_offset),
+        seat_world.transform_point(eye_offset),
+        seat_world.transform_point(at_offset),
     ))
 }
 

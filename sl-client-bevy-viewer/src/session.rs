@@ -110,12 +110,30 @@ pub(crate) fn repeat_debug_animation(
     }
 }
 
-/// How often, in seconds, the fly-camera's viewpoint is reported to the simulator
-/// as the agent's interest camera (R22). The simulator streams full object /
-/// avatar updates within the interest radius of this viewpoint, so a few times a
-/// second is ample — `set_camera` sends an `AgentUpdate` on each call, and the
-/// session re-advertises the viewpoint on every keep-alive between them.
-const CAMERA_INTEREST_INTERVAL_SECS: f32 = 0.5;
+/// The shortest interval, in seconds, between interest-camera `AgentUpdate`s while
+/// the view is moving (≈45 Hz). The simulator paces the interest-list object /
+/// avatar update stream off the agent's `AgentUpdate` cadence, so a moving vehicle
+/// (or any moving object) only renders smoothly when the camera is reported near
+/// the display rate — the reference viewer sends `AgentUpdate` at up to
+/// `MAX_AGENT_UPDATES_PER_SECOND` (125, `llviewermessage.cpp`) whenever the camera
+/// or controls change. The earlier 0.5 s (2 Hz) reporting starved the stream: the
+/// sim streamed a driven kart at ~14 Hz, so extrapolation between those sparse
+/// samples showed as visible jerk even going straight
+/// ([[viewer-physical-object-motion-not-smooth]]). Capped at ~45 Hz (the sim's own
+/// physics rate — sending faster cannot yield fresher object data). A **still**
+/// view sends nothing here and falls back to the 1 Hz keep-alive `AgentUpdate`.
+const CAMERA_INTEREST_MIN_PERIOD_SECS: f32 = 1.0 / 45.0;
+
+/// The camera must move at least this far (metres) since the last interest report
+/// before another is sent within the min period — so a static view relies on the
+/// keep-alive rather than spamming identical viewpoints, mirroring the reference
+/// viewer's send-on-significant-change behaviour.
+const CAMERA_INTEREST_MOVE_EPS_M: f32 = 0.02;
+
+/// The camera's look axis must change by at least this (one minus the dot product
+/// of successive forward vectors, ~2.6°) before another interest report is sent
+/// within the min period, the rotation counterpart of [`CAMERA_INTEREST_MOVE_EPS_M`].
+const CAMERA_INTEREST_LOOK_EPS: f32 = 1.0e-3;
 
 /// Report the fly-camera's world viewpoint to the simulator as the agent's
 /// interest camera, throttled to [`CAMERA_INTEREST_INTERVAL_SECS`] (R22).
@@ -134,6 +152,7 @@ const CAMERA_INTEREST_INTERVAL_SECS: f32 = 0.5;
 pub(crate) fn report_camera_interest(
     time: Res<Time>,
     mut since_last: Local<f32>,
+    mut last_view: Local<Option<(Vec3, Vec3)>>,
     session: Res<ViewerSession>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
@@ -146,11 +165,12 @@ pub(crate) fn report_camera_interest(
     if !session.agent_in_world {
         return;
     }
+    // Rate-limit to ~45 Hz: sending faster than the sim's physics rate cannot yield
+    // fresher object data, and it matches the reference's high-but-bounded cadence.
     *since_last += time.delta_secs();
-    if *since_last < CAMERA_INTEREST_INTERVAL_SECS {
+    if *since_last < CAMERA_INTEREST_MIN_PERIOD_SECS {
         return;
     }
-    *since_last = 0.0;
     let Ok(transform) = camera.single() else {
         return;
     };
@@ -159,7 +179,21 @@ pub(crate) fn report_camera_interest(
     // look axis `Camera::looking_at` needs; the distance is irrelevant to it.
     // Per-component `f32` maths keeps clear of the workspace
     // `arithmetic_side_effects` lint, which `Vec3`'s `+` operator trips.
-    let forward = transform.forward();
+    let forward = transform.forward().as_vec3();
+    // Only report when the view actually moved since the last send; a static view
+    // relies on the 1 Hz keep-alive `AgentUpdate` instead of re-sending an identical
+    // viewpoint every 22 ms (the reference viewer likewise sends on significant
+    // change). While driving, the camera moves every frame, so this fires at the full
+    // ~45 Hz cap — which is what keeps the sim's interest-list object stream dense.
+    let moved = last_view.is_none_or(|(last_eye, last_forward)| {
+        eye.distance(last_eye) > CAMERA_INTEREST_MOVE_EPS_M
+            || forward.dot(last_forward) < 1.0 - CAMERA_INTEREST_LOOK_EPS
+    });
+    if !moved {
+        return;
+    }
+    *since_last = 0.0;
+    *last_view = Some((eye, forward));
     let target = Vec3::new(eye.x + forward.x, eye.y + forward.y, eye.z + forward.z);
     let center = bevy_to_sl_vec(eye);
     // R22b diagnostic: surface the interest camera actually reported to the sim, so a

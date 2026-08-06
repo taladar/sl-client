@@ -2685,9 +2685,17 @@ pub(crate) fn update_avatar_objects(
 /// and optional [`ChildOf`] parent. Aliased so the system signature and the
 /// [`seat_world_transform`] helper stay readable and clear of
 /// `clippy::type_complexity`. `Without<AvatarAnchor>` keeps it disjoint from the
-/// mutable anchor query (a seat object is never an avatar anchor).
-type SeatChainQuery<'world, 'state> =
-    Query<'world, 'state, (&'static Transform, Option<&'static ChildOf>), Without<AvatarAnchor>>;
+/// mutable anchor query (a seat object is never an avatar anchor), and
+/// `Without<ViewerCamera>` from the camera's mutable transform query — the same
+/// helper composes the scripted sit camera's seat pose in
+/// [`sit_camera_pose`](crate::camera), whose system mutably borrows the camera
+/// transform (a seat object is never the camera either).
+pub(crate) type SeatChainQuery<'world, 'state> = Query<
+    'world,
+    'state,
+    (&'static Transform, Option<&'static ChildOf>),
+    (Without<AvatarAnchor>, Without<crate::camera::ViewerCamera>),
+>;
 
 /// Drive every **seated** avatar's world pose from its seat each frame — self and
 /// others alike, so a boat full of avatars rides together.
@@ -2759,7 +2767,7 @@ pub(crate) fn place_seated_avatars(
 /// mid-frame). Object entities carry no scale (it rides their geometry holder, a
 /// separate child), so the composed world transform matches what propagation would
 /// produce.
-fn seat_world_transform(seat: Entity, chain: &SeatChainQuery) -> Option<Transform> {
+pub(crate) fn seat_world_transform(seat: Entity, chain: &SeatChainQuery) -> Option<Transform> {
     // Collect the chain leaf-first, then compose root-first so each parent's
     // transform pre-multiplies its child's (`world = root · … · seat`).
     let mut locals: Vec<Transform> = Vec::new();
