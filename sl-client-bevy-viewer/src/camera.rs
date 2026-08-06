@@ -1127,7 +1127,7 @@ pub(crate) fn position_camera(
     // The own avatar's live world position and stable (heading-derived) facing, if
     // it has arrived. Read from the current-frame anchor `Transform`, not the
     // frame-late `GlobalTransform`, so the follow does not trail by a frame.
-    let avatar_pose = own_avatar_pose(&identity, &avatars, &globals, &transforms, &motions);
+    let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions);
 
     match *mode {
         CameraMode::Flycam => {
@@ -1335,22 +1335,20 @@ fn collide_camera(ray_cast: &mut MeshRayCast, focus: Vec3, eye: Vec3) -> Vec3 {
 fn own_avatar_pose(
     identity: &SlIdentity,
     avatars: &AvatarState,
-    globals: &AvatarPoseQuery,
     transforms: &AvatarTransformQuery,
     motions: &Query<&AvatarMotion>,
 ) -> Option<(Vec3, Vec3)> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
-    // Seated on an object, the anchor is **not** a region-space root: its world pose
-    // is composed each frame from its seat ([`place_seated_avatars`]), so read the
-    // world `GlobalTransform` (its local `Transform` is the seat-relative offset)
-    // and take the facing from that world orientation. A seat that moves fast enough
-    // for the one-frame `GlobalTransform` lag to show typically drives the camera
-    // from the seat itself (a scripted sit camera / forced mouselook).
+    // Seated on an object, the anchor still holds its **world** pose (a top-level
+    // entity), written this frame by [`place_seated_avatars`] from the seat's
+    // current-frame transform — so read its local `Transform` (this frame's value),
+    // not the frame-late `GlobalTransform`, and take the facing from that world
+    // orientation. Reading the stale global here was the seated-vehicle rubber-band
+    // (`viewer-seated-avatar-vehicle-rubberband`).
     if avatars.is_seated(agent) {
-        let global = globals.get(anchor).ok()?;
-        let (_scale, rotation, translation) = global.to_scale_rotation_translation();
-        return Some((translation, rotation.mul_vec3(Vec3::X)));
+        let transform = transforms.get(anchor).ok()?;
+        return Some((transform.translation, transform.rotation.mul_vec3(Vec3::X)));
     }
     // Standing, the anchor is a root entity, so its local `Transform` is its world
     // pose — and it is this frame's value (unlike the frame-late `GlobalTransform`),

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 95 |
 | in-progress | 10 |
 | bugs | 14 |
-| done | 716 |
+| done | 717 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1164** |
+| **total** | **1165** |
 
 ## ideas (58)
 
@@ -1053,11 +1053,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-physical-object-motion-not-smooth`](bugs/viewer-physical-object-motion-not-smooth.md)
+  — Physical object (vehicle) motion is not as smooth as it should be between
+  updates
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
-- [`viewer-seated-avatar-vehicle-rubberband`](bugs/viewer-seated-avatar-vehicle-rubberband.md)
-  — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
-  parenting
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -1065,7 +1065,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists
 
-## done (716)
+## done (717)
 
 ### protocol
 
@@ -1896,6 +1896,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-experience-permission-dialog` (done))
 - [`viewer-search-floater`](done/viewer-search-floater.md) — Search floater —
   directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-seated-avatar-vehicle-rubberband`](done/viewer-seated-avatar-vehicle-rubberband.md)
+  — Seated avatar rubber-bands behind the vehicle it sits on instead of rigidly
+  parenting
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))

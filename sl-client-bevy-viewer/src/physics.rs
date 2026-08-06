@@ -196,10 +196,16 @@ impl Plugin for PhysicsPlugin {
                     // path), after `apply_object` has refreshed the [`AvatarMotion`].
                     drive_avatar_motion.after(update_avatar_objects),
                     // Seated avatars ride their seat, not the region: place them from
-                    // the seat's world transform after the dead-reckoner (whose write
-                    // it overrides for a seated anchor) and before the camera follow
-                    // reads the own avatar's pose.
+                    // the seat's current-frame world transform (composed from local
+                    // transforms — the seat's `GlobalTransform` is a frame stale), so
+                    // this must run after every mover that writes a seat's local
+                    // transform this frame — `update_objects` (authoritative snap) and
+                    // `drive_physical_objects` (between-update dead-reckon) — and after
+                    // `drive_avatar_motion` (whose write it overrides for a seated
+                    // anchor), and before the camera follow reads the own avatar's pose.
                     crate::avatars::place_seated_avatars
+                        .after(update_objects)
+                        .after(drive_physical_objects)
                         .after(drive_avatar_motion)
                         .before(crate::camera::position_camera),
                     // P31.3: replace the placeholder cuboid with a shape-aware

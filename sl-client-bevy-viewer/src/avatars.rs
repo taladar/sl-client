@@ -2680,6 +2680,15 @@ pub(crate) fn update_avatar_objects(
     }
 }
 
+/// The seat-chain query [`place_seated_avatars`] walks to compose a seat's
+/// current-frame world transform: every non-anchor entity's local [`Transform`]
+/// and optional [`ChildOf`] parent. Aliased so the system signature and the
+/// [`seat_world_transform`] helper stay readable and clear of
+/// `clippy::type_complexity`. `Without<AvatarAnchor>` keeps it disjoint from the
+/// mutable anchor query (a seat object is never an avatar anchor).
+type SeatChainQuery<'world, 'state> =
+    Query<'world, 'state, (&'static Transform, Option<&'static ChildOf>), Without<AvatarAnchor>>;
+
 /// Drive every **seated** avatar's world pose from its seat each frame — self and
 /// others alike, so a boat full of avatars rides together.
 ///
@@ -2694,17 +2703,30 @@ pub(crate) fn update_avatar_objects(
 /// `LLVOAvatar::sitOnObject` parenting (the avatar root rides the seat's transform,
 /// with no pelvis / root correction while seated).
 ///
-/// Ordered after [`drive_avatar_motion`](crate::physics::drive_avatar_motion)
-/// (whose write it overrides for a seated anchor) and before the camera follow, so
-/// a seated own avatar's world pose is current when the camera reads it. The seat's
-/// `GlobalTransform` is last frame's propagated value, so a seated avatar trails a
-/// fast-moving seat by a single frame — invisible for ordinary seats, and vehicles
-/// that move fast enough to matter typically drive the camera from the seat itself
-/// (a scripted sit camera / forced mouselook).
+/// The seat's world transform is composed **here** from the chain of local
+/// [`Transform`]s up its `ChildOf` parents ([`seat_world_transform`]), each of
+/// which is this frame's value once its mover has run — deliberately *not* the
+/// seat's [`GlobalTransform`], which Bevy only recomputes in `PostUpdate` and so
+/// is a frame stale. That one-frame lag is exactly the visible rubber-band on a
+/// moving vehicle (`viewer-seated-avatar-vehicle-rubberband`): the seat mesh
+/// renders at this frame's pose while a rider read from the stale
+/// `GlobalTransform` trails at last frame's, lurching on each of the vehicle's
+/// dead-reckon / snap corrections. Composing from the current-frame locals locks
+/// the rider to the seat rigidly, with zero lag.
+///
+/// Ordered after the movers that write the seat's local transform
+/// ([`update_objects`](crate::objects::update_objects) for the authoritative snap,
+/// [`drive_physical_objects`](crate::physics::drive_physical_objects) for the
+/// between-update dead-reckon) and after
+/// [`drive_avatar_motion`](crate::physics::drive_avatar_motion) (whose write it
+/// overrides for a seated anchor), and before the camera follow — so both the
+/// seat's locals and the seated own avatar's world pose are current when read.
 pub(crate) fn place_seated_avatars(
     state: Res<AvatarState>,
     objects: Res<ObjectState>,
-    seats: Query<&GlobalTransform>,
+    // The seat and its linkset ancestors, read to compose the seat's
+    // current-frame world pose from local transforms ([`seat_world_transform`]).
+    chain: SeatChainQuery,
     // Narrowed to avatar anchors (not every entity with a `Transform`) so this
     // mutable query conflicts with as few other systems as the scheduler allows.
     mut anchors: Query<&mut Transform, With<AvatarAnchor>>,
@@ -2713,18 +2735,48 @@ pub(crate) fn place_seated_avatars(
         let Some(seat_entity) = objects.entity_by_scoped(&seat_scoped) else {
             continue;
         };
-        let Ok(seat_global) = seats.get(seat_entity) else {
+        let Some(seat_world) = seat_world_transform(seat_entity, &chain) else {
             continue;
         };
         // Drop the anchor by the pelvis height so the hips land on the sit target.
         let seated = drop_to_hips(offset, seat_drop);
-        let world = seat_global.mul_transform(seated).compute_transform();
+        let world = seat_world.mul_transform(seated);
         if let Ok(mut transform) = anchors.get_mut(anchor)
             && *transform != world
         {
             *transform = world;
         }
     }
+}
+
+/// Compose an object entity's **current-frame** world [`Transform`] from the chain
+/// of local transforms up its `ChildOf` parents — the manual equivalent of the
+/// `GlobalTransform` Bevy propagates in `PostUpdate`, but read from this frame's
+/// local values so a seat driven this frame is not a frame stale (the point of
+/// [`place_seated_avatars`]). SL linksets are flat (a root plus its children), so
+/// the chain is at most two deep; the walk is general regardless. Returns `None`
+/// if any entity in the chain has lost its [`Transform`] (left the scene
+/// mid-frame). Object entities carry no scale (it rides their geometry holder, a
+/// separate child), so the composed world transform matches what propagation would
+/// produce.
+fn seat_world_transform(seat: Entity, chain: &SeatChainQuery) -> Option<Transform> {
+    // Collect the chain leaf-first, then compose root-first so each parent's
+    // transform pre-multiplies its child's (`world = root · … · seat`).
+    let mut locals: Vec<Transform> = Vec::new();
+    let mut current = seat;
+    loop {
+        let (transform, parent) = chain.get(current).ok()?;
+        locals.push(*transform);
+        match parent {
+            Some(child_of) => current = child_of.parent(),
+            None => break,
+        }
+    }
+    let mut world = Transform::IDENTITY;
+    for local in locals.iter().rev() {
+        world = world.mul_transform(*local);
+    }
+    Some(world)
 }
 
 /// Render a placeholder for every coarse-only avatar, keeping the set current with
@@ -4510,10 +4562,10 @@ pub(crate) fn apply_bom_face_materials(
 mod tests {
     use super::{
         AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
-        PROVISIONAL_ID_CHARS, Seated, SeatedTarget, body_root_transform, bom_face_alpha_mode,
-        classify_bake_alpha, coarse_translation, drop_to_hips, invisible_body_slots,
-        provisional_label, root_drop_from_metrics, seated_offset, should_refetch_bakes,
-        used_baked_slots, visible_body_bakes,
+        PROVISIONAL_ID_CHARS, SeatChainQuery, Seated, SeatedTarget, body_root_transform,
+        bom_face_alpha_mode, classify_bake_alpha, coarse_translation, drop_to_hips,
+        invisible_body_slots, provisional_label, root_drop_from_metrics, seat_world_transform,
+        seated_offset, should_refetch_bakes, used_baked_slots, visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -4737,6 +4789,66 @@ mod tests {
             "a tilted seat drops along the avatar's up, got {:?}",
             dropped.translation,
         );
+    }
+
+    /// [`seat_world_transform`] composes the seat's world pose from the chain of
+    /// **local** transforms, matching exactly what Bevy's `PostUpdate` propagation
+    /// produces for the same hierarchy — but read from this frame's locals rather
+    /// than the frame-late `GlobalTransform`. That is what locks a seated rider
+    /// rigidly to a moving vehicle (`viewer-seated-avatar-vehicle-rubberband`). A
+    /// child-prim seat (the avatar sat on a non-root prim of a linkset) must compose
+    /// `root · child`, so this checks a root seat and a child seat alike against the
+    /// propagated ground truth.
+    #[test]
+    fn seat_world_transform_matches_propagation() -> Result<(), Box<dyn core::error::Error>> {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, ChildOf, GlobalTransform, TransformPlugin};
+
+        let mut app = App::new();
+        app.add_plugins(TransformPlugin);
+
+        // A linkset: a moved-and-rotated root prim, plus a child prim at a local
+        // offset — the two seat topologies a rider can sit on.
+        let root_local = Transform::from_translation(Vec3::new(10.0, 0.0, 5.0))
+            .with_rotation(Quat::from_rotation_y(core::f32::consts::FRAC_PI_2));
+        let child_local = Transform::from_translation(Vec3::new(0.0, 0.0, 2.0));
+        let root = app.world_mut().spawn(root_local).id();
+        let child = app.world_mut().spawn((child_local, ChildOf(root))).id();
+
+        // Let propagation compute the ground-truth `GlobalTransform`s.
+        app.update();
+
+        let mut system_state: SystemState<SeatChainQuery> = SystemState::new(app.world_mut());
+        // `SystemState::get` is fallible and `expect` is denied workspace-wide.
+        let chain = system_state
+            .get(app.world())
+            .ok()
+            .ok_or("the seat-chain query must build")?;
+
+        for entity in [root, child] {
+            let composed =
+                seat_world_transform(entity, &chain).ok_or("entity should be in the chain")?;
+            let propagated = app
+                .world()
+                .get::<GlobalTransform>(entity)
+                .ok_or("entity should have a propagated global transform")?
+                .compute_transform();
+            assert!(
+                composed
+                    .translation
+                    .abs_diff_eq(propagated.translation, 1.0e-5),
+                "composed translation {:?} matches propagation {:?}",
+                composed.translation,
+                propagated.translation,
+            );
+            assert!(
+                composed.rotation.abs_diff_eq(propagated.rotation, 1.0e-5),
+                "composed rotation {:?} matches propagation {:?}",
+                composed.rotation,
+                propagated.rotation,
+            );
+        }
+        Ok(())
     }
 
     /// A coarse location maps its whole-metre region-relative position through the
