@@ -40,6 +40,7 @@ mod avatar_menu;
 mod avatar_pick;
 mod avatar_picker;
 mod avatar_profile;
+mod avatar_replay;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
@@ -157,6 +158,7 @@ mod render_readback;
 mod render_scene;
 #[cfg(test)]
 mod render_test;
+mod replay_bundle;
 mod screenshot;
 mod script_dialog;
 mod script_permission;
@@ -416,6 +418,10 @@ pub enum Error {
     /// The grid issued an MFA challenge but the avatar has no `mfa_command`.
     #[error("the grid requires multi-factor authentication but no mfa_command is configured")]
     MfaRequired,
+    /// A `--replay` bundle could not be loaded (missing directory, no manifests,
+    /// or an unreadable / unsupported manifest).
+    #[error("replay bundle error: {0}")]
+    Replay(String),
 }
 
 /// The command-line options for the viewer.
@@ -536,6 +542,22 @@ struct Options {
     /// Has no effect off Second Life (OpenSim sends no OpenID token).
     #[clap(long)]
     no_web_auth: bool,
+    /// Render a captured avatar-state bundle **offline** (no login, no grid):
+    /// `--replay <dir>` where `<dir>` is a bundle written by the capture
+    /// (**Ctrl+Alt+D** with `SL_VIEWER_DUMP_DIR` set). The viewer rebuilds the
+    /// avatar(s) from the bundle and draws them with the live render pipeline, so
+    /// a render-only bug can be reproduced — and a fix tested — after the avatar
+    /// has logged out. Needs `--viewer-assets` (a body needs the system skeleton).
+    #[clap(long, value_name = "DIR")]
+    replay: Option<PathBuf>,
+    /// In `--replay`, add an orbiting local light around the avatar — a slow
+    /// specular-highlight sweep for testing material shading. Off by default.
+    #[clap(long)]
+    replay_orbit_light: bool,
+    /// In `--replay`, add a local reflection probe around the avatar, so
+    /// image-based-lighting materials have a probe to sample. Off by default.
+    #[clap(long)]
+    replay_reflection_probe: bool,
 }
 
 /// Parse a `--camera-position` / `--camera-look-at` argument: three
@@ -797,7 +819,12 @@ fn run_session(
     camera: CameraStartup,
     skin: SkinRuntime,
     media: MediaRuntime,
+    replay: Option<crate::avatar_replay::ReplayConfig>,
 ) -> LoginOutcome {
+    // Offline (avatar-state replay) mode: the plugin registers its event/resource
+    // substrate but never logs in; the session is fed synthetic events from the
+    // bundle instead (see `crate::avatar_replay`).
+    let offline = replay.is_some();
     let CameraStartup {
         start: camera_start,
         spin: camera_spin,
@@ -890,6 +917,7 @@ fn run_session(
             cache_library: true,
         },
         background_inventory_fetch: false,
+        offline,
     })
     // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
     // `bevy_ui_widgets` + `bevy_input_focus` bring-up, the one `UiRoot` every
@@ -1173,9 +1201,6 @@ fn run_session(
     // the live stacking / fade / modal behaviour can be watched without a server
     // alert.
     .add_systems(Update, (ingest_alert_messages, spawn_notification_demo))
-    // Avatar-state capture (viewer-avatar-state-dump-replay): Ctrl+Alt+D writes a
-    // self-contained dump bundle per avatar when `SL_VIEWER_DUMP_DIR` is set.
-    .add_systems(Update, crate::avatar_dump::dump_avatars_on_key)
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout
@@ -2082,6 +2107,33 @@ fn run_session(
     if let Some(library) = load_avatar_library(viewer_assets) {
         app.insert_resource(library);
     }
+    // Avatar-state capture (viewer-avatar-state-dump-replay): only when
+    // `SL_VIEWER_DUMP_DIR` is set — retain the raw avatar/appearance/animation
+    // events each frame, and write a bundle per avatar on Ctrl+Alt+D. Off (zero
+    // cost) in a normal session.
+    if std::env::var_os("SL_VIEWER_DUMP_DIR").is_some() {
+        app.init_resource::<crate::avatar_dump::ReplayCaptureStore>()
+            .add_systems(
+                Update,
+                (
+                    crate::avatar_dump::capture_replay_inputs,
+                    crate::avatar_dump::dump_avatars_on_key,
+                ),
+            );
+    }
+    // Avatar-state replay (viewer-avatar-state-dump-replay): inject the bundle's
+    // captured events once and drive the optional test rig (orbit light /
+    // reflection probe). Only present in `--replay` mode.
+    if let Some(config) = replay {
+        app.insert_resource(config).add_systems(
+            Update,
+            (
+                crate::avatar_replay::inject_replay_bundle,
+                crate::avatar_replay::drive_replay_orbit_light,
+                crate::avatar_replay::follow_replay_probe,
+            ),
+        );
+    }
     // In screenshot mode, capture a numbered PNG sequence of the window after a
     // startup delay, then quit (the R11 offline-inspection harness).
     if let Some(dir) = screenshot_dir {
@@ -2178,6 +2230,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 video: !options.disable_video_media,
                 web_auth: !options.no_web_auth,
             },
+            None,
         );
         if let Some(challenge) = outcome.challenge {
             info!(
@@ -2204,6 +2257,124 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     }
     info!("session ended");
     Ok(())
+}
+
+/// Render a captured avatar-state bundle offline (`--replay <dir>`): point the
+/// asset stores at the bundle's drop-in `cache/`, load its manifests, and run one
+/// windowed session with login disabled and the replay injector wired in. No
+/// credentials, no grid, no login retry loop.
+///
+/// # Errors
+///
+/// Returns [`Error::Replay`] if the bundle is missing, empty, or unreadable.
+fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
+    // Serve every asset request from the bundle's drop-in cache for the rest of
+    // the process (must be set before the asset stores are built below).
+    crate::paths::set_replay_cache_root(bundle_dir.join(crate::replay_bundle::CACHE_SUBDIR));
+    info!(
+        "replay: assets served from {:?}",
+        crate::paths::asset_cache_dir("texturecache")
+    );
+    let manifests = crate::replay_bundle::load_bundle(bundle_dir).map_err(Error::Replay)?;
+    if manifests.is_empty() {
+        return Err(Error::Replay(format!(
+            "no avatar manifests (*.json) in {}",
+            bundle_dir.display()
+        )));
+    }
+    info!(
+        "replaying {} avatar(s) from {}",
+        manifests.len(),
+        bundle_dir.display()
+    );
+    let config = crate::avatar_replay::ReplayConfig::new(
+        manifests,
+        options.replay_orbit_light,
+        options.replay_reflection_probe,
+    );
+
+    // Frame the camera on the primary avatar unless the operator fixed a pose.
+    let camera_start = if options.camera_position.is_some() {
+        CameraStart {
+            position: options.camera_position,
+            look: match (options.camera_position, options.camera_look_at) {
+                (Some(position), Some(target)) => Some(Vec3::new(
+                    target.x - position.x,
+                    target.y - position.y,
+                    target.z - position.z,
+                )),
+                _other => None,
+            },
+        }
+    } else {
+        replay_camera_start(&config)
+    };
+    let camera_spin = CameraSpin {
+        rate: options.camera_spin.unwrap_or(0.0).to_radians(),
+        axis: options.camera_spin_axis,
+    };
+
+    // A placeholder login (never used offline), only to satisfy the plugin's
+    // required `LoginParams`.
+    let params = LoginParams {
+        login_uri: DEFAULT_LOGIN_URI.parse()?,
+        request: LoginRequest::new(
+            "Replay".to_owned(),
+            "Avatar".to_owned(),
+            String::new(),
+            StartLocation::Last,
+            options.channel.clone(),
+            options.version.clone(),
+        ),
+    };
+    let _outcome = run_session(
+        &params,
+        options.viewer_assets.as_deref(),
+        &options.play_animation,
+        options.repeat_animation,
+        options.screenshot_dir.as_deref(),
+        CameraStartup {
+            start: camera_start,
+            spin: camera_spin,
+        },
+        SkinRuntime {
+            selection: crate::skin::SkinSelection::resolve(
+                options.skin.clone(),
+                options.theme.clone(),
+            ),
+            watch: options.watch_skins,
+        },
+        // No network surfaces offline: keep the media engines and web auth off.
+        MediaRuntime {
+            web: false,
+            video: false,
+            web_auth: false,
+        },
+        Some(config),
+    );
+    info!("replay ended");
+    Ok(())
+}
+
+/// The flycam start pose framing the primary replay avatar in a three-quarter
+/// view — placed in front of and above the avatar's chest, looking back at it —
+/// or the default (login-snapped) start when no avatar object was captured.
+fn replay_camera_start(config: &crate::avatar_replay::ReplayConfig) -> CameraStart {
+    let Some(avatar) = config.primary_position() else {
+        return CameraStart::default();
+    };
+    // Aim at the chest (~1 m above the object root, which sits at the feet).
+    let target = Vec3::new(avatar.x, avatar.y + 1.0, avatar.z);
+    // A three-quarter viewpoint a couple of metres out.
+    let position = Vec3::new(target.x + 1.8, target.y + 0.4, target.z + 2.2);
+    CameraStart {
+        position: Some(position),
+        look: Some(Vec3::new(
+            target.x - position.x,
+            target.y - position.y,
+            target.z - position.z,
+        )),
+    }
 }
 
 /// Guards that keep profiling tracing layers alive for the process lifetime.
@@ -2371,5 +2542,9 @@ pub fn run() -> Result<(), Error> {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = init_tracing();
     let options = Options::parse();
+    // `--replay <dir>` renders a captured bundle offline; otherwise a normal login.
+    if let Some(bundle_dir) = options.replay.clone() {
+        return run_replay(&options, &bundle_dir);
+    }
     run_viewer(&options)
 }

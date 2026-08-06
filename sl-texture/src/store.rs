@@ -387,7 +387,16 @@ impl TextureStore {
             if covered >= need {
                 return Ok(());
             }
-            let grew = self.fetch_more(entry, &current, need).await?;
+            let grew = match self.fetch_more(entry, &current, need).await {
+                Ok(grew) => grew,
+                // A fetch failure must not discard an already-loaded, decodable
+                // prefix: a lower-LOD codestream from the disk cache (or an offline
+                // replay bundle with no network) should still render at its reduced
+                // resolution rather than being dropped. Only propagate the error
+                // when nothing at all has been loaded yet.
+                Err(_error) if current.covered() > 0 => return Ok(()),
+                Err(error) => return Err(error),
+            };
             if !grew {
                 // No progress possible (server returned nothing new); decode with
                 // whatever prefix is in hand.
@@ -420,7 +429,13 @@ impl TextureStore {
                 total: need,
             });
             self.0.cache_hits.fetch_add(1, Ordering::Relaxed);
-            store_codestream(entry, bytes, false);
+            // Mark the disk codestream complete when it carries the J2C
+            // End-of-Codestream marker, so the grow loop stops instead of trying
+            // to fetch more of an already-whole texture — which a cache holding a
+            // full codestream (e.g. an offline replay bundle) has no network to do.
+            // A low-LOD prefix has no `EOC` and is still grown as before.
+            let complete = ends_with_eoc(&bytes);
+            store_codestream(entry, bytes, complete);
             return Ok(true);
         }
         entry.set_progress(TextureProgress::Downloading {
@@ -521,6 +536,14 @@ const fn finest(target: DiscardLevel, want: Option<DiscardLevel>) -> DiscardLeve
         Some(want) if want.is_at_least_as_fine_as(target) => want,
         _other => target,
     }
+}
+
+/// Whether a J2C codestream is complete: it ends with the End-of-Codestream
+/// marker (`0xFF 0xD9`). The disk cache may hold only a low-LOD prefix (no marker),
+/// which must still be grown over the network; a complete codestream must not be
+/// (there is nothing more to fetch — and an offline replay bundle has no network).
+const fn ends_with_eoc(bytes: &[u8]) -> bool {
+    matches!(bytes.last_chunk::<2>(), Some(&[0xff, 0xd9]))
 }
 
 /// Stores a new codestream prefix on `entry` and refreshes its cached header.

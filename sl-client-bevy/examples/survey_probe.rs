@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             background_inventory_fetch: false,
+            offline: false,
         })
         .insert_resource(ProbeState {
             collect: Duration::from_secs(collect_secs),

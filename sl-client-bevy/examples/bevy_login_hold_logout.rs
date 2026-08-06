@@ -59,6 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             background_inventory_fetch: false,
+            offline: false,
         })
         .insert_resource(HoldState {
             hold: Duration::from_secs(hold_secs),

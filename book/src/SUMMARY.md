@@ -50,6 +50,7 @@
 
 - [The REPL test client](tools/sl-repl.md)
 - [Profiling the viewer](tools/profiling.md)
+- [Avatar state capture & replay](tools/avatar-replay.md)
 
 ## Conformance Testing
 

@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 58 |
 | ready | 241 |
 | blocked | 95 |
-| in-progress | 11 |
-| bugs | 14 |
-| done | 713 |
+| in-progress | 10 |
+| bugs | 15 |
+| done | 714 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1161** |
+| **total** | **1162** |
 
 ## ideas (58)
 
@@ -996,12 +996,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (11)
+## in-progress (10)
 
 ### viewer
 
-- [`viewer-avatar-state-dump-replay`](in-progress/viewer-avatar-state-dump-replay.md)
-  — Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -1025,7 +1023,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (15)
 
 ### protocol
 
@@ -1065,8 +1063,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-texture-stuck-low-lod`](bugs/viewer-texture-stuck-low-lod.md) — A
+  texture can stay stuck at a low-res prefix and never upgrade to a finer level
+  that exists
 
-## done (713)
+## done (714)
 
 ### protocol
 
@@ -1219,6 +1220,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
+- [`viewer-avatar-state-dump-replay`](done/viewer-avatar-state-dump-replay.md) —
+  Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)

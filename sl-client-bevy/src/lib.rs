@@ -155,9 +155,9 @@ pub use sl_texture::{
 // `sl_proto`); the mesh `CacheLimits` is aliased so it does not collide with the
 // texture one.
 pub use sl_mesh::{
-    CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshEntry, MeshError,
-    MeshFetcher, MeshLod, MeshPhysics, MeshProgress, MeshReadLease, MeshRequest, MeshSkin,
-    MeshStore, Submesh, VertexWeights,
+    AssetBytes, CacheLimits as MeshCacheLimits, DEFAULT_LOD_FACTOR, DecodedMesh, MeshDiskCache,
+    MeshEntry, MeshError, MeshFetcher, MeshLod, MeshPhysics, MeshProgress, MeshReadLease,
+    MeshRequest, MeshSkin, MeshStore, Submesh, VertexWeights,
 };
 
 // The generic-asset store (the opaque-blob counterpart of the texture/mesh
@@ -165,7 +165,7 @@ pub use sl_mesh::{
 // aliased so it does not collide with the texture/mesh ones; `Priority`,
 // `AssetKey`, and `AssetType` are already re-exported.
 pub use sl_asset::{
-    AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
+    AssetDiskCache, AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
     CacheLimits as AssetCacheLimits,
 };
 
@@ -452,6 +452,13 @@ pub struct SlClientPlugin {
     /// (`RequestFolderContents` / `FetchInventoryFolders`), so a consumer that
     /// ignores inventory pays nothing.
     pub background_inventory_fetch: bool,
+    /// Run the plugin **offline**: register the same event/resource substrate
+    /// ([`SlEvent`], [`SlCommand`], [`SlIdentity`], …) but never perform the
+    /// XML-RPC login or open a circuit, so nothing touches the network. The
+    /// driver goes straight to its finished state and the session is fed entirely
+    /// by whatever writes synthetic [`SlEvent`]s instead (the viewer's
+    /// avatar-state **replay** mode). Default `false` (the normal live login).
+    pub offline: bool,
 }
 
 impl Plugin for SlClientPlugin {
@@ -470,6 +477,7 @@ impl Plugin for SlClientPlugin {
                 account_dirs: self.account_dirs.clone(),
                 inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
+                offline: self.offline,
             })
             .init_resource::<SlIdentity>()
             .init_resource::<SlAgentParcel>()
@@ -540,6 +548,8 @@ struct SlConfig {
     inventory_cache_config: InventoryCacheConfig,
     /// Whether the automatic background inventory crawl is enabled (default off).
     background_inventory_fetch: bool,
+    /// Whether to run offline (skip login; feed the session synthetic events).
+    offline: bool,
 }
 
 /// The driver's runtime state resource.
@@ -628,6 +638,15 @@ impl Drop for Caps {
 
 /// Startup system: builds the session and spawns the blocking login thread.
 fn start_login(mut commands: Commands, config: Res<SlConfig>) {
+    // Offline (replay) mode: register nothing on the wire — go straight to
+    // `Done`, so `drive` is a no-op and the session is fed only by synthetic
+    // `SlEvent`s injected by the replay loader.
+    if config.offline {
+        commands.insert_resource(SlState {
+            inner: SlInner::Done,
+        });
+        return;
+    }
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
     session.set_background_inventory_fetch(config.background_inventory_fetch);

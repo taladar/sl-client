@@ -2280,25 +2280,11 @@ impl AvatarState {
             .insert(mesh);
     }
 
-    /// The worn rigged-mesh asset ids and the latest appearance bytes for `agent`,
-    /// for the avatar-state dump — `None` if the avatar has no recorded appearance.
-    pub(crate) fn dump_inputs(&self, agent: AgentKey) -> Option<(&[u8], Vec<Uuid>)> {
-        let appearance = self.appearances.get(&agent)?;
-        let mut meshes: Vec<Uuid> = self
-            .worn_rigged_meshes
-            .get(&agent)
-            .into_iter()
-            .flatten()
-            .copied()
-            .collect();
-        meshes.sort_unstable();
-        Some((appearance, meshes))
-    }
-
-    /// Every avatar with a tracked skeleton instance (rigged), for the dump to
-    /// iterate. Delegates to the same set the animation driver uses.
-    pub(crate) fn dumpable_agents(&self) -> Vec<AgentKey> {
-        self.objects.keys().copied().collect()
+    /// The anchor entity (rigged-body root, or placeholder sphere) of `agent`'s
+    /// full-object avatar, if one is tracked — the world pose the replay test rig
+    /// (an orbiting light, a reflection probe) centres itself on.
+    pub(crate) fn anchor_of(&self, agent: AgentKey) -> Option<Entity> {
+        self.objects.get(&agent).map(|entities| entities.anchor)
     }
 
     /// Record the joint position overrides that worn rigged `mesh` imposes on
@@ -2551,7 +2537,7 @@ const UNIVERSAL_BAKE_SLOTS: [usize; 5] = [
 /// per-slot `mDefaultImageName`, the `<slot>` segment of a server bake's URL
 /// (`<service>texture/<avatar>/<slot>/<uuid>`). `None` for a slot with no service
 /// name (the "universal" bakes, which the base body does not fetch).
-const fn bake_service_slot_name(slot: usize) -> Option<&'static str> {
+pub(crate) const fn bake_service_slot_name(slot: usize) -> Option<&'static str> {
     match slot {
         avatar_texture::HEAD_BAKED => Some("head"),
         avatar_texture::UPPER_BAKED => Some("upper"),

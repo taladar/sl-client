@@ -22,8 +22,22 @@
 //! the `directories` crate does not invalidate an existing cache.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use directories::ProjectDirs;
+
+/// A process-global override for the asset-cache root, set once by the
+/// avatar-state **replay** mode ([`crate::avatar_replay`]) before the app is
+/// built. When set, every [`asset_cache_dir`] resolves under it instead of the
+/// platform cache root, so the asset stores serve from the replay bundle's
+/// drop-in `cache/` (`<root>/<kind>/<first-char>/<uuid>.<ext>`) with no grid.
+static REPLAY_CACHE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// Point every [`asset_cache_dir`] at `root` for the rest of the process (the
+/// replay bundle's `cache/`). Idempotent — only the first call takes effect.
+pub(crate) fn set_replay_cache_root(root: PathBuf) {
+    let _ignored = REPLAY_CACHE_ROOT.set(root);
+}
 
 /// The filename of the global settings file within the config root.
 const GLOBAL_SETTINGS_FILE: &str = "viewer-settings.toml";
@@ -42,6 +56,11 @@ fn project_dirs() -> Option<ProjectDirs> {
 /// `texturecache`, `meshcache`), or `None` when the platform has no cache
 /// directory (the asset store then runs in-memory only).
 pub(crate) fn asset_cache_dir(kind: &str) -> Option<PathBuf> {
+    // In replay mode every cache resolves under the bundle's `cache/` instead of
+    // the platform cache root, so the asset stores serve from the bundle.
+    if let Some(root) = REPLAY_CACHE_ROOT.get() {
+        return Some(root.join(kind));
+    }
     Some(project_dirs()?.cache_dir().join(kind))
 }
 

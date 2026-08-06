@@ -1,42 +1,116 @@
-//! Avatar-state capture (viewer-avatar-state-dump-replay): on demand, write each
-//! tracked avatar's render *inputs* — appearance visual-param bytes, currently
-//! playing animation ids, and worn rigged-mesh asset ids — to a JSON file, so a
-//! buggy avatar can be reproduced offline (with the headless replay analyzer)
-//! after it logs out. The heavy geometry/textures/animations already persist in
-//! the viewer's on-disk caches, keyed by the ids captured here.
+//! Avatar-state capture (viewer-avatar-state-dump-replay): on **Ctrl+Alt+D**,
+//! write each nearby avatar's full render *inputs* — the avatar object and its
+//! whole attachment tree (verbatim wire [`Object`]s), the decoded
+//! [`AvatarAppearance`] (visual params + baked-texture entry) and the animations
+//! it is playing — to a `<agent>.json` manifest, plus copy every mesh / texture /
+//! animation those inputs reference out of the on-disk caches into the bundle's
+//! `cache/` subtree (a drop-in cache). The [replay mode](crate::avatar_replay)
+//! then rebuilds and *renders* the avatar offline, so a render-only defect can be
+//! reproduced (and a fix tested) after the avatar has logged out or changed.
 //!
-//! Opt-in and non-interfering: it does nothing unless `SL_VIEWER_DUMP_DIR` is set,
-//! and only fires on the deliberate **Ctrl+Alt+D** chord.
+//! Opt-in and non-interfering: the capture store and its systems are only added
+//! when `SL_VIEWER_DUMP_DIR` is set (see [`crate::run`]), so a normal session
+//! pays nothing. The heavy geometry/textures/animations are copied from the
+//! viewer's own caches, keyed by the ids in the captured events.
+
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
-use serde::Serialize;
-use sl_client_bevy::Uuid;
+use sl_client_bevy::{
+    AgentKey, AvatarAppearance, CAP_GET_TEXTURE, MAX_FACES, Object, PlayingAnimation,
+    RenderMaterialEntry, ScopedObjectId, SlCapabilities, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    decode_texture_entry, pcode,
+};
 
-use crate::animations::AnimationPlayback;
-use crate::avatars::AvatarState;
+use crate::replay_bundle::{
+    MANIFEST_VERSION, ReplayManifest, copy_cache_assets, run_texture_fetch, texture_fetch_urls,
+};
 
-/// One avatar's captured render inputs — everything needed, alongside the on-disk
-/// caches, to reconstruct it offline.
-#[derive(Serialize)]
-struct AvatarDump {
-    /// The avatar's agent id (also the file stem).
-    agent: String,
-    /// The raw `AvatarAppearance.visual_params` bytes, hex-encoded — drives the
-    /// skeletal / morph shape deformation on replay.
-    appearance_hex: String,
-    /// The animation asset ids currently playing (their `.anim` assets are in the
-    /// anim cache) — needed to reproduce a pose-driven defect (e.g. a face track).
-    animations: Vec<String>,
-    /// The worn rigged-mesh asset ids (their geometry + skin are in the mesh cache).
-    rigged_meshes: Vec<String>,
+/// The retained raw session events a capture needs: the avatar objects and their
+/// attachment/linkset prims, each avatar's latest appearance, and each avatar's
+/// latest animation set. Folded from the [`SlEvent`] stream every frame (only
+/// while capture is enabled), so a **Ctrl+Alt+D** at any moment has a coherent,
+/// verbatim snapshot to serialise.
+#[derive(Resource, Default)]
+pub(crate) struct ReplayCaptureStore {
+    /// Every retained object by its scoped id: avatars ([`pcode::AVATAR`]) and
+    /// any parented prim (an attachment root, or a child of one / of a linkset).
+    objects: HashMap<ScopedObjectId, Object>,
+    /// Each avatar's latest decoded appearance (visual params + baked textures).
+    appearances: HashMap<AgentKey, AvatarAppearance>,
+    /// Each avatar's latest playing-animation set.
+    animations: HashMap<AgentKey, Vec<PlayingAnimation>>,
+    /// Every legacy (`RenderMaterials`) `LLMaterial` resolved this session, keyed
+    /// by its material id — so a dump can carry the ones its faces reference (the
+    /// offline session cannot fetch the `RenderMaterials` cap).
+    render_materials: HashMap<Uuid, RenderMaterialEntry>,
+    /// The region's `GetTexture` capability URL, so the dump can fetch each
+    /// referenced texture at full resolution (the local cache holds only the
+    /// low-LOD prefix the live viewer happened to load).
+    get_texture_cap: Option<String>,
 }
 
-/// Write a dump file per tracked avatar on **Ctrl+Alt+D**, into `SL_VIEWER_DUMP_DIR`.
-/// A no-op unless that env var is set, so it never interferes with normal use.
+/// Fold the object / appearance / animation session events into
+/// [`ReplayCaptureStore`], retaining just what a capture can rebuild an avatar
+/// from: avatars and parented prims (attachments), appearances and animation
+/// sets. Added only when capture is enabled, so it never runs in a normal
+/// session.
+pub(crate) fn capture_replay_inputs(
+    mut events: MessageReader<SlEvent>,
+    mut capabilities: MessageReader<SlCapabilities>,
+    mut store: ResMut<ReplayCaptureStore>,
+) {
+    for SlCapabilities(map) in capabilities.read() {
+        if let Some(url) = map.get(CAP_GET_TEXTURE) {
+            store.get_texture_cap = Some(url.clone());
+        }
+    }
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
+                // Retain avatars and any parented prim (attachment roots have the
+                // avatar as parent; child prims chain up to the root) — enough to
+                // rebuild an avatar's whole attachment tree, without hoarding the
+                // region's unrelated world prims.
+                if object.pcode == pcode::AVATAR || object.parent_id.get() != 0 {
+                    let _previous = store.objects.insert(object.scoped_id(), (**object).clone());
+                }
+            }
+            SlSessionEvent::ObjectRemoved { local_id, .. } => {
+                let _removed = store.objects.remove(local_id);
+            }
+            SlSessionEvent::AvatarAppearance(appearance) => {
+                let _previous = store
+                    .appearances
+                    .insert(appearance.avatar_id, (**appearance).clone());
+            }
+            SlSessionEvent::AvatarAnimation {
+                avatar_id,
+                animations,
+                ..
+            } => {
+                let _previous = store.animations.insert(*avatar_id, animations.clone());
+            }
+            SlSessionEvent::RenderMaterials(entries) => {
+                for entry in entries {
+                    let _previous = store
+                        .render_materials
+                        .insert(entry.material_id, entry.clone());
+                }
+            }
+            _other => {}
+        }
+    }
+}
+
+/// Write a bundle (one `<agent>.json` manifest per captured avatar, plus a shared
+/// `cache/` of the referenced assets) into `SL_VIEWER_DUMP_DIR` on **Ctrl+Alt+D**.
+/// Added only when capture is enabled.
 pub(crate) fn dump_avatars_on_key(
     keyboard: Res<ButtonInput<KeyCode>>,
-    state: Res<AvatarState>,
-    playback: Res<AnimationPlayback>,
+    store: Res<ReplayCaptureStore>,
+    identity: Res<SlIdentity>,
 ) {
     let Some(dir) = std::env::var_os("SL_VIEWER_DUMP_DIR") else {
         return;
@@ -46,81 +120,145 @@ pub(crate) fn dump_avatars_on_key(
         return;
     }
     let dir = std::path::PathBuf::from(dir);
-    // Bundle the actual asset bytes next to the manifests so the reproduction
-    // survives a cache clear / eviction.
-    let mesh_dst = dir.join("assets").join("meshes");
-    let anim_dst = dir.join("assets").join("anims");
-    for sub in [&dir, &mesh_dst, &anim_dst] {
-        if let Err(error) = fs_err::create_dir_all(sub) {
-            warn!("avatar dump: cannot create {sub:?}: {error}");
-            return;
-        }
+    if let Err(error) = fs_err::create_dir_all(&dir) {
+        warn!("avatar dump: cannot create {dir:?}: {error}");
+        return;
     }
-    let mesh_cache = crate::paths::asset_cache_dir("meshcache");
-    let anim_cache = crate::paths::asset_cache_dir("animcache");
+    let now_unix = unix_now();
+    // The full-resolution texture fetch inputs: the GetTexture cap and (for a
+    // central-baking grid) the appearance service that serves baked-body textures.
+    let get_texture_cap = store.get_texture_cap.clone();
+    let appearance_service = identity
+        .agent_appearance_service
+        .as_ref()
+        .map(ToString::to_string);
     let mut written = 0_u32;
     let mut assets = 0_u32;
-    for agent in state.dumpable_agents() {
-        let Some((appearance, meshes)) = state.dump_inputs(agent) else {
-            continue;
-        };
-        let animations = playback.playing_anims(agent);
-        // Copy each referenced asset out of the on-disk cache into the bundle.
-        for &mesh in &meshes {
-            assets =
-                assets.saturating_add(copy_cached(mesh_cache.as_ref(), mesh, "mesh", &mesh_dst));
+    // The deduplicated (texture id -> full-resolution URL) fetch plan across every
+    // dumped avatar (the shared `cache/` means one fetch serves all).
+    let mut plan: HashMap<Uuid, String> = HashMap::new();
+    // Each retained avatar object is one dumpable avatar.
+    for avatar in store
+        .objects
+        .values()
+        .filter(|object| object.pcode == pcode::AVATAR)
+    {
+        let manifest = build_manifest(&store, avatar);
+        let agent = manifest.agent.to_string();
+        let (counts, textures) = copy_cache_assets(&dir, &manifest, now_unix);
+        assets = assets
+            .saturating_add(counts.meshes)
+            .saturating_add(counts.anims)
+            .saturating_add(counts.materials);
+        for (id, url) in texture_fetch_urls(
+            &manifest,
+            &textures,
+            get_texture_cap.as_deref(),
+            appearance_service.as_deref(),
+        ) {
+            let _previous = plan.entry(id).or_insert(url);
         }
-        for &anim in &animations {
-            assets =
-                assets.saturating_add(copy_cached(anim_cache.as_ref(), anim, "asset", &anim_dst));
-        }
-        let dump = AvatarDump {
-            agent: agent.uuid().to_string(),
-            appearance_hex: to_hex(appearance),
-            animations: animations.iter().map(ToString::to_string).collect(),
-            rigged_meshes: meshes.iter().map(ToString::to_string).collect(),
-        };
-        let path = dir.join(format!("{}.json", dump.agent));
-        match serde_json::to_string_pretty(&dump) {
+        let path = dir.join(format!("{agent}.json"));
+        match serde_json::to_vec_pretty(&manifest) {
             Ok(json) => match fs_err::write(&path, json) {
                 Ok(()) => written = written.saturating_add(1),
                 Err(error) => warn!("avatar dump: write {path:?}: {error}"),
             },
-            Err(error) => warn!("avatar dump: serialize {}: {error}", dump.agent),
+            Err(error) => warn!("avatar dump: serialize {agent}: {error}"),
         }
     }
-    info!("avatar dump: wrote {written} avatar(s) + {assets} asset(s) to {dir:?}");
+    let plan: Vec<(Uuid, String)> = plan.into_iter().collect();
+    let total = plan.len();
+    info!(
+        "avatar dump: wrote {written} avatar(s) + {assets} mesh/anim/material asset(s) to {}; \
+         fetching {total} texture(s) at full resolution — the viewer will pause until done",
+        dir.display(),
+    );
+    // Fetch on a worker thread (so `reqwest::blocking` is never nested in a tokio
+    // runtime) but block the dump on its completion: a detached thread would be
+    // killed when the operator closes the viewer, leaving the bundle's textures
+    // incomplete. The brief pause is the price of a guaranteed-complete bundle.
+    let fetched = std::thread::spawn(move || run_texture_fetch(&dir, &plan, now_unix))
+        .join()
+        .unwrap_or(0);
+    info!("avatar dump: fetched {fetched}/{total} full-resolution texture(s); capture complete");
 }
 
-/// Lowercase-hex-encode `bytes` (a `fold` + `write!`, the clippy-clean form —
-/// `map(format!).collect()` trips `clippy::format_collect`).
-fn to_hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut hex, byte| {
-        let _written = write!(hex, "{byte:02x}");
-        hex
-    })
+/// Build one avatar's [`ReplayManifest`]: the avatar object, its attachment tree,
+/// its appearance and its animations, all as verbatim captured events.
+fn build_manifest(store: &ReplayCaptureStore, avatar: &Object) -> ReplayManifest {
+    let agent = avatar.full_id.uuid();
+    let avatar_scoped = avatar.scoped_id();
+    // The avatar object first, then every prim whose parent chain roots at it.
+    let mut objects = vec![avatar.clone()];
+    for object in store.objects.values() {
+        if object.scoped_id() != avatar_scoped && wearer_of(store, object) == Some(avatar_scoped) {
+            objects.push(object.clone());
+        }
+    }
+    let avatar_key = AgentKey::from(agent);
+    let render_materials = referenced_render_materials(store, &objects);
+    ReplayManifest {
+        version: MANIFEST_VERSION,
+        agent,
+        objects,
+        appearance: store.appearances.get(&avatar_key).cloned(),
+        animations: store
+            .animations
+            .get(&avatar_key)
+            .cloned()
+            .unwrap_or_default(),
+        render_materials,
+    }
 }
 
-/// Copy the cached asset file for `id` (`<cache>/<first-char>/<uuid>.<ext>`, the
-/// disk-cache layout) into `dest`. Returns 1 on a successful copy, 0 otherwise (no
-/// cache dir, missing/partial entry, or already present) — best-effort bundling.
-fn copy_cached(
-    cache: Option<&std::path::PathBuf>,
-    id: Uuid,
-    ext: &str,
-    dest: &std::path::Path,
-) -> u32 {
-    let Some(cache) = cache else { return 0 };
-    let name = id.to_string();
-    let Some(first) = name.get(..1) else { return 0 };
-    let src = cache.join(first).join(format!("{name}.{ext}"));
-    let dst = dest.join(format!("{name}.{ext}"));
-    if dst.exists() {
-        return 0;
+/// The legacy (`RenderMaterials`) material entries whose id is referenced by any
+/// face of `objects` — the ones the avatar's attachments actually use, resolved
+/// from the retained set so replay can re-emit them offline.
+fn referenced_render_materials(
+    store: &ReplayCaptureStore,
+    objects: &[Object],
+) -> Vec<RenderMaterialEntry> {
+    let mut wanted: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    for object in objects {
+        let entry = decode_texture_entry(&object.texture_entry, MAX_FACES);
+        for face in &entry.faces {
+            if let Some(material_id) = face.material_id {
+                let _inserted = wanted.insert(material_id);
+            }
+        }
     }
-    match fs_err::copy(&src, &dst) {
-        Ok(_bytes) => 1,
-        Err(_) => 0,
+    wanted
+        .into_iter()
+        .filter_map(|id| store.render_materials.get(&id).cloned())
+        .collect()
+}
+
+/// Follow `object`'s parent chain up through the retained objects to the avatar
+/// ([`pcode::AVATAR`]) that wears it, or `None` if the chain does not root at an
+/// avatar (a world linkset) or is broken. Bounded against a cycle.
+fn wearer_of(store: &ReplayCaptureStore, object: &Object) -> Option<ScopedObjectId> {
+    let mut current = object;
+    // A linkset/attachment chain is shallow; cap the walk well above any real
+    // depth so a malformed cycle cannot loop forever.
+    for _step in 0..64_u8 {
+        if current.pcode == pcode::AVATAR {
+            return Some(current.scoped_id());
+        }
+        if current.parent_id.get() == 0 {
+            return None;
+        }
+        current = store.objects.get(&current.scoped_parent_id())?;
     }
+    None
+}
+
+/// The current Unix time in whole seconds, for stamping bundle cache entries
+/// (their own LRU bookkeeping). Falls back to `0` before the epoch.
+fn unix_now() -> u32 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u32::try_from(duration.as_secs()).unwrap_or(u32::MAX)
+        })
 }

@@ -672,6 +672,7 @@ fn run_session(
             // background (the tokio REPL does the same via
             // `set_background_inventory_fetch`).
             background_inventory_fetch: true,
+            offline: false,
         })
         .insert_resource(ReplState {
             ctx: SessionContext::new(),

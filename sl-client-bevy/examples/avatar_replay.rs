@@ -1,10 +1,11 @@
 //! Headless avatar-state **replay** analyzer (viewer-avatar-state-dump-replay):
-//! reconstruct a dumped avatar's posed skeleton offline from a dump bundle (the
-//! `<agent>.json` manifest plus the `assets/` the viewer copied out of its
-//! caches) and report the face-bone diagnostic — each mouth/brow bone's world
-//! position and its distance from `mHead`, both at the deformed rest and under
-//! the captured animation pose. Reproduces the protruding-tongue and brow-spike
-//! defects without a live grid.
+//! reconstruct a dumped avatar's posed skeleton offline from a replay bundle (the
+//! `<agent>.json` manifest plus the `cache/` drop-in caches the viewer copied out
+//! of its own caches) and report the face-bone diagnostic — each mouth/brow
+//! bone's world position and its distance from `mHead`, both at the deformed rest
+//! and under the captured animation pose. Reproduces the protruding-tongue and
+//! brow-spike defects without a live grid — the geometry-diagnosis counterpart of
+//! the viewer's full `--replay` render mode.
 //!
 //! Usage (the `character/` dir supplies the standard skeleton + visual params):
 //!
@@ -21,11 +22,13 @@ use std::path::{Path, PathBuf};
 
 use bevy::math::{Mat4, Quat, Vec3};
 use sl_anim::{JointPriority, Motion};
+use sl_asset::{AssetDiskCache, CacheLimits as AssetCacheLimits};
 use sl_avatar::{
     AttachmentPoints, SkeletalDeformations, Skeleton, VisualParams, VolumeDeformations,
 };
-use sl_client_bevy::{AnimationPose, BevySkeleton, JointOverrides, joint_position_overrides};
-use sl_mesh::{decode_skin, parse_header};
+use sl_client_bevy::{AnimationPose, BevySkeleton, JointOverrides, Uuid, joint_position_overrides};
+use sl_mesh::{CacheLimits as MeshCacheLimits, MeshDiskCache, MeshSkin, decode_skin, parse_header};
+use sl_proto::{AvatarAppearance, Object, PlayingAnimation, SculptOrMeshKey};
 
 /// The mouth/brow bones the diagnostic reports, in chain order.
 const FACE_BONES: &[&str] = &[
@@ -52,10 +55,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let bundle = dump_path.parent().unwrap_or_else(|| Path::new("."));
     let manifest: serde_json::Value = serde_json::from_slice(&fs_err::read(&dump_path)?)?;
+
+    // The captured wire events, typed straight out of the manifest.
+    let objects: Vec<Object> = manifest
+        .get("objects")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
+    let appearance: Option<AvatarAppearance> = manifest
+        .get("appearance")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .flatten();
+    let animations: Vec<PlayingAnimation> = manifest
+        .get("animations")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
     let agent = manifest.get("agent").and_then(serde_json::Value::as_str);
-    let appearance = decode_hex(str_field(&manifest, "appearance_hex"));
-    let animations = str_list(&manifest, "animations");
-    let meshes = str_list(&manifest, "rigged_meshes");
+    let appearance_bytes = appearance
+        .map(|value| value.visual_params)
+        .unwrap_or_default();
+    // The worn rigged meshes: every object carrying a mesh asset.
+    let meshes: Vec<Uuid> = objects
+        .iter()
+        .filter_map(|object| match object.extra.sculpt.as_ref()?.texture {
+            SculptOrMeshKey::Mesh(mesh) => Some(mesh.uuid()),
+            SculptOrMeshKey::Sculpt(_texture) => None,
+        })
+        .collect();
+
+    // The bundle's drop-in caches (verbatim mesh / animation bytes).
+    let mesh_cache = MeshDiskCache::open(
+        bundle.join("cache").join("meshcache"),
+        MeshCacheLimits::default(),
+    )
+    .ok();
+    let anim_cache = AssetDiskCache::open(
+        bundle.join("cache").join("animcache"),
+        AssetCacheLimits::default(),
+    )
+    .ok();
 
     // The standard skeleton + visual-param table, built exactly as the viewer does.
     let char_dir = PathBuf::from(std::env::var("SL_VIEWER_ASSETS")?);
@@ -69,14 +112,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     bevy.insert_attachment_points(&AttachmentPoints::from_xml(&lad)?);
 
     // Shape → skeletal + volume deformation.
-    let deform = SkeletalDeformations::from_appearance(&params, &appearance);
-    let volumes = VolumeDeformations::from_appearance(&params, &appearance);
+    let deform = SkeletalDeformations::from_appearance(&params, &appearance_bytes);
+    let volumes = VolumeDeformations::from_appearance(&params, &appearance_bytes);
 
     // Worn rigged meshes' joint-position overrides, merged (highest wins).
     let mut overrides = JointOverrides::default();
     let mut overriding_meshes = 0_usize;
-    for mesh in &meshes {
-        if let Some(skin) = load_skin(bundle, mesh) {
+    for &mesh in &meshes {
+        if let Some(skin) = load_skin(mesh_cache.as_ref(), mesh) {
             let mesh_overrides =
                 joint_position_overrides(&skin, bevy.lookup(), bevy.local_transforms());
             if !mesh_overrides.is_empty() {
@@ -91,7 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1.0);
-    let pose = resolve_pose(&bevy, bundle, &animations, time);
+    let pose = resolve_pose(&bevy, anim_cache.as_ref(), &animations, time);
 
     let posed = bevy.deformed_world_matrices(&deform, &volumes, &overrides, &pose);
     let rest =
@@ -121,57 +164,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// The string at `key` in the manifest, or `""`.
-fn str_field<'a>(manifest: &'a serde_json::Value, key: &str) -> &'a str {
-    manifest
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-}
-
-/// The list of strings at `key` in the manifest.
-fn str_list(manifest: &serde_json::Value, key: &str) -> Vec<String> {
-    manifest
-        .get(key)
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_owned))
-        .collect()
-}
-
-/// Decode a hex string into bytes (ignoring a trailing odd nibble).
-fn decode_hex(hex: &str) -> Vec<u8> {
-    let bytes = hex.as_bytes();
-    bytes
-        .chunks_exact(2)
-        .filter_map(|pair| {
-            let text = std::str::from_utf8(pair).ok()?;
-            u8::from_str_radix(text, 16).ok()
-        })
-        .collect()
-}
-
-/// Load and decode a bundled (or cached-layout) mesh's skin block, if present.
-fn load_skin(bundle: &Path, mesh: &str) -> Option<sl_mesh::MeshSkin> {
-    let bytes = read_asset(bundle, "meshes", mesh, "mesh")?;
-    let (header, header_size) = parse_header(&bytes)?;
+/// Load and decode a bundled mesh's skin block from the drop-in mesh cache, if
+/// present.
+fn load_skin(mesh_cache: Option<&MeshDiskCache>, mesh: Uuid) -> Option<MeshSkin> {
+    let bytes = mesh_cache?.read(mesh)?;
+    let (header, header_size) = parse_header(bytes.data())?;
     let skin_ref = header.skin?;
     let (start, end) = skin_ref.range(header_size);
-    let slice = bytes.get(start..end)?;
+    let slice = bytes.data().get(start..end)?;
     decode_skin(slice).ok()
 }
 
-/// Load and decode a bundled animation motion, if present.
-fn load_motion(bundle: &Path, anim: &str) -> Option<Motion> {
-    let bytes = read_asset(bundle, "anims", anim, "asset")?;
-    Motion::from_bytes(&bytes).ok()
-}
-
-/// Read a bundled asset file `assets/<kind>/<id>.<ext>`.
-fn read_asset(bundle: &Path, kind: &str, id: &str, ext: &str) -> Option<Vec<u8>> {
-    let path = bundle.join("assets").join(kind).join(format!("{id}.{ext}"));
-    fs_err::read(path).ok()
+/// Load and decode a bundled animation motion from the drop-in animation cache,
+/// if present.
+fn load_motion(anim_cache: Option<&AssetDiskCache>, anim: Uuid) -> Option<Motion> {
+    let bytes = anim_cache?.read(anim)?;
+    Motion::from_bytes(bytes.as_ref()).ok()
 }
 
 /// Resolve the per-joint animation pose from the captured animations: for each
@@ -180,14 +188,14 @@ fn read_asset(bundle: &Path, kind: &str, id: &str, ext: &str) -> Option<Vec<u8>>
 /// `time`.
 fn resolve_pose(
     bevy: &BevySkeleton,
-    bundle: &Path,
-    animations: &[String],
+    anim_cache: Option<&AssetDiskCache>,
+    animations: &[PlayingAnimation],
     time: f32,
 ) -> AnimationPose {
     let mut pose = AnimationPose::new();
     let mut winner: HashMap<usize, JointPriority> = HashMap::new();
-    for anim in animations {
-        let Some(motion) = load_motion(bundle, anim) else {
+    for animation in animations {
+        let Some(motion) = load_motion(anim_cache, animation.anim_id) else {
             continue;
         };
         for joint in &motion.joints {
