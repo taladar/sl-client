@@ -50,7 +50,7 @@ const FORBIDDEN_FILENAME_CHARS: &[char] = &[
 /// Firestorm's zone-less local timestamps. Produced by the runtime from
 /// `SystemTime::now()` (or an inbound message's wire Unix time) and consumed by
 /// [`format_log_line`]; recovered (best-effort) by [`parse_log_lines`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LogLineTime {
     /// The calendar year (e.g. `2026`).
     pub year: i32,
@@ -70,7 +70,7 @@ pub struct LogLineTime {
 /// entry is — the discriminator behind the filename scheme and the index line's
 /// numeric type field. Nearby chat is **not** here: it is region-local, has no
 /// conversation identity, and always logs to the single `chat.txt`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConversationKind {
     /// A 1:1 instant-message conversation (`conversation.log` type `0`).
     Direct,
@@ -110,7 +110,9 @@ impl ConversationKind {
 /// stays under the project's struct-bool limit). [`Nearby`](Self::Nearby) is the
 /// only one with no [`ConversationKind`] — region-local chat has no conversation
 /// identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum LoggedChatType {
     /// Region-local nearby chat, logged to `chat.txt`.
     Nearby,
@@ -123,7 +125,7 @@ pub enum LoggedChatType {
 }
 
 /// Whether log timestamps use a 24-hour or a 12-hour `AM`/`PM` clock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ClockStyle {
     /// A 24-hour clock (`14:05:09`).
     TwentyFourHour,
@@ -135,7 +137,7 @@ pub enum ClockStyle {
 /// "log a timestamp at all" toggle: [`ChatLogConfig::timestamp`] is `None` to omit
 /// the prefix entirely. The two `bool`s plus the [`ClockStyle`] enum keep the type
 /// under the struct-bool limit while spelling each knob out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimestampFormat {
     /// Include the `YYYY/MM/DD` date (Firestorm `LogTimestampDate`); when `false`
     /// the prefix is time-only, `[HH:MM:SS]`.
@@ -168,7 +170,7 @@ impl Default for TimestampFormat {
 /// The directories are deliberately separate so the three features can live in
 /// different roots: a per-account cache dir (machine-regenerable), a per-account
 /// chat-log dir (user-facing transcripts), and a cross-account shared cache.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClientDirectories {
     /// The directory the per-account inventory disk-cache files
     /// (`<agent-uuid>.inv.llsd.gz` and `<agent-uuid>.lib.inv.llsd.gz`) are written
@@ -193,7 +195,7 @@ pub struct ClientDirectories {
 /// `.lib.inv.llsd.gz` files under. Supplied once at each runtime's construction
 /// and consumed by the runtime inventory-cache shell (the sans-IO
 /// [`Session`](crate::Session) never touches the filesystem).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryCacheConfig {
     /// The master switch for the inventory disk cache. While `false` (the
     /// default) the runtime neither loads a cache at login nor writes one at
@@ -229,7 +231,7 @@ impl Default for InventoryCacheConfig {
 /// all-off configuration with Firestorm's format defaults (timestamp on, date on,
 /// **seconds on**, 24-hour, the [`LOG_RECALL_SIZE`] window, the 30-day index
 /// retention).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatLogConfig {
     /// The text-chat types whose messages are written to a transcript. Empty means
     /// the feature is fully off.
@@ -470,7 +472,7 @@ pub fn format_log_line(
 /// carried a `[…]` prefix that parsed), the sender name (`None` for a line that
 /// failed the `Name: message` shape — kept as a plain-text fallback), and the
 /// message body with its folded continuations rejoined.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParsedLogLine {
     /// The line's local timestamp, if it carried a parseable `[…]` prefix.
     pub time: Option<LogLineTime>,

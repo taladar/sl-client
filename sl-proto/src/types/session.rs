@@ -6,7 +6,7 @@ use sl_types::lsl::Vector;
 use sl_wire::LoginRequest;
 
 /// The parameters needed to start a session: where to log in and with what.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoginParams {
     /// The XML-RPC login endpoint URL (e.g. `http://127.0.0.1:9000/`).
     pub login_uri: url::Url,
@@ -17,7 +17,7 @@ pub struct LoginParams {
 /// An HTTP request the driver must perform on the session's behalf: POST `body`
 /// to `url` and feed the response back via
 /// [`Session::handle_login_response`](crate::Session::handle_login_response).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LoginHttpRequest {
     /// The URL to POST to.
     pub url: url::Url,
@@ -29,7 +29,7 @@ pub struct LoginHttpRequest {
 }
 
 /// How an outgoing message should be delivered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Reliability {
     /// Send once, best-effort.
     Unreliable,
@@ -42,7 +42,7 @@ pub enum Reliability {
 /// [`ServerEvent::SetAlwaysRun`](crate::ServerEvent::SetAlwaysRun). A named
 /// intent enum in place of the bare `always_run: bool` of the `SetAlwaysRun`
 /// message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MovementMode {
     /// Walk for ground movement (the `always_run` wire flag is clear).
     Walk,
@@ -80,7 +80,7 @@ impl MovementMode {
 /// SLURL-style `start=` login parameter (`last` / `home` / `uri:Region&x&y&z`):
 /// that enum names *where to log in*, whereas this one is the wire `LocationID`
 /// of the request that *records* a home/last slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum StartLocationSlot {
     /// The agent's last-location slot (`START_LOCATION_ID_LAST`).
@@ -138,7 +138,7 @@ impl StartLocationSlot {
 /// an invalid state). Use [`Kilobits::new_unchecked`] only at the codec
 /// boundary, where an inbound `AgentThrottle` must be reconstructed verbatim
 /// from whatever the peer sent.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct Kilobits(f32);
 
 impl Kilobits {
@@ -182,7 +182,9 @@ impl Kilobits {
 /// Why a [`Kilobits`] rate (and therefore a [`Throttle`]) was rejected: a
 /// per-category bandwidth must be a finite, non-negative number of kilobits per
 /// second.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
 #[non_exhaustive]
 pub enum ThrottleError {
     /// The rate was NaN or infinite.
@@ -217,7 +219,7 @@ pub enum ThrottleError {
 /// transposition hazard of [`Throttle::new`]'s seven positional rates) and read
 /// the categories back with the [`Throttle::resend`] … [`Throttle::asset`]
 /// accessors.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Throttle {
     /// Resent (reliable retransmit) traffic.
     resend: Kilobits,
@@ -435,7 +437,7 @@ impl Default for Throttle {
 /// Each setter takes an already-validated [`Kilobits`], so the build is
 /// infallible and `const`-friendly; validate caller input once with
 /// [`Kilobits::new`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ThrottleBuilder {
     /// Resent (reliable retransmit) traffic.
     resend: Kilobits,
@@ -554,7 +556,7 @@ impl Default for ThrottleBuilder {
 /// sets one with [`Session::set_camera`](crate::Session::set_camera), the
 /// session advertises [`Camera::region_center`] — the historic region-centre
 /// viewpoint looking along +X.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Camera {
     /// The camera's region-local position (the eye point).
     pub center: Vector,
@@ -569,7 +571,9 @@ pub struct Camera {
 /// Why [`Camera::new`] rejected a set of axes: they do not form a right-handed
 /// orthonormal frame in the SL convention (`at × left = up`). The axes arrive as
 /// `f32`, so every check allows a small tolerance rather than an exact match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
 #[non_exhaustive]
 pub enum CameraError {
     /// One of the three axes is not unit-length (within tolerance).
@@ -769,7 +773,7 @@ fn normalize(v: &Vector) -> Option<Vector> {
 }
 
 /// A datagram ready to be sent on the wire.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Transmit {
     /// Where to send the datagram.
     pub destination: SocketAddr,
@@ -778,7 +782,7 @@ pub struct Transmit {
 }
 
 /// Why a session became disconnected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum DisconnectReason {
     /// The login server rejected the credentials.

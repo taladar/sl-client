@@ -35,7 +35,9 @@ pub(crate) const TYPING_TIMEOUT: Duration = Duration::from_secs(9);
 /// discriminant keeps the three id spaces disjoint, so a group id never aliases a
 /// conference id or a 1:1 XOR id in the map (the bug a bare-`Uuid` key would
 /// have).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum ChatSessionKind {
     /// A 1:1 instant-message conversation, keyed by the **peer** avatar (the
     /// human-meaningful, stable identity — a conversation is "with this avatar").
@@ -82,7 +84,7 @@ impl ChatSessionKind {
 /// invite to both is [`Both`](Self::Both). Classified from the `ChatterBoxInvitation`
 /// body — an `instantmessage` sub-map is a text invite, a `voice` sub-map a voice
 /// invite (Firestorm `llimview.cpp:5047`/`:5196`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum InviteChannel {
     /// A text-session invite (the viewer auto-joins these).
     Text,
@@ -97,7 +99,7 @@ pub enum InviteChannel {
 /// for. There is no separate pending-invitation registry — a pending invitation is
 /// exactly a chat-session entry whose lifecycle is `Invited`, so the registry is
 /// self-describing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PendingInvite {
     /// The inviting agent (the `ConferenceInvited.from_agent_id`).
     pub inviter: AgentKey,
@@ -112,7 +114,7 @@ pub struct PendingInvite {
 /// [`Invited`](Self::Invited)) and the promotion rule (any session message or
 /// participant traffic, and an explicit accept, set [`Joined`](Self::Joined)), so
 /// the `Invited` variant is never a dead, never-constructed state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatSessionLifecycle {
     /// A session we were invited to but have not yet joined; carries the invite.
     Invited(PendingInvite),
@@ -126,7 +128,7 @@ pub enum ChatSessionLifecycle {
 /// Read back via [`Session::history`](crate::Session::history). Distinct from the
 /// nearby-chat [`ChatMessage`](crate::ChatMessage) (region-local spoken chat);
 /// this is the IM/session conversation log entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionMessage {
     /// Who sent the message: the remote avatar for inbound traffic, or our own
     /// agent for messages we sent.
@@ -155,7 +157,7 @@ pub struct SessionMessage {
 /// [`SessionMessage`]: the transcript stores the speaker's **display name** (a
 /// string, not a resolvable key — most nearby speakers are avatars/objects we
 /// hold no key for), so that is what a recalled line carries.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NearbyHistoryLine {
     /// The speaker's display name as written in the transcript, or `None` for a
     /// plain-text fallback line that carried no recognisable `Name:` separator.
@@ -174,7 +176,7 @@ pub struct NearbyHistoryLine {
 /// spatial-voice-only): it mirrors only the per-session room's connection
 /// coordinates. All fields are optional, so it [`Default`]s to an empty,
 /// no-coordinates channel. Signalling only — never the audio stream.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VoiceChannelInfo {
     /// The voice room URI to connect to (`sip:…` for Vivox, the session room for
     /// WebRTC), or `None` when the grid carried an empty/absent uri.
@@ -197,7 +199,7 @@ pub struct VoiceChannelInfo {
 /// "who is speaking" state (the standing project rule — that lives in an external
 /// voice client). [`Default`]s to an empty, no-voice facet (all `false` / `None` /
 /// empty), so a freshly opened chat session starts without voice.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VoiceChannelState {
     /// Whether this session offers a voice channel at all (set from a voice
     /// invitation or an accept reply that carried channel coordinates).
@@ -326,7 +328,7 @@ impl ChatSession {
 /// [`ChatSessionInfo::lifecycle`]. The `Invited` variant inlines the
 /// [`PendingInvite`] fields rather than nesting them, so a consumer reads
 /// `inviter` / `session_name` / `channel` directly off the view.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatLifecycleView {
     /// A session we are in (the common case for everything we have sent into or
     /// received traffic from).
@@ -365,7 +367,7 @@ impl ChatLifecycleView {
 /// [`Event::ChatHistoryPage`](crate::Event::ChatHistoryPage), and the monotonic
 /// `last_activity` is meaningless across a process boundary (it only orders the
 /// list newest-first before it ships).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatSessionInfo {
     /// The typed session id (1:1 direct, group, or conference).
     pub kind: ChatSessionKind,
@@ -394,7 +396,7 @@ pub struct ChatSessionInfo {
 /// `online` follows the same visibility caveat as
 /// [`Session::is_online`](crate::Session::is_online): `false` is "offline or not
 /// visible to us", never provably offline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FriendPresence {
     /// The friend, with the friendship rights in both directions.
     pub friend: Friend,
@@ -411,7 +413,7 @@ pub struct FriendPresence {
 /// (rather than fully
 /// opaque) precisely so the runtime can cross that boundary; ordinary in-memory
 /// consumers still need not interpret it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MessageCursor(usize);
 
 impl MessageCursor {

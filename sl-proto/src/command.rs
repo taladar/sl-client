@@ -31,7 +31,7 @@ use crate::{
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     /// Send an application message.
     Send {

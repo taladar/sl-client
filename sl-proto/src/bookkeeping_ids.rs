@@ -18,7 +18,19 @@ use uuid::Uuid;
 ///
 /// A circuit numbers its outgoing pings with a wrapping `u8`; the matching
 /// `CompletePingCheck` echoes the id so a round trip can be paired up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct PingId(pub u8);
 
 impl PingId {
@@ -54,7 +66,19 @@ impl core::fmt::Display for PingId {
 ///
 /// It correlates every packet of a single chunked file transfer (a mute-list
 /// download, an inventory-asset upload, …).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct XferId(pub u64);
 
 impl XferId {
@@ -84,7 +108,19 @@ impl core::fmt::Display for XferId {
 /// Although it is carried on the wire as a UUID, it is *not* a persistent asset
 /// key: the client mints a fresh one per `TransferRequest` purely to demultiplex
 /// the inbound packets of concurrent transfers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct TransferId(pub Uuid);
 
 impl TransferId {
@@ -121,7 +157,19 @@ impl core::fmt::Display for TransferId {
 ///
 /// `0` is the conventional "no callback" sentinel (the simulator does not echo
 /// a correlation).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct InventoryCallbackId(pub u32);
 
 impl InventoryCallbackId {
@@ -152,7 +200,7 @@ macro_rules! uuid_correlation_id {
     ($(#[$meta:meta])* $name:ident, $role:literal) => {
         $(#[$meta])*
         #[doc = concat!("A ", $role, " correlation id (a wire `Uuid` echoed back to pair a reply with its request).")]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, serde::Serialize, serde::Deserialize)]
         pub struct $name(pub Uuid);
 
         impl $name {

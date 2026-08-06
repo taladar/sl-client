@@ -24,6 +24,7 @@
 /// crossings or relogins; use the object's persistent `full_id` UUID for that.
 /// A value of `0` is the conventional "no object" / "no parent" sentinel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionLocalObjectId(pub u32);
 
 impl RegionLocalObjectId {
@@ -56,6 +57,7 @@ impl core::fmt::Display for RegionLocalObjectId {
 /// The wire field is signed (`S32`), so this newtype wraps an `i32` rather than
 /// the `u32` of [`RegionLocalObjectId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionLocalParcelId(pub i32);
 
 impl RegionLocalParcelId {

@@ -41,6 +41,7 @@ pub const SEARCH_PAGE_SIZE: i32 = 30;
 /// `Allow`/`Block` are sent as a PUT body; `Forget` clears any prior preference
 /// (sent as a DELETE — see [`build_set_experience_permission_request`](crate::build_set_experience_permission_request)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum ExperiencePermission {
     /// Admit the experience for this agent.
@@ -99,6 +100,7 @@ fn experience_owner(agent_id: Uuid, group_id: Uuid) -> Option<OwnerKey> {
 /// A single experience's metadata record, as carried in a cap reply's
 /// `experience_keys` array (and decoded by [`ExperienceInfo::from_llsd`]).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExperienceInfo {
     /// The experience's public id (`public_id`) — the key used everywhere else.
     pub public_id: ExperienceKey,
@@ -235,6 +237,7 @@ impl ExperienceInfo {
 /// [`build_update_experience_request`](crate::build_update_experience_request)). The viewer omits `quota`, `expiration`
 /// and `agent_id` (server-controlled), so this carries only the editable fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExperienceUpdate {
     /// The experience to update (`public_id`).
     pub public_id: ExperienceKey,

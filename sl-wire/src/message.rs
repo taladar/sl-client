@@ -15,6 +15,7 @@ const EXTEND: u8 = 0xFF;
 /// `0xFF 0xFF` plus a big-endian `u16`; fixed ids are the full four-byte value
 /// (always of the form `0xFFFFFFxx`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MessageId {
     /// A high-frequency id (single byte).
     High(u8),

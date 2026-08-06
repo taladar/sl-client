@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub use sl_types::key::PickKey;
 
 /// An avatar's profile properties, parsed from `AvatarPropertiesReply`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarProperties {
     /// The avatar the profile is about.
     pub avatar_id: AgentKey,
@@ -40,7 +40,7 @@ pub struct AvatarProperties {
 }
 
 /// An avatar's interests, parsed from `AvatarInterestsReply`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarInterests {
     /// The avatar the interests are about.
     pub avatar_id: AgentKey,
@@ -57,7 +57,7 @@ pub struct AvatarInterests {
 }
 
 /// One group listed in an avatar's profile, from an `AvatarGroupsReply` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarGroupMembership {
     /// The group id.
     pub group_id: GroupKey,
@@ -74,7 +74,7 @@ pub struct AvatarGroupMembership {
 }
 
 /// One pick from an `AvatarPicksReply` (header data only: id and name).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarPick {
     /// The pick id (use to fetch full details).
     pub pick_id: PickKey,
@@ -85,7 +85,7 @@ pub struct AvatarPick {
 /// One classified ad from an `AvatarClassifiedReply` (header data only: id and
 /// name). Fetch the full details with
 /// [`Session::request_classified_info`](crate::Session::request_classified_info).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarClassified {
     /// The classified id (use to fetch full details).
     pub classified_id: ClassifiedKey,
@@ -95,7 +95,7 @@ pub struct AvatarClassified {
 
 /// The full details of one pick, parsed from `PickInfoReply` in response to
 /// [`Session::request_pick_info`](crate::Session::request_pick_info).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PickInfo {
     /// The pick id.
     pub pick_id: PickKey,
@@ -129,7 +129,7 @@ pub struct PickInfo {
 /// The full details of one classified ad, parsed from `ClassifiedInfoReply` in
 /// response to
 /// [`Session::request_classified_info`](crate::Session::request_classified_info).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClassifiedInfo {
     /// The classified id.
     pub classified_id: ClassifiedKey,
@@ -170,7 +170,7 @@ pub struct ClassifiedInfo {
 /// current values with
 /// [`Session::request_avatar_properties`](crate::Session::request_avatar_properties)
 /// first and edit from there.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProfileUpdate {
     /// The "second life" profile image (texture id).
     pub image_id: TextureKey,
@@ -205,7 +205,7 @@ impl Default for ProfileUpdate {
 /// An update to the agent's own interests, sent via
 /// [`Session::update_interests`](crate::Session::update_interests)
 /// (`AvatarInterestsUpdate`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct InterestsUpdate {
     /// The "want to" category bitmask.
     pub want_to_mask: u32,
@@ -224,7 +224,7 @@ pub struct InterestsUpdate {
 /// Supply a fresh [`pick_id`](Self::pick_id) to create a pick, or an existing
 /// one to edit it; the simulator fills in [`parcel_id`](Self::parcel_id) from
 /// the agent's current parcel when it is nil.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PickUpdate {
     /// The pick id (a fresh id to create; an existing id to edit).
     pub pick_id: PickKey,
@@ -267,7 +267,7 @@ impl Default for PickUpdate {
 /// existing one to edit it; the simulator fills in
 /// [`parcel_id`](Self::parcel_id) and the parent estate from the agent's
 /// current parcel when the parcel is nil.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClassifiedUpdate {
     /// The classified id (a fresh id to create; an existing id to edit).
     pub classified_id: ClassifiedKey,
@@ -313,7 +313,7 @@ pub use sl_types::friend::FriendRights;
 
 /// One friend from the login buddy list, with the friendship rights in both
 /// directions (parsed from the login `buddy-list`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Friend {
     /// The friend's agent id.
     pub id: FriendKey,
@@ -328,7 +328,7 @@ pub struct Friend {
 /// Emitted once as [`Event::Account`](crate::Event::Account) right after [`Event::CircuitEstablished`](crate::Event::CircuitEstablished),
 /// and also available from
 /// [`Session::login_account`](crate::Session::login_account).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoginAccount {
     /// The agent's home location (region handle, position, look-at), if the grid
     /// provided a well-formed `home` field.
@@ -358,7 +358,7 @@ pub struct LoginAccount {
 /// string, but the only two values the reference viewer ever uses are
 /// `"default"` (shown) and `"hidden"`; it is driven by a single "hide my online
 /// status" toggle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DirectoryVisibility {
     /// The default visibility — the account's online status is shown in search.
     Default,
@@ -393,7 +393,7 @@ impl DirectoryVisibility {
 /// to a `UserInfoRequest`: whether offline IMs are forwarded to email, the
 /// agent's directory (search) visibility, and the email address on file.
 /// Surfaced as [`Event::UserInfo`](crate::Event::UserInfo).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UserInfo {
     /// Whether offline instant messages are forwarded to the agent's email.
     pub im_via_email: bool,

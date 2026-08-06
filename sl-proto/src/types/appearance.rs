@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// [`Hair`](Self::Hair), [`Eyes`](Self::Eyes)) are *body parts* — an avatar
 /// always wears exactly one of each; the rest are *clothing* layers that may be
 /// absent or stacked. [`WearableType::is_body_part`] distinguishes them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum WearableType {
     /// Body shape (`WT_SHAPE`).
@@ -121,7 +121,7 @@ impl WearableType {
 /// [`Session::set_wearing`](crate::Session::set_wearing) (which sends
 /// `AgentIsNowWearing`) only the [`item_id`](Self::item_id) and
 /// [`wearable_type`](Self::wearable_type) are sent, so the asset id may be nil.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Wearable {
     /// The inventory item id of the worn wearable.
     pub item_id: InventoryKey,
@@ -416,7 +416,7 @@ pub mod avatar_texture {
 /// (`AvatarAppearance`); [`decode_texture_entry`](crate::decode_texture_entry)
 /// unpacks it into one of these per face. Values are converted to natural units
 /// (matching the reference viewer's `applyParsedTEMessage`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextureFace {
     /// The face's texture asset id. For an avatar's baked slots (see
     /// [`avatar_texture`]) this is the composited bake to fetch and render.
@@ -528,7 +528,7 @@ impl TextureFace {
 /// constants; for an object they follow the prim's face numbering. Decode a raw
 /// blob (e.g. [`Object::texture_entry`](crate::Object::texture_entry)) with
 /// [`decode_texture_entry`](crate::decode_texture_entry).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextureEntry {
     /// The per-face data, in face-index order.
     pub faces: Vec<TextureFace>,
@@ -557,7 +557,7 @@ impl TextureEntry {
 /// [`avatar_texture`] slot constants) can be fetched with
 /// [`Session::request_texture`](crate::Session::request_texture) to render the
 /// avatar.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarAppearance {
     /// The avatar this appearance describes.
     pub avatar_id: AgentKey,
@@ -588,7 +588,7 @@ pub struct AvatarAppearance {
 
 /// One animation an avatar is currently playing, from an `AvatarAnimation`
 /// update (surfaced inside [`Event::AvatarAnimation`](crate::Event::AvatarAnimation)).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PlayingAnimation {
     /// The animation asset id (a built-in animation UUID or an uploaded
     /// animation asset; fetch custom ones over the HTTP `ViewerAsset` capability,
@@ -606,7 +606,7 @@ pub struct PlayingAnimation {
 
 /// The playback flags carried by an [`Event::AttachedSound`](crate::Event::AttachedSound) (`AttachedSound`'s
 /// `Flags` byte). The values match the viewer's `LL_SOUND_FLAG_*` constants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SoundFlags(pub u8);
 
 impl SoundFlags {
@@ -644,7 +644,7 @@ impl SoundFlags {
 
 /// One sound the simulator asks the viewer to pre-fetch, from a `PreloadSound`
 /// update (surfaced inside [`Event::PreloadSound`](crate::Event::PreloadSound)).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SoundPreload {
     /// The sound asset to pre-fetch.
     pub sound_id: Uuid,
@@ -656,7 +656,7 @@ pub struct SoundPreload {
 
 /// One entry of an [`AvatarAppearance`] attachment block: an attached object and
 /// where it is worn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarAttachment {
     /// The attached object's id.
     pub id: ObjectKey,
@@ -679,7 +679,7 @@ pub struct AvatarAttachment {
 /// [`to_code`](Self::to_code) / [`from_code`](Self::from_code) carry only the
 /// point itself (the low 7 bits); use [`split_code`](Self::split_code) /
 /// [`with_mode`](Self::with_mode) to combine or separate the two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum AttachmentPoint {
     /// The item's default attachment point (`0`); the simulator picks the slot
@@ -972,7 +972,7 @@ impl AttachmentPoint {
 /// ([`Command::AttachObject`](crate::Command::AttachObject),
 /// [`Command::RezAttachment`](crate::Command::RezAttachment)) and their matching
 /// server events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AttachmentMode {
     /// Add the object to the point *alongside* anything already worn there (the
     /// `ATTACHMENT_ADD` flag is set).
@@ -1006,7 +1006,7 @@ impl AttachmentMode {
 /// bare `bool`, carried by
 /// [`Command::RezAttachments`](crate::Command::RezAttachments) and its matching
 /// server event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DetachOrder {
     /// Detach everything currently worn before wearing the batch — replacing the
     /// whole outfit (the `FirstDetachAll` flag is set).
@@ -1041,7 +1041,7 @@ impl DetachOrder {
 /// [`Command::RezAttachment`](crate::Command::RezAttachment) and
 /// [`Command::RezAttachments`](crate::Command::RezAttachments) (the
 /// `RezSingleAttachmentFromInv` / `RezMultipleAttachmentsFromInv` messages).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RezAttachment {
     /// The inventory item id to wear.
     pub item_id: InventoryKey,

@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// `ScriptDialog`. Reply with
 /// [`Session::reply_script_dialog`](crate::Session::reply_script_dialog), passing
 /// the chosen button's index/label on [`chat_channel`](ScriptDialog::chat_channel).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptDialog {
     /// The object id that raised the dialog (the reply target).
     pub object_id: ObjectKey,
@@ -68,7 +68,7 @@ pub use sl_types::lsl::ScriptPermissions;
 /// [`RecordOnly`](Self::RecordOnly), not an action: a granted `llTeleportAgent`
 /// teleports the agent server-side and arrives as an ordinary teleport handled
 /// by the teleport state machine, so the client merely mirrors the grant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PermissionRole {
     /// The simulator enforces the permission end-to-end; the client only
     /// mirrors the grant and takes no action (any effect arrives later on the
@@ -115,7 +115,7 @@ impl PermissionRole {
 /// A scripted-object permission request (`llRequestPermissions`), parsed from a
 /// `ScriptQuestion`. Grant (a subset) with
 /// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptPermissionRequest {
     /// The task (object) id holding the script.
     pub task_id: ObjectKey,
@@ -138,7 +138,7 @@ pub struct ScriptPermissionRequest {
 /// The grant registry's internal types stay private; this flattens what a driver
 /// needs. The simulator stays authoritative — this only mirrors what the agent
 /// granted, never a security boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptGrantInfo {
     /// The task (object) id holding the script.
     pub task_id: ObjectKey,
@@ -167,7 +167,7 @@ pub struct ScriptGrantInfo {
 /// to surface "you previously refused this script"). The simulator stays
 /// authoritative; this mirrors the agent's recorded answer, never a security
 /// boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ScriptPermissionStatus {
     /// No answer from this script's permission request has been recorded (the
     /// holder is absent from the mirror).
@@ -180,7 +180,7 @@ pub enum ScriptPermissionStatus {
 
 /// A scripted-object request to open a URL (`llLoadURL`), parsed from a
 /// `LoadURL`. There is no reply; the client decides whether to open the URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LoadUrlRequest {
     /// The object's name.
     pub object_name: String,
@@ -197,7 +197,7 @@ pub struct LoadUrlRequest {
 /// A scripted-object request to teleport the agent (`llMapDestination` /
 /// `ScriptTeleportRequest`). There is no direct reply; the client may initiate a
 /// teleport to the named region/position.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptTeleportRequest {
     /// The requesting object's name.
     pub object_name: String,
@@ -219,7 +219,7 @@ pub struct ScriptTeleportRequest {
 /// together with the substitution parameters for that template. Carried by
 /// messages such as `TeleportFailed` and `AlertMessage` alongside a plain
 /// fallback string. Mirrors the viewer's `AlertInfo` block.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AlertInfo {
     /// The localizable message key (`Message`), e.g. `RegionEntryAccessBlocked`.
     /// Empty if the simulator sent no key.
@@ -234,7 +234,7 @@ pub struct AlertInfo {
 /// *releasing* them — the `TakeControls` wire flag on a `ScriptControlChange.Data`
 /// block (`llTakeControls` vs `llReleaseControls`), modelled as a named intent
 /// rather than a bare `bool`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ScriptControlAction {
     /// The script is *taking* the named controls (the `TakeControls` flag is
     /// set): route the control inputs to the script.
@@ -270,7 +270,7 @@ impl ScriptControlAction {
 /// [`ScriptPermissions::TAKE_CONTROLS`]; the client should route the named
 /// control inputs to the script (and, when [`action`](Self::action) is
 /// [`ScriptControlAction::Release`], stop doing so).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptControl {
     /// Whether the script is *taking* the named controls or releasing them.
     pub action: ScriptControlAction,
@@ -293,7 +293,7 @@ pub struct ScriptControl {
 /// The per-control take counts stay private; this exposes only the union of
 /// currently-held bits. The simulator stays authoritative — this is an
 /// API-convenience mirror, never a security boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptControlsInfo {
     /// Controls scripts hold and *consume* (`PassToAgent` was clear; the avatar
     /// does not move from these inputs). The union of every consumed control bit
@@ -317,7 +317,7 @@ pub struct ScriptControlsInfo {
 /// movement controls ([`ScriptControlsInfo`]). The simulator stays
 /// authoritative — this is an API-convenience mirror of what the agent answered,
 /// never a security boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptPermissionState {
     /// Every recorded grant or denial, in deterministic order (a never-asked
     /// script is absent).
@@ -330,7 +330,7 @@ pub struct ScriptPermissionState {
 /// the `Type` field of a `SetFollowCamProperties.CameraProperty` block. The
 /// numeric values match the viewer's `EFollowCamAttributes`
 /// (`llfollowcamparams.h`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum FollowCamProperty {
     /// `FOLLOWCAM_PITCH` — camera pitch angle (degrees).
@@ -449,7 +449,7 @@ impl FollowCamProperty {
 
 /// One follow-camera parameter and its value, from a
 /// `SetFollowCamProperties.CameraProperty` block (`llSetCameraParams`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FollowCamPropertyValue {
     /// Which camera parameter this sets.
     pub property: FollowCamProperty,
@@ -459,7 +459,7 @@ pub struct FollowCamPropertyValue {
 }
 
 /// The kind of thing a mute-list entry blocks, from the `MuteType` field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum MuteType {
     /// A mute by display name only (no specific id).
@@ -507,7 +507,7 @@ impl MuteType {
 /// The per-entry mute flags bitfield. **Each set bit is an *exception*** — it
 /// means "do *not* mute this aspect" — so `MuteFlags(0)` mutes everything (the
 /// usual case). The flag values match the viewer's `LLMute::flag*` constants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct MuteFlags(pub u32);
 
 impl MuteFlags {
@@ -529,7 +529,7 @@ impl MuteFlags {
 
 /// One entry in the agent's mute (block) list, parsed from the downloaded mute
 /// file ([`Event::MuteList`](crate::Event::MuteList)).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MuteEntry {
     /// The muted entity's id (nil for a [`MuteType::ByName`] mute).
     pub id: Uuid,
@@ -558,7 +558,7 @@ pub struct MuteEntry {
 /// `{ LSL2, MONO }` enum to a free-form combo whose values now include `luau`
 /// (Lua/SLua), with more runtimes (e.g. a new LSL VM) in progress. New backends
 /// arrive rarely (every few years), so each is added as a variant when it ships.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ScriptTarget {
     /// Legacy LSL bytecode (`"lsl2"`).
@@ -597,7 +597,7 @@ impl ScriptTarget {
 /// low byte of the item's `flags` (`II_FLAGS_SUBTYPE_MASK`), as Linden Lab's
 /// viewer records it (`ScriptSubtype_t`). Distinct from [`ScriptTarget`], which
 /// is a per-upload *compile* request; this is a persisted property of the item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ScriptLanguage {
     /// LSL (`SST_LSL = 0`).
@@ -642,7 +642,7 @@ impl ScriptLanguage {
 
 /// Where a script's source is being uploaded to — selecting the capability and
 /// the request body for [`Command::UploadScript`](crate::Command::UploadScript).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ScriptUploadLocation {
     /// A script item in the agent's own inventory (`UpdateScriptAgent`).
     AgentInventory {
@@ -672,7 +672,7 @@ pub enum ScriptUploadLocation {
 /// of the grid's format (Second Life Mono and OpenSim XEngine format these
 /// differently), falling back to `line`/`column` `None` and `message == raw` when
 /// no position prefix is recognised.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptCompileError {
     /// The diagnostic string exactly as the simulator sent it.
     pub raw: String,

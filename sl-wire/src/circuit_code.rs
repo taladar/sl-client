@@ -22,6 +22,7 @@
 /// children), so it scopes a datagram to the *session*, not to an individual
 /// connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CircuitCode(pub u32);
 
 impl CircuitCode {

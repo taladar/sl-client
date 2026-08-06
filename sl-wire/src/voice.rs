@@ -47,6 +47,7 @@ pub const VOICE_SERVER_TYPE_WEBRTC: &str = "webrtc";
 ///   [`viewer_session`](Self::viewer_session) to tear the connection down. Use
 ///   [`VoiceProvisionRequest::webrtc_logout`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VoiceProvisionRequest {
     /// The voice backend ([`VOICE_SERVER_TYPE_VIVOX`] /
     /// [`VOICE_SERVER_TYPE_WEBRTC`]); omitted from the body when `None` (the
@@ -115,6 +116,7 @@ impl VoiceProvisionRequest {
 /// come from the out-of-scope WebRTC peer connection and are passed through
 /// verbatim.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IceCandidate {
     /// The media stream identification of the candidate (`sdpMid`).
     pub sdp_mid: String,
@@ -328,6 +330,7 @@ pub fn parse_voice_signaling_request(
 /// while the WebRTC reply fills [`viewer_session`](Self::viewer_session) and the
 /// JSEP **answer** ([`jsep_type`](Self::jsep_type) / [`jsep_sdp`](Self::jsep_sdp)).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VoiceAccountInfo {
     /// The backend the grid answered for, when it echoes `voice_server_type`.
     pub voice_server_type: Option<String>,
@@ -494,6 +497,7 @@ pub fn build_provision_voice_account_response(info: &VoiceAccountInfo) -> String
 
 /// The decoded reply to a `ParcelVoiceInfoRequest`: the parcel's voice channel.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ParcelVoiceInfo {
     /// The parcel the channel belongs to (`-1` if the reply omitted it).
     pub parcel_local_id: crate::RegionLocalParcelId,

@@ -4145,7 +4145,12 @@ pub(crate) fn apply_rigged_attachments(
         }
         match (animesh, bind_agent) {
             (Some((object, _entity)), _) => control.record_overrides(object, key.uuid(), overrides),
-            (None, Some(agent)) => avatars.record_joint_overrides(agent, key.uuid(), overrides),
+            (None, Some(agent)) => {
+                avatars.record_joint_overrides(agent, key.uuid(), overrides);
+                // Record the worn rigged mesh for the avatar-state dump
+                // (viewer-avatar-state-dump-replay).
+                avatars.record_worn_rigged_mesh(agent, key.uuid());
+            }
             (None, None) => {}
         }
         debug!("bound rigged mesh {key} to its skeleton");

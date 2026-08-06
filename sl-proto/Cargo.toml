@@ -17,18 +17,20 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
 md5 = { version = "0.7.0" }
+serde = { version = "1.0.229", features = ["derive", "rc"] }
 sl-lsl = { version = "0.1.0", path = "../sl-lsl" }
 sl-types = { version = "0.8.0" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
+sl-wire = { version = "0.1.0", path = "../sl-wire", features = ["serde"] }
 thiserror = { version = "2.0.18" }
 tracing = { version = "0.1.44" }
-url = { version = "2.5.8" }
-uuid = { version = "1.18.1" }
+url = { version = "2.5.8", features = ["serde"] }
+uuid = { version = "1.18.1", features = ["serde"] }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
+serde_json = { version = "1.0.151" }
 sl-types = { version = "0.8.0" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
+sl-wire = { version = "0.1.0", path = "../sl-wire", features = ["serde"] }
 uuid = { version = "1.18.1" }
 
 [lints]

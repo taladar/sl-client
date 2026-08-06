@@ -10,7 +10,7 @@
 //! left to the consumer.
 
 /// The voice protocol version a region requires (`RequiredVoiceVersion`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RequiredVoiceVersion {
     /// The major version of the voice protocol the region expects
     /// (`major_version`). A viewer warns when this exceeds the version its

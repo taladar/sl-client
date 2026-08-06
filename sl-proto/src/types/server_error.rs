@@ -22,7 +22,7 @@ use crate::bookkeeping_ids::TransactionId;
 /// [`system`](Self::system) (the hierarchical path to the originating handler,
 /// e.g. `"message/handler"`) to react to a specific failure — for example
 /// surfacing a money-transaction failure in the UI.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ServerError {
     /// The agent the error is addressed to.
     pub agent: AgentKey,
@@ -46,7 +46,7 @@ pub struct ServerError {
 
 /// A notice that a feature the agent requested is disabled, parsed from a
 /// `FeatureDisabled` message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FeatureDisabled {
     /// A human-readable description of why the feature is unavailable.
     pub message: String,
@@ -66,7 +66,7 @@ pub struct FeatureDisabled {
 /// The `KickUser` routing fields (the target sim's address and the agent's own
 /// session id) carry nothing the application needs, so only the meaningful
 /// payload is surfaced.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Kick {
     /// The agent being kicked.
     pub agent: AgentKey,

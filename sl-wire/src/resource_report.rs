@@ -33,6 +33,7 @@ use crate::llsd::{Llsd, LlsdError};
 /// resource is available or used. The `resource_type` is `"memory"` (bytes; an
 /// `amount` of `-1` means "unlimited") or `"urls"` (a count).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceAmount {
     /// The resource being measured (`type`): `"memory"` or `"urls"`.
     pub resource_type: String,
@@ -43,6 +44,7 @@ pub struct ResourceAmount {
 /// A resource budget summary: the `available` and `used` amounts of each
 /// resource. Shared by the attachment report and the land summary report.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceSummary {
     /// The available (budget) amount of each resource (`available`).
     pub available: Vec<ResourceAmount>,
@@ -54,6 +56,7 @@ pub struct ResourceSummary {
 /// number of `llRequestURL` URLs it holds. Each is [`None`] when the simulator
 /// omits it (it reports a value only when non-zero, in the attachment report).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScriptedObjectResources {
     /// The script memory the object uses, in bytes (`memory`).
     pub memory: Option<i32>,
@@ -64,6 +67,7 @@ pub struct ScriptedObjectResources {
 /// One scripted object in a resource report, shared by the attachment report and
 /// the land detail report.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScriptedObjectInfo {
     /// The object's id (`id`).
     pub id: Uuid,
@@ -312,6 +316,7 @@ fn scripted_objects_from_llsd(
 /// One attachment point in an [`AttachmentResourcesReport`]: the point's display
 /// name and the scripted objects worn there.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttachmentLocation {
     /// The attachment point's display name (`location`), e.g. `"Right Hand"`.
     pub location: String,
@@ -322,6 +327,7 @@ pub struct AttachmentLocation {
 /// An `AttachmentResources` reply: the agent's scripted attachments grouped by
 /// attachment point, plus the total resource summary.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttachmentResourcesReport {
     /// The scripted attachments, grouped by attachment point (`attachments`).
     pub attachments: Vec<AttachmentLocation>,
@@ -414,6 +420,7 @@ pub fn build_attachment_resources_response(report: &AttachmentResourcesReport) -
 /// parcel's totals and, when present, [`script_resource_details`](Self::script_resource_details)
 /// for the per-object breakdown (omitted when the agent may not see detail).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LandResourcesUrls {
     /// The URL of the parcel's resource-summary follow-up cap
     /// (`ScriptResourceSummary`). The empty/absent wire value decodes to [`None`].
@@ -521,6 +528,7 @@ pub fn build_land_resource_summary_response(summary: &ResourceSummary) -> String
 
 /// One parcel's scripted-object breakdown in a `ScriptResourceDetails` report.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ParcelScriptResources {
     /// The parcel's name (`name`).
     pub name: String,

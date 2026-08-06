@@ -283,6 +283,7 @@ fn reconstruct_w(x: f32, y: f32, z: f32) -> f32 {
 
 /// A growable buffer for writing typed values in little-endian wire form.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Writer {
     /// The accumulated output bytes.
     buf: Vec<u8>,

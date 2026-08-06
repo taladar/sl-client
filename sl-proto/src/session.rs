@@ -663,7 +663,7 @@ struct Timers {
 /// total size and packet count plus packet 0's data; subsequent `ImagePacket`s
 /// carry packets `1..`. Packets are buffered by index so an out-of-order arrival
 /// still reassembles correctly.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TextureDownload {
     /// The codec reported by the `ImageData` header.
     codec: ImageCodec,
@@ -697,7 +697,7 @@ impl TextureDownload {
 /// [`Session::request_xfer`](Session::request_xfer) path) registers its purpose
 /// so the single `SendXferPacket` handler can route the assembled bytes to the
 /// right typed event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum XferPurpose {
     /// A mute-list file: parse it into [`Event::MuteList`](crate::Event::MuteList).
     MuteList,
@@ -731,7 +731,7 @@ enum XferPurpose {
 /// do with them once the final packet arrives. Started by a `MuteListUpdate`, an
 /// auto-fetched `ReplyTaskInventory`, or [`Session::request_xfer`], and keyed by
 /// [`XferId`] in [`Session::xfer_downloads`](Session::xfer_downloads).
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct XferDownload {
     /// What the assembled file should be routed to on completion.
     purpose: XferPurpose,
@@ -756,7 +756,7 @@ pub(crate) const XFER_UPLOAD_CHUNK_SIZE: usize = 1000;
 /// [`Session::xfer_uploads`](Session::xfer_uploads). Unlike downloads, the
 /// simulator drives the pacing: each `SendXferPacket` we queue is released only
 /// once the previous one's `ConfirmXferPacket` arrives.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct XferUpload {
     /// The viewer-side filename this upload was named with, echoed back on
     /// [`Event::XferUploaded`](crate::Event::XferUploaded) once the final packet
@@ -817,7 +817,7 @@ struct Circuit {
 }
 
 /// The lifecycle state of a [`Session`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum SessionState {
     /// Constructed; the login request is available but not yet answered.
     New,
@@ -867,7 +867,7 @@ enum TeleportPhase {
 /// flag conflated, so the seat object learned from the `AvatarSitResponse` is
 /// carried by the type rather than dropped: a request that has not been
 /// answered cannot be confused with being seated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum SitState {
     /// Not seated on an object and no sit request outstanding. Whether the
     /// agent is standing, walking, or ground-sitting is an avatar *animation*
@@ -887,7 +887,9 @@ enum SitState {
 /// `(holding object, inventory item within it)` pair (one object may run several
 /// scripts, each with its own grant). Both halves come straight off the
 /// `ScriptQuestion` / [`Event::ScriptPermissionRequest`](crate::Event::ScriptPermissionRequest).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 struct ScriptHolder {
     /// The task (object) id holding the script.
     task_id: ObjectKey,
@@ -903,7 +905,7 @@ struct ScriptHolder {
 /// conservative direction (an unrecognised holder is cleared on the next
 /// teleport rather than kept forever; losing a mirror entry is cheap, the
 /// simulator still enforces).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum HolderKind {
     /// The script lives in an attachment worn by this agent; the grant crosses
     /// regions with the avatar (kept on teleport, cleared on detach).
@@ -918,7 +920,7 @@ enum HolderKind {
 /// (answered with no permissions) or a granted, non-empty subset. The third
 /// state — *never asked* — is the absence of a registry entry, so it has no
 /// variant here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum GrantStatus {
     /// The agent answered with no permissions (an explicit deny). Distinct from
     /// a never-asked holder, which has no registry entry at all, so the driver's
@@ -936,7 +938,7 @@ enum GrantStatus {
 ///
 /// The simulator stays authoritative; this is an API-convenience mirror of what
 /// the agent answered, never a security boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ScriptGrant {
     /// Whether the agent denied this script outright or granted it a non-empty
     /// permission subset. A denial still carries the `kind` / `circuit` below so
@@ -968,7 +970,7 @@ struct ScriptGrant {
 /// not clear it for the other — a single union would lose that.
 ///
 /// The simulator stays authoritative; this is an API-convenience mirror.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TakenControls {
     /// Per-control-bit take count for controls the script *consumes*
     /// (`PassToAgent` clear; the avatar does not move from the input). Keyed by

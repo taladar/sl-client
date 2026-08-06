@@ -17,6 +17,7 @@ use core::ops::{BitAnd, BitOr, BitOrAssign, Not};
 /// reconstructed booleans) keeps the value byte-identical across a decode/encode
 /// round trip even if the simulator sets bits the viewer does not yet name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReflectionProbeFlags {
     /// The raw flag bits.
     bits: u8,

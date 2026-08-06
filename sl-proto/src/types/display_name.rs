@@ -18,7 +18,7 @@ use sl_wire::DisplayName;
 
 /// A pushed display-name change (`DisplayNameUpdate`): an avatar's display name
 /// changed, so a client mirroring the name cache can refresh its entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DisplayNameUpdate {
     /// The avatar's previous display name (`old_display_name`), useful for a
     /// "X is now known as Y" notification. Empty when the sim omits it.
@@ -35,7 +35,7 @@ pub struct DisplayNameUpdate {
 /// later reports whether the change was accepted. A [`status`](Self::status) of
 /// `200` means success; `409` (conflict) means the viewer's cached name was
 /// stale and should be re-fetched.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SetDisplayNameReply {
     /// The HTTP-like status code of the change request (`status`): `200` on
     /// success, `409` on a stale-name conflict, etc.

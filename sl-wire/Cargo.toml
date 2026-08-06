@@ -18,7 +18,7 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 [features]
 # Derive `serde::Serialize` on the generated message/block structs and
 # `AnyMessage`, so decoded messages can be serialized (e.g. to JSON) by tools.
-serde = ["dep:serde", "uuid/serde"]
+serde = ["dep:serde", "uuid/serde", "url/serde"]
 
 [dependencies]
 base64 = { version = "0.22.1" }

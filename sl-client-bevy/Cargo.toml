@@ -64,6 +64,7 @@ wgpu-types = { version = "29" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
+serde_json = { version = "1.0.145" }
 tracing-subscriber = { version = "0.3.19" }
 
 [lints]

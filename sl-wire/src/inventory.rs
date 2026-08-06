@@ -244,6 +244,7 @@ pub fn parse_ais_item_url(suffix: &str) -> Option<InventoryKey> {
 /// A parsed AIS3 create-folder body (`{ name, type }`): the inverse of
 /// [`build_ais_create_category_body`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AisCategoryCreate {
     /// The new folder's preferred `FolderType` (`-1` for none).
     pub folder_type: i32,
@@ -307,6 +308,7 @@ pub fn parse_ais_move_body(xml: &str) -> Result<InventoryFolderKey, WireError> {
 /// A parsed AIS3 item-update body (`{ name, desc }`): the inverse of
 /// [`build_ais_update_item_body`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AisItemUpdate {
     /// The item's new name.
     pub name: String,
@@ -336,6 +338,7 @@ pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, WireError>
 /// parent_id, type, name }`): the inverse of
 /// [`build_create_inventory_category_request`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreateInventoryCategoryRequest {
     /// The desired (client-chosen) id for the new folder.
     pub folder_id: InventoryFolderKey,
@@ -397,6 +400,7 @@ fn llsd_string(root: &Llsd, key: &'static str) -> Result<String, WireError> {
 /// Field names mirror the `_`-prefixed wire keys the Firestorm viewer reads in
 /// `llaisapi.cpp` (`AISUpdate::parseMeta`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AisUpdate {
     /// `_created_categories`: folders created by the operation.
     pub created_categories: Vec<InventoryFolderKey>,

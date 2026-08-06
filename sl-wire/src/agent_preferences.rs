@@ -35,6 +35,7 @@ use crate::llsd::{Llsd, LlsdError};
 /// (`default_object_perm_masks`), as raw `PERM_*` bit masks. The viewer sends
 /// these from the "new object" defaults in its permissions preferences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ObjectPermMasks {
     /// The default permission mask granted to the object's group (`Group`).
     pub group: i32,
@@ -49,6 +50,7 @@ pub struct ObjectPermMasks {
 /// agent is changing (a fully-empty set is a pure "get"), and a reply fills in
 /// the complete stored set the grid echoes back.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AgentPreferences {
     /// The avatar's hover height in metres (`hover_height`), the Z offset applied
     /// to the avatar's apparent ground position.

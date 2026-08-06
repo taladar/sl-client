@@ -39,7 +39,7 @@ pub mod pcode {
 /// An object's kinematic state, decoded from the packed `ObjectData`/`Data`
 /// blob of an object update. Linear quantities are region-local; the rotation
 /// is the object's orientation in its parent's frame.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectMotion {
     /// Region-local position, in metres.
     pub position: Vector,
@@ -65,7 +65,7 @@ pub struct ObjectMotion {
 /// later full, compressed, and motion-only (`ImprovedTerseObjectUpdate`)
 /// updates. Surfaced via [`Event::ObjectAdded`](crate::Event::ObjectAdded) / [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) and
 /// removed via [`Event::ObjectRemoved`](crate::Event::ObjectRemoved).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Object {
     /// The region the object lives in (its [`RegionHandle`]).
     pub region_handle: RegionHandle,
@@ -283,7 +283,7 @@ impl Object {
 
 /// One parsed entry of an object's packed `name_value` string (the reference
 /// viewer's `LLNameValue`). Produced by [`Object::name_values`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NameValue {
     /// The entry's name (the lookup key, e.g. `AttachItemID`).
     pub name: String,
@@ -373,7 +373,9 @@ fn starts_with_token(text: &str, token: &str) -> bool {
 /// are the simulator's quantized integers — the same encoding [`PrimShape`](crate::PrimShape) uses
 /// to *send* a shape — not dequantized floats; the quantization for each field
 /// matches the like-named [`PrimShape`](crate::PrimShape) field (e.g. `path_begin / 0.00002`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub struct PrimShapeParams {
     /// The path curve byte (`LL_PCODE_PATH_*`).
     pub path_curve: u8,
@@ -418,7 +420,7 @@ pub struct PrimShapeParams {
 /// in an `ObjectUpdate` is a list of optional typed parameters (each a Linden
 /// `LLNetworkData` subtype); each field here is present only if the object
 /// carries that parameter.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectExtraParams {
     /// Flexible-path ("flexi") parameters (`PARAMS_FLEXIBLE`, `0x10`).
     pub flexible: Option<FlexibleData>,
@@ -440,7 +442,7 @@ pub struct ObjectExtraParams {
 
 /// Flexible-path ("flexi") parameters (`LLFlexibleObjectData`): the prim's path
 /// bends under simulated softbody physics.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FlexibleData {
     /// The softness / simulate-LOD level (0–3): how finely the path flexes.
     pub softness: u8,
@@ -457,7 +459,7 @@ pub struct FlexibleData {
 }
 
 /// Point/spot-light parameters (`LLLightParams`): the object emits light.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LightData {
     /// The light colour, RGBA as sent on the wire (sRGB).
     pub color: [u8; 4],
@@ -471,7 +473,7 @@ pub struct LightData {
 
 /// Sculpt or mesh parameters (`LLSculptParams`): the prim's shape comes from a
 /// sculpt texture or a mesh asset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SculptData {
     /// The sculpt texture or mesh asset id, typed by the low bits of
     /// [`sculpt_type`](Self::sculpt_type): a [`SculptOrMeshKey::Mesh`] when they
@@ -485,7 +487,7 @@ pub struct SculptData {
 
 /// Projected-light texture parameters (`LLLightImageParams`): a light projects
 /// an image.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LightImage {
     /// The projected texture id.
     pub texture: TextureKey,
@@ -495,7 +497,7 @@ pub struct LightImage {
 
 /// Extended-mesh flags (`LLExtendedMeshParams`), e.g. animated-mesh
 /// (`ANIMATED_MESH_ENABLED_FLAG`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExtendedMesh {
     /// The extended-mesh flag bits.
     pub flags: u32,
@@ -503,7 +505,7 @@ pub struct ExtendedMesh {
 
 /// One per-face GLTF (PBR) render-material reference
 /// (`LLRenderMaterialParams::Entry`): the material asset applied to a face.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RenderMaterialRef {
     /// The texture-entry (face) index the material applies to.
     pub face: u8,
@@ -516,7 +518,7 @@ pub struct RenderMaterialRef {
 /// probe that captures the surrounding environment for image-based lighting and
 /// reflections. The probe itself is rendered by the viewer (there is no asset to
 /// fetch); these are just its volume parameters.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionProbe {
     /// The probe's ambiance (irradiance) scale.
     pub ambiance: f32,
@@ -555,7 +557,7 @@ pub mod texture_anim_mode {
 /// `llSetTextureAnim`): a 16-byte block driving an animated, rotating, or scaling
 /// texture on one or all of a prim's faces. Decoded by
 /// [`decode_texture_anim`](crate::decode_texture_anim).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextureAnimation {
     /// The mode bit field (see [`texture_anim_mode`]). With
     /// [`ON`](texture_anim_mode::ON) clear the prim has no active animation.
@@ -587,7 +589,7 @@ pub struct TextureAnimation {
 /// avatar with these. Unlike an avatar animation it never names a triggering
 /// source object (the animesh object itself is the source), so there is no
 /// `source_id` field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectPlayingAnimation {
     /// The animation asset id playing on the object (a built-in animation UUID
     /// or an uploaded animation asset).
@@ -603,7 +605,7 @@ pub struct ObjectPlayingAnimation {
 /// inventory and the temporary Xfer filename from which the full contents
 /// listing is downloaded. Surfaced as
 /// [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskInventoryReply {
     /// The in-world object (task) whose inventory this describes.
     pub task: ObjectKey,
@@ -623,7 +625,7 @@ pub struct TaskInventoryReply {
 ///
 /// The listing is LL's plain-text `inv_item { … }` format; folder (`inv_object`)
 /// sections are skipped, so this describes only leaf items.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskInventoryItem {
     /// The task inventory item id.
     pub item_id: InventoryKey,
@@ -685,7 +687,7 @@ pub mod particle_pattern {
 /// parameters the source emits. Decoded by
 /// [`decode_particle_system`](crate::decode_particle_system) from both the legacy
 /// (86-byte) and modern (size-prefixed, glow/blend-extended) wire forms.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParticleSystem {
     /// The system CRC (a non-zero value marks a live system; zero means "no
     /// system").
@@ -750,7 +752,7 @@ pub struct ParticleSystem {
 /// An object's extended properties (`ObjectProperties`), delivered after the
 /// object is selected (see
 /// [`Session::request_object_properties`](crate::Session::request_object_properties)).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectProperties {
     /// The object's persistent global id.
     pub object_id: ObjectKey,
@@ -816,7 +818,7 @@ pub struct ObjectProperties {
 /// Unlike the full [`ObjectProperties`] (which needs the object selected), the
 /// family reply carries just the owner/permissions/sale summary a viewer shows
 /// on hover or in the pay/report dialogs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectPropertiesFamily {
     /// The request flags echoed back from the request (e.g. `OBJECT_PAY_REQUEST`
     /// `0x04`), letting a viewer route the reply to the dialog that asked.
@@ -955,6 +957,40 @@ mod tests {
         let object = test_object(0, 0, "");
         // The default object's full id is the nil object key, not a stray value.
         assert_eq!(object.full_id, ObjectKey::from(super::Uuid::nil()));
+    }
+
+    /// A representative [`Object`] round-trips losslessly through serde JSON:
+    /// serializing to a JSON string and deserializing it back yields an equal
+    /// value. This exercises the serde derives on `Object` and every type it
+    /// transitively holds (its `sl-wire` newtypes/flags, `ObjectMotion`,
+    /// `PrimShapeParams`, `ObjectExtraParams`, an optional `url::Url`, …).
+    #[test]
+    fn object_serde_json_round_trips() -> Result<(), Box<dyn core::error::Error>> {
+        let mut object = test_object(9, 0x16, "AttachItemID STRING RW SV foo");
+        object.region_handle = RegionHandle(0x0000_0400_0000_0300);
+        object.local_id = RegionLocalObjectId(4242);
+        object.parent_id = RegionLocalObjectId(4200);
+        object.crc = 0xDEAD_BEEF;
+        object.update_flags = 0x0000_00A5;
+        object.text = "hover text".to_owned();
+        object.text_color = [10, 20, 30, 255];
+        object.media_url = Some(url::Url::parse("http://example.com/media")?);
+        object.scale = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        object.texture_entry = vec![1, 2, 3, 4];
+        object.shape = super::PrimShapeParams {
+            path_curve: 16,
+            profile_curve: 1,
+            profile_hollow: 12_345,
+            ..super::PrimShapeParams::default()
+        };
+        let json = serde_json::to_string(&object)?;
+        let decoded: super::Object = serde_json::from_str(&json)?;
+        assert_eq!(object, decoded);
+        Ok(())
     }
 
     #[test]

@@ -28,6 +28,7 @@ use crate::CircuitCode;
 /// directly or [parse](StartLocation::from_str) a wire string into one, and
 /// render it back with [`to_wire_string`](StartLocation::to_wire_string).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StartLocation {
     /// Resume at the avatar's last logout location (`"last"`).
     Last,
@@ -108,6 +109,7 @@ impl FromStr for StartLocation {
 
 /// An error parsing a [`StartLocation`] from its `start` wire string.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum StartLocationParseError {
     /// The value matched none of `"last"`, `"home"`, or a `"uri:"` location.
@@ -123,6 +125,7 @@ pub enum StartLocationParseError {
 
 /// The parameters of an XML-RPC `login_to_simulator` request.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoginRequest {
     /// The avatar's first name.
     pub first_name: String,
@@ -300,6 +303,7 @@ fn push_escaped(out: &mut String, value: &str) {
 
 /// A parsed login response: success, a multi-factor challenge, or a failure.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LoginResponse {
     /// The login succeeded.
     Success(Box<LoginSuccess>),
@@ -313,6 +317,7 @@ pub enum LoginResponse {
 
 /// A multi-factor authentication challenge returned by the grid.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MfaChallenge {
     /// An `mfa_hash` the grid wants echoed back on the retry, if it provided
     /// one.
@@ -323,6 +328,7 @@ pub struct MfaChallenge {
 
 /// The fields of a successful login needed to bring up the UDP circuit.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoginSuccess {
     /// The avatar/agent id.
     pub agent_id: AgentKey,
@@ -427,6 +433,7 @@ pub struct LoginSuccess {
 /// quasi-LLSD string such as `{'region_handle':[r256000,r256000],
 /// 'position':[r128.0,r128.0,r25.0], 'look_at':[r1.0,r0.0,r0.0]}`).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HomeLocation {
     /// The home region's handle (its grid-corner world coordinates in metres,
     /// the two components the wire carries as `region_handle: [x, y]`).
@@ -440,6 +447,7 @@ pub struct HomeLocation {
 /// One folder of the inventory skeleton carried in a login response
 /// (`inventory-skeleton`): the folder tree without item contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SkeletonFolder {
     /// The folder's id.
     pub folder_id: InventoryFolderKey,
@@ -458,6 +466,7 @@ pub struct SkeletonFolder {
 /// used by `GrantUserRights`/`ChangeUserRights` (bit 0 = see online, bit 1 = see
 /// on map, bit 2 = modify objects).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BuddyListEntry {
     /// The friend's agent id.
     pub buddy_id: Uuid,
@@ -469,6 +478,7 @@ pub struct BuddyListEntry {
 
 /// The reason a login was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoginFailure {
     /// The machine-readable reason code (e.g. `"key"`, `"presence"`).
     pub reason: String,
@@ -491,6 +501,7 @@ pub struct LoginFailure {
 /// the human-readable [`message`](LoginFailure::message); see
 /// [`LoginFailure::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum LoginRejectKind {
     /// The avatar already has a presence registered on the grid ("you appear to
@@ -929,6 +940,7 @@ where
 /// (`agree_to_tos`/`read_critical`/`extended_errors`) are surfaced so the
 /// endpoint can enforce them. Produced by [`parse_login_request`].
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ParsedLoginRequest {
     /// The avatar's first name (`first`).
     pub first_name: String,
@@ -1222,6 +1234,7 @@ fn vector3_to_string(vector: [f32; 3]) -> String {
 /// A grid's server-side multi-factor policy for an account, used by
 /// [`LoginServer::respond`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MfaPolicy {
     /// The one-time token the request's `token` must equal to authenticate.
     pub expected_token: String,
@@ -1244,6 +1257,7 @@ impl MfaPolicy {
 
 /// The stored credentials a [`LoginServer`] checks a login request against.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Credential {
     /// The stored password hash (`$1$<md5>`; see [`password_hash`]), compared to
     /// the request's `passwd` field.
@@ -1271,6 +1285,7 @@ impl Credential {
 /// and selects the response variant, which [`build_login_response`] then
 /// serializes.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoginServer;
 
 impl LoginServer {

@@ -14,6 +14,7 @@ pub const GLTF_MATERIAL_OVERRIDE_METHOD: u16 = 0x4175;
 /// interpreted — each is surfaced as its raw notation-LLSD bytes, positionally
 /// correlated with [`faces`](Self::faces).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GltfMaterialOverride {
     /// The region-local id of the object whose material is overridden.
     pub local_id: crate::RegionLocalObjectId,
@@ -28,6 +29,7 @@ pub struct GltfMaterialOverride {
 /// normal and specular maps with their texture transforms, as carried by the
 /// `RenderMaterials` capability (`LLMaterial` / OpenSim's `FaceMaterial`).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LegacyMaterial {
     /// The normal-map texture id (nil for none).
     pub normal_map: TextureKey,
@@ -63,6 +65,7 @@ pub struct LegacyMaterial {
 /// One legacy material returned by the `RenderMaterials` capability: the
 /// 16-byte material id keying it and its decoded [`LegacyMaterial`].
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RenderMaterialEntry {
     /// The material id (the per-face `TextureEntry` material id requesting it).
     pub material_id: Uuid,
@@ -77,6 +80,7 @@ pub struct RenderMaterialEntry {
 /// computes and assigns the resulting 16-byte material id and echoes it back on
 /// the face's `TextureEntry` — the caller never hashes it.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FaceMaterialPut {
     /// The region-local id of the object to modify.
     pub local_id: u32,
@@ -92,6 +96,7 @@ pub struct FaceMaterialPut {
 /// or both to one face of an object. `side` is the face index, or `-1` for all
 /// faces.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MaterialOverrideUpdate {
     /// The object to modify.
     pub object_id: ObjectKey,

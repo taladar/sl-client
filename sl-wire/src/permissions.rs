@@ -14,6 +14,7 @@ use core::ops::{BitAnd, BitOr, BitOrAssign, Not};
 /// permission-holder (base / owner / group / everyone / next-owner). Combine
 /// bits with `|`; query with [`Permissions::contains`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Permissions {
     /// The raw permission bits.
     bits: u32,
@@ -126,6 +127,7 @@ impl Not for Permissions {
 /// one named struct keeps them from being scattered as five same-typed fields a
 /// caller could transpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Permissions5 {
     /// The base permission mask — the ceiling the other masks are clamped to.
     pub base: Permissions,

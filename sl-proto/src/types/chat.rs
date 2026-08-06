@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
 /// `ChatFromViewer` (outgoing) and `ChatFromSimulator` (incoming).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ChatType {
     /// Whisper: a reduced (10 m) range.
@@ -74,7 +74,9 @@ impl ChatType {
 /// [`sl_types::chat::ChatVolume`]. Only [`ChatType::Whisper`],
 /// [`ChatType::Normal`], [`ChatType::Shout`], and [`ChatType::Region`] are
 /// volumes; the typing/debug/owner/direct/unknown types have no volume.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
 #[error("chat type {chat_type:?} is not a chat volume")]
 #[non_exhaustive]
 pub struct ChatTypeNotAVolume {
@@ -122,7 +124,7 @@ impl TryFrom<ChatType> for sl_types::chat::ChatVolume {
 
 /// What kind of source produced a chat message, from the `SourceType` byte of
 /// `ChatFromSimulator`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ChatSourceType {
     /// The system / region (no avatar or object).
@@ -155,7 +157,7 @@ impl ChatSourceType {
 /// The system case carries no id (the wire `SourceID` is nil); an unrecognised
 /// source-type byte preserves both the raw type byte and the raw id verbatim so
 /// a decode/encode round trip is lossless.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatSource {
     /// The system / region (no avatar or object); the wire `SourceID` is nil.
     System,
@@ -225,7 +227,7 @@ impl ChatSource {
 
 /// Whether a chat message was audible at the listener, from the `Audible` byte
 /// of `ChatFromSimulator` (a signed value: `-1`/`255` means not audible).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ChatAudible {
     /// Not audible (out of range); the message text may be elided.
@@ -252,7 +254,7 @@ impl ChatAudible {
 }
 
 /// A chat message received from the simulator, parsed from `ChatFromSimulator`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     /// The display name of the speaker (avatar legacy name or object name).
     pub from_name: String,
@@ -275,7 +277,7 @@ pub struct ChatMessage {
 /// `ImprovedInstantMessage` (the `EInstantMessage` enum in the protocol). Only
 /// the commonly handled dialogs are named; the rest are preserved verbatim via
 /// [`ImDialog::Unknown`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ImDialog {
     /// An ordinary 1:1 instant message (`IM_NOTHING_SPECIAL`).
@@ -420,7 +422,7 @@ impl ImDialog {
 /// `ImprovedInstantMessage`. Many fields are dialog-dependent (notably
 /// [`InstantMessage::id`] and [`InstantMessage::binary_bucket`]); see
 /// [`ImDialog`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InstantMessage {
     /// The sender's agent id.
     pub from_agent_id: AgentKey,
@@ -626,7 +628,7 @@ impl InstantMessage {
 /// [`InstantMessage`] by [`InstantMessage::group_notice`]. The subject / body are
 /// split from the IM message; the group id and attachment come from the binary
 /// bucket.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupNoticeReceived {
     /// The group the notice was posted to.
     pub group_id: GroupKey,
@@ -648,7 +650,7 @@ pub struct GroupNoticeReceived {
 /// [`group_id`](Self::group_id) and [`transaction_id`](Self::transaction_id)
 /// back in an `IM_GROUP_INVITATION_ACCEPT` / `IM_GROUP_INVITATION_DECLINE` IM
 /// (the reference `send_join_group_response`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupInvitationReceived {
     /// The group the invitee is invited to join (the invitation IM's sender).
     pub group_id: GroupKey,
@@ -670,7 +672,7 @@ pub struct GroupInvitationReceived {
 /// The inventory item attached to a received group notice — its class and name,
 /// for display. Accepting the item (copying it into inventory) is the viewer's
 /// notice-attachment accept path, not this decode.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupNoticeItem {
     /// The attached item's asset class.
     pub asset_type: AssetType,
@@ -683,7 +685,7 @@ pub struct GroupNoticeItem {
 /// [`InstantMessage`] (see [`InstantMessage::inventory_offer`]). Reply with
 /// [`Session::accept_inventory_offer`](crate::Session::accept_inventory_offer)
 /// or [`Session::decline_inventory_offer`](crate::Session::decline_inventory_offer).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryOffer {
     /// The offered asset's class ([`AssetType::Folder`] for a whole folder).
     pub asset_type: AssetType,

@@ -31,6 +31,7 @@ use crate::llsd::{Llsd, LlsdError};
 /// (`PhysicsShapeTypes`). The viewer enables the corresponding entries in the
 /// build tool's physics-shape dropdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PhysicsShapeTypes {
     /// The convex-hull shape is accepted (`convex`).
     pub convex: bool,
@@ -43,6 +44,7 @@ pub struct PhysicsShapeTypes {
 /// Animated-object (animesh) limits (`AnimatedObjects`): the triangle budget for
 /// one animated object and how many animated objects an agent may wear at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AnimatedObjects {
     /// The maximum triangle count of a single animated object
     /// (`AnimatedObjectMaxTris`).
@@ -58,6 +60,7 @@ pub struct AnimatedObjects {
 /// did **not** advertise the key (so the caller applies its own default — e.g.
 /// the 20/100/10 m chat ranges), distinct from a value the grid did send.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OpenSimExtras {
     /// Whether the grid permits the "export" creator permission (`ExportSupported`).
     pub export_supported: Option<bool>,
@@ -97,6 +100,7 @@ pub struct OpenSimExtras {
 /// [`open_sim_extras`](Self::open_sim_extras), which is [`None`] on Second Life
 /// (and any grid omitting the `OpenSimExtras` map).
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SimulatorFeatures {
     /// Whether rezzing mesh objects is permitted (`MeshRezEnabled`).
     pub mesh_rez_enabled: Option<bool>,

@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// `PlacesQuery`: a bitfield selecting what a `DirFindQuery` searches
 /// (people / events / groups), which results to include, and how they are
 /// sorted. Combine the constants with [`union`](Self::union).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DirFindFlags(pub u32);
 
 impl DirFindFlags {
@@ -120,7 +120,7 @@ impl DirFindFlags {
 /// The land-for-sale sale-type filter (`ST_*`) of a `DirLandQuery`: a bitfield
 /// selecting which sale categories to include. Combine the constants with
 /// [`union`](Self::union).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LandSearchType(pub u32);
 
 impl LandSearchType {
@@ -170,7 +170,7 @@ impl Default for LandSearchType {
 
 /// One person matched by a `DirFindQuery` with [`DirFindFlags::PEOPLE`], carried
 /// in a [`DirPeopleReply`](crate::Event::DirPeopleReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DirPeopleResult {
     /// The matched avatar.
     pub agent_id: AgentKey,
@@ -188,7 +188,7 @@ pub struct DirPeopleResult {
 
 /// One group matched by a `DirFindQuery` with [`DirFindFlags::GROUPS`], carried
 /// in a [`DirGroupsReply`](crate::Event::DirGroupsReply).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DirGroupResult {
     /// The matched group.
     pub group_id: GroupKey,
@@ -202,7 +202,7 @@ pub struct DirGroupResult {
 
 /// One event matched by a `DirFindQuery` with [`DirFindFlags::EVENTS`], carried
 /// in a [`DirEventsReply`](crate::Event::DirEventsReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DirEventResult {
     /// The event owner.
     pub owner_id: Uuid,
@@ -220,7 +220,7 @@ pub struct DirEventResult {
 
 /// One classified matched by a [`DirClassifiedQuery`](crate::Command::DirClassifiedQuery),
 /// carried in a [`DirClassifiedReply`](crate::Event::DirClassifiedReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DirClassifiedResult {
     /// The classified ad's id (use with `ClassifiedInfoRequest` for full detail).
     pub classified_id: ClassifiedKey,
@@ -238,7 +238,7 @@ pub struct DirClassifiedResult {
 
 /// One place matched by a [`DirPlacesQuery`](crate::Command::DirPlacesQuery),
 /// carried in a [`DirPlacesReply`](crate::Event::DirPlacesReply).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DirPlaceResult {
     /// The matched parcel.
     pub parcel_id: ParcelKey,
@@ -254,7 +254,7 @@ pub struct DirPlaceResult {
 
 /// One land parcel matched by a [`DirLandQuery`](crate::Command::DirLandQuery),
 /// carried in a [`DirLandReply`](crate::Event::DirLandReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DirLandResult {
     /// The matched parcel.
     pub parcel_id: ParcelKey,
@@ -274,7 +274,7 @@ pub struct DirLandResult {
 
 /// One name matched by an [`AvatarPickerRequest`](crate::Command::AvatarPickerRequest),
 /// carried in an [`AvatarPickerReply`](crate::Event::AvatarPickerReply).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarPickerResult {
     /// The matched avatar.
     pub avatar_id: AgentKey,
@@ -288,7 +288,7 @@ pub struct AvatarPickerResult {
 /// carried in a [`PlacesReply`](crate::Event::PlacesReply). The `PlacesQuery`
 /// drives the land-holdings panels (an agent's or a group's parcels), distinct
 /// from the directory search above.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlacesResult {
     /// The parcel's owner.
     pub owner_id: Uuid,
@@ -320,7 +320,7 @@ pub struct PlacesResult {
 /// [`EventInfoRequest`](crate::Command::EventInfoRequest). The event id comes
 /// from a [`DirEventResult`] of an events `DirFindQuery`, or from the events
 /// directory; this fills in the rest of the listing.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EventInfo {
     /// The event id (the same id passed to `EventInfoRequest`).
     pub event_id: EventId,

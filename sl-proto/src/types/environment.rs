@@ -29,7 +29,7 @@ pub use sl_types::map::Scale;
 /// as [`Event::Environment`](crate::Event::Environment)).
 ///
 /// (Not `Eq`: it ultimately holds `f32` settings.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EnvironmentSettings {
     /// The parcel these settings apply to, or `-1` for the whole region.
     pub parcel_id: i32,
@@ -55,7 +55,7 @@ pub struct EnvironmentSettings {
 /// definitions the tracks reference by name.
 ///
 /// (Not `Eq`: the frames hold `f32` settings.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DayCycle {
     /// The cycle's name.
     pub name: String,
@@ -74,7 +74,7 @@ pub struct DayCycle {
 
 /// One keyframe within a day-cycle track: a named frame and the time of day it
 /// is reached.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DayCycleFrame {
     /// The time of day this frame is reached, as a fraction of the day in
     /// `0.0..=1.0`.
@@ -90,7 +90,7 @@ pub struct DayCycleFrame {
 /// frame's `legacy_haze` block.
 ///
 /// (Not `Eq`: holds `f32` fields.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SkySettings {
     /// The frame's name.
     pub name: String,
@@ -184,7 +184,7 @@ pub struct SkySettings {
 /// fixed frames).
 ///
 /// (Not `Eq`: the settings hold `f32` fields.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EnvironmentAsset {
     /// A sky settings asset (`type` == `"sky"`). Boxed: [`SkySettings`] is much
     /// larger than [`WaterSettings`], so an unboxed variant makes every
@@ -198,7 +198,7 @@ pub enum EnvironmentAsset {
 /// one keyframe.
 ///
 /// (Not `Eq`: holds `f32` fields.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WaterSettings {
     /// The frame's name.
     pub name: String,

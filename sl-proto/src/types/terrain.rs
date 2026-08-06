@@ -7,7 +7,7 @@ use sl_wire::RegionHandle;
 /// heightmap (the one a renderer needs for the ground); WIND/CLOUD/WATER carry
 /// the per-region wind field, cloud density, and water height respectively, in
 /// the same patched-DCT encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TerrainLayerType {
     /// Terrain heightmap (`'L'`). Each cell is a ground height in metres.
@@ -89,7 +89,7 @@ impl TerrainLayerType {
 /// the values are ground heights in metres.
 ///
 /// [`Land`]: TerrainLayerType::Land
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TerrainPatch {
     /// The region this patch belongs to (its [`RegionHandle`]), or `0` if not yet
     /// known for the originating simulator.

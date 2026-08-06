@@ -19,6 +19,7 @@ const PRELUDE_LEN: usize = 6;
 
 /// The LLUDP packet flag bits carried in the first header byte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PacketFlags {
     /// The raw flags byte.
     bits: u8,

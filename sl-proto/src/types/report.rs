@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// name; `subject` and `message` are the email subject and body. `allow_publish`
 /// asks the grid to allow the snapshot on its web gallery, and `mature_publish`
 /// marks that gallery entry mature.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Postcard {
     /// The uploaded snapshot asset id to email.
     pub asset_id: Uuid,

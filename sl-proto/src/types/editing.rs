@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 /// The left-click behaviour of an object (`ClickAction` / `CLICK_ACTION_*`), as
 /// set by [`Session::set_object_click_action`](crate::Session::set_object_click_action).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ClickAction {
     /// The default: clicking touches the object (`CLICK_ACTION_TOUCH`, also
@@ -81,7 +81,7 @@ impl ClickAction {
 /// An object's physical material (`LL_MCODE_*`), as set by
 /// [`Session::set_object_material`](crate::Session::set_object_material). The
 /// material governs the object's collision sound and default friction/density.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Material {
     /// Stone (`LL_MCODE_STONE`).
@@ -138,7 +138,7 @@ impl Material {
 /// How an object is offered for sale (`EForSale`), as set by
 /// [`Session::set_object_for_sale`](crate::Session::set_object_for_sale) and
 /// reported in [`ObjectProperties::sale_type`](crate::ObjectProperties::sale_type).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum SaleType {
     /// Not for sale (`FS_NOT`).
@@ -192,7 +192,7 @@ impl SaleType {
 /// Which id the simulator matches an `UpdateTaskInventory` against (the
 /// message's `Key` field, LL's `TASK_INVENTORY_*_KEY`), as passed to
 /// [`Session::update_task_inventory`](crate::Session::update_task_inventory).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TaskInventoryKey {
     /// Match the item by its inventory item id (`TASK_INVENTORY_ITEM_KEY`) — the
@@ -226,7 +226,7 @@ impl TaskInventoryKey {
 /// Where a derezzed object should go (the `Destination` of `DeRezObject`, LL's
 /// `EDeRezDestination` / `DRD_*`), as passed to
 /// [`Session::derez_objects`](crate::Session::derez_objects).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum DeRezDestination {
     /// Save into agent inventory, leaving a copy in world
@@ -305,7 +305,7 @@ impl DeRezDestination {
 /// Which permission mask an `ObjectPermissions` change targets (the `Field`
 /// byte; LL's `PERM_BASE`/`PERM_OWNER`/…), passed to
 /// [`Session::set_object_permissions`](crate::Session::set_object_permissions).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum PermissionField {
     /// The base permissions mask (`PERM_BASE`).
@@ -338,7 +338,7 @@ impl PermissionField {
 /// [`Session::rez_object`](crate::Session::rez_object) (`ObjectAdd`). Start from
 /// [`PrimShape::cube`] (a unit box) and adjust as needed; the path/profile
 /// fields use the same quantized wire encoding the viewer sends.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PrimShape {
     /// The object class (almost always [`pcode::PRIMITIVE`], a volume prim).
     pub pcode: u8,
@@ -451,6 +451,7 @@ impl PrimShape {
     clippy::struct_excessive_bools,
     reason = "mirrors the four independent boolean toggles of the ObjectFlagUpdate wire message"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ObjectFlagSettings {
     /// Whether the object is physical (`UsePhysics`).
     pub use_physics: bool,
@@ -467,7 +468,7 @@ pub struct ObjectFlagSettings {
 /// (`MultipleObjectUpdate`). Set only the components to change; leave the rest
 /// `None`. `group` edits the whole linkset (root-relative); `uniform` keeps a
 /// scale change proportional about the object's centre.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ObjectTransform {
     /// The new region-local position, if the position is being changed.
     pub position: Option<Vector>,
@@ -520,7 +521,7 @@ impl ObjectTransform {
 /// which is what a client with no pick to report (e.g. a scripted touch by local
 /// id) does — the simulator then leaves every `llDetectedTouch*` at its
 /// "no touch data" value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceInfo {
     /// The **texture** coordinate of the touch on the picked face
     /// (`llDetectedTouchUV`): the surface coordinate with the face's texture
@@ -546,7 +547,7 @@ pub struct SurfaceInfo {
 }
 
 /// A region maturity / content rating, from the `SimAccess` byte.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Maturity {
     /// General ("PG") content.
@@ -604,7 +605,7 @@ pub use sl_types::map::TeleportFlags;
 
 /// A region product type, inferred from the `ProductSKU`/`ProductName` strings.
 /// OpenSim grids usually leave these empty, yielding [`ProductType::Unknown`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ProductType {
     /// A full ("Estate" / "Standalone") region.
@@ -647,7 +648,7 @@ impl ProductType {
 /// [`ObjectPropertiesFamily`](crate::ObjectPropertiesFamily) or
 /// [`ObjectProperties`](crate::ObjectProperties)); the simulator rejects a
 /// mismatch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ObjectBuyItem {
     /// The object's region-local id (the root prim).
     pub local_id: RegionLocalObjectId,
@@ -667,6 +668,7 @@ pub struct ObjectBuyItem {
     clippy::struct_excessive_bools,
     reason = "mirrors the independent boolean toggles of the RezObjectFromNotecard wire block"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct NotecardRez {
     /// The active group the new object is set to (`None` for none).
     pub group_id: Option<GroupKey>,
@@ -712,7 +714,7 @@ pub struct NotecardRez {
 /// simulator rezzes the object back where it last sat.
 ///
 /// [`UDPDeprecated`]: https://wiki.secondlife.com/wiki/Message_Layout
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RestoreItem {
     /// The inventory item id to restore.
     pub item_id: InventoryKey,
@@ -765,6 +767,7 @@ pub struct RestoreItem {
     clippy::struct_excessive_bools,
     reason = "mirrors the independent boolean toggles of the RezObject wire block"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct RezObjectParams {
     /// The active group the new object is set to (`None` for none) — the
     /// `AgentData.GroupID` of the message.
@@ -806,7 +809,7 @@ pub struct RezObjectParams {
 /// task inventory (`RezScript`), as passed to
 /// [`Session::rez_script`](crate::Session::rez_script). The target object is
 /// named separately by its region-local id; this struct carries the rest.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RezScriptParams {
     /// The active group the operation is performed under (`None` for none) — the
     /// `AgentData.GroupID` of the message.

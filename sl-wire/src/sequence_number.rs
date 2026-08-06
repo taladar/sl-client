@@ -20,6 +20,7 @@
 /// names an outgoing packet's id, a key in the unacknowledged-packet set, and an
 /// inbound id owed an acknowledgement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SequenceNumber(pub u32);
 
 impl SequenceNumber {

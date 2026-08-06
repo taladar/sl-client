@@ -250,6 +250,7 @@ pub fn build_upload_baked_texture_request() -> String {
 /// [`new_inventory_item`](Self::new_inventory_item). A failure yields some other
 /// state and, usually, an [`error`](Self::error) message.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AssetUploadResponse {
     /// The uploader state (`"upload"`, `"complete"`, or an error state).
     pub state: String,
@@ -369,6 +370,7 @@ pub const MEDIA_PERM_ALL: u8 = 7;
 /// [`Default`]ed entry with [`home_url`](Self::home_url) /
 /// [`current_url`](Self::current_url) set is a valid "media here" record.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "mirrors the viewer's LLMediaEntry: these are independent on/off media flags, not a state enum"
@@ -712,6 +714,7 @@ pub fn build_object_media_navigate_request(object_id: ObjectKey, face: u8, url: 
 /// (one slot per prim face, `None` for a face without media) and the media
 /// version string the simulator advances on every media change.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ObjectMediaResponse {
     /// The object the media belongs to.
     pub object_id: ObjectKey,

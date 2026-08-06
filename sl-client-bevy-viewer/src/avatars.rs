@@ -659,6 +659,11 @@ pub(crate) struct AvatarState {
     /// avatar wearing no position-carrying rig — its skeleton stays on the plain
     /// appearance shape. `apply_avatar_appearance` folds the effective set in.
     joint_overrides: HashMap<AgentKey, HashMap<Uuid, JointOverrides>>,
+    /// Every worn **rigged mesh asset id** bound to each avatar's skeleton, kept so
+    /// the avatar-state dump (viewer-avatar-state-dump-replay) can record which
+    /// meshes make up an avatar — the heavy geometry itself already persists in the
+    /// mesh cache, so only the id set is needed to reconstruct it offline.
+    worn_rigged_meshes: HashMap<AgentKey, HashSet<Uuid>>,
     /// Whether each avatar's `TEX_SKIRT_BAKED` slot holds a visible bake, from its
     /// latest appearance — the reference viewer's skirt-worn test. Absent means
     /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
@@ -2265,6 +2270,37 @@ impl AvatarState {
         self.joints.keys().copied().collect()
     }
 
+    /// Note that `agent` wears the rigged mesh asset `mesh` (for the avatar-state
+    /// dump). Idempotent; forgotten with the avatar on despawn.
+    pub(crate) fn record_worn_rigged_mesh(&mut self, agent: AgentKey, mesh: Uuid) {
+        let _new = self
+            .worn_rigged_meshes
+            .entry(agent)
+            .or_default()
+            .insert(mesh);
+    }
+
+    /// The worn rigged-mesh asset ids and the latest appearance bytes for `agent`,
+    /// for the avatar-state dump — `None` if the avatar has no recorded appearance.
+    pub(crate) fn dump_inputs(&self, agent: AgentKey) -> Option<(&[u8], Vec<Uuid>)> {
+        let appearance = self.appearances.get(&agent)?;
+        let mut meshes: Vec<Uuid> = self
+            .worn_rigged_meshes
+            .get(&agent)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        meshes.sort_unstable();
+        Some((appearance, meshes))
+    }
+
+    /// Every avatar with a tracked skeleton instance (rigged), for the dump to
+    /// iterate. Delegates to the same set the animation driver uses.
+    pub(crate) fn dumpable_agents(&self) -> Vec<AgentKey> {
+        self.objects.keys().copied().collect()
+    }
+
     /// Record the joint position overrides that worn rigged `mesh` imposes on
     /// `agent`'s skeleton (R1), replacing any previous contribution from that mesh
     /// (a rebind is idempotent). Flags the avatar for a skeleton re-deform **only
@@ -2323,6 +2359,7 @@ impl AvatarState {
     /// the avatar despawns, so a re-spawn rebuilds them from scratch.
     pub(crate) fn clear_joint_overrides(&mut self, agent: AgentKey) {
         let _prev = self.joint_overrides.remove(&agent);
+        let _worn = self.worn_rigged_meshes.remove(&agent);
     }
 
     /// The agent whose avatar a worn object `scoped` hangs off — chasing parent

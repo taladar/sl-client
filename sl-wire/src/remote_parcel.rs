@@ -37,6 +37,7 @@ use sl_types::map::RegionCoordinates;
 /// meaningful — the viewer sends the id when known and the handle otherwise — so
 /// the absent one is nil / zero.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RemoteParcelRequest {
     /// The region-relative position whose parcel to resolve.
     pub location: RegionCoordinates,

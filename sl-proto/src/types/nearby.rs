@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// These are the low-resolution positions a viewer draws on its minimap: each
 /// coordinate is a whole metre relative to the region's south-west corner, so
 /// the precision is one metre and heights above `1020` m are clamped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CoarseLocation {
     /// The avatar (or in-world object) the position belongs to.
     pub agent_id: AgentKey,
@@ -27,7 +27,7 @@ pub struct CoarseLocation {
 /// The kind of a [`ViewerEffect`]: the viewer's HUD-effect type codes
 /// (`LLHUDObject`'s effect enumeration). Most effects a normal viewer emits are
 /// [`LookAt`](Self::LookAt), [`PointAt`](Self::PointAt) and the beam family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ViewerEffectType {
     /// Floating text (`LL_HUD_TEXT`, `0`).
@@ -145,7 +145,7 @@ impl ViewerEffectType {
 
 /// What an avatar's gaze (a [`ViewerEffectType::LookAt`] effect) is directed at
 /// (`ELookAtType`). The numeric order doubles as a priority: higher targets win.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum LookAtType {
     /// No look-at target (`0`).
@@ -217,7 +217,7 @@ impl LookAtType {
 
 /// What an avatar's pointing gesture (a [`ViewerEffectType::PointAt`] effect) is
 /// directed at (`EPointAtType`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum PointAtType {
     /// No point-at target (`0`).
@@ -264,7 +264,7 @@ impl PointAtType {
 /// The well-known layouts are decoded into typed variants; anything else (or a
 /// payload whose length does not match its type) is kept verbatim as
 /// [`Raw`](Self::Raw) so it still round-trips.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ViewerEffectData {
     /// An avatar's gaze target (the 57-byte `LLHUDEffectLookAt` layout): the
@@ -444,7 +444,7 @@ fn optional_object(raw: Uuid) -> Option<ObjectKey> {
 /// A single viewer effect, as sent with [`Command::ViewerEffect`](crate::Command::ViewerEffect)
 /// or received as [`Event::ViewerEffect`](crate::Event::ViewerEffect) (one entry
 /// of a `ViewerEffect` message, which may batch several).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ViewerEffect {
     /// A unique id for the effect (a fresh UUID per effect).
     pub id: Uuid,

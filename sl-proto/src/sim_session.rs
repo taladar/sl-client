@@ -309,7 +309,7 @@ impl SeenWindow {
 }
 
 /// The lifecycle state of a [`SimSession`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum SimState {
     /// Constructed; no circuit accepted yet (awaiting `UseCircuitCode`).
     AwaitingCircuit,
@@ -324,7 +324,7 @@ enum SimState {
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
 /// and to drive its interest list, mirroring what the client
 /// [`Session`](crate::Session) sends.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentUpdateInfo {
     /// The agent's body (facing) rotation.
     pub body_rotation: Rotation,
@@ -352,7 +352,7 @@ pub struct AgentUpdateInfo {
 /// `ImprovedInstantMessage`, `AgentUpdate`, `AgentThrottle`) are decoded into
 /// typed variants. Every other decoded client message is surfaced verbatim as
 /// [`ServerEvent::ClientMessage`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ServerEvent {
     /// The client opened the circuit with `UseCircuitCode`. The simulator now
     /// knows the agent/session ids and circuit code for this link.

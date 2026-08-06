@@ -35,6 +35,7 @@ use crate::llsd::Llsd;
 /// into records with only [`id`](Self::id) set and [`missing`](Self::missing)
 /// `true`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DisplayName {
     /// The agent id that was looked up (`id`).
     pub id: AgentKey,

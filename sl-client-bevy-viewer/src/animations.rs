@@ -415,6 +415,21 @@ pub(crate) struct AnimationPlayback {
 }
 
 impl AnimationPlayback {
+    /// The animation asset ids currently playing on `agent` (the union of the
+    /// simulator-driven, client-locomotion, and client-typing sets), for the
+    /// avatar-state dump (viewer-avatar-state-dump-replay). Sorted for a stable dump.
+    #[must_use]
+    pub(crate) fn playing_anims(&self, agent: AgentKey) -> Vec<Uuid> {
+        let mut ids: Vec<Uuid> = [&self.playing, &self.client_locomotion, &self.client_typing]
+            .into_iter()
+            .filter_map(|set| set.get(&agent))
+            .flat_map(|set| set.keys().copied())
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// Whether the simulator is currently driving at least one **active** (not
     /// easing-out) animation on `agent`. The client-side locomotion fallback
     /// (P31.6) defers to the simulator whenever this is true — a grid that

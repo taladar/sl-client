@@ -5,7 +5,7 @@ use sl_wire::RegionLocalParcelId;
 /// The terraform operation a `ModifyLand` brush stroke applies, mirroring the
 /// viewer's `E_LAND_*` action codes — the same constants LSL exposes to
 /// `llModifyLand` as `LAND_LEVEL` … `LAND_REVERT`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum LandBrushAction {
     /// Flatten terrain toward the brush's reference height (`LAND_LEVEL`).
@@ -58,7 +58,7 @@ impl LandBrushAction {
 /// constants. The radius in metres is sent in the `ModifyLand`
 /// `ModifyBlockExtended` block; the legacy `BrushSize` index byte is deprecated
 /// (the simulator uses the metre radius) but still sent for old simulators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum LandBrushSize {
     /// Small brush — 1 m radius (`LAND_SMALL_BRUSH`).
@@ -125,7 +125,7 @@ impl LandBrushSize {
 /// sends a zero-area rectangle (`west == east`, `south == north`) at the cursor
 /// for click-drag brushing, and the selected parcel's bounding rectangle for a
 /// whole-parcel edit.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TerraformArea {
     /// Western edge (region-local X, metres).
     pub west: f32,
@@ -162,7 +162,7 @@ impl TerraformArea {
 /// rectangle (and optional parcel) it applies to.
 ///
 /// [`Session::modify_land`]: crate::Session::modify_land
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LandEdit {
     /// The terraform operation to apply.
     pub action: LandBrushAction,

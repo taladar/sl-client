@@ -10,7 +10,7 @@ use crate::types::LandArea;
 /// `MoneyBalanceReply` (a reply to
 /// [`Session::request_money_balance`](crate::Session::request_money_balance), or
 /// pushed unsolicited by the simulator after a transaction changes the balance).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MoneyBalance {
     /// The agent the balance belongs to (the client's own id).
     pub agent_id: AgentKey,
@@ -39,7 +39,7 @@ pub struct MoneyBalance {
 
 /// The transaction details optionally attached to a [`MoneyBalance`], describing
 /// the L$ movement that changed the balance.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MoneyTransaction {
     /// The transaction type code (e.g. `5008` for paying an object); classify
     /// with [`MoneyTransactionType::from_i32`].
@@ -58,7 +58,7 @@ pub struct MoneyTransaction {
 /// [`Session::send_money_transfer`](crate::Session::send_money_transfer). A small
 /// subset of the Second Life transaction codes (`lltransactiontypes.h`); any
 /// other code round-trips through [`MoneyTransactionType::Other`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum MoneyTransactionType {
     /// A direct L$ gift to another avatar (`5001`).
@@ -115,7 +115,19 @@ impl MoneyTransactionType {
 /// TODO: move this to `sl_types` (alongside [`LindenAmount`] and `LandArea`) the
 /// next time shared value types are migrated there. Kept local to `sl-proto` for
 /// now to avoid cutting an `sl-types` release for a single newtype.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct LandImpact(pub u32);
 
 impl std::fmt::Display for LandImpact {
@@ -170,7 +182,7 @@ impl From<LandImpact> for u32 {
 /// `EconomyData` reply to
 /// [`Session::request_economy_data`](crate::Session::request_economy_data). All
 /// prices are in L$ unless noted.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EconomyData {
     /// The region's total object capacity (its Land Impact budget).
     pub object_capacity: LandImpact,

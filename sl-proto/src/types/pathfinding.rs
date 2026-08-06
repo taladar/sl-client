@@ -15,7 +15,7 @@ use uuid::Uuid;
 /// The navmesh is the navigation surface the simulator bakes from the region's
 /// pathfinding-relevant geometry; it is rebuilt whenever that geometry changes.
 /// The states mirror the reference viewer's `LLPathfindingNavMeshStatus`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NavMeshBuildStatus {
     /// The navmesh is dirty and a rebuild is queued but has not started.
     Pending,
@@ -56,7 +56,7 @@ impl NavMeshBuildStatus {
 
 /// A region's navmesh build status, parsed from a `NavMeshStatusUpdate` CAPS
 /// event-queue push.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NavMeshStatus {
     /// The region the navmesh belongs to. A region id stays a raw [`Uuid`]
     /// throughout this crate (there is no dedicated region-key newtype).

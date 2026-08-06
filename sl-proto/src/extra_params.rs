@@ -40,7 +40,7 @@ const LL_SCULPT_TYPE_MESH: u8 = 5;
 /// codes only ever appear inside the raw `ExtraParams` blob this module walks.
 /// `code()`/`from_code` are transparent, so wire bytes are byte-identical to the
 /// previous bare-`u16` form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ExtraParamType(u16);
 
 impl ExtraParamType {
@@ -223,6 +223,7 @@ fn present_entries(params: &ObjectExtraParams) -> Vec<(ExtraParamType, Vec<u8>)>
 
 /// One block of an outbound `ObjectExtraParams` message: a parameter's wire type
 /// code, whether it is in use, and its packed payload (empty when not in use).
+#[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct ExtraParamBlock {
     /// The `ParamType` wire code (the `LLNetworkData` subtype tag).
     pub(crate) param_type: u16,

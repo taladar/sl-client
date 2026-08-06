@@ -10,7 +10,7 @@ use uuid::Uuid;
 /// A region's identity, maturity, and product type, parsed from `RegionHandshake`.
 ///
 /// (Not `Eq`: `water_height` / `billable_factor` are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionIdentity {
     /// The region (simulator) name, or `None` when the grid sent an empty
     /// (unknown) name.
@@ -102,7 +102,7 @@ pub const DEFAULT_TERRAIN_DETAIL_TEXTURES: [Uuid; 4] = [
 /// are not carried here.
 ///
 /// (Not `Eq`: the elevation fields are `f32`.)
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionTerrainComposition {
     /// The four ground/detail texture ids (`TerrainDetail0..3`), from the
     /// lowest-elevation texture (index 0) to the highest (index 3).
@@ -149,7 +149,7 @@ impl RegionTerrainComposition {
 /// [`Session::request_region_info`](crate::Session::request_region_info)).
 ///
 /// (Not `Eq`: several fields are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionLimits {
     /// The region (simulator) name, or `None` when the grid sent an empty
     /// (unknown) name.
@@ -213,7 +213,7 @@ pub struct RegionLimits {
 /// (`OpenSim/Framework/SimStats.cs`); both agree on ids 0–40. Ids in the
 /// 1000+ range are OpenSim-only extras. Any id the simulator sends that is not
 /// in either table is preserved as [`SimStatId::Unknown`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SimStatId {
     /// Time dilation (0–1): the fraction of real time the physics simulation
     /// is keeping up with.
@@ -436,7 +436,7 @@ impl SimStatId {
 /// The simulator pushes one of these roughly once a second to every agent in
 /// the region; the viewer feeds the [`stats`](Self::stats) into its statistics
 /// bar. (Not `Eq`: the stat values are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionStats {
     /// The region's grid coordinates (region index pair = global metres / 256),
     /// from the `Region` block's `RegionX` / `RegionY` (which carry the region's
@@ -460,7 +460,7 @@ pub struct RegionStats {
 ///
 /// The simulator pushes this so the viewer can resynchronise its day-cycle
 /// clock and sun position. (Not `Eq`: the sun fields are `f32`/[`Vector`].)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SimulatorTime {
     /// Microseconds since the simulator started (its monotonic world clock).
     pub usec_since_start: u64,
@@ -480,7 +480,7 @@ pub struct SimulatorTime {
 /// `RegionInfo` `RegionInfo5` block.
 ///
 /// (Not `Eq`: the ranges/offsets are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionChatSettings {
     /// The whisper audibility range, in metres.
     pub whisper_range: f32,
@@ -502,7 +502,7 @@ pub struct RegionChatSettings {
 /// `CombatSettings` block.
 ///
 /// (Not `Eq`: several fields are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionCombatSettings {
     /// The raw combat-behaviour flag bitfield.
     pub flags: u32,

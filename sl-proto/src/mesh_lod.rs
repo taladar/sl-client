@@ -35,7 +35,9 @@ const BASE_THRESHOLD: f32 = 0.03;
 ///
 /// The variants are declared coarsest-first so the derived [`Ord`] matches
 /// resolution: `Lowest < Low < Medium < High`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub enum MeshLod {
     /// The coarsest level (`lowest_lod`, block index 0).
     Lowest,

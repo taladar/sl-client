@@ -152,6 +152,7 @@ impl<'a> BitReader<'a> {
 
 /// One patch decoded out of a `LayerData` message, before its region handle and
 /// layer are attached by the session.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct DecodedPatch {
     /// The patch column (grid X) within the region.
     pub(crate) patch_x: u32,
@@ -471,7 +472,7 @@ pub(crate) fn into_terrain_patch(
 /// most-significant-first into each byte, and a multi-bit value is taken
 /// little-endian (its low byte emitted first), so [`BitReader::unpack`]
 /// reassembles it. The trailing partial byte is left-aligned at flush.
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct BitWriter {
     /// The completed bytes, in transmission order.
     bytes: Vec<u8>,
@@ -790,7 +791,7 @@ mod tests {
     /// decoder must invert): bits are emitted MSB-first, and a multi-bit value
     /// is taken little-endian (its low byte first). Used to synthesise test
     /// payloads independently of the reader.
-    #[derive(Default)]
+    #[derive(Default, serde::Serialize, serde::Deserialize)]
     struct BitWriter {
         bits: Vec<u8>,
     }

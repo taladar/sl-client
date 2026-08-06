@@ -35,6 +35,7 @@ mod animesh;
 mod appearance;
 mod attachment_menu;
 mod avatar_assets;
+mod avatar_dump;
 mod avatar_menu;
 mod avatar_pick;
 mod avatar_picker;
@@ -1172,6 +1173,9 @@ fn run_session(
     // the live stacking / fade / modal behaviour can be watched without a server
     // alert.
     .add_systems(Update, (ingest_alert_messages, spawn_notification_demo))
+    // Avatar-state capture (viewer-avatar-state-dump-replay): Ctrl+Alt+D writes a
+    // self-contained dump bundle per avatar when `SL_VIEWER_DUMP_DIR` is set.
+    .add_systems(Update, crate::avatar_dump::dump_avatars_on_key)
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout

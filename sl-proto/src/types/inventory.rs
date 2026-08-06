@@ -11,7 +11,7 @@ use crate::{AssetType, FolderState, InventoryType, SaleType, WearableType};
 
 /// An inventory folder (category): from the login skeleton
 /// ([`Event::InventorySkeleton`](crate::Event::InventorySkeleton)) or an `InventoryDescendents` sub-folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryFolder {
     /// The folder's id.
     pub folder_id: InventoryFolderKey,
@@ -27,7 +27,7 @@ pub struct InventoryFolder {
 }
 
 /// An inventory item, from an `InventoryDescendents` item entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryItem {
     /// The item's id.
     pub item_id: InventoryKey,
@@ -74,7 +74,7 @@ pub struct InventoryItem {
 /// [`Session::create_inventory_item`](crate::Session::create_inventory_item)
 /// (`CreateInventoryItem`). The simulator allocates the item's id and replies
 /// with an [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewInventoryItem {
     /// The folder the new item is created in.
     pub folder_id: InventoryFolderKey,
@@ -124,7 +124,7 @@ impl Default for NewInventoryItem {
 /// The simulator allocates the link item's id and echoes the request's async
 /// callback id in its
 /// [`Event::InventoryItemCreated`](crate::Event::InventoryItemCreated) reply.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewInventoryLink {
     /// The folder the new link is created in.
     pub folder_id: InventoryFolderKey,
@@ -146,7 +146,7 @@ pub struct NewInventoryLink {
 /// A single item relocation from a `MoveInventoryItem`: the simulator tells the
 /// client to re-parent `item` into `folder`, optionally renaming it. A client
 /// mirroring inventory should move (and rename) the item locally to match.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryItemMove {
     /// The item being moved.
     pub item: InventoryKey,
@@ -163,7 +163,7 @@ pub struct InventoryItemMove {
 /// id of its gesture asset. Deactivation
 /// ([`Session::deactivate_gestures`](crate::Session::deactivate_gestures)) only
 /// needs the item id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GestureActivation {
     /// The gesture's inventory item id.
     pub item_id: InventoryKey,
@@ -177,7 +177,7 @@ pub struct GestureActivation {
 /// two number spaces overlap but disagree (`AT_CATEGORY` is `8` while
 /// `FT_ROOT_INVENTORY` is also `8`), so a folder's type must be resolved through
 /// this enum, never [`AssetType`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum FolderType {
     /// No preferred type (`FT_NONE`, wire `-1`) — an ordinary user folder.
@@ -339,7 +339,7 @@ pub enum Child<'a> {
 /// and the [`Command`](crate::Command)/[`Event`](crate::Event) pull-bridge:
 /// typed keys and a resolved [`FolderType`] / [`FolderState`] instead of the raw
 /// `i8` / loose fields of [`InventoryFolder`]. Cheap to clone and `Arc`-share.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FolderInfo {
     /// The folder's id.
     pub folder_id: InventoryFolderKey,
@@ -376,7 +376,7 @@ impl FolderInfo {
 /// typed keys and resolved [`AssetType`] / [`InventoryType`] / [`SaleType`]
 /// enums instead of the raw `i8` / `u8` of [`InventoryItem`]. Cheap to clone and
 /// `Arc`-share.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItemInfo {
     /// The item's id.
     pub item_id: InventoryKey,
@@ -479,7 +479,7 @@ impl ItemInfo {
 /// [`Command`](crate::Command)/[`Event`](crate::Event) pull-bridge can carry it
 /// across the channel boundary; ordinary in-memory consumers need not interpret
 /// it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InventoryCursor(usize);
 
 impl InventoryCursor {

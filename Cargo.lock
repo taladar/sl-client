@@ -8525,6 +8525,7 @@ dependencies = [
  "fs-err",
  "pretty_assertions",
  "reqwest 0.12.28",
+ "serde_json",
  "sl-account-dirs",
  "sl-anim",
  "sl-asset",
@@ -8838,6 +8839,8 @@ version = "0.1.0"
 dependencies = [
  "md5",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "sl-lsl",
  "sl-types",
  "sl-wire",
@@ -10113,6 +10116,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

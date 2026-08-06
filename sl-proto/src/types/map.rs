@@ -13,7 +13,7 @@ use uuid::Uuid;
 /// A change to one of an estate's access lists, applied via
 /// [`Session::update_estate_access`](crate::Session::update_estate_access)
 /// (`EstateOwnerMessage` method `estateaccessdelta`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum EstateAccessDelta {
     /// Add an agent to the allowed-access list.
@@ -53,7 +53,7 @@ impl EstateAccessDelta {
 }
 
 /// Which estate access list a [`Event::EstateAccessList`](crate::Event::EstateAccessList) carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum EstateAccessKind {
     /// The allowed-agents list.
@@ -69,7 +69,7 @@ pub enum EstateAccessKind {
 /// An estate's configuration, parsed from an `EstateOwnerMessage`
 /// `estateupdateinfo` reply to
 /// [`Session::request_estate_info`](crate::Session::request_estate_info).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EstateInfo {
     /// The estate name.
     pub estate_name: String,
@@ -95,7 +95,7 @@ pub struct EstateInfo {
 /// [`Session::request_estate_covenant`](crate::Session::request_estate_covenant)
 /// (`EstateCovenantRequest`). The covenant text itself is an asset fetched
 /// separately via the notecard [`covenant_id`](EstateCovenant::covenant_id).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EstateCovenant {
     /// The covenant notecard's asset id (`None` if the estate has no covenant).
     pub covenant_id: Option<Uuid>,
@@ -111,7 +111,7 @@ pub struct EstateCovenant {
 /// [`Session::request_telehub_info`](crate::Session::request_telehub_info)
 /// (and after each telehub-management command). A telehub routes incoming
 /// teleports to one of its spawn points.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TelehubInfo {
     /// The telehub object's id (`None` when the region has no telehub).
     pub object_id: Option<ObjectKey>,
@@ -136,6 +136,7 @@ pub struct TelehubInfo {
     clippy::struct_excessive_bools,
     reason = "each bool is a distinct region toggle in the setregioninfo wire message"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct RegionInfoUpdate {
     /// Block terraforming by non-owners.
     pub block_terraform: bool,
@@ -177,7 +178,7 @@ impl Default for RegionInfoUpdate {
 /// [`Session::set_region_debug`](crate::Session::set_region_debug)
 /// (`EstateOwnerMessage` method `setregiondebug`). Each disables a subsystem
 /// region-wide.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct RegionDebugUpdate {
     /// Disable all scripts region-wide.
     pub disable_scripts: bool,
@@ -195,7 +196,7 @@ pub struct RegionDebugUpdate {
 /// elevation bands), and `texturecommit` (apply).
 ///
 /// (Not `Eq`: several fields are `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionTerrainUpdate {
     /// The water height, in metres.
     pub water_height: f32,
@@ -242,7 +243,7 @@ impl Default for RegionTerrainUpdate {
 /// flags (`llregionflags.h` `REGION_FLAGS_*`), which differ from the 32-bit
 /// [`RegionFlags`](sl_wire::RegionFlags) carried in `RegionHandshake` — use this
 /// type for estate settings and that one for per-region handshake flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EstateFlags {
     /// The raw flags value.
     bits: u32,
@@ -307,7 +308,7 @@ impl EstateFlags {
 /// bits the UI does not expose.
 ///
 /// (Not `Eq`: `sun_hour` is `f32`.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EstateInfoUpdate {
     /// The estate name (unchanged by this UI, but the wire message carries it).
     pub estate_name: String,
@@ -321,7 +322,7 @@ pub struct EstateInfoUpdate {
 /// [`Session::eject_user`](crate::Session::eject_user) (`EjectUser`). The wire
 /// `Flags` field is `0` for a plain eject and `0x1` to also add the user to the
 /// parcel ban list, matching the reference viewer's `handleEjectAvatar`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EjectAction {
     /// Eject the user from the land (send them away).
     Eject,
@@ -355,7 +356,7 @@ impl EjectAction {
 /// [`Session::freeze_user`](crate::Session::freeze_user) (`FreezeUser`). The
 /// wire `Flags` field is `0` to freeze and `0x1` to unfreeze, matching the
 /// reference viewer's `handleFreezeAvatar`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FreezeAction {
     /// Freeze the user (prevent them from moving or acting).
     Freeze,
@@ -390,7 +391,7 @@ impl FreezeAction {
 /// (`SimWideDeletes`; needs estate/god rights). The wire `Flags` field is the
 /// `SWD_*` bitfield from the reference viewer; an all-`false` value (the
 /// [`Default`]) deletes every object owned by the target across the region.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SimWideDeleteFlags {
     /// Only delete the target's objects on land they do *not* own
     /// (`SWD_OTHERS_LAND_ONLY`).
@@ -440,7 +441,7 @@ impl SimWideDeleteFlags {
 /// (`GodUpdateRegionInfo`; needs grid-god rights). Mirrors the god-tools
 /// region floater: the simulator overwrites these fields wholesale, so all of
 /// them are sent on every update.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GodRegionUpdate {
     /// The region (simulator) name. The reference viewer echoes the region's
     /// current name; the simulator can rename the region from this field.
@@ -463,7 +464,7 @@ pub struct GodRegionUpdate {
 }
 
 /// A region reported by the world map (one `MapBlockReply` `Data` entry).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MapRegionInfo {
     /// The region name, or `None` when the grid sent an empty (unknown) name.
     pub name: Option<RegionName>,
@@ -492,7 +493,7 @@ pub struct MapRegionInfo {
 /// A kind of world-map overlay item requested via `MapItemRequest` (the
 /// `GridItemType`). [`MapItemType::AgentLocations`] gives the avatar "green
 /// dots"; the land-for-sale and event types give the corresponding map overlays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum MapItemType {
     /// The region's telehub, if any (`1`).
@@ -559,7 +560,7 @@ impl MapItemType {
 ///   the parcel area in m², `extra2` the sale price in L$.
 /// - event types: `extra` is the event id, `extra2` packs the event flags.
 // Not `Eq`: `position` ([`GlobalCoordinates`]) holds `f64` components.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MapItem {
     /// The item's global position in metres (the wire carries integer metres;
     /// the altitude component is unused — the map is 2-D — and is `0`).
@@ -604,7 +605,7 @@ impl MapItem {
 /// is a single global layer (lower-left `(0, 0)`, upper-right very large — which
 /// is why [`GridRectangle`] stores `u32`); OpenSim grids report their own
 /// coverage.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MapLayer {
     /// The inclusive grid-coordinate rectangle the tile covers.
     pub rect: GridRectangle,
@@ -623,7 +624,7 @@ pub struct MapLayer {
 ///
 /// The bits are independent; an all-clear value (`MapRequestFlags(0)`) is what
 /// `MapBlockRequest` carries when it does not select the layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MapRequestFlags(pub u32);
 
 impl MapRequestFlags {
@@ -644,7 +645,7 @@ impl MapRequestFlags {
 }
 
 /// A neighbouring simulator announced via `EnableSimulator`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NeighborInfo {
     /// The neighbour's region handle.
     pub region_handle: RegionHandle,

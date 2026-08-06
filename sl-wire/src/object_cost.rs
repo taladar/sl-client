@@ -30,6 +30,7 @@ use crate::llsd::{Llsd, LlsdError};
 /// Each value is reported per-part (`resource_cost` / `physics_cost`) and for the
 /// whole linkset the part belongs to (`linked_set_*`).
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ObjectCost {
     /// The land-impact ("resource") cost of the whole linkset
     /// (`linked_set_resource_cost`).
@@ -48,6 +49,7 @@ pub struct ObjectCost {
 /// The summed costs of the current selection, as carried by a
 /// `ResourceCostSelected` reply (the `selected` map).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SelectedResourceCost {
     /// The total physics cost of the selection (`physics`).
     pub physics: f32,
@@ -61,6 +63,7 @@ pub struct SelectedResourceCost {
 /// *roots* (`selected_roots`, summing each whole linkset) or individual *prims*
 /// (`selected_prims`). The viewer normally sends roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum SelectedCostKind {
     /// Sum each selected linkset by its root id (`selected_roots`).

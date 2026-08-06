@@ -32,7 +32,19 @@ use sl_wire::{RegionLocalObjectId, RegionLocalParcelId};
 /// The value is never serialized on the wire (it is a purely client-side
 /// bookkeeping token) — do not confuse it with the protocol *circuit code*. The
 /// default/zero value is the "no circuit / unknown" sentinel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct CircuitId(pub u64);
 
 impl CircuitId {
@@ -66,7 +78,9 @@ impl std::fmt::Display for CircuitId {
 /// [`Error::UnknownCircuit`](crate::Error::UnknownCircuit) if it has gone away
 /// (a stale id). The wire codec only ever sees the bare
 /// [`RegionLocalObjectId`]; the scope is a client-side, never-serialized concern.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct ScopedObjectId {
     /// The circuit instance the [`id`](Self::id) is valid on.
     pub circuit: CircuitId,
@@ -109,7 +123,9 @@ impl std::fmt::Display for ScopedObjectId {
 /// `Session` methods (which resolve the circuit and error with
 /// [`Error::UnknownCircuit`](crate::Error::UnknownCircuit) when it is gone). The
 /// wire codec only ever sees the bare [`RegionLocalParcelId`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct ScopedParcelId {
     /// The circuit instance the [`id`](Self::id) is valid on.
     pub circuit: CircuitId,

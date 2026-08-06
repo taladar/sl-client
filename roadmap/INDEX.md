@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 57 |
-| ready | 240 |
+| ideas | 58 |
+| ready | 241 |
 | blocked | 95 |
-| in-progress | 10 |
+| in-progress | 11 |
 | bugs | 14 |
 | done | 713 |
 | deferred | 20 |
 | wont-do | 9 |
-| **total** | **1158** |
+| **total** | **1161** |
 
-## ideas (57)
+## ideas (58)
 
 ### viewer
 
@@ -60,6 +60,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   backup export / import (glTF-based)
 - [`viewer-object-mark-copy-key`](ideas/viewer-object-mark-copy-key.md) — Object
   marking + copy object keys
+- [`viewer-onboarding-tutorial`](ideas/viewer-onboarding-tutorial.md) —
+  In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
 - [`viewer-perf-avatar-ground-probe`](ideas/viewer-perf-avatar-ground-probe.md)
@@ -145,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (240)
+## ready (241)
 
 ### protocol
 
@@ -157,6 +159,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   surface at full fidelity
 - [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
   state machines for the higher-level LLUDP flows
+- [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
+  Serialize/Deserialize derives for sl-llsd (Llsd) types
+- [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
+  sl-lsl (LslSyntax) types
 - [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 
@@ -210,8 +216,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
-- [`viewer-avatar-state-dump-replay`](ready/viewer-avatar-state-dump-replay.md)
-  — Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
 - [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
@@ -992,10 +996,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (10)
+## in-progress (11)
 
 ### viewer
 
+- [`viewer-avatar-state-dump-replay`](in-progress/viewer-avatar-state-dump-replay.md)
+  — Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard

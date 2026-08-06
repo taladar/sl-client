@@ -19,7 +19,7 @@ pub use sl_types::key::GroupNoticeKey;
 /// against. Distinct from [`ProposalCandidateId`] (an option *within* a
 /// proposal), so the two can't be transposed. Kept client-local in `sl-proto`;
 /// mirrors the `sl-types` key ergonomics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProposalVoteId(pub Uuid);
 
 impl From<Uuid> for ProposalVoteId {
@@ -48,7 +48,7 @@ impl core::fmt::Display for ProposalVoteId {
 /// Identifies one option within a proposal's vote history ([`GroupVote`]).
 /// Distinct from [`ProposalVoteId`] (the proposal itself). Kept client-local in
 /// `sl-proto`; mirrors the `sl-types` key ergonomics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ProposalCandidateId(pub Uuid);
 
 impl From<Uuid> for ProposalCandidateId {
@@ -74,7 +74,7 @@ impl core::fmt::Display for ProposalCandidateId {
 /// The agent's active group and title, parsed from `AgentDataUpdate` (pushed on
 /// login and whenever the active group changes via
 /// [`Session::activate_group`](crate::Session::activate_group)).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ActiveGroup {
     /// The agent the update is about.
     pub agent_id: AgentKey,
@@ -93,7 +93,7 @@ pub struct ActiveGroup {
 }
 
 /// One of the agent's group memberships, from an `AgentGroupDataUpdate` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupMembership {
     /// The group id.
     pub group_id: GroupKey,
@@ -112,7 +112,7 @@ pub struct GroupMembership {
 }
 
 /// One member of a group, from a `GroupMembersReply` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupMember {
     /// The member's agent id.
     pub agent_id: AgentKey,
@@ -130,7 +130,7 @@ pub struct GroupMember {
 }
 
 /// One role within a group, from a `GroupRoleDataReply` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupRole {
     /// The role id (`None` for the "Everyone" default role).
     pub role_id: Option<GroupRoleKey>,
@@ -147,7 +147,7 @@ pub struct GroupRole {
 }
 
 /// One role↔member pairing, from a `GroupRoleMembersReply` entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupRoleMember {
     /// The role id.
     pub role_id: Option<GroupRoleKey>,
@@ -156,7 +156,7 @@ pub struct GroupRoleMember {
 }
 
 /// One title the agent may wear in a group, from a `GroupTitlesReply` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupTitle {
     /// The title text.
     pub title: String,
@@ -171,7 +171,7 @@ pub struct GroupTitle {
     clippy::struct_excessive_bools,
     reason = "the four booleans mirror distinct wire flags in GroupProfileReply"
 )]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupProfile {
     /// The group id.
     pub group_id: GroupKey,
@@ -214,7 +214,7 @@ pub struct GroupProfile {
     clippy::struct_excessive_bools,
     reason = "the four booleans mirror distinct wire flags in CreateGroupRequest"
 )]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CreateGroupParams {
     /// The group name (must be unique on the grid).
     pub name: String,
@@ -242,7 +242,7 @@ pub struct CreateGroupParams {
     clippy::struct_excessive_bools,
     reason = "the four booleans mirror distinct wire flags in UpdateGroupInfo"
 )]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdateGroupInfoParams {
     /// The group to edit.
     pub group_id: GroupKey,
@@ -265,7 +265,7 @@ pub struct UpdateGroupInfoParams {
 /// One group notice header, from a `GroupNoticesListReply` entry. Fetch the full
 /// body/attachment with
 /// [`Session::request_group_notice`](crate::Session::request_group_notice).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupNotice {
     /// The notice id.
     pub notice_id: GroupNoticeKey,
@@ -284,7 +284,7 @@ pub struct GroupNotice {
 /// How a [`GroupRoleEdit`] changes a group role (`GroupRoleUpdate`'s
 /// `UpdateType`). The wire bytes match the viewer's `LLRoleChangeType`
 /// (`roles_constants.h`) and OpenSim's `OpenMetaverse.GroupRoleUpdate` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum GroupRoleUpdateType {
     /// No change (a no-op `RoleData` block).
@@ -321,7 +321,7 @@ impl GroupRoleUpdateType {
 /// [`GroupRoleUpdateType::Create`] the `role_id` is the client-chosen id (the
 /// simulator may substitute its own); for update/delete it names the existing
 /// role. The `powers` bitfield is built from the [`group_powers`] constants.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupRoleEdit {
     /// The role id (a fresh id for `Create`, the existing role for the rest).
     pub role_id: Option<GroupRoleKey>,
@@ -340,7 +340,7 @@ pub struct GroupRoleEdit {
 /// Whether a [`GroupRoleMemberChange`] adds a member to a role or removes them
 /// (`GroupRoleChanges`'s `Change`). Add = 0, Remove = 1, matching OpenSim's
 /// `GroupRoleChanges` handler and the viewer's `LLRoleMemberChangeType`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GroupRoleChange {
     /// Assign the member to the role.
     Add,
@@ -361,7 +361,7 @@ impl GroupRoleChange {
 
 /// One member↔role assignment change in a `GroupRoleChanges`, passed to
 /// [`Session::change_group_role_members`](crate::Session::change_group_role_members).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupRoleMemberChange {
     /// The role to add the member to or remove them from.
     pub role_id: Option<GroupRoleKey>,
@@ -376,7 +376,7 @@ pub struct GroupRoleMemberChange {
 /// must be copy+transfer for the grid to accept it. The notice's recipients
 /// receive an `IM_GROUP_NOTICE` they can accept to copy the item into their
 /// inventory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupNoticeAttachment {
     /// The attached inventory item's id.
     pub item_id: InventoryKey,
@@ -389,7 +389,7 @@ pub struct GroupNoticeAttachment {
 /// [`Command::RequestGroupAccountSummary`](crate::Command::RequestGroupAccountSummary)).
 /// All monetary fields are L$. `current_interval` selects this period (0) or the
 /// previous one (1); `interval_days` is the period length.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupAccountSummary {
     /// The group the summary is for.
     pub group_id: GroupKey,
@@ -437,7 +437,7 @@ pub struct GroupAccountSummary {
 
 /// One line of a group's accounting detail, from a `GroupAccountDetailsReply`
 /// entry: a single tax/fee charge with its L$ amount.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupAccountDetailsEntry {
     /// What the charge is for (grid-formatted string).
     pub description: String,
@@ -449,7 +449,7 @@ pub struct GroupAccountDetailsEntry {
 /// A group's itemised accounting detail for an interval, parsed from
 /// `GroupAccountDetailsReply` (the answer to
 /// [`Command::RequestGroupAccountDetails`](crate::Command::RequestGroupAccountDetails)).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupAccountDetails {
     /// The group the detail is for.
     pub group_id: GroupKey,
@@ -467,7 +467,7 @@ pub struct GroupAccountDetails {
 
 /// One entry in a group's transaction log, from a `GroupAccountTransactionsReply`
 /// entry: a single dated L$ transaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupAccountTransaction {
     /// When the transaction happened (grid-formatted string).
     pub time: String,
@@ -484,7 +484,7 @@ pub struct GroupAccountTransaction {
 /// A group's transaction log for an interval, parsed from
 /// `GroupAccountTransactionsReply` (the answer to
 /// [`Command::RequestGroupAccountTransactions`](crate::Command::RequestGroupAccountTransactions)).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupAccountTransactions {
     /// The group the log is for.
     pub group_id: GroupKey,
@@ -503,7 +503,7 @@ pub struct GroupAccountTransactions {
 /// One active group proposal, from a `GroupActiveProposalItemReply` entry. The
 /// agent votes on it via
 /// [`Command::GroupProposalBallot`](crate::Command::GroupProposalBallot).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GroupActiveProposalItem {
     /// The proposal's id (used as the ballot's `proposal_id`).
     pub vote_id: ProposalVoteId,
@@ -529,7 +529,7 @@ pub struct GroupActiveProposalItem {
 
 /// One candidate tally within a finished proposal, from a
 /// `GroupVoteHistoryItemReply` `VoteItem` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupVote {
     /// The candidate/option id (or the voter for a yes/no proposal).
     pub candidate_id: ProposalCandidateId,
@@ -542,7 +542,7 @@ pub struct GroupVote {
 /// One finished proposal from a group's vote history, parsed from a
 /// `GroupVoteHistoryItemReply` (the answer to
 /// [`Command::RequestGroupVoteHistory`](crate::Command::RequestGroupVoteHistory)).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GroupVoteHistoryItem {
     /// The proposal's id.
     pub vote_id: ProposalVoteId,

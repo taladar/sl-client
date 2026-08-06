@@ -18,7 +18,7 @@ use sl_types::map::RegionCoordinates;
 /// OpenSim's per-region limits and client-behaviour overrides
 /// (`OpenRegionInfo`). All fields are optional; field names mirror the wire
 /// keys parsed by the reference viewer.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OpenRegionInfo {
     /// Whether the region permits minimap rendering (`AllowMinimap`).
     pub allow_minimap: Option<bool>,

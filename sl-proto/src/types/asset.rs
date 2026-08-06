@@ -10,7 +10,7 @@ use uuid::Uuid;
 /// The Second Life asset class (`LLAssetType` / `AT_*`), identifying what kind
 /// of asset a UUID names. Used to pick the
 /// [`ViewerAsset`](crate::CAP_VIEWER_ASSET) HTTP fetch query parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum AssetType {
     /// A texture (`AT_TEXTURE`, a JPEG-2000 / `.j2c` image).
@@ -267,7 +267,7 @@ impl AssetType {
 /// here, updating a script through the generic path is unrepresentable — a
 /// compile error, not a runtime check. Widen to an [`AssetType`] with
 /// [`From`]/[`Into`]; narrow a raw [`AssetType`] with [`TryFrom`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum UpdatableAssetType {
     /// A gesture (`UpdateGestureAgentInventory`).
@@ -321,7 +321,7 @@ impl UpdatableAssetType {
 /// generic (non-script) asset-update path. The location selects the capability
 /// ([`UpdatableAssetType::cap`] vs [`task_cap`](UpdatableAssetType::task_cap))
 /// and the shape of the uploader's metadata body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AssetUpdateLocation {
     /// An item in the agent's own inventory — the body carries just the
     /// `item_id`.
@@ -355,7 +355,9 @@ impl From<UpdatableAssetType> for AssetType {
 /// capability (a script — use
 /// [`Command::UploadScript`](crate::Command::UploadScript) — or any class the
 /// `Update*AgentInventory` path does not serve) into an [`UpdatableAssetType`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
 #[error("asset type {0:?} has no generic inventory-update capability")]
 pub struct NotUpdatableAssetType(pub AssetType);
 
@@ -381,7 +383,7 @@ impl TryFrom<AssetType> for UpdatableAssetType {
 /// [`Snapshot`](Self::Snapshot); a `Clothing`/`Bodypart` asset is a
 /// [`Wearable`](Self::Wearable). Used to build the CAPS upload
 /// (`NewFileAgentInventory`) request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum InventoryType {
     /// A texture (`IT_TEXTURE`).
@@ -531,7 +533,7 @@ impl InventoryType {
 
 /// The image codec of a texture delivered over the legacy UDP image path
 /// (`ImageData`'s `Codec` field / `EImageCodec`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ImageCodec {
     /// JPEG 2000 codestream (`IMG_CODEC_J2C`) — the normal Second Life texture
@@ -573,7 +575,7 @@ impl ImageCodec {
 /// The status of a generic asset transfer (`LLTSCode`), reported in a
 /// `TransferInfo`/`TransferPacket` on the wire and surfaced (for an HTTP fetch)
 /// in [`Event::AssetTransferFailed`](crate::Event::AssetTransferFailed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TransferStatus {
     /// In progress (`LLTS_OK`).
@@ -623,7 +625,7 @@ impl TransferStatus {
 /// and the raw encoded image bytes (a JPEG-2000 codestream for the usual
 /// [`J2c`](ImageCodec::J2c) codec). The bytes are **not** decoded into pixels —
 /// see [`crate::j2c`] for header parsing / LOD truncation helpers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Texture {
     /// The texture's asset UUID.
     pub id: TextureKey,
@@ -637,7 +639,7 @@ pub struct Texture {
 /// A fetched generic asset: its UUID, asset class and raw encoded bytes (a sound
 /// clip, animation, notecard, landmark, mesh, …). Delivered over the UDP
 /// transfer path or the HTTP `GetAsset`/`GetMesh` capability.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Asset {
     /// The asset's UUID.
     pub id: Uuid,

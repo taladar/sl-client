@@ -27,6 +27,7 @@ use crate::llsd::Llsd;
 
 /// The kind of report carried by an [`AbuseReport`] (the `ReportType` byte).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum AbuseReportType {
     /// A bug report (`1`).
@@ -70,6 +71,7 @@ impl AbuseReportType {
 /// current region. `summary` is a one-line headline; `details` is the free-text
 /// body; `version_string` is the reporting viewer's version.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AbuseReport {
     /// Whether this is a bug report or an abuse complaint.
     pub report_type: AbuseReportType,

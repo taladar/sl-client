@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// flag-gated optional fields can be read and written by name instead of with
 /// raw `& MASK != 0` masking. It stays private to this codec because the flags
 /// only ever appear inside the packed `Data` blob this module decodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 struct CompressedFlags {
     /// The raw flag bits.
     bits: u32,

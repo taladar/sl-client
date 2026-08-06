@@ -10,6 +10,7 @@
 /// (and the parcel-related update messages). The bit meanings match the viewer's
 /// `indra/llinventory/llparcelflags.h`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ParcelFlags {
     /// The raw flags value.
     bits: u32,
@@ -98,6 +99,7 @@ impl ParcelFlags {
 /// The `RegionFlags` bitfield carried in `RegionHandshake`/`RegionInfo`. Only the
 /// commonly useful bits are named; use [`RegionFlags::bits`] for the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionFlags {
     /// The raw flags value.
     bits: u32,

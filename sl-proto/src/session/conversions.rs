@@ -275,7 +275,7 @@ pub(crate) fn parse_task_inventory(
 
 /// The raw text fields collected while scanning one `inv_item` block, resolved
 /// into a [`TaskInventoryItem`] by [`build`](TaskItemFields::build).
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct TaskItemFields {
     /// The brace depth the `inv_item` opened at, so its matching close is found.
     open_depth: i32,
@@ -2288,7 +2288,7 @@ pub(crate) fn estate_access_from_params(
 /// A decoded CAPS `TeleportFinish` event: the destination simulator address and
 /// seed capability plus the destination region's maturity (`SimAccess`) and the
 /// teleport flags (how/why the teleport happened).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CapsTeleportFinish {
     /// The destination simulator's UDP address.
     pub(crate) dest: SocketAddr,

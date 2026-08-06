@@ -11,7 +11,7 @@ use sl_wire::{Reader, RegionLocalObjectId, Writer};
 
 /// A decoded `ImprovedTerseObjectUpdate` entry: the object's local id, its state
 /// byte, and its new motion.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TerseUpdate {
     /// The object's region-local id.
     pub local_id: RegionLocalObjectId,

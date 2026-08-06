@@ -42,7 +42,7 @@ const SCAN_WINDOW: usize = 64;
 
 /// The parsed header of a J2C codestream: enough to estimate per-LOD byte
 /// sizes without decoding the image.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Header {
     /// Image width in pixels (`Xsiz - XOsiz`).
     pub width: u32,
@@ -113,7 +113,9 @@ pub const MAX_DISCARD_LEVEL: u8 = 5;
 /// **not** replace the signed discard field of the UDP `RequestImage` message
 /// (`Command::RequestTexture`), whose `-1` sentinel cancels an in-flight request
 /// and so needs its own signed representation.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct DiscardLevel(u8);
 
 impl DiscardLevel {

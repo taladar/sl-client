@@ -40,3 +40,8 @@ viewer-settings.toml
 tracy-grab-*/
 # Tracy long-capture output (ad-hoc profiling runs)
 /tracy-captures/
+
+# Avatar-state capture bundles (viewer-avatar-state-dump-replay): local, ephemeral,
+# and NEVER committed — they contain other residents assets (content permissions).
+/avatar-dumps/
+*.avatardump/

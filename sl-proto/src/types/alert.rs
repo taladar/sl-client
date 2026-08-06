@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// avatar (the [`perp`](MeanCollision::perp)) collided with another (the
 /// [`victim`](MeanCollision::victim)). The numeric values match the viewer's
 /// `EMeanCollisionType` (`mean_collision_data.h`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum MeanCollisionType {
     /// `MEAN_INVALID` (`0`) — an unset / placeholder type.
@@ -68,7 +68,7 @@ impl MeanCollisionType {
 /// accounting of an avatar-on-avatar collision (the data behind the viewer's
 /// "Bumps, Pushes & Hits" panel). Surfaced as part of
 /// [`Event::MeanCollisionAlert`](crate::Event::MeanCollisionAlert).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MeanCollision {
     /// The avatar that was collided with.
     pub victim: Uuid,
@@ -81,4 +81,44 @@ pub struct MeanCollision {
     pub magnitude: f32,
     /// How the collision occurred.
     pub collision_type: MeanCollisionType,
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{MeanCollision, MeanCollisionType};
+    use uuid::Uuid;
+
+    #[test]
+    fn mean_collision_json_round_trips() -> Result<(), String> {
+        let value = MeanCollision {
+            victim: Uuid::from_u128(0x1234),
+            perp: Uuid::from_u128(0xabcd),
+            time: 1_700_000_000,
+            magnitude: 12.5,
+            collision_type: MeanCollisionType::PushObject,
+        };
+        let json = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+        let decoded: MeanCollision =
+            serde_json::from_str(&json).map_err(|error| error.to_string())?;
+        assert_eq!(value, decoded);
+        Ok(())
+    }
+
+    #[test]
+    fn mean_collision_type_enum_json_round_trips() -> Result<(), String> {
+        for value in [
+            MeanCollisionType::Invalid,
+            MeanCollisionType::Bump,
+            MeanCollisionType::PhysicalObjectCollide,
+            MeanCollisionType::Unknown(200),
+        ] {
+            let json = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+            let decoded: MeanCollisionType =
+                serde_json::from_str(&json).map_err(|error| error.to_string())?;
+            assert_eq!(value, decoded);
+        }
+        Ok(())
+    }
 }

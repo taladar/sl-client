@@ -24,7 +24,19 @@ use uuid::Uuid;
 /// [`MeshKey`](sl_types::key::MeshKey): those name a specific asset class fetched
 /// over its own capability, whereas an `AssetKey` is the class-agnostic id paired
 /// with an explicit `AssetType` at the call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct AssetKey(pub Uuid);
 
 impl AssetKey {
@@ -58,7 +70,19 @@ impl std::fmt::Display for AssetKey {
 ///
 /// A dedicated newtype keeps an animation id from being transposed with a
 /// generic [`AssetKey`] or any other key at a `play`/`stop` call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct AnimationKey(pub Uuid);
 
 impl AnimationKey {

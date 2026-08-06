@@ -11,7 +11,7 @@ use sl_types::key::{AgentKey, GroupKey};
 
 /// A legacy avatar name resolved from a `UUIDNameReply` — the reply to
 /// [`Session::request_avatar_names`](crate::Session::request_avatar_names).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarName {
     /// The agent id that was looked up.
     pub id: AgentKey,
@@ -38,7 +38,7 @@ impl AvatarName {
 
 /// A group name resolved from a `UUIDGroupNameReply` — the reply to
 /// [`Session::request_group_names`](crate::Session::request_group_names).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GroupName {
     /// The group id that was looked up.
     pub id: GroupKey,

@@ -14,7 +14,7 @@ use crate::types::LandArea;
 /// field. A "not found / no access" reply arrives as [`NoData`](Self::NoData)
 /// and must be distinguished from a normal parcel (mirrors the viewer's
 /// `PARCEL_RESULT_*` constants).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ParcelRequestResult {
     /// No parcel data (the query found nothing, or access was denied)
@@ -63,7 +63,7 @@ impl ParcelRequestResult {
 
 /// A parcel's ownership status, the `Status` field of `ParcelProperties` (the
 /// viewer's `LLParcel::EOwnershipStatus`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ParcelStatus {
     /// The parcel is leased (owned) (`OS_LEASED`, `0`).
@@ -109,7 +109,7 @@ impl ParcelStatus {
 
 /// How an avatar arrives on a parcel, the `LandingType` field of
 /// `ParcelProperties` (the viewer's `LLParcel::ELandingType`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum LandingType {
     /// Teleport routing is blocked (`L_NONE`, `0`).
@@ -161,6 +161,7 @@ impl LandingType {
     clippy::struct_excessive_bools,
     reason = "faithfully mirrors the distinct ParcelProperties wire booleans"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ParcelInfo {
     /// The request sequence id echoed back (used to match an outstanding query).
     pub sequence_id: i32,
@@ -429,7 +430,7 @@ fn block_index(coord: f32, block: f32) -> Option<usize> {
 }
 
 /// A region parcel-ownership overlay chunk, parsed from `ParcelOverlay`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelOverlayInfo {
     /// Which of the four overlay chunks this is (0–3).
     pub sequence_id: i32,
@@ -478,7 +479,7 @@ mod overlay_bits {
 /// The ownership colour class of a parcel-overlay square — the low three bits of
 /// a packed overlay byte, which decide the colour the map and property overlay
 /// paint the square (mirrors the reference viewer's `PARCEL_PUBLIC` … constants).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ParcelOwnership {
     /// Unowned / public land (`PARCEL_PUBLIC`, `0`).
@@ -528,6 +529,7 @@ impl ParcelOwnership {
     clippy::struct_excessive_bools,
     reason = "the packed overlay byte carries four independent boolean flags; modelling each as its own field mirrors the wire layout"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ParcelOverlayCell {
     /// The ownership colour class (low three bits).
     pub ownership: ParcelOwnership,
@@ -563,6 +565,7 @@ impl ParcelOverlayCell {
     variant_size_differences,
     reason = "the diagnostic fields on ChunkOutOfRange are worth more than shrinking a rarely-constructed error to match the tiny NegativeSequenceId variant"
 )]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum ParcelOverlayError {
     /// The chunk's `sequence_id` was negative; overlay chunks are numbered from
     /// zero.
@@ -612,7 +615,7 @@ fn grid_square_index(coord: f32) -> Option<usize> {
 /// once every chunk has arrived. Squares are addressed by `row` (south→north,
 /// zero-based) and `col` (west→east), matching the reference viewer's
 /// `mOwnership[row * grids_per_edge + col]` layout.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelOverlayGrid {
     /// Number of squares along each edge (64 for a standard 256 m region).
     grids_per_edge: usize,
@@ -753,7 +756,7 @@ impl ParcelOverlayGrid {
 /// [`Event::ParcelMediaCommand`](crate::Event::ParcelMediaCommand) (`ParcelMediaCommandMessage`). The values match
 /// the viewer's `PARCEL_MEDIA_COMMAND_*` constants and the LSL
 /// `PARCEL_MEDIA_COMMAND_*` flags fed to `llParcelMediaCommandList`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ParcelMediaCommand {
     /// Stop the media and unload it (`PARCEL_MEDIA_COMMAND_STOP`).
@@ -819,7 +822,7 @@ impl ParcelMediaCommand {
 /// as [`Event::ParcelMediaUpdate`](crate::Event::ParcelMediaUpdate). This is the streaming media *surface* (the
 /// "media" half of a parcel's media/music split); the streaming-audio URL is the
 /// separate [`ParcelInfo::music_url`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelMediaUpdateInfo {
     /// The media URL the parcel streams (e.g. an HLS/MP4/web page), [`None`] if
     /// the update cleared it.
@@ -845,7 +848,7 @@ pub struct ParcelMediaUpdateInfo {
 
 /// A parcel category, the `Category` of a [`ParcelUpdate`] (the parcel's search
 /// classification).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ParcelCategory {
     /// No category set.
@@ -904,7 +907,7 @@ impl ParcelCategory {
 }
 
 /// Which parcel access list to query or modify: the allow list or the ban list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ParcelAccessScope {
     /// The allow list (`AL_ACCESS`, `0x1`).
     Access,
@@ -949,7 +952,7 @@ pub use sl_types::parcel::ParcelAccessFlags;
 /// One entry of a parcel access (allow) or ban list, from an
 /// [`Event::ParcelAccessList`](crate::Event::ParcelAccessList) or supplied to
 /// [`Session::update_parcel_access_list`](crate::Session::update_parcel_access_list).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelAccessEntry {
     /// The agent the entry applies to.
     pub id: Uuid,
@@ -975,7 +978,7 @@ pub use sl_types::parcel::ParcelReturnType;
 /// [`Session::update_parcel`](crate::Session::update_parcel)
 /// (`ParcelPropertiesUpdate`). Start from [`ParcelUpdate::default`] and set the
 /// fields to change; `local_id` is required (from [`ParcelInfo::local_id`]).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelUpdate {
     /// The parcel's region-local id (from [`ParcelInfo::local_id`]).
     pub local_id: RegionLocalParcelId,
@@ -1044,7 +1047,7 @@ impl Default for ParcelUpdate {
 /// (the per-owner rows the "Returnable objects" land panel shows). Requested via
 /// [`Command::RequestParcelObjectOwners`](crate::Command::RequestParcelObjectOwners)
 /// and surfaced as [`Event::ParcelObjectOwners`](crate::Event::ParcelObjectOwners).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelObjectOwner {
     /// The owner of the objects — an agent or a group.
     pub owner: OwnerKey,
@@ -1060,7 +1063,7 @@ pub struct ParcelObjectOwner {
 /// in [`Command::RequestLandStat`](crate::Command::RequestLandStat) and echoed in
 /// [`Event::LandStatReply`](crate::Event::LandStatReply). This is the data behind
 /// the estate-tools "Top Scripts" / "Top Colliders" panels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum LandStatReportType {
     /// The top objects by script resource use (`0`).
@@ -1097,7 +1100,7 @@ impl LandStatReportType {
 /// One row of a `LandStatReply` — a single top-scripts / top-colliders object,
 /// from a `LandStatReply` `ReportData` block. Surfaced (with the others) as
 /// [`Event::LandStatReply`](crate::Event::LandStatReply).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LandStatItem {
     /// The object's region-local id (`TaskLocalID`).
     pub task_local_id: RegionLocalObjectId,
@@ -1121,7 +1124,7 @@ pub struct LandStatItem {
 /// (the id comes from a `RemoteParcelRequest` capability lookup,
 /// [`Command::RequestRemoteParcelId`](crate::Command::RequestRemoteParcelId)) and
 /// surfaced as [`Event::ParcelDetails`](crate::Event::ParcelDetails).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ParcelDetails {
     /// The parcel's grid-wide id (the `parcel_id` the lookup resolves).
     pub parcel_id: ParcelKey,

@@ -13,6 +13,7 @@ use core::ops::{BitAnd, BitOr, BitOrAssign, Not};
 /// [`ControlFlags::AT_POS`] walks forward in the direction of the body rotation,
 /// `| `[`ControlFlags::FLY`] flies).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ControlFlags {
     /// The raw flags value.
     bits: u32,

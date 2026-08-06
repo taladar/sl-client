@@ -33,7 +33,9 @@ use crate::types::{Child, InventoryFolder, InventoryItem, optional_key_from_wire
 /// Which of the two inventory trees an entry belongs to: the agent's own
 /// mutable inventory, or the read-only shared Library. The two trees share one
 /// held model but stay queryable apart (and are persisted to separate caches).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum InventoryOwner {
     /// The agent's own inventory tree.
     Agent,
@@ -46,7 +48,7 @@ pub enum InventoryOwner {
 /// authoritative version even while its contents are unfetched: a skeleton
 /// folder carries a known version but [`Unknown`](Self::Unknown) contents until
 /// it is fetched in its own right.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FolderState {
     /// Known to exist (from the login skeleton, or named as a child in some other
     /// folder's descendents reply) but its own contents have not been fetched.

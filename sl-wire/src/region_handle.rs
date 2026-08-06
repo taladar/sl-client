@@ -14,6 +14,7 @@
 /// A handle of `0` is the conventional "not yet known" sentinel the simulator
 /// uses before a region's position has been established.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionHandle(pub u64);
 
 impl RegionHandle {

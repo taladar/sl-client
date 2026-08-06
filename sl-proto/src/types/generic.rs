@@ -20,7 +20,7 @@ use crate::InvoiceId;
 /// raw byte blobs here. In practice each parameter is a (usually
 /// NUL-terminated) UTF-8 string, but the payload is preserved verbatim so a
 /// consumer can decode it however the specific method requires.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenericMessage {
     /// The method name selecting which feature this envelope carries.
     pub method: String,
@@ -38,7 +38,7 @@ pub struct GenericMessage {
 /// [`GLTF_MATERIAL_OVERRIDE_METHOD`](sl_wire::GLTF_MATERIAL_OVERRIDE_METHOD))
 /// and the payload is a single opaque [`data`](Self::data) blob (often
 /// notation- or binary-encoded LLSD), kept verbatim for the consumer to decode.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenericStreamingMessage {
     /// The numeric method id selecting which feature this envelope carries.
     pub method: u16,
