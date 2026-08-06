@@ -62,6 +62,6 @@ difference at any camera distance. This helps **every** small local light, not
 just facelights.
 
 Two unrelated issues on the same avatar were split out for their own sessions:
-[viewer-attachment-earrings-not-rigged](../bugs/viewer-attachment-earrings-not-rigged.md)
+[viewer-attachment-earrings-not-rigged](../done/viewer-attachment-earrings-not-rigged.md)
 and
 [mesh-hair-and-hairbase](../bugs/viewer-avatar-mesh-hair-and-hairbase-both-render.md).

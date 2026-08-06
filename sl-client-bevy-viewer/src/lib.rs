@@ -248,7 +248,7 @@ use crate::about_land::AboutLandPlugin;
 use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
-    poll_animations, pose_avatar_skeletons, update_animation_caps,
+    poll_animations, pose_attachment_nodes, pose_avatar_skeletons, update_animation_caps,
 };
 use crate::animesh::{
     ControlAvatarState, drive_control_avatars, ingest_object_animations, pose_control_avatars,
@@ -2092,6 +2092,10 @@ fn run_session(
             (
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
                 pose_control_avatars.after(TransformSystems::Propagate),
+                // Re-place worn rigid attachments (earrings, piercings) from the
+                // joint globals `pose_avatar_skeletons` just wrote — propagation ran
+                // before the driver, so without this they freeze at the rest pose.
+                pose_attachment_nodes.after(pose_avatar_skeletons),
                 // Object floating text placement (viewer-hover-text): read the
                 // object's freshly-propagated world pose and lift the text by
                 // 0.6 × the prim's Z scale in world up (the billboard's own

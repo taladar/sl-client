@@ -413,6 +413,17 @@ pub(crate) struct AvatarJoint {
     index: usize,
 }
 
+/// A marker on one avatar attachment-point node (P16.2) — the node parented to a
+/// skeleton joint at the `avatar_lad.xml` offset, off which a worn **rigid**
+/// attachment hangs. The pose driver overwrites each joint's `GlobalTransform`
+/// directly in `PostUpdate` *after* transform propagation, so Bevy never
+/// recomputes these nodes (nor the rigid attachments below them) from the animated
+/// joint — [`pose_attachment_nodes`](crate::animations::pose_attachment_nodes)
+/// re-propagates their subtrees from the posed joint so a worn rigid attachment
+/// (an earring, a piercing) tracks the head instead of freezing at the rest pose.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct AttachmentPointNode;
+
 /// A world-space name-tag billboard ([`crate::name_tag_billboard`]), pointing
 /// back at the avatar anchor it floats over so the placement system can
 /// follow the anchor's world position each frame.
@@ -1864,7 +1875,12 @@ impl AvatarState {
             .filter_map(|(&point_id, point)| {
                 let joint = joints.get(point.joint_index).copied()?;
                 let node = commands
-                    .spawn((point.offset, Visibility::default(), ChildOf(joint)))
+                    .spawn((
+                        point.offset,
+                        Visibility::default(),
+                        AttachmentPointNode,
+                        ChildOf(joint),
+                    ))
                     .id();
                 Some((point_id, node))
             })

@@ -1276,6 +1276,67 @@ pub(crate) fn pose_avatar_skeletons(
     }
 }
 
+/// Re-place every avatar attachment-point node — and the worn **rigid**
+/// attachment subtree hanging off it — from its now-posed skeleton joint, so a
+/// rigid attachment (an earring, a piercing, a rigid hat) tracks the animated
+/// joint instead of freezing at the rest / T-pose.
+///
+/// [`pose_avatar_skeletons`] overwrites each joint's `GlobalTransform` **directly**
+/// in `PostUpdate`, *after* Bevy's transform propagation — so the attachment-point
+/// node (a `ChildOf` the joint, at the `avatar_lad.xml` offset) still holds the
+/// stale global propagation computed from the joint's *pre-animation* transform,
+/// and so does every rigid attachment below it. Bevy's dirty-bit propagation will
+/// not recompute them (their ancestor's global was overwritten out from under it),
+/// exactly as the driver already hand-re-places the rigid base parts (the
+/// eyeballs). This does the same for the attachment subtrees: for each node it
+/// reads its parent joint's posed global and walks the node's descendants,
+/// composing `global = parent_global × local` down the tree — a targeted
+/// re-propagation of only the subtrees the direct-global-write orphaned.
+///
+/// Runs `after` the driver so the joint globals it reads are the posed ones, and
+/// its writes land before render extraction. A node whose joint or transform is
+/// momentarily missing (an avatar mid-spawn) is skipped and retried next frame.
+pub(crate) fn pose_attachment_nodes(
+    nodes: Query<Entity, With<crate::avatars::AttachmentPointNode>>,
+    parents: Query<&ChildOf>,
+    transforms: Query<&Transform>,
+    children: Query<&Children>,
+    mut globals: Query<&mut GlobalTransform>,
+) {
+    for node in &nodes {
+        // The node's parent is its skeleton joint, whose `GlobalTransform` the pose
+        // driver just wrote. Copy it out as a plain matrix so the immutable borrow
+        // of `globals` ends before the subtree walk below borrows it mutably.
+        let Ok(child_of) = parents.get(node) else {
+            continue;
+        };
+        let Ok(joint_global) = globals.get(child_of.parent()) else {
+            continue;
+        };
+        let joint_matrix = joint_global.to_matrix();
+        // Iterative depth-first walk of the node's subtree, carrying each entity's
+        // freshly-composed world matrix down to its children — Bevy's own
+        // propagation in miniature, but seeded from the posed joint.
+        let mut stack: Vec<(Entity, Mat4)> = vec![(node, joint_matrix)];
+        while let Some((entity, parent_matrix)) = stack.pop() {
+            let Ok(local) = transforms.get(entity) else {
+                continue;
+            };
+            // `mul_mat4` (a method, not `*`) keeps clear of the workspace
+            // `arithmetic_side_effects` lint.
+            let global_matrix = parent_matrix.mul_mat4(&local.to_matrix());
+            if let Ok(mut global) = globals.get_mut(entity) {
+                *global = GlobalTransform::from(Affine3A::from_mat4(global_matrix));
+            }
+            if let Ok(kids) = children.get(entity) {
+                for &kid in kids {
+                    stack.push((kid, global_matrix));
+                }
+            }
+        }
+    }
+}
+
 /// Write one avatar's posed joint **world** matrices into its joint entities'
 /// `GlobalTransform`s (and re-place its rigid base parts, the eyeballs, from the
 /// eye joints' posed globals — transform propagation used the pre-overwrite joint
@@ -1387,6 +1448,61 @@ mod tests {
         reconcile_playing(&mut entry, &mut next_order, &[(stand(), 2)], 9.0);
         assert_eq!(stop_of(&entry, walk())?, Some(9.0 - 5.0));
         assert_eq!(stop_of(&entry, stand())?, None);
+        Ok(())
+    }
+
+    /// A worn **rigid** attachment tracks its posed joint: `pose_attachment_nodes`
+    /// re-places the attachment-point node and every descendant from the joint's
+    /// (driver-written) `GlobalTransform`, composing `parent × local` down the
+    /// tree — so the node and the rigid attachment below it land at the posed
+    /// joint, not the stale rest global Bevy's propagation left behind (the bug
+    /// that froze an earring at the T-pose ear position).
+    #[test]
+    fn attachment_subtree_follows_the_posed_joint() -> Result<(), TestError> {
+        use crate::avatars::AttachmentPointNode;
+        use bevy::ecs::system::RunSystemOnce as _;
+        use bevy::prelude::*;
+
+        let mut world = World::new();
+        // The joint, "posed" by the driver to a non-rest place — a pure translation
+        // is enough to catch a node frozen elsewhere.
+        let joint_global = GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0));
+        let joint = world.spawn((Transform::default(), joint_global)).id();
+        // The attachment-point node at a fixed local offset from the joint; its
+        // stale `GlobalTransform` starts at the identity (what froze the earring).
+        let node = world
+            .spawn((
+                Transform::from_xyz(0.0, 0.5, 0.0),
+                GlobalTransform::default(),
+                AttachmentPointNode,
+                ChildOf(joint),
+            ))
+            .id();
+        // The worn rigid attachment hanging off the node.
+        let worn = world
+            .spawn((
+                Transform::from_xyz(0.1, 0.0, 0.0),
+                GlobalTransform::default(),
+                ChildOf(node),
+            ))
+            .id();
+
+        world
+            .run_system_once(super::pose_attachment_nodes)
+            .map_err(|error| format!("run pose_attachment_nodes: {error:?}"))?;
+
+        // node = joint (1,2,3) × offset (0,0.5,0) = (1, 2.5, 3).
+        let node_pos = world
+            .get::<GlobalTransform>(node)
+            .ok_or("node global")?
+            .translation();
+        assert!(node_pos.abs_diff_eq(Vec3::new(1.0, 2.5, 3.0), 1.0e-5));
+        // worn = node (1,2.5,3) × local (0.1,0,0) = (1.1, 2.5, 3).
+        let worn_pos = world
+            .get::<GlobalTransform>(worn)
+            .ok_or("worn global")?
+            .translation();
+        assert!(worn_pos.abs_diff_eq(Vec3::new(1.1, 2.5, 3.0), 1.0e-5));
         Ok(())
     }
 }

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 241 |
 | blocked | 95 |
 | in-progress | 10 |
-| bugs | 16 |
-| done | 715 |
+| bugs | 15 |
+| done | 716 |
 | deferred | 20 |
 | wont-do | 9 |
 | **total** | **1164** |
@@ -1023,7 +1023,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (16)
+## bugs (15)
 
 ### protocol
 
@@ -1035,8 +1035,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
-- [`viewer-attachment-earrings-not-rigged`](bugs/viewer-attachment-earrings-not-rigged.md)
-  — Worn earrings (and a brand-label mesh) float beside the head instead of
 - [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
   — Ease the avatar's rendered translation toward truth (dead-reckoning
   rubberband)
@@ -1069,7 +1067,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists
 
-## done (715)
+## done (716)
 
 ### protocol
 
@@ -1212,6 +1210,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
   Attachment context / pie menu entries (worn on self + on others) (blocked by
   `viewer-avatar-context-menu` (done))
+- [`viewer-attachment-earrings-not-rigged`](done/viewer-attachment-earrings-not-rigged.md)
+  — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))
