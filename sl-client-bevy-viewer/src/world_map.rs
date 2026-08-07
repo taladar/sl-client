@@ -23,12 +23,13 @@
 //! rasterise into the image). Search results are rows in a side panel; picking
 //! one recentres the map on that region.
 //!
-//! Double-clicking a region **teleports** there (`viewer-world-map-tracking-teleport`):
-//! it places the shared [`MapTracking`] beacon at the clicked spot (unless
-//! already tracking) and issues the teleport through the shared
+//! Single-clicking the map places the shared [`MapTracking`] beacon at the clicked
+//! spot (the reference's world-map click → `LLTracker::trackLocation`, the easiest
+//! way to set an in-world beacon) and selects the region (feeding the X/Y/Z fields
+//! and the Teleport button). Double-clicking a region additionally **teleports**
+//! there (`viewer-world-map-tracking-teleport`) through the shared
 //! [`issue_teleport`] backend, so the map, minimap, and in-world double-click all
-//! drive the same teleport + progress path. A single click still only selects the
-//! region (feeding the X/Y/Z fields and the Teleport button).
+//! drive the same teleport + progress path.
 
 use std::collections::HashMap;
 
@@ -1144,6 +1145,7 @@ fn drive_world_map_location(
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     model: Res<WorldMapModel>,
+    mut tracking: ResMut<MapTracking>,
     translator: Translator,
     mut fields: Query<&mut EditableText>,
     mut texts: Query<&mut Text>,
@@ -1187,6 +1189,28 @@ fn drive_world_map_location(
     let z = parse(ui.field_z, &fields, 4095)
         .map_or(old_z, |value| u16::try_from(value).unwrap_or(u16::MAX));
     state.selected_local = (x, y, z);
+    // Keep the tracking beacon's altitude (the red/blue seam) in step with the Z
+    // field, when the beacon is the selected location — the reference's map
+    // altitude control moving the beacon up and down. Only the altitude of a
+    // Location beacon at the selected spot is touched (an avatar track, or a beacon
+    // set elsewhere, is left alone), and only when it actually changed.
+    if let Some((grid_x, grid_y)) = state.selected
+        && let Some(TrackTarget::Location { east, north, up }) = tracking.target
+    {
+        let selected_east = f64::from(grid_x) * f64::from(REGION_WIDTH_METRES) + f64::from(x);
+        let selected_north = f64::from(grid_y) * f64::from(REGION_WIDTH_METRES) + f64::from(y);
+        let new_up = f32::from(z);
+        if (east - selected_east).abs() < BEACON_MATCH_METRES
+            && (north - selected_north).abs() < BEACON_MATCH_METRES
+            && (up - new_up).abs() > f32::EPSILON
+        {
+            tracking.target = Some(TrackTarget::Location {
+                east,
+                north,
+                up: new_up,
+            });
+        }
+    }
     // The readout: region name once its map block arrived, else coordinates.
     let line = state.selected.map_or_else(
         || translator.get("worldmap-location-none"),
@@ -2044,6 +2068,12 @@ fn on_world_map_press(press: On<Pointer<Press>>, mut state: ResMut<WorldMapState
 /// still reads as a click (above it, it was a pan drag).
 const CLICK_SLOP: f32 = 4.0;
 
+/// How close (metres) a Location beacon must be to the selected map location for
+/// the Z field to be treated as its altitude control — the beacon's east/north come
+/// from the continuous click cursor while the selection's come from the quantised
+/// X/Y fields, so they agree only within a metre or so.
+const BEACON_MATCH_METRES: f64 = 2.0;
+
 /// The maximum interval (seconds) between the two clicks of a map double-click.
 const WORLD_MAP_DOUBLE_CLICK_SECONDS: f64 = 0.4;
 
@@ -2089,10 +2119,22 @@ fn on_world_map_click(
     };
     let local_x = local(east, grid_x);
     let local_y = local(north, grid_y);
-    // A single click selects the region (feeding the X/Y/Z fields); a
-    // double-click also tracks and teleports, matching the minimap.
+    // A single click selects the region (feeding the X/Y/Z fields) and places the
+    // shared tracking beacon at the clicked spot — the reference's world-map click
+    // → `LLTracker::trackLocation`, the easiest way to set an in-world beacon. A
+    // double-click also teleports, matching the minimap.
     state.selected = Some((grid_x, grid_y));
     state.pending_local = Some((local_x, local_y));
+    // Track the clicked spot at the altitude currently in the Z field — the
+    // reference's map altitude control moves the beacon's red/blue seam; the field
+    // stays put across clicks, so a click adopts the height the user set, and
+    // [`drive_world_map_location`] keeps the beacon's `up` in step as the field is
+    // edited afterwards.
+    tracking.target = Some(TrackTarget::Location {
+        east,
+        north,
+        up: f32::from(state.selected_local.2),
+    });
 
     let now = time.elapsed_secs_f64();
     let double = state.last_click.is_some_and(|(at, position)| {
@@ -2104,16 +2146,6 @@ fn on_world_map_click(
         return;
     }
     state.last_click = None;
-
-    // Place a tracking beacon at the clicked spot first (unless already
-    // tracking), as the reference does before a map teleport.
-    if tracking.target.is_none() {
-        tracking.target = Some(TrackTarget::Location {
-            east,
-            north,
-            up: 0.0,
-        });
-    }
 
     // Teleport to the clicked point (altitude 0 → the destination ground, which
     // is all the map knows), aimed from the agent toward the target.

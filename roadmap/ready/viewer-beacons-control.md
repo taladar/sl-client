@@ -2,12 +2,22 @@
 id: viewer-beacons-control
 title: Tracking beacon — set / clear from the UI
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-beacons
 blocked_by: [viewer-beacons-beam-render, viewer-ui-widget-scaffold]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+Partly done already (implemented alongside [[viewer-beacons-beam-render]]): a
+**world-map single-click sets** the location beacon (and the world-map Z field
+drives its altitude), the minimap radar's **Start / Stop Tracking** sets /
+clears an avatar beacon, the **dismiss arrow** on the beam is clickable to stop
+tracking, and a location beacon **auto-clears on arrival**
+(`clear_reached_location_track`, minimap.rs — within 3 m horizontally, the
+reference `LLTracker` behaviour, runs ungated so it applies to a world-map-set
+beacon too). Remaining: a landmark-tracking source, and a general "clear current
+track" UI control outside the arrow / radar menu.
 
 The control side of the tracking beacon: **set** a beacon from the UI and
 **clear** it. This is the map / radar hand-off — a map double-click, a tracked

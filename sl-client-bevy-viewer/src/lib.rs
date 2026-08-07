@@ -44,6 +44,7 @@ mod avatar_replay;
 mod avatars;
 mod bake_inputs;
 mod bake_publish;
+mod beacons;
 mod body_physics;
 mod bottom_toolbar;
 mod browser_widget;
@@ -1344,6 +1345,10 @@ fn run_session(
     // colour-coded vertical bands draped along parcel boundaries, driven by the
     // `parcel_borders` module's system below.
     .add_plugins(crate::parcel_borders::ParcelBordersPlugin)
+    // The in-world tracking beacon (viewer-beacons-beam-render): the vertical
+    // beam + label + off-screen arrow drawn at the tracked position from the
+    // shared `MapTracking` resource.
+    .add_plugins(crate::beacons::BeaconPlugin)
     // The world-space avatar name-tag billboards (viewer-name-tags-billboard-
     // render): the embedded billboard shader + material pipeline; the tag
     // systems themselves register with the avatar systems below.

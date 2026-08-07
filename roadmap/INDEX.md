@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 243 |
-| blocked | 95 |
+| ready | 244 |
+| blocked | 93 |
 | in-progress | 11 |
 | bugs | 18 |
-| done | 729 |
+| done | 730 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1184** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (244)
 
 ### protocol
 
@@ -218,8 +218,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
-- [`viewer-beacons-beam-render`](ready/viewer-beacons-beam-render.md) — Tracking
-  beacon — beam + off-screen direction arrow
+- [`viewer-beacons-control`](ready/viewer-beacons-control.md) — Tracking beacon
+  — set / clear from the UI (blocked by `viewer-beacons-beam-render` (done),
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-block-list`](ready/viewer-block-list.md) — Block / mute list UI
   (blocked by `viewer-social-people-panel` (done), `viewer-ui-virtualized-list`
   (done))
@@ -657,6 +658,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-virtualized-list` (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
+- [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
+  — World-map floater — tracking & teleport hand-off (blocked by
+  `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
+  `viewer-teleport-flow-progress` (done))
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
@@ -727,7 +732,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (95)
+## blocked (93)
 
 ### protocol
 
@@ -758,9 +763,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-render-settings-manager`](blocked/viewer-avatar-render-settings-manager.md)
   — Per-avatar render-settings manager (blocked by
   `viewer-avatar-complexity-limit`)
-- [`viewer-beacons-control`](blocked/viewer-beacons-control.md) — Tracking
-  beacon — set / clear from the UI (blocked by `viewer-beacons-beam-render`,
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
@@ -960,7 +962,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
   route following — advancing waypoint beacons (blocked by
-  `viewer-usb-route-map-display`, `viewer-beacons-beam-render`)
+  `viewer-usb-route-map-display`, `viewer-beacons-beam-render` (done))
 - [`viewer-video-recording`](blocked/viewer-video-recording.md) — In-viewer
   video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-video-playback`)
@@ -986,10 +988,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map-script-destination`](blocked/viewer-world-map-script-destination.md)
   — Script-requested map destination (llMapDestination) (blocked by
   `viewer-world-map-tracking-teleport`)
-- [`viewer-world-map-tracking-teleport`](blocked/viewer-world-map-tracking-teleport.md)
-  — World-map floater — tracking & teleport hand-off (blocked by
-  `viewer-world-map-floater` (done), `viewer-beacons-beam-render`,
-  `viewer-teleport-flow-progress` (done))
 - [`viewer-world-pie-menu-reactions`](blocked/viewer-world-pie-menu-reactions.md)
   — Right-click reactions per world target class (blocked by
   `viewer-world-test-harness`)
@@ -1082,7 +1080,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (729)
+## done (730)
 
 ### protocol
 
@@ -1248,6 +1246,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —
   Avatar tongue protrudes (rigged mesh + base-system head)
+- [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
+  beacon — beam + off-screen direction arrow
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)

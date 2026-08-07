@@ -2,7 +2,7 @@
 id: viewer-world-map-tracking-teleport
 title: World-map floater — tracking & teleport hand-off
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07); split from viewer-world-map
 blocked_by: [viewer-world-map-floater, viewer-beacons-beam-render, viewer-teleport-flow-progress]
 ---
