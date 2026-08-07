@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 mod test {
+    use std::collections::{HashMap, HashSet};
     use std::error::Error;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::{Duration, Instant};
@@ -331,9 +332,25 @@ mod test {
     /// Drives a session from login through the region handshake into the active
     /// state, returning the active session.
     fn established(now: Instant) -> Result<Session, TestError> {
+        established_in_region(now, None, None)
+    }
+
+    /// Like [`established`] but seeds the root region's global south-west corner
+    /// (metres) from the login response, so [`Session::region_handle`] returns a
+    /// real handle — needed by tests that exercise region-handle adjacency.
+    fn established_in_region(
+        now: Instant,
+        region_x: Option<u32>,
+        region_y: Option<u32>,
+    ) -> Result<Session, TestError> {
         let mut session = new_session()?;
         assert!(session.login_http_request().is_some());
-        session.handle_login_response(success()?, now)?;
+        let mut response = success()?;
+        if let LoginResponse::Success(ref mut success) = response {
+            success.region_x = region_x;
+            success.region_y = region_y;
+        }
+        session.handle_login_response(response, now)?;
         // `CompleteAgentMovement` is deferred until the driver reports the region's
         // capabilities are ready (so the simulator knows we support animesh before
         // it streams the scene); a test driver releases it explicitly.
@@ -1787,6 +1804,10 @@ mod test {
             },
         });
         session.handle_datagram(sim_addr(), &server_message(&finish, 10, true)?, now)?;
+        // Deferred teardown: the seat (and the source region) survive until the
+        // destination confirms the handover — commit it, then the seat clears.
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100);
+        confirm_handover(&mut session, dest, handle, now)?;
         assert_eq!(
             session.seat(),
             None,
@@ -12582,6 +12603,566 @@ mod test {
         ))
     }
 
+    /// A simulator address as `(sim_ip, sim_port)` in the on-wire form the region
+    /// blocks use: the IPv4 octets and the port in **network (big-endian) order**
+    /// (the decoders swap it back to host order).
+    fn addr_ip_port(addr: SocketAddr) -> ([u8; 4], [u8; 2]) {
+        let ip = match addr.ip() {
+            IpAddr::V4(v4) => v4.octets(),
+            IpAddr::V6(_) => [127, 0, 0, 1],
+        };
+        // Big-endian (network) order by hand — the workspace forbids the
+        // endianness-explicit `to_be_bytes`.
+        let port = addr.port();
+        let hi = u8::try_from(port >> 8).unwrap_or(0);
+        let lo = u8::try_from(port & 0x00FF).unwrap_or(0);
+        (ip, [hi, lo])
+    }
+
+    /// An `AgentMovementComplete` from the region serving `region_handle` — the
+    /// simulator's confirmation that the agent is now a root agent there.
+    fn agent_movement_complete_msg(region_handle: u64) -> AnyMessage {
+        AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(128.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"mock\0".to_vec(),
+            },
+        })
+    }
+
+    /// Commit an in-flight (deferred) teleport handover by feeding the
+    /// destination's `AgentMovementComplete` — the confirmation that triggers the
+    /// source teardown (seat clear, grant drop, circuit swap, `RegionChanged`).
+    /// Drains the outbound handover burst first.
+    fn confirm_handover(
+        session: &mut Session,
+        dest: SocketAddr,
+        region_handle: u64,
+        now: Instant,
+    ) -> Result<(), TestError> {
+        while session.poll_transmit().is_some() {}
+        session.handle_datagram(
+            dest,
+            &server_message(&agent_movement_complete_msg(region_handle), 1, true)?,
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// A minimal multi-region simulator for driving the client [`Session`] through
+    /// the teleport / crossing handover deterministically — including timeouts and
+    /// lost messages, which cannot be provoked against a real grid
+    /// (`test-handover-mock-grid-harness`).
+    ///
+    /// [`pump`](MockGrid::pump) routes the client's outbound datagrams by
+    /// destination and synthesises the server side: a `CompleteAgentMovement` to a
+    /// live region is answered with its `RegionHandshake` greeting and an
+    /// `AgentMovementComplete` confirmation, unless that region is in a **drop**
+    /// set — modelling a lost handshake / a silent (dead) destination, so the
+    /// client's teleport timer expires. Teleport / crossing / neighbour
+    /// announcements are injected explicitly.
+    struct MockGrid {
+        /// The region handle each simulator address serves.
+        handles: HashMap<SocketAddr, u64>,
+        /// Regions that will NOT answer `CompleteAgentMovement` (a lost
+        /// confirmation / dead destination): the client then times out.
+        drop_movement_complete: HashSet<SocketAddr>,
+        /// Regions that will NOT send their `RegionHandshake` greeting.
+        drop_region_handshake: HashSet<SocketAddr>,
+        /// The next server-side packet sequence number.
+        next_sequence: u32,
+    }
+
+    impl MockGrid {
+        /// A grid with the given `(addr, region_handle)` regions registered.
+        fn new(regions: &[(SocketAddr, u64)]) -> Self {
+            Self {
+                handles: regions.iter().copied().collect(),
+                drop_movement_complete: HashSet::new(),
+                drop_region_handshake: HashSet::new(),
+                next_sequence: 1000,
+            }
+        }
+
+        /// Withhold `addr`'s `AgentMovementComplete` — models a lost confirmation
+        /// / a silent destination, so a teleport to it times out.
+        fn drop_amc(&mut self, addr: SocketAddr) {
+            self.drop_movement_complete.insert(addr);
+        }
+
+        /// The next server sequence number.
+        fn seq(&mut self) -> u32 {
+            let sequence = self.next_sequence;
+            self.next_sequence = self.next_sequence.wrapping_add(1);
+            sequence
+        }
+
+        /// The region handle registered for `addr` (0 if unknown).
+        fn handle(&self, addr: SocketAddr) -> u64 {
+            self.handles.get(&addr).copied().unwrap_or(0)
+        }
+
+        /// Inject a `TeleportFinish` (UDP) on the `source` root circuit, pointing
+        /// the client at `dest`.
+        fn teleport_finish(
+            &mut self,
+            session: &mut Session,
+            source: SocketAddr,
+            dest: SocketAddr,
+            now: Instant,
+        ) -> Result<(), TestError> {
+            let (ip, port) = addr_ip_port(dest);
+            let mut body = Writer::new();
+            body.put_uuid(uuid::Uuid::from_u128(1)); // agent_id
+            body.put_u32(0); // location_id
+            body.bytes(&ip);
+            body.bytes(&port);
+            body.put_u64(self.handle(dest));
+            body.put_variable2(b"http://mock/seed")?; // seed_capability
+            body.put_u8(13); // sim_access (PG)
+            body.put_u32(0); // teleport_flags
+            let sequence = self.seq();
+            let datagram = server_datagram(MessageId::Low(69), &body.into_bytes(), sequence, true);
+            session.handle_datagram(source, &datagram, now)?;
+            Ok(())
+        }
+
+        /// Inject an `EnableSimulator` (UDP) on the `root` circuit announcing the
+        /// neighbour region at `sim`, so the client opens a child circuit to it.
+        fn enable_neighbour(
+            &mut self,
+            session: &mut Session,
+            root: SocketAddr,
+            sim: SocketAddr,
+            now: Instant,
+        ) -> Result<(), TestError> {
+            let (ip, port) = addr_ip_port(sim);
+            let mut body = Writer::new();
+            body.put_u64(self.handle(sim));
+            body.bytes(&ip);
+            body.bytes(&port);
+            let sequence = self.seq();
+            let datagram = server_datagram(MessageId::Low(151), &body.into_bytes(), sequence, true);
+            session.handle_datagram(root, &datagram, now)?;
+            Ok(())
+        }
+
+        /// Inject a `CrossedRegion` (UDP) on the `source` circuit handing the agent
+        /// to `dest` (a physical border crossing).
+        fn crossed_region(
+            &mut self,
+            session: &mut Session,
+            source: SocketAddr,
+            dest: SocketAddr,
+            now: Instant,
+        ) -> Result<(), TestError> {
+            let (ip, _port) = addr_ip_port(dest);
+            let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+                agent_data: CrossedRegionAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                    session_id: uuid::Uuid::from_u128(2),
+                },
+                region_data: CrossedRegionRegionDataBlock {
+                    sim_ip: ip,
+                    // The handler swaps the port back to host order, so the block
+                    // carries the byte-swapped (network-order) value.
+                    sim_port: dest.port().swap_bytes(),
+                    region_handle: self.handle(dest),
+                    seed_capability: b"http://mock/seed\0".to_vec(),
+                },
+                info: CrossedRegionInfoBlock {
+                    position: vec3(10.0, 128.0, 30.0),
+                    look_at: vec3(1.0, 0.0, 0.0),
+                },
+            });
+            let sequence = self.seq();
+            session.handle_datagram(source, &server_message(&crossed, sequence, true)?, now)?;
+            Ok(())
+        }
+
+        /// Drain the client's queued datagrams and answer each
+        /// `CompleteAgentMovement` (with the destination's `RegionHandshake` +
+        /// `AgentMovementComplete`, unless dropped), looping until the client goes
+        /// quiet. Bounded so a misbehaving exchange fails the test rather than
+        /// hangs.
+        fn pump(&mut self, session: &mut Session, now: Instant) -> Result<(), TestError> {
+            for _round in 0..64 {
+                let mut transmits = Vec::new();
+                while let Some(transmit) = session.poll_transmit() {
+                    transmits.push(transmit);
+                }
+                if transmits.is_empty() {
+                    return Ok(());
+                }
+                for transmit in transmits {
+                    let dest = transmit.destination;
+                    if !matches!(decode(&transmit)?, AnyMessage::CompleteAgentMovement(_)) {
+                        continue;
+                    }
+                    if self.drop_movement_complete.contains(&dest) {
+                        continue;
+                    }
+                    // The greeting comes before the movement confirmation (as a
+                    // live sim orders them), each on the destination circuit.
+                    if !self.drop_region_handshake.contains(&dest) {
+                        let sequence = self.seq();
+                        let handshake = server_message(
+                            &region_handshake_msg(13, 0, "Mock", "", ""),
+                            sequence,
+                            true,
+                        )?;
+                        session.handle_datagram(dest, &handshake, now)?;
+                    }
+                    let sequence = self.seq();
+                    let confirm = server_message(
+                        &agent_movement_complete_msg(self.handle(dest)),
+                        sequence,
+                        true,
+                    )?;
+                    session.handle_datagram(dest, &confirm, now)?;
+                }
+            }
+            Err("mock grid did not reach quiescence".into())
+        }
+    }
+
+    /// A third simulator for multi-hop / corner-crossing scenarios.
+    fn sim_c() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9002)
+    }
+
+    /// Region handles for the harness grid: the login region and two neighbours.
+    const SRC_HANDLE: u64 = 0x0003_E800_0003_E800; // grid (1000, 1000)
+    const B_HANDLE: u64 = 0x0003_E900_0003_E800; // grid (1001, 1000)
+    const C_HANDLE: u64 = 0x0003_EA00_0003_E800; // grid (1002, 1000)
+
+    /// An established session (drained) plus a three-region mock grid. The root
+    /// region is `SRC_HANDLE` (global 256000, 256000 = grid 1000, 1000) so
+    /// region-handle adjacency resolves against the mock grid's neighbours.
+    fn grid_session(now: Instant) -> Result<(Session, MockGrid), TestError> {
+        let mut session = established_in_region(now, Some(256_000), Some(256_000))?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let grid = MockGrid::new(&[
+            (sim_addr(), SRC_HANDLE),
+            (sim_b(), B_HANDLE),
+            (sim_c(), C_HANDLE),
+        ]);
+        Ok((session, grid))
+    }
+
+    /// The first `RegionChanged` `(region_handle, sim, world_reset)` in `session`'s
+    /// event queue, draining it.
+    fn take_region_changed(session: &mut Session) -> Option<(RegionHandle, SocketAddr, bool)> {
+        drain_events(session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::RegionChanged {
+                    region_handle,
+                    sim,
+                    world_reset,
+                    ..
+                } => Some((region_handle, sim, world_reset)),
+                _ => None,
+            })
+    }
+
+    /// A **distant** teleport (no pre-opened child) completes the deferred
+    /// handover on the destination's confirmation and resets the world.
+    #[test]
+    fn handover_distant_teleport_arrives_and_resets() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        // The destination is contacted as a child (UseCircuitCode +
+        // CompleteAgentMovement) while the source stays root.
+        assert!(
+            take_transmit_to(&mut session, sim_c()).is_some(),
+            "the destination circuit is bootstrapped"
+        );
+        grid.pump(&mut session, now)?;
+
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(changed.0, RegionHandle(C_HANDLE));
+        assert_eq!(changed.1, sim_c());
+        assert!(changed.2, "a distant teleport resets the world");
+        assert_eq!(session.region_handle(), Some(RegionHandle(C_HANDLE)));
+        Ok(())
+    }
+
+    /// A teleport to a region we already neighbour promotes its child circuit and
+    /// keeps the world (no reset), the deferred-commit counterpart of a crossing.
+    #[test]
+    fn handover_neighbour_teleport_keeps_world() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), now)?;
+        drain(&mut session)?; // the child open burst
+
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?;
+
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(changed.1, sim_b());
+        assert!(!changed.2, "a neighbour teleport keeps the world");
+        assert_eq!(session.region_handle(), Some(RegionHandle(B_HANDLE)));
+        Ok(())
+    }
+
+    /// Catching a still-held child circuit several regions away — the classic
+    /// "fell off a fast vehicle a couple of regions back and teleported to catch
+    /// it" — keeps the world, even though the destination is **not** positionally
+    /// adjacent: we are already connected to it and its scene is streaming, so
+    /// there is nothing to reset. Distance alone must not force a world reset when
+    /// the destination is a live child.
+    #[test]
+    fn handover_catches_distant_held_child_keeps_world() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        // sim_c is two regions away (grid 1002 vs the source's 1000) — NOT
+        // adjacent — but we hold a child circuit to it, as if accumulated while
+        // chasing a vehicle across regions.
+        grid.enable_neighbour(&mut session, sim_addr(), sim_c(), now)?;
+        drain(&mut session)?; // the child open burst
+
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(changed.1, sim_c());
+        assert!(
+            !changed.2,
+            "catching a held child keeps the world, however far away it is"
+        );
+        assert_eq!(session.region_handle(), Some(RegionHandle(C_HANDLE)));
+        Ok(())
+    }
+
+    /// **The regression**: a teleport whose destination never confirms times out
+    /// leaving the session in its **source** region (never torn down), and a retry
+    /// to that same neighbour still counts as a neighbour teleport — even though
+    /// the timeout drops the destination's child circuit (reconciling with the
+    /// simulator, which removes the child agent on a failed teleport). The retry
+    /// is classified by region-handle **adjacency**, not by whether the child
+    /// still exists, so it keeps the world rather than misfiring as a distant jump
+    /// that clears everything — the broken "no neighbours after a failed teleport"
+    /// state observed live on OpenSim.
+    #[test]
+    fn handover_timeout_reclassifies_retry_by_adjacency() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), now)?;
+        drain(&mut session)?;
+        let source_circuit = session.root_circuit_id();
+
+        // The destination will never answer CompleteAgentMovement.
+        grid.drop_amc(sim_b());
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?; // sends CompleteAgentMovement to B; no reply
+
+        // Past the 30 s teleport timeout the teleport fails — in place.
+        let later = now + Duration::from_secs(31);
+        session.handle_timeout(later);
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::TeleportFailed { .. })),
+            "the teleport times out"
+        );
+        assert_eq!(
+            session.root_circuit_id(),
+            source_circuit,
+            "the source region is still the root (never torn down)"
+        );
+
+        // The retry to the same neighbour re-opens its (dropped) child circuit and
+        // still keeps the world: sim_b is adjacent to the source region by handle,
+        // so it is a neighbour teleport, NOT a fresh distant one — even though its
+        // child circuit no longer survives from before.
+        grid.drop_movement_complete.remove(&sim_b());
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            later,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), later)?;
+        grid.pump(&mut session, later)?;
+        let changed =
+            take_region_changed(&mut session).ok_or("expected a RegionChanged on retry")?;
+        assert_eq!(changed.1, sim_b());
+        assert!(
+            !changed.2,
+            "the retry stays a neighbour teleport (adjacent by handle), not a distant one"
+        );
+        Ok(())
+    }
+
+    /// Cancelling a teleport mid-handover returns to the source region and drops
+    /// the freshly-opened destination circuit (so a later teleport there is fresh
+    /// again, not a promote).
+    #[test]
+    fn handover_cancel_returns_to_source() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        let source_circuit = session.root_circuit_id();
+
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        drain(&mut session)?; // do not confirm the destination
+
+        session.cancel_teleport(now)?;
+        assert_eq!(
+            session.root_circuit_id(),
+            source_circuit,
+            "cancelling returns to the untouched source region"
+        );
+
+        // The dropped destination circuit means a fresh teleport there next time.
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert!(
+            changed.2,
+            "the re-teleport is a fresh distant teleport (world reset)"
+        );
+        Ok(())
+    }
+
+    /// A crossing hands over on the destination's confirmation and keeps the world.
+    #[test]
+    fn handover_crossing_keeps_world() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), now)?;
+        drain(&mut session)?;
+
+        grid.crossed_region(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?;
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(changed.1, sim_b());
+        assert!(!changed.2, "a crossing keeps the world");
+        assert_eq!(session.region_handle(), Some(RegionHandle(B_HANDLE)));
+        Ok(())
+    }
+
+    /// **The corner double-crossing**: a second `CrossedRegion` arriving while the
+    /// first is still finalizing (a fast vehicle crossing two borders at a region
+    /// corner) finalizes the first hop, then promotes the second — the session
+    /// ends up at the final region, not stranded mid-hop.
+    #[test]
+    fn handover_corner_double_crossing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+        grid.enable_neighbour(&mut session, sim_addr(), sim_b(), now)?;
+        grid.enable_neighbour(&mut session, sim_addr(), sim_c(), now)?;
+        drain(&mut session)?;
+
+        // Cross into B, then — before B's handshake completes — cross into C.
+        grid.crossed_region(&mut session, sim_addr(), sim_b(), now)?;
+        grid.crossed_region(&mut session, sim_b(), sim_c(), now)?;
+        grid.pump(&mut session, now)?;
+
+        // Both hops surface, in order, and we end at C.
+        let events = drain_events(&mut session);
+        let changed: Vec<(RegionHandle, SocketAddr)> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::RegionChanged {
+                    region_handle, sim, ..
+                } => Some((*region_handle, *sim)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            changed,
+            vec![
+                (RegionHandle(B_HANDLE), sim_b()),
+                (RegionHandle(C_HANDLE), sim_c()),
+            ],
+            "the double crossing finalizes B then promotes C"
+        );
+        assert_eq!(session.region_handle(), Some(RegionHandle(C_HANDLE)));
+        Ok(())
+    }
+
+    /// A new teleport issued while one is in flight supersedes it: the pending
+    /// destination is abandoned and the new one proceeds.
+    #[test]
+    fn handover_teleport_supersedes_pending() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut session, mut grid) = grid_session(now)?;
+
+        // Start a (never-confirmed) teleport to C.
+        session.teleport_to(
+            RegionHandle(C_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_c(), now)?;
+        drain(&mut session)?;
+
+        // Supersede with a teleport to B, which completes.
+        session.teleport_to(
+            RegionHandle(B_HANDLE),
+            region_coords(128.0, 128.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        grid.teleport_finish(&mut session, sim_addr(), sim_b(), now)?;
+        grid.pump(&mut session, now)?;
+        let changed = take_region_changed(&mut session).ok_or("expected a RegionChanged")?;
+        assert_eq!(changed.1, sim_b(), "the superseding teleport wins");
+        assert_eq!(session.region_handle(), Some(RegionHandle(B_HANDLE)));
+        Ok(())
+    }
+
     #[test]
     fn teleport_handover_rebinds_circuit_to_new_sim() -> Result<(), TestError> {
         let now = Instant::now();
@@ -12615,9 +13196,16 @@ mod test {
         assert!(matches!(decode(&transmit)?, AnyMessage::UseCircuitCode(_)));
         drain(&mut session)?; // CompleteAgentMovement
 
-        // The destination region's handshake completes the handover.
+        // The destination greets us (`RegionHandshake` on its still-child circuit)
+        // and then confirms our arrival (`AgentMovementComplete`) — the
+        // confirmation commits the deferred handover into a `RegionChanged`.
         let handshake = server_message(&region_handshake_msg(13, 0, "RegionB", "", ""), 1, true)?;
         session.handle_datagram(sim_b(), &handshake, now)?;
+        session.handle_datagram(
+            sim_b(),
+            &server_message(&agent_movement_complete_msg(handle), 2, true)?,
+            now,
+        )?;
         let events = drain_events(&mut session);
         let changed = events
             .iter()
@@ -13266,9 +13854,15 @@ mod test {
             "expected a CompleteAgentMovement to the destination, got {to_dest:?}"
         );
 
-        // The destination's handshake completes the handover.
+        // The destination greets us then confirms our arrival — the
+        // `AgentMovementComplete` commits the deferred handover.
         let handshake = server_message(&region_handshake_msg(13, 0, "RegionB", "", ""), 1, true)?;
         session.handle_datagram(sim_b(), &handshake, now)?;
+        session.handle_datagram(
+            sim_b(),
+            &server_message(&agent_movement_complete_msg(handle), 2, true)?,
+            now,
+        )?;
         let events = drain_events(&mut session);
         let changed = events
             .iter()
@@ -14371,6 +14965,10 @@ mod test {
             },
         });
         session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+        // Deferred teardown: grants (and the source region) survive until the
+        // destination confirms the handover — commit it, then the drop happens.
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100);
+        confirm_handover(&mut session, dest, handle, now)?;
 
         assert_eq!(
             session.granted_permissions(world_task, item),
@@ -14640,6 +15238,10 @@ mod test {
             },
         });
         session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+        // Deferred teardown: commit the handover (destination confirms) before the
+        // in-world denial is dropped.
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100);
+        confirm_handover(&mut session, dest, handle, now)?;
 
         assert_eq!(
             session.script_permission_status(world_task, item),
@@ -14719,6 +15321,10 @@ mod test {
             },
         });
         session.handle_datagram(sim_addr(), &server_message(&finish, 20, true)?, now)?;
+        // Deferred teardown: commit the handover (destination confirms) before the
+        // grant stores are reset.
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9100);
+        confirm_handover(&mut session, dest, handle, now)?;
 
         // Grant registry: in-world dropped, attachment kept.
         assert_eq!(

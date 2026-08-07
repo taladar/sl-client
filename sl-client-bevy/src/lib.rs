@@ -3,8 +3,6 @@
 use std::io::ErrorKind;
 use std::net::UdpSocket;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
@@ -626,14 +624,12 @@ pub(crate) struct Caps {
     pub(crate) map_rx: Receiver<Result<HashMap<String, String>, String>>,
     /// The cached capability map (cap name → URL), empty until discovered.
     pub(crate) map: HashMap<String, String>,
-    /// Set on drop to ask the poller thread to stop at its next loop iteration.
-    pub(crate) stop: Arc<AtomicBool>,
-}
-
-impl Drop for Caps {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
+    /// Commands the single long-lived event-queue worker thread — a
+    /// [`EqCommand::Switch`](crate::caps::EqCommand) on every region change
+    /// re-targets it at the new root's seed instead of spawning a second poller.
+    /// Dropping the [`Caps`] closes this channel, so the worker exits after its
+    /// current poll.
+    pub(crate) command_tx: crossbeam_channel::Sender<crate::caps::EqCommand>,
 }
 
 /// Startup system: builds the session and spawns the blocking login thread.
@@ -3867,7 +3863,15 @@ fn advance_running(
         events.write(SlEvent(event));
     }
     if region_changed {
-        caps = start_caps(&session);
+        // Re-target the single event-queue worker at the new root region rather
+        // than dropping + respawning a poller (which, under rapid region changes,
+        // left two pollers racing on one region's ack-sequenced queue and lost
+        // events). If the worker was never started (no seed at login yet), start
+        // it now.
+        match caps.as_mut() {
+            Some(existing) => existing.switch_to(&session),
+            None => caps = start_caps(&session),
+        }
     }
 
     if done || session.is_closed() {

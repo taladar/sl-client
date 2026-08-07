@@ -2,7 +2,7 @@
 id: protocol-teleport-timeout-strands-child-circuits
 title: A timed-out teleport strands the session and loses its child circuits
 topic: protocol
-status: bugs
+status: done
 origin: user report (2026-08-07), live teleport testing on the local 2x2 grid
 refs: [viewer-seamless-region-handover-objects, protocol-teleport-deferred-teardown-handover]
 ---

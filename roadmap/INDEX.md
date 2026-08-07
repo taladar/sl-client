@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 244 |
+| ready | 243 |
 | blocked | 95 |
 | in-progress | 11 |
-| bugs | 16 |
-| done | 725 |
+| bugs | 18 |
+| done | 729 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1179** |
+| **total** | **1184** |
 
 ## ideas (58)
 
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -165,8 +165,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sl-lsl (LslSyntax) types
 - [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
-- [`protocol-teleport-deferred-teardown-handover`](ready/protocol-teleport-deferred-teardown-handover.md)
-  — Defer handover teardown until the destination confirms (+ overlap safety)
 
 ### viewer
 
@@ -699,8 +697,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start a proposal, cast a ballot
 - [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
   — Group session message — [aditi] variant
-- [`test-handover-mock-grid-harness`](ready/test-handover-mock-grid-harness.md)
-  — Mock-grid simulator harness for deterministic handover/timeout testing
+- [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
+  — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
+  on aditi
 - [`test-im-1to1-aditi`](ready/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
   1:1 — [aditi] variant
 - [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
@@ -1032,20 +1031,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (16)
+## bugs (18)
 
 ### protocol
 
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
-- [`protocol-teleport-timeout-strands-child-circuits`](bugs/protocol-teleport-timeout-strands-child-circuits.md)
-  — A timed-out teleport strands the session and loses its child circuits
 
 ### viewer
 
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
+- [`viewer-arrival-orientation-snap`](bugs/viewer-arrival-orientation-snap.md) —
+  Avatar arrives facing the wrong way then snaps to the correct orientation
+  (rotates the whole minimap)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1066,6 +1066,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
+  — Top-bar region name stuck on "Connecting..." after crossing into a region
+  never teleported to
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1074,10 +1077,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-stuck-low-lod`](bugs/viewer-texture-stuck-low-lod.md) — A
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists
+- [`viewer-underwater-fog-background-flicker`](bugs/viewer-underwater-fog-background-flicker.md)
+  — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (725)
+## done (729)
 
 ### protocol
 
@@ -1202,6 +1207,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
+  — Defer handover teardown until the destination confirms (+ overlap safety)
+- [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)
+  — A timed-out teleport strands the session and loses its child circuits
 
 ### viewer
 
@@ -1264,6 +1273,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-input-action-map` (done))
 - [`viewer-camera-transitions`](done/viewer-camera-transitions.md) — Smooth
   camera-mode transitions (blocked by `viewer-camera-mouselook` (done))
+- [`viewer-caps-event-queue-stops-after-teleport-spree`](done/viewer-caps-event-queue-stops-after-teleport-spree.md)
+  — CAPS EventQueueGet stops delivering (no CrossedRegion) after a rapid
+  teleport spree, freezing the avatar at a crossing
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
@@ -2427,6 +2439,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — fetch members / roles / titles / profile
 - [`test-group-session-message`](done/test-group-session-message-open-a-group-session-send-leave.md)
   — open a group session, send, leave
+- [`test-handover-mock-grid-harness`](done/test-handover-mock-grid-harness.md) —
+  Mock-grid simulator harness for deterministic handover/timeout testing
 - [`test-im-1to1`](done/test-im-1to1-send-im-peer-receives-reply-back.md) — send
   IM, peer receives; reply back
 - [`test-im-typing`](done/test-im-typing-im-typing-start-stop.md) — IM typing

@@ -64,6 +64,30 @@ impl RegionHandle {
         Self(u64::from(global_x).checked_shl(32).unwrap_or(0) | u64::from(global_y))
     }
 
+    /// Whether `other` is this region or one of its eight immediate neighbours —
+    /// their grid coordinates differ by at most one region on each axis.
+    ///
+    /// Used to classify a teleport by **position** rather than by whether the
+    /// destination happens to be a currently-open child circuit: an adjacent hop
+    /// keeps the current scene (like a crossing — the old root demotes to a
+    /// child), while a distant jump resets it (a fresh local-id space at the
+    /// destination). Classifying by position is what lets a retry after a failed
+    /// teleport to a neighbour stay a neighbour teleport even though the failure
+    /// dropped that neighbour's child circuit.
+    ///
+    /// Standard 256 m regions only: a varregion larger than 256 m is judged by
+    /// its south-west grid index, so a hop to the far side of a big neighbour can
+    /// read as distant. A zero (unknown) handle on either side is never adjacent.
+    #[must_use]
+    pub fn is_adjacent_to(self, other: Self) -> bool {
+        if self.0 == 0 || other.0 == 0 {
+            return false;
+        }
+        let (ax, ay) = self.grid_coordinates();
+        let (bx, by) = other.grid_coordinates();
+        ax.abs_diff(bx) <= 1 && ay.abs_diff(by) <= 1
+    }
+
     /// Builds a region handle from its grid coordinates (region indices) — the
     /// inverse of [`RegionHandle::grid_coordinates`]. The
     /// `From<sl_types::map::GridCoordinates>` impl is the equivalent typed form.
@@ -145,6 +169,36 @@ mod tests {
     fn zero_is_the_unknown_sentinel() {
         assert_eq!(RegionHandle::default(), RegionHandle(0));
         assert_eq!(RegionHandle(0).grid_coordinates(), (0, 0));
+    }
+
+    #[test]
+    fn adjacency_is_by_grid_position() {
+        let source = RegionHandle::from_grid(1000, 1000);
+        // The four orthogonal and four diagonal neighbours are all adjacent.
+        for (dx, dy) in [
+            (1, 0),
+            (-1_i64, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (-1, -1),
+            (1, -1),
+            (-1, 1),
+        ] {
+            let x = u32::try_from(1000 + dx).unwrap_or(0);
+            let y = u32::try_from(1000 + dy).unwrap_or(0);
+            let neighbour = RegionHandle::from_grid(x, y);
+            assert!(source.is_adjacent_to(neighbour), "({dx},{dy}) is adjacent");
+            assert!(neighbour.is_adjacent_to(source), "adjacency is symmetric");
+        }
+        // The region itself counts as adjacent (diff of zero on both axes).
+        assert!(source.is_adjacent_to(source));
+        // Two regions away on either axis is distant.
+        assert!(!source.is_adjacent_to(RegionHandle::from_grid(1002, 1000)));
+        assert!(!source.is_adjacent_to(RegionHandle::from_grid(1000, 1002)));
+        // The unknown sentinel is never adjacent to anything.
+        assert!(!source.is_adjacent_to(RegionHandle(0)));
+        assert!(!RegionHandle(0).is_adjacent_to(source));
     }
 
     #[test]

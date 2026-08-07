@@ -40,10 +40,10 @@ use super::{
     ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
     FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory,
     InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MessageCursor, PING_INTERVAL, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, Session,
-    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE, XferDownload,
-    XferPurpose, XferUpload, deadline, merge_deadline,
+    MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant,
+    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
+    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo,
+    XFER_UPLOAD_CHUNK_SIZE, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -193,6 +193,7 @@ impl Session {
             camera: Camera::region_center(),
             sit: SitState::NotSitting,
             teleport: TeleportPhase::Idle,
+            pending_handover: None,
             script_grants: BTreeMap::new(),
             taken_controls: TakenControls {
                 consumed: BTreeMap::new(),
@@ -461,10 +462,12 @@ impl Session {
             }
             // The agent has physically crossed a region border; OpenSim signals
             // the handover over the CAPS event queue (not the UDP `CrossedRegion`).
-            // Promote the pre-opened child circuit for the destination to root.
-            "CrossedRegion" if matches!(self.state, SessionState::Active) => {
+            // Promote the pre-opened child circuit for the destination to root
+            // (`begin_crossing` first finalizes/aborts any transfer still in
+            // flight — the corner double-crossing / a racing teleport).
+            "CrossedRegion" => {
                 if let Some((handle, dest, seed)) = crossed_region_from_caps_llsd(body) {
-                    self.promote_child_to_root(dest, RegionHandle(handle), Some(seed), now)?;
+                    self.begin_crossing(dest, RegionHandle(handle), Some(seed), now)?;
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -1009,12 +1012,16 @@ impl Session {
         Ok(())
     }
 
-    /// Hands the circuit over to a teleport destination `dest`: retargets the
-    /// circuit, sends `UseCircuitCode` + `CompleteAgentMovement` (creating the
-    /// child presence then promoting it to root, as a viewer does on
-    /// `TeleportFinish`), records the seed capability, and awaits the
-    /// destination's handshake / `AgentMovementComplete`. No-op unless a teleport
-    /// is in flight.
+    /// Begins a teleport handover to `dest` with **deferred teardown**: opens (or
+    /// reuses) a child circuit to the destination, sends `CompleteAgentMovement`
+    /// on it to ask the destination to make us root, records the pending handover
+    /// (destination seed, region handle, and whether committing will reset the
+    /// world — decided by region-handle adjacency), and stays `Teleporting` with
+    /// the **source still root**. The commit ([`commit_handover`]) happens only on
+    /// the destination's `AgentMovementComplete`; until then nothing is torn down,
+    /// so a lost handshake fails the teleport in place rather than stranding the
+    /// session. No-op unless a teleport is in flight, or for a duplicate
+    /// `TeleportFinish` naming the destination already pending.
     fn begin_handover(
         &mut self,
         dest: SocketAddr,
@@ -1025,96 +1032,189 @@ impl Session {
         if !matches!(self.state, SessionState::Teleporting) {
             return Ok(());
         }
+        // A duplicate `TeleportFinish` for the handover already in flight is a
+        // no-op; one naming a *different* destination re-targets (abort the old
+        // pending handover first, so its freshly-opened circuit is not leaked).
+        if self.pending_handover.as_ref().map(|pending| pending.dest) == Some(dest) {
+            return Ok(());
+        }
+        self.abort_pending_handover();
         // Prefer the destination seed from the `TeleportFinish`; fall back to the
         // one cached from a pre-opened child's `EstablishAgentCommunication`.
-        let seed_capability = seed_capability.or_else(|| self.child_seeds.get(&dest).cloned());
-        // If we already hold a **child-agent circuit** to the destination — a
-        // teleport to a neighbouring region we are already connected to (its map
-        // shows on our minimap, its objects render in-world) — PROMOTE that
-        // circuit: the simulator created the child agent and expects a
-        // `CompleteAgentMovement` on *its* circuit, not a fresh `UseCircuitCode`
-        // (which it would reject, leaving the handshake to never complete — after
-        // the teleport timeout the old circuit is gone and the session drops). A
-        // teleport to a region we have *no* child agent on instead mints a fresh
-        // circuit and retargets.
+        let seed = seed_capability.or_else(|| self.child_seeds.get(&dest).cloned());
+        // Deferred teardown: the destination lives as a **child** circuit until it
+        // confirms our arrival (its `AgentMovementComplete`), so the source region
+        // and all its child circuits stay live throughout. A neighbour we are
+        // already connected to is already a child; a distant region needs one
+        // opened now. Either way we then send `CompleteAgentMovement` on that
+        // child circuit to ask the destination to make us a root agent there.
         //
-        // The promote branch is the teleport counterpart of
-        // `promote_child_to_root` (a crossing) and behaves the same way toward the
-        // **world**: keep the objects / terrain / regions and demote the old root
-        // to a child, so the destination — and the region we left, now a child —
-        // keep streaming without a purge-and-refetch. Only a **distant** teleport
-        // (the fresh branch) discards the source's world, since its local-id
-        // spaces and region are all new. Either way a teleport still unseats and
-        // drops in-world grants below (a crossing keeps the seat).
-        let promoted = if let Some(mut new_root) = self.children.remove(&dest) {
-            tracing::debug!("teleport handover to {dest}: promoting the existing child circuit");
-            new_root.send_complete_agent_movement(now)?;
-            self.child_seeds.remove(&dest);
-            // Demote the old root to a child agent of the new region (like a
-            // crossing): it is a neighbour of the destination, so it keeps
-            // streaming its scene to our now-child circuit rather than being torn
-            // down and refetched. The other children stay open for the same
-            // reason `promote_child_to_root` keeps them.
-            let old_root = self.circuit.replace(new_root);
-            if let Some(old) = old_root {
-                self.children.insert(old.sim_addr, old);
-            }
-            true
+        // Whether committing will reset the world combines two "keep the scene"
+        // signals — reset only when the destination is **neither** already a
+        // child circuit **nor** positionally adjacent:
+        //
+        // - already a child: we are connected and its scene is already streaming,
+        //   so keep it however far away it is. Following a vehicle across several
+        //   regions can leave a still-held child two or three regions off; falling
+        //   off and "catching" it by teleporting there must not clear everything.
+        // - adjacent by region handle: an in-range hop, like a crossing — and, in
+        //   particular, a retry to a neighbour whose child circuit a failed
+        //   teleport just dropped is still in range, so it stays a neighbour
+        //   teleport rather than misfiring as a world-clearing distant jump.
+        //
+        // Only a destination that is both disconnected and out of range resets.
+        // An unknown source handle (no current region) falls back to the child
+        // check alone.
+        let dest_is_child = self.children.contains_key(&dest);
+        let dest_is_adjacent = self
+            .region_handle()
+            .is_some_and(|source| source.is_adjacent_to(region_handle));
+        let world_reset = !dest_is_child && !dest_is_adjacent;
+        // The destination lives as a child circuit until it confirms. A region we
+        // are already connected to is already a child; any other needs one opened
+        // now. Nothing else is torn down here, so a lost handshake is fully
+        // recoverable: the timeout / cancel path ([`abort_pending_handover`])
+        // drops only this pending destination and leaves the agent in the source.
+        if dest_is_child {
+            tracing::debug!("teleport handover to {dest}: reusing the neighbour child circuit");
         } else {
-            tracing::debug!("teleport handover to {dest}: minting a fresh circuit");
-            // A retarget resets the circuit's sequence/ack/seen/timer state to the
-            // new simulator, after which the source check accepts only the
-            // destination. A fresh connection needs a new circuit id — the
-            // destination's region-local ids are a new space, and any scoped id
-            // captured at the source must now fail to resolve.
-            let circuit_id = self.mint_circuit_id();
-            if let Some(circuit) = self.circuit.as_mut() {
-                circuit.id = circuit_id;
-                circuit.retarget(dest, now);
-                circuit.send_use_circuit_code(now)?;
-                circuit.send_complete_agent_movement(now)?;
-            }
-            false
+            tracing::debug!("teleport handover to {dest}: opening a fresh destination circuit");
+            self.open_child_circuit(dest, now)?;
+        }
+        if let Some(child) = self.children.get_mut(&dest) {
+            child.send_complete_agent_movement(now)?;
+        }
+        self.pending_handover = Some(PendingHandover {
+            dest,
+            region_handle,
+            seed,
+            world_reset,
+        });
+        // State stays `Teleporting` (source still root) and the teleport timer
+        // armed by `teleport_to` still guards the handover; on expiry `run_timeout`
+        // aborts the pending destination and fails the teleport in place.
+        Ok(())
+    }
+
+    /// Commit a pending teleport handover once the destination confirms our
+    /// arrival (its `AgentMovementComplete` arrived on its child circuit): promote
+    /// the destination child to root and only **now** tear down the source — a
+    /// neighbour keeps the world (the old root is demoted to a child, like a
+    /// crossing), a distant region clears it — apply the destination seed, unseat
+    /// the agent and drop its in-world grants (attachments cross with it), arm the
+    /// new root's keep-alives, and emit [`Event::RegionChanged`]. A no-op unless a
+    /// handover to exactly `dest` is pending.
+    fn commit_handover(&mut self, dest: SocketAddr, now: Instant) {
+        let Some(pending) = self.pending_handover.take() else {
+            return;
         };
-        if !promoted {
-            // A distant teleport discards the source region's neighbours + world:
-            // the retargeted root and the dropped neighbours leave their cached
-            // objects, terrain and regions stale (new local-id spaces and a new
-            // region at the destination), so start fresh. The driver purges its
-            // scene mirror on the `world_reset` flag below (the clear emits no
-            // per-object removals).
+        if pending.dest != dest {
+            // A stray confirmation from some other circuit: restore the pending
+            // handover untouched.
+            self.pending_handover = Some(pending);
+            return;
+        }
+        let Some(new_root) = self.children.remove(&dest) else {
+            // The destination circuit vanished (e.g. a `DisableSimulator` raced
+            // the confirmation); nothing to promote, so the teleport quietly
+            // fails back to the source region.
+            self.state = SessionState::Active;
+            self.teleport = TeleportPhase::Idle;
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.timers.teleport = None;
+            }
+            self.events.push_back(Event::TeleportFailed {
+                reason: "destination circuit was retired before arrival".to_owned(),
+                alert_info: None,
+            });
+            return;
+        };
+        self.child_seeds.remove(&dest);
+        let old_root = self.circuit.replace(new_root);
+        if pending.world_reset {
+            // Distant teleport: drop the old root and clear the source's world —
+            // its local-id spaces and region are all new at the destination. The
+            // driver purges its scene mirror on the `world_reset` flag below (the
+            // clear emits no per-object removals). Only a genuine positional jump
+            // reaches here (adjacency is checked in `begin_handover`), so the
+            // neighbour circuits being cleared really are out of range.
             self.children.clear();
             self.child_seeds.clear();
             self.objects.clear();
             self.terrain.clear();
             self.regions.clear();
             self.time_dilation.clear();
+        } else {
+            // Neighbour teleport: demote the old root to a child of the new region
+            // and keep the whole world (objects / terrain / regions / neighbours),
+            // exactly like a crossing.
+            if let Some(old) = old_root {
+                self.children.insert(old.sim_addr, old);
+            }
         }
-        if seed_capability.is_some() {
-            self.seed_capability = seed_capability;
+        if pending.seed.is_some() {
+            self.seed_capability = pending.seed;
         }
-        // A teleport unseats the agent: any prior object-sit no longer holds at
-        // the destination, so drop it rather than report a stale seat. (A plain
-        // region *crossing* — `promote_child_to_root` — keeps the seat, since a
-        // vehicle the agent sits on carries it across the border.)
+        // Record the destination region for the (now root) circuit so
+        // `region_handle` is correct — a neighbour already had it from
+        // `EnableSimulator`; a fresh circuit cleared `regions` above and needs it
+        // re-added.
+        if let Some(circuit_id) = self.circuit.as_ref().map(|circuit| circuit.id) {
+            self.regions.insert(circuit_id, pending.region_handle);
+        }
+        // A teleport unseats the agent (a crossing keeps the seat), and leaves its
+        // in-world objects behind — drop their permission grants (attachments
+        // cross with the avatar). Grid-level state (chat / friends / inventory) is
+        // deliberately untouched, as at every region boundary.
         self.sit = SitState::NotSitting;
-        // A real teleport leaves in-world objects behind in the old simulator
-        // (whether a neighbour promote or a distant fresh circuit); drop their
-        // permission grants (attachments cross with the avatar).
         self.drop_inworld_grants();
-        // Deliberately NOT reset here (nor at any region boundary): `chat_sessions`
-        // / `friends` / `online` / `inventory` are grid-level state routed by the
-        // grid's IM / group / presence / inventory services, not the region
-        // simulator, so they survive every teleport and crossing (the inverse of
-        // the region-local `sit` / script grants above). They are seeded empty
-        // only in `Session::new` and die solely when the `Session` is dropped —
-        // see CHAT_ROADMAP B10/A9 and INVENTORY_ROADMAP A10/B3.
-        self.teleport = TeleportPhase::Handover {
-            region_handle,
-            world_reset: !promoted,
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.timers.agent_update = Some(deadline(now, AGENT_UPDATE_INTERVAL));
+            circuit.timers.ping = Some(deadline(now, PING_INTERVAL));
+            circuit.timers.teleport = None;
+            if let Some(throttle) = self.throttle {
+                let _ignored = circuit.send_agent_throttle(&throttle, now);
+            }
+        }
+        self.teleport = TeleportPhase::Idle;
+        self.state = SessionState::Active;
+        if let Some((sim, circuit)) = self
+            .circuit
+            .as_ref()
+            .map(|circuit| (circuit.sim_addr, circuit.id))
+        {
+            self.events.push_back(Event::RegionChanged {
+                region_handle: pending.region_handle,
+                sim,
+                circuit,
+                world_reset: pending.world_reset,
+            });
+        }
+    }
+
+    /// Drop an in-flight teleport handover, leaving the session in its **source**
+    /// region. The destination circuit is removed and its cached objects / coarse
+    /// dots reaped — whether it was a circuit opened *just* for this teleport or a
+    /// pre-existing neighbour child. The simulator
+    /// removes the destination child agent when a teleport to it fails or is
+    /// cancelled (`UpdateAgent failed … Removing child agent …` on OpenSim), so
+    /// keeping it here would strand a **zombie child** the sim no longer tracks —
+    /// the source of the "stale presence on the minimap where there is no region"
+    /// after a failed teleport, and a dead circuit we would go on driving. The
+    /// caller resets `state` / `teleport` / the teleport timer. A no-op when no
+    /// handover is pending. If the destination was a genuine neighbour, the sim
+    /// re-advertises it with `EnableSimulator` (or it is re-established the next
+    /// time we transfer there); we do not fabricate a child the sim has dropped.
+    fn abort_pending_handover(&mut self) {
+        let Some(pending) = self.pending_handover.take() else {
+            return;
         };
-        self.state = SessionState::AwaitingHandshake;
-        Ok(())
+        let circuit_id = self.circuit_id_for(pending.dest);
+        self.children.remove(&pending.dest);
+        self.child_seeds.remove(&pending.dest);
+        if let Some(circuit_id) = circuit_id {
+            self.forget_sim_objects(circuit_id);
+        }
     }
 
     /// Completes the initial login handshake or a teleport handover: arms the
@@ -1147,6 +1247,10 @@ impl Session {
                 world_reset,
             } => {
                 if let Some((sim, circuit)) = self.circuit.as_ref().map(|c| (c.sim_addr, c.id)) {
+                    // Record the destination region for the (now root) circuit so
+                    // `region_handle` is correct after a crossing, mirroring
+                    // `commit_handover` for a teleport.
+                    self.regions.insert(circuit, region_handle);
                     self.events.push_back(Event::RegionChanged {
                         region_handle,
                         sim,
@@ -1209,6 +1313,45 @@ impl Session {
         self.children.insert(sim, child);
         tracing::debug!("opened child-agent circuit to neighbour {sim}");
         Ok(())
+    }
+
+    /// Handle an inbound region crossing (`CrossedRegion`) with **overlap
+    /// safety**. The simulator has physically moved the agent to `dest`, so we
+    /// must promote that region to root — but a previous transfer may still be in
+    /// flight. Finalize or abort it first, then promote:
+    ///
+    /// - `Active`: promote directly (the common case).
+    /// - `AwaitingHandshake`: a previous crossing is still finalizing — force it
+    ///   to complete (we are already root there; only its confirming handshake is
+    ///   late), then promote. This is the classic **double crossing on a vehicle
+    ///   near a region corner**: two `CrossedRegion`s in quick succession.
+    /// - `Teleporting`: a teleport handover is pending, but the sim has moved us
+    ///   across a border — the crossing wins, so abort the pending teleport and
+    ///   promote from a clean `Active` state.
+    /// - login / logging out / closed: ignore.
+    fn begin_crossing(
+        &mut self,
+        dest: SocketAddr,
+        region_handle: RegionHandle,
+        seed: Option<url::Url>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        match self.state {
+            SessionState::Active => {}
+            SessionState::AwaitingHandshake => self.complete_arrival(now),
+            SessionState::Teleporting => {
+                self.abort_pending_handover();
+                if let Some(circuit) = self.circuit.as_mut() {
+                    circuit.timers.teleport = None;
+                }
+                self.teleport = TeleportPhase::Idle;
+                self.state = SessionState::Active;
+            }
+            SessionState::New | SessionState::LoggingOut | SessionState::Closed => {
+                return Ok(());
+            }
+        }
+        self.promote_child_to_root(dest, region_handle, seed, now)
     }
 
     /// Promotes a child-agent circuit at `dest` to the root after the avatar
@@ -1642,6 +1785,14 @@ impl Session {
                 }
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
+            }
+            AnyMessage::AgentMovementComplete(_) => {
+                // The only child circuit we ever send `CompleteAgentMovement` to
+                // is a **pending teleport destination**, so its
+                // `AgentMovementComplete` confirms our arrival there: commit the
+                // deferred handover (promote it to root, tear down the source). A
+                // no-op if `from` is not the pending destination.
+                self.commit_handover(from, now);
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -3094,22 +3245,22 @@ impl Session {
             AnyMessage::CrossedRegion(crossed) => {
                 // The avatar walked across a region border; the source region
                 // hands us the destination's details. Promote the pre-opened
-                // child circuit there to root.
-                if matches!(self.state, SessionState::Active) {
-                    let region = &crossed.region_data;
-                    // IPPORT is big-endian on the wire; the generated decoder
-                    // reads it little-endian, so swap back to host order.
-                    let port = region.sim_port.swap_bytes();
-                    let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(region.sim_ip)), port);
-                    // As in `TeleportFinish`: an empty inline seed falls back to
-                    // the cached child seed during promotion; a non-empty but
-                    // unparsable one is a hard error.
-                    let seed = sl_wire::optional_url_from_wire(
-                        "seed-capability",
-                        String::from_utf8_lossy(&region.seed_capability).as_ref(),
-                    )?;
-                    self.promote_child_to_root(dest, RegionHandle(region.region_handle), seed, now)?;
-                }
+                // child circuit there to root — `begin_crossing` first finalizes
+                // or aborts any transfer still in flight (the corner
+                // double-crossing / a racing teleport).
+                let region = &crossed.region_data;
+                // IPPORT is big-endian on the wire; the generated decoder reads it
+                // little-endian, so swap back to host order.
+                let port = region.sim_port.swap_bytes();
+                let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(region.sim_ip)), port);
+                // As in `TeleportFinish`: an empty inline seed falls back to the
+                // cached child seed during promotion; a non-empty but unparsable
+                // one is a hard error.
+                let seed = sl_wire::optional_url_from_wire(
+                    "seed-capability",
+                    String::from_utf8_lossy(&region.seed_capability).as_ref(),
+                )?;
+                self.begin_crossing(dest, RegionHandle(region.region_handle), seed, now)?;
             }
             AnyMessage::StartPingCheck(ping) => {
                 if let Some(circuit) = self.circuit.as_mut() {
@@ -4486,6 +4637,11 @@ impl Session {
                 .and_then(|c| c.timers.teleport)
                 .is_some_and(|d| now >= d)
         {
+            // A handover in flight left the source region live (deferred
+            // teardown): drop only the pending destination and stay put, so a
+            // lost confirmation fails the teleport in place rather than stranding
+            // the session with its child circuits torn down.
+            self.abort_pending_handover();
             self.state = SessionState::Active;
             self.teleport = TeleportPhase::Idle;
             if let Some(circuit) = self.circuit.as_mut() {
@@ -11443,10 +11599,16 @@ impl Session {
             // A new teleport request supersedes an in-progress one (the reference
             // viewer lets a fresh teleport replace the current one): cancel the old
             // cleanly first — `TeleportCancel` to the simulator, disarm the timeout,
-            // reset the phase to idle — then request the new one from the
-            // now-active state. Without this the second request would be rejected
-            // and the first would linger.
+            // drop the pending destination, reset the phase to idle — then request
+            // the new one from the now-active state. Without this the second
+            // request would be rejected and the first would linger.
             SessionState::Teleporting => self.cancel_teleport(now)?,
+            // A crossing (or login) is still finalizing (`AwaitingHandshake`).
+            // Force it to complete — the destination circuit is already the root
+            // and the confirming handshake was merely lost — then teleport from
+            // the now-`Active` state, so a teleport issued the instant after a
+            // crossing is not spuriously rejected.
+            SessionState::AwaitingHandshake => self.complete_arrival(now),
             _ => return Err(Error::NotActive),
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
@@ -11509,10 +11671,20 @@ impl Session {
     /// Returns [`Error::NoCircuit`] if no circuit is established, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn cancel_teleport(&mut self, now: Instant) -> Result<(), Error> {
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_teleport_cancel(now)?;
+        // Send `TeleportCancel` on the (still-live source) root circuit.
+        self.circuit
+            .as_mut()
+            .ok_or(Error::NoCircuit)?
+            .send_teleport_cancel(now)?;
         if matches!(self.state, SessionState::Teleporting) {
-            circuit.timers.teleport = None;
+            // Deferred teardown kept the source region live: drop only the pending
+            // destination and return to the source, so a cancelled teleport never
+            // strands the session (this is what makes the viewer watchdog's
+            // `CancelTeleport` actually recover a hung handover).
+            self.abort_pending_handover();
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.timers.teleport = None;
+            }
             self.teleport = TeleportPhase::Idle;
             self.state = SessionState::Active;
         }

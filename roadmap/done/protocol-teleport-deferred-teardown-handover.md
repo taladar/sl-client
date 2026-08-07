@@ -2,7 +2,7 @@
 id: protocol-teleport-deferred-teardown-handover
 title: Defer handover teardown until the destination confirms (+ overlap safety)
 topic: protocol
-status: ready
+status: done
 origin: user report + investigation (2026-08-07); user chose the reference-
   faithful "defer teardown" approach over a force-recover timeout
 refs: [protocol-teleport-timeout-strands-child-circuits, test-handover-mock-grid-harness, viewer-seamless-region-handover-objects]

@@ -2062,12 +2062,31 @@ impl AvatarState {
         &mut self,
         object: &Object,
         body: Option<&AvatarBody>,
+        own: Option<AgentKey>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
     ) {
         let agent = AgentKey::from(object.full_id.uuid());
         let scoped = object.scoped_id();
+        // The **own** avatar is authoritative in the root region (the scene
+        // origin) only. A non-root circuit that streams it — most notably the
+        // destination during a deferred-teardown teleport handshake, which begins
+        // streaming our full object as soon as we send `CompleteAgentMovement`,
+        // *before* the commit shifts the origin — reports it in that region's
+        // frame. Applying that update would offset the body by a whole inter-
+        // region delta (`region_offset` below) and the camera, following it, would
+        // leave the visible world: the "own avatar vanishes on a slow / failed
+        // teleport, and snaps back on the next move" bug. Ignore an own-avatar
+        // update whose region is not the current origin; the root region's stream
+        // (and, on commit, the shifted origin) place it correctly.
+        if own == Some(agent)
+            && self
+                .origin
+                .is_some_and(|origin| origin != object.region_handle)
+        {
+            return;
+        }
         // A neighbour region's avatar is offset onto the right terrain, exactly
         // like the coarse dots and world objects (zero for the root region).
         let region_offset = region_offset_bevy(object.region_handle, self.origin);
@@ -2806,6 +2825,7 @@ pub(crate) fn recenter_avatars(
 /// once.
 pub(crate) fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
+    identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
@@ -2836,7 +2856,14 @@ pub(crate) fn update_avatar_objects(
                     } else {
                         state.ever_full_object.insert(agent);
                     }
-                    state.apply_object(object, body, &mut commands, &mut meshes, &mut materials);
+                    state.apply_object(
+                        object,
+                        body,
+                        identity.agent_id,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                    );
                 }
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {

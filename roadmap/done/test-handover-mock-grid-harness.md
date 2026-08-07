@@ -2,7 +2,7 @@
 id: test-handover-mock-grid-harness
 title: Mock-grid simulator harness for deterministic handover/timeout testing
 topic: test
-status: ready
+status: done
 origin: user request (2026-08-07) — timeouts and lost-message races can't be
   deterministically provoked against a real grid
 refs: [protocol-teleport-deferred-teardown-handover, protocol-teleport-timeout-strands-child-circuits]

@@ -367,29 +367,6 @@ impl Circuit {
         }
     }
 
-    /// Re-points the circuit at a new simulator after a teleport, resetting the
-    /// per-circuit sequence/ack/seen/timer state while keeping the agent
-    /// identity and circuit code (both reused across regions).
-    pub(crate) fn retarget(&mut self, sim_addr: SocketAddr, now: Instant) {
-        self.sim_addr = sim_addr;
-        self.next_sequence = SequenceNumber::FIRST;
-        self.next_ping_id = PingId::default();
-        self.outstanding_ping = None;
-        self.pending_acks.clear();
-        self.unacked.clear();
-        self.seen = SeenWindow::default();
-        self.out.clear();
-        self.timers = Timers {
-            inactivity: deadline(now, INACTIVITY_TIMEOUT),
-            ack_flush: None,
-            agent_update: None,
-            ping: None,
-            logout: None,
-            teleport: None,
-            sit: None,
-        };
-    }
-
     /// Allocates the next outgoing sequence number.
     pub(crate) const fn next_sequence(&mut self) -> SequenceNumber {
         let sequence = self.next_sequence;

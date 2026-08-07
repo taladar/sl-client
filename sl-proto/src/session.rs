@@ -867,6 +867,38 @@ enum TeleportPhase {
     },
 }
 
+/// A teleport handover whose destination has been contacted but not yet
+/// confirmed: `CompleteAgentMovement` has gone out on the destination's **child**
+/// circuit, and the session is waiting for the destination's
+/// `AgentMovementComplete` before it commits (promotes the destination to root
+/// and tears down the source).
+///
+/// Deferring the teardown to the confirmation is what keeps a **lost** handshake
+/// from stranding the session: while this is `Some`, the source region and its
+/// child circuits are still fully live, so a timeout/cancel just drops the
+/// pending destination and leaves the agent exactly where it was
+/// (`protocol-teleport-deferred-teardown-handover`).
+#[derive(Debug, Clone)]
+struct PendingHandover {
+    /// The destination simulator's address — a child circuit until commit.
+    dest: SocketAddr,
+    /// The destination region handle (from `TeleportFinish`), for the eventual
+    /// `RegionChanged`.
+    region_handle: RegionHandle,
+    /// The destination's seed capability, applied to the session on commit.
+    seed: Option<url::Url>,
+    /// Whether committing this handover **resets the world**: `false` when the
+    /// destination is kept-in-scene — either already a child circuit (connected,
+    /// streaming) or positionally adjacent — so the old root demotes to a child
+    /// like a crossing; `true` only for a jump that is **both** disconnected and
+    /// out of range, clearing the source's objects / terrain / neighbours for the
+    /// fresh local-id space. Decided in [`Session::begin_handover`]; combining the
+    /// child and adjacency signals is what keeps both a retry to a neighbour whose
+    /// child a failed teleport dropped, and a catch of a still-held child several
+    /// regions away, as neighbour teleports.
+    world_reset: bool,
+}
+
 /// Where the agent is in an object-sit sequence.
 ///
 /// Replaces a bare `sit_requested: bool` with the three distinct phases the
@@ -1040,6 +1072,11 @@ pub struct Session {
     /// sending a `TeleportLocationRequest` and the next region's
     /// `RegionHandshake`).
     teleport: TeleportPhase,
+    /// A teleport handover in flight whose destination has not yet confirmed (see
+    /// [`PendingHandover`]). `Some` only between sending the destination's
+    /// `CompleteAgentMovement` and its `AgentMovementComplete`; the source region
+    /// stays live throughout, so a timeout/cancel leaves the agent in place.
+    pending_handover: Option<PendingHandover>,
     /// The script-permission registry: what the agent has answered each script
     /// (a grant or an explicit deny), keyed by the holding `(object, item)`
     /// pair; a never-asked script is simply absent. Written by
