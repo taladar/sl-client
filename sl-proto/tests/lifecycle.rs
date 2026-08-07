@@ -1795,6 +1795,113 @@ mod test {
         Ok(())
     }
 
+    /// A seamless region crossing on a vehicle keeps **both** the seat and the
+    /// sit-implied in-world script grants (the controls / camera / animation trio),
+    /// unlike a real teleport which clears both (`teleport_clears_seat`,
+    /// `teleport_drops_inworld_grants_keeps_attachment`). This is what lets the
+    /// destination sim's re-grant land without our mirror having spuriously revoked
+    /// the permissions mid-crossing — the crux of the seamless-seated-crossing
+    /// concern (`viewer-seated-region-crossing`).
+    #[test]
+    fn region_crossing_preserves_seat_and_inworld_grants() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Sit on an in-world object (a vehicle) and let the sit complete.
+        let seat = uuid::Uuid::from_u128(0x5EA7_C0DE);
+        let vehicle = object_update(700, 0x5EA7_C0DE, zero_vec());
+        session.handle_datagram(sim_addr(), &server_message(&vehicle, 5, true)?, now)?;
+        session.sit_on(ObjectKey::from(seat), vec3(0.0, 0.0, 0.0), now)?;
+        drain(&mut session)?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&sit_response(seat), 9, false)?,
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        assert_eq!(
+            session.seat(),
+            Some(ObjectKey::from(seat)),
+            "seated on the vehicle before the crossing"
+        );
+
+        // The seat's script holds the sit-implied trio, recorded as an in-world
+        // grant (the seat is not an attachment worn by us).
+        let seat_task = ObjectKey::from(seat);
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5EA7_17E1));
+        let implied = ScriptPermissions(
+            ScriptPermissions::TAKE_CONTROLS
+                | ScriptPermissions::TRACK_CAMERA
+                | ScriptPermissions::TRIGGER_ANIMATION,
+        );
+        session.answer_script_permissions(seat_task, item, implied, None, now)?;
+        drain(&mut session)?;
+        assert!(
+            session
+                .script_grants()
+                .any(|g| g.task_id == seat_task && !g.is_attachment),
+            "the seat's grant is classified in-world"
+        );
+
+        // Pre-open the neighbour and cross the border — the vehicle carries us
+        // (and its seat) across into sim_b.
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        let handle = 0x0003_E900_0003_E800;
+        let crossed = AnyMessage::CrossedRegion(CrossedRegion {
+            agent_data: CrossedRegionAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            region_data: CrossedRegionRegionDataBlock {
+                sim_ip: [127, 0, 0, 1],
+                sim_port: 9001u16.swap_bytes(),
+                region_handle: handle,
+                seed_capability: b"http://x/seatCross\0".to_vec(),
+            },
+            info: CrossedRegionInfoBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&crossed, 10, true)?, now)?;
+        while session.poll_transmit().is_some() {}
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        drain_events(&mut session);
+
+        // The seat survives (no transient unsit on our side)…
+        assert_eq!(
+            session.seat(),
+            Some(ObjectKey::from(seat)),
+            "the crossing keeps the seat"
+        );
+        // …and so do the sit-implied in-world grants (unlike a real teleport).
+        assert_eq!(
+            session.granted_permissions(seat_task, item),
+            implied,
+            "the sit-implied in-world grants survive the crossing"
+        );
+        Ok(())
+    }
+
     #[test]
     fn unrequested_sit_response_is_ignored() -> Result<(), TestError> {
         let now = Instant::now();
@@ -12531,6 +12638,85 @@ mod test {
         Ok(())
     }
 
+    /// A teleport to a **neighbour we already have a child-agent circuit to**
+    /// promotes that circuit (a `CompleteAgentMovement` on it, **no** fresh
+    /// `UseCircuitCode`) rather than minting a new one — the simulator created the
+    /// child agent and expects it promoted, so a fresh circuit would be rejected
+    /// and the handshake would fail (the live "teleport into a neighbouring
+    /// region disconnects" bug). Contrast `teleport_handover_rebinds_circuit_to_new_sim`,
+    /// which mints a fresh circuit for a region with no pre-opened child.
+    #[test]
+    fn teleport_to_neighbour_promotes_its_child_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Pre-open the neighbour's child-agent circuit (as EnableSimulator does).
+        enable_neighbour_b(&mut session, 9, now)?;
+        // Drop the child's open burst (its UseCircuitCode + AgentUpdate).
+        while session.poll_transmit().is_some() {}
+
+        // Teleport to that neighbour.
+        let handle = 0x0003_E900_0003_E800;
+        session.teleport_to(
+            RegionHandle(handle),
+            region_coords(10.0, 20.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+
+        // The destination `TeleportFinish` points at sim_b — the child we hold.
+        session.handle_datagram(sim_addr(), &teleport_finish_to_sim_b(handle, 2)?, now)?;
+
+        // The handover promotes the existing child: a CompleteAgentMovement goes to
+        // sim_b, but NO fresh UseCircuitCode (already sent when the child opened).
+        let mut to_b = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_b() {
+                to_b.push(decode(&transmit)?);
+            }
+        }
+        assert!(
+            to_b.iter()
+                .any(|m| matches!(m, AnyMessage::CompleteAgentMovement(_))),
+            "expected a CompleteAgentMovement to the neighbour, got {to_b:?}"
+        );
+        assert!(
+            !to_b
+                .iter()
+                .any(|m| matches!(m, AnyMessage::UseCircuitCode(_))),
+            "the pre-opened child must be promoted, not re-opened with a fresh \
+             UseCircuitCode, got {to_b:?}"
+        );
+
+        // The destination handshake then completes the teleport into RegionChanged.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 20.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: handle,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"x\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::RegionChanged { .. })),
+            "the promoted handover completes into a RegionChanged"
+        );
+        Ok(())
+    }
+
     #[test]
     fn teleport_failed_returns_to_active() -> Result<(), TestError> {
         let now = Instant::now();
@@ -12584,6 +12770,49 @@ mod test {
             vec3(1.0, 0.0, 0.0),
             now,
         )?;
+        Ok(())
+    }
+
+    /// A new teleport request while one is already in flight **supersedes** it:
+    /// the old teleport is cancelled (a `TeleportCancel` reaches the sim) and the
+    /// new `TeleportLocationRequest` is sent, rather than the second request being
+    /// rejected — the reference viewer's "a fresh teleport replaces the current
+    /// one" behaviour, and what keeps a rapid double-click-teleport from stalling
+    /// on an earlier still-pending one.
+    #[test]
+    fn teleport_supersedes_an_in_progress_one() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // A first teleport is in flight.
+        session.teleport_to(
+            RegionHandle(0x0003_E800_0003_E900),
+            region_coords(10.0, 20.0, 30.0),
+            vec3(1.0, 0.0, 0.0),
+            now,
+        )?;
+        drain(&mut session)?;
+
+        // A second request while still teleporting supersedes the first.
+        session.teleport_to(
+            RegionHandle(0x0003_E900_0003_E800),
+            region_coords(40.0, 50.0, 60.0),
+            vec3(0.0, 1.0, 0.0),
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::TeleportCancel(_))),
+            "the superseded teleport should be cancelled, got {sent:?}"
+        );
+        assert!(
+            sent.iter()
+                .any(|m| matches!(m, AnyMessage::TeleportLocationRequest(_))),
+            "the new teleport request should be sent, got {sent:?}"
+        );
         Ok(())
     }
 

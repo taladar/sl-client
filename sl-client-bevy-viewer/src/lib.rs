@@ -54,6 +54,7 @@ mod chat_input;
 mod conversations;
 mod coords;
 mod diagnostics;
+mod double_click_teleport;
 mod edit_contents;
 mod edit_create;
 mod edit_link;
@@ -175,6 +176,7 @@ mod snapshot_floater;
 mod spacenav;
 mod stand_stop_button;
 mod status_bar;
+mod teleport_progress;
 mod terrain;
 mod texture_anim;
 mod textures;
@@ -1026,6 +1028,8 @@ fn run_session(
     // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
     // while in flycam.
     .add_plugins(StandStopButtonPlugin)
+    .add_plugins(crate::teleport_progress::TeleportProgressPlugin)
+    .add_plugins(crate::double_click_teleport::DoubleClickTeleportPlugin)
     // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
     // which entries a given pie holds is per-domain and belongs with the domain.
     .add_plugins(PieMenuPlugin)

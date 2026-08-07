@@ -23,10 +23,12 @@
 //! rasterise into the image). Search results are rows in a side panel; picking
 //! one recentres the map on that region.
 //!
-//! Deliberate scope edges, owned by follow-up tasks: double-click teleport and
-//! the tracking hand-off (`viewer-world-map-tracking-teleport`) — the shared
-//! [`MapTracking`] beacon is *drawn* here when another surface set one, but
-//! nothing sets or clears it from this floater yet.
+//! Double-clicking a region **teleports** there (`viewer-world-map-tracking-teleport`):
+//! it places the shared [`MapTracking`] beacon at the clicked spot (unless
+//! already tracking) and issues the teleport through the shared
+//! [`issue_teleport`] backend, so the map, minimap, and in-world double-click all
+//! drive the same teleport + progress path. A single click still only selects the
+//! region (feeding the X/Y/Z fields and the Teleport button).
 
 use std::collections::HashMap;
 
@@ -53,6 +55,7 @@ use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::minimap::{MapTracking, TrackTarget};
 use crate::minimap_math::{self, REGION_WIDTH_METRES, Rgba, Surface};
 use crate::settings::{AccountContext, ViewerSettings};
+use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -299,6 +302,8 @@ struct WorldMapState {
     pending_local: Option<(u8, u8)>,
     /// The cursor position at the last primary press (click-vs-drag test).
     press_cursor: Option<Vec2>,
+    /// The time and cursor of the last single click, for double-click detection.
+    last_click: Option<(f64, Vec2)>,
 }
 
 impl Default for WorldMapState {
@@ -332,6 +337,7 @@ impl Default for WorldMapState {
             selected_local: (128, 128, 0),
             pending_local: None,
             press_cursor: None,
+            last_click: None,
         }
     }
 }
@@ -2038,10 +2044,25 @@ fn on_world_map_press(press: On<Pointer<Press>>, mut state: ResMut<WorldMapState
 /// still reads as a click (above it, it was a pan drag).
 const CLICK_SLOP: f32 = 4.0;
 
+/// The maximum interval (seconds) between the two clicks of a map double-click.
+const WORLD_MAP_DOUBLE_CLICK_SECONDS: f64 = 0.4;
+
+/// The maximum cursor travel (pixels) between the two clicks of a map
+/// double-click.
+const WORLD_MAP_DOUBLE_CLICK_SLOP: f32 = 6.0;
+
 /// A primary click on the map selects the location under the cursor: the
 /// region plus its region-local coordinates, which the X/Y fields take over
 /// (the reference's map click driving the location spinners).
-fn on_world_map_click(click: On<Pointer<Click>>, mut state: ResMut<WorldMapState>) {
+fn on_world_map_click(
+    click: On<Pointer<Click>>,
+    time: Res<Time>,
+    mut state: ResMut<WorldMapState>,
+    model: Res<WorldMapModel>,
+    mut tracking: ResMut<MapTracking>,
+    mut commands: MessageWriter<SlCommand>,
+    mut begin: MessageWriter<BeginTeleportFlow>,
+) {
     if click.button != PointerButton::Primary {
         return;
     }
@@ -2066,8 +2087,78 @@ fn on_world_map_click(click: On<Pointer<Click>>, mut state: ResMut<WorldMapState
         let out = clamped as u8;
         out
     };
+    let local_x = local(east, grid_x);
+    let local_y = local(north, grid_y);
+    // A single click selects the region (feeding the X/Y/Z fields); a
+    // double-click also tracks and teleports, matching the minimap.
     state.selected = Some((grid_x, grid_y));
-    state.pending_local = Some((local(east, grid_x), local(north, grid_y)));
+    state.pending_local = Some((local_x, local_y));
+
+    let now = time.elapsed_secs_f64();
+    let double = state.last_click.is_some_and(|(at, position)| {
+        now - at <= WORLD_MAP_DOUBLE_CLICK_SECONDS
+            && position.distance(cursor) <= WORLD_MAP_DOUBLE_CLICK_SLOP
+    });
+    if !double {
+        state.last_click = Some((now, cursor));
+        return;
+    }
+    state.last_click = None;
+
+    // Place a tracking beacon at the clicked spot first (unless already
+    // tracking), as the reference does before a map teleport.
+    if tracking.target.is_none() {
+        tracking.target = Some(TrackTarget::Location {
+            east,
+            north,
+            up: 0.0,
+        });
+    }
+
+    // Teleport to the clicked point (altitude 0 → the destination ground, which
+    // is all the map knows), aimed from the agent toward the target.
+    let handle = RegionHandle::from_grid(grid_x, grid_y);
+    let position = RegionCoordinates::new(f32::from(local_x), f32::from(local_y), 0.0);
+    let look_at = map_look_at(state.agent, east, north);
+    let label = model
+        .regions
+        .get(&(grid_x, grid_y))
+        .and_then(|info| info.name.as_ref().map(ToString::to_string))
+        .unwrap_or_else(|| format!("({grid_x}, {grid_y})"));
+    issue_teleport(
+        &mut commands,
+        &mut begin,
+        TeleportTarget {
+            region_handle: handle,
+            position,
+            look_at,
+        },
+        Some(label),
+    );
+}
+
+/// A level arrival look-at aimed from the agent's global position toward a target
+/// global position, or east when the agent's position is unknown or coincident.
+fn map_look_at(agent: Option<(f64, f64)>, target_east: f64, target_north: f64) -> Vector {
+    let default = Vector {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let Some((agent_east, agent_north)) = agent else {
+        return default;
+    };
+    let de = target_east - agent_east;
+    let dn = target_north - agent_north;
+    let length = de.hypot(dn);
+    if length <= 0.001 {
+        return default;
+    }
+    Vector {
+        x: world_map_math::narrow_f64(de / length),
+        y: world_map_math::narrow_f64(dn / length),
+        z: 0.0,
+    }
 }
 
 /// A primary drag pans the map (the world map has no auto-centre; plain drag,
@@ -2453,6 +2544,7 @@ fn handle_world_map_actions(
     model: Res<WorldMapModel>,
     clipboard: Res<WorldMapClipboard>,
     mut commands: MessageWriter<SlCommand>,
+    mut begin: MessageWriter<BeginTeleportFlow>,
 ) {
     for action in actions.read() {
         if action.element != WORLD_MAP_ELEMENT {
@@ -2467,15 +2559,29 @@ fn handle_world_map_actions(
             "teleport-selected" => {
                 if let Some((grid_x, grid_y)) = state.selected {
                     let (x, y, z) = state.selected_local;
-                    commands.write(SlCommand(Command::Teleport {
-                        region_handle: RegionHandle::from_grid(grid_x, grid_y),
-                        position: RegionCoordinates::new(f32::from(x), f32::from(y), f32::from(z)),
-                        look_at: Vector {
-                            x: 1.0,
-                            y: 0.0,
-                            z: 0.0,
+                    let label = model
+                        .regions
+                        .get(&(grid_x, grid_y))
+                        .and_then(|info| info.name.as_ref().map(ToString::to_string))
+                        .unwrap_or_else(|| format!("({grid_x}, {grid_y})"));
+                    issue_teleport(
+                        &mut commands,
+                        &mut begin,
+                        TeleportTarget {
+                            region_handle: RegionHandle::from_grid(grid_x, grid_y),
+                            position: RegionCoordinates::new(
+                                f32::from(x),
+                                f32::from(y),
+                                f32::from(z),
+                            ),
+                            look_at: Vector {
+                                x: 1.0,
+                                y: 0.0,
+                                z: 0.0,
+                            },
                         },
-                    }));
+                        Some(label),
+                    );
                 }
             }
             "copy-slurl" => {

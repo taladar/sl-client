@@ -53,3 +53,20 @@ What this task is:
 
 Reference (Firestorm, read-only): `LLAgent` sit / crossing handling, the vehicle
 region-crossing path; `process_avatar_sit_response` re-grant flow.
+
+## Progress (2026-08-07)
+
+The **client-side invariant is pinned by a test**
+(`sl-proto` `region_crossing_preserves_seat_and_inworld_grants`): a crossing
+keeps `Session::seat()` **and** the sit-implied in-world script grants (the
+controls / camera / animation trio), unlike a real teleport which clears both
+(`teleport_clears_seat`, `teleport_drops_inworld_grants_keeps_attachment`). So
+our mirror does not spuriously revoke the permissions mid-crossing — the
+destination sim's re-grant lands cleanly.
+
+Still **pending live verification on aditi**: OpenSim has
+**no scripted vehicle** to sit on and carry across a border, so the end-to-end
+seated-vehicle crossing (seamless placement, no permission churn) can only be
+exercised on aditi — to be done after the rest of the teleport/crossing work is
+solid. (A separate walk-crossing movement lockup surfaced live —
+[[viewer-crossing-movement-locks-up]].)

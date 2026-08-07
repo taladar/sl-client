@@ -2,7 +2,7 @@
 id: viewer-double-click-teleport
 title: In-world double-click teleport
 topic: viewer
-status: ready
+status: done
 origin: Vintage-parity coverage audit (2026-07-22); split from viewer-click-to-walk-autopilot
 blocked_by: [viewer-input-action-map]
 refs: [viewer-autopilot-click-to-walk]
@@ -37,3 +37,25 @@ Builds on: the picking path (`avatar_pick.rs` / object picking) and the
 existing teleport plumbing (`protocol-10`).
 
 Deps: [[viewer-input-action-map]] (the gesture binding).
+
+## Done (2026-08-07)
+
+New `double_click_teleport.rs`: a persisted `DoubleClickAction` setting
+(`0` nothing / `1` teleport / `2` walk), the reference **Ctrl+Shift+D** hotkey
+(the `menu_viewer.xml` "DoubleClick Teleport" `Advanced.SetDoubleClickAction
+teleport_to` shortcut) toggling it on/off, and a double-click detector with the
+same UI / HUD occlusion + `Alt` guards as the world touch pick. The picked
+point is resolved to the containing region (current **or** a visible neighbour)
+via the shared `region_handle_at` / `narrow` map math and issued through the
+shared `issue_teleport` backend, so it drives the same teleport + progress path
+as the minimap and world map. Verified live on OpenSim (in-region and
+cross-region).
+
+Scope landed vs. deferred: the **teleport** arm + the setting + the hotkey (the
+gesture detection must not be gated on keyboard focus — a mouse gesture is
+independent of it, fixed live). The trigger fires on **terrain only** (an
+object's script touch-handlers are not visible client-side, so bare ground is
+the safe subset) — object-surface teleport is a follow-up. The **walk** arm is a
+stub routing to [[viewer-autopilot-click-to-walk]]. Objects not rebasing on a
+cross-region arrival is the separate
+[[viewer-seamless-region-handover-objects]].

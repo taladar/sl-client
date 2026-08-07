@@ -215,6 +215,7 @@ impl ViewerSettings {
         };
         crate::spacenav::register_settings(&mut settings);
         crate::minimap::register_settings(&mut settings);
+        crate::double_click_teleport::register_settings(&mut settings);
         crate::parcel_borders::register_settings(&mut settings);
         crate::world_map::register_settings(&mut settings);
         crate::search::register_settings(&mut settings);

@@ -1025,20 +1025,43 @@ impl Session {
         if !matches!(self.state, SessionState::Teleporting) {
             return Ok(());
         }
-        // Retarget synchronously: it resets the circuit's sequence/ack/seen/timer
-        // state to the new simulator, after which the source check accepts only
-        // the destination. A retarget is a fresh connection to a different region
-        // (the destination had no pre-opened child), so mint a new circuit id —
-        // the destination's region-local ids are a new space, and any scoped id
-        // captured at the source must now fail to resolve.
-        let circuit_id = self.mint_circuit_id();
-        if let Some(circuit) = self.circuit.as_mut() {
-            circuit.id = circuit_id;
-            circuit.retarget(dest, now);
-            circuit.send_use_circuit_code(now)?;
-            circuit.send_complete_agent_movement(now)?;
+        // Prefer the destination seed from the `TeleportFinish`; fall back to the
+        // one cached from a pre-opened child's `EstablishAgentCommunication`.
+        let seed_capability = seed_capability.or_else(|| self.child_seeds.get(&dest).cloned());
+        // If we already hold a **child-agent circuit** to the destination — a
+        // teleport to a neighbouring region we are already connected to (its map
+        // shows on our minimap, its objects render in-world) — PROMOTE that
+        // circuit: the simulator created the child agent and expects a
+        // `CompleteAgentMovement` on *its* circuit, not a fresh `UseCircuitCode`
+        // (which it would reject, leaving the handshake to never complete — after
+        // the teleport timeout the old circuit is gone and the session drops). A
+        // teleport to a region we have *no* child agent on instead mints a fresh
+        // circuit and retargets. (This is the teleport counterpart of
+        // `promote_child_to_root`; the difference is a teleport still discards the
+        // source's neighbours / caches / seat below, where a crossing keeps them.)
+        if let Some(mut new_root) = self.children.remove(&dest) {
+            tracing::debug!("teleport handover to {dest}: promoting the existing child circuit");
+            new_root.send_complete_agent_movement(now)?;
+            // The teleport leaves the old root behind (a crossing keeps it as a
+            // child; a teleport does not), so replacing simply drops it.
+            self.circuit = Some(new_root);
+        } else {
+            tracing::debug!("teleport handover to {dest}: minting a fresh circuit");
+            // A retarget resets the circuit's sequence/ack/seen/timer state to the
+            // new simulator, after which the source check accepts only the
+            // destination. A fresh connection needs a new circuit id — the
+            // destination's region-local ids are a new space, and any scoped id
+            // captured at the source must now fail to resolve.
+            let circuit_id = self.mint_circuit_id();
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.id = circuit_id;
+                circuit.retarget(dest, now);
+                circuit.send_use_circuit_code(now)?;
+                circuit.send_complete_agent_movement(now)?;
+            }
         }
-        // Any child circuits were neighbours of the source region; drop them.
+        // The remaining child circuits were neighbours of the *source* region; a
+        // teleport discards them (the destination re-announces its own neighbours).
         self.children.clear();
         self.child_seeds.clear();
         // The retargeted root and the dropped neighbours leave their cached
@@ -1157,6 +1180,7 @@ impl Session {
         // one interval from now).
         child.timers.ping = Some(deadline(now, PING_INTERVAL));
         self.children.insert(sim, child);
+        tracing::debug!("opened child-agent circuit to neighbour {sim}");
         Ok(())
     }
 
@@ -2950,13 +2974,27 @@ impl Session {
                 });
             }
             AnyMessage::TeleportStart(_) => {
-                self.events.push_back(Event::TeleportStarted);
+                // Only surface a teleport WE requested (state `Teleporting`). A
+                // seamless region **crossing** is a teleport under the hood, and
+                // OpenSim sends `TeleportStart`/`TeleportProgress` for it too — but
+                // it must stay invisible (no progress UI), so a crossing's teleport
+                // messages are ignored here (the crossing runs via
+                // `CrossedRegion` → `promote_child_to_root`). This mirrors the
+                // reference viewer, which only shows the teleport screen for a
+                // teleport it initiated.
+                if matches!(self.state, SessionState::Teleporting) {
+                    self.events.push_back(Event::TeleportStarted);
+                } else {
+                    tracing::debug!("ignoring TeleportStart outside a requested teleport (crossing)");
+                }
             }
             AnyMessage::TeleportProgress(progress) => {
-                self.events.push_back(Event::TeleportProgress {
-                    message: String::from_utf8_lossy(&progress.info.message).into_owned(),
-                    teleport_flags: progress.info.teleport_flags,
-                });
+                if matches!(self.state, SessionState::Teleporting) {
+                    self.events.push_back(Event::TeleportProgress {
+                        message: String::from_utf8_lossy(&progress.info.message).into_owned(),
+                        teleport_flags: progress.info.teleport_flags,
+                    });
+                }
             }
             AnyMessage::TeleportLocal(_) => {
                 // An intra-region teleport: no new circuit, just resume activity.
@@ -11345,11 +11383,16 @@ impl Session {
     /// [`Event::RegionChanged`]; on failure it emits [`Event::TeleportFailed`]
     /// and stays connected to the current region.
     ///
+    /// If a teleport is already in progress, this **supersedes** it: the
+    /// in-flight teleport is cancelled ([`Session::cancel_teleport`]) before the
+    /// new one is requested, matching the reference viewer's "a new teleport
+    /// replaces the current one" behaviour.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::NotActive`] if the session is not in the active state,
-    /// [`Error::NoCircuit`] if no circuit is established, or [`Error::Wire`] if
-    /// the request fails to encode.
+    /// Returns [`Error::NotActive`] if the session is neither active nor already
+    /// teleporting (e.g. mid-handover), [`Error::NoCircuit`] if no circuit is
+    /// established, or [`Error::Wire`] if the request fails to encode.
     pub fn teleport_to(
         &mut self,
         region_handle: RegionHandle,
@@ -11357,8 +11400,16 @@ impl Session {
         look_at: Vector,
         now: Instant,
     ) -> Result<(), Error> {
-        if !matches!(self.state, SessionState::Active) {
-            return Err(Error::NotActive);
+        match self.state {
+            SessionState::Active => {}
+            // A new teleport request supersedes an in-progress one (the reference
+            // viewer lets a fresh teleport replace the current one): cancel the old
+            // cleanly first — `TeleportCancel` to the simulator, disarm the timeout,
+            // reset the phase to idle — then request the new one from the
+            // now-active state. Without this the second request would be rejected
+            // and the first would linger.
+            SessionState::Teleporting => self.cancel_teleport(now)?,
+            _ => return Err(Error::NotActive),
         }
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         // The wire `TeleportLocationRequest` carries a plain vector; unwrap the

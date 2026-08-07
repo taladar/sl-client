@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 241 |
+| ready | 243 |
 | blocked | 95 |
-| in-progress | 10 |
-| bugs | 14 |
-| done | 717 |
+| in-progress | 11 |
+| bugs | 16 |
+| done | 723 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1165** |
+| **total** | **1176** |
 
 ## ideas (58)
 
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (241)
+## ready (243)
 
 ### protocol
 
@@ -295,13 +295,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
 - [`viewer-derender-blacklist`](ready/viewer-derender-blacklist.md) — Derender +
   asset blacklist (blocked by `viewer-object-context-menu` (done))
+- [`viewer-disconnect-screen`](ready/viewer-disconnect-screen.md) — Disconnect
+  screen (greyscale + error dialog) instead of closing the window
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
   display name (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-do-not-disturb-away`](ready/viewer-do-not-disturb-away.md) — Away /
   auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
   `viewer-chat-input-bar` (done))
-- [`viewer-double-click-teleport`](ready/viewer-double-click-teleport.md) —
-  In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-draw-distance-stepping`](ready/viewer-draw-distance-stepping.md) —
   Progressive draw-distance ramp after teleport
 - [`viewer-edit-attachment-behavior`](ready/viewer-edit-attachment-behavior.md)
@@ -436,6 +436,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-pie-multi-select-take`](ready/viewer-object-pie-multi-select-take.md)
   — Object pie multi-selection take slices (blocked by
   `viewer-object-selection-core` (done))
+- [`viewer-object-ping-forward-interpolation`](ready/viewer-object-ping-forward-interpolation.md)
+  — Nudge dead-reckoned objects forward by half the ping (sPingInterpolate
+  parity)
 - [`viewer-object-rezzing`](ready/viewer-object-rezzing.md) — Object rezzing
   from inventory (blocked by `viewer-object-selection-core` (done),
   `viewer-inventory-context-actions` (done))
@@ -589,6 +592,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
+  — Apply scripted follow-camera parameters (llSetCameraParams)
+- [`viewer-seamless-region-handover-objects`](ready/viewer-seamless-region-handover-objects.md)
+  — Seamless region handover for world objects (neighbour render + rebase, not
+  purge)
 - [`viewer-seated-region-crossing`](ready/viewer-seated-region-crossing.md) —
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
@@ -609,9 +617,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatar animations (+ revoke variant)
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
-- [`viewer-teleport-flow-progress`](ready/viewer-teleport-flow-progress.md) —
-  Teleport flow — progress screen & arrival (blocked by
-  `viewer-ui-notification-host` (done))
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
@@ -984,7 +989,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-map-tracking-teleport`](blocked/viewer-world-map-tracking-teleport.md)
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render`,
-  `viewer-teleport-flow-progress`)
+  `viewer-teleport-flow-progress` (done))
 - [`viewer-world-pie-menu-reactions`](blocked/viewer-world-pie-menu-reactions.md)
   — Right-click reactions per world target class (blocked by
   `viewer-world-test-harness`)
@@ -996,10 +1001,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (10)
+## in-progress (11)
 
 ### viewer
 
+- [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
+  — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
+  the sim reacts)
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -1023,7 +1031,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (14)
+## bugs (16)
 
 ### protocol
 
@@ -1035,13 +1043,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
-- [`viewer-avatar-dead-reckoning-translation-rubberband`](bugs/viewer-avatar-dead-reckoning-translation-rubberband.md)
-  — Ease the avatar's rendered translation toward truth (dead-reckoning
-  rubberband)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
+- [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
+  — Movement locks up after a region crossing (stand-up anim, esp. onto lower
+  terrain)
+- [`viewer-crossing-stale-minimap-self-dot`](bugs/viewer-crossing-stale-minimap-self-dot.md)
+  — Stale own-avatar dot left in the old region on the minimap after a crossing
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
@@ -1051,11 +1061,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   oracle at scale)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
+- [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
+  Minimap other-avatar dots are red, not green like the reference
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-physical-object-motion-not-smooth`](bugs/viewer-physical-object-motion-not-smooth.md)
-  — Physical object (vehicle) motion is not as smooth as it should be between
-  updates
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1064,8 +1073,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-stuck-low-lod`](bugs/viewer-texture-stuck-low-lod.md) — A
   texture can stay stuck at a low-res prefix and never upgrade to a finer level
   that exists
+- [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
+  — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (717)
+## done (723)
 
 ### protocol
 
@@ -1213,6 +1224,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))
+- [`viewer-avatar-dead-reckoning-translation-rubberband`](done/viewer-avatar-dead-reckoning-translation-rubberband.md)
+  — Ease the avatar's rendered translation toward truth (dead-reckoning
+  rubberband)
 - [`viewer-avatar-mesh-accurate-pick`](done/viewer-avatar-mesh-accurate-pick.md)
   — Mesh-accurate avatar picking (replace the bounding-box approximation)
   (blocked by `viewer-avatar-context-menu` (done))
@@ -1285,6 +1299,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
+  In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))
@@ -1787,6 +1803,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host` (done))
 - [`viewer-phase-31-general-physics`](done/viewer-phase-31-general-physics-phase-31-general-physics-foundation-avian3d.md)
   — Phase 31 — General physics foundation (avian3d)
+- [`viewer-physical-object-motion-not-smooth`](done/viewer-physical-object-motion-not-smooth.md)
+  — Physical object (vehicle) motion is not as smooth as it should be between
+  updates
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
@@ -1905,6 +1924,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML
   settings file with comments and nested sections (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-sit-camera-vehicle-frame-lag`](done/viewer-sit-camera-vehicle-frame-lag.md)
+  — Scripted sit camera lags a moving vehicle by a frame (wobble in the driver's
+  view)
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)
@@ -1941,6 +1963,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Sun disc renders grey on aditi (EEP sky needs sky_hdr_scale)
 - [`viewer-table-cell-ellipsis`](done/viewer-table-cell-ellipsis.md) — Truncate
   overflowing table cells with a locale-aware ellipsis
+- [`viewer-teleport-flow-progress`](done/viewer-teleport-flow-progress.md) —
+  Teleport flow — progress screen & arrival (blocked by
+  `viewer-ui-notification-host` (done))
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
@@ -2041,6 +2066,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
+- [`viewer-world-map-double-click-teleport`](done/viewer-world-map-double-click-teleport.md)
+  — World-map double-click teleport + tracking marker
 - [`viewer-world-map-floater`](done/viewer-world-map-floater.md) — World-map
   floater — surface, zoom & region tiles (blocked by `viewer-ui-widget-scaffold`
   (done))

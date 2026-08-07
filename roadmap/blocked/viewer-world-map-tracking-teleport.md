@@ -24,3 +24,12 @@ render, and the teleport progress flow.
 
 Deps: [[viewer-world-map-floater]], [[viewer-beacons-beam-render]],
 [[viewer-teleport-flow-progress]].
+
+## Partial (2026-08-07)
+
+The **teleport + map-marker** half landed as
+[[viewer-world-map-double-click-teleport]] (done): double-click a region → drop
+the `MapTracking` beacon + teleport through the shared backend. What remains
+here (still blocked on [[viewer-beacons-beam-render]]): the **in-world tracking
+beam** pointed at the tracked point. This task stays blocked until the beam
+render exists.

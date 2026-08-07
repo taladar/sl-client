@@ -695,6 +695,21 @@ fn bevy_rotation_of(motion: &MotionState) -> Quat {
 /// standing lag.
 const ROTATION_SMOOTHING_TAU_SECS: f32 = 0.08;
 
+/// The time constant (seconds) for easing the avatar anchor's rendered
+/// **translation** toward the authoritative / dead-reckoned position, the
+/// translation counterpart of [`ROTATION_SMOOTHING_TAU_SECS`]. Kept short (~100 ms)
+/// so the own avatar's rendered position stays responsive to input while the
+/// per-update correction that used to hard-snap (the dead-reckoning rubberband) is
+/// spread across a few frames instead of jumping in one.
+const TRANSLATION_SMOOTHING_TAU_SECS: f32 = 0.1;
+
+/// The distance (metres) beyond which a fresh authoritative avatar position is
+/// **snapped** rather than eased: a region crossing's 256 m rebase or a teleport
+/// must not glide across, exactly as the object path snaps past
+/// [`OBJECT_SNAP_DISTANCE_M`]. Region-scale, so ordinary per-update prediction
+/// error (sub-metre to a few metres) always eases.
+const TRANSLATION_SNAP_DISTANCE_M: f32 = 32.0;
+
 /// The framerate-independent exponential-smoothing blend factor for a frame of
 /// length `dt` seconds and time constant `tau_secs` (`1 - e^(-dt/τ)`). A
 /// non-positive `dt` blends fully (snap) so a paused / first frame cannot stall.
@@ -710,6 +725,30 @@ fn smoothing_alpha(dt: f32, tau_secs: f32) -> f32 {
 /// non-positive `dt` blends fully (snap) so a paused / first frame cannot stall.
 fn rotation_smoothing_alpha(dt: f32) -> f32 {
     smoothing_alpha(dt, ROTATION_SMOOTHING_TAU_SECS)
+}
+
+/// The exponential-smoothing blend factor for a frame of length `dt` seconds, the
+/// framerate-independent easing of the rendered translation toward the
+/// authoritative / dead-reckoned position.
+fn translation_smoothing_alpha(dt: f32) -> f32 {
+    smoothing_alpha(dt, TRANSLATION_SMOOTHING_TAU_SECS)
+}
+
+/// The next eased rendered anchor translation, given the last `rendered`
+/// position, the current authoritative/dead-reckoned `target`, whether a region
+/// crossing occurred this frame, and the frame's easing `alpha`. Called every
+/// frame (the ease is continuous, not update-gated).
+///
+/// Snaps (returns `target`) across a region crossing or any region-scale jump
+/// (a teleport / 256 m rebase) so the world does not glide across it; otherwise
+/// eases from `rendered` toward `target`, spreading an ordinary per-update
+/// prediction correction over a few frames instead of the visible hard snap.
+fn eased_translation(rendered: Vec3, target: Vec3, region_crossed: bool, alpha: f32) -> Vec3 {
+    if region_crossed || target.distance(rendered) > TRANSLATION_SNAP_DISTANCE_M {
+        target
+    } else {
+        rendered.lerp(target, alpha)
+    }
 }
 
 /// Ease the avatar anchor's rendered orientation toward its current authoritative /
@@ -1250,11 +1289,31 @@ pub(crate) struct AvatarInterp {
     /// `ObjectUpdate`s echoing the client-driven `SetRotation` (P31.5), so without
     /// this easing a turn snaps between those updates while translation stays smooth.
     rendered_rotation: Quat,
+    /// The anchor **translation** actually written this frame (Bevy space,
+    /// including the R23 root-drop offset baked in by [`apply_object`](crate::avatars)),
+    /// eased toward the authoritative / dead-reckoned position each update rather
+    /// than snapped to it. This is the translation counterpart of
+    /// [`rendered_rotation`](Self::rendered_rotation): on each terse `ObjectUpdate`
+    /// the authoritative position jumps a little (fast motion, sparse updates), and
+    /// snapping the anchor to it made the world visibly shake against a rigid
+    /// follow camera — easing spreads the correction across a few frames. A
+    /// region crossing / teleport still snaps (see [`TRANSLATION_SNAP_DISTANCE_M`]).
+    rendered_translation: Vec3,
+    /// The **authoritative / dead-reckoned** anchor translation (Bevy space, with
+    /// the root-drop offset) that [`rendered_translation`](Self::rendered_translation)
+    /// eases toward every frame: captured from the anchor on each server update and
+    /// advanced by the prediction delta between updates. Tracking it separately (vs.
+    /// easing only on update frames) is what lets a short teleport that leaves the
+    /// avatar standing still converge fully to the destination instead of freezing
+    /// part-way once updates stop arriving.
+    target_translation: Vec3,
 }
 
 impl AvatarInterp {
-    /// Seed the interpolation state from an authoritative update at time `now`.
-    fn seeded(motion: &AvatarMotion, now: f64) -> Self {
+    /// Seed the interpolation state from an authoritative update at time `now`,
+    /// starting the eased translation at the anchor's current position `anchor`
+    /// (already placed by [`apply_object`](crate::avatars)).
+    fn seeded(motion: &AvatarMotion, now: f64, anchor: Vec3) -> Self {
         let motion_state = MotionState::new(
             &motion.position,
             &motion.velocity,
@@ -1273,6 +1332,8 @@ impl AvatarInterp {
             height: motion.height,
             apply_rotation: motion.apply_rotation,
             rendered_rotation,
+            rendered_translation: anchor,
+            target_translation: anchor,
         }
     }
 
@@ -1341,82 +1402,94 @@ pub(crate) fn drive_avatar_motion(
                 "avatar {entity} → dead-reckoned (height {:.2} m, rotates {})",
                 motion.height, motion.apply_rotation
             );
-            commands
-                .entity(entity)
-                .insert(AvatarInterp::seeded(&motion, now));
+            commands.entity(entity).insert(AvatarInterp::seeded(
+                &motion,
+                now,
+                transform.translation,
+            ));
             continue;
         };
 
-        // A fresh server update: `apply_object` already snapped the anchor's
-        // translation to truth, so just reseed the prediction and restart the timers.
-        // The orientation, though, is *not* snapped — it eases toward the new facing
-        // (P31.7), so a client-driven turn stays fluid across sparse rotation updates.
+        // Update the authoritative/predicted `target_translation` this frame, and
+        // note whether it moved discontinuously (a region crossing) so the ease
+        // below snaps rather than glides.
+        let mut region_crossed = false;
         if motion.is_changed() {
+            // A fresh server update: `apply_object` already snapped the anchor to
+            // the authoritative pose, so capture that as the new target.
+            region_crossed = interp.motion.region_handle != motion.region_handle;
+            interp.target_translation = transform.translation;
             interp.reseed(&motion, now);
-            apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
-            continue;
-        }
-
-        // Between updates: dead-reckon forward.
-        let region = interp.motion.region_handle;
-        let region_dilation = dilations.per_region.get(&region).copied().unwrap_or(1.0);
-        let dt = clamp_dilation(region_dilation) * dt_raw;
-        let time_since_last_update = now - interp.last_message_secs;
-        if dt <= 0.0 || time_since_last_update <= 0.0 {
+        } else {
+            // Between updates: dead-reckon forward and advance the target by the
+            // prediction delta (a Bevy-space delta, so the root-drop render offset
+            // R23 baked into the target is preserved).
+            let region = interp.motion.region_handle;
+            let region_dilation = dilations.per_region.get(&region).copied().unwrap_or(1.0);
+            let dt = clamp_dilation(region_dilation) * dt_raw;
+            let time_since_last_update = now - interp.last_message_secs;
+            if dt > 0.0 && time_since_last_update > 0.0 {
+                let phase_out = phase_out_factor(
+                    time_since_last_update,
+                    now - interp.last_interp_secs,
+                    interp.last_interp_secs - interp.last_message_secs > PHASE_OUT_START_SECS,
+                    circuit_stale,
+                );
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "phase_out is a 0.0..=1.0 ratio; f32 precision is ample"
+                )]
+                let phase_out_f32 = phase_out as f32;
+                let neighbours = neighbours_known(&dilations, region);
+                let height = interp.height;
+                let previous = interp.motion.position;
+                advance_motion(
+                    &mut interp.motion,
+                    neighbours,
+                    dt,
+                    phase_out_f32,
+                    now,
+                    // Avatars use the stricter ground floor so a laggy avatar does
+                    // not sink under the terrain (the one guard the object path
+                    // leaves permissive).
+                    |predicted_x, predicted_y| {
+                        avatar_ground_floor(
+                            terrain.land_height(region, predicted_x, predicted_y),
+                            height,
+                        )
+                    },
+                );
+                let [prev_x, prev_y, prev_z] = previous;
+                let [next_x, next_y, next_z] = interp.motion.position;
+                let delta = sl_to_bevy_vec(&Vector {
+                    x: next_x - prev_x,
+                    y: next_y - prev_y,
+                    z: next_z - prev_z,
+                });
+                interp.target_translation = Vec3::new(
+                    interp.target_translation.x + delta.x,
+                    interp.target_translation.y + delta.y,
+                    interp.target_translation.z + delta.z,
+                );
+            }
             interp.last_interp_secs = now;
-            apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
-            continue;
         }
 
-        let phase_out = phase_out_factor(
-            time_since_last_update,
-            now - interp.last_interp_secs,
-            interp.last_interp_secs - interp.last_message_secs > PHASE_OUT_START_SECS,
-            circuit_stale,
+        // Ease the rendered translation toward the target *every* frame (the
+        // translation counterpart of the orientation easing, P31.7) so a per-update
+        // correction spreads over a few frames instead of hard-snapping (the
+        // dead-reckoning rubberband) — and, crucially, so a short teleport that
+        // leaves the avatar standing still still converges fully to the destination
+        // rather than freezing part-way once updates stop. A region crossing /
+        // teleport-scale jump snaps instead of gliding.
+        interp.rendered_translation = eased_translation(
+            interp.rendered_translation,
+            interp.target_translation,
+            region_crossed,
+            translation_smoothing_alpha(dt_raw),
         );
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            reason = "phase_out is a 0.0..=1.0 ratio; f32 precision is ample"
-        )]
-        let phase_out_f32 = phase_out as f32;
-        let neighbours = neighbours_known(&dilations, region);
-        let height = interp.height;
-        let previous = interp.motion.position;
-        advance_motion(
-            &mut interp.motion,
-            neighbours,
-            dt,
-            phase_out_f32,
-            now,
-            // Avatars use the stricter ground floor so a laggy avatar does not sink
-            // under the terrain (the one guard the object path leaves permissive).
-            |predicted_x, predicted_y| {
-                avatar_ground_floor(
-                    terrain.land_height(region, predicted_x, predicted_y),
-                    height,
-                )
-            },
-        );
-        interp.last_interp_secs = now;
-
-        // Apply the Second Life-space position change as a Bevy translation delta
-        // (the basis change is linear, so the delta converts directly), so the
-        // root-drop vertical render offset (R23) baked into the anchor is preserved.
-        let [prev_x, prev_y, prev_z] = previous;
-        let [next_x, next_y, next_z] = interp.motion.position;
-        let delta = sl_to_bevy_vec(&Vector {
-            x: next_x - prev_x,
-            y: next_y - prev_y,
-            z: next_z - prev_z,
-        });
-        transform.translation = Vec3::new(
-            transform.translation.x + delta.x,
-            transform.translation.y + delta.y,
-            transform.translation.z + delta.z,
-        );
-        // Ease (not snap) the rendered facing toward the dead-reckoned orientation,
-        // the rotation counterpart of the smoothed translation above (P31.7).
+        transform.translation = interp.rendered_translation;
         apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
     }
 }
@@ -1722,11 +1795,11 @@ mod tests {
     use super::{
         ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, PHASE_OUT_START_SECS,
         PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS,
-        SL_GRAVITY_Z, advance_motion, angular_step, append_triangles, avatar_ground_floor,
-        bevy_position_of, bevy_rotation_of, clamp_dilation, clamp_prediction, dead_reckon,
-        extents_differ, ground_floor, neighbours_known, phase_out_factor, place_smoothed,
-        reaim_residual, rotation_smoothing_alpha, shape_wants_geometry, sl_gravity,
-        smoothing_alpha,
+        SL_GRAVITY_Z, TRANSLATION_SNAP_DISTANCE_M, advance_motion, angular_step, append_triangles,
+        avatar_ground_floor, bevy_position_of, bevy_rotation_of, clamp_dilation, clamp_prediction,
+        dead_reckon, eased_translation, extents_differ, ground_floor, neighbours_known,
+        phase_out_factor, place_smoothed, reaim_residual, rotation_smoothing_alpha,
+        shape_wants_geometry, sl_gravity, smoothing_alpha,
     };
     use crate::physics::RegionTimeDilation;
     use avian3d::prelude::{Collider, SimpleCollider as _};
@@ -2294,5 +2367,44 @@ mod tests {
         // The rendered pose is truth, not the pre-crossing position.
         let truth = bevy_position_of(&interp.motion);
         assert!(rendered_of(&interp).distance(truth) < 1.0e-4);
+    }
+
+    /// An ordinary per-update prediction correction eases: the next rendered
+    /// position lies strictly between the last rendered position and the fresh
+    /// authoritative truth, so a terse-update correction never hard-snaps.
+    #[test]
+    fn eased_translation_eases_a_small_correction() {
+        let rendered = Vec3::new(10.0, 5.0, -3.0);
+        let truth = Vec3::new(10.6, 5.0, -3.0);
+        let next = eased_translation(rendered, truth, false, 0.3);
+        assert!(
+            next.x > rendered.x && next.x < truth.x,
+            "eased toward truth, not snapped"
+        );
+        // 30 % of the 0.6 m gap.
+        near(next.x, 10.18);
+    }
+
+    /// A region crossing snaps regardless of how small the numeric jump looks,
+    /// so the 256 m rebase never glides across.
+    #[test]
+    fn eased_translation_snaps_on_region_crossing() {
+        let rendered = Vec3::new(10.0, 5.0, -3.0);
+        let truth = Vec3::new(10.2, 5.0, -3.0);
+        let next = eased_translation(rendered, truth, true, 0.3);
+        assert!(next.distance(truth) < 1.0e-6, "a crossing snaps to truth");
+    }
+
+    /// A region-scale jump (a teleport, or a rebase that read as a huge delta)
+    /// snaps even without the region-crossing flag.
+    #[test]
+    fn eased_translation_snaps_a_region_scale_jump() {
+        let rendered = Vec3::new(0.0, 0.0, 0.0);
+        let truth = Vec3::new(TRANSLATION_SNAP_DISTANCE_M + 10.0, 0.0, 0.0);
+        let next = eased_translation(rendered, truth, false, 0.3);
+        assert!(
+            next.distance(truth) < 1.0e-6,
+            "a region-scale jump snaps to truth"
+        );
     }
 }

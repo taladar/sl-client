@@ -2,7 +2,7 @@
 id: viewer-avatar-dead-reckoning-translation-rubberband
 title: Ease the avatar's rendered translation toward truth (dead-reckoning rubberband)
 topic: viewer
-status: bugs
+status: done
 origin: surfaced fixing viewer-third-person-cam-lag-vertical-flight (2026-07-30)
 refs: [viewer-third-person-cam-lag-vertical-flight, viewer-p31-7, viewer-p31-4]
 ---
@@ -46,3 +46,23 @@ Care needed:
   (an avian pre-physics pass clobbering the head **joint** for `Update` readers)
   and explicitly ruled out the dead-reckoning snap for that case — this is the
   snap it left untouched.
+
+## Done (2026-08-07)
+
+`physics.rs` `drive_avatar_motion` now eases the rendered avatar translation
+toward the authoritative / dead-reckoned position **every frame** (the
+translation counterpart of P31.7's rotation easing), instead of hard-snapping on
+each `ObjectUpdate`. A tracked `AvatarInterp::target_translation` (captured from
+the anchor on each server update, advanced by the prediction delta between
+updates — a Bevy-space delta, so the R23 root-drop offset is preserved) is what
+`rendered_translation` eases toward via `eased_translation` (τ ≈ 100 ms). A
+**region crossing** or any region-scale jump (`> 32 m`, a teleport / 256 m
+rebase) **snaps** rather than gliding.
+
+The continuous (every-frame) ease — not just on update frames — also fixed a
+short teleport freezing **part-way** to the destination once the avatar stood
+still and updates stopped (confirmed live on OpenSim: short teleports now
+converge fully). Pure decision helper `eased_translation` is unit-tested (ease a
+small correction; snap on crossing; snap a region-scale jump). The fast-flight
+background-shake is the same per-update snap→ease mechanism; not separately
+re-measured this session, but the ease directly addresses it.

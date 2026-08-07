@@ -859,8 +859,9 @@ const fn vec2_scale(v: Vec2, s: f32) -> Vec2 {
 }
 
 /// Narrow an `f64` metre offset to `f32` (offsets near the camera are small,
-/// so the narrowing is exact enough for pixel placement).
-const fn narrow(value: f64) -> f32 {
+/// so the narrowing is exact enough for pixel placement). Shared with the
+/// in-world double-click teleport, which resolves a picked point the same way.
+pub(crate) const fn narrow(value: f64) -> f32 {
     #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
@@ -1448,8 +1449,9 @@ fn grid_index_at(value: f64) -> Option<u32> {
     u32::try_from(index).ok()
 }
 
-/// The region handle containing a global position, if it is on the grid.
-fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
+/// The region handle containing a global position, if it is on the grid. Shared
+/// with the in-world double-click teleport.
+pub(crate) fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
     Some(RegionHandle::from_grid(
         grid_index_at(east)?,
         grid_index_at(north)?,
@@ -2432,6 +2434,7 @@ fn on_minimap_click(
     identity: Res<SlIdentity>,
     mut tracking: ResMut<MapTracking>,
     mut commands: MessageWriter<SlCommand>,
+    mut begin: MessageWriter<crate::teleport_progress::BeginTeleportFlow>,
     mut world_map: MessageWriter<crate::world_map::OpenWorldMap>,
 ) {
     if click.button != PointerButton::Primary {
@@ -2494,11 +2497,17 @@ fn on_minimap_click(
             },
         );
         let _current = identity.region_handle;
-        commands.write(SlCommand(Command::Teleport {
-            region_handle: handle,
-            position: RegionCoordinates::new(local_x, local_y, up),
-            look_at: look,
-        }));
+        let label = format!("{local_x:.0}, {local_y:.0}, {up:.0}");
+        crate::teleport_progress::issue_teleport(
+            &mut commands,
+            &mut begin,
+            crate::teleport_progress::TeleportTarget {
+                region_handle: handle,
+                position: RegionCoordinates::new(local_x, local_y, up),
+                look_at: look,
+            },
+            Some(label),
+        );
     }
     if action == DoubleClickAction::WorldMap {
         // Hand off to the world-map floater, centred on the clicked point
