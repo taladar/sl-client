@@ -160,6 +160,7 @@ mod render_scene;
 #[cfg(test)]
 mod render_test;
 mod replay_bundle;
+mod scene_reset;
 mod screenshot;
 mod script_dialog;
 mod script_permission;
@@ -267,8 +268,8 @@ use crate::avatars::{
     apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
     apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
     fit_avatar_pick_colliders, focus_camera_on_volume_shape, ingest_avatar_bakes,
-    log_avatar_interest_census, setup_avatar_body, toggle_volume_morphs, update_avatar_objects,
-    update_coarse_avatars,
+    log_avatar_interest_census, recenter_avatars, setup_avatar_body, toggle_volume_morphs,
+    update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -343,7 +344,8 @@ use crate::objects::{
     ObjectState, PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets,
     adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
     apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
-    pick_worn_attachment, prune_control_avatars, spawn_animesh_control_avatars, update_objects,
+    pick_worn_attachment, prune_control_avatars, recenter_objects, spawn_animesh_control_avatars,
+    update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1646,10 +1648,29 @@ fn run_session(
                     poll_wearable_assets,
                     assemble_own_bake,
                 ),
-                // Recenter (origin follows the root region) before folding terrain
-                // events, so patches are placed on the current origin.
-                (recenter_terrain, update_terrain).chain(),
-                update_objects,
+                // Scene re-base / purge on a region change, then fold terrain +
+                // object events. Nested into one tuple to stay within Bevy's
+                // per-tuple system limit.
+                (
+                    // A distant teleport purged the session's world; despawn the
+                    // stale scene mirror (objects / avatars / terrain) before the
+                    // recenter systems, so each re-anchors on the destination
+                    // without a spurious shift. A crossing / neighbour teleport
+                    // keeps the world (no-op).
+                    scene_reset::reset_scene_on_world_reset
+                        .before(recenter_terrain)
+                        .before(recenter_objects)
+                        .before(recenter_avatars),
+                    // Recenter (origin follows the root region) before folding
+                    // terrain events, so patches are placed on the current origin.
+                    (recenter_terrain, update_terrain).chain(),
+                    // Re-base world-root objects onto the new origin (a crossing or
+                    // a teleport to an already-connected region) before folding
+                    // object events, so a static object stays put and a new object
+                    // is placed against the current origin. Chained after the
+                    // terrain recenter so it re-bases to the same authoritative root.
+                    (recenter_objects, update_objects).chain(),
+                ),
                 // Build the geometry of any mesh object whose asset just decoded, and
                 // of any sculpted prim whose sculpt map just decoded.
                 apply_object_meshes,
@@ -1723,6 +1744,10 @@ fn run_session(
                 // fold resolved names in and float each name tag over its sphere.
                 (
                     (
+                        // Re-base avatars onto the new origin before folding avatar
+                        // updates, so a stationary neighbour avatar stays put and a
+                        // freshly-streamed one is placed against the current origin.
+                        recenter_avatars,
                         update_avatar_objects,
                         update_coarse_avatars,
                         // One batched legacy + display-name request per frame,

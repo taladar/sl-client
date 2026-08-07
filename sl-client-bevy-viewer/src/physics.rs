@@ -87,7 +87,7 @@ use sl_client_bevy::{
 };
 
 use crate::avatars::update_avatar_objects;
-use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::objects::{GeometryHolder, ObjectState, update_objects};
 use crate::terrain::TerrainState;
 
@@ -952,6 +952,9 @@ pub(crate) fn drive_physical_objects(
 ) {
     let now = time.elapsed_secs_f64();
     let dt_raw = time.delta_secs();
+    // The scene origin, so a physical prim in a neighbour region is placed onto the
+    // right terrain and re-based across a crossing (like avatars and static objects).
+    let origin = terrain.origin();
     // The circuit looks stalled if no inbound event has been seen for longer than
     // the phase-out window (the analogue of `isBlocked` / a stale last-packet time).
     let circuit_stale = liveness
@@ -968,6 +971,7 @@ pub(crate) fn drive_physical_objects(
                 &mut transform,
                 &phys.position,
                 &sl_rotation_to_quat(&phys.rotation),
+                region_offset_bevy(phys.region_handle, origin),
             );
             commands.entity(entity).insert((
                 RigidBody::Kinematic,
@@ -996,7 +1000,8 @@ pub(crate) fn drive_physical_objects(
                 .mul_quat(bevy_rotation_of(&interp.motion));
             interp.reseed(&phys, now);
             reaim_residual(&mut interp, rendered_pos_before, rendered_rot_before);
-            place_smoothed(&mut interp, &mut transform, dt_raw);
+            let region_offset = region_offset_bevy(interp.motion.region_handle, origin);
+            place_smoothed(&mut interp, &mut transform, dt_raw, region_offset);
             continue;
         }
 
@@ -1008,7 +1013,12 @@ pub(crate) fn drive_physical_objects(
         if dt <= 0.0 || time_since_last_update <= 0.0 {
             interp.last_interp_secs = now;
             // Keep easing any outstanding residual even on a stalled physics frame.
-            place_smoothed(&mut interp, &mut transform, dt_raw);
+            place_smoothed(
+                &mut interp,
+                &mut transform,
+                dt_raw,
+                region_offset_bevy(region, origin),
+            );
             continue;
         }
 
@@ -1048,7 +1058,12 @@ pub(crate) fn drive_physical_objects(
         interp.last_interp_secs = now;
         // Render the freshly dead-reckoned pose, easing away any residual left over
         // from the last authoritative correction (zero in steady prediction).
-        place_smoothed(&mut interp, &mut transform, dt_raw);
+        place_smoothed(
+            &mut interp,
+            &mut transform,
+            dt_raw,
+            region_offset_bevy(region, origin),
+        );
     }
 }
 
@@ -1064,8 +1079,17 @@ const fn array_to_vector(array: [f32; 3]) -> Vector {
 /// [`Transform`], applying the single Second Life → Bevy basis change (the same
 /// mapping a root object's `object_transform` uses). The entity carries no scale
 /// (it rides the geometry holder), so only translation and rotation are set.
-fn place(transform: &mut Transform, position: &Vector, sl_rotation: &Quat) {
-    transform.translation = sl_to_bevy_vec(position);
+fn place(transform: &mut Transform, position: &Vector, sl_rotation: &Quat, region_offset: Vec3) {
+    let local = sl_to_bevy_vec(position);
+    // `region_offset` places a physical prim in a neighbour region onto the right
+    // terrain (zero for the root region); added only to the final translation, so
+    // the residual math stays in region-local space and self-corrects the offset
+    // every frame when the scene origin moves (a crossing).
+    transform.translation = Vec3::new(
+        local.x + region_offset.x,
+        local.y + region_offset.y,
+        local.z + region_offset.z,
+    );
     transform.rotation = sl_to_bevy_rotation().mul_quat(*sl_rotation);
 }
 
@@ -1083,17 +1107,26 @@ fn bevy_position_of(motion: &MotionState) -> Vec3 {
 /// motion the residual is zero, so the rendered pose is the prediction; just after
 /// a divergent authoritative update it eases the correction in over
 /// [`OBJECT_SMOOTHING_TAU_SECS`] instead of snapping (the object rubberband fix).
-fn place_smoothed(interp: &mut PhysicsInterp, transform: &mut Transform, dt: f32) {
+fn place_smoothed(
+    interp: &mut PhysicsInterp,
+    transform: &mut Transform,
+    dt: f32,
+    region_offset: Vec3,
+) {
     let alpha = smoothing_alpha(dt, OBJECT_SMOOTHING_TAU_SECS);
     // Decay the residual toward zero (position) / identity (rotation).
     interp.render_offset = interp.render_offset.lerp(Vec3::ZERO, alpha);
     interp.render_rot_offset = interp.render_rot_offset.slerp(Quat::IDENTITY, alpha);
     let predicted_pos = bevy_position_of(&interp.motion);
     let predicted_rot = bevy_rotation_of(&interp.motion);
+    // `region_offset` is applied only to the final translation (a neighbour
+    // region's prim onto the right terrain, zero for the root region); the
+    // residual (`render_offset`) stays in region-local space, so a crossing that
+    // moves the origin self-corrects here each frame without re-basing the interp.
     transform.translation = Vec3::new(
-        predicted_pos.x + interp.render_offset.x,
-        predicted_pos.y + interp.render_offset.y,
-        predicted_pos.z + interp.render_offset.z,
+        predicted_pos.x + interp.render_offset.x + region_offset.x,
+        predicted_pos.y + interp.render_offset.y + region_offset.y,
+        predicted_pos.z + interp.render_offset.z + region_offset.z,
     );
     transform.rotation = interp.render_rot_offset.mul_quat(predicted_rot).normalize();
 }
@@ -1335,6 +1368,24 @@ impl AvatarInterp {
             rendered_translation: anchor,
             target_translation: anchor,
         }
+    }
+
+    /// Re-base the eased translation onto a moved scene origin: a region crossing
+    /// (or a teleport to an already-connected region) shifts every origin-anchored
+    /// entity by the same `delta`, so shift both the rendered and target
+    /// translations to keep the avatar in the same world spot across the re-base
+    /// ([`recenter_avatars`](crate::avatars::recenter_avatars)). The region-local
+    /// [`motion`](Self::motion) is unaffected — its dead-reckoned deltas are
+    /// origin-invariant.
+    pub(crate) fn rebase(&mut self, delta: Vec3) {
+        // Per-component to avoid the `arithmetic_side_effects` lint on the glam
+        // `Vec3` operator.
+        self.rendered_translation.x += delta.x;
+        self.rendered_translation.y += delta.y;
+        self.rendered_translation.z += delta.z;
+        self.target_translation.x += delta.x;
+        self.target_translation.y += delta.y;
+        self.target_translation.z += delta.z;
     }
 
     /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
@@ -2336,7 +2387,7 @@ mod tests {
         // Easing many frames drives the residual to zero — the render converges to truth.
         let mut transform = Transform::IDENTITY;
         for _ in 0..300 {
-            place_smoothed(&mut interp, &mut transform, 0.016);
+            place_smoothed(&mut interp, &mut transform, 0.016, Vec3::ZERO);
         }
         let truth = bevy_position_of(&interp.motion);
         assert!(

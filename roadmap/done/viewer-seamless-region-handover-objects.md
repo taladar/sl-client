@@ -2,7 +2,7 @@
 id: viewer-seamless-region-handover-objects
 title: Seamless region handover for world objects (neighbour render + rebase, not purge)
 topic: viewer
-status: ready
+status: done
 origin: surfaced during teleport live testing (2026-08-07) once cross-region teleport first worked
 refs: [viewer-seated-region-crossing, viewer-avatar-dead-reckoning-translation-rubberband]
 ---

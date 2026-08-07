@@ -16,7 +16,7 @@
 //! in Phase 5, object meshes are) lands correctly in Bevy's Y-up world.
 
 use bevy::math::{Quat, Vec3};
-use sl_client_bevy::{Rotation, Vector};
+use sl_client_bevy::{RegionHandle, Rotation, Vector};
 
 /// Convert a global metre coordinate (a region's south-west corner, up to a few
 /// million metres) to `f32` exactly, via a 16-bit high/low split — there is no
@@ -28,6 +28,40 @@ pub(crate) fn metres_to_f32(metres: u32) -> f32 {
     let high = u16::try_from(metres.checked_shr(16).unwrap_or(0)).unwrap_or(u16::MAX);
     let low = u16::try_from(metres & 0xFFFF).unwrap_or(u16::MAX);
     f32::from(high) * 65_536.0 + f32::from(low)
+}
+
+/// The Bevy-space translation from the scene origin — the root region, anchored
+/// at `<0,0,0>` — to the south-west corner of `region`. A neighbour region's
+/// **root** objects and full-object avatars are placed at this offset (plus their
+/// region-local position) so they land on the right neighbour terrain, mirroring
+/// the coarse-dot offset ([`crate::avatars`]) and the terrain recenter delta
+/// ([`crate::terrain::recenter_terrain`]).
+///
+/// Zero for the origin region itself, and — as a safe fallback before the first
+/// [`Event::RegionChanged`](sl_client_bevy::SlSessionEvent) — when no origin is
+/// known yet (the object is then placed as if it were in the root region, which
+/// is where a fresh login's objects are). The offset is in whole region metres,
+/// so it is exact in `f32` (see [`metres_to_f32`]).
+#[must_use]
+pub(crate) fn region_offset_bevy(region: RegionHandle, origin: Option<RegionHandle>) -> Vec3 {
+    let (region_x, region_y) = region.global_coordinates();
+    let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
+    sl_to_bevy_vec(&Vector {
+        x: metres_to_f32(region_x) - metres_to_f32(origin_x),
+        y: metres_to_f32(region_y) - metres_to_f32(origin_y),
+        z: 0.0,
+    })
+}
+
+/// The Bevy-space shift applied to every origin-anchored entity (camera, terrain
+/// patches, root objects, avatars) when the scene origin moves from `previous` to
+/// `current` — a region crossing or a teleport to an already-connected region.
+/// The origin moved once, so this single uniform delta re-bases everything: an
+/// entity is translated by **`-shift`** to compensate for the world moving under
+/// it. Equivalent to [`region_offset_bevy(current, Some(previous))`].
+#[must_use]
+pub(crate) fn origin_shift_bevy(previous: RegionHandle, current: RegionHandle) -> Vec3 {
+    region_offset_bevy(current, Some(previous))
 }
 
 /// Convert a Second Life position [`Vector`] (Z-up metres) into a Bevy
@@ -137,11 +171,68 @@ pub(crate) fn sl_euler_deg_to_quat(euler_deg: [f32; 3]) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::{
-        sl_euler_deg_to_quat, sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation,
-        sl_to_bevy_vec,
+        origin_shift_bevy, region_offset_bevy, sl_euler_deg_to_quat, sl_rotation_to_quat,
+        sl_to_bevy_object_rotation, sl_to_bevy_rotation, sl_to_bevy_vec,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{Rotation, Vector};
+    use sl_client_bevy::{RegionHandle, Rotation, Vector};
+
+    /// A region handle from its south-west corner in whole region metres
+    /// (`x` east, `y` north), the `(x << 32) | y` packing.
+    fn region_at(x: u32, y: u32) -> RegionHandle {
+        RegionHandle::new((u64::from(x) << 32) | u64::from(y))
+    }
+
+    /// A neighbour region east of the origin offsets its objects `+256 m` east
+    /// (Bevy `+X`); north offsets Bevy `-Z`. The origin region itself is zero, and
+    /// an unknown origin is treated as zero (placed as if in the root region).
+    #[test]
+    fn region_offset_places_neighbours() {
+        let origin = region_at(1024, 1024);
+        // The origin region itself: no offset.
+        assert_eq!(
+            region_offset_bevy(origin, Some(origin)),
+            bevy::math::Vec3::ZERO
+        );
+        // 256 m east → Bevy +X.
+        assert_eq!(
+            region_offset_bevy(region_at(1280, 1024), Some(origin)),
+            bevy::math::Vec3::new(256.0, 0.0, 0.0)
+        );
+        // 256 m north → Bevy -Z.
+        assert_eq!(
+            region_offset_bevy(region_at(1024, 1280), Some(origin)),
+            bevy::math::Vec3::new(0.0, 0.0, -256.0)
+        );
+        // A diagonal neighbour composes both axes.
+        assert_eq!(
+            region_offset_bevy(region_at(1280, 1280), Some(origin)),
+            bevy::math::Vec3::new(256.0, 0.0, -256.0)
+        );
+        // No origin known → zero (placed as if in the root region).
+        assert_eq!(
+            region_offset_bevy(region_at(1280, 1024), None),
+            bevy::math::Vec3::ZERO
+        );
+    }
+
+    /// The origin shift for a crossing equals the destination's offset from the
+    /// previous origin, and re-basing an origin-anchored point by `-shift` keeps
+    /// it in the same world spot: a point at the destination's `(0,0)` corner sits
+    /// at `+offset` before the crossing and at the new origin after it.
+    #[test]
+    fn origin_shift_rebases_in_place() {
+        let previous = region_at(1024, 1024);
+        let current = region_at(1280, 1024);
+        let shift = origin_shift_bevy(previous, current);
+        assert_eq!(shift, region_offset_bevy(current, Some(previous)));
+        // A neighbour object placed at the new region's SW corner sat at `+offset`
+        // under the old origin; `-shift` brings it to the new origin's `(0,0)`.
+        let placed = region_offset_bevy(current, Some(previous));
+        let rebased =
+            bevy::math::Vec3::new(placed.x - shift.x, placed.y - shift.y, placed.z - shift.z);
+        assert_eq!(rebased, bevy::math::Vec3::ZERO);
+    }
 
     /// The east/north/up Second Life axes map to Bevy right/forward-negation/up.
     #[test]

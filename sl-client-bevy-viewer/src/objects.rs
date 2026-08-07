@@ -45,13 +45,13 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
     JointOverrides, MeshKey, MeshSkin, Object, ObjectExtraParams, ObjectKey, PrimFaceId, PrimLod,
-    PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, Rotation, ScopedObjectId, SculptOrMeshKey,
-    SlEvent, SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace,
-    TextureKey, TreeLod, Uuid, Vector, avatar_texture, decode_texture_entry, grass_geometry,
-    grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
-    tessellate_sculpt, tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh,
-    to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
-    tree_billboard_geometry, tree_geometry, tree_species,
+    PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
+    SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
+    TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
+    decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
+    texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh,
+    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
 };
 
 use crate::animesh::ControlAvatarState;
@@ -59,7 +59,10 @@ use crate::avatars::{
     AvatarBody, AvatarPickTarget, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
 use crate::camera::ViewerCamera;
-use crate::coords::{sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec};
+use crate::coords::{
+    origin_shift_bevy, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_object_rotation,
+    sl_to_bevy_vec,
+};
 use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
@@ -256,6 +259,20 @@ pub(crate) struct ObjectSlMotion {
     /// the attachment path, not the world gizmos).
     pub(crate) attachment: bool,
 }
+
+/// Marks a **linkset-root** object entity — one placed in absolute scene space
+/// (offset from the scene origin by its region's global metres,
+/// [`object_transform`]), as opposed to a linkset child (parent-relative) or an
+/// attachment (skeleton-joint-relative).
+///
+/// When the scene origin moves — a region crossing, or a teleport to an
+/// already-connected region — [`recenter_objects`] shifts every entity carrying
+/// this marker by the same uniform delta the camera and terrain shift by, so a
+/// static object (one receiving no fresh update across the handover) stays put in
+/// the world rather than piling into the new region. A child / attachment carries
+/// no marker: its parent already carries it across.
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct WorldRootObject;
 
 /// Tags a worn **rigged** submesh with the tracked worn object its geometry
 /// belongs to.
@@ -639,9 +656,47 @@ struct PendingTree {
 pub(crate) struct ObjectState {
     /// Every tracked object, keyed by its scoped id.
     objects: HashMap<ScopedObjectId, TrackedObject>,
+    /// The region the Bevy scene is currently anchored at (origin `<0,0,0>`), so
+    /// a **root** object in a neighbour region is offset onto the right terrain
+    /// ([`object_transform`]) and every root is re-based when this moves
+    /// ([`recenter_objects`]). `None` until the first region is known; kept in
+    /// lockstep with [`crate::terrain::TerrainState`]'s origin (both follow
+    /// [`SlIdentity`]'s root handle).
+    origin: Option<RegionHandle>,
 }
 
 impl ObjectState {
+    /// Despawn **every** tracked object entity (and its faces) and forget them —
+    /// the object half of the scene-mirror purge a **fresh-circuit** teleport
+    /// needs. The session cleared its object cache with no per-object
+    /// `KillObject`, so the incremental [`remove_object`] path never fires;
+    /// without this the old region's objects linger forever, at offsets that no
+    /// longer correspond to any connected region
+    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
+    ///
+    /// The own avatar's **object** entity is purged along with the rest — it is
+    /// only a position-only mirror; the agent's *visible body* is kept across the
+    /// purge by [`AvatarState::purge`](crate::avatars::AvatarState::purge) (keyed
+    /// by agent, so it does not flash), and the destination re-streams the object
+    /// entity. Keeping it here would instead strand it as a ghost dot at the spot
+    /// we left, because the same avatar is streamed by *every* connected region so
+    /// no single copy is authoritative.
+    ///
+    /// Also drops the origin anchor so [`recenter_objects`] re-anchors on the
+    /// destination without a spurious re-base shift.
+    pub(crate) fn purge(&mut self, commands: &mut Commands) {
+        for tracked in self.objects.values() {
+            // Bevy's hierarchy despawn takes the geometry holder + parented
+            // linkset children; `try_despawn` tolerates an entity a parent already
+            // reaped. A rigged mesh's faces hang off the avatar body root, so
+            // despawn them explicitly (a no-op for a static mesh).
+            commands.entity(tracked.entity).try_despawn();
+            despawn_prim_faces(&tracked.face_entities, commands);
+        }
+        self.objects.clear();
+        self.origin = None;
+    }
+
     /// The full (grid-wide) [`ObjectKey`] of a tracked object, looked up by its
     /// region-scoped id. Used by the physics module (P31.3) to translate a pushed
     /// `ObjectPhysicsProperties` event — which keys by [`ScopedObjectId`] — onto the
@@ -992,9 +1047,20 @@ impl ObjectState {
     /// ride the root, exactly as [`pick_summary`](Self::pick_summary) reads
     /// them). Worn objects — anything whose parent walk reaches an attachment
     /// point — are excluded, as the reference's map membership excludes them.
+    ///
+    /// **Avatars** (`pcode` 47) are excluded too: an avatar belongs on the minimap
+    /// *avatar* layer (drawn from [`AvatarState`](crate::avatars::AvatarState),
+    /// deduplicated by agent), not the object layer. The same avatar is streamed
+    /// as a separate object by *every* connected region (root and each neighbour
+    /// child circuit), so admitting them here would plot one object dot per region
+    /// — and leave a ghost dot at a region left behind whose copy has not been
+    /// reaped (viewer-crossing-stale-minimap-self-dot).
     pub(crate) fn minimap_objects(&self) -> Vec<(Entity, u32)> {
         let mut out = Vec::with_capacity(self.objects.len());
         for tracked in self.objects.values() {
+            if tracked.shape.pcode == pcode::AVATAR {
+                continue;
+            }
             let mut flags = tracked.update_flags;
             let mut attachment = tracked.attachment_point.is_some();
             let mut current = tracked;
@@ -1123,10 +1189,17 @@ fn classify(object: &Object) -> ObjectCategory {
 /// them when it is non-uniform and they are rotated). The scale lives on a
 /// per-object geometry holder ([`geometry_transform`]) that only this object's
 /// own faces hang off, so it reaches the geometry but never the child prims.
-fn object_transform(object: &Object, is_root: bool) -> Transform {
+fn object_transform(object: &Object, is_root: bool, origin: Option<RegionHandle>) -> Transform {
     if is_root {
+        // A root is placed in absolute scene space, offset from the origin region
+        // by its own region's global metres so a neighbour region's objects land
+        // on the right terrain (0 for an object in the root region itself). A
+        // linkset child stays parent-relative and gets no offset — its parent
+        // root already carries it.
+        let offset = region_offset_bevy(object.region_handle, origin);
+        let local = sl_to_bevy_vec(&object.motion.position);
         Transform {
-            translation: sl_to_bevy_vec(&object.motion.position),
+            translation: Vec3::new(local.x + offset.x, local.y + offset.y, local.z + offset.z),
             rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
             scale: Vec3::ONE,
         }
@@ -1136,6 +1209,70 @@ fn object_transform(object: &Object, is_root: bool) -> Transform {
             rotation: sl_rotation_to_quat(&object.motion.rotation),
             scale: Vec3::ONE,
         }
+    }
+}
+
+/// Insert or remove the [`WorldRootObject`] re-base marker on `entity` so it
+/// carries the marker exactly when the object is a linkset root — see
+/// [`recenter_objects`].
+fn sync_world_root_marker(entity: Entity, is_root: bool, commands: &mut Commands) {
+    if is_root {
+        commands.entity(entity).insert(WorldRootObject);
+    } else {
+        commands.entity(entity).remove::<WorldRootObject>();
+    }
+}
+
+/// Keep the scene origin on the root region for **world objects**: when the root
+/// region changes — a border crossing, or a teleport to an already-connected
+/// region — shift every [`WorldRootObject`] by the same `-shift`
+/// [`recenter_terrain`](crate::terrain::recenter_terrain) applies to the camera
+/// and terrain, and record the new origin so freshly-streamed objects are placed
+/// against it ([`object_transform`]).
+///
+/// The origin moved once, so a single uniform delta re-bases every root object
+/// regardless of which region it sits in — a root in the region left behind, one
+/// in the region entered, and one in a diagonal neighbour all shift by the same
+/// vector ([`origin_shift_bevy`]). Only **root** objects carry the marker; a
+/// linkset child / attachment is parent-relative, so shifting it too would
+/// double-move it.
+///
+/// This is belt-and-braces with [`object_transform`], which already places each
+/// arriving update against the current origin: a root receiving a fresh update
+/// across the handover re-places itself correctly regardless, so the shift here
+/// is what keeps a *static* root (no update across the crossing) in place. The
+/// two never fight — the shift adjusts the old transform, and any same-frame
+/// update overwrites it wholesale with the absolute-correct pose.
+///
+/// Runs after [`recenter_terrain`](crate::terrain::recenter_terrain) (so it reads
+/// the same authoritative root the camera/terrain re-based to) and before
+/// [`update_objects`] (so a new object this frame is placed against the updated
+/// origin).
+pub(crate) fn recenter_objects(
+    identity: Res<SlIdentity>,
+    mut state: ResMut<ObjectState>,
+    mut roots: Query<&mut Transform, With<WorldRootObject>>,
+) {
+    let Some(root) = identity.region_handle else {
+        return;
+    };
+    match state.origin {
+        // Unchanged origin: nothing to re-base.
+        Some(current) if current == root => {}
+        Some(previous) => {
+            let shift = origin_shift_bevy(previous, root);
+            for mut transform in &mut roots {
+                // Per-component (not the `glam` vector operator) to stay clear of
+                // the workspace `arithmetic_side_effects` lint, matching
+                // `recenter_terrain`.
+                transform.translation.x -= shift.x;
+                transform.translation.y -= shift.y;
+                transform.translation.z -= shift.z;
+            }
+            state.origin = Some(root);
+        }
+        // First region learned (login): anchor the origin without shifting.
+        None => state.origin = Some(root),
     }
 }
 
@@ -1232,6 +1369,14 @@ enum PendingObjectEvent {
 pub(crate) struct PendingObjectEvents {
     /// Events not yet processed, oldest at the front.
     queue: VecDeque<PendingObjectEvent>,
+}
+
+impl PendingObjectEvents {
+    /// Drop the whole backlog — a distant teleport purged the scene, so any
+    /// buffered upsert / remove targets a now-gone (old-region local-id) object.
+    pub(crate) fn clear(&mut self) {
+        self.queue.clear();
+    }
 }
 
 /// The per-frame object geometry-build budget (see [`DEFAULT_OBJECT_SPAWN_BUDGET`]).
@@ -3091,7 +3236,7 @@ fn apply_object(
     let attachment_point = object.attachment_point_id();
     let category = classify(object);
     let shape = ShapeFingerprint::of(object);
-    let transform = object_transform(object, is_root);
+    let transform = object_transform(object, is_root, state.origin);
     // The parent's entity, if its root is already tracked (looked up before the
     // mutable borrow of the object's own entry below). A root has no parent, and
     // an attachment is left for the skeleton-joint parenting path — both `None`.
@@ -3191,6 +3336,10 @@ fn apply_object(
             debug_info,
             sl_motion,
         ));
+        // Keep the world-root marker in step with a live relink/unlink so
+        // [`recenter_objects`] re-bases exactly the roots (a child that just
+        // became a root gains it; a root demoted to a child loses it).
+        sync_world_root_marker(existing.entity, is_root, commands);
         commands
             .entity(existing.geometry)
             .insert(holder_transform(object, category));
@@ -3320,6 +3469,9 @@ fn apply_object(
             Propagate(probe_layers),
         ))
         .id();
+    // A fresh root carries the re-base marker (see [`recenter_objects`]); a child
+    // / attachment does not (its parent re-bases it).
+    sync_world_root_marker(entity, is_root, commands);
     let parented = match parent_entity {
         Some(root_entity) => {
             commands.entity(entity).insert(ChildOf(root_entity));
@@ -4675,7 +4827,8 @@ mod tests {
     #[test]
     fn root_transform_maps_to_world() {
         let object = bare_object(pcode::PRIMITIVE);
-        let transform = object_transform(&object, true);
+        // No origin known → no region offset (placed as if in the root region).
+        let transform = object_transform(&object, true, None);
         // Second Life (10, 20, 30) → Bevy (x, z, -y) = (10, 30, -20).
         assert!(
             transform
@@ -4692,12 +4845,37 @@ mod tests {
         );
     }
 
+    /// A root object in a **neighbour** region is offset onto that region's
+    /// terrain: its region-local placement plus the region's global-metre offset
+    /// from the scene origin. A child stays parent-relative and gets no offset.
+    #[test]
+    fn root_transform_offsets_a_neighbour_region() {
+        // Origin at the SW corner (1024, 1024); the object's region is 256 m east.
+        let origin = RegionHandle::new((1024_u64 << 32) | 1024);
+        let mut object = bare_object(pcode::PRIMITIVE);
+        object.region_handle = RegionHandle::new((1280_u64 << 32) | 1024);
+        // Root: (10, 20, 30) → Bevy (10, 30, -20), plus +256 east (Bevy +X).
+        let root = object_transform(&object, true, Some(origin));
+        assert!(
+            root.translation
+                .abs_diff_eq(Vec3::new(266.0, 30.0, -20.0), 1.0e-4)
+        );
+        // A child is parent-relative — the neighbour offset must NOT apply (its
+        // root already carries it).
+        let child = object_transform(&object, false, Some(origin));
+        assert!(
+            child
+                .translation
+                .abs_diff_eq(Vec3::new(10.0, 20.0, 30.0), 1.0e-4)
+        );
+    }
+
     /// A child object's local transform stays in pure Second Life space (no axis
     /// swap), since the parent entity carries the basis change.
     #[test]
     fn child_transform_stays_in_sl_space() {
         let object = bare_object(pcode::PRIMITIVE);
-        let transform = object_transform(&object, false);
+        let transform = object_transform(&object, false, None);
         // The parent-relative offset is carried across verbatim.
         assert!(
             transform

@@ -12623,13 +12623,22 @@ mod test {
             .iter()
             .find_map(|e| match e {
                 Event::RegionChanged {
-                    region_handle, sim, ..
-                } => Some((*region_handle, *sim)),
+                    region_handle,
+                    sim,
+                    world_reset,
+                    ..
+                } => Some((*region_handle, *sim, *world_reset)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        // A distant teleport minted a fresh circuit and purged the world, so the
+        // driver is told to reset its scene mirror.
+        assert!(
+            changed.2,
+            "a fresh-circuit teleport must report world_reset = true"
+        );
 
         // Stray traffic from the old simulator is now ignored.
         let stray = server_message(&region_handshake_msg(13, 0, "OldRegion", "", ""), 9, true)?;
@@ -12708,11 +12717,18 @@ mod test {
             },
         });
         session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
+        // A neighbour promote keeps the world (the old root becomes a child that
+        // keeps streaming), so the driver must NOT reset its scene mirror — it
+        // re-bases the kept world instead.
         assert!(
-            drain_events(&mut session)
-                .iter()
-                .any(|e| matches!(e, Event::RegionChanged { .. })),
-            "the promoted handover completes into a RegionChanged"
+            drain_events(&mut session).iter().any(|e| matches!(
+                e,
+                Event::RegionChanged {
+                    world_reset: false,
+                    ..
+                }
+            )),
+            "the promoted handover completes into a RegionChanged with world_reset = false"
         );
         Ok(())
     }

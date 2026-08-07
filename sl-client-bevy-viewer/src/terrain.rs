@@ -183,6 +183,23 @@ impl TerrainState {
         self.origin
     }
 
+    /// Despawn every rendered land patch and forget all per-region terrain state —
+    /// the terrain half of the distant-teleport scene purge
+    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
+    /// The destination streams its terrain fresh; the shared placeholder image and
+    /// the decoded-detail-texture cache are kept (a texture shared with the
+    /// destination need not be refetched). Drops the origin so [`recenter_terrain`]
+    /// re-anchors on the destination without a spurious camera shift.
+    pub(crate) fn purge(&mut self, commands: &mut Commands) {
+        for (_key, entity) in self.patches.drain() {
+            commands.entity(entity).try_despawn();
+        }
+        self.regions.clear();
+        self.raw_patches.clear();
+        self.map_revision = self.map_revision.wrapping_add(1);
+        self.origin = None;
+    }
+
     /// The terrain-data revision — bumped on every ingested patch and learned
     /// composition, so a derived map texture knows when to rebuild.
     pub(crate) const fn map_revision(&self) -> u64 {

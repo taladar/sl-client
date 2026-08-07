@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 243 |
+| ready | 244 |
 | blocked | 95 |
 | in-progress | 11 |
 | bugs | 16 |
-| done | 723 |
+| done | 725 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1176** |
+| **total** | **1179** |
 
 ## ideas (58)
 
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (244)
 
 ### protocol
 
@@ -165,6 +165,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sl-lsl (LslSyntax) types
 - [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
+- [`protocol-teleport-deferred-teardown-handover`](ready/protocol-teleport-deferred-teardown-handover.md)
+  — Defer handover teardown until the destination confirms (+ overlap safety)
 
 ### viewer
 
@@ -594,9 +596,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
-- [`viewer-seamless-region-handover-objects`](ready/viewer-seamless-region-handover-objects.md)
-  — Seamless region handover for world objects (neighbour render + rebase, not
-  purge)
 - [`viewer-seated-region-crossing`](ready/viewer-seated-region-crossing.md) —
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
@@ -700,6 +699,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start a proposal, cast a ballot
 - [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
   — Group session message — [aditi] variant
+- [`test-handover-mock-grid-harness`](ready/test-handover-mock-grid-harness.md)
+  — Mock-grid simulator harness for deterministic handover/timeout testing
 - [`test-im-1to1-aditi`](ready/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
   1:1 — [aditi] variant
 - [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
@@ -1038,6 +1039,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
+- [`protocol-teleport-timeout-strands-child-circuits`](bugs/protocol-teleport-timeout-strands-child-circuits.md)
+  — A timed-out teleport strands the session and loses its child circuits
 
 ### viewer
 
@@ -1050,8 +1053,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
-- [`viewer-crossing-stale-minimap-self-dot`](bugs/viewer-crossing-stale-minimap-self-dot.md)
-  — Stale own-avatar dot left in the old region on the minimap after a crossing
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
@@ -1076,7 +1077,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (723)
+## done (725)
 
 ### protocol
 
@@ -1286,6 +1287,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — "\"Entity despawned\" command warnings during a plain scene run"
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
+- [`viewer-crossing-stale-minimap-self-dot`](done/viewer-crossing-stale-minimap-self-dot.md)
+  — Stale own-avatar dot left in the old region on the minimap after a crossing
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
   — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
   specular
@@ -1913,6 +1916,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
   — Script permission-request experience card (ScriptQuestionExperience)
   (blocked by `viewer-experience-permission-dialog` (done))
+- [`viewer-seamless-region-handover-objects`](done/viewer-seamless-region-handover-objects.md)
+  — Seamless region handover for world objects (neighbour render + rebase, not
+  purge)
 - [`viewer-search-floater`](done/viewer-search-floater.md) — Search floater —
   directory search UI (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-seated-avatar-vehicle-rubberband`](done/viewer-seated-avatar-vehicle-rubberband.md)

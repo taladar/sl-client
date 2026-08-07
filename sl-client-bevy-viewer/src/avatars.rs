@@ -57,14 +57,14 @@ use sl_client_bevy::{
 use crate::avatar_assets::{AvatarAssetLibrary, BodyRegion, LoadedBinding};
 use crate::bake_inputs::OwnBakeInputs;
 use crate::coords::{
-    metres_to_f32, sl_euler_deg_to_quat, sl_rotation_to_quat, sl_to_bevy_object_rotation,
-    sl_to_bevy_vec,
+    metres_to_f32, origin_shift_bevy, region_offset_bevy, sl_euler_deg_to_quat,
+    sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::name_tag_billboard::name_tag_render_bundle;
 use crate::name_tag_content::TagContent;
 use crate::objects::ObjectState;
-use crate::physics::AvatarMotion;
+use crate::physics::{AvatarInterp, AvatarMotion};
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 
@@ -609,6 +609,13 @@ struct AvatarEntities {
 /// avatar is keyed by.
 #[derive(Resource, Default)]
 pub(crate) struct AvatarState {
+    /// The region the Bevy scene is anchored at (origin `<0,0,0>`), so a **full
+    /// object** avatar in a neighbour region is offset onto the right terrain
+    /// (mirroring the coarse-dot and object offsets) and every avatar is re-based
+    /// when this moves ([`recenter_avatars`]). `None` until the first region is
+    /// known; kept in lockstep with the object/terrain origins (all follow
+    /// [`SlIdentity`]'s root handle).
+    origin: Option<RegionHandle>,
     /// Avatars known as a full in-world object (`pcode` 47), keyed by agent id;
     /// their sphere follows the object's precise position.
     objects: HashMap<AgentKey, AvatarEntities>,
@@ -1057,6 +1064,18 @@ pub(crate) fn setup_avatar_body(
     info!("built rigged avatar body ({part_count} parts)");
 }
 
+/// A placeholder sphere avatar's world translation: its region-local position in
+/// Bevy space, plus the neighbour-region offset (zero for the root region) so it
+/// lands on the right terrain — the sphere counterpart of [`body_root_transform`].
+fn sphere_translation(object: &Object, region_offset: Vec3) -> Vec3 {
+    let local = sl_to_bevy_vec(&object.motion.position);
+    Vec3::new(
+        local.x + region_offset.x,
+        local.y + region_offset.y,
+        local.z + region_offset.z,
+    )
+}
+
 /// The world [`Transform`] of a rigged avatar body root: the object's position
 /// and orientation carried into Bevy's Y-up world by the Second Life → Bevy
 /// basis change, lowered by `root_drop` (R23).
@@ -1070,12 +1089,17 @@ pub(crate) fn setup_avatar_body(
 /// per-avatar [`root_drop_from_metrics`] of the shape's `computeBodySize`
 /// quantities — half the shape-scaled body height, corrected for the pelvis
 /// joint sitting `pelvis_local_z` above this root and lifted by any hover.
-fn body_root_transform(object: &Object, root_drop: f32) -> Transform {
+fn body_root_transform(object: &Object, root_drop: f32, region_offset: Vec3) -> Transform {
     let translation = sl_to_bevy_vec(&object.motion.position);
     Transform {
-        // Per-component subtract to avoid the `arithmetic_side_effects` lint on
-        // the glam `Vec3` operator.
-        translation: Vec3::new(translation.x, translation.y - root_drop, translation.z),
+        // Per-component add/subtract to avoid the `arithmetic_side_effects` lint on
+        // the glam `Vec3` operator. `region_offset` places a neighbour region's
+        // avatar onto the right terrain (zero for one in the root region).
+        translation: Vec3::new(
+            translation.x + region_offset.x,
+            translation.y - root_drop + region_offset.y,
+            translation.z + region_offset.z,
+        ),
         rotation: sl_to_bevy_object_rotation(&object.motion.rotation),
         scale: Vec3::ONE,
     }
@@ -1813,11 +1837,18 @@ impl AvatarState {
     /// order), and the attachment-point node entities (keyed by raw point id),
     /// which the caller records so a worn attachment can be parented to the right
     /// joint at its stored offset (P16.1/P16.2).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "spawning an avatar body needs the agent, its object + region \
+                  offset (for the neighbour-region placement), the shared body \
+                  asset, the collider mesh/material, and the Commands sink"
+    )]
     fn spawn_body(
         &self,
         agent: AgentKey,
         object: &Object,
         body: &AvatarBody,
+        region_offset: Vec3,
         collider: Handle<Mesh>,
         collider_material: Handle<FaceMaterial>,
         commands: &mut Commands,
@@ -1829,7 +1860,7 @@ impl AvatarState {
             .unwrap_or(body.rest_root_drop);
         let root = commands
             .spawn((
-                body_root_transform(object, root_drop),
+                body_root_transform(object, root_drop, region_offset),
                 Visibility::default(),
                 AvatarAnchor,
                 // Avatars are dynamic content for reflection probes: propagate the
@@ -2037,6 +2068,9 @@ impl AvatarState {
     ) {
         let agent = AgentKey::from(object.full_id.uuid());
         let scoped = object.scoped_id();
+        // A neighbour region's avatar is offset onto the right terrain, exactly
+        // like the coarse dots and world objects (zero for the root region).
+        let region_offset = region_offset_bevy(object.region_handle, self.origin);
         self.seed_from_name_values(agent, object);
         // The authoritative motion the P31.4 dead-reckoner (`drive_avatar_motion`)
         // extrapolates between updates; re-inserted on every update so its change
@@ -2086,9 +2120,9 @@ impl AvatarState {
                             .get(&agent)
                             .copied()
                             .unwrap_or(body.rest_root_drop);
-                        body_root_transform(object, root_drop)
+                        body_root_transform(object, root_drop, region_offset)
                     }
-                    None => Transform::from_translation(sl_to_bevy_vec(&object.motion.position)),
+                    None => Transform::from_translation(sphere_translation(object, region_offset)),
                 };
                 anchor.insert(transform).remove::<Seated>();
             }
@@ -2099,8 +2133,15 @@ impl AvatarState {
             Some(body) => {
                 let (collider, collider_material) =
                     Self::collider_handles(&mut self.assets, meshes, materials);
-                let (entities, joints, attachment_nodes) =
-                    self.spawn_body(agent, object, body, collider, collider_material, commands);
+                let (entities, joints, attachment_nodes) = self.spawn_body(
+                    agent,
+                    object,
+                    body,
+                    region_offset,
+                    collider,
+                    collider_material,
+                    commands,
+                );
                 // Record the joint entities and per-point attachment nodes so a
                 // worn attachment can be parented at the right joint offset once it
                 // arrives (P16.1/P16.2).
@@ -2110,7 +2151,7 @@ impl AvatarState {
             }
             None => self.spawn_sphere(
                 agent,
-                sl_to_bevy_vec(&object.motion.position),
+                sphere_translation(object, region_offset),
                 commands,
                 meshes,
                 materials,
@@ -2396,6 +2437,7 @@ impl AvatarState {
         &mut self,
         region: RegionHandle,
         origin: Option<RegionHandle>,
+        own: Option<AgentKey>,
         locations: &[CoarseLocation],
         you: Option<usize>,
         commands: &mut Commands,
@@ -2410,11 +2452,16 @@ impl AvatarState {
         let offset_north = metres_to_f32(region_y) - metres_to_f32(origin_y);
         let mut present: HashSet<AgentKey> = HashSet::new();
         for (index, location) in locations.iter().enumerate() {
-            // The agent's own coarse dot is left to the (precise) object path.
-            if Some(index) == you {
+            let agent = location.agent_id;
+            // The agent's own coarse dot is left to the (precise) self-marker
+            // path. Skip it by the update's `you` index *and* by the agent id: a
+            // region we became a **child** of after a crossing (the region we left)
+            // still lists us in its coarse update — sometimes without setting
+            // `you` — and without the id check that stale entry would spawn a ghost
+            // self-dot back in the old region (viewer-crossing-stale-minimap-self-dot).
+            if Some(index) == you || own == Some(agent) {
                 continue;
             }
-            let agent = location.agent_id;
             // A full-object avatar renders from its precise object position.
             if self.objects.contains_key(&agent) {
                 continue;
@@ -2451,6 +2498,74 @@ impl AvatarState {
             self.coarse_region.remove(&agent);
             self.coarse_pos.remove(&agent);
         }
+    }
+
+    /// Despawn every **other** avatar (full objects and coarse dots) and forget
+    /// their per-agent state — the scene-mirror purge a **distant** teleport
+    /// needs, since the session cleared its object cache with no per-object
+    /// `KillObject` to drive the incremental removal path
+    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
+    ///
+    /// The agent's **own** avatar (`own`) is kept — its body, skeleton, appearance
+    /// and worn state all cross with the agent on a teleport, so despawning it
+    /// would flash the self view and force an appearance / bake refetch. Its
+    /// visible body simply re-anchors when the destination re-streams its
+    /// (agent-keyed) full object. The scoped-id-keyed bookkeeping is dropped
+    /// wholesale (the source region's local-id space is gone) and rebuilt as the
+    /// destination streams. Also drops the origin anchor so [`recenter_avatars`]
+    /// re-anchors on the destination without a spurious re-base shift.
+    pub(crate) fn purge(&mut self, own: Option<AgentKey>, commands: &mut Commands) {
+        let keep = |agent: &AgentKey| own == Some(*agent);
+        // Despawn every non-own avatar's entities (full objects + coarse dots).
+        let others: Vec<AgentKey> = self
+            .objects
+            .keys()
+            .chain(self.coarse.keys())
+            .copied()
+            .filter(|agent| !keep(agent))
+            .collect();
+        for agent in others {
+            if let Some(entities) = self.objects.remove(&agent) {
+                despawn_avatar(entities, commands);
+            }
+            if let Some(entities) = self.coarse.remove(&agent) {
+                despawn_avatar(entities, commands);
+            }
+        }
+        // Retain only the own agent on the per-agent bookkeeping.
+        self.coarse_region.retain(|agent, _| keep(agent));
+        self.coarse_pos.retain(|agent, _| keep(agent));
+        self.joints.retain(|agent, _| keep(agent));
+        self.attachment_nodes.retain(|agent, _| keep(agent));
+        self.names.retain(|agent, _| keep(agent));
+        self.titles.retain(|agent, _| keep(agent));
+        self.requested.retain(keep);
+        self.pending_name_requests.retain(keep);
+        self.appearances.retain(|agent, _| keep(agent));
+        self.appearance_dirty.retain(keep);
+        self.joint_overrides.retain(|agent, _| keep(agent));
+        self.worn_rigged_meshes.retain(|agent, _| keep(agent));
+        self.skirt_visible.retain(|agent, _| keep(agent));
+        self.body_physics.retain(|agent, _| keep(agent));
+        self.baked_textures.retain(|agent, _| keep(agent));
+        self.invisible_regions.retain(|agent, _| keep(agent));
+        self.baked_cof_version.retain(|agent, _| keep(agent));
+        self.bake_dirty.retain(keep);
+        self.deformations.retain(|agent, _| keep(agent));
+        self.volume_deformations.retain(|agent, _| keep(agent));
+        self.root_drops.retain(|agent, _| keep(agent));
+        self.seat_drops.retain(|agent, _| keep(agent));
+        self.ever_full_object.retain(keep);
+        self.seated.retain(|agent, _| keep(agent));
+        // The source region's local-id space is gone; drop every scoped-id-keyed
+        // entry (own included — its ids are reassigned when the destination
+        // re-streams it). `by_scoped` is repopulated by `apply_object`, the parent
+        // / hide maps by `track_object`.
+        self.by_scoped.clear();
+        self.object_parents.clear();
+        self.baked_hides.clear();
+        self.scanned_objects.clear();
+        self.origin = None;
     }
 
     /// Record a resolved legacy name. (The tag itself refreshes via the
@@ -2630,6 +2745,62 @@ fn despawn_avatar(entities: AvatarEntities, commands: &mut Commands) {
     commands.entity(entities.label).try_despawn();
 }
 
+/// Keep the scene origin on the root region for **avatars**: when the root region
+/// changes — a border crossing, or a teleport to an already-connected region —
+/// shift every (non-seated) avatar anchor, and its dead-reckoning interpolation,
+/// by the same `-shift` the camera, terrain and objects re-base by, and record
+/// the new origin so a freshly-streamed avatar is placed against it
+/// ([`AvatarState::apply_object`]).
+///
+/// Like [`recenter_objects`](crate::objects::recenter_objects) this is
+/// belt-and-braces with the per-update placement: a moving avatar re-snaps itself
+/// on its next update (with the new offset), so the shift here keeps a *stationary*
+/// neighbour avatar — one receiving no update across the handover — in place. A
+/// **seated** avatar is skipped: its anchor is driven from its seat object (which
+/// [`recenter_objects`](crate::objects::recenter_objects) already re-based), so it
+/// follows for free — shifting it here too would double-move it.
+///
+/// Runs before [`update_avatar_objects`] and the dead-reckoner
+/// ([`drive_avatar_motion`](crate::physics::drive_avatar_motion)) so a same-frame
+/// update / interpolation step sees the re-based pose.
+#[expect(
+    clippy::type_complexity,
+    reason = "the anchor query pairs each avatar's transform with its optional \
+              dead-reckoning interp, filtered to non-seated anchors"
+)]
+pub(crate) fn recenter_avatars(
+    identity: Res<SlIdentity>,
+    mut state: ResMut<AvatarState>,
+    mut anchors: Query<
+        (&mut Transform, Option<&mut AvatarInterp>),
+        (With<AvatarAnchor>, Without<Seated>),
+    >,
+) {
+    let Some(root) = identity.region_handle else {
+        return;
+    };
+    match state.origin {
+        // Unchanged origin: nothing to re-base.
+        Some(current) if current == root => {}
+        Some(previous) => {
+            let shift = origin_shift_bevy(previous, root);
+            for (mut transform, interp) in &mut anchors {
+                // Per-component (not the glam vector operator) for the
+                // `arithmetic_side_effects` lint, matching `recenter_terrain`.
+                transform.translation.x -= shift.x;
+                transform.translation.y -= shift.y;
+                transform.translation.z -= shift.z;
+                if let Some(mut interp) = interp {
+                    interp.rebase(Vec3::new(-shift.x, -shift.y, -shift.z));
+                }
+            }
+            state.origin = Some(root);
+        }
+        // First region learned (login): anchor the origin without shifting.
+        None => state.origin = Some(root),
+    }
+}
+
 /// Spawn / move / despawn the placeholder of every avatar the simulator streams
 /// as a full in-world object (`pcode` 47), requesting each avatar's legacy name
 /// once.
@@ -2801,6 +2972,7 @@ pub(crate) fn update_coarse_avatars(
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let origin = identity.region_handle;
+    let own = identity.agent_id;
     for event in events.read() {
         if let SlSessionEvent::CoarseLocationUpdate {
             locations,
@@ -2812,6 +2984,7 @@ pub(crate) fn update_coarse_avatars(
             state.apply_coarse(
                 *region_handle,
                 origin,
+                own,
                 locations,
                 *you,
                 &mut commands,
@@ -5006,7 +5179,8 @@ mod tests {
             y: 20.0,
             z: 30.0,
         });
-        let transform = body_root_transform(&object, root_drop);
+        // No region offset (root region) → the raw region-local placement.
+        let transform = body_root_transform(&object, root_drop, Vec3::ZERO);
         // Second Life (10, 20, 30) → Bevy (10, 30, -20), then lowered in Y by the
         // root drop.
         assert_eq!(

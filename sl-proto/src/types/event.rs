@@ -399,6 +399,15 @@ pub enum Event {
         /// mints a fresh one). Track it as the current circuit for later scoped
         /// object/parcel commands.
         circuit: CircuitId,
+        /// Whether the session **cleared** its world caches (objects / terrain /
+        /// regions / neighbours) as part of this handover — `true` only for a
+        /// **distant** teleport that minted a fresh circuit to an unconnected
+        /// region. A region *crossing* and a teleport to an *already-connected*
+        /// (neighbour) region both keep and re-base the world (`false`), so a
+        /// consumer that mirrors the scene must **purge** its own mirror when this
+        /// is `true` (the cache clearing emits no per-object removals), and keep +
+        /// re-base it when `false`.
+        world_reset: bool,
     },
     /// Local chat was received (`ChatFromSimulator`): a nearby agent or object
     /// spoke, or the region/system sent a message. Sent in response to nearby

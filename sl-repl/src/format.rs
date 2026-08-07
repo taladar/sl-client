@@ -950,6 +950,7 @@ mod tests {
                 region_handle: RegionHandle(1_099_511_628_032),
                 sim,
                 circuit: sl_proto::CircuitId(1),
+                world_reset: false,
             },
             &ctx,
         );

@@ -858,6 +858,12 @@ enum TeleportPhase {
         /// The destination region handle reported by `TeleportFinish` / the
         /// region crossing.
         region_handle: RegionHandle,
+        /// Whether the world caches were cleared for this handover (a distant
+        /// teleport to an unconnected region), carried through to the
+        /// [`Event::RegionChanged`](crate::Event::RegionChanged) `world_reset`
+        /// flag so the driver purges (vs re-bases) its scene mirror. A crossing
+        /// and a neighbour teleport keep the world, so this is `false` for them.
+        world_reset: bool,
     },
 }
 

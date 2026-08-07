@@ -1036,15 +1036,30 @@ impl Session {
         // (which it would reject, leaving the handshake to never complete — after
         // the teleport timeout the old circuit is gone and the session drops). A
         // teleport to a region we have *no* child agent on instead mints a fresh
-        // circuit and retargets. (This is the teleport counterpart of
-        // `promote_child_to_root`; the difference is a teleport still discards the
-        // source's neighbours / caches / seat below, where a crossing keeps them.)
-        if let Some(mut new_root) = self.children.remove(&dest) {
+        // circuit and retargets.
+        //
+        // The promote branch is the teleport counterpart of
+        // `promote_child_to_root` (a crossing) and behaves the same way toward the
+        // **world**: keep the objects / terrain / regions and demote the old root
+        // to a child, so the destination — and the region we left, now a child —
+        // keep streaming without a purge-and-refetch. Only a **distant** teleport
+        // (the fresh branch) discards the source's world, since its local-id
+        // spaces and region are all new. Either way a teleport still unseats and
+        // drops in-world grants below (a crossing keeps the seat).
+        let promoted = if let Some(mut new_root) = self.children.remove(&dest) {
             tracing::debug!("teleport handover to {dest}: promoting the existing child circuit");
             new_root.send_complete_agent_movement(now)?;
-            // The teleport leaves the old root behind (a crossing keeps it as a
-            // child; a teleport does not), so replacing simply drops it.
-            self.circuit = Some(new_root);
+            self.child_seeds.remove(&dest);
+            // Demote the old root to a child agent of the new region (like a
+            // crossing): it is a neighbour of the destination, so it keeps
+            // streaming its scene to our now-child circuit rather than being torn
+            // down and refetched. The other children stay open for the same
+            // reason `promote_child_to_root` keeps them.
+            let old_root = self.circuit.replace(new_root);
+            if let Some(old) = old_root {
+                self.children.insert(old.sim_addr, old);
+            }
+            true
         } else {
             tracing::debug!("teleport handover to {dest}: minting a fresh circuit");
             // A retarget resets the circuit's sequence/ack/seen/timer state to the
@@ -1059,18 +1074,22 @@ impl Session {
                 circuit.send_use_circuit_code(now)?;
                 circuit.send_complete_agent_movement(now)?;
             }
+            false
+        };
+        if !promoted {
+            // A distant teleport discards the source region's neighbours + world:
+            // the retargeted root and the dropped neighbours leave their cached
+            // objects, terrain and regions stale (new local-id spaces and a new
+            // region at the destination), so start fresh. The driver purges its
+            // scene mirror on the `world_reset` flag below (the clear emits no
+            // per-object removals).
+            self.children.clear();
+            self.child_seeds.clear();
+            self.objects.clear();
+            self.terrain.clear();
+            self.regions.clear();
+            self.time_dilation.clear();
         }
-        // The remaining child circuits were neighbours of the *source* region; a
-        // teleport discards them (the destination re-announces its own neighbours).
-        self.children.clear();
-        self.child_seeds.clear();
-        // The retargeted root and the dropped neighbours leave their cached
-        // objects and terrain stale (new local-id spaces and a new region at the
-        // destination); start fresh.
-        self.objects.clear();
-        self.terrain.clear();
-        self.regions.clear();
-        self.time_dilation.clear();
         if seed_capability.is_some() {
             self.seed_capability = seed_capability;
         }
@@ -1079,8 +1098,9 @@ impl Session {
         // region *crossing* — `promote_child_to_root` — keeps the seat, since a
         // vehicle the agent sits on carries it across the border.)
         self.sit = SitState::NotSitting;
-        // A real teleport leaves in-world objects behind in the old simulator;
-        // drop their permission grants (attachments cross with the avatar).
+        // A real teleport leaves in-world objects behind in the old simulator
+        // (whether a neighbour promote or a distant fresh circuit); drop their
+        // permission grants (attachments cross with the avatar).
         self.drop_inworld_grants();
         // Deliberately NOT reset here (nor at any region boundary): `chat_sessions`
         // / `friends` / `online` / `inventory` are grid-level state routed by the
@@ -1089,7 +1109,10 @@ impl Session {
         // the region-local `sit` / script grants above). They are seeded empty
         // only in `Session::new` and die solely when the `Session` is dropped —
         // see CHAT_ROADMAP B10/A9 and INVENTORY_ROADMAP A10/B3.
-        self.teleport = TeleportPhase::Handover { region_handle };
+        self.teleport = TeleportPhase::Handover {
+            region_handle,
+            world_reset: !promoted,
+        };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
     }
@@ -1119,12 +1142,16 @@ impl Session {
         }
         self.state = SessionState::Active;
         match core::mem::replace(&mut self.teleport, TeleportPhase::Idle) {
-            TeleportPhase::Handover { region_handle } => {
+            TeleportPhase::Handover {
+                region_handle,
+                world_reset,
+            } => {
                 if let Some((sim, circuit)) = self.circuit.as_ref().map(|c| (c.sim_addr, c.id)) {
                     self.events.push_back(Event::RegionChanged {
                         region_handle,
                         sim,
                         circuit,
+                        world_reset,
                     });
                 }
             }
@@ -1235,7 +1262,12 @@ impl Session {
         if seed.is_some() {
             self.seed_capability = seed;
         }
-        self.teleport = TeleportPhase::Handover { region_handle };
+        // A crossing keeps the whole world (objects / terrain / regions) and only
+        // re-bases it onto the new root, so no `world_reset` for the driver.
+        self.teleport = TeleportPhase::Handover {
+            region_handle,
+            world_reset: false,
+        };
         self.state = SessionState::AwaitingHandshake;
         Ok(())
     }
@@ -1626,19 +1658,8 @@ impl Session {
                 self.children.remove(&from);
                 self.child_seeds.remove(&from);
                 if let Some(circuit_id) = circuit_id {
-                    // Drop this neighbour region's coarse (minimap) avatar dots:
-                    // an empty `CoarseLocationUpdate` for the region reconciles its
-                    // coarse set to nothing, so a consumer does not leave stale
-                    // dots behind once the region is gone (R24). Emitted before
-                    // `forget_sim_objects`, which clears the region-handle cache.
-                    if let Some(region_handle) = self.regions.get(&circuit_id).copied() {
-                        self.events.push_back(Event::CoarseLocationUpdate {
-                            locations: Vec::new(),
-                            you: None,
-                            prey: None,
-                            region_handle,
-                        });
-                    }
+                    // Reaps this neighbour's objects *and* prunes its coarse
+                    // (minimap) dots via an empty `CoarseLocationUpdate` (R24).
                     self.forget_sim_objects(circuit_id);
                 }
             }
@@ -2293,9 +2314,26 @@ impl Session {
     }
 
     /// Drops every cached object for the circuit instance `circuit_id` (it has
-    /// gone away), emitting an [`Event::ObjectRemoved`] for each so consumers
-    /// can prune.
+    /// gone away — retired by `DisableSimulator` or expired on inactivity),
+    /// emitting an [`Event::ObjectRemoved`] for each so consumers can prune, plus
+    /// an empty [`Event::CoarseLocationUpdate`] for its region so a consumer drops
+    /// that region's coarse (minimap) avatar dots too (R24). Both callers rely on
+    /// this, so a silently-timed-out neighbour prunes exactly like a cleanly
+    /// disabled one.
     fn forget_sim_objects(&mut self, circuit_id: CircuitId) {
+        // Capture the region before the handle cache is cleared below, so the
+        // coarse-dot prune can name it.
+        let region_handle = self.regions.get(&circuit_id).copied();
+        // Reconcile this region's coarse set to nothing so no stale minimap dot
+        // is left behind once the region is gone.
+        if let Some(region_handle) = region_handle {
+            self.events.push_back(Event::CoarseLocationUpdate {
+                locations: Vec::new(),
+                you: None,
+                prey: None,
+                region_handle,
+            });
+        }
         // The terrain, region-handle, time-dilation, and own-avatar caches for
         // this circuit go stale too.
         self.terrain.remove(&circuit_id);

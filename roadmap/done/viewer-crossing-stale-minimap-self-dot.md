@@ -2,7 +2,7 @@
 id: viewer-crossing-stale-minimap-self-dot
 title: Stale own-avatar dot left in the old region on the minimap after a crossing
 topic: viewer
-status: bugs
+status: done
 origin: user report (2026-08-07), teleport/crossing live testing
 refs: [viewer-minimap, viewer-seamless-region-handover-objects]
 ---

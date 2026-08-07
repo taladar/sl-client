@@ -643,6 +643,10 @@ impl Plugin for MinimapPlugin {
                 Update,
                 (
                     read_chat_ranges,
+                    // Clear a reached location beacon before the composite draws
+                    // it, so a double-click-teleport target does not linger as a
+                    // red "ghost" dot once the agent arrives.
+                    clear_reached_location_track,
                     drive_minimap_view,
                     regen_minimap_layers,
                     composite_minimap,
@@ -885,6 +889,56 @@ fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
 fn global_from_bevy(origin: (f64, f64), translation: Vec3) -> (f64, f64, f32) {
     let sl = bevy_to_sl_vec(translation);
     (origin.0 + f64::from(sl.x), origin.1 + f64::from(sl.y), sl.z)
+}
+
+/// The horizontal distance (metres) within which the agent counts as having
+/// reached a tracked location, so tracking of it stops — the reference
+/// `LLTracker` clears a location track on arrival.
+const TRACK_ARRIVAL_RADIUS_M: f64 = 3.0;
+
+/// Whether the agent at global `(agent_east, agent_north)` has reached the
+/// tracked location `(east, north)` — within [`TRACK_ARRIVAL_RADIUS_M`]
+/// horizontally (altitude ignored, as the reference tracker does for arrival).
+fn location_reached(agent_east: f64, agent_north: f64, east: f64, north: f64) -> bool {
+    let de = agent_east - east;
+    let dn = agent_north - north;
+    de * de + dn * dn <= TRACK_ARRIVAL_RADIUS_M * TRACK_ARRIVAL_RADIUS_M
+}
+
+/// Stop tracking a fixed **location** once the agent reaches it (within
+/// [`TRACK_ARRIVAL_RADIUS_M`] horizontally), matching the reference `LLTracker`,
+/// which clears a location track on arrival.
+///
+/// A double-click-to-teleport on the minimap sets this beacon at the destination
+/// ([`on_minimap_click`], "unless already tracking"); without an arrival-clear it
+/// lingers as a **red** map dot at the spot after the agent arrives (and
+/// teleports on again) — a stale "ghost" that looks exactly like an avatar dot,
+/// because [`COLOR_TRACK`](crate::minimap_math::COLOR_TRACK) is byte-identical to
+/// the avatar-dot red. An **avatar** track is left alone (it follows its avatar
+/// until stopped from the menu).
+pub(crate) fn clear_reached_location_track(
+    mut tracking: ResMut<MapTracking>,
+    identity: Res<SlIdentity>,
+    avatars: Res<AvatarState>,
+    terrain: Res<TerrainState>,
+    transforms: Query<&GlobalTransform>,
+) {
+    let Some(TrackTarget::Location { east, north, .. }) = tracking.target else {
+        return;
+    };
+    let origin = origin_global(terrain.origin().or(identity.region_handle));
+    let Some((agent_east, agent_north, _up)) = identity
+        .agent_id
+        .and_then(|agent| avatars.root_entity_of(agent))
+        .and_then(|entity| transforms.get(entity).ok())
+        .map(|transform| global_from_bevy(origin, transform.translation()))
+    else {
+        return;
+    };
+    if location_reached(agent_east, agent_north, east, north) {
+        debug!("reached tracked location; clearing the map beacon");
+        tracking.target = None;
+    }
 }
 
 /// Update the per-frame view state: seed the scale from its setting, size the
@@ -3165,11 +3219,25 @@ pub(crate) fn spawn_minimap_specimen(
 mod tests {
     use super::{
         COMPASS_MINOR, COMPASS_POINTS, MARK_COLORS, MINIMAP_MENU, MenuDef, MenuItemDef,
-        ObjectLayerInput, ObjectPose, ObjectSample, grid_index_at, phantom_alpha, range_metres,
-        region_handle_at,
+        ObjectLayerInput, ObjectPose, ObjectSample, grid_index_at, location_reached, phantom_alpha,
+        range_metres, region_handle_at,
     };
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
     use pretty_assertions::assert_eq;
+
+    /// A tracked location is "reached" only within the arrival radius (3 m),
+    /// horizontally — the trigger to clear a double-click-teleport beacon so it
+    /// does not linger as a red ghost dot.
+    #[test]
+    fn location_reached_within_arrival_radius() {
+        // Right on it, and just inside 3 m, count as reached.
+        assert!(location_reached(1000.0, 1000.0, 1000.0, 1000.0));
+        assert!(location_reached(1002.0, 1000.0, 1000.0, 1000.0));
+        assert!(location_reached(1000.0, 1002.9, 1000.0, 1000.0));
+        // Beyond 3 m is not reached (a beacon a few metres away stays lit).
+        assert!(!location_reached(1005.0, 1000.0, 1000.0, 1000.0));
+        assert!(!location_reached(1000.0, 1000.0, 1010.0, 1010.0));
+    }
 
     /// Collect every action string reachable from a menu.
     fn collect_actions(menu: &MenuDef, out: &mut Vec<&'static str>) {

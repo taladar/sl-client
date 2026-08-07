@@ -334,10 +334,18 @@ pub(crate) fn maintain_world(
                 region_handle,
                 sim,
                 circuit,
-                ..
+                world_reset,
             } => {
                 identity.region_handle = Some(*region_handle);
                 identity.circuit_id = Some(*circuit);
+                // A distant teleport purged the session's world caches (a fresh
+                // circuit to an unconnected region); drop every mirrored region
+                // — the source and its neighbours are all gone — before the
+                // destination is spawned fresh below. A crossing / neighbour
+                // teleport keeps them (they keep streaming as child circuits).
+                if *world_reset {
+                    clear_world(&mut commands, &mut index);
+                }
                 set_current_region(&mut commands, &mut index, *region_handle, *sim);
                 // Drop the previous region's overlay; the destination re-pushes
                 // its own on entry.
@@ -539,6 +547,7 @@ mod tests {
                 region_handle: next,
                 sim: sim(9001),
                 circuit: CircuitId(2),
+                world_reset: false,
             }));
         app.update();
 
@@ -719,6 +728,7 @@ mod tests {
                 region_handle: next,
                 sim: sim(9001),
                 circuit: CircuitId(2),
+                world_reset: false,
             }));
         app.update();
         let overlay = app.world().resource::<SlParcelOverlay>();
