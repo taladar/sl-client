@@ -2,7 +2,7 @@
 id: viewer-experience-permission-body-links
 title: Experience card name — clickable experience-profile SLURL
 topic: viewer
-status: blocked
+status: ready
 origin: deferred from viewer-experience-permission-dialog (2026-07-29) — the
   experience-name link parked like the sibling toasts', pending the linkification
   layer

@@ -2,7 +2,7 @@
 id: viewer-script-dialog-body-links
 title: Script dialog body — clickable URLs / SLURLs
 topic: viewer
-status: blocked
+status: ready
 origin: deferred from viewer-dialog-lldialog (2026-07-29) — links parked like
   chat's, pending the linkification layer
 blocked_by: [viewer-url-linkification]

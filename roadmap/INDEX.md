@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 242 |
-| blocked | 92 |
+| ready | 247 |
+| blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 733 |
+| done | 734 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1185** |
+| **total** | **1186** |
 
 ## ideas (58)
 
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (242)
+## ready (247)
 
 ### protocol
 
@@ -269,6 +269,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-chat-omnifilter`](ready/viewer-chat-omnifilter.md) — Omnifilter
   chat-filtering floater
+- [`viewer-chat-sender-name-links`](ready/viewer-chat-sender-name-links.md) —
+  Chat sender names — clickable agent / object links (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-chat-spellcheck`](ready/viewer-chat-spellcheck.md) — Spellcheck in
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
@@ -318,6 +321,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-experience-permission-body-links`](ready/viewer-experience-permission-body-links.md)
+  — Experience card name — clickable experience-profile SLURL (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -342,6 +348,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Group profile — set the group insignia
 - [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
   — Group notices — attach on send, open on receive
+- [`viewer-group-notice-body-links`](ready/viewer-group-notice-body-links.md) —
+  Group notice body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -370,6 +379,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
   (done))
+- [`viewer-inspector-popups`](ready/viewer-inspector-popups.md) — Avatar /
+  object inspector popups from clickable chat names (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-inventory-bulk-permissions`](ready/viewer-inventory-bulk-permissions.md)
   — Bulk next-owner permissions editor (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -387,6 +399,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
+- [`viewer-load-url-body-links`](ready/viewer-load-url-body-links.md) — Script
+  web-page toast body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
@@ -582,6 +597,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-space reflections (SSR)
 - [`viewer-screenshot-wait-for-quiescence`](ready/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
+- [`viewer-script-dialog-body-links`](ready/viewer-script-dialog-body-links.md)
+  — Script dialog body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
   warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
@@ -642,8 +660,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-url-linkification`](ready/viewer-url-linkification.md) — URLs in chat
-  & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
@@ -728,7 +744,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (92)
+## blocked (87)
 
 ### protocol
 
@@ -775,9 +791,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-experience-permission-body-links`](blocked/viewer-experience-permission-body-links.md)
-  — Experience card name — clickable experience-profile SLURL (blocked by
-  `viewer-url-linkification`)
 - [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
   SimSession (blocked by `protocol-sim-caps-framework`)
 - [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
@@ -798,9 +811,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by
   `viewer-preferences-graphics-tab`)
-- [`viewer-group-notice-body-links`](blocked/viewer-group-notice-body-links.md)
-  — Group notice body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification`)
 - [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
   — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
   by `viewer-audio-backend`)
@@ -819,16 +829,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
-- [`viewer-inspector-popups`](blocked/viewer-inspector-popups.md) — Avatar /
-  object inspector popups from clickable chat names (blocked by
-  `viewer-url-linkification`)
 - [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-inventory-sound-anim-preview`](blocked/viewer-inventory-sound-anim-preview.md)
   — Inventory sound & animation preview (blocked by `viewer-audio-backend`)
-- [`viewer-load-url-body-links`](blocked/viewer-load-url-body-links.md) — Script
-  web-page toast body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -911,9 +915,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlva-floaters-toggles`](blocked/viewer-rlva-floaters-toggles.md) —
   "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked by
   `viewer-rlv-restriction-state`)
-- [`viewer-script-dialog-body-links`](blocked/viewer-script-dialog-body-links.md)
-  — Script dialog body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification`)
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
@@ -1076,7 +1077,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (733)
+## done (734)
 
 ### protocol
 
@@ -2083,6 +2084,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
+  & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life

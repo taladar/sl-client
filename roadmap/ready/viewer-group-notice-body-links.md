@@ -2,7 +2,7 @@
 id: viewer-group-notice-body-links
 title: Group notice body — clickable URLs / SLURLs
 topic: viewer
-status: blocked
+status: ready
 origin: deferred from viewer-group-notice-display (2026-07-29) — links parked
   like chat's, pending the linkification layer
 blocked_by: [viewer-url-linkification]

@@ -132,6 +132,12 @@ jiff = { version = "0.2.35" }
 # on one parley build (a second copy would mean a second, unrelated font
 # collection).
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
+# The URL-linkification matcher (viewer-url-linkification) scans chat / notice /
+# profile text for `http(s)` URLs, SLURLs and `secondlife:///app/...` links,
+# faithfully mirroring the reference `llurlregistry` / `llurlentry` regex set.
+# The reference's Perl patterns for the subset we recognise use no lookahead or
+# backreferences, so the linear-time `regex` crate matches them exactly.
+regex = { version = "1.13.1" }
 # The blocking HTTP client for the login-time OpenID token POST
 # (`viewer-web-openid-auth`): a one-shot POST on a worker thread whose
 # `Set-Cookie` primes the embedded browser's shared cookie store. `rustls-tls`

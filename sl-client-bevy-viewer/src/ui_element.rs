@@ -634,6 +634,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::script_dialog::spawn_script_textbox_specimen,
     },
     UiElement {
+        id: "linkified-text",
+        summary: "A run of text with its http(s) URL, labelled [url text] link and location \
+                  SLURL turned into coloured, hoverable, clickable spans \
+                  (viewer-url-linkification). The shared decoration layer every text-bearing \
+                  panel consumes; here a static sample sweeps the segment wrapping / link tint.",
+        spawn: crate::linkified_text::spawn_linkified_text_specimen,
+    },
+    UiElement {
         id: "load-url-toast",
         summary: "A script web-page request card (viewer-dialog-script-load-url): the \"Open a \
                   web page?\" heading, the object / owner title, the script message, the target \

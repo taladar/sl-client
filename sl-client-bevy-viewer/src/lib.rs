@@ -108,6 +108,7 @@ mod inventory_properties;
 mod land_menu;
 mod legacy_materials;
 mod lights;
+mod linkified_text;
 mod load_url;
 mod local_chat_input;
 mod locomotion;
@@ -141,6 +142,7 @@ mod objects;
 mod offers_invites;
 mod parcel_audio;
 mod parcel_borders;
+mod parcel_names;
 mod particle_render;
 mod particles;
 mod paths;
@@ -217,6 +219,7 @@ mod ui_text;
 mod ui_text_input;
 mod ui_texture_picker;
 mod underwater_fog;
+mod url_linkify;
 mod virtual_list;
 mod water;
 mod water_exclusion;
@@ -986,6 +989,12 @@ fn run_session(
     // resolves an avatar / group / owner name against the caches, keeps the
     // label + link tint in step, and opens the right profile on click.
     .add_plugins(crate::ui_name_link::NameLinkPlugin)
+    // The shared URL-linkification widget (viewer-url-linkification): renders text
+    // with clickable http(s) / SLURL / secondlife:///app links, resolves agent /
+    // group / parcel names in place, shows the target URL on hover, and opens web
+    // links. The parcel-name cache feeds the parcel-link labels.
+    .add_plugins(crate::parcel_names::ParcelNamesPlugin)
+    .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
     // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
     // each option's `Checked` marker and indicator glyph reconciled to the
     // group's selection, so a click and an external write (the Build Tools

@@ -2937,6 +2937,18 @@ load-url-button-load = Load
 load-url-button-block = Block
 load-url-button-ignore = Ignore
 
+# The shared URL-linkification widget (viewer-url-linkification): the placeholder
+# an agent / group link shows until its name resolves, and the hover-tooltip
+# category lines (shown above the link's actual destination URL). Mirror the
+# reference Tooltip* strings.
+link-loading = (loading…)
+link-tooltip-http = Web page
+link-tooltip-slurl = Location in Second Life
+link-tooltip-slapp = Second Life command
+link-tooltip-parcel = Parcel information
+link-tooltip-agent = Resident profile
+link-tooltip-group = Group information
+
 # The script permission-request toast (viewer-permission-request-dialog): the card
 # a scripted object's llRequestPermissions pops (the ScriptQuestion message),
 # naming the object / owner and the requested permission bits.

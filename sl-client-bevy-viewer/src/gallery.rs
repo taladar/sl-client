@@ -274,6 +274,20 @@ pub fn run() {
             video_enabled: false,
         })
         .add_plugins(crate::browser_widget::BrowserWidgetPlugin)
+        // The i18n scaffold, so the linkified-text widget's `Translator` (the
+        // hover-tooltip category, the "(loading…)" placeholder) resolves here. It
+        // is self-contained (its settings input is optional) and the specimens'
+        // own strings still go through the cell's `SampleText`, not this.
+        .add_plugins(crate::i18n::ViewerI18nPlugin)
+        // The URL-linkification widget, so its gallery specimen renders live: icons,
+        // the hover-URL tooltip and web-link opening all work here. Its name /
+        // parcel caches are absent in this login-free binary (the widget treats them
+        // as optional), so a name link would stay "(loading…)"; the specimen uses
+        // fixed-label links. The two session messages it writes to are declared so
+        // its `MessageWriter`s have somewhere inert to go.
+        .add_message::<sl_client_bevy::SlCommand>()
+        .add_message::<crate::web_floater::OpenWebBrowser>()
+        .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.
         .insert_resource(UiDirection::from_env())
