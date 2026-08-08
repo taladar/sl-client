@@ -730,6 +730,8 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetObjectIncludeInSearch { .. } => "set_object_include_in_search",
         Command::LinkObjects { .. } => "link_objects",
         Command::DelinkObjects { .. } => "delink_objects",
+        Command::UndoObjects { .. } => "undo_objects",
+        Command::RedoObjects { .. } => "redo_objects",
         Command::BuyObject { .. } => "buy_object",
         Command::BuyObjectInventory { .. } => "buy_object_inventory",
         Command::RequestPayPrice { .. } => "request_pay_price",

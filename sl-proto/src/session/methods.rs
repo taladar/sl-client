@@ -11571,6 +11571,74 @@ impl Session {
         Ok(())
     }
 
+    /// Resolves region-local object ids to their persistent full ids
+    /// ([`ObjectKey`]) from `scope`'s object cache, skipping any not currently
+    /// cached. Used by the object undo / redo sends, whose wire form
+    /// (`Undo` / `Redo`) addresses objects by full id rather than region-local
+    /// id (mirroring the reference's `packObjectID`, which packs `mID`).
+    fn resolve_full_ids(&self, scope: CircuitId, ids: &[RegionLocalObjectId]) -> Vec<ObjectKey> {
+        let Some(cache) = self.objects.get(&scope) else {
+            return Vec::new();
+        };
+        ids.iter()
+            .filter_map(|id| cache.get(id).map(|object| object.full_id))
+            .collect()
+    }
+
+    /// Undoes the last edit on `local_ids` via `Undo`: the simulator keeps a
+    /// per-object edit history and reverts each named object one step. There is
+    /// no client-side undo ledger — this matches the reference viewer's
+    /// `LLSelectMgr::undo`, which likewise only sends the object ids. Objects not
+    /// currently in the cache are skipped; if none resolve, nothing is sent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MixedCircuits`] if `local_ids` span more than one
+    /// circuit, [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn undo_objects(
+        &mut self,
+        local_ids: &[ScopedObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let Some((scope, ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let object_ids = self.resolve_full_ids(scope, &ids);
+        if object_ids.is_empty() {
+            return Ok(());
+        }
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_undo(&object_ids, now)?;
+        Ok(())
+    }
+
+    /// Redoes the last undone edit on `local_ids` via `Redo` — the inverse of
+    /// [`Session::undo_objects`], again driven entirely by the simulator's
+    /// per-object history.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MixedCircuits`] if `local_ids` span more than one
+    /// circuit, [`Error::NoCircuit`] if no circuit is established, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn redo_objects(
+        &mut self,
+        local_ids: &[ScopedObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let Some((scope, ids)) = split_scoped_object_ids(local_ids)? else {
+            return Ok(());
+        };
+        let object_ids = self.resolve_full_ids(scope, &ids);
+        if object_ids.is_empty() {
+            return Ok(());
+        }
+        let circuit = self.circuit_for_scope(scope)?;
+        circuit.send_redo(&object_ids, now)?;
+        Ok(())
+    }
+
     /// Requests an in-world teleport to `position` (region-local) in the region
     /// identified by `region_handle`, looking towards `look_at`. On success the
     /// session re-establishes its circuit at the destination simulator and emits

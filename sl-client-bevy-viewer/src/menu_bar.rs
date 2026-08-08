@@ -99,6 +99,14 @@ const CAN_LINK: &str = "can-link";
 /// Condition key: the current selection can be **unlinked** (`crate::edit_link`).
 const CAN_UNLINK: &str = "can-unlink";
 
+/// Condition key: the current selection has an object whose last edit can be
+/// **undone** (`crate::edit_undo`).
+const CAN_UNDO: &str = "can-undo";
+
+/// Condition key: the current selection has an object whose last undone edit can
+/// be **redone** (`crate::edit_undo`).
+const CAN_REDO: &str = "can-redo";
+
 /// The condition keys that hold while the matching World ▸ Environment fixed
 /// environment is pinned — one per group × time (Day Cycle / Legacy / Modern ×
 /// Sunrise / Midday / Sunset / Midnight), plus the shared-environment default.
@@ -291,9 +299,9 @@ static WORLD_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Build menu — the build tool (`crate::edit_tool`) and prim
-/// linking / unlinking (`crate::edit_link`); the grid options / undo /
-/// selection-filter entries are future tasks.
+/// The Build menu — the build tool (`crate::edit_tool`), object undo / redo
+/// (`crate::edit_undo`), and prim linking / unlinking (`crate::edit_link`); the
+/// grid options / selection-filter entries are future tasks.
 static BUILD_MENU: MenuDef = MenuDef {
     label: "Build",
     items: &[
@@ -301,6 +309,17 @@ static BUILD_MENU: MenuDef = MenuDef {
             MenuCommand::new("Build Tools", "toggle-build-tools")
                 .accel("Ctrl+B")
                 .checked_when(BUILD_TOOLS_OPEN),
+        ),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Undo", crate::edit_undo::UNDO_ACTION)
+                .accel("Ctrl+Z")
+                .enabled_when(CAN_UNDO),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Redo", crate::edit_undo::REDO_ACTION)
+                .accel("Ctrl+Y")
+                .enabled_when(CAN_REDO),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
@@ -488,6 +507,14 @@ fn update_top_menu_conditions(
     }
     if crate::edit_link::can_unlink(&selection) {
         wanted.push(CAN_UNLINK);
+    }
+    // The Build ▸ Undo / Redo enable gates, from the current selection's
+    // per-object permissions (the reference's `canUndo` / `canRedo`).
+    if crate::edit_undo::can_undo(&selection, &edit_tool) {
+        wanted.push(CAN_UNDO);
+    }
+    if crate::edit_undo::can_redo(&selection, &edit_tool) {
+        wanted.push(CAN_REDO);
     }
     // The Environment submenu's check marks: exactly one of the four presets or
     // the shared default holds. The gallery has no environment resource, so the

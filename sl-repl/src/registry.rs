@@ -4049,6 +4049,30 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "undo_objects",
+            usage: "<local_id,local_id,…>",
+            build: |args, ctx| {
+                Ok(Command::UndoObjects {
+                    local_ids: scoped_objects(
+                        ctx,
+                        args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
+                    )?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "redo_objects",
+            usage: "<local_id,local_id,…>",
+            build: |args, ctx| {
+                Ok(Command::RedoObjects {
+                    local_ids: scoped_objects(
+                        ctx,
+                        args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
+                    )?,
+                })
+            },
+        },
+        CommandSpec {
             name: "buy_object",
             usage: "<group_id> <category_id> <local_id:sale_type:sale_price,…>",
             build: |args, ctx| {
@@ -6467,6 +6491,30 @@ mod tests {
     #[test]
     fn undo_land_parses() {
         assert!(matches!(build("undo_land"), Ok(Command::UndoLand)));
+    }
+
+    #[test]
+    fn undo_objects_parses_scoped_list() {
+        assert!(matches!(
+            build_scoped("undo_objects 3,4,5"),
+            Ok(Command::UndoObjects { local_ids })
+                if local_ids == vec![
+                    ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(3) },
+                    ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(4) },
+                    ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(5) },
+                ]
+        ));
+    }
+
+    #[test]
+    fn redo_objects_parses_scoped_list() {
+        assert!(matches!(
+            build_scoped("redo_objects 9"),
+            Ok(Command::RedoObjects { local_ids })
+                if local_ids == vec![
+                    ScopedObjectId { circuit: TEST_CIRCUIT, id: RegionLocalObjectId(9) },
+                ]
+        ));
     }
 
     #[test]

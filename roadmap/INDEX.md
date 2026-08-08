@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 243 |
+| ready | 242 |
 | blocked | 92 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 731 |
+| done | 732 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1184** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (242)
 
 ### protocol
 
@@ -235,9 +235,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
   Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
-- [`viewer-build-undo-redo`](ready/viewer-build-undo-redo.md) — Object-edit
-  undo/redo stack (blocked by `viewer-transform-gizmos` (done),
-  `viewer-prim-parameter-editing` (done))
 - [`viewer-bumps-floater`](ready/viewer-bumps-floater.md) — Bumps, pushes & hits
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-camera-constraint-plane`](ready/viewer-camera-constraint-plane.md) —
@@ -1078,7 +1075,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (731)
+## done (732)
 
 ### protocol
 
@@ -1255,6 +1252,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
   — Build tools — gate modifications on modify/move permission + grey the
+- [`viewer-build-undo-redo`](done/viewer-build-undo-redo.md) — Object-edit
+  undo/redo stack (blocked by `viewer-transform-gizmos` (done),
+  `viewer-prim-parameter-editing` (done))
 - [`viewer-camera-collision`](done/viewer-camera-collision.md) — Camera
   collision (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-camera-flycam`](done/viewer-camera-flycam.md) — Flycam mode

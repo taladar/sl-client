@@ -1422,6 +1422,12 @@ impl Client {
                         Some(Command::DelinkObjects { local_ids }) => {
                             self.session.delink_objects(&local_ids, Instant::now())?;
                         }
+                        Some(Command::UndoObjects { local_ids }) => {
+                            self.session.undo_objects(&local_ids, Instant::now())?;
+                        }
+                        Some(Command::RedoObjects { local_ids }) => {
+                            self.session.redo_objects(&local_ids, Instant::now())?;
+                        }
                         Some(Command::UpdateParcel(update)) => {
                             self.session.update_parcel(&update, Instant::now())?;
                         }

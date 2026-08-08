@@ -1470,6 +1470,24 @@ pub enum Command {
         /// The region-local ids to unlink.
         local_ids: Vec<ScopedObjectId>,
     },
+    /// Undo the last edit on the selected objects (`Undo`). There is **no**
+    /// client-side undo ledger: the simulator keeps a per-object edit history
+    /// and reverts each named object one step, exactly as the reference viewer's
+    /// `LLSelectMgr::undo` does (it only sends the object ids). The inverse is
+    /// [`Command::RedoObjects`]. The region-local ids are resolved to the full
+    /// object ids the `Undo` message addresses by; any not currently cached are
+    /// skipped.
+    UndoObjects {
+        /// The region-local ids to undo.
+        local_ids: Vec<ScopedObjectId>,
+    },
+    /// Redo the last undone edit on the selected objects (`Redo`) — the inverse
+    /// of [`Command::UndoObjects`], again driven entirely by the simulator's
+    /// per-object history.
+    RedoObjects {
+        /// The region-local ids to redo.
+        local_ids: Vec<ScopedObjectId>,
+    },
     /// Buy one or more in-world objects offered for sale (`ObjectBuy`). The sale
     /// type and price in each [`ObjectBuyItem`] must match what the object
     /// advertises (see [`Command::RequestObjectPropertiesFamily`]); the simulator

@@ -69,6 +69,7 @@ mod edit_selection;
 mod edit_texture;
 mod edit_texture_align;
 mod edit_tool;
+mod edit_undo;
 mod edit_wearable;
 mod emoji_complete;
 mod emoji_picker;
@@ -1111,6 +1112,9 @@ fn run_session(
     // and the Build menu, sending ObjectLink / ObjectDelink with the
     // last-selected object as the linkset root.
     .add_plugins(crate::edit_link::EditLinkPlugin)
+    // Object-edit undo / redo (viewer-build-undo-redo): Ctrl+Z / Ctrl+Y and
+    // the Build menu, sending the server-side Undo / Redo for the selection.
+    .add_plugins(crate::edit_undo::EditUndoPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The

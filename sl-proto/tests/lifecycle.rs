@@ -16349,6 +16349,90 @@ mod test {
     }
 
     #[test]
+    fn undo_redo_objects_resolve_full_ids_and_send() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+
+        // Cache two objects so their region-local ids resolve to full ids.
+        let position = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&object_update(200, 0xABCD, position.clone()), 5, true)?,
+            now,
+        )?;
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&object_update(201, 0xBEEF, position), 6, true)?,
+            now,
+        )?;
+        drain(&mut session)?;
+
+        // Undo sends the two objects' *full* ids (the wire form), with a nil
+        // group (the simulator ignores it for undo).
+        session.undo_objects(
+            &[
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(200)),
+                ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(201)),
+            ],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let undo = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::Undo(undo) => Some(undo),
+                _ => None,
+            })
+            .ok_or("expected an Undo")?;
+        assert!(undo.agent_data.group_id.is_nil());
+        let ids: Vec<uuid::Uuid> = undo.object_data.iter().map(|b| b.object_id).collect();
+        assert_eq!(
+            ids,
+            vec![uuid::Uuid::from_u128(0xABCD), uuid::Uuid::from_u128(0xBEEF)]
+        );
+
+        // Redo goes out as a Redo carrying the same full ids.
+        session.redo_objects(
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(200),
+            )],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let redo = sent
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::Redo(redo) => Some(redo),
+                _ => None,
+            })
+            .ok_or("expected a Redo")?;
+        let ids: Vec<uuid::Uuid> = redo.object_data.iter().map(|b| b.object_id).collect();
+        assert_eq!(ids, vec![uuid::Uuid::from_u128(0xABCD)]);
+
+        // An uncached id resolves to nothing, so no Undo is sent.
+        session.undo_objects(
+            &[ScopedObjectId::new(
+                circuit,
+                sl_proto::RegionLocalObjectId(999),
+            )],
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        assert!(
+            !sent.iter().any(|m| matches!(m, AnyMessage::Undo(_))),
+            "an uncached id must not send an Undo"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn edit_helpers_send_their_messages() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;

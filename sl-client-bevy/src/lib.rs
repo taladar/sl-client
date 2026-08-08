@@ -2270,6 +2270,12 @@ fn advance_running(
             Command::DelinkObjects { local_ids } => {
                 session.delink_objects(local_ids, now).ok();
             }
+            Command::UndoObjects { local_ids } => {
+                session.undo_objects(local_ids, now).ok();
+            }
+            Command::RedoObjects { local_ids } => {
+                session.redo_objects(local_ids, now).ok();
+            }
             Command::UpdateParcel(update) => {
                 session.update_parcel(update, now).ok();
             }

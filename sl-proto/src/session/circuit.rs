@@ -281,7 +281,8 @@ use sl_wire::messages::{
     ModifyLandModifyBlockExtendedBlock, ModifyLandParcelDataBlock, ParcelPropertiesRequestByID,
     ParcelPropertiesRequestByIDAgentDataBlock, ParcelPropertiesRequestByIDParcelDataBlock,
     ParcelSetOtherCleanTime, ParcelSetOtherCleanTimeAgentDataBlock,
-    ParcelSetOtherCleanTimeParcelDataBlock, UndoLand, UndoLandAgentDataBlock,
+    ParcelSetOtherCleanTimeParcelDataBlock, Redo, RedoAgentDataBlock, RedoObjectDataBlock, Undo,
+    UndoAgentDataBlock, UndoLand, UndoLandAgentDataBlock, UndoObjectDataBlock,
 };
 use sl_wire::messages::{
     MoveTaskInventory, MoveTaskInventoryAgentDataBlock, MoveTaskInventoryInventoryDataBlock,
@@ -5737,6 +5738,56 @@ impl Circuit {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `Undo` reliably: asks the simulator to revert each object in
+    /// `object_ids` one step in its server-side edit history (the reference's
+    /// `LLSelectMgr::undo`). The reference fills the message's `GroupID` with the
+    /// agent's active group, but the simulator (and OpenSim's `HandleUndo`)
+    /// ignore it for undo — only the object ids matter — so it is sent nil.
+    pub(crate) fn send_undo(
+        &mut self,
+        object_ids: &[ObjectKey],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::Undo(Undo {
+            agent_data: UndoAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                group_id: uuid::Uuid::nil(),
+            },
+            object_data: object_ids
+                .iter()
+                .map(|id| UndoObjectDataBlock {
+                    object_id: id.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `Redo` reliably (the inverse of [`Circuit::send_undo`]): asks the
+    /// simulator to re-apply each object's last undone edit. The `GroupID` field
+    /// is sent nil for the same reason as [`Circuit::send_undo`].
+    pub(crate) fn send_redo(
+        &mut self,
+        object_ids: &[ObjectKey],
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::Redo(Redo {
+            agent_data: RedoAgentDataBlock {
+                agent_id: self.agent_id.uuid(),
+                session_id: self.session_id,
+                group_id: uuid::Uuid::nil(),
+            },
+            object_data: object_ids
+                .iter()
+                .map(|id| RedoObjectDataBlock {
+                    object_id: id.uuid(),
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)
     }
