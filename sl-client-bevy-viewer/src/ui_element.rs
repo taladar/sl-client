@@ -547,6 +547,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::preferences::spawn_preferences_specimen,
     },
     UiElement {
+        id: "quick-preferences",
+        summary: "The Quick Preferences panel: the environment preset / time-of-day combos over \
+                  a divider and the curated setting slider rows (draw distance, particle cap). \
+                  Static — the live panel (`crate::quick_preferences`) adds the store binding and \
+                  the environment wiring.",
+        spawn: crate::quick_preferences::spawn_quick_prefs_specimen,
+    },
+    UiElement {
         id: "tabs-trailing",
         summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
                   placement the reference viewer cannot express, usable for LTR too, not only as \

@@ -5,6 +5,7 @@ topic: viewer
 status: blocked
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
+refs: [viewer-quick-preferences]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -30,6 +31,12 @@ settings store, and the mute-on-focus-loss / mute-on-minimise behaviour the
 reference viewer offers. The sliders also want a home in
 [[viewer-quick-preferences]] and the [[viewer-preferences-audio-tab]] —
 same store, three views.
+
+Quick Preferences: when the volume settings land, add a default entry (at least
+master volume) in the Quick Preferences panel ([[viewer-quick-preferences]]) — a
+line in `default_entries()` (`quick_preferences.rs`) plus a Fluent label. The
+panel binds by setting key over the same store, so the entry needs only the key,
+range and label.
 
 Reference (Firestorm, read-only): `llfloatervolumepulldown`,
 `llpanelvolumepulldown`, the `llui` audio settings group.

@@ -228,6 +228,8 @@ impl ViewerSettings {
         crate::hover_text::register_settings(&mut settings);
         crate::hover_tooltip::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
+        crate::session::register_settings(&mut settings);
+        crate::particles::register_settings(&mut settings);
         settings.load_global();
         settings
     }

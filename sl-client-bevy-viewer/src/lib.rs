@@ -153,6 +153,7 @@ mod preferences_general;
 mod probe_layers;
 mod probes;
 mod procedural;
+mod quick_preferences;
 mod reach;
 pub mod render_gallery;
 mod render_priority;
@@ -362,8 +363,9 @@ use crate::screenshot::{ScreenshotSchedule, capture_screenshots, poll_screenshot
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
-    PlayOnLogin, ViewerSession, drive_session, enforce_quit_deadline, handle_quit_input,
-    repeat_debug_animation, report_agent_viewport, report_camera_interest, save_settings_on_logout,
+    PlayOnLogin, ViewerSession, apply_draw_distance, drive_session, enforce_quit_deadline,
+    handle_quit_input, repeat_debug_animation, report_agent_viewport, report_camera_interest,
+    save_settings_on_logout,
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
@@ -1336,6 +1338,13 @@ fn run_session(
     // per-tab tasks plug their panels into its registry. After FloaterPlugin,
     // whose spawn_floater and deferred-content build it rides.
     .add_plugins(crate::preferences::PreferencesPlugin)
+    // The Quick Preferences panel (viewer-quick-preferences): the small
+    // bottom-right floater of the settings reached-for hourly (draw distance,
+    // particle cap, environment preset + time of day), a curated view over the
+    // typed store. Opened from a gear button in the bottom toolbar's trailing
+    // area. After FloaterPlugin (its spawn_floater / deferred-content build) and
+    // the bottom toolbar (its BottomArea host).
+    .add_plugins(crate::quick_preferences::QuickPreferencesPlugin)
     // The alerts tab's popup list (viewer-preferences-alerts-tab): the model
     // refresh, row pool and binding behind the panel build_alerts_tab plugs
     // into the shell's registry.
@@ -1635,6 +1644,9 @@ fn run_session(
             (
                 capture_login_outcome,
                 drive_session,
+                // Announce the (user-tunable) draw distance on handshake and
+                // whenever the quick-preferences slider moves it.
+                apply_draw_distance,
                 // Request the region environment (EEP) on handshake, then fold the
                 // grid's reply into `EnvironmentState` (P22.1); the sky / water /
                 // shadow phases render from it. Nested into one tuple to stay within

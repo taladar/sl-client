@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 92 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 732 |
+| done | 733 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1184** |
+| **total** | **1185** |
 
 ## ideas (58)
 
@@ -535,8 +535,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-qol-toggles`](ready/viewer-qol-toggles.md) — Advanced-menu
   quality-of-life toggles (blocked by `viewer-input-action-map` (done),
   `viewer-ui-settings-store` (done))
-- [`viewer-quick-preferences`](ready/viewer-quick-preferences.md) —
-  Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
+- [`viewer-quick-preferences-editor`](ready/viewer-quick-preferences-editor.md)
+  — Quick-preferences in-viewer editor (blocked by `viewer-quick-preferences`
+  (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
@@ -1075,7 +1076,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (732)
+## done (733)
 
 ### protocol
 
@@ -1848,6 +1849,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Profile Web tab — render the feed in the embedded browser
 - [`viewer-profiling-logplugin-tracing`](done/viewer-profiling-logplugin-tracing.md)
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
+- [`viewer-quick-preferences`](done/viewer-quick-preferences.md) —
+  Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
   skinning distortion
 - [`viewer-r10`](done/viewer-r10-tiled-faces-need-a-repeating-texture-sampler.md)

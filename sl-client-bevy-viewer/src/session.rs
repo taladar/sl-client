@@ -22,18 +22,41 @@ use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     Throttle,
 };
+use sl_settings::SettingValue;
 
 use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
 use crate::settings::ViewerSettings;
 
-/// The draw distance requested once the region handshake completes, in metres.
+/// The persisted-settings section the draw-distance setting lives under.
+const RENDER_SECTION: &[&str] = &["render"];
+
+/// The draw-distance setting key: how far, in metres, the simulator streams
+/// objects and terrain toward the agent. The reference viewer's `RenderFarClip`;
+/// surfaced in the quick-preferences panel ([`crate::quick_preferences`]) and
+/// applied live by [`apply_draw_distance`].
+pub(crate) const SETTING_DRAW_DISTANCE: &str = "RenderFarClip";
+
+/// The default draw distance, in metres.
 ///
 /// The sim only streams object/terrain updates within the agent's interest
 /// radius, so the viewer must announce one before any content arrives. A full
 /// region is 256 m; a draw distance past that lets the sim announce the
 /// neighbouring regions (opening child circuits) so their terrain streams too.
-const DRAW_DISTANCE_METRES: f64 = 512.0;
+const DEFAULT_DRAW_DISTANCE_METRES: f32 = 512.0;
+
+/// Declare the persisted draw-distance setting (the quick-preferences panel and
+/// any future graphics tab bind to it; [`apply_draw_distance`] consumes it).
+pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        RENDER_SECTION,
+        SETTING_DRAW_DISTANCE,
+        SettingValue::F32(DEFAULT_DRAW_DISTANCE_METRES),
+        "Draw distance in metres: how far the simulator streams objects and \
+         terrain toward the agent (a larger value opens child circuits to \
+         neighbouring regions)",
+    );
+}
 
 /// How long, in seconds, to wait for a clean `LoggedOut` after a quit request
 /// before forcing the exit anyway.
@@ -338,9 +361,50 @@ pub(crate) fn enforce_quit_deadline(
     }
 }
 
-/// Fold the session event stream into viewer actions: draw distance on
-/// handshake, marking the agent in-world on its first appearance, and a clean
-/// exit on logout/disconnect.
+/// Announce the (user-tunable) draw distance to the simulator, re-sending it
+/// whenever the [`SETTING_DRAW_DISTANCE`] setting changes and on every region
+/// handshake.
+///
+/// The sim builds the agent's interest list around this radius, so it must be
+/// (re)announced for a fresh region and updated live when the quick-preferences
+/// panel ([`crate::quick_preferences`]) moves the draw-distance slider — the
+/// reference viewer's `RenderFarClip` → `AgentSetAppearance`/interest behaviour.
+/// The camera's far clip plane is deliberately *not* tied to this: the sky dome
+/// and stars render at the fixed far plane (see `crate::sky`), so shrinking it to
+/// the draw distance would clip the sky. Only the streaming radius follows the
+/// setting.
+pub(crate) fn apply_draw_distance(
+    settings: Option<Res<ViewerSettings>>,
+    mut events: MessageReader<SlEvent>,
+    mut applied: Local<Option<f32>>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    // A fresh region must be told the draw distance again, so drop the memo of
+    // what was last announced (to the old region) on every handshake.
+    if events
+        .read()
+        .any(|event| matches!(event.0, SlSessionEvent::RegionHandshakeComplete))
+    {
+        *applied = None;
+    }
+    let Ok(distance) = settings.store().get_f32(SETTING_DRAW_DISTANCE) else {
+        return;
+    };
+    if *applied == Some(distance) {
+        return;
+    }
+    *applied = Some(distance);
+    info!("announcing draw distance {distance} m to the simulator");
+    commands.write(SlCommand(Command::SetDrawDistance(Distance::new(
+        f64::from(distance),
+    ))));
+}
+
+/// Fold the session event stream into viewer actions: marking the agent in-world
+/// on its first appearance, and a clean exit on logout/disconnect.
 ///
 /// The camera is no longer placed here: third-person
 /// ([`crate::camera::position_camera`]) follows the avatar the moment it arrives,
@@ -358,10 +422,9 @@ pub(crate) fn drive_session(
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::RegionHandshakeComplete => {
-                info!("region handshake complete; requesting draw distance + throttle");
-                commands.write(SlCommand(Command::SetDrawDistance(Distance::new(
-                    DRAW_DISTANCE_METRES,
-                ))));
+                info!("region handshake complete; requesting throttle");
+                // The draw distance is announced by `apply_draw_distance`, which
+                // re-sends the (user-tunable) setting on every handshake.
                 // Advertise a generous bandwidth throttle (R22b). Without an
                 // `AgentThrottle` the simulator streams objects at conservative
                 // defaults, so it spends the tiny budget on the highest-priority
@@ -423,5 +486,87 @@ pub(crate) fn drive_session(
             }
             _other => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
+    use sl_settings::{Scope, SettingValue};
+
+    use super::{SETTING_DRAW_DISTANCE, apply_draw_distance, register_settings};
+    use crate::settings::ViewerSettings;
+
+    /// A boxed error so tests can use `?`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// Collects the `SetDrawDistance` commands `apply_draw_distance` emits.
+    #[derive(Resource, Default)]
+    struct Sent {
+        /// How many draw-distance announcements were sent.
+        count: usize,
+        /// The metres of the most recent announcement.
+        last: Option<f64>,
+    }
+
+    /// Drain `SlCommand`s, recording each draw-distance announcement.
+    fn collect(mut reader: MessageReader<SlCommand>, mut out: ResMut<Sent>) {
+        for command in reader.read() {
+            if let Command::SetDrawDistance(distance) = &command.0 {
+                out.count = out.count.saturating_add(1);
+                out.last = Some(distance.meters());
+            }
+        }
+    }
+
+    /// A headless app with the draw-distance setting registered and the
+    /// apply + collect systems chained.
+    fn app() -> App {
+        let mut settings = ViewerSettings::from_store_for_test(sl_settings::SettingsStore::new());
+        register_settings(&mut settings);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SlCommand>()
+            .add_message::<SlEvent>()
+            .insert_resource(settings)
+            .init_resource::<Sent>()
+            .add_systems(Update, (apply_draw_distance, collect).chain());
+        app
+    }
+
+    /// The draw distance is announced once, re-sent on change, deduped otherwise,
+    /// and re-announced on every region handshake.
+    #[test]
+    fn draw_distance_announced_and_deduped() -> Result<(), TestError> {
+        let mut app = app();
+
+        // First frame: the default 512 m is announced once.
+        app.update();
+        assert_eq!(app.world().resource::<Sent>().count, 1);
+        assert_eq!(app.world().resource::<Sent>().last, Some(512.0));
+
+        // No change: nothing re-sent.
+        app.update();
+        assert_eq!(app.world().resource::<Sent>().count, 1);
+
+        // A slider move (a store change) re-announces the new value.
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_DRAW_DISTANCE,
+            SettingValue::F32(256.0),
+        );
+        app.update();
+        assert_eq!(app.world().resource::<Sent>().count, 2);
+        assert_eq!(app.world().resource::<Sent>().last, Some(256.0));
+
+        // A fresh region re-announces the (unchanged) draw distance.
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::RegionHandshakeComplete));
+        app.update();
+        assert_eq!(app.world().resource::<Sent>().count, 3);
+        assert_eq!(app.world().resource::<Sent>().last, Some(256.0));
+        Ok(())
     }
 }

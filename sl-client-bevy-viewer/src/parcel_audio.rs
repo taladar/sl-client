@@ -197,15 +197,16 @@ fn spawn_parcel_audio_bar(
     let Some(area) = area else {
         return;
     };
-    // Fill the trailing half of the upper row, right-aligned: the nearby-chat bar
-    // owns the leading half beside it, the audio cluster sits on the trailing side
-    // (mirrored under RTL for free). Because the two halves are fixed and side by
-    // side, showing / hiding this cluster never moves the chat bar.
+    // Sit at the trailing edge of the upper row's trailing half (which already
+    // right-aligns its children), content-width so it packs beside any sibling
+    // cluster the slot hosts (the quick-prefs button) rather than spanning the
+    // whole half. The nearby-chat bar owns the leading half beside it; because
+    // the two halves are fixed and side by side, showing / hiding this cluster
+    // never moves the chat bar.
     let wrapper = commands
         .spawn((
             Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::FlexEnd,
+                align_items: AlignItems::FlexEnd,
                 ..row(Val::ZERO)
             },
             Pickable {

@@ -106,6 +106,7 @@ use crate::particle_render::{
     ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances, ParticleQuad,
 };
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
+use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
 
 /// A component marking an object entity as a **particle source**, carrying the
@@ -181,11 +182,42 @@ pub(crate) fn apply_particles(
 // P30.2 — CPU particle simulation + camera-facing billboard render.
 // ---------------------------------------------------------------------------
 
-/// The global cap on live particles across every source, mirroring the reference
-/// viewer's `LLViewerPartSim::sMaxParticleCount` (4096). Emission stops once the
-/// cap is reached and resumes as particles age out, so a scene full of emitters
-/// cannot swamp the simulation.
+/// The default global cap on live particles across every source, mirroring the
+/// reference viewer's `LLViewerPartSim::sMaxParticleCount` (4096). Emission stops
+/// once the cap is reached and resumes as particles age out, so a scene full of
+/// emitters cannot swamp the simulation. Tunable live via [`SETTING_MAX_PARTICLES`].
 const MAX_PARTICLES: usize = 4096;
+
+/// The persisted-settings section the particle-cap setting lives under.
+const RENDER_SECTION: &[&str] = &["render"];
+
+/// The particle-cap setting key: the maximum number of live particles across all
+/// sources. The reference viewer's `RenderMaxPartCount`; surfaced in the
+/// quick-preferences panel ([`crate::quick_preferences`]) and consumed live by
+/// [`drive_particles`].
+pub(crate) const SETTING_MAX_PARTICLES: &str = "RenderMaxPartCount";
+
+/// Declare the persisted particle-cap setting (the quick-preferences panel binds
+/// to it; [`drive_particles`] reads it each frame).
+pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        RENDER_SECTION,
+        SETTING_MAX_PARTICLES,
+        sl_settings::SettingValue::U32(4096),
+        "Maximum number of live particles drawn across all sources; emission \
+         stops at the cap and resumes as particles age out",
+    );
+}
+
+/// The live particle cap: the [`SETTING_MAX_PARTICLES`] setting, or the built-in
+/// [`MAX_PARTICLES`] default when the store is absent (e.g. the gallery app) or
+/// the value does not fit a `usize`.
+fn particle_cap(settings: Option<&ViewerSettings>) -> usize {
+    settings
+        .and_then(|settings| settings.store().get_u32(SETTING_MAX_PARTICLES).ok())
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(MAX_PARTICLES)
+}
 
 /// The `LLPartData` per-particle flag masks (`indra/llmessage/llpartdata.h`),
 /// mirrored here so the simulation reads the same bits the wire carries on
@@ -929,6 +961,9 @@ pub(crate) fn drive_particles(
     mut images: ResMut<Assets<Image>>,
     mut manager: ResMut<TextureManager>,
     default_image: Res<DefaultParticleImage>,
+    // The live particle cap (`RenderMaxPartCount`); optional so the gallery app
+    // (no store) falls back to the built-in default.
+    settings: Option<Res<ViewerSettings>>,
     // A throttle so the live-count diagnostic logs periodically, not every frame.
     mut log_timer: Local<f32>,
     // `SL_VIEWER_DISABLE_HUD_PARTICLES` (P35.4): the reference's `RenderHUDParticles`
@@ -938,6 +973,7 @@ pub(crate) fn drive_particles(
     let hud_disabled = *hud_disabled
         .get_or_insert_with(|| std::env::var_os("SL_VIEWER_DISABLE_HUD_PARTICLES").is_some());
     let dt = time.delta_secs();
+    let max_particles = particle_cap(settings.as_deref());
 
     // Snapshot each source's world pose, HUD classification, and system, releasing
     // the query borrow before the resource is mutated. The Second Life-space source
@@ -1070,7 +1106,7 @@ pub(crate) fn drive_particles(
             *q_sl,
             &mut cloud.particles,
             &mut total,
-            MAX_PARTICLES,
+            max_particles,
         );
 
         // Resolve the source's diffuse texture through the shared pipeline (or keep
@@ -1162,9 +1198,29 @@ fn build_particle_image(decoded: &DecodedTexture) -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectParticleSystem, particles_from_object};
+    use super::{
+        MAX_PARTICLES, ObjectParticleSystem, SETTING_MAX_PARTICLES, particle_cap,
+        particles_from_object, register_settings,
+    };
+    use crate::settings::ViewerSettings;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ParticleSystem, Vector};
+
+    /// The particle cap reads the setting, falling back to the built-in default
+    /// when the store is absent (the gallery app) or unset.
+    #[test]
+    fn particle_cap_reads_setting_or_falls_back() {
+        assert_eq!(particle_cap(None), MAX_PARTICLES);
+        let mut settings = ViewerSettings::from_store_for_test(sl_settings::SettingsStore::new());
+        register_settings(&mut settings);
+        assert_eq!(particle_cap(Some(&settings)), 4096);
+        settings.set(
+            sl_settings::Scope::Global,
+            SETTING_MAX_PARTICLES,
+            sl_settings::SettingValue::U32(1024),
+        );
+        assert_eq!(particle_cap(Some(&settings)), 1024);
+    }
 
     /// A minimal plain prim object with no particle system — the fixture the
     /// particle tests decorate.

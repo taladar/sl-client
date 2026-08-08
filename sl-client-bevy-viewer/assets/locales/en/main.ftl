@@ -3128,6 +3128,27 @@ preferences-section-alert-popups = Viewer alerts that can be shown or hidden
 preferences-alerts-col-show = Show
 preferences-alerts-col-label = Alert
 
+## The Quick Preferences panel (viewer-quick-preferences): the small
+## bottom-right floater of the settings reached-for hourly.
+
+quick-prefs-title = Quick Preferences
+quick-prefs-environment = Environment
+quick-prefs-env-preset = Preset
+quick-prefs-env-time = Time of day
+# The environment preset groups.
+quick-prefs-env-shared = Shared (region)
+quick-prefs-env-daycycle = Region day cycle
+quick-prefs-env-legacy = Legacy WindLight
+quick-prefs-env-modern = Modern (EEP)
+# The times of day.
+quick-prefs-time-sunrise = Sunrise
+quick-prefs-time-midday = Midday
+quick-prefs-time-sunset = Sunset
+quick-prefs-time-midnight = Midnight
+# The curated default setting rows.
+quick-prefs-draw-distance = Draw distance
+quick-prefs-max-particles = Max particles
+
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip
 # box adds around the object / owner data it fetches.
 hovertip-loading = Loading…

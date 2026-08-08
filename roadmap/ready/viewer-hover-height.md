@@ -32,6 +32,14 @@ exposing a slider is a follow-up — the reference puts it in
 [[viewer-quick-preferences]] with the value also visible in the preferences
 floater ([[viewer-preferences-floater]]).
 
+Quick Preferences: when the slider lands, register the hover height as a
+persisted setting and add a default entry for it in the Quick Preferences panel
+([[viewer-quick-preferences]]) — a line in `default_entries()`
+(`quick_preferences.rs`) plus a Fluent label — so it rides in the
+always-reachable panel, not only the preferences floater. The panel is a view
+over the same store and binds by setting key, so the entry needs nothing but the
+key, range and label.
+
 Related: the open bug `viewer-r23` (avatar stands too low, feet sinking into the
 ground) is *not* this — do not "fix" R23 by dialling in a hover offset; but
 whoever works either one should know the other exists, because a hover offset
