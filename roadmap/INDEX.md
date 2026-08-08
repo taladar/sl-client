@@ -13,8 +13,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 58 |
 | ready | 244 |
-| blocked | 93 |
-| in-progress | 11 |
+| blocked | 92 |
+| in-progress | 12 |
 | bugs | 18 |
 | done | 730 |
 | deferred | 21 |
@@ -732,7 +732,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (93)
+## blocked (92)
 
 ### protocol
 
@@ -882,8 +882,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-voice-audio`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
-- [`viewer-realtime-mirrors`](blocked/viewer-realtime-mirrors.md) — Real-time
-  mirrors (hero probes) (blocked by `viewer-perf-probe-scheduling`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
   — Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`)
@@ -999,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (11)
+## in-progress (12)
 
 ### viewer
 
@@ -1010,6 +1008,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
+  Real-time mirrors (hero probes)
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
   — Region / Estate floater — estate tab (blocked by
   `viewer-region-options-debug` (done))

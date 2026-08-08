@@ -164,6 +164,15 @@ impl ObjectReflectionProbe {
         self.data.flags.contains(ReflectionProbeFlags::BOX_VOLUME)
     }
 
+    /// Whether this probe drives a **realtime mirror** — the `MIRROR` flag, which the
+    /// reference reads as `LLVOVolume::isMirror` to hand the prim to the hero-probe
+    /// manager. A mirror is captured sharp and live (all six faces every frame,
+    /// dynamic content included) by the `hero` path rather than the amortized
+    /// P33 local pool; see [`ReflectionProbePlugin`].
+    pub(crate) const fn is_mirror(&self) -> bool {
+        self.data.flags.contains(ReflectionProbeFlags::MIRROR)
+    }
+
     /// The influence volume as a scale for Bevy's unit-cube [`LightProbe`] volume,
     /// in the prim's **local** frame (the frame below the object entity, i.e. still
     /// Second Life axes — the object entity carries the basis change, exactly as the
@@ -583,6 +592,11 @@ struct ProbeCubeCopy {
     cube: AssetId<Image>,
     /// The six source face images, in cube-layer order.
     faces: [AssetId<Image>; FACE_COUNT],
+    /// The per-face texel size the faces and cube were created at — [`CAPTURE_SIZE`]
+    /// for the P33 probes, the `hero` resolution for a mirror. The blit's
+    /// copy extent must match the actual texture size, since the two probe families
+    /// no longer share one resolution.
+    size: u32,
 }
 
 /// The render-world work-list of probe cubes to reassemble each frame, extracted
@@ -608,6 +622,10 @@ struct ProbeCubeCopies {
 /// (P33.2): the nearest [`MAX_LOCAL_PROBES`] probe prims each get a rig of their own
 /// and a [`LightProbe`] volume (box or sphere, from the prim) that overrides the
 /// default inside it.
+///
+/// It also drives the **realtime mirrors** (hero probes, viewer-realtime-mirrors): the
+/// nearest [`MAX_HERO_PROBES`] `MIRROR`-flagged prims get a high-resolution rig
+/// re-rendered every frame — see the hero section at the bottom of this module.
 pub(crate) struct ReflectionProbePlugin;
 
 impl Plugin for ReflectionProbePlugin {
@@ -616,12 +634,29 @@ impl Plugin for ReflectionProbePlugin {
             .init_resource::<CaptureSchedule>()
             .init_resource::<ProbeTestSphere>()
             .init_resource::<ProbeDynamicContent>()
+            .init_resource::<MirrorSettings>()
+            .init_resource::<HeroCubeCopies>()
+            .init_resource::<HeroSchedule>()
             .add_plugins(ExtractResourcePlugin::<ProbeCubeCopies>::default())
-            .add_systems(Startup, (setup_probe_rigs, register_probe_settings))
+            .add_plugins(ExtractResourcePlugin::<HeroCubeCopies>::default())
+            .add_systems(
+                Startup,
+                (
+                    setup_probe_rigs,
+                    register_probe_settings,
+                    // Register the mirror settings before the hero rigs are built, so
+                    // their resolution reads the registered default (or a file
+                    // override) rather than falling back.
+                    (register_mirror_settings, setup_hero_rigs).chain(),
+                ),
+            )
             .add_systems(
                 Update,
                 (
                     install_global_probe,
+                    // The mirror settings must be current before the local pool decides
+                    // which probes to exclude (mirrors) and before the hero systems run.
+                    sync_mirror_settings,
                     drive_local_probes,
                     calibrate_probe_intensity,
                     light_capture_cameras,
@@ -632,42 +667,62 @@ impl Plugin for ReflectionProbePlugin {
                 )
                     .chain(),
             )
+            // The hero (mirror) path, ordered after the shared settings sync. Kept out
+            // of the P33 chain above so a hero capture is independent of the amortized
+            // local-pool schedule — a mirror re-renders its whole cube every frame,
+            // never one face at a time.
+            .add_systems(
+                Update,
+                (
+                    drive_hero_probes,
+                    drive_hero_captures,
+                    light_hero_capture_cameras,
+                )
+                    .chain()
+                    .after(sync_mirror_settings),
+            )
             // Runs after the sky system (Update) re-sets the ambient each frame.
             .add_systems(PostUpdate, suppress_global_ambient);
 
         // The face → cube-layer blit runs in the render world after the capture
         // cameras have drawn this frame's faces; the view's env-map filter reads the
         // reassembled cube on the following frame (a one-frame lag that is
-        // imperceptible for a slowly re-captured environment).
+        // imperceptible for a slowly re-captured environment). The hero blit runs the
+        // same way for the mirror cubes.
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
-        render_app.add_systems(Render, copy_probe_faces.after(RenderSystems::Render));
+        render_app.add_systems(
+            Render,
+            (copy_probe_faces, copy_hero_faces).after(RenderSystems::Render),
+        );
     }
 }
 
-/// Build a single-face colour target: a square `Rgba16Float` render texture the
-/// capture camera draws HDR scene radiance into, also readable as a copy source so
+/// Build a single-face colour target: a square `size²` `Rgba16Float` render texture
+/// the capture camera draws HDR scene radiance into, also readable as a copy source so
 /// the render-world blit can lift it into the cube's matching layer.
-fn create_face_image(images: &mut Assets<Image>) -> Handle<Image> {
-    let mut image =
-        Image::new_target_texture(CAPTURE_SIZE, CAPTURE_SIZE, TextureFormat::Rgba16Float, None);
+///
+/// `size` is [`CAPTURE_SIZE`] for the P33 default / local probes and the (higher)
+/// `hero` resolution for a mirror's hero probe.
+fn create_face_image(images: &mut Assets<Image>, size: u32) -> Handle<Image> {
+    let mut image = Image::new_target_texture(size, size, TextureFormat::Rgba16Float, None);
     // `new_target_texture` sets TEXTURE_BINDING | COPY_DST | RENDER_ATTACHMENT; the
     // blit additionally reads the face as a copy source.
     image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
     images.add(image)
 }
 
-/// Build the destination cube [`Image`]: six `Rgba16Float` array layers viewed as a
-/// cubemap, a copy destination for the per-face blit and a storage / sampled source
-/// for [`GeneratedEnvironmentMapLight`]'s realtime filter.
-fn create_cube_image(images: &mut Assets<Image>) -> Handle<Image> {
+/// Build the destination cube [`Image`]: six `size²` `Rgba16Float` array layers viewed
+/// as a cubemap, a copy destination for the per-face blit and a storage / sampled
+/// source for [`GeneratedEnvironmentMapLight`]'s realtime filter.
+fn create_cube_image(images: &mut Assets<Image>, size: u32) -> Handle<Image> {
     // A single `Rgba16Float` texel (four 16-bit floats = eight bytes) as the fill
     // pattern; `new_fill` replicates it across all six layers.
     let mut image = Image::new_fill(
         Extent3d {
-            width: CAPTURE_SIZE,
-            height: CAPTURE_SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: u32::try_from(FACE_COUNT).unwrap_or(6),
         },
         TextureDimension::D2,
@@ -834,8 +889,9 @@ fn create_capture_rig(
     images: &mut Assets<Image>,
     rig: usize,
 ) -> CaptureRig {
-    let cube = create_cube_image(images);
-    let faces: [Handle<Image>; FACE_COUNT] = core::array::from_fn(|_| create_face_image(images));
+    let cube = create_cube_image(images, CAPTURE_SIZE);
+    let faces: [Handle<Image>; FACE_COUNT] =
+        core::array::from_fn(|_| create_face_image(images, CAPTURE_SIZE));
     for face in 0..FACE_COUNT {
         // `.get(face)` (rather than `faces[face]`) to stay clear of the workspace
         // `indexing_slicing` lint; the loop index is always in range.
@@ -901,9 +957,14 @@ fn install_global_probe(
 fn rank_local_probes(
     eye: Vec3,
     probes: &Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+    exclude_mirrors: bool,
 ) -> Vec<Entity> {
     let mut ranked: Vec<(Entity, f32)> = probes
         .iter()
+        // A mirror-flagged prim is claimed by the hero path when mirrors are on, so it
+        // must not also take an amortized local rig (two coincident probe volumes over
+        // the same surface — wasted capture, and Bevy would pick between them).
+        .filter(|(_, probe, _)| !(exclude_mirrors && probe.is_mirror()))
         .map(|(entity, probe, transform)| {
             let distance = eye.distance(transform.translation()) - probe.radius();
             (entity, distance)
@@ -999,11 +1060,17 @@ fn sample_rotation(world_rotation: Quat) -> Quat {
 ///
 /// Finally it republishes the render-world blit work-list ([`ProbeCubeCopies`]) —
 /// the default probe plus exactly the bound local probes.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters; the mirror-exclusion setting is the one \
+              added over the P33 original and does not group with the rest"
+)]
 fn drive_local_probes(
     mut commands: Commands,
     mut rigs: ResMut<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
     mut copies: ResMut<ProbeCubeCopies>,
+    mirrors: Res<MirrorSettings>,
     camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
     mut last_bound: Local<usize>,
@@ -1012,7 +1079,7 @@ fn drive_local_probes(
         return;
     };
     let candidates = probes.iter().len();
-    let selected = rank_local_probes(view.translation(), &probes);
+    let selected = rank_local_probes(view.translation(), &probes, mirrors.enabled);
 
     // Free the rigs of probes that dropped out of the budget or whose prim is gone.
     // Bevy's hierarchy already despawns a holder whose parent object despawned, so
@@ -1111,6 +1178,7 @@ fn drive_local_probes(
                 faces: core::array::from_fn(|face| {
                     rig.faces.get(face).map(Handle::id).unwrap_or_default()
                 }),
+                size: CAPTURE_SIZE,
             });
         }
     }
@@ -1385,12 +1453,28 @@ fn copy_probe_faces(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
-    if copies.copies.is_empty() {
+    blit_cube_faces(&copies.copies, &images, &device, &queue);
+}
+
+/// Blit each listed probe's six captured face textures into its cube's six array
+/// layers, at that copy's own [`ProbeCubeCopy::size`]. Shared by the P33 probes
+/// ([`copy_probe_faces`]) and the mirror hero probes ([`copy_hero_faces`]), which
+/// keep separate work-lists but the identical per-cube copy.
+///
+/// Runs after the capture cameras have drawn, issuing its own command buffer (it does
+/// not run beneath the render graph, so it cannot use `RenderContext`).
+fn blit_cube_faces(
+    copies: &[ProbeCubeCopy],
+    images: &RenderAssets<GpuImage>,
+    device: &RenderDevice,
+    queue: &RenderQueue,
+) {
+    if copies.is_empty() {
         return;
     }
     let mut encoder = device.create_command_encoder(&default());
     let mut recorded = false;
-    for copy in &copies.copies {
+    for copy in copies {
         let Some(cube) = images.get(copy.cube) else {
             continue;
         };
@@ -1417,8 +1501,8 @@ fn copy_probe_faces(
                     aspect: TextureAspect::All,
                 },
                 Extent3d {
-                    width: CAPTURE_SIZE,
-                    height: CAPTURE_SIZE,
+                    width: copy.size,
+                    height: copy.size,
                     depth_or_array_layers: 1,
                 },
             );
@@ -1428,6 +1512,611 @@ fn copy_probe_faces(
     if recorded {
         queue.submit([encoder.finish()]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime mirrors — hero probes (viewer-realtime-mirrors)
+// ---------------------------------------------------------------------------
+//
+// A **mirror** is a reflection-probe prim carrying the `MIRROR` flag
+// ([`ObjectReflectionProbe::is_mirror`]). Where the P33 default / local probes are
+// captured slowly and blurred by the roughness filter — right for image-based
+// ambient, wrong for a bathroom or shop mirror — a mirror needs a **hero probe**:
+// captured **sharp** (a much higher `RenderHeroProbeResolution` cube) and
+// **live** (all six faces re-rendered every frame, `RenderHeroProbeUpdateRate`
+// throttling it), including the **dynamic content** (avatars — so you see yourself)
+// the local pool can be told to skip. It reuses the P33 [`CaptureRig`] /
+// [`LocalBinding`] machinery — a hero probe is just a local reflection probe pinned
+// to an every-frame cadence at high resolution — but keeps its own rigs, work-list
+// and schedule so the two families never share a resolution or a budget. This is the
+// reference viewer's `LLHeroProbeManager`, the dynamic cousin of
+// `LLReflectionMapManager`.
+//
+// The reflection lands **on the glass** the same way every other reflection does:
+// the hero rig's [`LightProbe`] volume sits at the mirror prim, so Bevy's per-fragment
+// probe lookup finds the sharp hero cube for the mirror surface (a low-roughness PBR
+// face), overriding the default probe there. To keep that from being fought over,
+// mirror prims are **excluded from the P33 local pool** while mirrors are enabled
+// ([`rank_local_probes`]'s `exclude_mirrors`), so a mirror is captured once, by the
+// hero path, not twice.
+//
+// **Perf levers, all part of the feature** (a per-frame six-face render is expensive):
+// the **instance cap** ([`MAX_HERO_PROBES`] — only the nearest mirror(s) get a rig),
+// the **resolution** (`RenderHeroProbeResolution`, VRAM- and fill-bounded), and the
+// **update rate** (`RenderHeroProbeUpdateRate` — every frame, or every Nth). A scene
+// with no mirror in view pays nothing (the hero cameras sit inactive); toggling
+// `RenderMirrors` off releases the rigs and lets the P33 pool reclaim the prims as
+// ordinary (blurry) probes.
+//
+// **Rigid attachments move with the avatar in the mirror** — a bug the reference
+// viewer has (its hero pass renders non-rigged attachments at a stale pose, so they
+// float free of the avatar in the glass), and the mirror of one we had ourselves on
+// the avatars themselves (pose_avatar_skeletons orphaning joint children). We avoid it
+// **structurally**: the hero cameras render the *same live ECS entities* as the main
+// view, at the same `GlobalTransform`s — there is no separate mirror-pose pass to fall
+// behind. As long as the avatar posing (`drive_avatar_motion`) and the rigid-attachment
+// re-placement (`pose_attachment_nodes`) have run before the render, which they have
+// (both are `PostUpdate`, before extract), a rigid attachment is exactly where it is in
+// the main view, so it tracks the avatar in the reflection too. Nothing here needs to
+// do anything to get that right; it must only *not* introduce a second, stale posing
+// path — so a hero capture must never pre-pose the scene.
+
+/// The per-face resolution a hero probe's cube is captured at when the setting is
+/// unset or the settings store is absent (the gallery / readback harnesses). Higher
+/// than the P33 [`CAPTURE_SIZE`] so a mirror is sharp, but well under the reference's
+/// 2048 default to keep the six-face-per-frame cost and the VRAM (six `size²`
+/// `Rgba16Float` faces plus the cube, per active mirror) tractable.
+const HERO_DEFAULT_RESOLUTION: u32 = 512;
+
+/// The smallest hero-probe resolution the setting accepts (the P33 probe size — below
+/// it a "mirror" is no sharper than an ordinary probe).
+const HERO_MIN_RESOLUTION: u32 = 128;
+
+/// The largest hero-probe resolution the setting accepts — the reference viewer's
+/// `RenderHeroProbeResolution` default, and the VRAM ceiling (a 2048² cube plus six
+/// face targets is ~400 MB of `Rgba16Float`).
+const HERO_MAX_RESOLUTION: u32 = 2048;
+
+/// The default `RenderHeroProbeUpdateRate`: re-render the mirror **every** frame, the
+/// sharpest and most live setting. Raising it trades liveness for frame time.
+const HERO_DEFAULT_UPDATE_RATE: u32 = 1;
+
+/// How many mirrors are captured live at once — the **instance cap**, the nearest
+/// mirror(s) winning. Each costs six full scene re-renders per update at the hero
+/// resolution, so this is deliberately tiny; the reference likewise keeps a bounded
+/// hero-probe set.
+const MAX_HERO_PROBES: usize = 1;
+
+/// The smallest full extent (metres) a hero probe's influence volume takes along each
+/// axis. A mirror is usually a **flat** prim, whose own box volume is razor-thin — its
+/// reflective face would sit right on the volume boundary, where Bevy's per-fragment
+/// probe lookup may miss it. Flooring each axis gives the volume depth in front of the
+/// glass so the reflection reliably lands on the surface.
+const HERO_MIN_VOLUME_EXTENT: f32 = 1.0;
+
+/// The persistent settings keys for the mirror feature, grouped under `[render]`, named
+/// after the reference viewer's controls.
+const RENDER_MIRRORS_SETTING: &str = "render_mirrors";
+/// See [`RENDER_MIRRORS_SETTING`] — the hero-probe cube resolution.
+const HERO_RESOLUTION_SETTING: &str = "render_hero_probe_resolution";
+/// See [`RENDER_MIRRORS_SETTING`] — the hero-probe re-render cadence in frames.
+const HERO_UPDATE_RATE_SETTING: &str = "render_hero_probe_update_rate";
+
+/// The live mirror configuration, mirrored from the persistent `[render]` settings by
+/// [`sync_mirror_settings`] so an edit in the settings file (or a bound preferences
+/// control) takes effect without a restart — except the resolution, which sizes the
+/// GPU targets and so is fixed at [`setup_hero_rigs`] (a restart applies a change).
+#[derive(Resource, Clone, Copy, Debug)]
+pub(crate) struct MirrorSettings {
+    /// Whether realtime mirrors are enabled (`RenderMirrors`). Off releases the hero
+    /// rigs and lets the P33 local pool reclaim mirror prims as ordinary probes.
+    enabled: bool,
+    /// How often a mirror re-renders, in frames (`RenderHeroProbeUpdateRate`, floored
+    /// at 1): 1 = every frame, N = every Nth frame.
+    update_rate: u32,
+}
+
+impl Default for MirrorSettings {
+    /// Mirrors on, re-rendered every frame — the most faithful (and costliest)
+    /// starting point, matching the P33 dynamic-content default's "measure the full
+    /// cost" stance. Only a mirror prim actually in view incurs any of that cost.
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            update_rate: HERO_DEFAULT_UPDATE_RATE,
+        }
+    }
+}
+
+/// Round a requested hero-probe resolution to a power of two within
+/// `[HERO_MIN_RESOLUTION, HERO_MAX_RESOLUTION]`: [`GeneratedEnvironmentMapLight`]'s
+/// filter requires a power-of-two cube, and the bounds cap the VRAM / fill cost.
+fn normalize_hero_resolution(requested: u32) -> u32 {
+    let clamped = requested.clamp(HERO_MIN_RESOLUTION, HERO_MAX_RESOLUTION);
+    // `next_power_of_two` rounds up (and is a no-op on a power of two); a value just
+    // under the max can round to just over it, so re-clamp.
+    clamped
+        .next_power_of_two()
+        .clamp(HERO_MIN_RESOLUTION, HERO_MAX_RESOLUTION)
+}
+
+/// The influence-volume scale for a hero probe: the prim's own volume
+/// ([`ObjectReflectionProbe::volume_scale`]) but floored per axis at
+/// [`HERO_MIN_VOLUME_EXTENT`], so a flat mirror still has a volume that reaches its
+/// reflective surface (see [`HERO_MIN_VOLUME_EXTENT`]).
+fn hero_volume_scale(probe: &ObjectReflectionProbe) -> Vec3 {
+    probe
+        .volume_scale()
+        .max(Vec3::splat(HERO_MIN_VOLUME_EXTENT))
+}
+
+/// A component on each hero capture camera marking which mirror rig and cube face it
+/// renders — the hero counterpart of [`ProbeCaptureCamera`], kept distinct so the P33
+/// capture / lighting systems never touch the hero cameras and vice versa.
+#[derive(Component, Debug, Clone, Copy)]
+struct HeroCaptureCamera {
+    /// The hero rig this camera belongs to, indexed as in [`HeroProbeRigs::rigs`].
+    rig: usize,
+    /// The cube face (`0..6`) this camera renders, indexed as [`CUBE_MAP_FACES`].
+    face: usize,
+}
+
+/// Every hero capture rig: a small pool of [`MAX_HERO_PROBES`] rigs handed to the
+/// nearest mirror prims. Parallel to [`ProbeRigs`] but with no reserved global rig —
+/// every hero rig is a pool rig bound to a mirror.
+#[derive(Resource)]
+struct HeroProbeRigs {
+    /// The rigs, all pool rigs. Created once by [`setup_hero_rigs`].
+    rigs: Vec<CaptureRig>,
+    /// What each rig is bound to (`None` = free), indexed as [`rigs`](Self::rigs).
+    bindings: Vec<Option<LocalBinding>>,
+    /// The per-face resolution every rig's cube and faces were created at — fixed at
+    /// setup (it sizes GPU targets), fed to the render-world blit.
+    resolution: u32,
+}
+
+impl HeroProbeRigs {
+    /// The rig currently bound to `object`'s mirror, if any.
+    fn rig_of(&self, object: Entity) -> Option<usize> {
+        self.bindings
+            .iter()
+            .position(|binding| binding.as_ref().is_some_and(|bound| bound.object == object))
+    }
+
+    /// The lowest-indexed **free** rig, or `None` when every rig is bound.
+    fn free_rig(&self) -> Option<usize> {
+        self.bindings.iter().position(Option::is_none)
+    }
+}
+
+/// The render-world work-list of hero cubes to reassemble each frame, extracted from
+/// the main world — the hero counterpart of [`ProbeCubeCopies`], kept separate so each
+/// family owns its own rebuild. [`copy_hero_faces`] blits each mirror's six captured
+/// faces into its cube.
+#[derive(Resource, Clone, Default, ExtractResource)]
+struct HeroCubeCopies {
+    /// One entry per bound mirror.
+    copies: Vec<ProbeCubeCopy>,
+}
+
+/// The hero-probe frame counter, driving the `RenderHeroProbeUpdateRate` cadence.
+#[derive(Resource, Default)]
+struct HeroSchedule {
+    /// Frames elapsed since startup (wrapping), so a capture fires when
+    /// `frame % update_rate == 0`.
+    frame: u64,
+}
+
+/// Register the mirror feature's persistent `[render]` settings (startup). Guarded on
+/// [`ViewerSettings`] existing, like [`register_probe_settings`], so the gallery /
+/// headless harnesses are unaffected.
+fn register_mirror_settings(settings: Option<ResMut<ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.register_in(
+        &["render"],
+        RENDER_MIRRORS_SETTING,
+        SettingValue::Bool(MirrorSettings::default().enabled),
+        "Enable realtime mirrors (hero probes): a mirror-flagged reflection-probe prim \
+         reflects the scene — and you — sharp and live, re-rendered every frame. \
+         Costlier than the P33 reflection probes, but only a mirror prim actually in \
+         view pays for it.",
+    );
+    settings.register_in(
+        &["render"],
+        HERO_RESOLUTION_SETTING,
+        SettingValue::U32(HERO_DEFAULT_RESOLUTION),
+        "Per-face resolution of a mirror's hero-probe cubemap, in texels \
+         (RenderHeroProbeResolution). Sharper and costlier when higher; rounded to a \
+         power of two in [128, 2048]. Sizes GPU targets, so a change takes effect on \
+         restart.",
+    );
+    settings.register_in(
+        &["render"],
+        HERO_UPDATE_RATE_SETTING,
+        SettingValue::U32(HERO_DEFAULT_UPDATE_RATE),
+        "How often a mirror re-renders, in frames (RenderHeroProbeUpdateRate): 1 = \
+         every frame (most live), N = every Nth frame (cheaper, laggier). The main \
+         performance lever for mirrors.",
+    );
+}
+
+/// Mirror the persistent mirror settings into the [`MirrorSettings`] resource each
+/// frame (a no-op once they agree). The resolution is deliberately not synced — it
+/// sizes GPU targets fixed at [`setup_hero_rigs`].
+fn sync_mirror_settings(
+    settings: Option<Res<ViewerSettings>>,
+    mut mirrors: ResMut<MirrorSettings>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    if let Ok(enabled) = settings.store().get_bool(RENDER_MIRRORS_SETTING)
+        && mirrors.enabled != enabled
+    {
+        mirrors.enabled = enabled;
+    }
+    if let Ok(rate) = settings.store().get_u32(HERO_UPDATE_RATE_SETTING) {
+        let rate = rate.max(1);
+        if mirrors.update_rate != rate {
+            mirrors.update_rate = rate;
+        }
+    }
+}
+
+/// Spawn one hero cube-face capture camera: a 90°-FOV square HDR camera rendering the
+/// full scene (environment + geometry + dynamic content — a mirror must show avatars)
+/// into `face_image`, initially inactive ([`drive_hero_captures`] toggles it per the
+/// update rate).
+fn spawn_hero_camera(commands: &mut Commands, rig: usize, face: usize, face_image: Handle<Image>) {
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            // Ahead of the main view; the blit reads the faces a frame later, so the
+            // order among capture cameras is irrelevant.
+            order: -1,
+            is_active: false,
+            ..default()
+        },
+        RenderTarget::Image(face_image.into()),
+        Projection::Perspective(PerspectiveProjection {
+            fov: FRAC_PI_2,
+            aspect_ratio: 1.0,
+            near: MIN_NEAR_CLIP,
+            far: 4096.0,
+            ..default()
+        }),
+        Transform::default(),
+        // HDR, single-sampled, no tonemap: the cube holds linear scene radiance, like
+        // the P33 capture cameras.
+        Hdr,
+        Msaa::Off,
+        Tonemapping::None,
+        // A mirror always captures dynamic content (you must see yourself), on the
+        // probe layers only so the shadow sun builds no cascade for these cameras.
+        local_probe_camera_render_layers(true),
+        HeroCaptureCamera { rig, face },
+    ));
+}
+
+/// Build one hero rig at `resolution`: its cube, its six face targets, and the six
+/// cameras that render them (all initially idle).
+fn create_hero_rig(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    rig: usize,
+    resolution: u32,
+) -> CaptureRig {
+    let cube = create_cube_image(images, resolution);
+    let faces: [Handle<Image>; FACE_COUNT] =
+        core::array::from_fn(|_| create_face_image(images, resolution));
+    for face in 0..FACE_COUNT {
+        let handle = faces.get(face).cloned().unwrap_or_default();
+        spawn_hero_camera(commands, rig, face, handle);
+    }
+    CaptureRig { cube, faces }
+}
+
+/// Startup: create the [`MAX_HERO_PROBES`] hero rigs at the configured
+/// `RenderHeroProbeResolution` (defaulting when the settings store is absent). Like
+/// the P33 rigs they exist for the process's lifetime; a mirror entering or leaving
+/// the budget only *rebinds* one.
+fn setup_hero_rigs(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    settings: Option<Res<ViewerSettings>>,
+) {
+    let resolution = settings
+        .and_then(|settings| settings.store().get_u32(HERO_RESOLUTION_SETTING).ok())
+        .map_or(HERO_DEFAULT_RESOLUTION, normalize_hero_resolution);
+    let rigs: Vec<CaptureRig> = (0..MAX_HERO_PROBES)
+        .map(|rig| create_hero_rig(&mut commands, &mut images, rig, resolution))
+        .collect();
+    commands.insert_resource(HeroProbeRigs {
+        rigs,
+        bindings: std::iter::repeat_with(|| None)
+            .take(MAX_HERO_PROBES)
+            .collect(),
+        resolution,
+    });
+    debug!("hero probes: {MAX_HERO_PROBES} hero rig(s) set up at {resolution}² per face");
+}
+
+/// Rank the mirror prims for the [`MAX_HERO_PROBES`] budget: nearest first, by the same
+/// `|eye - origin| - radius` measure the P33 local pool uses ([`rank_local_probes`]).
+fn rank_hero_probes(
+    eye: Vec3,
+    probes: &Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+) -> Vec<Entity> {
+    let mut ranked: Vec<(Entity, f32)> = probes
+        .iter()
+        .filter(|(_, probe, _)| probe.is_mirror())
+        .map(|(entity, probe, transform)| {
+            (
+                entity,
+                eye.distance(transform.translation()) - probe.radius(),
+            )
+        })
+        .collect();
+    ranked.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    ranked.truncate(MAX_HERO_PROBES);
+    ranked
+        .into_iter()
+        .map(|(entity, _distance)| entity)
+        .collect()
+}
+
+/// Spawn a hero rig's [`LightProbe`] holder as a child of the mirror prim: the entity
+/// carrying the (floored — [`hero_volume_scale`]) influence volume and binding the
+/// rig's sharp cube as an [`EnvironmentMapLight`] over the glass. Like
+/// [`spawn_probe_holder`] but with the hero volume, and a hard [`BOX_FALLOFF`] so the
+/// reflection fills the volume rather than fading across it.
+fn spawn_hero_holder(
+    commands: &mut Commands,
+    object: Entity,
+    cube: Handle<Image>,
+    probe: &ObjectReflectionProbe,
+    intensity: f32,
+    world_rotation: Quat,
+) -> Entity {
+    commands
+        .spawn((
+            LightProbe {
+                falloff: Vec3::splat(BOX_FALLOFF),
+            },
+            GeneratedEnvironmentMapLight {
+                environment_map: cube,
+                intensity,
+                rotation: sample_rotation(world_rotation),
+                affects_lightmapped_mesh_diffuse: true,
+            },
+            Transform::from_scale(hero_volume_scale(probe)),
+            ChildOf(object),
+        ))
+        .id()
+}
+
+/// Hand the nearest mirror prims the hero rigs (the mirror counterpart of
+/// [`drive_local_probes`]).
+///
+/// When `RenderMirrors` is off it releases every hero binding and clears the work-list
+/// — the P33 local pool then reclaims the mirror prims as ordinary probes (they are no
+/// longer excluded from [`rank_local_probes`]). When on, it ranks the mirrors nearest
+/// first, frees rigs whose mirror fell out of the budget (or despawned), binds a free
+/// rig to each newcomer (spawning its holder), refreshes a kept rig's holder only on a
+/// real change, and republishes the render-world blit list.
+fn drive_hero_probes(
+    mut commands: Commands,
+    settings: Res<MirrorSettings>,
+    mut rigs: ResMut<HeroProbeRigs>,
+    mut copies: ResMut<HeroCubeCopies>,
+    camera: Query<(&GlobalTransform, &Exposure), With<ViewerCamera>>,
+    probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
+    mut last_bound: Local<usize>,
+) {
+    let Ok((view, exposure)) = camera.single() else {
+        return;
+    };
+
+    // Mirrors off: release everything and let the P33 pool take over.
+    if !settings.enabled {
+        for binding in &mut rigs.bindings {
+            if let Some(bound) = binding.take() {
+                commands.entity(bound.holder).try_despawn();
+            }
+        }
+        if !copies.copies.is_empty() {
+            copies.copies.clear();
+        }
+        if *last_bound != 0 {
+            debug!("hero probes: RenderMirrors off — released every hero rig");
+            *last_bound = 0;
+        }
+        return;
+    }
+
+    let selected = rank_hero_probes(view.translation(), &probes);
+
+    // Free the rigs of mirrors that dropped out of the budget or whose prim is gone.
+    for (index, binding) in rigs.bindings.iter_mut().enumerate() {
+        let stale = binding
+            .as_ref()
+            .is_some_and(|bound| !selected.contains(&bound.object));
+        if stale && let Some(bound) = binding.take() {
+            commands.entity(bound.holder).try_despawn();
+            debug!("hero probes: mirror released hero rig {index}");
+        }
+    }
+
+    for object in selected {
+        let Ok((_, probe, global)) = probes.get(object) else {
+            continue;
+        };
+        let world_rotation = global.rotation();
+        match rigs.rig_of(object) {
+            // Already bound: refresh the holder only on a real change (a resized or
+            // reshaped mirror), and re-derive the sampling correction if the prim
+            // turned — a rest prim costs no churn.
+            Some(index) => {
+                let Some(Some(bound)) = rigs.bindings.get_mut(index) else {
+                    continue;
+                };
+                if bound.applied != *probe {
+                    commands.entity(bound.holder).insert((
+                        LightProbe {
+                            falloff: Vec3::splat(BOX_FALLOFF),
+                        },
+                        Transform::from_scale(hero_volume_scale(probe)),
+                    ));
+                    bound.applied = *probe;
+                }
+                if !bound.sample_rotation.abs_diff_eq(world_rotation, 1.0e-5) {
+                    bound.sample_rotation = world_rotation;
+                    commands
+                        .entity(bound.holder)
+                        .entry::<GeneratedEnvironmentMapLight>()
+                        .and_modify(move |mut light| {
+                            light.rotation = sample_rotation(world_rotation);
+                        });
+                }
+            }
+            // A newcomer: bind it to a free rig if the cap has one.
+            None => {
+                let Some(index) = rigs.free_rig() else {
+                    continue;
+                };
+                let Some(cube) = rigs.rigs.get(index).map(|rig| rig.cube.clone()) else {
+                    continue;
+                };
+                let holder = spawn_hero_holder(
+                    &mut commands,
+                    object,
+                    cube,
+                    probe,
+                    probe_intensity(exposure),
+                    world_rotation,
+                );
+                if let Some(slot) = rigs.bindings.get_mut(index) {
+                    *slot = Some(LocalBinding {
+                        object,
+                        holder,
+                        applied: *probe,
+                        sample_rotation: world_rotation,
+                    });
+                }
+                debug!("hero probes: mirror took hero rig {index}");
+            }
+        }
+    }
+
+    // Republish the blit list: exactly the bound mirrors, at the hero resolution.
+    copies.copies.clear();
+    for (index, rig) in rigs.rigs.iter().enumerate() {
+        let live = rigs
+            .bindings
+            .get(index)
+            .is_some_and(|binding| binding.is_some());
+        if live {
+            copies.copies.push(ProbeCubeCopy {
+                cube: rig.cube.id(),
+                faces: core::array::from_fn(|face| {
+                    rig.faces.get(face).map(Handle::id).unwrap_or_default()
+                }),
+                size: rigs.resolution,
+            });
+        }
+    }
+
+    let bound = copies.copies.len();
+    if bound != *last_bound {
+        debug!("hero probes: {bound} mirror(s) captured live (cap {MAX_HERO_PROBES})");
+        *last_bound = bound;
+    }
+}
+
+/// Drive the live mirror capture: every [`MirrorSettings::update_rate`] frames, pose a
+/// bound hero rig's six cameras at its mirror prim and activate them so the whole cube
+/// re-renders **this** frame — the sharp, live reflection. Between those frames (and
+/// when mirrors are off) the cameras idle, which is where the update rate buys its
+/// frame time back.
+fn drive_hero_captures(
+    settings: Res<MirrorSettings>,
+    rigs: Res<HeroProbeRigs>,
+    mut schedule: ResMut<HeroSchedule>,
+    probes: Query<(&ObjectReflectionProbe, &GlobalTransform)>,
+    mut cameras: Query<(
+        &HeroCaptureCamera,
+        &mut Transform,
+        &mut Camera,
+        &mut Projection,
+    )>,
+) {
+    schedule.frame = schedule.frame.wrapping_add(1);
+    let due = settings.enabled
+        && schedule
+            .frame
+            .is_multiple_of(u64::from(settings.update_rate.max(1)));
+
+    for (capture, mut transform, mut camera, mut projection) in &mut cameras {
+        // The mirror this rig is bound to, and where it is — `None` when the frame is
+        // not due (or mirrors are off), when the rig is free, or when its prim is gone.
+        let pose = if due {
+            rigs.bindings
+                .get(capture.rig)
+                .and_then(|binding| binding.as_ref())
+                .and_then(|bound| probes.get(bound.object).ok())
+                .map(|(probe, global)| (global.translation(), probe.near_clip()))
+        } else {
+            None
+        };
+        if let Some((origin, near)) = pose {
+            if let Some(face) = CUBE_MAP_FACES.get(capture.face) {
+                *transform = Transform::from_translation(origin).looking_to(face.target, face.up);
+            }
+            if let Projection::Perspective(perspective) = projection.as_mut() {
+                perspective.near = near;
+            }
+        }
+        let active = pose.is_some();
+        if camera.is_active != active {
+            camera.is_active = active;
+        }
+    }
+}
+
+/// Light the hero capture cameras with the main view's environment map, so a mirror
+/// re-renders the world as the eye sees it (image-based lighting included) rather than
+/// unlit — the hero counterpart of [`light_capture_cameras`].
+fn light_hero_capture_cameras(
+    mut commands: Commands,
+    view: Query<&EnvironmentMapLight, With<ViewerCamera>>,
+    cameras: Query<(Entity, Option<&EnvironmentMapLight>), With<HeroCaptureCamera>>,
+) {
+    let Ok(environment) = view.single() else {
+        return;
+    };
+    for (entity, current) in &cameras {
+        let stale = current.is_none_or(|current| {
+            current.diffuse_map != environment.diffuse_map
+                || current.specular_map != environment.specular_map
+                || (current.intensity - environment.intensity).abs() > f32::EPSILON
+        });
+        if stale {
+            commands.entity(entity).insert(environment.clone());
+        }
+    }
+}
+
+/// Render world: blit each bound mirror's six captured faces into its hero cube — the
+/// hero counterpart of [`copy_probe_faces`], sharing [`blit_cube_faces`].
+fn copy_hero_faces(
+    copies: Res<HeroCubeCopies>,
+    images: Res<RenderAssets<GpuImage>>,
+    device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
+) {
+    blit_cube_faces(&copies.copies, &images, &device, &queue);
 }
 
 #[cfg(test)]
@@ -1707,5 +2396,85 @@ mod tests {
         assert_eq!(pick_next_rig([(1, 10.0, 50.0), (2, 1.0, 5.0)]), Some(1));
         // No candidates: nothing to capture.
         assert_eq!(pick_next_rig([]), None);
+    }
+
+    use super::{
+        HERO_MAX_RESOLUTION, HERO_MIN_RESOLUTION, HERO_MIN_VOLUME_EXTENT, hero_volume_scale,
+        normalize_hero_resolution,
+    };
+
+    /// The `MIRROR` flag is what routes a probe prim to the hero path.
+    #[test]
+    fn mirror_flag_is_detected() {
+        let mut object = bare_object();
+        object.extra.reflection_probe = Some(ReflectionProbe {
+            ambiance: 0.0,
+            clip_distance: 1.0,
+            flags: ReflectionProbeFlags::MIRROR,
+        });
+        assert!(
+            matches!(reflection_probe_from_object(&object), Some(probe) if probe.is_mirror()),
+            "the MIRROR flag marks a hero probe"
+        );
+
+        // A plain (non-mirror) probe is not a hero probe.
+        let mut plain = bare_object();
+        plain.extra.reflection_probe = Some(ReflectionProbe {
+            ambiance: 0.0,
+            clip_distance: 1.0,
+            flags: ReflectionProbeFlags::BOX_VOLUME,
+        });
+        assert!(
+            matches!(reflection_probe_from_object(&plain), Some(probe) if !probe.is_mirror()),
+            "a plain (non-mirror) probe is not a hero probe"
+        );
+    }
+
+    /// The hero resolution is always a power of two within the accepted band — the
+    /// env-map filter's requirement and the VRAM ceiling.
+    #[test]
+    fn hero_resolution_is_a_bounded_power_of_two() {
+        // Already a power of two in range: unchanged.
+        assert_eq!(normalize_hero_resolution(512), 512);
+        // Rounded up to the next power of two.
+        assert_eq!(normalize_hero_resolution(500), 512);
+        assert_eq!(normalize_hero_resolution(1025), 2048);
+        // Clamped to the band at both ends.
+        assert_eq!(normalize_hero_resolution(1), HERO_MIN_RESOLUTION);
+        assert_eq!(normalize_hero_resolution(100_000), HERO_MAX_RESOLUTION);
+        // A value between max/2 and max still ends within the band (not above it).
+        for requested in [1, 127, 200, 999, 2047, 2048, 5000] {
+            let size = normalize_hero_resolution(requested);
+            assert!(size.is_power_of_two(), "{size} must be a power of two");
+            assert!((HERO_MIN_RESOLUTION..=HERO_MAX_RESOLUTION).contains(&size));
+        }
+    }
+
+    /// A flat mirror's razor-thin box gets a volume floored to
+    /// [`HERO_MIN_VOLUME_EXTENT`] on every axis, so the reflective face is inside the
+    /// volume rather than on its boundary — while a large mirror keeps its own extent.
+    #[test]
+    fn hero_volume_is_floored_for_a_flat_mirror() {
+        // A flat mirror: 2 m × 3 m panel, 2 cm thick (a box-volume probe).
+        let flat = probe(
+            [2.0, 3.0, 0.02],
+            ReflectionProbeFlags::MIRROR.union(ReflectionProbeFlags::BOX_VOLUME),
+        );
+        let scale = hero_volume_scale(&flat);
+        assert!(
+            (scale.z - HERO_MIN_VOLUME_EXTENT).abs() < EPS,
+            "the thin axis is floored to {HERO_MIN_VOLUME_EXTENT}, got {}",
+            scale.z
+        );
+        // The already-large axes are untouched (box-volume mirror keeps its extent).
+        assert!((scale.x - 2.0).abs() < EPS);
+        assert!((scale.y - 3.0).abs() < EPS);
+
+        // A large mirror is never shrunk by the floor.
+        let big = probe(
+            [4.0, 4.0, 4.0],
+            ReflectionProbeFlags::MIRROR.union(ReflectionProbeFlags::BOX_VOLUME),
+        );
+        assert!(hero_volume_scale(&big).abs_diff_eq(Vec3::splat(4.0), EPS));
     }
 }
