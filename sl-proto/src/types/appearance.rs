@@ -521,7 +521,36 @@ impl TextureFace {
     pub const fn is_planar_texgen(self) -> bool {
         self.tex_gen() == 0x02
     }
+
+    /// Whether this face is a **water-exclusion surface** (the modern successor to
+    /// the legacy "invisiprim"): its texture is one of the [`IMG_ALPHA_GRAD`]
+    /// sentinels the reference viewer forces to a single-channel `GL_ALPHA`
+    /// format. The modern reference repurposed the old invisiprim draw pool into a
+    /// dedicated water-exclusion pass that punches a hole in the water plane where
+    /// such faces are (`LLDrawPoolWaterExclusion`, `PASS_INVISIBLE`) — and nothing
+    /// more: unlike the legacy invisiprim it no longer occludes avatars, objects,
+    /// or the sky. Boat / dock content textures its hull faces this way to keep the
+    /// interior dry.
+    ///
+    /// This is the id the build tool's "Hide water" checkbox applies
+    /// (`LLPanelFace::onCommitHideWater` → `selectionSetImage(IMG_ALPHA_GRAD)`).
+    #[must_use]
+    pub fn is_water_exclusion(self) -> bool {
+        let id = self.texture_id.uuid();
+        id == IMG_ALPHA_GRAD || id == IMG_ALPHA_GRAD_2D
+    }
 }
+
+/// The "alpha gradient" sentinel texture id (`IMG_ALPHA_GRAD`,
+/// `indra/llcommon/indra_constants.cpp`), a viewer-local single-channel
+/// (`GL_ALPHA`) image. A prim face textured with it is a **water-exclusion
+/// surface** — see [`TextureFace::is_water_exclusion`].
+pub const IMG_ALPHA_GRAD: Uuid = Uuid::from_u128(0xe97c_f410_8e61_7005_ec06_629e_ba4c_d1fb);
+
+/// The 2-D variant of the alpha-gradient sentinel (`IMG_ALPHA_GRAD_2D`); the other
+/// texture id the reference viewer forces to `GL_ALPHA`, so a face carrying it is
+/// likewise a water-exclusion surface. See [`TextureFace::is_water_exclusion`].
+pub const IMG_ALPHA_GRAD_2D: Uuid = Uuid::from_u128(0x38b8_6f85_2575_52a9_a531_2310_8d8d_a837);
 
 /// A decoded `TextureEntry`: one [`TextureFace`] per face. For an avatar (from
 /// `AvatarAppearance`) the faces are indexed by the [`avatar_texture`] slot
@@ -1141,6 +1170,27 @@ mod tests {
         // The reserved modes (spherical 0x04, cylindrical 0x06) are not planar.
         assert!(!face(0, 0x04).is_planar_texgen());
         assert!(!face(0, 0x06).is_planar_texgen());
+    }
+
+    #[test]
+    fn detects_water_exclusion_faces() {
+        use super::{IMG_ALPHA_GRAD, IMG_ALPHA_GRAD_2D, TextureFace, TextureKey, Uuid};
+        // The two alpha-gradient sentinels canonicalize to the reference viewer's
+        // `indra_constants` ids, and a face carrying either is a water-exclusion
+        // surface.
+        assert_eq!(
+            IMG_ALPHA_GRAD.hyphenated().to_string(),
+            "e97cf410-8e61-7005-ec06-629eba4cd1fb"
+        );
+        assert_eq!(
+            IMG_ALPHA_GRAD_2D.hyphenated().to_string(),
+            "38b86f85-2575-52a9-a531-23108d8da837"
+        );
+        assert!(TextureFace::new(TextureKey::from(IMG_ALPHA_GRAD)).is_water_exclusion());
+        assert!(TextureFace::new(TextureKey::from(IMG_ALPHA_GRAD_2D)).is_water_exclusion());
+        // An ordinary texture (and the null id) is not a water-exclusion surface.
+        assert!(!TextureFace::new(TextureKey::from(Uuid::from_u128(0xabcd))).is_water_exclusion());
+        assert!(!TextureFace::new(TextureKey::from(Uuid::nil())).is_water_exclusion());
     }
 
     #[test]

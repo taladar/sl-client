@@ -387,8 +387,8 @@ pub(crate) fn linden_balance_to_wire(
 pub use alert::{MeanCollision, MeanCollisionType};
 pub use appearance::{
     AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarAttachment, DetachOrder,
-    PlayingAnimation, RezAttachment, SoundFlags, SoundPreload, TextureEntry, TextureFace, Wearable,
-    WearableType, avatar_texture,
+    IMG_ALPHA_GRAD, IMG_ALPHA_GRAD_2D, PlayingAnimation, RezAttachment, SoundFlags, SoundPreload,
+    TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,
 };
 pub use asset::{
     Asset, AssetType, AssetUpdateLocation, ImageCodec, InventoryType, NotUpdatableAssetType,

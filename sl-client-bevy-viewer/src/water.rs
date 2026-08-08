@@ -148,6 +148,12 @@ impl WaterState {
     pub(crate) fn height_of(&self, region: RegionHandle) -> Option<f32> {
         self.region_heights.get(&region).copied()
     }
+
+    /// The shared water material handle, so the water-exclusion pass
+    /// ([`crate::water_exclusion`]) can bind its screen-space mask into it.
+    pub(crate) const fn material(&self) -> &Handle<WaterMaterial> {
+        &self.material
+    }
 }
 
 /// Startup: create the shared water material (on a flat-normal placeholder), spawn
@@ -179,6 +185,10 @@ pub(crate) fn setup_water(
         params,
         normal_map: placeholder.clone(),
         normal_map_next: placeholder,
+        // A white 1×1 placeholder — "water everywhere" — until the water-exclusion
+        // pass ([`crate::water_exclusion`]) swaps in its real screen-space mask, so
+        // the sea is unaffected until an exclusion surface is in view.
+        exclusion_mask: images.add(white_mask_image()),
     });
 
     // The endless ocean: a large plane (XZ, +Y normal), kept centred on the camera
@@ -563,6 +573,25 @@ pub(crate) fn water_normal_image(decoded: &DecodedTexture) -> Image {
         ..ImageSamplerDescriptor::linear()
     });
     image
+}
+
+/// A 1×1 all-white placeholder [`Image`] for the water-exclusion mask: `1` means
+/// "water present", so a water material wearing this placeholder renders the sea
+/// everywhere (no exclusion) until [`crate::water_exclusion`] wires in the real
+/// screen-space mask. Single-channel [`TextureFormat::R8Unorm`] to match the mask
+/// render target the water shader samples.
+pub(crate) fn white_mask_image() -> Image {
+    Image::new(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        vec![255],
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::default(),
+    )
 }
 
 /// A 1×1 flat-normal placeholder [`Image`] (RGB `(128, 128, 255)` = the unit +Z

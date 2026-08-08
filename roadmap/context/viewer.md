@@ -1699,3 +1699,48 @@ follow these conventions:
 - Planned modules: `ui_interact.rs` (synthetic pointer/keyboard over
   `LayoutTest`), `world_test.rs` (fixture world), and the `sl-fake-grid`
   crate (loopback grid).
+
+## viewer-water-exclusion — cross-cutting notes
+
+- **Reusable pattern: feeding a screen-space signal to a main-pass
+  (transparent-phase) material.** The water surface is drawn in the main
+  pass's `Transparent3d` phase, so a `Core3d`/`PostProcess` fullscreen
+  system (the `underwater_fog` style) runs **too late** to feed it that
+  frame. The fix that worked: a dedicated camera **slaved to the main
+  `ViewerCamera`** (pose + projection copied each frame, near/far matched,
+  aspect matched by sizing its target to the window), rendered **first**
+  (`Camera.order = -1`, the probe-camera slot) into an `Image` render
+  target, seeing **only** the exclusion faces (a private render layer,
+  `WATER_EXCLUSION_LAYER = 7`, so they are invisible to the main view and
+  every probe). That render-target `Handle<Image>` binds **directly** into
+  the shared `WaterMaterial`'s `AsBindGroup` (`#[texture(5)]`) — no custom
+  bind group / render node — exactly like `material_preview` / `probes` /
+  `render_readback`. The shader samples it by
+  `(frag_coord.xy - view.viewport.xy) / view.viewport.zw` and `discard`s.
+  Screen-UV sampling is resolution-independent as long as the aspect
+  matches, so a mismatched mask resolution only softens edges, never
+  misaligns.
+- **THE crash that bit (reusable gotcha for any reactive face mutator).** A
+  system reacting to `Changed<FaceTextureDebug>` to re-materialise a face
+  races with `update_objects` (and the P21.3 LOD rebuild), which
+  **despawns and respawns** an object's faces on an update — both run in
+  `Update`, so a face the query matched can be despawned before the command
+  buffer flushes, and a plain `commands.entity(e).insert(..)` then **panics**
+  ("Entity despawned"). It reproduced instantly with an exclusion prim in
+  view and not at all away from it. Fix: queue the conversion as a
+  `commands.queue(move |world| { let Ok(mut e) = world.get_entity_mut(id)
+  else { return }; … })` closure that re-checks existence **at apply time**;
+  the respawned face is caught next frame. This is the correct idiom for
+  best-effort mutation of entities another system owns — distinct from the
+  forbidden global `DefaultErrorHandler→warn` suppression.
+- **Live-verify recipe.** OpenSim's Default Region is **land above the
+  waterline at spawn**, so the sea (hence the hole) is only visible when the
+  camera goes **below the terrain** where the water plane shows — cam under
+  the ground to see it. Content: `sl-client-tokio` example
+  `rez_water_exclusion` rezzes an `IMG_ALPHA_GRAD`-textured cube straddling
+  the water height (`SL_REZ_X/Y/Z`, `SL_REZ_SIZE` overrides) and logs out
+  leaving it rezzed. Run it as **secondary** and view as **primary** so the
+  rezzer and the viewer never contend for the same avatar (no stale-presence
+  cooldown). Since an exclusion prim is invisible in the ordinary view, the
+  **only** visible effect is the water hole — no water in frame means no
+  observable signal, not a failure.

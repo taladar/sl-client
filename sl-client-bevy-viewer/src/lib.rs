@@ -217,6 +217,7 @@ mod ui_texture_picker;
 mod underwater_fog;
 mod virtual_list;
 mod water;
+mod water_exclusion;
 mod web_auth;
 mod web_floater;
 mod world_map;
@@ -396,6 +397,10 @@ use crate::ui_text_input::{
 use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
 use crate::virtual_list::VirtualListPlugin;
 use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
+use crate::water_exclusion::{
+    bind_water_exclusion_mask, convert_water_exclusion_faces, setup_water_exclusion,
+    sync_water_exclusion_camera,
+};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -1588,6 +1593,10 @@ fn run_session(
                 setup_clouds,
                 setup_stars,
                 setup_water,
+                // The water-exclusion mask camera + render target
+                // (`viewer-water-exclusion`); its mask is bound into the water
+                // material by `bind_water_exclusion_mask` once both exist.
+                setup_water_exclusion,
                 // The chat overlay now parents itself under the scaffold's
                 // `UiRoot` (so the snapshot include-UI-off hide covers it), and so
                 // must see the root.
@@ -2031,6 +2040,14 @@ fn run_session(
                 update_water,
                 drive_water.after(position_camera),
                 apply_water_textures,
+                // Water-exclusion surfaces (`viewer-water-exclusion`): route faces
+                // textured with the invisiprim-successor sentinel onto the mask
+                // layer, slave the mask camera to the main view (after the
+                // fly-camera so the mask lines up with what the water samples it
+                // against), and bind the finished mask into the water material.
+                convert_water_exclusion_faces,
+                sync_water_exclusion_camera.after(position_camera),
+                bind_water_exclusion_mask,
                 // Underwater fog (P23.1): refresh the camera's fog parameters (water
                 // level, EEP fog colour/density, reconstruction matrix) each frame,
                 // after the fly-camera so the matrix matches the current viewpoint.

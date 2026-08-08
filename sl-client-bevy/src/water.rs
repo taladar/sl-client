@@ -119,6 +119,17 @@ pub struct WaterMaterial {
     #[texture(3)]
     #[sampler(4)]
     pub normal_map_next: Handle<Image>,
+    /// The screen-space **water-exclusion mask** (`exclusionTex`): a single-channel
+    /// image, `1` where water should render and `0` where a water-exclusion surface
+    /// (an "invisiprim" successor) punches a hole in the sea. The viewer renders the
+    /// exclusion faces into this target each frame; the fragment shader discards the
+    /// water where the mask reads `0`. A `1×1` white placeholder (water everywhere)
+    /// until the viewer wires the real mask in, so the sea is unaffected until then.
+    /// Mirrors the reference viewer's `LLDrawPoolWaterExclusion` mask sampled by
+    /// `class3/environment/waterF.glsl`.
+    #[texture(5)]
+    #[sampler(6)]
+    pub exclusion_mask: Handle<Image>,
 }
 
 impl Material for WaterMaterial {

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 244 |
+| ready | 243 |
 | blocked | 92 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 730 |
+| done | 731 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1184** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -651,8 +651,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
-- [`viewer-water-exclusion`](ready/viewer-water-exclusion.md) — Water-exclusion
-  surfaces (invisiprim successor)
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -1080,7 +1078,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (730)
+## done (731)
 
 ### protocol
 
@@ -2082,6 +2080,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
+  surfaces (invisiprim successor)
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-world-map-double-click-teleport`](done/viewer-world-map-double-click-teleport.md)

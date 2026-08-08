@@ -80,6 +80,13 @@ struct WaterParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var normal_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var normal_next_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var normal_next_sampler: sampler;
+// The screen-space water-exclusion mask: 1 where water renders, 0 where a
+// water-exclusion surface ("invisiprim" successor) punches a hole in the sea. The
+// viewer renders the exclusion faces into this target with a camera slaved to the
+// main view, so it is sampled by the fragment's screen position (the reference's
+// `exclusionTex`, `class3/environment/waterF.glsl`).
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var exclusion_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var exclusion_sampler: sampler;
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -128,6 +135,19 @@ fn tangent_to_world(t: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Water-exclusion (`LLDrawPoolWaterExclusion`): the exclusion faces are rendered
+    // into a screen-space mask by a camera slaved to this view, so it is sampled by
+    // the fragment's screen position (framebuffer pixel / viewport size). Where the
+    // mask reads 0 an exclusion surface covers the water, so discard the sea there —
+    // the reference `if (water_mask < 1) discard`, at a 0.5 threshold so an
+    // antialiased mask edge falls on the silhouette rather than eroding the water.
+    let viewport = view_bindings::view.viewport;
+    let screen_uv = (in.clip_position.xy - viewport.xy) / viewport.zw;
+    let water_mask = textureSample(exclusion_texture, exclusion_sampler, screen_uv).r;
+    if (water_mask < 0.5) {
+        discard;
+    }
+
     // The Second Life horizontal plane (its "xy") is Bevy's "xz"; work in that
     // horizontal 2-space for the wave texcoords.
     let horiz = vec2<f32>(in.world_position.x, in.world_position.z);

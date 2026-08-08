@@ -135,7 +135,7 @@ use crate::terrain::{
 };
 use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use crate::textures::TextureManager;
-use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params};
+use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -3256,6 +3256,9 @@ fn water_surface(
         // cycle drives a separate next frame and a blend between them.
         normal_map: normal.clone(),
         normal_map_next: normal,
+        // No water-exclusion mask in this offline scene: an all-white 1×1 placeholder
+        // means "water everywhere" (the live viewer wires the real mask via a camera).
+        exclusion_mask: assets.images.add(white_mask_image()),
     });
     // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
     let space = commands

@@ -60,6 +60,13 @@ pub(crate) const PROBE_GEOM_LAYER: usize = 5;
 /// runtime setting can keep it out of local probes.
 pub(crate) const PROBE_DYNAMIC_LAYER: usize = 6;
 
+/// Render layer for **water-exclusion surfaces** (the "invisiprim" successor,
+/// [`crate::water_exclusion`]): these faces render **only** here — never on
+/// [`MAIN_LAYER`] or any probe layer — so they are invisible in every ordinary
+/// view and are seen only by the water-exclusion mask camera, which renders this
+/// layer alone into the screen-space mask the water shader samples.
+pub(crate) const WATER_EXCLUSION_LAYER: usize = 7;
+
 /// Render layers for static world geometry: the main layer plus
 /// [`PROBE_GEOM_LAYER`].
 pub(crate) fn world_geom_render_layers() -> RenderLayers {
