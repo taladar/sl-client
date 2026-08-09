@@ -173,6 +173,12 @@ const RIGHT_KNEE_AXIS: Vec3 = Vec3::new(-0.05, 1.0, 0.0);
 /// the legs straight.
 const FOOT_IK_WEIGHT_TIME_CONSTANT: f32 = 0.15;
 
+/// The residual below which an exponentially-eased quantity (the foot-IK weight,
+/// the smoothed foot displacements, the fly-bank roll) snaps exactly onto its
+/// target: the eases are asymptotic, and converging exactly is what lets the
+/// pose gate's settle test hold on a still avatar. Sub-0.1 mm / sub-0.006°.
+const SETTLE_EPSILON: f32 = 1.0e-4;
+
 /// How much of the leg's length the foot IK keeps in reserve, so the goal can never drive
 /// it fully straight. A standing leg already sits at ~99.5% of full extension, and the
 /// IK's gain *at* full extension is unbounded — the ankle-to-hip distance is stationary in
@@ -339,6 +345,17 @@ struct AgentAdjust {
     /// (`mRotationToGroundNormal`), captured when the `standup` motion starts (the
     /// reference captures it in `onActivate`) and held for the motion's life.
     fall_ground_rotation: Option<Quat>,
+    /// The ground samples consumed by the last [`apply`] run, so the pose gate can
+    /// tell whether re-running the fold would read different ground (the probe
+    /// keeps running every frame; only its consumption is gated).
+    last_ground: Option<AgentGround>,
+    /// Which adjusters the last [`apply`] ran under (`walking`, `standing`,
+    /// `fall`), so the gate wakes the avatar when the animation set flips one.
+    last_anims: (bool, bool, bool),
+    /// Whether the last [`apply`] left every eased quantity latched (weight and
+    /// displacements exactly at their targets, no roll, no fall) — the fold's
+    /// output is then a pure function of the (unchanged) pose and ground.
+    settled: bool,
 }
 
 /// Per-avatar [`AgentAdjust`] state, keyed by agent, retained across frames so the
@@ -366,6 +383,25 @@ impl LocomotionAdjust {
     /// not grow without bound over a long session.
     pub(crate) fn retain(&mut self, live: &impl Fn(AgentKey) -> bool) {
         self.states.retain(|&agent, _state| live(agent));
+    }
+
+    /// Whether re-running `agent`'s locomotion fold would reproduce its last
+    /// output exactly: the last run left every eased quantity latched
+    /// ([`AgentAdjust::settled`]), the active adjuster set is unchanged, and the
+    /// ground samples it would consume are the ones it consumed last time. Part
+    /// of the pose gate's settle test. A fresh (never-run) avatar reports
+    /// unsettled so its first fold always runs.
+    pub(crate) fn is_settled(
+        &self,
+        agent: AgentKey,
+        anims: &AdjusterAnims,
+        ground: &AgentGround,
+    ) -> bool {
+        self.states.get(&agent).is_some_and(|state| {
+            state.settled
+                && state.last_anims == (anims.walking, anims.standing, anims.fall.is_some())
+                && state.last_ground == Some(*ground)
+        })
     }
 }
 
@@ -591,6 +627,11 @@ pub(crate) fn apply(
     };
     let ease = smooth_interpolant(FOOT_IK_WEIGHT_TIME_CONSTANT, dt);
     state.foot_ik_weight += (target_weight - state.foot_ik_weight) * ease;
+    // Terminal snap: the exponential ease is asymptotic; converging exactly is
+    // what lets the pose gate's settle test hold on a standing avatar.
+    if (target_weight - state.foot_ik_weight).abs() < SETTLE_EPSILON {
+        state.foot_ik_weight = target_weight;
+    }
     let mut displacement = (0.0, 0.0);
     if let Some(root_ground) = input.ground.root
         && state.foot_ik_weight > f32::EPSILON
@@ -599,10 +640,18 @@ pub(crate) fn apply(
         // near-straight leg's huge IK gain has nothing high-frequency to amplify.
         let ground_ease = smooth_interpolant(FOOT_GROUND_TIME_CONSTANT, dt);
         let raw = |hit: Option<GroundHit>| hit.map_or(0.0, |hit| hit.point.y - root_ground.point.y);
-        state.foot_displacement.0 +=
-            (raw(input.ground.left) - state.foot_displacement.0) * ground_ease;
-        state.foot_displacement.1 +=
-            (raw(input.ground.right) - state.foot_displacement.1) * ground_ease;
+        let raw_left = raw(input.ground.left);
+        let raw_right = raw(input.ground.right);
+        state.foot_displacement.0 += (raw_left - state.foot_displacement.0) * ground_ease;
+        state.foot_displacement.1 += (raw_right - state.foot_displacement.1) * ground_ease;
+        // Terminal snaps, as for the weight above: on still ground the smoothed
+        // displacements *reach* the raw ones and stop changing.
+        if (raw_left - state.foot_displacement.0).abs() < SETTLE_EPSILON {
+            state.foot_displacement.0 = raw_left;
+        }
+        if (raw_right - state.foot_displacement.1).abs() < SETTLE_EPSILON {
+            state.foot_displacement.1 = raw_right;
+        }
         let weight = state.foot_ik_weight;
         let (left, right) = state.foot_displacement;
         displacement = (
@@ -610,6 +659,32 @@ pub(crate) fn apply(
             plant_foot(pose, input, Leg::Right, weight, right),
         );
     }
+
+    // Record what this run consumed and whether every eased quantity is latched,
+    // for the pose gate's [`LocomotionAdjust::is_settled`]: with the weight and
+    // displacements exactly at their targets, no fly bank, no fall recovery and
+    // no walk servo, re-running this fold on the same pose and ground reproduces
+    // its output bit-for-bit.
+    state.last_ground = Some(input.ground);
+    state.last_anims = (
+        input.anims.walking,
+        input.anims.standing,
+        input.anims.fall.is_some(),
+    );
+    // With the IK fully released (weight latched at zero) the stale smoothed
+    // displacements are never read, so they do not block the settle.
+    let displacements_latched = state.foot_ik_weight == 0.0
+        || input.ground.root.is_none_or(|root_ground| {
+            let raw =
+                |hit: Option<GroundHit>| hit.map_or(0.0, |hit| hit.point.y - root_ground.point.y);
+            state.foot_displacement.0.to_bits() == raw(input.ground.left).to_bits()
+                && state.foot_displacement.1.to_bits() == raw(input.ground.right).to_bits()
+        });
+    state.settled = !input.anims.walking
+        && input.anims.fall.is_none()
+        && state.roll == 0.0
+        && state.foot_ik_weight.to_bits() == target_weight.to_bits()
+        && displacements_latched;
 
     AdjustReport {
         walk_speed: state.anim_speed,
@@ -722,6 +797,11 @@ fn fly_adjust(state: &mut AgentAdjust, motion: &AvatarMotion, dt: f32) {
         motion.sl_velocity().length(),
     );
     state.roll += (target - state.roll) * smooth_interpolant(FLY_ROLL_TIME_CONSTANT, dt);
+    // Terminal snap (see [`SETTLE_EPSILON`]): a hovering avatar's bank *reaches*
+    // its (zero) target instead of asymptoting, so it can settle.
+    if (target - state.roll).abs() < SETTLE_EPSILON {
+        state.roll = target;
+    }
 }
 
 /// `LLKeyframeFallMotion`: the pelvis starts lying along the ground it landed on and

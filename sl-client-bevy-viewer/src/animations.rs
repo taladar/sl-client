@@ -412,6 +412,11 @@ pub(crate) struct AnimationPlayback {
     /// drivable animation appear). An avatar absent here keeps its plain deformed
     /// rest pose, produced by ordinary transform propagation.
     poses: HashMap<AgentKey, AnimationPose>,
+    /// A per-avatar counter bumped whenever the avatar's resolved pose *changed*
+    /// from the previous frame — including gaining or losing a pose entirely. A
+    /// held pose (a single-frame AO stand) keeps its tick, so the pose gate can
+    /// skip the skeleton fold; any animating joint bumps it every frame.
+    pose_ticks: HashMap<AgentKey, u64>,
 }
 
 impl AnimationPlayback {
@@ -920,7 +925,151 @@ pub(crate) fn drive_avatar_skeletons(
             debug!("animation: released avatar {agent} skeleton back to rest");
         }
     }
+    // Bump each avatar's pose tick when its resolved pose changed — including a
+    // pose appearing or disappearing (Some↔None) — so the pose gate re-evaluates
+    // exactly the avatars whose keyframe pose moved. Exact equality is the
+    // point: a held pose samples identically every frame and keeps its tick.
+    let changed: Vec<AgentKey> = poses
+        .keys()
+        .chain(playback.poses.keys())
+        .copied()
+        .collect::<HashSet<AgentKey>>()
+        .into_iter()
+        .filter(|agent| poses.get(agent) != playback.poses.get(agent))
+        .collect();
+    for agent in changed {
+        let tick = playback.pose_ticks.entry(agent).or_default();
+        *tick = tick.wrapping_add(1);
+    }
     playback.poses = poses;
+}
+
+/// The rate (Hz) the procedural idle clock ticks at: [`pose_avatar_skeletons`]
+/// quantises the time it feeds `apply_idle_adjustments` to this grid, so the
+/// breathe / body-noise output is **bit-identical between ticks** — which is
+/// what makes an idle avatar's pose comparable frame-to-frame at all (the idle
+/// motions are continuous functions of time). 15 Hz stepping of a 0.05 rad
+/// breathing sine over a ~6 s period is imperceptible.
+const POSE_IDLE_HZ: f32 = 15.0;
+
+/// The pose gate's per-avatar skip stamp: when it matches the stored one — and
+/// every procedural adjuster reports settled, and the avatar's root anchor did
+/// not move — re-running the skeleton fold would rewrite every joint global
+/// with the values it already wrote, so the whole evaluation is skipped.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PoseStamp {
+    /// The avatar's keyframe-pose change tick ([`AnimationPlayback::pose_ticks`]).
+    pose_tick: u64,
+    /// The quantised idle-clock value, as bits (a new tick moves every avatar).
+    idle_time_bits: u32,
+    /// The appearance-side inputs generation
+    /// ([`AvatarState::pose_inputs_generation`]).
+    inputs_generation: u64,
+    /// Whether the debug T-pose freeze was on (toggling it wakes everyone).
+    t_pose: bool,
+}
+
+/// The pose gate: per-avatar skip stamps plus the skip-rate meter
+/// (`SL_VIEWER_LOG_POSE_GATE=1`, the ui_perf `log_layout_skip_rate` pattern).
+/// Kill-switch: `SL_VIEWER_POSE_GATE=0` disables all skipping.
+#[derive(Resource, Default)]
+pub(crate) struct PoseGate {
+    /// The stamp each avatar was last evaluated at.
+    stamps: HashMap<AgentKey, PoseStamp>,
+    /// Avatar-frames evaluated since the last meter log.
+    evaluated: u64,
+    /// Avatar-frames skipped since the last meter log.
+    skipped: u64,
+    /// Wake-reason tallies for the evaluated frames (one frame can tally several
+    /// reasons), so the meter says *why* the gate is not skipping.
+    wake: WakeReasons,
+    /// Each avatar's root pose at its last evaluation, so the meter can report
+    /// how far an "anchor moved" wake actually moved — `0` on both exposes a
+    /// same-value dirtying writer, non-zero a genuine drift (server jitter).
+    anchor_positions: HashMap<AgentKey, (Vec3, Quat)>,
+    /// When (elapsed seconds) the meter logs next.
+    next_log: f32,
+}
+
+/// Why evaluated avatar-frames were not skipped, tallied per meter window.
+#[derive(Default)]
+struct WakeReasons {
+    /// The root anchor's `GlobalTransform` changed (the avatar moved / was moved).
+    anchor: u64,
+    /// An adjuster reported unsettled (look-at / reach / locomotion / physics /
+    /// saccade event).
+    unsettled: u64,
+    /// The keyframe pose tick moved (an animating joint).
+    pose_tick: u64,
+    /// The quantised idle clock ticked.
+    idle_tick: u64,
+    /// The appearance-side inputs generation moved.
+    inputs: u64,
+    /// No stored stamp yet (a freshly rigged avatar) or the T-pose flag flipped.
+    fresh: u64,
+    /// The largest anchor translation delta (metres) among the `anchor` wakes.
+    max_anchor_delta: f32,
+    /// The largest anchor rotation delta (radians) among the `anchor` wakes.
+    max_anchor_rot: f32,
+}
+
+/// Whether the pose gate may skip settled avatars (`SL_VIEWER_POSE_GATE`,
+/// default on; `0` forces every avatar to evaluate every frame — the A/B and
+/// escape hatch if a wake condition turns out to be missing).
+fn pose_gate_enabled() -> bool {
+    std::env::var("SL_VIEWER_POSE_GATE").as_deref() != Ok("0")
+}
+
+/// Env-gated (`SL_VIEWER_LOG_POSE_GATE=1`) churn tracer: any `Transform` change
+/// under an avatar root dirties the transform tree, and Bevy's propagation then
+/// **reverts the driver-written joint globals to rest** on a frame the pose gate
+/// skips (the T-pose flicker). This names the churning entities (~1 s throttle)
+/// so the writer can be fixed at the source.
+#[expect(
+    clippy::type_complexity,
+    reason = "one query classifying each changed entity by the avatar-subtree markers it carries"
+)]
+pub(crate) fn log_pose_gate_churn(
+    time: Res<Time>,
+    mut next_log: Local<f32>,
+    changed: Query<
+        (
+            Entity,
+            Has<crate::avatars::AvatarAnchor>,
+            Has<crate::avatars::AttachmentPointNode>,
+            Has<AvatarBodyPart>,
+        ),
+        Changed<Transform>,
+    >,
+    parents: Query<&ChildOf>,
+    anchors: Query<(), With<crate::avatars::AvatarAnchor>>,
+) {
+    if std::env::var("SL_VIEWER_LOG_POSE_GATE").is_err() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < *next_log {
+        return;
+    }
+    for (entity, is_anchor, is_node, is_part) in &changed {
+        // Walk up: is this entity under an avatar root?
+        let mut current = entity;
+        let mut under_avatar = is_anchor;
+        while let Ok(child_of) = parents.get(current) {
+            current = child_of.parent();
+            if anchors.get(current).is_ok() {
+                under_avatar = true;
+                break;
+            }
+        }
+        if under_avatar {
+            *next_log = now + 1.0;
+            info!(
+                "pose gate churn: {entity} changed Transform under an avatar root \
+                 (anchor={is_anchor} attachment_node={is_node} body_part={is_part})"
+            );
+        }
+    }
 }
 
 /// The procedural adjusters' resources, bundled so [`pose_avatar_skeletons`] stays
@@ -983,9 +1132,11 @@ pub(crate) fn pose_avatar_skeletons(
     body: Option<Res<AvatarBody>>,
     state: Res<AvatarState>,
     mut ground: ResMut<AvatarGround>,
+    mut gate: ResMut<PoseGate>,
     mut adjusters: AvatarAdjusters,
     motions: Query<&AvatarMotion>,
     parts: Query<(Entity, &AvatarBodyPart)>,
+    anchors: Query<Ref<Transform>, With<crate::avatars::AvatarAnchor>>,
     mut globals: Query<&mut GlobalTransform>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
@@ -1010,6 +1161,7 @@ pub(crate) fn pose_avatar_skeletons(
     adjusters
         .runtime_morphs
         .retain(&|agent| rigged.contains(&agent));
+    gate.stamps.retain(|agent, _stamp| rigged.contains(agent));
     let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
     let reach_joints = ReachJoints::resolve(|name| body.joint_index(name));
     // The fallback for an avatar whose shape displaces no collision volume (P34.3),
@@ -1019,20 +1171,10 @@ pub(crate) fn pose_avatar_skeletons(
     // runs of the viewer frame the same body from the same angle and can be compared
     // pixel for pixel (an avatar's AO would otherwise walk and turn it).
     let t_pose = t_pose_enabled();
+    let gate_enabled = pose_gate_enabled();
+    // The quantised procedural idle clock (see [`POSE_IDLE_HZ`]).
+    let idle_now = (now * POSE_IDLE_HZ).floor() / POSE_IDLE_HZ;
     for agent in rigged {
-        // Start from the resolved keyframe pose (or an empty rest pose), then fold
-        // in the always-on procedural idle adjusters (P31.8) so every avatar
-        // breathes and sways subtly even when no animation is playing. The T-pose
-        // switch takes neither: the shaped rest skeleton *is* the T-pose.
-        let mut pose = if t_pose {
-            AnimationPose::default()
-        } else {
-            let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
-            crate::procedural::apply_idle_adjustments(&mut pose, now, |name| {
-                body.joint_index(name)
-            });
-            pose
-        };
         let Some(root) = state.body_root_of(agent) else {
             continue;
         };
@@ -1041,6 +1183,126 @@ pub(crate) fn pose_avatar_skeletons(
         };
         let Some(deform) = state.deformations(agent) else {
             continue;
+        };
+
+        // Advance the eye saccade / blink timers **every frame** (skipped frames
+        // included): blinks drive the (equality-guarded) runtime-morph path, not
+        // the skeleton, and stalling the timers would freeze them. The returned
+        // event flag is a wake source — a jitter re-aim / look-away toggle moves
+        // the eye joints. The T-pose freeze takes none of this, as before.
+        let eye_event = if t_pose {
+            false
+        } else {
+            let (blink, event) =
+                crate::look_at::advance_eyes(agent, &mut adjusters.look_motion, dt);
+            adjusters
+                .runtime_morphs
+                .set(agent, BLINK_LEFT_PARAM, blink.left);
+            adjusters
+                .runtime_morphs
+                .set(agent, BLINK_RIGHT_PARAM, blink.right);
+            event
+        };
+
+        // The pose gate: skip the whole evaluation when nothing that feeds it
+        // changed. The anchor test reads the root's change tick **without** a
+        // mutable deref — after the anchor settle guards, "changed since this
+        // system last ran" means propagation actually moved the avatar (walking,
+        // a seat / vehicle carrying it, an origin rebase).
+        let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
+        let stamp = PoseStamp {
+            pose_tick: playback.pose_ticks.get(&agent).copied().unwrap_or(0),
+            idle_time_bits: idle_now.to_bits(),
+            inputs_generation: state.pose_inputs_generation(),
+            t_pose,
+        };
+        // Two wake signals, both load-bearing:
+        //
+        // - The root's **`Transform`** tick: every genuine avatar move (the
+        //   dead-reckoner, a seat, an origin rebase, a server snap) writes it.
+        // - The root's **`GlobalTransform`** tick: Bevy's parallel propagation
+        //   rewrites a dirty tree's root global (and `set_if_neq`-recomposes the
+        //   descendants under it — REVERTING the driver-written joint globals to
+        //   the rest pose!) whenever any descendant's `Transform` changed. On
+        //   such a frame the driver MUST re-pose or the avatar renders at rest
+        //   until the next wake — the T-pose flicker. A per-frame Transform
+        //   churner anywhere under the avatar therefore pins this wake on and
+        //   the gate off; `log_pose_gate_churn` names such churners.
+        let anchor_moved = anchors
+            .get(root)
+            .map_or(true, |transform| transform.is_changed())
+            || globals
+                .get_mut(root)
+                .map_or(true, |global| global.is_changed());
+        let settled = t_pose
+            || (!eye_event
+                && adjusters.look_targets.point(agent).is_none()
+                && !look_debug.forces_target()
+                && adjusters.look_motion.is_settled(agent)
+                && adjusters.point_at_targets.point(agent).is_none()
+                && !playback.is_aiming(agent)
+                && adjusters.reach.is_settled(agent)
+                && adjusters
+                    .locomotion
+                    .is_settled(agent, &anims, &ground.get(agent))
+                && !state
+                    .body_physics(agent)
+                    .is_some_and(sl_client_bevy::BodyPhysics::is_active));
+        let stored = gate.stamps.get(&agent).copied();
+        if gate_enabled && !anchor_moved && settled && stored == Some(stamp) {
+            gate.skipped = gate.skipped.wrapping_add(1);
+            continue;
+        }
+        gate.evaluated = gate.evaluated.wrapping_add(1);
+        // Tally why (a frame can tally several reasons) for the meter below.
+        if anchor_moved {
+            gate.wake.anchor = gate.wake.anchor.wrapping_add(1);
+            if let Ok(global) = globals.get(root) {
+                let translation = global.translation();
+                let rotation = global.rotation();
+                if let Some((prev_pos, prev_rot)) =
+                    gate.anchor_positions.insert(agent, (translation, rotation))
+                {
+                    let delta = translation.distance(prev_pos);
+                    gate.wake.max_anchor_delta = gate.wake.max_anchor_delta.max(delta);
+                    let rot_delta = rotation.angle_between(prev_rot);
+                    gate.wake.max_anchor_rot = gate.wake.max_anchor_rot.max(rot_delta);
+                }
+            }
+        }
+        if !settled {
+            gate.wake.unsettled = gate.wake.unsettled.wrapping_add(1);
+        }
+        match stored {
+            Some(prev) => {
+                if prev.pose_tick != stamp.pose_tick {
+                    gate.wake.pose_tick = gate.wake.pose_tick.wrapping_add(1);
+                }
+                if prev.idle_time_bits != stamp.idle_time_bits {
+                    gate.wake.idle_tick = gate.wake.idle_tick.wrapping_add(1);
+                }
+                if prev.inputs_generation != stamp.inputs_generation {
+                    gate.wake.inputs = gate.wake.inputs.wrapping_add(1);
+                }
+                if prev.t_pose != stamp.t_pose {
+                    gate.wake.fresh = gate.wake.fresh.wrapping_add(1);
+                }
+            }
+            None => gate.wake.fresh = gate.wake.fresh.wrapping_add(1),
+        }
+
+        // Start from the resolved keyframe pose (or an empty rest pose), then fold
+        // in the always-on procedural idle adjusters (P31.8) so every avatar
+        // breathes and sways subtly even when no animation is playing. The T-pose
+        // switch takes neither: the shaped rest skeleton *is* the T-pose.
+        let mut pose = if t_pose {
+            AnimationPose::default()
+        } else {
+            let mut pose = playback.poses.get(&agent).cloned().unwrap_or_default();
+            crate::procedural::apply_idle_adjustments(&mut pose, idle_now, |name| {
+                body.joint_index(name)
+            });
+            pose
         };
         // The shape's collision-volume displacements (P34.3) ride the same
         // recurrence; an avatar whose shape displaces none has no entry.
@@ -1068,6 +1330,7 @@ pub(crate) fn pose_avatar_skeletons(
                 joints,
                 &world,
             );
+            let _prev = gate.stamps.insert(agent, stamp);
             continue;
         }
         // Fold in the head & eye look-at adjusters (P31.12) before the final world
@@ -1111,9 +1374,9 @@ pub(crate) fn pose_avatar_skeletons(
             } else {
                 (None, None, Quat::IDENTITY)
             };
-        // The look-at fold also advances the eye-blink timer (P31.12b); drive the two
-        // eyelid morph params through the per-frame runtime-morph pipeline (P31.12a).
-        let blink = crate::look_at::apply(
+        // The head / eye look-at fold. (The blink timers were advanced — and the
+        // eyelid morphs published — at the top of the loop, every frame.)
+        crate::look_at::apply(
             &mut pose,
             agent,
             &adjusters.look_targets,
@@ -1126,12 +1389,6 @@ pub(crate) fn pose_avatar_skeletons(
             dt,
             look_debug,
         );
-        adjusters
-            .runtime_morphs
-            .set(agent, BLINK_LEFT_PARAM, blink.left);
-        adjusters
-            .runtime_morphs
-            .set(agent, BLINK_RIGHT_PARAM, blink.right);
         // Fold in the activity-driven reach & aim adjusters (P31.15): the left-arm IK reach
         // toward whatever the avatar has selected (its point-at target) and the torso twist
         // that aims its right hand at its look-at target while a gun-aim animation plays.
@@ -1193,7 +1450,6 @@ pub(crate) fn pose_avatar_skeletons(
                 root_global.transform_point(right),
             );
         }
-        let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
         let report = crate::locomotion_ik::apply(
             &mut pose,
             &mut adjusters.locomotion,
@@ -1273,6 +1529,34 @@ pub(crate) fn pose_avatar_skeletons(
             joints,
             &world,
         );
+        let _prev = gate.stamps.insert(agent, stamp);
+    }
+
+    // The skip-rate meter (`SL_VIEWER_LOG_POSE_GATE=1`): "evaluated X of Y
+    // avatar-frames" every ~5 s, the ui_perf `log_layout_skip_rate` pattern.
+    if now >= gate.next_log {
+        if gate.next_log > 0.0 && std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
+            let total = gate.evaluated.saturating_add(gate.skipped);
+            info!(
+                "pose gate: evaluated {} of {total} avatar-frames over the last 5s \
+                 (gate {}; wake: anchor={} (max delta {:.6} m / {:.6} rad) unsettled={} \
+                 pose={} idle={} inputs={} fresh={})",
+                gate.evaluated,
+                if gate_enabled { "on" } else { "OFF" },
+                gate.wake.anchor,
+                gate.wake.max_anchor_delta,
+                gate.wake.max_anchor_rot,
+                gate.wake.unsettled,
+                gate.wake.pose_tick,
+                gate.wake.idle_tick,
+                gate.wake.inputs,
+                gate.wake.fresh,
+            );
+        }
+        gate.evaluated = 0;
+        gate.skipped = 0;
+        gate.wake = WakeReasons::default();
+        gate.next_log = now + 5.0;
     }
 }
 
@@ -1305,15 +1589,27 @@ pub(crate) fn pose_attachment_nodes(
 ) {
     for node in &nodes {
         // The node's parent is its skeleton joint, whose `GlobalTransform` the pose
-        // driver just wrote. Copy it out as a plain matrix so the immutable borrow
-        // of `globals` ends before the subtree walk below borrows it mutably.
+        // driver just wrote. Copy it out as a plain matrix so the borrow of
+        // `globals` ends before the subtree walk below borrows it mutably.
         let Ok(child_of) = parents.get(node) else {
             continue;
         };
-        let Ok(joint_global) = globals.get(child_of.parent()) else {
-            continue;
+        // Change-tick gate: this system runs immediately after the driver, so
+        // "changed since this system last ran" is precisely "the driver (or, for
+        // a moving avatar, propagation) rewrote this joint this frame". A joint
+        // the pose gate skipped is unchanged, and the subtree below it already
+        // holds the correct globals — a subtree whose *own* local Transform
+        // changed was recomposed by ordinary change-gated propagation against
+        // the joint's stable global. Read without a mutable deref.
+        let joint_matrix = {
+            let Ok(joint_global) = globals.get_mut(child_of.parent()) else {
+                continue;
+            };
+            if !joint_global.is_changed() {
+                continue;
+            }
+            joint_global.to_matrix()
         };
-        let joint_matrix = joint_global.to_matrix();
         // Iterative depth-first walk of the node's subtree, carrying each entity's
         // freshly-composed world matrix down to its children — Bevy's own
         // propagation in miniature, but seeded from the posed joint.
@@ -1503,6 +1799,77 @@ mod tests {
             .ok_or("worn global")?
             .translation();
         assert!(worn_pos.abs_diff_eq(Vec3::new(1.1, 2.5, 3.0), 1.0e-5));
+        Ok(())
+    }
+
+    /// The attachment pass's change-tick gate: a node whose parent joint the
+    /// driver did **not** rewrite this frame is left untouched (its subtree
+    /// already holds the correct globals), and a joint write wakes it again.
+    /// Uses a registered (persistent) system so change ticks carry across runs
+    /// — `run_system_once` would see everything as freshly changed each time.
+    #[test]
+    fn attachment_subtree_skips_an_unchanged_joint() -> Result<(), TestError> {
+        use crate::avatars::AttachmentPointNode;
+        use bevy::prelude::*;
+
+        let mut world = World::new();
+        let joint_global = GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0));
+        let joint = world.spawn((Transform::default(), joint_global)).id();
+        let node = world
+            .spawn((
+                Transform::from_xyz(0.0, 0.5, 0.0),
+                GlobalTransform::default(),
+                AttachmentPointNode,
+                ChildOf(joint),
+            ))
+            .id();
+        let system = world.register_system(super::pose_attachment_nodes);
+
+        // First run: the joint is freshly observed (changed), so the node is
+        // composed from it.
+        world
+            .run_system(system)
+            .map_err(|error| format!("first run: {error:?}"))?;
+        let node_pos = world
+            .get::<GlobalTransform>(node)
+            .ok_or("node global")?
+            .translation();
+        assert!(node_pos.abs_diff_eq(Vec3::new(1.0, 2.5, 3.0), 1.0e-5));
+
+        // Plant a sentinel on the node. The joint is untouched, so the second
+        // run must skip the subtree and the sentinel must survive.
+        let sentinel = GlobalTransform::from(Transform::from_xyz(9.0, 9.0, 9.0));
+        *world
+            .get_mut::<GlobalTransform>(node)
+            .ok_or("node global mut")? = sentinel;
+        world
+            .run_system(system)
+            .map_err(|error| format!("second run: {error:?}"))?;
+        let node_pos = world
+            .get::<GlobalTransform>(node)
+            .ok_or("node global")?
+            .translation();
+        assert!(
+            node_pos.abs_diff_eq(Vec3::new(9.0, 9.0, 9.0), 1.0e-5),
+            "an unchanged joint must not re-place its subtree (got {node_pos})"
+        );
+
+        // Rewrite the joint (the driver evaluating this avatar again): the node
+        // recomposes and the sentinel is gone.
+        *world
+            .get_mut::<GlobalTransform>(joint)
+            .ok_or("joint global mut")? = GlobalTransform::from(Transform::from_xyz(2.0, 2.0, 3.0));
+        world
+            .run_system(system)
+            .map_err(|error| format!("third run: {error:?}"))?;
+        let node_pos = world
+            .get::<GlobalTransform>(node)
+            .ok_or("node global")?
+            .translation();
+        assert!(
+            node_pos.abs_diff_eq(Vec3::new(2.0, 2.5, 3.0), 1.0e-5),
+            "a rewritten joint must wake its subtree (got {node_pos})"
+        );
         Ok(())
     }
 }

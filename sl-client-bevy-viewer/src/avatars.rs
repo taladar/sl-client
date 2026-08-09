@@ -668,6 +668,12 @@ pub(crate) struct AvatarState {
     /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
     /// a newly spawned body, drained by [`apply_avatar_appearance`].
     appearance_dirty: HashSet<AgentKey>,
+    /// A generation counter over every input the skeleton pose fold consumes from
+    /// this state (deformations, volume deformations, joint overrides, body
+    /// physics): bumped by [`bump_pose_inputs`](Self::bump_pose_inputs) whenever
+    /// one is (re)applied. The pose gate re-evaluates **all** avatars for one
+    /// frame on any bump — coarse but simple, and these are rare events.
+    pose_inputs_generation: u64,
     /// The joint position overrides each avatar's worn rigged meshes impose (R1),
     /// keyed by agent id then by the contributing **mesh asset id**. Kept per-mesh
     /// (rather than pre-merged) so the set can be rebuilt as meshes come and go — the
@@ -1552,8 +1558,16 @@ pub(crate) fn fit_avatar_pick_colliders(
         }
         // Height from the joint `z` span, grown to the crown and the soles; depth
         // (local x) and width (local y) fixed; centred on the body axis (x = y = 0).
-        let bottom = min_z - PICK_COLLIDER_FOOT_MARGIN;
-        let top = max_z + PICK_COLLIDER_HEAD_MARGIN;
+        // Quantised to a 1 cm grid: the box is a broad-phase volume with ±10 cm
+        // margins, but it is fitted from the *posed* joints, so the idle
+        // breathe/sway would otherwise move it a hair every evaluated frame —
+        // dirtying the avatar's transform tree, which makes Bevy propagation
+        // revert the driver-written joint globals and re-wakes the pose gate (a
+        // self-sustaining feedback loop). On the grid it only moves when the
+        // body's extent genuinely changes.
+        let quantise = |value: f32| (value * 100.0).round() / 100.0;
+        let bottom = quantise(min_z - PICK_COLLIDER_FOOT_MARGIN);
+        let top = quantise(max_z + PICK_COLLIDER_HEAD_MARGIN);
         let height = (top - bottom).clamp(PICK_COLLIDER_MIN_HEIGHT, PICK_COLLIDER_MAX_HEIGHT);
         // The mesh is a unit cube (full extent 1), so `scale = size` gives it the
         // wanted extents: local x = depth, local y = width, local z = height.
@@ -2143,7 +2157,19 @@ impl AvatarState {
                     }
                     None => Transform::from_translation(sphere_translation(object, region_offset)),
                 };
-                anchor.insert(transform).remove::<Seated>();
+                // `set_if_neq` via `entry`, NOT a plain `insert`: the simulator
+                // streams updates for the own avatar continuously even when it
+                // stands still, and re-inserting an identical Transform marks it
+                // changed — which re-propagated the whole avatar subtree and
+                // woke the pose gate every frame (the "anchor wake, delta 0"
+                // signature in the gate meter).
+                anchor
+                    .entry::<Transform>()
+                    .and_modify(move |mut existing| {
+                        existing.set_if_neq(transform);
+                    })
+                    .or_insert(transform);
+                anchor.remove::<Seated>();
             }
             return;
         }
@@ -2398,6 +2424,19 @@ impl AvatarState {
         self.body_physics.get(&agent)
     }
 
+    /// The current pose-inputs generation (see the field doc): the pose gate
+    /// stores it per avatar and re-evaluates when it moved.
+    pub(crate) const fn pose_inputs_generation(&self) -> u64 {
+        self.pose_inputs_generation
+    }
+
+    /// Record that an input the skeleton pose fold consumes (deformations, volume
+    /// deformations, joint overrides, body physics) was (re)applied. Over-bumping
+    /// is harmless — an extra bump costs one frame of full re-evaluation.
+    pub(crate) const fn bump_pose_inputs(&mut self) {
+        self.pose_inputs_generation = self.pose_inputs_generation.wrapping_add(1);
+    }
+
     /// The effective joint position overrides for `agent` (R1): the per-joint winner
     /// across every worn rigged mesh, resolved to the **highest mesh id** on a
     /// conflict (the reference viewer's `findActiveOverride`) with the scale lock
@@ -2422,6 +2461,7 @@ impl AvatarState {
     pub(crate) fn clear_joint_overrides(&mut self, agent: AgentKey) {
         let _prev = self.joint_overrides.remove(&agent);
         let _worn = self.worn_rigged_meshes.remove(&agent);
+        self.bump_pose_inputs();
     }
 
     /// The agent whose avatar a worn object `scoped` hangs off — chasing parent
@@ -4025,6 +4065,18 @@ pub(crate) fn apply_avatar_appearance(
         state.appearance_dirty.clear();
         return;
     };
+    // The dirty avatars' deformations / volumes / physics are about to be
+    // re-resolved below: wake the pose gate so it re-poses them next frame.
+    state.bump_pose_inputs();
+    // Piggybacks on the pose-gate diagnostics: a steady stream here means some
+    // caller re-marks appearances dirty (each re-apply rebuilds part meshes and
+    // re-resolves the shape — real per-event cost worth tracing).
+    if std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
+        info!(
+            "appearance re-apply: {} avatar(s) dirty",
+            state.appearance_dirty.len()
+        );
+    }
     // Resolve each dirty avatar's appearance once into its morph weights and the
     // deformed joint transforms (both share one `ResolvedParams`).
     let log_geometry = std::env::var_os("SL_VIEWER_LOG_AVATAR_GEOMETRY").is_some();
@@ -4244,10 +4296,16 @@ pub(crate) fn apply_avatar_appearance(
         }
     }
     // Re-set every joint transform of a resolved avatar's skeleton instance.
+    // Write-on-change: a re-apply with an unchanged shape re-derives identical
+    // transforms, and an unguarded write would dirty the whole avatar transform
+    // tree — which makes Bevy propagation revert the pose driver's joint
+    // globals to rest and forces the pose gate to re-evaluate (see
+    // `log_pose_gate_churn`).
     let mut deformed_joints = 0_usize;
     for (joint, mut transform) in &mut joints {
         if let Some(transforms) = joint_transforms.get(&joint.agent)
             && let Some(deformed) = transforms.get(joint.index)
+            && *transform != *deformed
         {
             *transform = *deformed;
             deformed_joints = deformed_joints.saturating_add(1);

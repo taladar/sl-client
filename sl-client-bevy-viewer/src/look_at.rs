@@ -73,6 +73,16 @@ const HEAD_LOOKAT_LAG_HALF_LIFE: f32 = 0.15;
 /// tuned to ease in / out over a few tenths of a second.
 const LOOK_AT_WEIGHT_HALF_LIFE: f32 = 0.2;
 
+/// Per-component margin for the head lag's terminal snap: within this of the
+/// target on every quaternion component (a sub-0.005° residual) the asymptotic
+/// ease converges exactly, so the per-avatar state stops changing and the pose
+/// gate's settle test can hold.
+const HEAD_SETTLE_EPSILON: f32 = 1.0e-5;
+
+/// Margin for the aiming weight's terminal snap, likewise: within this of `0`
+/// (released) or `1` (fully aimed) the weight lands exactly on the target.
+const WEIGHT_SETTLE_EPSILON: f32 = 1.0e-4;
+
 /// Limit angle (radians) for the head's local rotation (reference
 /// `HEAD_ROTATION_CONSTRAINT`, `π/2 · 0.8`).
 const HEAD_ROTATION_CONSTRAINT: f32 = core::f32::consts::FRAC_PI_2 * 0.8;
@@ -327,22 +337,38 @@ pub(crate) struct BlinkWeights {
     pub(crate) right: f32,
 }
 
-/// The eye state produced by one [`Saccade::advance`]: the jitter / look-away
-/// rotation offset for the eye aim plus this frame's blink morph weights.
+/// The eye state produced by one [`Saccade::advance`]: this frame's blink morph
+/// weights, plus whether a **joint-affecting** event fired (a jitter re-aim or a
+/// look-away toggle — the only things that change the eye joints' rotations
+/// between frames, since the offsets are held constant between events).
 #[derive(Clone, Copy)]
 struct EyeSaccade {
-    /// The jitter + look-away rotation offset.
-    offset: SaccadeOffset,
     /// The eyelid blink morph weights.
     blink: BlinkWeights,
+    /// Whether the jitter re-aimed or the look-away toggled this frame.
+    event: bool,
 }
 
 impl Saccade {
+    /// The current jitter + look-away rotation offset — constant between the
+    /// events [`advance`](Self::advance) reports, which is what lets the pose
+    /// gate skip a settled avatar without freezing its eyes mid-saccade.
+    const fn offset(&self) -> SaccadeOffset {
+        SaccadeOffset {
+            yaw: self.jitter_yaw + self.look_away_yaw,
+            pitch: self.jitter_pitch + self.look_away_pitch,
+        }
+    }
+
     /// Advance the jitter / look-away / blink timers by `dt` seconds, drawing new
-    /// random targets as they fire, and return the eye offset + blink weights for
-    /// this frame. Mirrors `LLEyeMotion::onUpdate`'s timer logic.
+    /// random targets as they fire, and return the blink weights + whether a
+    /// joint-affecting event fired this frame. Mirrors `LLEyeMotion::onUpdate`'s
+    /// timer logic. Runs **every** frame (the pose gate must not stall the
+    /// timers); the pose fold reads the resulting [`offset`](Self::offset) only
+    /// on evaluated frames.
     fn advance(&mut self, dt: f32, rng: &mut Rng) -> EyeSaccade {
         let dt = dt.max(0.0);
+        let mut event = false;
         self.jitter_elapsed += dt;
         self.blink_elapsed += dt;
         if self.jitter_elapsed > self.jitter_time {
@@ -354,6 +380,7 @@ impl Saccade {
             // carry its countdown across this reset.
             self.look_away_time -= self.jitter_elapsed.max(0.0);
             self.jitter_elapsed = 0.0;
+            event = true;
         } else if self.jitter_elapsed > self.look_away_time {
             // Blink while moving the eyes some percentage of the time (reference:
             // `ll_frand() > 0.1f`): force the blink threshold to now so a blink
@@ -376,13 +403,11 @@ impl Saccade {
                 self.look_away_time = EYE_LOOK_AWAY_MIN_TIME
                     + rng.unit() * (EYE_LOOK_AWAY_MAX_TIME - EYE_LOOK_AWAY_MIN_TIME);
             }
+            event = true;
         }
         EyeSaccade {
-            offset: SaccadeOffset {
-                yaw: self.jitter_yaw + self.look_away_yaw,
-                pitch: self.jitter_pitch + self.look_away_pitch,
-            },
             blink: self.advance_blink(rng),
+            event,
         }
     }
 
@@ -477,6 +502,18 @@ impl LookAtMotion {
         self.states
             .entry(agent)
             .or_insert_with(|| AgentLookAt::new(agent))
+    }
+
+    /// Whether `agent`'s head / neck fold is fully released: no aiming weight
+    /// remains (the terminal snap makes the ease *reach* zero), so re-running the
+    /// fold with no target would leave the head / neck on their keyframe pose.
+    /// Part of the pose gate's settle test; the gate separately requires no live
+    /// look-at target and no saccade event this frame (the eyes' held offsets are
+    /// constant between events).
+    pub(crate) fn is_settled(&self, agent: AgentKey) -> bool {
+        self.states
+            .get(&agent)
+            .is_none_or(|state| state.weight == 0.0)
     }
 }
 
@@ -665,7 +702,7 @@ fn apply_to_pose(
     neck_parent_world: Quat,
     dt: f32,
     state: &mut AgentLookAt,
-) -> (f32, BlinkWeights) {
+) -> f32 {
     // --- Head / neck (LLHeadRotMotion) ---
     // The desired head **world** rotation (avatar-local frame) to face the target,
     // then the rotation limit — applied **relative to the animated upper body**
@@ -677,7 +714,14 @@ fn apply_to_pose(
     let relative = neck_parent_world.inverse().mul_quat(raw_target);
     let head_target = neck_parent_world.mul_quat(constrain(relative, HEAD_ROTATION_CONSTRAINT));
     let head_slerp = smooth_interpolant(HEAD_LOOKAT_LAG_HALF_LIFE, dt);
-    let aim = state.last_head_rot.lerp(head_target, head_slerp);
+    // Terminal snap on the asymptotic lag so the head *reaches* its target and
+    // the state stops changing (the pose gate's settle depends on it).
+    let eased = state.last_head_rot.lerp(head_target, head_slerp);
+    let aim = if eased.abs_diff_eq(head_target, HEAD_SETTLE_EPSILON) {
+        head_target
+    } else {
+        eased
+    };
     state.last_head_rot = aim;
 
     // Ease an "aiming" weight in while there is a target and out when there is none,
@@ -689,6 +733,10 @@ fn apply_to_pose(
     let target_weight = if look_dir.is_some() { 1.0 } else { 0.0 };
     let weight_slerp = smooth_interpolant(LOOK_AT_WEIGHT_HALF_LIFE, dt);
     state.weight += (target_weight - state.weight) * weight_slerp;
+    // Same terminal snap for the asymptotic weight ease.
+    if (target_weight - state.weight).abs() < WEIGHT_SETTLE_EPSILON {
+        state.weight = target_weight;
+    }
 
     // Distribute the world aim across the neck and head: the neck takes `NECK_LAG`
     // of it, the head completes it. Each joint's **local** rotation is derived from
@@ -704,8 +752,9 @@ fn apply_to_pose(
     // head-local space — the aim itself once engaged.
     let head_world = aim;
 
-    // --- Eyes (LLEyeMotion): aim, jitter / look-away, and blink ---
-    let eye = state.saccade.advance(dt, &mut state.rng);
+    // --- Eyes (LLEyeMotion): aim + the current jitter / look-away offset. The
+    // saccade / blink timers were advanced this frame by `advance_eyes` (they
+    // run every frame, gate or no gate); the fold reads the held offsets.
     let (target, vergence, aiming) = match look_dir {
         Some(dir) => (
             eye_target_rotation(dir, head_world),
@@ -714,7 +763,7 @@ fn apply_to_pose(
         ),
         None => (Quat::IDENTITY, FOVEAL_OFFSET, false),
     };
-    let (left, right) = eye_rotations(target, vergence, aiming, eye.offset);
+    let (left, right) = eye_rotations(target, vergence, aiming, state.saccade.offset());
     // The eyes rest at identity local rotation, so the aim replaces rather than
     // layers — but `compose` on an identity base is exactly that.
     compose(pose, joints.eye_left, left);
@@ -723,9 +772,8 @@ fn apply_to_pose(
     compose(pose, joints.alt_eye_right, right);
 
     // The head rotation angle (radians) effectively applied this frame — the aim
-    // angle scaled by the eased weight — for diagnostics, plus the eyelid blink
-    // morph weights for the per-frame runtime-morph pipeline (P31.12b).
-    (Quat::IDENTITY.angle_between(aim) * state.weight, eye.blink)
+    // angle scaled by the eased weight — for diagnostics.
+    Quat::IDENTITY.angle_between(aim) * state.weight
 }
 
 /// Apply the head & eye look-at adjusters for one avatar, resolving its look-at
@@ -750,6 +798,12 @@ pub(crate) struct LookAtDebug {
 }
 
 impl LookAtDebug {
+    /// Whether the debug override forces a look-at target onto every avatar —
+    /// a pose-gate wake source (a forced gaze must keep evaluating).
+    pub(crate) const fn forces_target(&self) -> bool {
+        self.force_dir.is_some()
+    }
+
     /// Read the debug switches from the environment.
     pub(crate) fn from_env() -> Self {
         let force_dir = if std::env::var("SL_VIEWER_LOOK_AT_TEST").as_deref() == Ok("1") {
@@ -786,7 +840,7 @@ pub(crate) fn apply(
     neck_parent_world: Quat,
     dt: f32,
     debug: LookAtDebug,
-) -> BlinkWeights {
+) {
     let real_dir = targets.point(agent).zip(head_pos).map(|(point, head)| {
         // Direction from the head to the target, in Bevy world space, rotated back
         // into the avatar-local Second Life frame the deformed skeleton uses.
@@ -796,7 +850,7 @@ pub(crate) fn apply(
     });
     let look_dir = debug.force_dir.or(real_dir);
     let interocular = eye_positions.map_or(0.0, |(left, right)| vsub(left, right).length());
-    let (head_angle, blink) = apply_to_pose(
+    let head_angle = apply_to_pose(
         pose,
         look_dir,
         interocular,
@@ -808,14 +862,29 @@ pub(crate) fn apply(
     if debug.log {
         let dir = look_dir.map(|d| (d.x, d.y, d.z));
         info!(
-            "P31.12 look-at agent={agent} target={} dir_local={dir:?} head_angle={head_angle:.3}rad head_joint={:?} blink=({:.2},{:.2})",
+            "P31.12 look-at agent={agent} target={} dir_local={dir:?} head_angle={head_angle:.3}rad head_joint={:?}",
             targets.point(agent).is_some(),
             joints.head,
-            blink.left,
-            blink.right,
         );
     }
-    blink
+}
+
+/// Advance one avatar's eye saccade / blink timers for this frame, returning the
+/// eyelid blink morph weights (for the runtime-morph pipeline — its consumer is
+/// equality-guarded, so a between-blinks frame uploads nothing) and whether a
+/// **joint-affecting** saccade event fired (a jitter re-aim / look-away toggle).
+///
+/// Runs **every** frame for every rigged avatar — gate or no gate — so blinks
+/// keep firing while the skeleton fold is skipped; the pose fold ([`apply`])
+/// reads the held saccade offsets on the frames it runs.
+pub(crate) fn advance_eyes(
+    agent: AgentKey,
+    motion: &mut LookAtMotion,
+    dt: f32,
+) -> (BlinkWeights, bool) {
+    let state = motion.state_mut(agent);
+    let eye = state.saccade.advance(dt, &mut state.rng);
+    (eye.blink, eye.event)
 }
 
 /// The distance (metres) ahead of the camera the own avatar's look-at target is
@@ -1150,7 +1219,8 @@ mod tests {
         let pitch_bound = EYE_JITTER_MAX_PITCH + EYE_LOOK_AWAY_MAX_PITCH + 1e-6;
         let mut moved = false;
         for _ in 0..5000 {
-            let offset = saccade.advance(0.05, &mut rng).offset;
+            let _tick = saccade.advance(0.05, &mut rng);
+            let offset = saccade.offset();
             assert!(
                 offset.yaw.abs() <= yaw_bound,
                 "yaw {} exceeds {yaw_bound}",

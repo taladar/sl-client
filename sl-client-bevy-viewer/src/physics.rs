@@ -825,14 +825,19 @@ fn eased_translation(rendered: Vec3, target: Vec3, region_crossed: bool, alpha: 
 const ROTATION_SETTLE_EPSILON: f32 = 1.0e-5;
 
 /// Ease the avatar anchor's rendered orientation toward its current authoritative /
-/// dead-reckoned facing and write it to the anchor (P31.7). A no-op for a
+/// dead-reckoned facing and return the value to write (P31.7), or `None` for a
 /// placeholder sphere (which does not carry the object rotation), so only rigged
 /// bodies smooth-turn. `dt` is the real (undilated) frame time — the smoothing is a
-/// visual concern, independent of the physics clock. Writes the anchor only when
-/// the eased value actually differs, so a still avatar settles.
-fn apply_smoothed_rotation(interp: &mut AvatarInterp, transform: &mut Transform, dt: f32) {
+/// visual concern, independent of the physics clock.
+///
+/// Deliberately returns the rotation instead of taking the anchor's `Transform`:
+/// passing a `Mut<Transform>` into a `&mut Transform` parameter deref-mut-coerces
+/// and marks the component changed **every call**, no matter what is written
+/// inside — which kept every idle avatar's anchor dirty per frame and defeated
+/// the pose gate. The caller writes through the `Mut` only on an actual change.
+fn smoothed_rotation(interp: &mut AvatarInterp, dt: f32) -> Option<Quat> {
     if !interp.apply_rotation {
-        return;
+        return None;
     }
     let target = bevy_rotation_of(&interp.motion);
     let alpha = rotation_smoothing_alpha(dt);
@@ -842,9 +847,7 @@ fn apply_smoothed_rotation(interp: &mut AvatarInterp, transform: &mut Transform,
     } else {
         next
     };
-    if transform.rotation != interp.rendered_rotation {
-        transform.rotation = interp.rendered_rotation;
-    }
+    Some(interp.rendered_rotation)
 }
 
 /// Which of the four axis-neighbour regions (`[-x, +x, -y, +y]`) are currently
@@ -1646,7 +1649,11 @@ pub(crate) fn drive_avatar_motion(
         if transform.translation != interp.rendered_translation {
             transform.translation = interp.rendered_translation;
         }
-        apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
+        if let Some(rotation) = smoothed_rotation(&mut interp, dt_raw)
+            && transform.rotation != rotation
+        {
+            transform.rotation = rotation;
+        }
     }
 }
 

@@ -340,7 +340,12 @@ pub(crate) fn drive_control_avatars(
             debug!("animesh: released control avatar for object {object} back to rest");
         }
     }
-    control.poses = poses;
+    // Write-on-change: [`pose_control_avatars`] gates its joint rewrites on this
+    // resource's change tick, so an unchanged pose set (idle animesh, or a pose
+    // released last frame and already written back to rest) must not re-dirty it.
+    if control.poses != poses {
+        control.poses = poses;
+    }
 }
 
 /// Write each posed animesh control avatar's animated joint world matrices straight
@@ -355,10 +360,14 @@ pub(crate) fn drive_control_avatars(
 /// composes each joint's Second Life world matrix with the control-avatar-root
 /// global (its object's Bevy world transform), and writes it to the joint entity.
 ///
-/// A control avatar with no pose this frame is still written each frame at its rest
-/// (empty) pose, so a stopped animation returns it to its bind pose and overlapping
-/// animations compose without a per-animation reset (Bevy's dirty-bit propagation
-/// cannot un-freeze a joint global the driver overwrote).
+/// The pose gate, animesh edition: a control avatar is (re)written only when the
+/// animesh state changed since this system last ran (a pose advanced, started,
+/// or was released — [`drive_control_avatars`] writes the resource only then;
+/// the release frame itself writes the rest pose once, latching it) or when its
+/// **root moved** (its object was carried / rebased, so every joint global must
+/// re-compose against the new root). Between those, the joints hold the driver's
+/// last write — Bevy's dirty-bit propagation cannot clobber them, exactly the
+/// invariant the avatar driver relies on.
 pub(crate) fn pose_control_avatars(
     control: Res<ControlAvatarState>,
     library: Option<Res<AvatarAssetLibrary>>,
@@ -367,12 +376,21 @@ pub(crate) fn pose_control_avatars(
     let Some(library) = library else {
         return;
     };
+    let control_changed = control.is_changed();
     // A control avatar (animesh) has no visual params, so both the skeletal and the
     // collision-volume deformations are the rest ones.
     let rest = SkeletalDeformations::default();
     let rest_volumes = VolumeDeformations::default();
     let empty = AnimationPose::default();
     for (&object, avatar) in &control.avatars {
+        // Root moved? Read the change tick without a mutable deref (this is what
+        // wakes a *carried* animesh whose own animation is idle).
+        let root_moved = globals
+            .get_mut(avatar.root)
+            .is_ok_and(|global| global.is_changed());
+        if !control_changed && !root_moved {
+            continue;
+        }
         let pose = control.poses.get(&object).unwrap_or(&empty);
         let overrides = control.effective_overrides(object);
         let world =

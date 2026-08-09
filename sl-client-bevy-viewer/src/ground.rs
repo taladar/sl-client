@@ -43,7 +43,7 @@ const PROBE_BELOW: f32 = 1.0;
 
 /// One ground sample, in **Bevy world** space: where the surface is, and which way it
 /// faces. The caller converts into whatever frame it needs.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GroundHit {
     /// The point on the surface (Bevy world metres).
     pub(crate) point: Vec3,
@@ -54,7 +54,7 @@ pub(crate) struct GroundHit {
 
 /// One avatar's ground samples for this frame: under its body root (the reference
 /// height the feet are measured against) and under each ankle.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct AgentGround {
     /// The ground under the avatar's body root — the surface it is standing *on*.
     /// [`None`] when the avatar is airborne (nothing within the probe's reach).

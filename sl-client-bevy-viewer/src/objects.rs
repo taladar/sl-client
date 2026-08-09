@@ -3327,8 +3327,20 @@ fn apply_object(
         // motion-only update stops here — the geometry is untouched). The scale
         // rides the geometry holder, refreshed here so a live resize is applied
         // without a re-tessellation.
+        // The pose transforms go through `set_if_neq` via `entry`, NOT a plain
+        // `insert`: re-inserting an identical `Transform` marks it changed,
+        // which dirties the whole transform tree above the object — for a worn
+        // (HUD) object whose script draws a steady update stream, that reverted
+        // the wearer's driver-written joint globals to rest every update and
+        // pinned the pose gate awake.
+        commands
+            .entity(existing.entity)
+            .entry::<Transform>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(transform);
+            })
+            .or_insert(transform);
         commands.entity(existing.entity).insert((
-            transform,
             SceneObject {
                 scoped_id: scoped,
                 category,
@@ -3340,9 +3352,14 @@ fn apply_object(
         // [`recenter_objects`] re-bases exactly the roots (a child that just
         // became a root gains it; a root demoted to a child loses it).
         sync_world_root_marker(existing.entity, is_root, commands);
+        let holder = holder_transform(object, category);
         commands
             .entity(existing.geometry)
-            .insert(holder_transform(object, category));
+            .entry::<Transform>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(holder);
+            })
+            .or_insert(holder);
         apply_render_materials(existing.geometry, scoped, object, commands);
         apply_texture_animation(existing.geometry, object, commands);
         apply_light(existing.entity, light, commands);

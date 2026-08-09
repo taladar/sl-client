@@ -1527,6 +1527,7 @@ fn run_session(
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
+        .init_resource::<crate::animations::PoseGate>()
         .init_resource::<ObjectState>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()
@@ -2168,6 +2169,9 @@ fn run_session(
         .add_systems(
             PostUpdate,
             (
+                // The env-gated pose-gate churn tracer, before the driver so it
+                // reports the same frame's Transform churn the gate reacts to.
+                crate::animations::log_pose_gate_churn.before(pose_avatar_skeletons),
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
                 pose_control_avatars.after(TransformSystems::Propagate),
                 // Re-place worn rigid attachments (earrings, piercings) from the
