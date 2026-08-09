@@ -156,6 +156,7 @@ group-profile-list-in-profile = List this group in my profile
 group-profile-active-title = Active title:
 group-profile-join = Join
 group-profile-invite-only = This group is invitation-only.
+group-profile-copy-slurl = Copy SLURL
 
 # The members table column headers.
 group-members-name = Name
@@ -682,6 +683,7 @@ profile-offer-teleport = Offer Teleport
 profile-add-friend = Add Friend
 profile-remove-friend = Remove Friend
 profile-block = Block
+profile-copy-slurl = Copy SLURL
 profile-find-on-map = Find on Map
 profile-invite-to-group = Invite to Group
 profile-pay = Pay

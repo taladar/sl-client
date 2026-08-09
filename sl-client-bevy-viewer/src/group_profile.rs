@@ -787,6 +787,10 @@ pub(crate) struct GroupProfileUi {
 enum GroupProfileAction {
     /// Join this open-enrollment group.
     Join,
+    /// Copy the group's SLURL (`secondlife:///app/group/<id>/about`) to the OS
+    /// clipboard, for pasting into chat / a notecard (the reference group
+    /// profile's "Copy" → group SLURL).
+    CopySlurl,
     /// Save the General tab's identity edits (`UpdateGroupInfo`).
     SaveGeneral,
     /// Toggle "receive notices" for the agent's membership.
@@ -1805,6 +1809,16 @@ fn build_general_structure(
             );
         }
     }
+
+    // Always available: copy the group's SLURL for pasting into chat.
+    let copy_row = spawn_button_row(commands, panel);
+    spawn_action_button(
+        commands,
+        copy_row,
+        "group-profile-copy-slurl",
+        GroupProfileAction::CopySlurl,
+        6,
+    );
 }
 
 /// Update the General tab's value nodes in place from the current state — the
@@ -2653,6 +2667,11 @@ fn on_notice_row_press(
     clippy::too_many_lines,
     reason = "one dispatch over every group-profile button kind, each arm a few lines"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected resources: the action marker, \
+              the state, the UI field handles, the clipboard, and the command output"
+)]
 fn on_group_profile_action(
     press: On<Pointer<Press>>,
     actions: Query<&GroupProfileAction>,
@@ -2660,6 +2679,7 @@ fn on_group_profile_action(
     mut dirty: ResMut<GroupProfileDirty>,
     ui: Res<GroupProfileUi>,
     fields: Query<&EditableText>,
+    clipboard: Res<crate::clipboard::ViewerClipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     if press.button != PointerButton::Primary {
@@ -2679,6 +2699,12 @@ fn on_group_profile_action(
     match *action {
         GroupProfileAction::Join => {
             sl_commands.write(SlCommand(Command::JoinGroup(target)));
+        }
+        GroupProfileAction::CopySlurl => {
+            crate::clipboard::copy_to_clipboard(
+                &clipboard,
+                &format!("secondlife:///app/group/{}/about", target.uuid()),
+            );
         }
         GroupProfileAction::SaveGeneral => {
             let Some(profile) = state.profile.as_ref() else {

@@ -52,6 +52,7 @@ mod bump;
 mod camera;
 mod chat;
 mod chat_input;
+mod clipboard;
 mod conversations;
 mod coords;
 mod diagnostics;
@@ -997,6 +998,8 @@ fn run_session(
     // links. The parcel-name cache feeds the parcel-link labels.
     .add_plugins(crate::parcel_names::ParcelNamesPlugin)
     .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
+    // Shared OS-clipboard handle for the "Copy SLURL" affordances.
+    .add_plugins(crate::clipboard::ClipboardPlugin)
     // Routes a clicked / command-line SLURL to its handler (profile, IM,
     // teleport, world map): viewer-slurl-parse-dispatch.
     .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)

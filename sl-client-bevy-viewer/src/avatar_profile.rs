@@ -424,6 +424,10 @@ enum ProfileAction {
     RemoveFriend,
     /// Block (mute) the shown avatar.
     Block,
+    /// Copy the shown avatar's SLURL (`secondlife:///app/agent/<id>/about`) to
+    /// the OS clipboard, for pasting into chat / a notecard (the reference
+    /// profile's "Copy" → agent SLURL).
+    CopySlurl,
     /// Pay the shown avatar the amount in the Pay field.
     Pay,
     /// Flip the own profile's "Show in search" checkbox (saved on Save).
@@ -1200,6 +1204,13 @@ fn build_second_life_structure(
             );
         }
         spawn_action_button(commands, buttons, "profile-block", ProfileAction::Block, 6);
+        spawn_action_button(
+            commands,
+            buttons,
+            "profile-copy-slurl",
+            ProfileAction::CopySlurl,
+            7,
+        );
         spawn_disabled_button(commands, buttons, "profile-find-on-map");
         spawn_disabled_button(commands, buttons, "profile-invite-to-group");
         spawn_section_label(commands, panel, "profile-share");
@@ -2478,6 +2489,7 @@ fn on_profile_action(
     ui: Res<ProfileUi>,
     fields: Query<&EditableText>,
     avatars: Res<AvatarState>,
+    clipboard: Res<crate::clipboard::ViewerClipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut conversations: MessageWriter<OpenConversation>,
 ) {
@@ -2512,6 +2524,12 @@ fn on_profile_action(
                 to_agent_id: target,
                 message: String::new(),
             }));
+        }
+        ProfileAction::CopySlurl => {
+            crate::clipboard::copy_to_clipboard(
+                &clipboard,
+                &format!("secondlife:///app/agent/{}/about", target.uuid()),
+            );
         }
         ProfileAction::RemoveFriend => {
             sl_commands.write(SlCommand(Command::TerminateFriendship(FriendKey::from(
