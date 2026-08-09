@@ -54,6 +54,7 @@ use crate::conversations::{ConversationKey, OpenConversation};
 use crate::group_profile::{OpenGroupProfile, RequestedGroupNotices};
 use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translator};
+use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notification_persist::{
     PersistNotification, PersistedKind, ReloadPersistedNotification,
@@ -484,8 +485,10 @@ fn build_group_notice_card(
             DIM_TEXT_COLOR,
         );
     }
-    // The body — plain text for now (linkification is deferred).
-    spawn_bounded_text(
+    // The body is linkified — its http(s) URLs / SLURLs render as clickable links
+    // (viewer-group-notice-body-links), exactly as nearby chat and the other toast
+    // bodies do.
+    spawn_bounded_linked_text(
         commands,
         message_column,
         TEXT_MAX_WIDTH,
@@ -868,6 +871,36 @@ fn spawn_bounded_text(
         Pickable::IGNORE,
         ChildOf(box_entity),
     ));
+}
+
+/// A width-bounded **linkified** text line: the caller's text run through the
+/// shared linkification widget ([`spawn_linkified_text`]) inside a bounded box, so
+/// its URLs / SLURLs render as clickable links and a long body still wraps within
+/// the card. An empty string spawns nothing.
+fn spawn_bounded_linked_text(
+    commands: &mut Commands,
+    parent: Entity,
+    max_width: f32,
+    text: String,
+    font_size: f32,
+    color: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let box_entity = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(max_width),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id();
+    let mut style = LinkTextStyle::at(font_size);
+    style.plain_color = color;
+    spawn_linkified_text(commands, box_entity, &text, style);
 }
 
 /// Format a notice's Unix timestamp as a localized date-time in **SLT** (Second

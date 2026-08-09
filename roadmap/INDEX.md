@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 247 |
+| ready | 244 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 734 |
+| done | 737 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (244)
 
 ### protocol
 
@@ -348,9 +348,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Group profile — set the group insignia
 - [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
   — Group notices — attach on send, open on receive
-- [`viewer-group-notice-body-links`](ready/viewer-group-notice-body-links.md) —
-  Group notice body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -399,9 +396,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
-- [`viewer-load-url-body-links`](ready/viewer-load-url-body-links.md) — Script
-  web-page toast body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
@@ -597,9 +591,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-space reflections (SSR)
 - [`viewer-screenshot-wait-for-quiescence`](ready/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
-- [`viewer-script-dialog-body-links`](ready/viewer-script-dialog-body-links.md)
-  — Script dialog body — clickable URLs / SLURLs (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
   warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
@@ -1077,7 +1068,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (734)
+## done (737)
 
 ### protocol
 
@@ -1344,6 +1335,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom
+- [`viewer-group-notice-body-links`](done/viewer-group-notice-body-links.md) —
+  Group notice body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
@@ -1434,6 +1428,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn tab lists Skin / Hair / Eyes / Shirt without their containing folders
 - [`viewer-land-context-menu`](done/viewer-land-context-menu.md) — Land /
   terrain context pie menu entries (blocked by `viewer-ui-radial-menu` (done))
+- [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
+  web-page toast body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))
@@ -1927,6 +1924,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-script-dialog-body-links`](done/viewer-script-dialog-body-links.md) —
+  Script dialog body — clickable URLs / SLURLs (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
   — Script permission-request experience card (ScriptQuestionExperience)
   (blocked by `viewer-experience-permission-dialog` (done))

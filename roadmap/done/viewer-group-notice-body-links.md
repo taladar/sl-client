@@ -2,7 +2,7 @@
 id: viewer-group-notice-body-links
 title: Group notice body — clickable URLs / SLURLs
 topic: viewer
-status: ready
+status: done
 origin: deferred from viewer-group-notice-display (2026-07-29) — links parked
   like chat's, pending the linkification layer
 blocked_by: [viewer-url-linkification]
@@ -21,3 +21,10 @@ dispatch for a SLURL is [[viewer-slurl-parse-dispatch]]'s job, not this one's.
 
 This is the same deferral chat's links carry: the toast's body node becomes a
 link-decorated text context instead of a bare `Text`.
+
+## Outcome (2026-08-09)
+
+Wired: the group-notice body now renders through the shared linkification widget
+(`crate::linkified_text::spawn_linkified_text`) instead of a bare `Text`, so
+its `http(s)` URLs / SLURLs are clickable (hover shows the URL). Followed the
+`spawn_bounded_linked_text` pattern beside the existing bounded-text helper.

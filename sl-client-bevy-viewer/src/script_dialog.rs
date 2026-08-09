@@ -49,6 +49,7 @@ use sl_client_bevy::{
 };
 
 use crate::i18n::{TransArgs, Translator};
+use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -265,7 +266,10 @@ fn build_script_dialog_card(
         TITLE_FONT_SIZE,
         DIM_TEXT_COLOR,
     );
-    spawn_bounded_text(
+    // The message is linkified — its http(s) URLs / SLURLs render as clickable
+    // links (viewer-script-dialog-body-links), exactly as nearby chat and the
+    // other toast bodies do.
+    spawn_bounded_linked_text(
         commands,
         root,
         content.message.clone(),
@@ -698,6 +702,35 @@ fn spawn_bounded_text(
         Pickable::IGNORE,
         ChildOf(box_entity),
     ));
+}
+
+/// A width-bounded **linkified** text line: the caller's text run through the
+/// shared linkification widget ([`spawn_linkified_text`]) inside a bounded box, so
+/// its URLs / SLURLs render as clickable links and a long message still wraps
+/// within the card. An empty string spawns nothing.
+fn spawn_bounded_linked_text(
+    commands: &mut Commands,
+    parent: Entity,
+    text: String,
+    font_size: f32,
+    color: Color,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let box_entity = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(FULL_TEXT_MAX_WIDTH),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id();
+    let mut style = LinkTextStyle::at(font_size);
+    style.plain_color = color;
+    spawn_linkified_text(commands, box_entity, &text, style);
 }
 
 /// The gallery / `ui_test` specimen (buttons): a static script-dialog card with a
