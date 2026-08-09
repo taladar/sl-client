@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 248 |
+| ready | 247 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 743 |
+| done | 744 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1195** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (248)
+## ready (247)
 
 ### protocol
 
@@ -504,8 +504,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Change-driven probe capture scheduling (zero idle cost)
 - [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
   — Teleport progress overlay writes Hidden visibility every idle frame
-- [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
-  — Dirty-gate terrain::update_terrain (runs every frame)
 - [`viewer-perf-worldmap-label-node-writes`](ready/viewer-perf-worldmap-label-node-writes.md)
   — World-map region labels write Node unconditionally every frame
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
@@ -1073,7 +1071,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (743)
+## done (744)
 
 ### protocol
 
@@ -1820,6 +1818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)
+  — Dirty-gate terrain::update_terrain (runs every frame)
 - [`viewer-perf-ui-layout-gate-open-widget-churn`](done/viewer-perf-ui-layout-gate-open-widget-churn.md)
   — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)

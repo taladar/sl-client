@@ -381,7 +381,10 @@ use crate::sky::{
 };
 use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
-use crate::terrain::{TerrainState, recenter_terrain, update_terrain};
+use crate::terrain::{
+    PendingPatchRebuilds, TerrainRebuildBudget, TerrainState, drain_patch_rebuilds,
+    recenter_terrain, update_terrain,
+};
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
     DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
@@ -1527,6 +1530,8 @@ fn run_session(
         // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
+        .init_resource::<PendingPatchRebuilds>()
+        .init_resource::<TerrainRebuildBudget>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
         .init_resource::<crate::animations::PoseGate>()
         .init_resource::<ObjectState>()
@@ -1708,8 +1713,10 @@ fn run_session(
                         .before(recenter_objects)
                         .before(recenter_avatars),
                     // Recenter (origin follows the root region) before folding
-                    // terrain events, so patches are placed on the current origin.
-                    (recenter_terrain, update_terrain).chain(),
+                    // terrain events, so patches are placed on the current origin;
+                    // then drain a few of the queued seam / whole-region patch
+                    // rebuilds (`PendingPatchRebuilds`).
+                    (recenter_terrain, update_terrain, drain_patch_rebuilds).chain(),
                     // Re-base world-root objects onto the new origin (a crossing or
                     // a teleport to an already-connected region) before folding
                     // object events, so a static object stays put and a new object
