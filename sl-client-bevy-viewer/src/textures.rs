@@ -1563,15 +1563,11 @@ const TRANSPARENCY_ALPHA_CUTOFF: u8 = 128;
 /// with at least one texel below [`TRANSPARENCY_ALPHA_CUTOFF`]. Distinguishes a
 /// hair / eyelash texture (soft alpha, blends) from a solid texture that merely
 /// carries a fully-opaque alpha channel (stays opaque), so only the former moves a
-/// rigged face into the transparent pass.
-fn texture_has_transparency(decoded: &DecodedTexture) -> bool {
-    texture_has_alpha(decoded)
-        && decoded
-            .pixels
-            .iter()
-            .skip(3)
-            .step_by(4)
-            .any(|&alpha| alpha < TRANSPARENCY_ALPHA_CUTOFF)
+/// rigged face into the transparent pass. O(1): the pixel scan happened once
+/// in the decode task ([`DecodedTexture::min_alpha`]), never on the frame
+/// thread.
+const fn texture_has_transparency(decoded: &DecodedTexture) -> bool {
+    texture_has_alpha(decoded) && decoded.min_alpha < TRANSPARENCY_ALPHA_CUTOFF
 }
 
 /// Convert a face tint (RGBA bytes, `[255; 4]` = opaque white = no tint) into a
@@ -1606,14 +1602,14 @@ mod tests {
     /// A decoded texture with the given source component count (pixels unused by
     /// the alpha test, so a single RGBA8 texel stands in).
     fn decoded(components: u16) -> DecodedTexture {
-        DecodedTexture {
-            width: 1,
-            height: 1,
+        DecodedTexture::new(
+            1,
+            1,
             components,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(vec![0xFF_u8; 4]),
-            aux: None,
-        }
+            DiscardLevel::FULL,
+            Bytes::from(vec![0xFF_u8; 4]),
+            None,
+        )
     }
 
     /// The R22d texture-alpha resolution is identical whether the face meets

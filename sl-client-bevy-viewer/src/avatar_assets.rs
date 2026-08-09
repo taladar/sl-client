@@ -491,12 +491,13 @@ fn decode_tga(bytes: &[u8]) -> Result<DecodedTexture, image::ImageError> {
         _other => 4,
     };
     let rgba = image.to_rgba8();
-    Ok(DecodedTexture {
-        width: rgba.width(),
-        height: rgba.height(),
+    let (width, height) = (rgba.width(), rgba.height());
+    Ok(DecodedTexture::new(
+        width,
+        height,
         components,
-        discard_level: sl_client_bevy::DiscardLevel::FULL,
-        pixels: bytes::Bytes::from(rgba.into_raw()),
-        aux: None,
-    })
+        sl_client_bevy::DiscardLevel::FULL,
+        bytes::Bytes::from(rgba.into_raw()),
+        None,
+    ))
 }

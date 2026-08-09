@@ -1109,14 +1109,7 @@ fn uv_reference_texture() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 4, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// [`SCENES`] `prim-textured-tiling`: a prim whose texture must repeat.
@@ -1265,14 +1258,7 @@ fn sculpt_sphere_map() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 3,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 3, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// [`SCENES`] `sculpt-sphere`: a sculpted prim stitched from [`sculpt_sphere_map`].
@@ -2774,14 +2760,15 @@ fn legacy_material_face(
 /// the second half's input is a fetched asset, which is what this stands in for.
 fn normal_map_texture(source: &Arc<DecodedTexture>) -> DecodedTexture {
     let generated = generate_normal_map(source, false);
-    DecodedTexture {
-        width: generated.width(),
-        height: generated.height(),
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(generated.data.unwrap_or_default()),
-        aux: None,
-    }
+    let (width, height) = (generated.width(), generated.height());
+    DecodedTexture::new(
+        width,
+        height,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(generated.data.unwrap_or_default()),
+        None,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -3194,14 +3181,7 @@ fn water_wavelet_texture() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 4, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// Where the [`water_surface`] scene's camera stands, in Second Life metres.

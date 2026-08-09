@@ -506,14 +506,14 @@ mod tests {
                 pixels.extend_from_slice(&[r, g, b, 255]);
             }
         }
-        DecodedImage {
+        DecodedImage::new(
             width,
             height,
-            components: 3,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+            3,
+            DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     /// The number of quad cells per side used by the working grid.
@@ -544,14 +544,14 @@ mod tests {
                 ]);
             }
         }
-        DecodedImage {
+        DecodedImage::new(
             width,
             height,
-            components: 3,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+            3,
+            DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     /// The signed volume enclosed by a face's triangles (`Σ p0 · (p1 × p2) / 6`):
@@ -689,14 +689,7 @@ mod tests {
     #[test]
     fn degenerate_map_falls_back_to_a_sphere_placeholder() {
         // A zero-sized map cannot be sampled; the placeholder is a sphere.
-        let empty = DecodedImage {
-            width: 0,
-            height: 0,
-            components: 3,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::new(),
-            aux: None,
-        };
+        let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
         let mesh = tessellate(&empty, 3);
         assert_face_integrity(&mesh);
         // Sphere topology regardless of the requested (plane) stitch.
@@ -706,14 +699,14 @@ mod tests {
     #[test]
     fn truncated_map_falls_back_without_panicking() {
         // Claims 64×64 but carries a single pixel: too short, so placeholder.
-        let short = DecodedImage {
-            width: 64,
-            height: 64,
-            components: 3,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from_static(&[10, 20, 30, 255]),
-            aux: None,
-        };
+        let short = DecodedImage::new(
+            64,
+            64,
+            3,
+            DiscardLevel::FULL,
+            Bytes::from_static(&[10, 20, 30, 255]),
+            None,
+        );
         let mesh = tessellate(&short, 2);
         assert_face_integrity(&mesh);
         assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
@@ -790,14 +783,7 @@ mod tests {
     #[test]
     fn placeholder_sphere_renders_outward() {
         // The degenerate-map placeholder ball must face outward too.
-        let empty = DecodedImage {
-            width: 0,
-            height: 0,
-            components: 3,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::new(),
-            aux: None,
-        };
+        let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
         let mesh = tessellate(&empty, 1);
         let volume = signed_volume(single_face(&mesh));
         assert!(volume > 0.05, "placeholder faces outward (volume {volume})");

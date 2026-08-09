@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 745 |
+| done | 746 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1196** |
+| **total** | **1197** |
 
 ## ideas (57)
 
@@ -1071,7 +1071,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (745)
+## done (746)
 
 ### protocol
 
@@ -1799,6 +1799,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Budget + debounce avatar appearance application
 - [`viewer-perf-avatar-bake-apply-spikes`](done/viewer-perf-avatar-bake-apply-spikes.md)
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
+- [`viewer-perf-bake-alpha-classify-offthread`](done/viewer-perf-bake-alpha-classify-offthread.md)
+  — Precompute alpha classification in the decode task
 - [`viewer-perf-decoded-geometry-budget`](done/viewer-perf-decoded-geometry-budget.md)
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)

@@ -225,16 +225,16 @@ impl BakedImage {
     /// texture-consuming paths as a fetched-and-decoded avatar bake.
     #[must_use]
     pub fn to_decoded_image(&self) -> DecodedImage {
-        DecodedImage {
-            width: self.size,
-            height: self.size,
-            components: RGBA_CHANNELS_U16,
-            discard_level: DiscardLevel::FULL,
-            pixels: bytes::Bytes::copy_from_slice(&self.pixels),
+        DecodedImage::new(
+            self.size,
+            self.size,
+            RGBA_CHANNELS_U16,
+            DiscardLevel::FULL,
+            bytes::Bytes::copy_from_slice(&self.pixels),
             // A client-side composited bake carries its coverage in the RGBA
             // alpha channel, not a separate Second Life 5-component aux mask.
-            aux: None,
-        }
+            None,
+        )
     }
 }
 
@@ -605,14 +605,14 @@ mod tests {
         for _ in 0..count {
             pixels.extend_from_slice(&rgba);
         }
-        DecodedImage {
-            width: size,
-            height: size,
+        DecodedImage::new(
+            size,
+            size,
             components,
-            discard_level: sl_proto::DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+            sl_proto::DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     /// The RGBA of the centre pixel of a bake.

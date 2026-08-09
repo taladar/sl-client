@@ -382,14 +382,14 @@ fn uv_grid_image() -> Image {
         }
     }
     let width = u32::try_from(size).unwrap_or(0);
-    let decoded = DecodedTexture {
+    let decoded = DecodedTexture::new(
         width,
-        height: width,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    };
+        width,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(pixels),
+        None,
+    );
     let mut image = to_bevy_image(&decoded);
     // Nearest + repeat: crisp grid lines, and tiling if a UV strays outside [0, 1].
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -3310,7 +3310,7 @@ impl AvatarBakeMaterials {
             return Some((handle.clone(), alpha));
         }
         let decoded = manager.decoded(id)?;
-        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        let alpha = classify_bake_alpha(decoded);
         if log_avatar_faces_enabled() {
             info!(
                 "bake {id}: {}x{} {}c discard={:?} -> {alpha:?}",
@@ -3514,31 +3514,23 @@ impl BakeAlpha {
 /// alpha bytes are scanned once — all at or above the cutoff is `Opaque`, all
 /// below is [`Transparent`](BakeAlpha::Transparent), and any mix is
 /// [`Masked`](BakeAlpha::Masked).
-fn classify_bake_alpha(components: u16, pixels: &[u8]) -> BakeAlpha {
+const fn classify_bake_alpha(decoded: &DecodedTexture) -> BakeAlpha {
     // No alpha channel: the decoder filled alpha to fully opaque.
-    if components < 4 {
+    if decoded.components < 4 {
         return BakeAlpha::Opaque;
     }
-    let mut any_kept = false;
-    let mut any_carved = false;
-    for &alpha in pixels.iter().skip(3).step_by(4) {
-        if alpha < BAKE_ALPHA_CUTOFF {
-            any_carved = true;
-        } else {
-            any_kept = true;
-        }
-        // Once both kinds are seen the region is masked; stop scanning.
-        if any_kept && any_carved {
-            return BakeAlpha::Masked;
-        }
-    }
-    match (any_kept, any_carved) {
+    // O(1) off the precomputed alpha range (the pixel scan happened once in
+    // the decode / composite task, never on the frame thread). Checked
+    // min-first so an empty image (range `(255, 0)`) classifies opaque.
+    if decoded.min_alpha >= BAKE_ALPHA_CUTOFF {
         // Nothing carved (or no pixels at all) → opaque.
-        (_, false) => BakeAlpha::Opaque,
+        BakeAlpha::Opaque
+    } else if decoded.max_alpha < BAKE_ALPHA_CUTOFF {
         // Every pixel carved → wholly transparent.
-        (false, true) => BakeAlpha::Transparent,
-        // A mix is returned inside the loop; kept here for totality.
-        (true, true) => BakeAlpha::Masked,
+        BakeAlpha::Transparent
+    } else {
+        // A mix of kept and carved pixels → masked.
+        BakeAlpha::Masked
     }
 }
 
@@ -3799,7 +3791,7 @@ fn run_local_bake_job(job: &LocalBakeJob) -> CompositedRegions {
         let Some(decoded) = composite_region_from_layers(*region, layers) else {
             continue;
         };
-        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        let alpha = classify_bake_alpha(&decoded);
         regions.push((region.slot(), to_bevy_image(&decoded), alpha));
         summary.push(format!(
             "{}={} layer(s)/{alpha:?}",
@@ -5620,37 +5612,52 @@ mod tests {
     /// masked.
     #[test]
     fn classify_bake_alpha_reads_the_alpha_channel() {
+        /// A one-row bake stand-in whose alpha range is computed from `pixels`
+        /// exactly as the decode task does ([`DecodedTexture::new`]).
+        fn bake(components: u16, pixels: &[u8]) -> sl_client_bevy::DecodedTexture {
+            sl_client_bevy::DecodedTexture::new(
+                u32::try_from(pixels.len() / 4).unwrap_or(0),
+                1,
+                components,
+                sl_client_bevy::DiscardLevel::FULL,
+                bytes::Bytes::copy_from_slice(pixels),
+                None,
+            )
+        }
         // No alpha channel (RGB source): opaque regardless of the filled byte.
-        assert_eq!(classify_bake_alpha(3, &[10, 20, 30, 0]), BakeAlpha::Opaque);
+        assert_eq!(
+            classify_bake_alpha(&bake(3, &[10, 20, 30, 0])),
+            BakeAlpha::Opaque
+        );
         // Every alpha at/above the cutoff → opaque.
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 255, 1, 1, 1, 200]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 255, 1, 1, 1, 200])),
             BakeAlpha::Opaque
         );
         // Every alpha below the cutoff → wholly transparent (hide the region).
         assert_eq!(
-            classify_bake_alpha(4, &[9, 9, 9, 0, 9, 9, 9, 10]),
+            classify_bake_alpha(&bake(4, &[9, 9, 9, 0, 9, 9, 9, 10])),
             BakeAlpha::Transparent
         );
         // A mix of kept and carved pixels → masked.
         assert_eq!(
-            classify_bake_alpha(4, &[9, 9, 9, 255, 9, 9, 9, 0]),
+            classify_bake_alpha(&bake(4, &[9, 9, 9, 255, 9, 9, 9, 0])),
             BakeAlpha::Masked
         );
         // The cutoff is the reference `sMinimumAlpha` (0.2 → 51): a pixel at alpha
         // 60 is *kept* (opaque), where the old 0.5 cutoff (128) would have carved it
         // — which is what stopped bare mesh-body skin rendering see-through (R22d).
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 60, 1, 1, 1, 255]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 60, 1, 1, 1, 255])),
             BakeAlpha::Opaque
         );
         // A pixel just below the cutoff (40 < 51) still carves, so it masks.
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 40, 1, 1, 1, 255]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 40, 1, 1, 1, 255])),
             BakeAlpha::Masked
         );
         // No pixels at all → opaque (nothing is carved away).
-        assert_eq!(classify_bake_alpha(4, &[]), BakeAlpha::Opaque);
+        assert_eq!(classify_bake_alpha(&bake(4, &[])), BakeAlpha::Opaque);
     }
 
     /// Each classification maps to the right render behaviour: opaque skin stays

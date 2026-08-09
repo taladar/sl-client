@@ -759,14 +759,14 @@ mod tests {
         for _ in 0..4 {
             pixels.extend_from_slice(&rgba);
         }
-        DecodedImage {
-            width: 2,
-            height: 2,
-            components: 4,
-            discard_level: sl_proto::DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+        DecodedImage::new(
+            2,
+            2,
+            4,
+            sl_proto::DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     /// Every plan references non-baked layer slots that map to the plan's
