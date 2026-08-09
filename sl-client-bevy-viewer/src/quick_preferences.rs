@@ -196,6 +196,18 @@ fn default_entries() -> Vec<QuickPrefEntry> {
             max: 8192.0,
             increment: 256.0,
         },
+        // Dynamic content (avatars) in local reflection probes: costlier and it
+        // defeats probe change-detection, so it earns a one-click toggle here.
+        QuickPrefEntry {
+            control_name: crate::probes::PROBE_DYNAMIC_SETTING.to_owned(),
+            label: QuickPrefLabel::Key("quick-prefs-probe-dynamic".to_owned()),
+            scope: Scope::Global,
+            kind: QuickPrefKind::Checkbox,
+            integer: false,
+            min: 0.0,
+            max: 1.0,
+            increment: 1.0,
+        },
     ]
 }
 

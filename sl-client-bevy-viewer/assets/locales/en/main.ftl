@@ -3160,6 +3160,7 @@ quick-prefs-time-midnight = Midnight
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles
+quick-prefs-probe-dynamic = Avatars in reflections
 
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip
 # box adds around the object / owner data it fetches.

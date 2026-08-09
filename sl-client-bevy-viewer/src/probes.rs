@@ -125,8 +125,8 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::{
-    Extent3d, Origin3d, TexelCopyTextureInfo, TextureAspect, TextureDimension, TextureFormat,
-    TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    CommandEncoder, Extent3d, Origin3d, TexelCopyTextureInfo, TextureAspect, TextureDimension,
+    TextureFormat, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
@@ -609,6 +609,15 @@ struct ProbeCubeCopy {
 struct ProbeCubeCopies {
     /// One entry per live probe: the default probe, plus each assigned local probe.
     copies: Vec<ProbeCubeCopy>,
+    /// The one face captured **this frame** — `(cube image, face index)`, published
+    /// by [`drive_probe_captures`] — or `None` on a frame with nothing to capture.
+    /// [`copy_probe_faces`] blits only this face: the other five faces of every
+    /// rig are unchanged since their own capture frames, and re-blitting them all
+    /// every frame dirtied every live cube (re-running the env-map filter) per
+    /// frame. (The capture *cadence* itself is deliberately untouched: slower
+    /// probe cycling lets Bevy purge the idle pipelines/bind groups and each
+    /// late capture then pays a recalculation spike.)
+    captured: Option<(AssetId<Image>, usize)>,
 }
 
 /// The reflection-probe plugin (Phase 33): captures scene environment cubemaps and
@@ -766,7 +775,7 @@ impl Default for ProbeDynamicContent {
 
 /// The persistent settings key toggling dynamic-content capture in local probes
 /// ([`ProbeDynamicContent`]). Grouped under `[render]` in the settings file.
-const PROBE_DYNAMIC_SETTING: &str = "render_reflection_probe_dynamic_content";
+pub(crate) const PROBE_DYNAMIC_SETTING: &str = "render_reflection_probe_dynamic_content";
 
 /// Register the reflection-probe settings' declared defaults (startup). Guarded on
 /// [`ViewerSettings`] existing, so the gallery / headless test apps that run the
@@ -1288,6 +1297,7 @@ fn rig_capture_pose(
 fn drive_probe_captures(
     rigs: Res<ProbeRigs>,
     mut schedule: ResMut<CaptureSchedule>,
+    mut copies: ResMut<ProbeCubeCopies>,
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     probes: Query<(Entity, &ObjectReflectionProbe, &GlobalTransform)>,
@@ -1353,6 +1363,14 @@ fn drive_probe_captures(
     // probe prim vanished this very frame), in which case no camera renders.
     let pose = burst.and_then(|(rig, _face)| rig_capture_pose(rig, &rigs, eye, &probes));
     let capturing = burst.zip(pose);
+
+    // Publish the one face rendered this frame for the render-world blit, so
+    // [`copy_probe_faces`] copies exactly it (and nothing on an idle frame).
+    let captured = capturing
+        .and_then(|((rig, face), _pose)| rigs.rigs.get(rig).map(|rig| (rig.cube.id(), face)));
+    if copies.captured != captured {
+        copies.captured = captured;
+    }
 
     // Only the one face being captured this frame renders; every other camera idles.
     // The components are touched only when something actually changes, so the idle
@@ -1453,7 +1471,19 @@ fn copy_probe_faces(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
-    blit_cube_faces(&copies.copies, &images, &device, &queue);
+    // Only the face captured this frame is blitted (see [`ProbeCubeCopies::
+    // captured`]); every other layer of every live cube already holds its own
+    // capture and re-copying it would dirty the cube for nothing.
+    let Some((cube, face)) = copies.captured else {
+        return;
+    };
+    let Some(copy) = copies.copies.iter().find(|copy| copy.cube == cube) else {
+        return;
+    };
+    let mut encoder = device.create_command_encoder(&default());
+    if blit_one_face(&mut encoder, copy, face, &images) {
+        queue.submit([encoder.finish()]);
+    }
 }
 
 /// Blit each listed probe's six captured face textures into its cube's six array
@@ -1475,43 +1505,54 @@ fn blit_cube_faces(
     let mut encoder = device.create_command_encoder(&default());
     let mut recorded = false;
     for copy in copies {
-        let Some(cube) = images.get(copy.cube) else {
-            continue;
-        };
-        for (index, face_id) in copy.faces.iter().enumerate() {
-            let Some(face) = images.get(*face_id) else {
-                continue;
-            };
-            let layer = u32::try_from(index).unwrap_or(0);
-            encoder.copy_texture_to_texture(
-                TexelCopyTextureInfo {
-                    texture: &face.texture,
-                    mip_level: 0,
-                    origin: Origin3d::ZERO,
-                    aspect: TextureAspect::All,
-                },
-                TexelCopyTextureInfo {
-                    texture: &cube.texture,
-                    mip_level: 0,
-                    origin: Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: layer,
-                    },
-                    aspect: TextureAspect::All,
-                },
-                Extent3d {
-                    width: copy.size,
-                    height: copy.size,
-                    depth_or_array_layers: 1,
-                },
-            );
-            recorded = true;
+        for index in 0..copy.faces.len() {
+            recorded |= blit_one_face(&mut encoder, copy, index, images);
         }
     }
     if recorded {
         queue.submit([encoder.finish()]);
     }
+}
+
+/// Record the copy of one captured face texture into its cube's matching array
+/// layer, returning whether a copy was recorded (both textures resolved).
+fn blit_one_face(
+    encoder: &mut CommandEncoder,
+    copy: &ProbeCubeCopy,
+    index: usize,
+    images: &RenderAssets<GpuImage>,
+) -> bool {
+    let Some(cube) = images.get(copy.cube) else {
+        return false;
+    };
+    let Some(face) = copy.faces.get(index).and_then(|id| images.get(*id)) else {
+        return false;
+    };
+    let layer = u32::try_from(index).unwrap_or(0);
+    encoder.copy_texture_to_texture(
+        TexelCopyTextureInfo {
+            texture: &face.texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        TexelCopyTextureInfo {
+            texture: &cube.texture,
+            mip_level: 0,
+            origin: Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            },
+            aspect: TextureAspect::All,
+        },
+        Extent3d {
+            width: copy.size,
+            height: copy.size,
+            depth_or_array_layers: 1,
+        },
+    );
+    true
 }
 
 // ---------------------------------------------------------------------------
