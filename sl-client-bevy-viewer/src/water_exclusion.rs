@@ -232,8 +232,15 @@ pub(crate) fn sync_water_exclusion_camera(
     else {
         return;
     };
-    *mask_transform = Transform::from_matrix(main_global.to_matrix());
-    *mask_projection = main_projection.clone();
+    // Guard both copies so a parked camera stops dirtying the mask camera every
+    // frame (an unconditional write re-extracts its view each frame).
+    // `Projection` has no `PartialEq` (its `Custom` variant is a boxed trait
+    // object), so compare the clip matrices — they capture everything the mask
+    // render sees of the projection.
+    mask_transform.set_if_neq(Transform::from_matrix(main_global.to_matrix()));
+    if mask_projection.get_clip_from_view() != main_projection.get_clip_from_view() {
+        *mask_projection = main_projection.clone();
+    }
 
     let (Some(mask), Ok(window)) = (mask, windows.single()) else {
         return;

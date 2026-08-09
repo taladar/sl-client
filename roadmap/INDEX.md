@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 243 |
+| ready | 248 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
 | done | 738 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1186** |
+| **total** | **1191** |
 
 ## ideas (58)
 
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (248)
 
 ### protocol
 
@@ -480,8 +480,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
+- [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
+  — Minimap / world-map hover tooltips write Node + Visibility unconditionally
+- [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
+  — Minimap minor-compass labels write Visibility unconditionally
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
+- [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
+  — Pipeline debug overlay rewrites its Text unconditionally every frame
 - [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
   — Throttle prim-texture application + GPU asset uploads during rez bursts
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
@@ -498,8 +504,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
+- [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
+  — Teleport progress overlay writes Hidden visibility every idle frame
 - [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
   — Dirty-gate terrain::update_terrain (runs every frame)
+- [`viewer-perf-worldmap-label-node-writes`](ready/viewer-perf-worldmap-label-node-writes.md)
+  — World-map region labels write Node unconditionally every frame
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))

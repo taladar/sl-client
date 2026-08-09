@@ -564,7 +564,12 @@ pub(crate) fn center_sky_on_camera(
     };
     let translation = camera.translation();
     for mut transform in &mut domes {
-        transform.translation = translation;
+        // Only write when the camera actually moved: an unconditional write
+        // marks the dome `Transform` changed every frame and re-propagates /
+        // re-extracts both domes even with a parked camera.
+        if transform.translation != translation {
+            transform.translation = translation;
+        }
     }
 }
 

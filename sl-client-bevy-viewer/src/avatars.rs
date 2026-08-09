@@ -4371,17 +4371,41 @@ fn attach_runtime_morphs(
 /// override if one is present, else to its appearance-resolved rest weight — so
 /// a driver need only push the params it is currently animating and everything
 /// else holds the avatar's own shape.
+///
+/// The weights are compared before any mutable deref: a `Mut` deref alone marks
+/// `MeshMorphWeights` changed and re-uploads the part's morph weights, so an
+/// idle avatar (no blink mid-cycle, no body-physics displacement) must take the
+/// read-only path and upload nothing.
 pub(crate) fn apply_avatar_runtime_morphs(
     morphs: Res<AvatarRuntimeMorphs>,
     mut parts: Query<(&AvatarBodyPart, &RuntimeMorphParams, &mut MeshMorphWeights)>,
 ) {
     for (part, params, mut weights) in &mut parts {
+        let MeshMorphWeights::Value { weights: current } = weights.as_ref() else {
+            continue;
+        };
+        let desired = |index: usize, name: &String| {
+            let rest = params.rest.get(index).copied().unwrap_or(0.0);
+            morphs.weight(part.agent, name).unwrap_or(rest)
+        };
+        // A slot missing from the weight vector cannot be written below either,
+        // so it never counts as a difference (else it would force the mutable
+        // pass every frame without effect). Bit-equality is deliberate: the
+        // question is "would the write change the stored value", not a numeric
+        // tolerance.
+        let unchanged = params.names.iter().enumerate().all(|(index, name)| {
+            current
+                .get(index)
+                .is_none_or(|slot| slot.to_bits() == desired(index, name).to_bits())
+        });
+        if unchanged {
+            continue;
+        }
         let MeshMorphWeights::Value { weights } = &mut *weights else {
             continue;
         };
         for (index, name) in params.names.iter().enumerate() {
-            let rest = params.rest.get(index).copied().unwrap_or(0.0);
-            let value = morphs.weight(part.agent, name).unwrap_or(rest);
+            let value = desired(index, name);
             if let Some(slot) = weights.get_mut(index) {
                 *slot = value;
             }
