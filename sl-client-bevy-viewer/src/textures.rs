@@ -750,7 +750,7 @@ impl Default for TextureApplyBudget {
 
 /// A positive per-frame budget from `var`, or `default` when it is unset /
 /// unparsable / zero.
-fn env_budget(var: &str, default: usize) -> usize {
+pub(crate) fn env_budget(var: &str, default: usize) -> usize {
     std::env::var(var)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())

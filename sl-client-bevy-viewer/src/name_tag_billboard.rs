@@ -369,12 +369,42 @@ pub(crate) fn sync_tag_spans(
     }
 }
 
+/// The default for [`TagLayoutBudget`]: dirty tag blocks laid out per frame.
+const DEFAULT_TAG_LAYOUT_BUDGET: usize = 4;
+
+/// The per-frame cap on tag text blocks [`layout_tag_text`] shapes +
+/// rasterises (env `SL_VIEWER_TAG_LAYOUT_BUDGET`): arriving in a crowded
+/// place (login / teleport — or, rarer, a crowd arriving around us) creates
+/// every tag dirty in the same frame, and each costs parley shaping plus
+/// glyph rasterisation into the shared atlases (new atlas pages for uncached
+/// glyphs). Over-budget tags re-enter through the system's existing retry
+/// queue next frame. Downstream `build_tag_meshes` is
+/// `Changed<TextLayoutInfo>`-driven, so this cap bounds it too.
+#[derive(Resource)]
+pub(crate) struct TagLayoutBudget {
+    /// How many dirty blocks may be laid out each frame.
+    per_frame: usize,
+}
+
+impl Default for TagLayoutBudget {
+    fn default() -> Self {
+        Self {
+            per_frame: crate::textures::env_budget(
+                "SL_VIEWER_TAG_LAYOUT_BUDGET",
+                DEFAULT_TAG_LAYOUT_BUDGET,
+            ),
+        }
+    }
+}
+
 /// Lay out every dirty [`TagText`] block through [`TextPipeline`] — a trimmed
 /// port of the stock `update_text2d_layout` loop, with the scale factor taken
 /// from the **viewer camera** (`With<ViewerCamera>` — the probe cameras make
 /// any unqualified camera resolution fail) and no dependence on 2D-camera
 /// visibility. Shares the pipeline, font contexts and glyph atlases with
-/// bevy_ui, so common glyphs are already rasterised.
+/// bevy_ui, so common glyphs are already rasterised. At most
+/// [`TagLayoutBudget`] dirty blocks are processed per frame; the rest defer
+/// through the retry queue.
 #[expect(
     clippy::too_many_arguments,
     clippy::type_complexity,
@@ -405,7 +435,9 @@ pub(crate) fn layout_tag_text(
     mut scale_cx: ResMut<ScaleCx>,
     rem_size: Res<RemSize>,
     primary_window: Option<Single<&Window, With<PrimaryWindow>>>,
+    budget: Res<TagLayoutBudget>,
 ) {
+    let mut laid_out = 0_usize;
     let logical_viewport_size =
         primary_window.map_or(Vec2::splat(1000.0), |window| window.resolution.size());
     let viewport_size_changed = *last_logical_viewport_size == logical_viewport_size;
@@ -436,6 +468,15 @@ pub(crate) fn layout_tag_text(
         if !(text_changed || bounds.is_changed() || hinting.is_changed()) {
             continue;
         }
+
+        // Per-frame budget: arriving in a crowded place dirties every tag in
+        // the same frame; defer the overflow through the retry queue (whose
+        // `remove` above re-marks the entity changed next frame).
+        if laid_out >= budget.per_frame {
+            reprocess_queue.insert(entity);
+            continue;
+        }
+        laid_out = laid_out.saturating_add(1);
 
         let text_bounds = TextBounds {
             width: if block.linebreak == LineBreak::NoWrap {
@@ -1720,7 +1761,8 @@ impl Plugin for NameTagBillboardPlugin {
             Shader::from_wgsl
         );
         app.add_plugins(MaterialPlugin::<NameTagMaterial>::default())
-            .init_resource::<NameTagMaterials>();
+            .init_resource::<NameTagMaterials>()
+            .init_resource::<TagLayoutBudget>();
     }
 }
 
