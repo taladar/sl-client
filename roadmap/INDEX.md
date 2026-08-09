@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 241 |
+| ready | 240 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 740 |
+| done | 741 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (241)
+## ready (240)
 
 ### protocol
 
@@ -370,9 +370,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
   (done))
-- [`viewer-inspector-popups`](ready/viewer-inspector-popups.md) — Avatar /
-  object inspector popups from clickable chat names (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-inventory-bulk-permissions`](ready/viewer-inventory-bulk-permissions.md)
   — Bulk next-owner permissions editor (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -1060,7 +1057,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (740)
+## done (741)
 
 ### protocol
 
@@ -1366,6 +1363,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-spacenav-device`](done/viewer-input-spacenav-device.md) —
   SpaceNavigator / 6-DOF device input (blocked by `viewer-input-action-map`
   (done))
+- [`viewer-inspector-popups`](done/viewer-inspector-popups.md) — Avatar / object
+  inspector popups from clickable chat names (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-inventory-advanced-filters`](done/viewer-inventory-advanced-filters.md)
   — Inventory advanced filters (type / date / worn)
 - [`viewer-inventory-attach-to-point`](done/viewer-inventory-attach-to-point.md)

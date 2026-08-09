@@ -2,7 +2,7 @@
 id: viewer-inspector-popups
 title: Avatar / object inspector popups from clickable chat names
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07-22)
 blocked_by: [viewer-url-linkification]
 refs: [viewer-hover-tooltips, viewer-social-profiles]

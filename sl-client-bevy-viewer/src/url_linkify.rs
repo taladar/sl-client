@@ -223,6 +223,19 @@ pub(crate) enum LinkTarget {
         /// The grid the link names, or `None` for the current grid.
         grid: Grid,
     },
+    /// A `secondlife:///app/object/<uuid>/<action>` link — an in-world object
+    /// addressed by its key, with no name / owner in the URL (unlike
+    /// [`Object`](LinkTarget::Object), the `objectim` form). The reference
+    /// `LLObjectHandler` `inspect` verb opens the object inspector, which resolves
+    /// the name / owner / description from an `ObjectPropertiesFamily` reply.
+    ObjectAction {
+        /// The object's key.
+        key: ObjectKey,
+        /// The action suffix (`inspect`, `zoomin`, …), verbatim after the id.
+        action: String,
+        /// The grid the link names, or `None` for the current grid.
+        grid: Grid,
+    },
     /// A `secondlife:///app/experience/<uuid>/profile` link — an experience
     /// profile.
     Experience {
@@ -496,6 +509,10 @@ static REGISTRY: LazyLock<Vec<UrlEntry>> = LazyLock::new(|| {
             build: build_object,
         },
         UrlEntry {
+            regex: compile(&format!(r"(?i){APP_HEADER}/object/[0-9a-f-]+/\w+")),
+            build: build_object_action,
+        },
+        UrlEntry {
             regex: compile(&format!(r"(?i){APP_HEADER}/experience/[0-9a-f-]+/profile")),
             build: build_experience,
         },
@@ -725,6 +742,28 @@ fn build_object(matched: &str) -> Option<LinkMatch> {
             grid,
         },
         label: LinkLabel::Fixed(label),
+        icon: LinkIcon::None,
+        tooltip_key: TOOLTIP_SLAPP,
+    })
+}
+
+/// Build a `/app/object/<uuid>/<action>` record — an in-world object addressed by
+/// key. The name is not in the URL (an `inspect` opens the object inspector, which
+/// resolves the name / owner from an `ObjectPropertiesFamily` reply), so the label
+/// is the raw URL. Returns `None` for a malformed id.
+fn build_object_action(matched: &str) -> Option<LinkMatch> {
+    let (grid, rest) = split_app(matched, "object")?;
+    let (id_str, action) = rest.split_once('/')?;
+    let key = ObjectKey::from(parse_uuid(id_str)?);
+    Some(LinkMatch {
+        matched: matched.to_owned(),
+        url: matched.to_owned(),
+        target: LinkTarget::ObjectAction {
+            key,
+            action: action.to_owned(),
+            grid,
+        },
+        label: LinkLabel::Fixed(matched.to_owned()),
         icon: LinkIcon::None,
         tooltip_key: TOOLTIP_SLAPP,
     })
@@ -1228,6 +1267,20 @@ mod tests {
         assert!(got.is_some());
         assert_eq!(slurl.as_deref(), Some("Ahern/128/128"));
         assert_eq!(link.label, LinkLabel::Fixed("Info Kiosk".to_owned()));
+        Ok(())
+    }
+
+    #[test]
+    fn object_app_inspect_link_carries_the_action() -> Result<(), TestError> {
+        let uuid = "0e346d8b-4433-4d66-a6b0-fd37083abc4c";
+        let link = only_link(&format!("secondlife:///app/object/{uuid}/inspect"))?;
+        let LinkTarget::ObjectAction {
+            action, grid: None, ..
+        } = &link.target
+        else {
+            return Err("expected an object-action target".into());
+        };
+        assert_eq!(action, "inspect");
         Ok(())
     }
 

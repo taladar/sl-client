@@ -2949,6 +2949,21 @@ link-tooltip-parcel = Parcel information
 link-tooltip-agent = Resident profile
 link-tooltip-group = Group information
 
+# The avatar / object inspector mini-popups (viewer-inspector-popups): the small
+# self-dismissing card a clicked resident / object name opens. Mirrors the
+# reference LLInspectAvatar / LLInspectObject buttons and labels.
+inspector-loading = (loading…)
+inspector-no-bio = (no profile text)
+inspector-owner = Owner:
+inspector-owner-unknown = (unknown)
+inspector-object-unnamed = (unnamed object)
+inspector-button-profile = View Profile
+inspector-button-im = IM
+inspector-button-add-friend = Add Friend
+inspector-button-offer-teleport = Offer Teleport
+inspector-button-show-on-map = Show on Map
+inspector-button-block = Block
+
 # The script permission-request toast (viewer-permission-request-dialog): the card
 # a scripted object's llRequestPermissions pops (the ScriptQuestion message),
 # naming the object / owner and the requested permission bits.

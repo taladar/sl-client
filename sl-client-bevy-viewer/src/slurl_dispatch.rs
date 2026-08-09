@@ -294,7 +294,7 @@ fn route_target(
         }
         // The inspector popups own the object targets ([[viewer-inspector-popups]]);
         // the dispatcher deliberately leaves them for that consumer.
-        LinkTarget::Object { .. } => {
+        LinkTarget::Object { .. } | LinkTarget::ObjectAction { .. } => {
             debug!("slurl: {url} routed by the inspector, not the dispatcher");
         }
         LinkTarget::Experience { .. } => {

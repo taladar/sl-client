@@ -99,6 +99,7 @@ mod i18n;
 mod ik;
 mod input_action;
 mod input_context;
+mod inspector_popup;
 mod inventory;
 mod inventory_actions;
 mod inventory_drag;
@@ -999,6 +1000,9 @@ fn run_session(
     // Routes a clicked / command-line SLURL to its handler (profile, IM,
     // teleport, world map): viewer-slurl-parse-dispatch.
     .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)
+    // The self-dismissing avatar / object inspector mini-popups opened from a
+    // clicked `.../inspect` / objectim link: viewer-inspector-popups.
+    .add_plugins(crate::inspector_popup::InspectorPopupPlugin)
     // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
     // each option's `Checked` marker and indicator glyph reconciled to the
     // group's selection, so a click and an external write (the Build Tools
