@@ -1,12 +1,12 @@
 //! The viewer's media engine runtime (`viewer-media-prim-browser` /
-//! `viewer-video-playback`): the Bevy side of the [`sl_media`] boundary and
+//! `viewer-video-playback`): the Bevy side of the `sl_media` boundary and
 //! its **two** engines — offscreen Chromium ([`sl_cef`]) for web pages, and
 //! GStreamer ([`sl_gst`]) for direct video / audio URLs — one offscreen
 //! *surface* per page / stream, pumped once per frame on the main thread,
 //! each surface's BGRA frames mirrored into a Bevy [`Image`] that UI widgets
 //! ([`crate::browser_widget`]) and in-world media faces
 //! ([`crate::media_prim`]) sample. Which engine serves a URL is decided by
-//! [`sl_media::classify_url`] (the `mime_types.xml` dispatch); the mirror
+//! `sl_media::classify_url` (the `mime_types.xml` dispatch); the mirror
 //! path is engine-agnostic.
 //!
 //! Everything CEF is thread-affine and `!Send`, so the engines and the
