@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 739 |
+| done | 740 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1191** |
+| **total** | **1192** |
 
 ## ideas (57)
 
@@ -1073,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (739)
+## done (740)
 
 ### protocol
 
@@ -1818,6 +1818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
   — Cut per-frame UI layout cost — structural bevy_ui floor
+- [`viewer-perf-world-map-composite-offthread`](done/viewer-perf-world-map-composite-offthread.md)
+  — Composite the world-map surface on the compute pool
 - [`viewer-perf-write-on-change-uploads`](done/viewer-perf-write-on-change-uploads.md)
   — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)

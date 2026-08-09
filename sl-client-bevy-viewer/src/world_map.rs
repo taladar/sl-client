@@ -37,6 +37,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy::ui::RelativeCursorPosition;
 use bevy::ui_widgets::{Activate, Button};
@@ -283,6 +284,12 @@ struct WorldMapState {
     tiles_revision: u64,
     /// The stamp of the last composited frame; recomposite when it changes.
     last_stamp: Option<WorldMapStamp>,
+    /// The in-flight background compose, if any. At most one runs at a time —
+    /// a stamp change while it runs coalesces into the next spawn.
+    pending: Option<Task<Vec<u8>>>,
+    /// The stamp the in-flight compose was spawned for, promoted to
+    /// [`last_stamp`](Self::last_stamp) when its surface is applied.
+    pending_stamp: Option<WorldMapStamp>,
     /// This frame's markers (hover hit-testing).
     markers: Vec<MarkerInfo>,
     /// The live search-field text (trimmed).
@@ -328,6 +335,8 @@ impl Default for WorldMapState {
             features_map_url: None,
             tiles_revision: 0,
             last_stamp: None,
+            pending: None,
+            pending_stamp: None,
             markers: Vec::new(),
             search_query: String::new(),
             search_debounce: None,
@@ -391,7 +400,8 @@ impl Plugin for WorldMapPlugin {
                     drive_world_map_view,
                     drive_world_map_location,
                     request_world_map_data,
-                    composite_world_map,
+                    apply_world_map_surface,
+                    spawn_world_map_compose,
                     layout_world_map_labels,
                     update_world_map_hover,
                     drive_world_map_search,
@@ -1427,16 +1437,55 @@ fn request_world_map_data(
 // Compositing.
 // ---------------------------------------------------------------------------
 
-/// Composite the surface image when any input changed: the tile backdrop (with
-/// coarser-level fallback while the right tiles load), region-border grid
-/// lines in the detail regime, the enabled marker layers, the shared tracking
-/// beacon, and the own-avatar marker.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the composite folds every map data source into one image; a staging resource \
-              would only rename the parameters"
-)]
-fn composite_world_map(
+/// One resolved tile blit for a background compose: a visible tile's grid
+/// corner plus the resident raster chosen for it (the tile itself, or the
+/// nearest coarser-level tile while it loads).
+struct TileBlit {
+    /// The tile's south-west grid x.
+    corner_x: u32,
+    /// The tile's south-west grid y.
+    corner_y: u32,
+    /// The source raster's tile level.
+    src_level: u8,
+    /// The source raster's tile x at its level.
+    src_x: u32,
+    /// The source raster's tile y at its level.
+    src_y: u32,
+    /// The source raster's pixels (shared with the tile store).
+    raster: std::sync::Arc<TileRaster>,
+}
+
+/// The owned inputs of one background compose: everything
+/// [`run_world_map_compose`] draws, resolved to plain `Send` data on the
+/// frame thread so the job never touches ECS state.
+struct WorldMapComposeJob {
+    /// The world↔surface transform of the composited frame.
+    view: WorldMapView,
+    /// The surface size, in pixels.
+    surface_px: UVec2,
+    /// Whether to draw the region-border grid (the detail regime).
+    detail_grid: bool,
+    /// The markers to draw.
+    markers: Vec<MarkerInfo>,
+    /// The tracking-beacon position (global metres), if tracking a location.
+    tracked: Option<(f64, f64)>,
+    /// The selected-location marker position (global metres), if any.
+    selected: Option<(f64, f64)>,
+    /// The own-avatar marker position (global metres), once known.
+    agent: Option<(f64, f64)>,
+    /// The resolved tile blits (per-tile best resident source).
+    tiles: Vec<TileBlit>,
+}
+
+/// Kick off a background composite when any input changed. Gathers this
+/// frame's markers first (always — they are hover hit-test data and must stay
+/// current even without a recomposite), builds the change stamp, and on a
+/// change snapshots every drawing input into an owned [`WorldMapComposeJob`]
+/// rendered on the compute pool by [`run_world_map_compose`] — the full-
+/// surface pixel work never runs on the frame thread. At most one compose is
+/// in flight; a change that arrives while one runs coalesces into the next
+/// spawn. The finished surface installs in [`apply_world_map_surface`].
+fn spawn_world_map_compose(
     ui: Option<Res<WorldMapUi>>,
     mut state: ResMut<WorldMapState>,
     mut tiles: ResMut<WorldMapTiles>,
@@ -1444,7 +1493,6 @@ fn composite_world_map(
     settings: Res<ViewerSettings>,
     tracking: Res<MapTracking>,
     panels: Query<&UiPanelShown>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1475,13 +1523,37 @@ fn composite_world_map(
         toggles,
         selected: selection_global(&state).map(|(east, north)| (quantise(east), quantise(north))),
     };
-    if state.last_stamp.as_ref() == Some(&stamp) {
+    // Coalesce: never queue a second compose while one is in flight, and skip
+    // when nothing changed since the last applied frame.
+    if state.pending.is_some() || state.last_stamp.as_ref() == Some(&stamp) {
         state.markers = markers;
         return;
     }
 
-    let width = state.surface_px.x;
-    let height = state.surface_px.y;
+    let job = WorldMapComposeJob {
+        view: state.view,
+        surface_px: state.surface_px,
+        detail_grid: world_map_math::detail_regime(state.scale),
+        markers: markers.clone(),
+        tracked,
+        selected: selection_global(&state),
+        agent: state.agent,
+        tiles: collect_tile_blits(&state.view, tiles.as_mut()),
+    };
+    let task = AsyncComputeTaskPool::get().spawn(async move { run_world_map_compose(&job) });
+    state.pending = Some(task);
+    state.pending_stamp = Some(stamp);
+    state.markers = markers;
+}
+
+/// Render one compose job into an RGBA surface buffer: the void fill, the
+/// tile backdrop, region-border grid lines in the detail regime, the enabled
+/// marker layers, the shared tracking beacon, the selection marker, and the
+/// own-avatar marker. Pure pixel work over owned data — runs on the compute
+/// pool.
+fn run_world_map_compose(job: &WorldMapComposeJob) -> Vec<u8> {
+    let width = job.surface_px.x;
+    let height = job.surface_px.y;
     let mut data = vec![
         0u8;
         usize::try_from(width)
@@ -1491,7 +1563,7 @@ fn composite_world_map(
     ];
     fill(&mut data, world_map_math::COLOR_MAP_VOID);
 
-    draw_tiles(&mut data, &state.view, state.surface_px, tiles.as_mut());
+    blit_tiles(&mut data, &job.view, job.surface_px, &job.tiles);
 
     let mut surface = Surface {
         width,
@@ -1500,25 +1572,25 @@ fn composite_world_map(
     };
 
     // Region-border grid lines in the detail regime.
-    if world_map_math::detail_regime(state.scale) {
-        draw_region_grid(&mut surface, &state.view);
+    if job.detail_grid {
+        draw_region_grid(&mut surface, &job.view);
     }
 
     // Markers.
-    for marker in &markers {
+    for marker in &job.markers {
         draw_marker(&mut surface, marker);
     }
 
     // The shared tracking beacon (set by the minimap today).
-    if let Some((east, north)) = tracked {
-        let position = state.view.view_from_global(east, north);
+    if let Some((east, north)) = job.tracked {
+        let position = job.view.view_from_global(east, north);
         minimap_math::draw_tracking(&mut surface, position, minimap_math::COLOR_TRACK);
     }
 
     // The selected-location marker (red ring + dot, the reference's track
     // circle look).
-    if let Some((east, north)) = selection_global(&state) {
-        let position = state.view.view_from_global(east, north);
+    if let Some((east, north)) = job.selected {
+        let position = job.view.view_from_global(east, north);
         minimap_math::draw_ring(
             &mut surface,
             position.x,
@@ -1537,8 +1609,8 @@ fn composite_world_map(
     }
 
     // The own-avatar marker.
-    if let Some((east, north)) = state.agent {
-        let position = state.view.view_from_global(east, north);
+    if let Some((east, north)) = job.agent {
+        let position = job.view.view_from_global(east, north);
         minimap_math::draw_ring(
             &mut surface,
             position.x,
@@ -1556,11 +1628,43 @@ fn composite_world_map(
         );
     }
 
+    data
+}
+
+/// Install a finished background composite into the map image and promote its
+/// stamp. Cheap: it takes [`Assets<Image>`] only for the O(1) buffer move, so
+/// it never stalls the frame.
+fn apply_world_map_surface(
+    ui: Option<Res<WorldMapUi>>,
+    mut state: ResMut<WorldMapState>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let ready = if let Some(task) = state.pending.as_mut() {
+        block_on(poll_once(task))
+    } else {
+        return;
+    };
+    let Some(data) = ready else {
+        return;
+    };
+    state.pending = None;
+    let stamp = state.pending_stamp.take();
     if let Some(mut image) = images.get_mut(ui.image.id()) {
-        image.data = Some(data);
+        // The image can be resized between a compose being spawned and
+        // finishing, leaving this buffer sized for the *old* surface. Writing
+        // it would desync the pixel data from the texture descriptor, so only
+        // upload when the sizes still match; otherwise drop the stale render
+        // and let the next spawn redraw at the new size (its stamp differs,
+        // so it re-spawns immediately).
+        let expected = image.data.as_ref().map_or(0, Vec::len);
+        if data.len() == expected {
+            image.data = Some(data);
+            state.last_stamp = stamp;
+        }
     }
-    state.markers = markers;
-    state.last_stamp = Some(stamp);
 }
 
 /// Quantise a global metre coordinate to quarter-metre steps for the stamp.
@@ -1616,19 +1720,19 @@ fn fill(data: &mut [u8], color: Rgba) {
     }
 }
 
-/// Draw the tile backdrop: for every visible tile at the current level, blit
-/// the best available raster — the tile itself, or the nearest coarser-level
-/// tile already resident while it loads.
-fn draw_tiles(data: &mut [u8], view: &WorldMapView, surface_px: UVec2, tiles: &mut WorldMapTiles) {
+/// Resolve every visible tile's best resident raster — the tile itself, or
+/// the nearest coarser-level tile already resident while it loads. Runs on
+/// the frame thread because the [`WorldMapTiles::state`] probes also bump the
+/// store's residency LRU; the heavy per-pixel blit happens off-thread in
+/// [`blit_tiles`], from the `Arc` clones collected here.
+fn collect_tile_blits(view: &WorldMapView, tiles: &mut WorldMapTiles) -> Vec<TileBlit> {
     let level = tile_level(view.scale);
     let (min_x, max_x, min_y, max_y) = view.visible_grid_rect();
-    let span = tile_span_regions(level);
-    let region_width = f64::from(REGION_WIDTH_METRES);
+    let mut blits = Vec::new();
     for (corner_x, corner_y) in
         world_map_math::tiles_in_rect(level, min_x, max_x, min_y, max_y, 256)
     {
         // The best resident source for this tile: itself, else coarser levels.
-        let mut source: Option<(u8, u32, u32, std::sync::Arc<TileRaster>)> = None;
         let mut probe_level = level;
         while probe_level <= world_map_math::MAX_TILE_LEVEL {
             let (px, py) = tile_corner(probe_level, corner_x, corner_y);
@@ -1637,17 +1741,32 @@ fn draw_tiles(data: &mut [u8], view: &WorldMapView, surface_px: UVec2, tiles: &m
                 x: px,
                 y: py,
             }) {
-                source = Some((probe_level, px, py, raster));
+                blits.push(TileBlit {
+                    corner_x,
+                    corner_y,
+                    src_level: probe_level,
+                    src_x: px,
+                    src_y: py,
+                    raster,
+                });
                 break;
             }
             probe_level = probe_level.saturating_add(1);
         }
-        let Some((src_level, src_x, src_y, raster)) = source else {
-            continue;
-        };
+    }
+    blits
+}
+
+/// Draw the tile backdrop from the pre-resolved blits (part of the background
+/// compose job).
+fn blit_tiles(data: &mut [u8], view: &WorldMapView, surface_px: UVec2, blits: &[TileBlit]) {
+    let level = tile_level(view.scale);
+    let span = tile_span_regions(level);
+    let region_width = f64::from(REGION_WIDTH_METRES);
+    for blit in blits {
         // The tile's view rectangle (top edge = its north edge).
-        let tile_min_east = f64::from(corner_x) * region_width;
-        let tile_max_north = f64::from(corner_y.saturating_add(span)) * region_width;
+        let tile_min_east = f64::from(blit.corner_x) * region_width;
+        let tile_max_north = f64::from(blit.corner_y.saturating_add(span)) * region_width;
         let top_left = view.view_from_global(tile_min_east, tile_max_north);
         let extent = f64::from(span) * region_width * f64::from(view.pixels_per_metre());
         let x0 = minimap_math::round_i32(top_left.x).max(0);
@@ -1665,7 +1784,9 @@ fn draw_tiles(data: &mut [u8], view: &WorldMapView, surface_px: UVec2, tiles: &m
                     minimap_math::i32_to_f32(y) + 0.5,
                 );
                 let (east, north) = view.global_from_view(pixel);
-                let texel = raster.sample(src_level, src_x, src_y, east, north);
+                let texel = blit
+                    .raster
+                    .sample(blit.src_level, blit.src_x, blit.src_y, east, north);
                 if texel[3] > 0 {
                     let offset = usize::try_from(y)
                         .unwrap_or(0)
