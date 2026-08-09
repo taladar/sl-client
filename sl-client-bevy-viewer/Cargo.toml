@@ -170,7 +170,6 @@ sl-l10n = { version = "0.1.0", path = "../sl-l10n" }
 # World-map tile fetch / disk cache (`MapTileCache`), shared with the
 # sl-map-tools CLI / web tools so the viewer does not grow a third fetcher.
 sl-map-apis = { version = "0.8.0" }
-sl-media = { version = "0.1.0", path = "../sl-media" }
 sl-notecard = { version = "0.1.0", path = "../sl-notecard" }
 sl-repl = { version = "0.1.0", path = "../sl-repl" }
 sl-settings = { version = "0.1.0", path = "../sl-settings" }

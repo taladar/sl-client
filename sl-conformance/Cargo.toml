@@ -31,7 +31,6 @@ clap_complete = "4.6.2"
 clap_mangen = "0.3.0"
 etherparse = { version = "0.20.2" }
 fs-err = { version = "3.3.0" }
-log-panics = { version = "2.1.0", features = ["with-backtrace"] }
 owo-colors = "4.3.0"
 pcap-file = { version = "2.0.0" }
 serde = { version = "1.0.228", features = ["derive"] }
