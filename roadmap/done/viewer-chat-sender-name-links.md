@@ -2,7 +2,7 @@
 id: viewer-chat-sender-name-links
 title: Chat sender names — clickable agent / object links
 topic: viewer
-status: ready
+status: done
 origin: requested during viewer-url-linkification (2026-08-09) — the speaker's
   name in a chat line should be a link, like the reference
 blocked_by: [viewer-url-linkification]
@@ -34,3 +34,20 @@ Note the overlay currently formats each line as one joined string
 (`format_transcript`); both need to move to the segment-rendered widget for the
 name to become its own clickable run — the same conversion the chat / notice
 body-link tasks make for the message body.
+
+## Outcome (2026-08-09)
+
+Done for the **Conversations transcript** only. The transient nearby-chat
+overlay (`chat.rs`) is **deliberately left plain**: a fading heads-up line that
+ate clicks would block picking in-world objects behind it, so its speaker name
+stays non-interactive (the persistent transcript is where clicking belongs).
+
+The transcript moved from one joined-string `Text` node to a **column of
+per-line linkified rows** (`crate::linkified_text::spawn_linkified_text`),
+rebuilt on a revision change. Each `TranscriptLine` carries a `SpeakerLink`
+(agent / object / own / none), and `line_text` builds the line as a labelled
+link `[secondlife:///app/agent/<id>/about  Name]: body` (an objectim link for an
+object speaker), so the name shows plainly but targets the SLURL and the body's
+own URLs / SLURLs linkify too. Recalled (persisted) history has no typed id, so
+those names are not links. The SLURL click dispatch is
+[[viewer-slurl-parse-dispatch]]'s job; web links in a line already open.

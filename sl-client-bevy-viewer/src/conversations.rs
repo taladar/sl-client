@@ -55,8 +55,8 @@ use std::collections::{BTreeMap, VecDeque};
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatType, Command, GroupKey, ImDialog, ImSessionId, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, Uuid,
+    AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, ObjectKey, SlCommand,
+    SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
 use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
@@ -65,6 +65,7 @@ use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translator};
+use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::ui::{
     LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column, row,
@@ -252,6 +253,22 @@ impl ConversationKey {
     }
 }
 
+/// The clickable identity of a transcript line's speaker — what the sender-name
+/// link targets (`viewer-chat-sender-name-links`). An avatar name links to the
+/// resident profile, an object name to the object inspector; our own lines and
+/// system lines carry no link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpeakerLink {
+    /// Our own line (rendered as the localized "You", no link).
+    Own,
+    /// An avatar spoke — links to `secondlife:///app/agent/<id>/about`.
+    Agent(AgentKey),
+    /// An object spoke — links to `secondlife:///app/objectim/<id>?...`.
+    Object(ObjectKey),
+    /// A system / unknown speaker — no link.
+    None,
+}
+
 /// One transcript line: who said it and what, plus whether it was **our own**
 /// line (rendered with the localized "You" label rather than a stored name).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,6 +277,8 @@ struct TranscriptLine {
     own: bool,
     /// The remote speaker's display name (empty for our own lines).
     speaker: String,
+    /// The clickable identity of the speaker, for the sender-name link.
+    speaker_link: SpeakerLink,
     /// The message text.
     body: String,
 }
@@ -428,20 +447,28 @@ impl ConversationModel {
             TranscriptLine {
                 own: false,
                 speaker: speaker.to_owned(),
+                speaker_link: SpeakerLink::Agent(speaker_id),
                 body: body.to_owned(),
             },
         );
         self.clear_typing(key, speaker_id);
     }
 
-    /// A remote nearby-chat line, whose typed speaker id we do not always hold —
-    /// so it clears no typing flag.
-    fn push_nearby(&mut self, speaker: &str, body: &str) {
+    /// A remote nearby-chat line, whose speaker is an avatar or an in-world object
+    /// (from the chat message's [`ChatSource`]) — so the sender name links to the
+    /// right profile / inspector. It clears no typing flag (a nearby speaker's
+    /// typed id is not always held).
+    fn push_nearby(&mut self, speaker: &str, source: &ChatSource, body: &str) {
         self.push_line(
             ConversationKey::Nearby,
             TranscriptLine {
                 own: false,
                 speaker: speaker.to_owned(),
+                speaker_link: match source {
+                    ChatSource::Agent(agent) => SpeakerLink::Agent(*agent),
+                    ChatSource::Object(object) => SpeakerLink::Object(*object),
+                    ChatSource::System | ChatSource::Unknown { .. } => SpeakerLink::None,
+                },
                 body: body.to_owned(),
             },
         );
@@ -455,6 +482,7 @@ impl ConversationModel {
             TranscriptLine {
                 own: true,
                 speaker: String::new(),
+                speaker_link: SpeakerLink::Own,
                 body: body.to_owned(),
             },
         );
@@ -651,25 +679,43 @@ fn invite_command(key: ConversationKey, accept: bool) -> Option<Command> {
     })
 }
 
-/// Renders a transcript to a single string, `you` labelling our own lines. Takes
-/// an iterator so the caller can render the persisted **recall** lines and the
-/// live lines as one block (`recall.iter().chain(lines.iter())`) without joining
-/// two owned collections.
-fn format_transcript<'line>(
-    lines: impl IntoIterator<Item = &'line TranscriptLine>,
-    you: &str,
-) -> String {
-    let mut out = String::new();
-    for line in lines {
-        if !out.is_empty() {
-            out.push('\n');
+/// The linkified source text for one transcript line — the speaker name followed
+/// by the body — as fed to [`spawn_linkified_text`]. The speaker name is a
+/// clickable link where the speaker is known: a `secondlife:///app/agent/<id>/…`
+/// link for an avatar, a `secondlife:///app/objectim/<id>?…` link for an object
+/// (both as labelled links so the display name shows but the SLURL is the target);
+/// our own lines use the localized `you` label with no link. The body is passed
+/// through verbatim, so any URLs / SLURLs it carries linkify too.
+///
+/// Pure, so the link construction is unit-testable. The display name is stripped
+/// of `[` / `]` so it cannot break the labelled-link brackets (a labelled link's
+/// target is always the real id regardless, but this keeps the shown name clean).
+fn line_text(line: &TranscriptLine, you: &str) -> String {
+    let name = match line.speaker_link {
+        SpeakerLink::Own => you.to_owned(),
+        SpeakerLink::Agent(agent) => {
+            format!(
+                "[secondlife:///app/agent/{}/about {}]",
+                agent.uuid(),
+                sanitize_label(&line.speaker)
+            )
         }
-        let speaker = if line.own { you } else { &line.speaker };
-        out.push_str(speaker);
-        out.push_str(": ");
-        out.push_str(&line.body);
-    }
-    out
+        SpeakerLink::Object(object) => {
+            format!(
+                "[secondlife:///app/objectim/{}? {}]",
+                object.uuid(),
+                sanitize_label(&line.speaker)
+            )
+        }
+        SpeakerLink::None => line.speaker.clone(),
+    };
+    format!("{name}: {}", line.body)
+}
+
+/// Strip the labelled-link delimiters (`[` / `]`) from a speaker name so they
+/// cannot terminate the `[url  name]` bracket early.
+fn sanitize_label(name: &str) -> String {
+    name.replace(['[', ']'], "")
 }
 
 /// The label a tab shows: its title, with a trailing unread badge when it has
@@ -727,8 +773,9 @@ struct ConversationView {
     panel: Entity,
     /// The pending-invite bar (Accept / Decline), shown only while invited.
     invite_bar: Entity,
-    /// The single transcript text node, rebuilt when the revision advances.
-    transcript_text: Entity,
+    /// The transcript's line column — one linkified row per line, rebuilt when the
+    /// revision advances.
+    transcript_column: Entity,
     /// The transcript scroll container, pinned to the bottom on a new line.
     transcript_scroll: Entity,
     /// The "X is typing…" status node, shown only while someone is typing.
@@ -1152,15 +1199,15 @@ fn spawn_conversation_view(
             ChildOf(panel),
         ))
         .id();
-    let transcript_text = commands
+    // The transcript is a vertical column of per-line linkified rows (rebuilt on a
+    // new line), so a speaker name and any URLs / SLURLs render as clickable links.
+    let transcript_column = commands
         .spawn((
-            Text::new(String::new()),
-            UiFont::Sans.at(TRANSCRIPT_FONT_SIZE),
-            TextColor(TRANSCRIPT_COLOR),
             Node {
                 width: Val::Percent(100.0),
-                ..default()
+                ..column(Val::ZERO)
             },
+            Pickable::IGNORE,
             Name::new("conversations-transcript"),
             ChildOf(transcript_scroll),
         ))
@@ -1216,7 +1263,7 @@ fn spawn_conversation_view(
         tab_label,
         panel,
         invite_bar,
-        transcript_text,
+        transcript_column,
         transcript_scroll,
         typing_text,
         input_field,
@@ -1381,7 +1428,7 @@ fn ingest_conversation_events(
                 // overlay does. Our own local chat is echoed here too, under our
                 // name — the same as the overlay shows it.
                 if is_displayable(&message.chat_type, &message.message) {
-                    model.push_nearby(&message.from_name, &message.message);
+                    model.push_nearby(&message.from_name, &message.source, &message.message);
                 }
             }
             SlSessionEvent::ChatTyping {
@@ -1500,6 +1547,9 @@ fn ingest_conversation_events(
                     .map(|line| TranscriptLine {
                         own: false,
                         speaker: line.speaker.clone().unwrap_or_default(),
+                        // Persisted history carries only the speaker name, not the
+                        // typed id, so a recalled name is not a link.
+                        speaker_link: SpeakerLink::None,
                         body: line.text.clone(),
                     })
                     .collect();
@@ -1649,6 +1699,7 @@ fn refresh_conversations(
     mut ui: Option<ResMut<ConversationsUi>>,
     translator: Translator,
     time: Res<Time>,
+    mut commands: Commands,
     mut texts: Query<&mut Text>,
     mut backgrounds: Query<&mut BackgroundColor>,
     mut borders: Query<&mut BorderColor>,
@@ -1711,12 +1762,26 @@ fn refresh_conversations(
             set_text(&mut texts, view.typing_text, &status);
         }
 
-        // Transcript, only when a new line landed.
+        // Transcript, only when a new line landed: rebuild the line column — one
+        // linkified row per line (persisted recall lines first, then the live
+        // lines) — so speaker names and body URLs / SLURLs render clickable. Rebuilt
+        // (not appended) on the revision change, matching the previous whole-string
+        // cadence; the transcript is bounded by `HISTORY_CAP`.
         if view.rendered_revision != entry.revision {
             view.rendered_revision = entry.revision;
-            // Persisted recall lines first, then the live lines, as one block.
-            let rendered = format_transcript(entry.recall.iter().chain(entry.lines.iter()), &you);
-            set_text(&mut texts, view.transcript_text, &rendered);
+            commands
+                .entity(view.transcript_column)
+                .despawn_related::<Children>();
+            for line in entry.recall.iter().chain(entry.lines.iter()) {
+                let mut style = LinkTextStyle::at(TRANSCRIPT_FONT_SIZE);
+                style.plain_color = TRANSCRIPT_COLOR;
+                spawn_linkified_text(
+                    &mut commands,
+                    view.transcript_column,
+                    &line_text(line, &you),
+                    style,
+                );
+            }
             // Pin the scroll to the newest line.
             if let Ok(mut scroll) = scrolls.get_mut(view.transcript_scroll) {
                 scroll.0.y = SCROLL_TO_BOTTOM;
@@ -1901,12 +1966,11 @@ fn position_conversations_dock_host(
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, ConversationKey, ConversationModel, ConversationTitle, TranscriptLine,
-        command_for, format_transcript, invite_command, tab_label,
+        Command, ConversationKey, ConversationModel, ConversationTitle, SpeakerLink,
+        TranscriptLine, command_for, invite_command, line_text, tab_label,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, GroupKey, ImSessionId, Uuid};
-    use std::collections::VecDeque;
+    use sl_client_bevy::{AgentKey, ChatSource, GroupKey, ImSessionId, ObjectKey, Uuid};
 
     /// A shared reference to `key`'s conversation in `model`, if it exists — the
     /// test-side lookup (the model has no non-test accessor for it).
@@ -1952,7 +2016,7 @@ mod tests {
     #[test]
     fn active_tab_has_no_unread() {
         let mut model = ConversationModel::default();
-        model.push_nearby("Avatar Three", "hello");
+        model.push_nearby("Avatar Three", &ChatSource::System, "hello");
         assert_eq!(model.entries.first().map(|entry| entry.unread), Some(0));
     }
 
@@ -2067,7 +2131,7 @@ mod tests {
         // Nearby unread (arrives while another tab is active) is not attention.
         model.select(ConversationKey::Direct(peer));
         model.ensure(ConversationKey::Direct(peer));
-        model.push_nearby("Avatar Ten", "hello");
+        model.push_nearby("Avatar Ten", &ChatSource::System, "hello");
         assert_eq!(model.has_im_attention(), false);
         // A direct IM to a non-active tab is.
         model.select(ConversationKey::Nearby);
@@ -2120,25 +2184,56 @@ mod tests {
         assert!(invite_command(ConversationKey::Nearby, true).is_none());
     }
 
-    /// The transcript renders one `"name: body"` line each, labelling our own
-    /// lines with the "you" string.
+    /// One line renders as `"name: body"`, with the speaker a labelled
+    /// agent / object SLURL link where known, "You" for our own line, and plain
+    /// text for a system speaker.
     #[test]
-    fn transcript_formats_own_and_remote_lines() {
-        let mut lines = VecDeque::new();
-        lines.push_back(TranscriptLine {
+    fn line_text_builds_the_speaker_link_and_body() {
+        let agent = AgentKey::from(Uuid::from_u128(0xa1));
+        let remote = TranscriptLine {
             own: false,
             speaker: "Avatar Five".to_owned(),
+            speaker_link: SpeakerLink::Agent(agent),
             body: "hi".to_owned(),
-        });
-        lines.push_back(TranscriptLine {
+        };
+        assert_eq!(
+            line_text(&remote, "You"),
+            format!(
+                "[secondlife:///app/agent/{}/about Avatar Five]: hi",
+                agent.uuid()
+            )
+        );
+
+        let object = ObjectKey::from(Uuid::from_u128(0x0b));
+        let object_line = TranscriptLine {
+            own: false,
+            speaker: "Radio".to_owned(),
+            speaker_link: SpeakerLink::Object(object),
+            body: "tune in".to_owned(),
+        };
+        assert_eq!(
+            line_text(&object_line, "You"),
+            format!(
+                "[secondlife:///app/objectim/{}? Radio]: tune in",
+                object.uuid()
+            )
+        );
+
+        let own = TranscriptLine {
             own: true,
             speaker: String::new(),
+            speaker_link: SpeakerLink::Own,
             body: "hey".to_owned(),
-        });
-        assert_eq!(
-            format_transcript(lines.iter(), "You"),
-            "Avatar Five: hi\nYou: hey"
-        );
+        };
+        assert_eq!(line_text(&own, "You"), "You: hey");
+
+        let system = TranscriptLine {
+            own: false,
+            speaker: "Region".to_owned(),
+            speaker_link: SpeakerLink::None,
+            body: "notice".to_owned(),
+        };
+        assert_eq!(line_text(&system, "You"), "Region: notice");
     }
 
     /// Nearby recall lines render *above* the live lines, and only the Nearby tab
@@ -2147,26 +2242,39 @@ mod tests {
     fn nearby_recall_renders_above_live_lines() {
         let mut model = ConversationModel::default();
         // A live line arrives first…
-        model.push_nearby("Avatar Live", "live line");
+        model.push_nearby("Avatar Live", &ChatSource::System, "live line");
         assert_eq!(model.nearby_live_len(), 1);
         // …then persisted history is recalled (oldest-first, as the ingest builds).
         model.set_nearby_recall(vec![
             TranscriptLine {
                 own: false,
                 speaker: "Avatar Past".to_owned(),
+                speaker_link: SpeakerLink::None,
                 body: "older".to_owned(),
             },
             TranscriptLine {
                 own: false,
                 speaker: "Avatar Past".to_owned(),
+                speaker_link: SpeakerLink::None,
                 body: "newer".to_owned(),
             },
         ]);
-        let rendered = get(&model, ConversationKey::Nearby)
-            .map(|entry| format_transcript(entry.recall.iter().chain(entry.lines.iter()), "You"));
+        // Recall lines render above the live lines (recall first, then live).
+        let bodies = get(&model, ConversationKey::Nearby).map(|entry| {
+            entry
+                .recall
+                .iter()
+                .chain(entry.lines.iter())
+                .map(|line| line.body.clone())
+                .collect::<Vec<_>>()
+        });
         assert_eq!(
-            rendered,
-            Some("Avatar Past: older\nAvatar Past: newer\nAvatar Live: live line".to_owned())
+            bodies,
+            Some(vec![
+                "older".to_owned(),
+                "newer".to_owned(),
+                "live line".to_owned()
+            ])
         );
     }
 

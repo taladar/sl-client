@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 243 |
+| ready | 242 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 738 |
+| done | 739 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (242)
 
 ### protocol
 
@@ -269,9 +269,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-chat-omnifilter`](ready/viewer-chat-omnifilter.md) — Omnifilter
   chat-filtering floater
-- [`viewer-chat-sender-name-links`](ready/viewer-chat-sender-name-links.md) —
-  Chat sender names — clickable agent / object links (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-chat-spellcheck`](ready/viewer-chat-spellcheck.md) — Spellcheck in
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
@@ -1065,7 +1062,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (738)
+## done (739)
 
 ### protocol
 
@@ -1279,6 +1276,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   binaries' chat logs by grid + avatar, not name alone
 - [`viewer-chat-overlay-fade`](done/viewer-chat-overlay-fade.md) — Nearby-chat
   overlay fade / decay
+- [`viewer-chat-sender-name-links`](done/viewer-chat-sender-name-links.md) —
+  Chat sender names — clickable agent / object links (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
   Reusable clickable avatar-name / group-name widgets
 - [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
