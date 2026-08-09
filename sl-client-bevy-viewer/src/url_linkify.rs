@@ -232,14 +232,36 @@ pub(crate) enum LinkTarget {
         grid: Grid,
     },
     /// A location SLURL — a region / place / teleport / world-map link. The
-    /// canonical URL ([`LinkMatch::url`]) is preserved for the dispatcher to
-    /// re-parse against `sl-map-tools`; the label is computed here.
+    /// region name and coordinates are parsed out here so the SLURL dispatcher
+    /// ([[viewer-slurl-parse-dispatch]]) can act on the destination directly
+    /// (resolve the region, teleport, centre the map) without re-parsing the URL.
     Location {
         /// Which location app / form matched.
         kind: LocationKind,
         /// The grid the link names, or `None` for the current grid.
         grid: Grid,
+        /// The (URL-unescaped) destination region name.
+        region: String,
+        /// The region-local arrival coordinates the URL carried, each present
+        /// only when the URL supplied it (`Region`, `Region/x`, `Region/x/y`,
+        /// `Region/x/y/z`). The reference clamps a coordinate the URL omits to
+        /// the region centre (128) / ground (0) at teleport time.
+        coords: LocationCoords,
     },
+}
+
+/// The region-local coordinates a location SLURL carried — each `None` when the
+/// URL did not supply that component. Mirrors the reference `LLSLURL` position,
+/// which fills an omitted coordinate with the region-centre default only when the
+/// destination is finally resolved.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LocationCoords {
+    /// The east (X) coordinate, if the URL supplied it.
+    pub(crate) x: Option<i32>,
+    /// The north (Y) coordinate, if the URL supplied it.
+    pub(crate) y: Option<i32>,
+    /// The up (Z) coordinate, if the URL supplied it.
+    pub(crate) z: Option<i32>,
 }
 
 /// Which SLURL / location form a [`LinkTarget::Location`] matched, so the
@@ -746,16 +768,24 @@ fn build_worldmap(matched: &str) -> Option<LinkMatch> {
 /// `Region (x,y,z)`, matching the reference `LLUrlEntryRegion::getLabel`.
 fn build_app_location(matched: &str, entity: &str, kind: LocationKind) -> Option<LinkMatch> {
     let (grid, rest) = split_app(matched, entity)?;
-    let label = location_label(rest.trim_end_matches('/'));
-    Some(location_link(matched, kind, grid, label))
+    Some(location_link(
+        matched,
+        kind,
+        grid,
+        rest.trim_end_matches('/'),
+    ))
 }
 
 /// Build a bare current-grid `secondlife://Region/x/y/z` SLURL — the reference
 /// `LLUrlEntryPlace`.
 fn build_slurl(matched: &str) -> Option<LinkMatch> {
     let rest = matched.strip_prefix_ci("secondlife://")?;
-    let label = location_label(rest.trim_end_matches('/'));
-    Some(location_link(matched, LocationKind::Slurl, None, label))
+    Some(location_link(
+        matched,
+        LocationKind::Slurl,
+        None,
+        rest.trim_end_matches('/'),
+    ))
 }
 
 /// Build a grid-qualified `secondlife://<Grid>/secondlife/Region/x/y/z` SLURL: the
@@ -763,12 +793,11 @@ fn build_slurl(matched: &str) -> Option<LinkMatch> {
 fn build_grid_slurl(matched: &str) -> Option<LinkMatch> {
     let rest = matched.strip_prefix_ci("secondlife://")?;
     let (grid, after) = rest.split_once("/secondlife/")?;
-    let label = location_label(after.trim_end_matches('/'));
     Some(location_link(
         matched,
         LocationKind::Slurl,
         grid_of(grid),
-        label,
+        after.trim_end_matches('/'),
     ))
 }
 
@@ -776,12 +805,11 @@ fn build_grid_slurl(matched: &str) -> Option<LinkMatch> {
 fn build_hop_location(matched: &str) -> Option<LinkMatch> {
     let rest = matched.strip_prefix_ci("hop://")?;
     let (grid, after) = rest.split_once('/')?;
-    let label = location_label(after.trim_end_matches('/'));
     Some(location_link(
         matched,
         LocationKind::Slurl,
         grid_of(grid),
-        label,
+        after.trim_end_matches('/'),
     ))
 }
 
@@ -789,12 +817,11 @@ fn build_hop_location(matched: &str) -> Option<LinkMatch> {
 fn build_xgrid_location(matched: &str) -> Option<LinkMatch> {
     let rest = matched.strip_prefix_ci("x-grid-location-info://")?;
     let (grid, after) = rest.split_once("/region/")?;
-    let label = location_label(after.trim_end_matches('/'));
     Some(location_link(
         matched,
         LocationKind::Slurl,
         grid_of(grid),
-        label,
+        after.trim_end_matches('/'),
     ))
 }
 
@@ -804,17 +831,29 @@ fn build_map_url(matched: &str) -> Option<LinkMatch> {
     let after = matched
         .split_once("/secondlife/")
         .map(|(_host, tail)| tail)?;
-    let label = location_label(after.trim_end_matches('/'));
-    Some(location_link(matched, LocationKind::MapUrl, None, label))
+    Some(location_link(
+        matched,
+        LocationKind::MapUrl,
+        None,
+        after.trim_end_matches('/'),
+    ))
 }
 
-/// Assemble a [`LinkTarget::Location`] link with a fixed label.
-fn location_link(matched: &str, kind: LocationKind, grid: Grid, label: String) -> LinkMatch {
+/// Assemble a [`LinkTarget::Location`] link from a `Region[/x[/y[/z]]]` path: the
+/// region name and coordinates are parsed out for the target, and the visible
+/// label is `Region (x,y,z)`.
+fn location_link(matched: &str, kind: LocationKind, grid: Grid, path: &str) -> LinkMatch {
+    let (region, coords) = parse_location_path(path);
     LinkMatch {
         matched: matched.to_owned(),
         url: matched.to_owned(),
-        target: LinkTarget::Location { kind, grid },
-        label: LinkLabel::Fixed(label),
+        target: LinkTarget::Location {
+            kind,
+            grid,
+            region: region.clone(),
+            coords,
+        },
+        label: LinkLabel::Fixed(location_label(&region, coords)),
         icon: LinkIcon::Location,
         tooltip_key: TOOLTIP_SLURL,
     }
@@ -848,18 +887,40 @@ fn grid_of(host: &str) -> Grid {
     (!host.is_empty()).then(|| host.to_owned())
 }
 
-/// Format a location label from a `Region[/x[/y[/z]]]` path: the (URL-unescaped)
-/// region name, then the coordinates parenthesised — `Ahern (128,128,24)`,
-/// `Ahern (128,128)`, `Ahern (128)`, or just `Ahern`. Mirrors the reference
-/// `getLabel` coordinate handling.
-fn location_label(path: &str) -> String {
+/// Split a `Region[/x[/y[/z]]]` location path into its (URL-unescaped) region
+/// name and up to three integer coordinates — the structured form the SLURL
+/// dispatcher acts on. A non-numeric coordinate segment parses to `None` (the
+/// match regex only admits digits, so this is a belt-and-braces guard).
+fn parse_location_path(path: &str) -> (String, LocationCoords) {
     let mut parts = path.split('/');
     let region = parts.next().map(unescape_url).unwrap_or_default();
-    let coords: Vec<&str> = parts.filter(|part| !part.is_empty()).collect();
-    if coords.is_empty() {
-        region
+    let mut coords = parts
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().ok());
+    (
+        region,
+        LocationCoords {
+            x: coords.next().flatten(),
+            y: coords.next().flatten(),
+            z: coords.next().flatten(),
+        },
+    )
+}
+
+/// Format a location label from a parsed region name and coordinates: the region
+/// name, then the coordinates parenthesised — `Ahern (128,128,24)`,
+/// `Ahern (128,128)`, `Ahern (128)`, or just `Ahern`. Mirrors the reference
+/// `getLabel` coordinate handling.
+fn location_label(region: &str, coords: LocationCoords) -> String {
+    let present: Vec<String> = [coords.x, coords.y, coords.z]
+        .into_iter()
+        .flatten()
+        .map(|coord| coord.to_string())
+        .collect();
+    if present.is_empty() {
+        region.to_owned()
     } else {
-        format!("{region} ({})", coords.join(","))
+        format!("{region} ({})", present.join(","))
     }
 }
 
@@ -928,7 +989,8 @@ impl StripPrefixCi for str {
 mod tests {
     use super::{
         AgentNameStyle, LinkIcon, LinkLabel, LinkMatch, LinkTarget, LocationKind, TextRun, linkify,
-        location_label, query_param, split_app, trim_trailing_punctuation, unescape_url,
+        location_label, parse_location_path, query_param, split_app, trim_trailing_punctuation,
+        unescape_url,
     };
     use crate::ui_test::TestError;
     use pretty_assertions::assert_eq;
@@ -1045,6 +1107,7 @@ mod tests {
             LinkTarget::Location {
                 kind: LocationKind::Slurl,
                 grid: None,
+                ..
             }
         ));
         assert_eq!(link.url, "secondlife://Ahern/128/128/24");
@@ -1176,11 +1239,18 @@ mod tests {
             LinkLabel::Fixed("Ahern (128,128,24)".to_owned())
         );
         assert!(matches!(
-            slurl.target,
+            &slurl.target,
             LinkTarget::Location {
                 kind: LocationKind::Slurl,
                 grid: None,
-            }
+                region,
+                coords,
+            } if region == "Ahern"
+                && *coords == super::LocationCoords {
+                    x: Some(128),
+                    y: Some(128),
+                    z: Some(24),
+                }
         ));
 
         let map = only_link("http://maps.secondlife.com/secondlife/Ahern/128/128/24")?;
@@ -1190,6 +1260,7 @@ mod tests {
             LinkTarget::Location {
                 kind: LocationKind::MapUrl,
                 grid: None,
+                ..
             }
         ));
         Ok(())
@@ -1203,6 +1274,7 @@ mod tests {
             LinkTarget::Location {
                 kind: LocationKind::Region,
                 grid: None,
+                ..
             }
         ));
         assert_eq!(link.label, LinkLabel::Fixed("Ahern (128,128,0)".to_owned()));
@@ -1269,11 +1341,15 @@ mod tests {
 
     #[test]
     fn location_label_handles_each_coordinate_arity() {
-        assert_eq!(location_label("Ahern/1/2/3"), "Ahern (1,2,3)");
-        assert_eq!(location_label("Ahern/1/2"), "Ahern (1,2)");
-        assert_eq!(location_label("Ahern/1"), "Ahern (1)");
-        assert_eq!(location_label("Ahern"), "Ahern");
-        assert_eq!(location_label("Da%20Boom/1/2"), "Da Boom (1,2)");
+        let label = |path: &str| {
+            let (region, coords) = parse_location_path(path);
+            location_label(&region, coords)
+        };
+        assert_eq!(label("Ahern/1/2/3"), "Ahern (1,2,3)");
+        assert_eq!(label("Ahern/1/2"), "Ahern (1,2)");
+        assert_eq!(label("Ahern/1"), "Ahern (1)");
+        assert_eq!(label("Ahern"), "Ahern");
+        assert_eq!(label("Da%20Boom/1/2"), "Da Boom (1,2)");
     }
 
     #[test]

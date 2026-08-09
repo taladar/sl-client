@@ -178,6 +178,7 @@ mod sit_offset;
 mod skin;
 mod sky;
 mod sky_presets;
+mod slurl_dispatch;
 mod snapshot_floater;
 mod spacenav;
 mod stand_stop_button;
@@ -995,6 +996,9 @@ fn run_session(
     // links. The parcel-name cache feeds the parcel-link labels.
     .add_plugins(crate::parcel_names::ParcelNamesPlugin)
     .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
+    // Routes a clicked / command-line SLURL to its handler (profile, IM,
+    // teleport, world map): viewer-slurl-parse-dispatch.
+    .add_plugins(crate::slurl_dispatch::SlurlDispatchPlugin)
     // The reusable radio-widget's runtime half (viewer-ui-radio-widget): keeps
     // each option's `Checked` marker and indicator glyph reconciled to the
     // group's selection, so a click and an external write (the Build Tools

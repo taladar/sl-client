@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 242 |
+| ready | 241 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 739 |
+| done | 740 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (242)
+## ready (241)
 
 ### protocol
 
@@ -602,8 +602,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
-- [`viewer-slurl-parse-dispatch`](ready/viewer-slurl-parse-dispatch.md) — SLURL
-  parsing & action dispatch
 - [`viewer-snapshot-postcard`](ready/viewer-snapshot-postcard.md) — Snapshot
   destination — postcard / e-mail (blocked by `viewer-snapshot-floater` (done))
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
@@ -1062,7 +1060,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (739)
+## done (740)
 
 ### protocol
 
@@ -1949,6 +1947,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   view)
 - [`viewer-sit-target-and-stand-button`](done/viewer-sit-target-and-stand-button.md)
   — Sit target ignored on sit, and no Stand button while seated
+- [`viewer-slurl-parse-dispatch`](done/viewer-slurl-parse-dispatch.md) — SLURL
+  parsing & action dispatch
 - [`viewer-snapshot-chat-overlay-not-hidden`](done/viewer-snapshot-chat-overlay-not-hidden.md)
   — Snapshot include-UI-off leaves the nearby-chat overlay in the shot
 - [`viewer-snapshot-floater`](done/viewer-snapshot-floater.md) — Snapshot

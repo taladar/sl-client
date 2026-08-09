@@ -2,7 +2,7 @@
 id: viewer-slurl-parse-dispatch
 title: SLURL parsing & action dispatch
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-slurl-handling
 refs: [viewer-world-map-floater, viewer-teleport-flow-progress]
 ---
