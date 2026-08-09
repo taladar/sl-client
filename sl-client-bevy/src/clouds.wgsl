@@ -22,6 +22,7 @@
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings::globals,
     view_transformations::position_world_to_clip,
 }
 
@@ -50,8 +51,8 @@ struct CloudParams {
     cloud_color: vec3<f32>,
     // The reference `cloud_scale`; < 0.001 discards the layer.
     cloud_scale: f32,
-    // Cloud layer 1 position (X, Y — already offset by the accumulated scroll) and
-    // density (Z).
+    // Cloud layer 1 position (X, Y — WITHOUT the scroll; the shader integrates
+    // the scroll from `globals.time` below) and density (Z).
     cloud_pos_density1: vec3<f32>,
     cloud_variance: f32,
     // Cloud layer 2 detail position (X, Y) and density (Z).
@@ -66,7 +67,30 @@ struct CloudParams {
     // for an EEP reflection-probe-ambiance sky. Applied after linearisation to
     // match the sky dome (the reference `softenLight` WL-sky branch).
     sky_hdr_scale: f32,
+    // The `globals.time` (wrapped seconds) at which `scroll_base` was anchored.
+    scroll_ref_time: f32,
+    // The scroll rate, in offset units per second (`cloud_scroll_rate / 100`).
+    scroll_rate: vec2<f32>,
+    // The accumulated scroll offset at the anchor time.
+    scroll_base: vec2<f32>,
 };
+
+// The hour-wrap period of `globals.time` (`Time::DEFAULT_WRAP_PERIOD`, 3600 s),
+// used to unwind the scroll clock across the wrap (the face_material.wgsl
+// texture-animation pattern; the CPU re-anchors `scroll_base` well before a
+// second wrap could be reached).
+const CLOUD_TIME_WRAP: f32 = 3600.0;
+
+// The accumulated cloud scroll at the current time: the reference
+// `LLEnvironment::updateCloudScroll` integration, evaluated GPU-side so a
+// steadily scrolling layer never rewrites the uniform block.
+fn cloud_scroll() -> vec2<f32> {
+    var elapsed = globals.time - cloud.scroll_ref_time;
+    if elapsed < 0.0 {
+        elapsed = elapsed + CLOUD_TIME_WRAP;
+    }
+    return cloud.scroll_base + cloud.scroll_rate * elapsed;
+}
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> cloud: CloudParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var noise_texture: texture_2d<f32>;
@@ -235,8 +259,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         cloud_noise((uv4 + uv2) / 8.0).x,
     ) * variance;
 
-    uv1 += cloud.cloud_pos_density1.xy + (disturbance * 0.2);
-    uv2 += cloud.cloud_pos_density1.xy;
+    // Layer-1 position with the GPU-integrated scroll folded in, exactly as the
+    // reference CPU accumulation applied it (`x - scroll.x`, `y + scroll.y`).
+    let scroll = cloud_scroll();
+    let pos1 = cloud.cloud_pos_density1.xy + vec2<f32>(-scroll.x, scroll.y);
+    uv1 += pos1 + (disturbance * 0.2);
+    uv2 += pos1;
     let uv3o = uv3 + cloud.cloud_pos_density2.xy;
     let uv4o = uv4 + cloud.cloud_pos_density2.xy;
 

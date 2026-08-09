@@ -38,7 +38,7 @@ const SKY_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7b3e1d9a-4c22-4f8e-b0a1-
 /// `sky.wgsl` `SkyParams` layout so the std140 uniform packing lines up: a
 /// `vec3` occupies 12 bytes with 16-byte alignment, and the following scalar
 /// fills the 4-byte remainder of that 16-byte slot.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root as `SkyParams`, where the name reads clearly"

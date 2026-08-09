@@ -17,20 +17,25 @@
 
 #import bevy_pbr::{
     mesh_functions,
+    mesh_view_bindings::globals,
     view_transformations::position_world_to_clip,
 }
 
-// The per-frame star inputs. Two live scalars plus a `vec2` pad, filling a single
+// The twinkle clock scale: elapsed seconds * 0.5 (the reference `sStarTime` /
+// `WATER_TIME` uniform). Applied to `globals.time` here rather than uploaded as
+// a uniform, so the running twinkle never rewrites the material. `globals.time`
+// wraps hourly (3600 s), and 3600 * 0.5 is an exact multiple of the 1.25 s
+// sawtooth period below, so the wrap is seamless.
+const STAR_TIME_SCALE: f32 = 0.5;
+
+// The per-frame star inputs. One live scalar plus a `vec3` pad, filling a single
 // 16-byte std140 slot, matching the Rust `StarParams` (`ShaderType`) exactly.
 struct StarParams {
     // Star-field opacity: `star_brightness / 500` (the reference `custom_alpha`),
     // clamped to 1.0.
     custom_alpha: f32,
-    // Twinkle animation time: elapsed seconds * 0.5 (the reference `sStarTime` /
-    // `WATER_TIME` uniform).
-    time: f32,
     // Padding to a 16-byte std140 slot.
-    reserved: vec2<f32>,
+    reserved: vec3<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> star: StarParams;
@@ -73,7 +78,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // position scaled by a sawtooth of time (`mod(time, 1.25)`). The star mesh is
     // centred on the camera and slowly rotated by the model matrix, so the
     // model-space position stays stable and the twinkle does not swim with it.
-    let t = star.time % 1.25;
+    let t = (globals.time * STAR_TIME_SCALE) % 1.25;
     out.screenpos = vertex.position.xy * vec2<f32>(t, t);
     out.uv = vertex.uv;
     out.color = vertex.color;

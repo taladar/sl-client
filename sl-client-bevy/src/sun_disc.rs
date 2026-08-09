@@ -40,7 +40,7 @@ const SUN_DISC_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f9c6b41-8d05-4c7e-
 ///
 /// Five scalars, so the layout matches the `sun_disc.wgsl` `SunDiscParams`
 /// exactly.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root as `SunDiscParams`, where the name reads clearly"

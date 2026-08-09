@@ -33,7 +33,7 @@ use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::image::Image;
 use bevy::mesh::{Mesh, MeshVertexBufferLayoutRef};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
-use bevy::prelude::{AlphaMode, Vec2};
+use bevy::prelude::{AlphaMode, Vec3};
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
@@ -44,23 +44,22 @@ use bevy::shader::{Shader, ShaderRef};
 /// material can reference it without an on-disk asset path.
 const STAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4a7e2c93-6f1b-4d8a-b2e5-3c9f0a7d1e64");
 
-/// The per-frame inputs for the star field: the reference viewer's star uniforms
-/// (`custom_alpha` and the twinkle `time`).
+/// The per-frame inputs for the star field: the reference viewer's star
+/// `custom_alpha` uniform. The twinkle clock is **not** CPU-driven: the shader
+/// reads Bevy's `globals.time` directly, so a running twinkle never dirties the
+/// material (the reference `sStarTime` uniform's job).
 ///
-/// Two live scalars plus a [`Vec2`] pad, filling a single 16-byte std140 uniform
+/// One live scalar plus a [`Vec3`] pad, filling a single 16-byte std140 uniform
 /// slot so the layout matches the `stars.wgsl` `StarParams` exactly.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct StarParams {
     /// The star-field opacity, the reference `custom_alpha` = `star_brightness /
     /// 500` (clamped to `1.0`). The viewer hides the field entirely below the
     /// reference `0.001` threshold, so the field only renders when this is
     /// meaningful.
     pub custom_alpha: f32,
-    /// The twinkle animation time, the reference `sStarTime` = elapsed seconds ×
-    /// `0.5`. `stars.wgsl` scrolls the per-star twinkle sawtooth by this.
-    pub time: f32,
     /// Padding so the block fills a 16-byte std140 slot (matches `stars.wgsl`).
-    pub reserved: Vec2,
+    pub reserved: Vec3,
 }
 
 /// The star-field material: one [`StarParams`] uniform block plus the bloom

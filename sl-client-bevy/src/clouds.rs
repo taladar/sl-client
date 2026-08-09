@@ -23,7 +23,7 @@ use bevy::image::Image;
 use bevy::math::Vec3;
 use bevy::mesh::{Mesh, MeshVertexBufferLayoutRef};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
-use bevy::prelude::AlphaMode;
+use bevy::prelude::{AlphaMode, Vec2};
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
@@ -41,7 +41,7 @@ const CLOUD_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1e9d43-2c07-4a8f-9e5
 ///
 /// Laid out as `vec3` + trailing scalar pairs so the std140 uniform layout matches
 /// the `clouds.wgsl` `CloudParams` (`ShaderType`) exactly.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct CloudParams {
     /// Sun (or, at night, moon) direction, Bevy Y-up, clamped like the reference
     /// `LLEnvironment::getClampedLightNorm`.
@@ -96,6 +96,19 @@ pub struct CloudParams {
     /// / classic-mode sky; `sqrt(gamma) * 2` for an EEP reflection-probe-ambiance
     /// sky (the sl-proto `SkySettings::sky_hdr_scale`).
     pub sky_hdr_scale: f32,
+    /// The `globals.time` value (wrapped-clock seconds) at which the scroll
+    /// anchor below was taken. The shader integrates the scroll GPU-side —
+    /// `scroll_base + scroll_rate * (globals.time - scroll_ref_time)`, unwound
+    /// across the hourly wrap — so a steadily scrolling cloud layer never
+    /// rewrites this uniform block (the face-material texture-anim pattern).
+    pub scroll_ref_time: f32,
+    /// The scroll rate in offset units per second (the EEP `cloud_scroll_rate`
+    /// divided by the reference divisor `100`).
+    pub scroll_rate: Vec2,
+    /// The accumulated cloud-scroll offset at the anchor time, in the reference
+    /// `LLEnvironment::updateCloudScroll` units (applied to
+    /// [`Self::cloud_pos_density1`]'s XY as `(-x, +y)`).
+    pub scroll_base: Vec2,
 }
 
 /// The cloud-layer material: one [`CloudParams`] uniform block plus the current and

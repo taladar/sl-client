@@ -2940,8 +2940,11 @@ fn spawn_sky_at(
             resolved.lightnorm,
             resolved.sun_up_factor,
             resolved.glow_factor,
-            // No scroll: `drive_clouds` accumulates it from the frame clock, and a
-            // scene that declared a still sky must not quietly drift.
+            // No scroll (zero rate): the shader's GPU-side integration is a
+            // no-op, and a scene that declared a still sky must not quietly
+            // drift.
+            0.0,
+            Vec2::ZERO,
             Vec2::ZERO,
         ),
         cloud_noise: placeholder.clone(),
@@ -2973,8 +2976,7 @@ fn spawn_sky_at(
             // `drive_stars` folds in, so the field fades with the time of day
             // rather than being pinned visible.
             custom_alpha: (sky.star_brightness / 500.0).min(1.0),
-            time: 0.0,
-            reserved: Vec2::ZERO,
+            reserved: Vec3::ZERO,
         },
         diffuse: placeholder.clone(),
     });
@@ -3238,19 +3240,15 @@ fn water_surface(
         .add(water_normal_image(&water_wavelet_texture()));
     // Midday's sun, so the sea is lit from where the sky scenes put it.
     let resolved = resolve_sky(&sky_settings_from(&MIDDAY));
-    // The scene's own declared camera pose, in Bevy space — the water's frame.
-    let camera = sl_to_bevy_rotation().mul_vec3(WATER_CAMERA);
     let material = assets.water_materials.add(WaterMaterial {
         params: water_params(
             &WaterSettings::legacy_default("Default"),
             resolved.light_dir,
-            camera,
             // The sky's own horizon colour would need the atmosphere resolved per
             // pixel; `drive_water` uses a sampled reflection tint, and this is its
             // pre-environment seed.
             Vec3::new(0.5, 0.6, 0.8),
             Vec3::from_array(resolved.diffuse),
-            0.0,
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.

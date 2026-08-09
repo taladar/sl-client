@@ -229,6 +229,13 @@ const CLOUD_DOME_SLICES: usize = 64;
 /// each frame.
 const CLOUD_SCROLL_DIVISOR: f32 = 100.0;
 
+/// How often [`drive_clouds`] re-anchors the GPU-integrated cloud scroll while a
+/// rate is active. `clouds.wgsl` unwinds its hourly-wrapping `globals.time`
+/// across **one** wrap (the face_material pattern), so the anchor must be
+/// refreshed well within an hour; half the wrap period leaves ample margin, at
+/// one material re-prepare per half hour.
+const CLOUD_SCROLL_REANCHOR_SECS: f32 = 1800.0;
+
 /// The reference viewer's built-in bloom / star texture (`IMG_BLOOM1`,
 /// `llsettingssky.cpp`), sampled by the star field when the sky frame names none
 /// of its own.
@@ -266,9 +273,13 @@ const STAR_ALPHA_THRESHOLD: f32 = 0.001;
 /// takes ~10 hours); it is converted to radians at use.
 const STAR_ROTATION_RATE_DEG: f32 = 0.01;
 
-/// The reference twinkle-time scale (`renderStarsDeferred`: `sStarTime =
-/// getElapsedSeconds() * 0.5`).
-const STAR_TIME_SCALE: f32 = 0.5;
+/// The quantisation step for the star-field rotation, in degrees: the [`drive_stars`]
+/// Transform write rounds the [`STAR_ROTATION_RATE_DEG`] drift down to this grid
+/// (one step every ~5 s) so the Transform settles between steps instead of being
+/// marked changed every frame; 0.05° of star-field yaw is imperceptible.
+/// (The reference twinkle-time scale — `sStarTime = getElapsedSeconds() * 0.5` —
+/// now lives in `stars.wgsl` as `STAR_TIME_SCALE`, applied to `globals.time`.)
+const STAR_ROTATION_STEP_DEG: f32 = 0.05;
 
 /// The seed for the deterministic star-placement PRNG, so the star field is
 /// identical across runs (the reference seeds from the global `ll_frand`).
@@ -346,11 +357,24 @@ pub(crate) struct CloudState {
     /// The texture id currently requested for the cloud noise (the active sky
     /// frame's, or the built-in [`DEFAULT_CLOUD_ID`]).
     cloud_key: Option<TextureKey>,
-    /// The accumulated cloud-scroll offset (the reference
-    /// `LLEnvironment::mCloudScrollDelta`), grown each frame from the sky frame's
-    /// `cloud_scroll_rate` and folded into `cloud_pos_density1` so the layer
-    /// drifts. Persists across sky-frame changes, like the reference.
-    scroll: Vec2,
+    /// The current scroll rate, in offset units per second (the sky frame's
+    /// `cloud_scroll_rate` over the reference divisor) — the value uploaded as
+    /// `CloudParams::scroll_rate`. The scroll itself (the reference
+    /// `LLEnvironment::mCloudScrollDelta`) is integrated **GPU-side** from
+    /// `globals.time`, so a steadily drifting layer never dirties the material;
+    /// the CPU only re-anchors on a rate change (or before the shader clock's
+    /// hourly wrap could double-wrap).
+    scroll_rate: Vec2,
+    /// The accumulated scroll offset at the anchor (uploaded as
+    /// `CloudParams::scroll_base`). Persists across sky-frame changes, like the
+    /// reference; reset to zero when the rate goes to zero (also the reference).
+    scroll_base: Vec2,
+    /// `Time::elapsed_secs` at the anchor, for the accumulated-offset fold and
+    /// the periodic re-anchor.
+    scroll_anchor_elapsed: f32,
+    /// `Time::elapsed_wrapped` at the anchor — the shader-clock (`globals.time`)
+    /// value uploaded as `CloudParams::scroll_ref_time`.
+    scroll_ref_time: f32,
     /// The next time (`Time::elapsed_secs`) the opt-in cloud-param debug log
     /// (`SL_VIEWER_LOG_CLOUDS`) may fire, throttling it to a readable cadence.
     next_log_at: f32,
@@ -573,24 +597,6 @@ pub(crate) fn center_sky_on_camera(
     }
 }
 
-/// Read the `SL_VIEWER_SUN_UPDATE_INTERVAL` churn-diagnosis env (seconds): how
-/// often [`drive_sky`] is allowed to re-fold the environment into the sun /
-/// materials. `0` (the default — unset or unparsable) keeps the original
-/// every-frame behaviour. A positive value rate-limits the update so the sun's
-/// `Transform` stops being rewritten every frame — the write dirties
-/// [`SceneSun`] via `Mut` change-detection *even when* R20's texel-snap left the
-/// value unchanged, which recomputes the four shadow cascades and re-culls every
-/// outdoor caster each frame. Rate-limiting isolates whether that per-frame
-/// shadow re-cull is a dominant sustained cost (the sun then visibly steps —
-/// acceptable for the experiment; the real fix is to guard the write on an
-/// actual value change).
-fn sun_update_interval() -> f32 {
-    std::env::var("SL_VIEWER_SUN_UPDATE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
-}
-
 /// Whether the sun casts shadows (`SL_VIEWER_SUN_SHADOWS`, default on): set to
 /// `0` to disable `shadow_maps_enabled` on [`SceneSun`] at spawn, so an A/B
 /// (frame time via Tracy or the status bar) measures the total per-frame cost of
@@ -607,44 +613,40 @@ fn sun_shadows_enabled() -> bool {
 /// Fold the current environment + camera altitude into the sky material, the
 /// directional light, and the ambient light, and (re)request the sky's rainbow /
 /// halo overlay textures boosted.
+///
+/// Every write is guarded on an actual value change (the texture_anim
+/// compare-then-`get_mut` idiom): an unguarded sun-`Transform` write dirties
+/// [`SceneSun`] via `Mut` change detection even when R20's texel-snap left the
+/// direction unchanged, which recomputes the four shadow cascades and re-culls
+/// every outdoor caster each frame; the material / ambient / exposure writes
+/// likewise re-prepared or re-flagged their targets per frame. Under a static
+/// environment and camera this system now writes nothing.
 #[expect(
     clippy::type_complexity,
-    reason = "one query over both directional lights (shadow sun + shadow-free mirror), tagged by which"
+    reason = "one query over both directional lights (shadow sun + shadow-free mirror)"
 )]
 #[expect(
     clippy::too_many_arguments,
-    reason = "the sky/sun/ambient fold plus the rate-limit experiment's time + cached-interval locals"
+    reason = "a Bevy system's parameters are its injected resources / queries: the sky \
+              material, both suns, the ambient light, and the exposure inputs"
 )]
 pub(crate) fn drive_sky(
-    time: Res<Time>,
-    // Accumulated real time since the last actual update, and the cached
-    // `SL_VIEWER_SUN_UPDATE_INTERVAL` (read once) — the churn experiment's gate.
-    mut since_last_update: Local<f32>,
-    mut update_interval: Local<Option<f32>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
     mut materials: ResMut<Assets<SkyMaterial>>,
     mut textures: ResMut<TextureManager>,
     // Both the shadow-casting [`SceneSun`] and the shadow-free
-    // [`SceneSunMirror`], tagged by `Has<SceneSunMirror>` so each is aimed the
-    // right way in one pass.
+    // [`SceneSunMirror`]; both take the texel-snapped direction, so both settle
+    // between snap steps (the mirror only lights reflection-probe captures,
+    // where a sub-texel angular step is invisible).
     mut suns: Query<
-        (&mut Transform, &mut DirectionalLight, Has<SceneSunMirror>),
+        (&mut Transform, &mut DirectionalLight),
         Or<(With<SceneSun>, With<SceneSunMirror>)>,
     >,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut exposure_range: ResMut<crate::exposure::ExposureRange>,
 ) {
-    // Churn experiment: skip the whole fold (and so the per-frame sun-`Transform`
-    // rewrite) until the configured interval has elapsed. `0` = every frame.
-    let interval = *update_interval.get_or_insert_with(sun_update_interval);
-    *since_last_update += time.delta_secs();
-    if interval > 0.0 && *since_last_update < interval {
-        return;
-    }
-    *since_last_update = 0.0;
-
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
     let position = day_position(&environment.settings);
     let Some(sky) = environment
@@ -662,48 +664,61 @@ pub(crate) fn drive_sky(
     // `reflection_probe_ambiance == 0` (an EEP sky that explicitly authors an ambiance
     // of exactly 0 is declaring "no HDR", so treating it as legacy is behaviourally
     // identical: both stay inert).
-    exposure_range.reflection_probe_ambiance = sky.reflection_probe_ambiance;
-    exposure_range.gamma = sky.gamma;
-    exposure_range.can_auto_adjust = sky.reflection_probe_ambiance == 0.0;
+    let new_range = crate::exposure::ExposureRange {
+        reflection_probe_ambiance: sky.reflection_probe_ambiance,
+        gamma: sky.gamma,
+        can_auto_adjust: sky.reflection_probe_ambiance == 0.0,
+    };
+    if *exposure_range != new_range {
+        *exposure_range = new_range;
+    }
 
     // Every derivation this system used to do inline. See `ResolvedSky`.
     let resolved = resolve_sky(&sky);
     let light_dir = resolved.light_dir;
     let diffuse = resolved.diffuse;
 
-    if let Some(mut material) = materials.get_mut(&state.material) {
+    // The texture_anim idiom: read-only compare, `get_mut` (and so a material
+    // re-prepare) only when the resolved params actually changed.
+    if materials
+        .get(&state.material)
+        .is_some_and(|material| material.params != resolved.params)
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
         material.params = resolved.params;
     }
 
-    for (mut transform, mut light, is_mirror) in &mut suns {
-        // The light travels *toward* its forward axis, i.e. away from the body, so
-        // its forward is the negated light direction. The **shadow-casting** sun
-        // snaps its direction to a texel-equivalent angular grid first (R20): the
-        // real-time day cycle rotates the sun a hair every frame, which rotates the
-        // cascaded shadow map's light-space texel grid and makes the ground shadows
-        // shimmer — Bevy texel-snaps the cascade origin, but a per-frame-rotating
-        // light defeats it. Snapping holds the direction bit-stable between steps.
-        // The **shadow-free mirror** sun (which only lights reflection-probe
-        // captures) has no cascade to stabilise, so it uses the un-snapped
-        // direction — as do the visible sun disc, sky, and light colour. Pick a
-        // safe up when the body is near the zenith (forward near-parallel to +Y).
-        let dir = if is_mirror {
-            light_dir
-        } else {
-            snap_shadow_direction(light_dir)
-        };
-        let forward = Vec3::new(-dir.x, -dir.y, -dir.z);
-        let up = if forward.dot(Vec3::Y).abs() > 0.99 {
-            Vec3::Z
-        } else {
-            Vec3::Y
-        };
-        *transform = Transform::default().looking_to(forward, up);
-        light.color = Color::linear_rgb(
-            diffuse[0].clamp(0.0, 1.0),
-            diffuse[1].clamp(0.0, 1.0),
-            diffuse[2].clamp(0.0, 1.0),
-        );
+    // The light travels *toward* its forward axis, i.e. away from the body, so
+    // its forward is the negated light direction. Both suns snap the direction
+    // to a texel-equivalent angular grid first (R20): the real-time day cycle
+    // rotates the sun a hair every frame, which rotates the cascaded shadow
+    // map's light-space texel grid and makes the ground shadows shimmer — Bevy
+    // texel-snaps the cascade origin, but a per-frame-rotating light defeats
+    // it. Snapping holds the direction bit-stable between steps, which also
+    // lets the `set_if_neq` below skip the write (and the shadow-cascade
+    // rebuild it would trigger) entirely between steps. The shadow-free mirror
+    // (probe-capture lighting only) takes the same snapped direction so it
+    // settles too — a sub-texel step is invisible in a probe. The visible sun
+    // disc, sky, and light colour still use the un-snapped direction. Pick a
+    // safe up when the body is near the zenith (forward near-parallel to +Y).
+    let dir = snap_shadow_direction(light_dir);
+    let forward = Vec3::new(-dir.x, -dir.y, -dir.z);
+    let up = if forward.dot(Vec3::Y).abs() > 0.99 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let sun_transform = Transform::default().looking_to(forward, up);
+    let sun_color = Color::linear_rgb(
+        diffuse[0].clamp(0.0, 1.0),
+        diffuse[1].clamp(0.0, 1.0),
+        diffuse[2].clamp(0.0, 1.0),
+    );
+    for (mut transform, mut light) in &mut suns {
+        transform.set_if_neq(sun_transform);
+        if light.color != sun_color {
+            light.color = sun_color;
+        }
     }
 
     // Ambient from the sky's total ambient: its luminance sets the fill strength,
@@ -711,11 +726,20 @@ pub(crate) fn drive_sky(
     let amb = resolved.ambient;
     let luminance = 0.2126 * amb[0] + 0.7152 * amb[1] + 0.0722 * amb[2];
     let peak = amb[0].max(amb[1]).max(amb[2]).max(1.0e-4);
-    ambient.color = Color::linear_rgb(amb[0] / peak, amb[1] / peak, amb[2] / peak);
-    ambient.brightness = luminance * AMBIENT_BRIGHTNESS_SCALE;
+    let ambient_color = Color::linear_rgb(amb[0] / peak, amb[1] / peak, amb[2] / peak);
+    let ambient_brightness = luminance * AMBIENT_BRIGHTNESS_SCALE;
+    if ambient.color != ambient_color
+        || ambient.brightness.to_bits() != ambient_brightness.to_bits()
+    {
+        ambient.color = ambient_color;
+        ambient.brightness = ambient_brightness;
+    }
 
     // Fetch the sky's referenced rainbow / halo textures boosted (the sky frame's
     // own, or the reference built-ins) so they resolve ahead of ordinary faces.
+    // Only on a key change: the boost request is persistent in the store, and an
+    // unconditional re-request every frame marks both `TextureManager` and
+    // `SkyState` changed with identical values.
     let rainbow_key = Some(
         sky.rainbow_texture
             .unwrap_or_else(|| TextureKey::from(IMG_RAINBOW)),
@@ -724,14 +748,18 @@ pub(crate) fn drive_sky(
         sky.halo_texture
             .unwrap_or_else(|| TextureKey::from(IMG_HALO)),
     );
-    if let Some(key) = rainbow_key {
-        textures.request_boosted(key, SKY_BOOST_PRIORITY);
+    if state.rainbow_key != rainbow_key {
+        if let Some(key) = rainbow_key {
+            textures.request_boosted(key, SKY_BOOST_PRIORITY);
+        }
+        state.rainbow_key = rainbow_key;
     }
-    if let Some(key) = halo_key {
-        textures.request_boosted(key, SKY_BOOST_PRIORITY);
+    if state.halo_key != halo_key {
+        if let Some(key) = halo_key {
+            textures.request_boosted(key, SKY_BOOST_PRIORITY);
+        }
+        state.halo_key = halo_key;
     }
-    state.rainbow_key = rainbow_key;
-    state.halo_key = halo_key;
 }
 
 /// Swap a decoded sky texture into the material when its rainbow / halo id
@@ -877,18 +905,30 @@ pub(crate) fn drive_sun_moon_discs(
     } = resolve_sky(&sky);
 
     // Aim each disc when its body is up, and show only the bodies above the
-    // horizon (`getIsSunUp` / `getIsMoonUp`).
+    // horizon (`getIsSunUp` / `getIsMoonUp`). `set_if_neq` throughout: with a
+    // parked camera and a fixed sky nothing here changes, and an unconditional
+    // write would re-extract both discs every frame.
     if let Ok((mut transform, mut vis)) = sun.single_mut() {
         if sun_up {
-            *transform = disc_transform(camera_pos, sun_dir, sky.sun_scale, SUN_DISK_RADIUS);
+            transform.set_if_neq(disc_transform(
+                camera_pos,
+                sun_dir,
+                sky.sun_scale,
+                SUN_DISK_RADIUS,
+            ));
         }
-        *vis = visible_if(sun_up);
+        vis.set_if_neq(visible_if(sun_up));
     }
     if let Ok((mut transform, mut vis)) = moon.single_mut() {
         if moon_up {
-            *transform = disc_transform(camera_pos, moon_dir, sky.moon_scale, MOON_DISK_RADIUS);
+            transform.set_if_neq(disc_transform(
+                camera_pos,
+                moon_dir,
+                sky.moon_scale,
+                MOON_DISK_RADIUS,
+            ));
         }
-        *vis = visible_if(moon_up);
+        vis.set_if_neq(visible_if(moon_up));
     }
 
     // The sun disc is untinted (the reference `sunDiscF` ignores its bound diffuse
@@ -926,28 +966,50 @@ pub(crate) fn drive_sun_moon_discs(
             sun_dir.z
         );
     }
-    if let Some(mut material) = materials.get_mut(&state.sun_material) {
-        material.params.up_component = sun_dir.y;
-        material.params.sky_hdr_scale = hdr_scale;
+    // Compare-then-`get_mut` (the texture_anim idiom): a disc material is only
+    // re-prepared when its params actually changed.
+    let sun_params = materials.get(&state.sun_material).map(|material| {
+        let mut params = material.params;
+        params.up_component = sun_dir.y;
+        params.sky_hdr_scale = hdr_scale;
+        (params, params != material.params)
+    });
+    if let Some((params, true)) = sun_params
+        && let Some(mut material) = materials.get_mut(&state.sun_material)
+    {
+        material.params = params;
     }
-    if let Some(mut material) = materials.get_mut(&state.moon_material) {
-        material.params.brightness = sky.moon_brightness;
-        material.params.up_component = moon_dir.y;
-        material.params.sky_hdr_scale = hdr_scale;
+    let moon_params = materials.get(&state.moon_material).map(|material| {
+        let mut params = material.params;
+        params.brightness = sky.moon_brightness;
+        params.up_component = moon_dir.y;
+        params.sky_hdr_scale = hdr_scale;
+        (params, params != material.params)
+    });
+    if let Some((params, true)) = moon_params
+        && let Some(mut material) = materials.get_mut(&state.moon_material)
+    {
+        material.params = params;
     }
 
     // Fetch the disc textures boosted (the sky frame's own, or the reference
-    // built-ins) so they resolve ahead of ordinary faces.
+    // built-ins) so they resolve ahead of ordinary faces. Only on a key change:
+    // the boost request is persistent in the store, and re-requesting per frame
+    // marks `TextureManager` and `DiscState` changed with identical values.
     let sun_key = sky
         .sun_texture
         .unwrap_or_else(|| TextureKey::from(DEFAULT_SUN_ID));
     let moon_key = sky
         .moon_texture
         .unwrap_or_else(|| TextureKey::from(DEFAULT_MOON_ID));
-    textures.request_boosted(sun_key, SKY_BOOST_PRIORITY);
-    textures.request_boosted(moon_key, SKY_BOOST_PRIORITY);
-    state.sun_key = Some(sun_key);
-    state.moon_key = Some(moon_key);
+    if state.sun_key != Some(sun_key) {
+        textures.request_boosted(sun_key, SKY_BOOST_PRIORITY);
+        state.sun_key = Some(sun_key);
+    }
+    if state.moon_key != Some(moon_key) {
+        textures.request_boosted(moon_key, SKY_BOOST_PRIORITY);
+        state.moon_key = Some(moon_key);
+    }
 }
 
 /// Swap a decoded disc texture into the sun / moon material when its id resolves.
@@ -1050,7 +1112,10 @@ pub(crate) fn setup_clouds(
     commands.insert_resource(CloudState {
         material,
         cloud_key: None,
-        scroll: Vec2::ZERO,
+        scroll_rate: Vec2::ZERO,
+        scroll_base: Vec2::ZERO,
+        scroll_anchor_elapsed: 0.0,
+        scroll_ref_time: 0.0,
         next_log_at: 0.0,
     });
 }
@@ -1079,34 +1144,68 @@ pub(crate) fn drive_clouds(
     // used to be a verbatim copy. See `ResolvedSky`.
     let resolved = resolve_sky(&sky);
 
-    // Accumulate the cloud scroll (`LLEnvironment::updateCloudScroll`): grow the
-    // delta by `dt * rate / 100`, or reset it to zero when the rate is zero.
+    // The cloud scroll (`LLEnvironment::updateCloudScroll`) is integrated
+    // GPU-side from `globals.time`; the CPU only maintains the anchor. Re-anchor
+    // when the rate changes (fold the offset accumulated so far into the base so
+    // the layer does not jump — or reset to zero when the rate goes to zero,
+    // like the reference) and periodically, so the shader's single-wrap unwind
+    // of its hourly-wrapping clock always suffices.
     let [rate_x, rate_y] = sky.cloud_scroll_rate;
-    if rate_x == 0.0 && rate_y == 0.0 {
-        state.scroll = Vec2::ZERO;
+    let rate = if rate_x == 0.0 && rate_y == 0.0 {
+        Vec2::ZERO
     } else {
-        let dt = time.delta_secs();
-        state.scroll.x += dt * rate_x / CLOUD_SCROLL_DIVISOR;
-        state.scroll.y += dt * rate_y / CLOUD_SCROLL_DIVISOR;
+        // Per-component `f32` arithmetic (the glam vector operators trip the
+        // workspace `arithmetic_side_effects` lint).
+        Vec2::new(rate_x / CLOUD_SCROLL_DIVISOR, rate_y / CLOUD_SCROLL_DIVISOR)
+    };
+    let elapsed = time.elapsed_secs();
+    let overdue = elapsed - state.scroll_anchor_elapsed > CLOUD_SCROLL_REANCHOR_SECS;
+    if rate != state.scroll_rate || (overdue && rate != Vec2::ZERO) {
+        let dt_anchor = elapsed - state.scroll_anchor_elapsed;
+        let accumulated = Vec2::new(
+            state.scroll_base.x + state.scroll_rate.x * dt_anchor,
+            state.scroll_base.y + state.scroll_rate.y * dt_anchor,
+        );
+        state.scroll_base = if rate == Vec2::ZERO {
+            Vec2::ZERO
+        } else {
+            accumulated
+        };
+        state.scroll_rate = rate;
+        state.scroll_anchor_elapsed = elapsed;
+        state.scroll_ref_time = time.elapsed_wrapped().as_secs_f32();
     }
 
-    if let Some(mut material) = materials.get_mut(&state.material) {
-        material.params = cloud_params(
-            &sky,
-            resolved.lightnorm,
-            resolved.sun_up_factor,
-            resolved.glow_factor,
-            state.scroll,
-        );
+    // Compare-then-`get_mut` (the texture_anim idiom): with a static sky and a
+    // stable anchor the params are identical every frame, so a steadily
+    // scrolling cloud layer re-prepares nothing.
+    let params = cloud_params(
+        &sky,
+        resolved.lightnorm,
+        resolved.sun_up_factor,
+        resolved.glow_factor,
+        state.scroll_ref_time,
+        state.scroll_rate,
+        state.scroll_base,
+    );
+    if materials
+        .get(&state.material)
+        .is_some_and(|material| material.params != params)
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
+        material.params = params;
     }
 
     // Fetch the sky's cloud-noise texture boosted (the sky frame's own, or the
-    // reference built-in) so it resolves ahead of ordinary faces.
+    // reference built-in) so it resolves ahead of ordinary faces. Only on a key
+    // change — the boost request is persistent in the store.
     let cloud_key = sky
         .cloud_texture
         .unwrap_or_else(|| TextureKey::from(DEFAULT_CLOUD_ID));
-    textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
-    state.cloud_key = Some(cloud_key);
+    if state.cloud_key != Some(cloud_key) {
+        textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
+        state.cloud_key = Some(cloud_key);
+    }
 
     // Opt-in cloud-param diagnostic (`SL_VIEWER_LOG_CLOUDS`): dump the EEP cloud
     // settings + the resolved cloud-noise texture id so a live aditi session can be
@@ -1227,8 +1326,7 @@ pub(crate) fn setup_stars(
     let material = materials.add(StarMaterial {
         params: StarParams {
             custom_alpha: 0.0,
-            time: 0.0,
-            reserved: Vec2::ZERO,
+            reserved: Vec3::ZERO,
         },
         diffuse: placeholder,
     });
@@ -1279,28 +1377,46 @@ pub(crate) fn drive_stars(
     let elapsed = time.elapsed_secs();
 
     if let Ok((mut transform, mut vis)) = field.single_mut() {
+        vis.set_if_neq(visible_if(visible));
         // Keep the field centred on the camera and rotate it slowly about the up
         // axis (the reference `rotatef(gFrameTimeSeconds * 0.01, …)`, in degrees).
-        *transform = Transform {
-            translation: camera_pos,
-            rotation: Quat::from_rotation_y((elapsed * STAR_ROTATION_RATE_DEG).to_radians()),
-            scale: Vec3::ONE,
-        };
-        *vis = visible_if(visible);
+        // Only while visible, and with the angle quantised to coarse steps: at
+        // 0.01°/s the continuous rotation moved sub-texel per frame but still
+        // marked the Transform changed every frame; a 0.05° step (one write per
+        // ~5 s) is far below what the eye can pick out on a star field while the
+        // Transform settles between steps. (The twinkle animates GPU-side from
+        // `globals.time`, so a still Transform does not freeze the stars.)
+        if visible {
+            let angle_deg = (elapsed * STAR_ROTATION_RATE_DEG / STAR_ROTATION_STEP_DEG).floor()
+                * STAR_ROTATION_STEP_DEG;
+            transform.set_if_neq(Transform {
+                translation: camera_pos,
+                rotation: Quat::from_rotation_y(angle_deg.to_radians()),
+                scale: Vec3::ONE,
+            });
+        }
     }
 
-    if let Some(mut material) = materials.get_mut(&state.material) {
+    // Compare-then-`get_mut`: the material is only re-prepared when the fold's
+    // brightness actually changed (the twinkle no longer lives in the params).
+    if materials
+        .get(&state.material)
+        .is_some_and(|material| material.params.custom_alpha.to_bits() != custom_alpha.to_bits())
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
         material.params.custom_alpha = custom_alpha;
-        material.params.time = elapsed * STAR_TIME_SCALE;
     }
 
     // Fetch the sky's bloom texture boosted (the sky frame's own, or the reference
-    // built-in) so it resolves ahead of ordinary faces.
+    // built-in) so it resolves ahead of ordinary faces. Only on a key change —
+    // the boost request is persistent in the store.
     let star_key = sky
         .bloom_texture
         .unwrap_or_else(|| TextureKey::from(IMG_BLOOM1));
-    textures.request_boosted(star_key, SKY_BOOST_PRIORITY);
-    state.star_key = Some(star_key);
+    if state.star_key != Some(star_key) {
+        textures.request_boosted(star_key, SKY_BOOST_PRIORITY);
+        state.star_key = Some(star_key);
+    }
 }
 
 /// Swap the decoded bloom texture into the star material when its id resolves.
@@ -1693,7 +1809,9 @@ pub(crate) fn cloud_params(
     lightnorm: Vec3,
     sun_up_factor: f32,
     glow_factor: f32,
-    scroll: Vec2,
+    scroll_ref_time: f32,
+    scroll_rate: Vec2,
+    scroll_base: Vec2,
 ) -> CloudParams {
     let sunlight = Vec3::from_array(color_alpha_rgb(sky.sunlight_color));
     let pd1 = sky.cloud_pos_density1;
@@ -1716,16 +1834,17 @@ pub(crate) fn cloud_params(
         sun_moon_glow_factor: glow_factor,
         cloud_color: Vec3::from_array(color_rgb(sky.cloud_color)),
         cloud_scale: sky.cloud_scale,
-        cloud_pos_density1: Vec3::new(
-            pd1.position_x() - scroll.x,
-            pd1.position_y() + scroll.y,
-            pd1.density(),
-        ),
+        // The scroll is integrated GPU-side (`clouds.wgsl` `cloud_scroll`), so
+        // the layer position uploads unscrolled.
+        cloud_pos_density1: Vec3::new(pd1.position_x(), pd1.position_y(), pd1.density()),
         cloud_variance: sky.cloud_variance,
         cloud_pos_density2: Vec3::new(pd2.position_x(), pd2.position_y(), pd2.density()),
         blend_factor: 0.0,
         linearize: sky_linearize(),
         sky_hdr_scale: resolved_sky_hdr_scale(sky),
+        scroll_ref_time,
+        scroll_rate,
+        scroll_base,
     }
 }
 
@@ -1733,7 +1852,7 @@ pub(crate) fn cloud_params(
 /// material before an environment is selected.
 pub(crate) fn default_cloud_params() -> CloudParams {
     let sky = SkySettings::legacy_windlight_default("Default");
-    cloud_params(&sky, Vec3::Y, 1.0, 1.0, Vec2::ZERO)
+    cloud_params(&sky, Vec3::Y, 1.0, 1.0, 0.0, Vec2::ZERO, Vec2::ZERO)
 }
 
 /// The scene lighting derived from a sky frame — the reference

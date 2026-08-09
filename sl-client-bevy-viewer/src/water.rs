@@ -172,14 +172,7 @@ pub(crate) fn setup_water(
         .settings
         .blended_water_settings(day_position(&environment.settings));
     let params = water.map_or_else(default_water_params, |water| {
-        water_params(
-            &water,
-            Vec3::Y,
-            Vec3::ZERO,
-            default_reflection(),
-            Vec3::ONE,
-            0.0,
-        )
+        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE)
     });
     let material = materials.add(WaterMaterial {
         params,
@@ -251,7 +244,6 @@ pub(crate) fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut
               environment, meshes, and the water material together"
 )]
 pub(crate) fn drive_water(
-    time: Res<Time>,
     identity: Res<SlIdentity>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
@@ -275,14 +267,21 @@ pub(crate) fn drive_water(
     let root_height = root
         .and_then(|root| state.region_heights.get(&root).copied())
         .unwrap_or(DEFAULT_WATER_HEIGHT);
-    // Publish the surface level for the underwater-fog post-process.
-    level.0 = root_height;
+    // Publish the surface level for the underwater-fog post-process (only when it
+    // moved — a per-frame same-value write would mark the resource changed and
+    // re-extract it every frame).
+    if level.0.to_bits() != root_height.to_bits() {
+        level.0 = root_height;
+    }
 
     // Place the ocean under the camera, just below the agent-region sea level so a
-    // same-height region plane never z-fights it.
+    // same-height region plane never z-fights it. Write-on-change: a parked
+    // camera re-propagates nothing.
     if let Ok(mut transform) = ocean.single_mut() {
-        transform.translation =
-            Vec3::new(camera_pos.x, root_height - OCEAN_DEPTH_BIAS, camera_pos.z);
+        let translation = Vec3::new(camera_pos.x, root_height - OCEAN_DEPTH_BIAS, camera_pos.z);
+        if transform.translation != translation {
+            transform.translation = translation;
+        }
     }
 
     // Reconcile per-region planes: spawn one for each region whose height differs
@@ -327,15 +326,16 @@ pub(crate) fn drive_water(
         },
     );
 
-    if let Some(mut material) = materials.get_mut(&state.material) {
-        material.params = water_params(
-            &water,
-            light_dir,
-            camera_pos,
-            reflection,
-            sunlight,
-            time.elapsed_secs(),
-        );
+    // Compare-then-`get_mut` (the texture_anim idiom): under a static sky the
+    // params are identical every frame — the waves animate GPU-side from
+    // `globals.time` — so the shared water material is never re-prepared.
+    let params = water_params(&water, light_dir, reflection, sunlight);
+    if materials
+        .get(&state.material)
+        .is_some_and(|material| material.params != params)
+        && let Some(mut material) = materials.get_mut(&state.material)
+    {
+        material.params = params;
     }
 
     // Fetch the water's wave normal map boosted (the water frame's own, or the
@@ -343,8 +343,13 @@ pub(crate) fn drive_water(
     let normal_key = water
         .normal_map
         .unwrap_or_else(|| TextureKey::from(DEFAULT_WATER_NORMAL));
-    textures.request_boosted(normal_key, SKY_BOOST_PRIORITY);
-    state.normal_key = Some(normal_key);
+    // Only on a key change: the boost request is persistent in the store, and a
+    // per-frame re-request marks `TextureManager` and `WaterState` changed with
+    // identical values.
+    if state.normal_key != Some(normal_key) {
+        textures.request_boosted(normal_key, SKY_BOOST_PRIORITY);
+        state.normal_key = Some(normal_key);
+    }
 }
 
 /// Spawn / despawn / reposition the per-region water planes: a region whose water
@@ -406,10 +411,13 @@ fn reconcile_region_planes(
     }
 
     // Re-place every surviving plane on the current origin (the origin follows the
-    // agent region, so a border crossing moves them all).
+    // agent region, so a border crossing moves them all). Write-on-change: with a
+    // stable origin the placement is identical every frame.
     for (plane, mut transform) in planes {
-        transform.translation =
-            region_plane_translation(root_x, root_y, plane.region, plane.height);
+        let translation = region_plane_translation(root_x, root_y, plane.region, plane.height);
+        if transform.translation != translation {
+            transform.translation = translation;
+        }
     }
 }
 
@@ -460,20 +468,17 @@ pub(crate) fn apply_water_textures(
 }
 
 /// Build the water-shader uniform block from a water frame plus the per-frame sun
-/// direction, camera position, sky-reflection tint, sunlight colour, and
-/// wave-scroll time.
+/// direction, sky-reflection tint, and sunlight colour. (The wave-scroll clock
+/// and the camera position are read GPU-side — `globals.time` and the view's
+/// `world_position` — so they are not part of the uniform block.)
 pub(crate) const fn water_params(
     water: &WaterSettings,
     light_dir: Vec3,
-    camera_position: Vec3,
     reflection_color: Vec3,
     sunlight_color: Vec3,
-    time: f32,
 ) -> WaterParams {
     WaterParams {
         light_dir,
-        time,
-        camera_position,
         fresnel_scale: water.fresnel_scale,
         normal_scale: Vec3::new(
             water.normal_scale.x(),
@@ -496,14 +501,7 @@ pub(crate) const fn water_params(
 /// material before an environment is selected.
 pub(crate) fn default_water_params() -> WaterParams {
     let water = WaterSettings::legacy_default("Default");
-    water_params(
-        &water,
-        Vec3::Y,
-        Vec3::ZERO,
-        default_reflection(),
-        Vec3::ONE,
-        0.0,
-    )
+    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE)
 }
 
 /// A neutral sky-reflection tint used before a sky frame is selected (a pale
