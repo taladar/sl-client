@@ -1456,6 +1456,78 @@ impl Default for SpawnBudget {
     }
 }
 
+/// The default for [`GeometryApplyBudget`]: geometry builds per frame across
+/// the three decode-result apply passes.
+const DEFAULT_GEOMETRY_APPLY_BUDGET: usize = 8;
+
+/// The most decoded keys [`apply_object_meshes`] / [`apply_object_sculpts`]
+/// pop per frame: each popped key costs one scan of the tracked-object map
+/// even when nothing is pending on it (most `TextureDecoded` ids are ordinary
+/// face textures, not sculpt maps), so the scans are capped separately from
+/// the build budget.
+const GEOMETRY_APPLY_SCAN_CAP: usize = 64;
+
+/// The shared per-frame budget for decode-result geometry builds: mesh
+/// submesh builds ([`apply_object_meshes`]), sculpt face builds
+/// ([`apply_object_sculpts`]), and rigged binds
+/// ([`apply_rigged_attachments`]) spend from one pool, refilled by
+/// [`reset_geometry_apply_budget`] each frame — so a cache-warm login (every
+/// asset decodes at once) builds a few objects per frame instead of the whole
+/// backlog in one. Deliberately separate from [`SpawnBudget`], so a decode
+/// burst cannot starve object spawning (or vice versa). A key whose objects
+/// number more than the remaining budget still finishes that key (soft
+/// overrun) — per-key work is not resumable without duplicate LOD rebuilds.
+#[derive(Resource)]
+pub(crate) struct GeometryApplyBudget {
+    /// The per-frame pool (env `SL_VIEWER_GEOMETRY_APPLY_BUDGET`).
+    per_frame: usize,
+    /// What remains this frame; refilled by [`reset_geometry_apply_budget`].
+    remaining: usize,
+}
+
+impl Default for GeometryApplyBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_GEOMETRY_APPLY_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_GEOMETRY_APPLY_BUDGET);
+        Self {
+            per_frame,
+            remaining: per_frame,
+        }
+    }
+}
+
+/// Refill the shared [`GeometryApplyBudget`] at the start of each frame's
+/// apply pass (runs before the three spending systems).
+pub(crate) fn reset_geometry_apply_budget(mut budget: ResMut<GeometryApplyBudget>) {
+    budget.remaining = budget.per_frame;
+}
+
+/// Decoded mesh keys awaiting application by [`apply_object_meshes`], deduped
+/// — a key already queued absorbs later decode events (the apply always reads
+/// the store's current block).
+#[derive(Resource, Default)]
+pub(crate) struct PendingDecodedMeshes {
+    /// Keys not yet applied, oldest at the front.
+    queue: VecDeque<MeshKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<MeshKey>,
+}
+
+/// Decoded texture keys awaiting the sculpt-build check by
+/// [`apply_object_sculpts`], deduped (see [`PendingDecodedMeshes`]). Most
+/// entries are ordinary face textures that no sculpt waits on; they drain as
+/// free scans under [`GEOMETRY_APPLY_SCAN_CAP`].
+#[derive(Resource, Default)]
+pub(crate) struct PendingDecodedSculpts {
+    /// Keys not yet checked, oldest at the front.
+    queue: VecDeque<TextureKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<TextureKey>,
+}
+
 /// Process queued items front-to-back, calling `process` on each; `process` returns
 /// `true` when the item did a geometry build (the budgeted work). The drain stops
 /// once `budget` builds have happened, leaving the rest queued for a later frame.
@@ -3871,12 +3943,20 @@ fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedO
 /// object pending on that key (texturing them via the Phase 6 pipeline). A decode
 /// that failed leaves the objects geometry-less (they keep waiting until a later
 /// update re-requests the mesh).
+///
+/// Budgeted: freshly decoded keys park in [`PendingDecodedMeshes`] and drain
+/// under the shared [`GeometryApplyBudget`], so a decode burst (a cache-warm
+/// login resolves everything at once) builds a few keys per frame instead of
+/// the whole backlog in one. Deferral is safe — the apply reads the store's
+/// current (newest) block when its key's turn comes.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading decoded meshes and the ECS resources the geometry build needs"
 )]
 pub(crate) fn apply_object_meshes(
     mut decoded: MessageReader<MeshDecoded>,
+    mut pending_keys: ResMut<PendingDecodedMeshes>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -3888,6 +3968,17 @@ pub(crate) fn apply_object_meshes(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
+        if pending_keys.queued.insert(key) {
+            pending_keys.queue.push_back(key);
+        }
+    }
+    let mut scans = 0_usize;
+    while budget.remaining > 0 && scans < GEOMETRY_APPLY_SCAN_CAP {
+        let Some(key) = pending_keys.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = pending_keys.queued.remove(&key);
+        scans = scans.saturating_add(1);
         let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
             // The fetch failed: objects pending on this key stay geometry-less.
             continue;
@@ -3965,6 +4056,7 @@ pub(crate) fn apply_object_meshes(
                         &pending.intern,
                         &mut material_cache,
                     );
+                    budget.remaining = budget.remaining.saturating_sub(1);
                     debug!(
                         "built mesh {key}: {} submesh entities",
                         tracked.face_entities.len()
@@ -4007,6 +4099,7 @@ pub(crate) fn apply_object_meshes(
                     &intern,
                     &mut material_cache,
                 );
+                budget.remaining = budget.remaining.saturating_sub(1);
                 debug!(
                     "rebuilt mesh {key} at new LOD: {} submesh entities",
                     tracked.face_entities.len()
@@ -4195,6 +4288,11 @@ pub(crate) fn animesh_root(
 /// unknown-joint fallback). The object is marked parented so
 /// [`adopt_pending_attachments`] does not also pin it to a rigid
 /// attachment-point node.
+///
+/// Budgeted: skinned builds spend from the shared [`GeometryApplyBudget`], so
+/// a crowd's rigged bodies bind over several frames; the not-yet-built rest
+/// stays pending and is re-collected next frame (the cheap not-ready retries
+/// — skeleton or finest LOD still loading — are free, as before).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system joining the object, avatar, and mesh state with the ECS resources the skinned build needs"
@@ -4205,6 +4303,7 @@ pub(crate) fn apply_rigged_attachments(
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4226,6 +4325,14 @@ pub(crate) fn apply_rigged_attachments(
         })
         .collect();
     for scoped in pending {
+        // A skinned build is among the heaviest per-object costs (submesh
+        // meshes + inverse bindposes + skeleton binding); spend from the
+        // shared decode-apply budget so a crowd's worth of rigged bodies
+        // binds over several frames. The unbuilt rest stays pending and is
+        // re-collected next frame.
+        if budget.remaining == 0 {
+            break;
+        }
         let Some(tracked) = state.objects.get(&scoped) else {
             continue;
         };
@@ -4333,6 +4440,7 @@ pub(crate) fn apply_rigged_attachments(
             &mut manager,
             &mut prim_textures,
         );
+        budget.remaining = budget.remaining.saturating_sub(1);
         if let Some(tracked) = state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
             tracked.pending = None;
@@ -4656,12 +4764,19 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
 /// flows through the shared [`TextureManager`] like any face texture — but keys off
 /// a *pending sculpt build* rather than a parked face material, so the two
 /// consumers never contend for the same decoded texture.
+///
+/// Budgeted: decoded keys park in [`PendingDecodedSculpts`] and drain under
+/// the shared [`GeometryApplyBudget`] (and the per-frame scan cap, since most
+/// decoded textures are not sculpt maps), spreading a decode burst's sculpt
+/// tessellation across frames.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading decoded sculpt maps and the ECS resources the geometry build needs"
 )]
 pub(crate) fn apply_object_sculpts(
     mut decoded: MessageReader<TextureDecoded>,
+    mut pending_keys: ResMut<PendingDecodedSculpts>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4672,6 +4787,32 @@ pub(crate) fn apply_object_sculpts(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
+        if pending_keys.queued.insert(id) {
+            pending_keys.queue.push_back(id);
+        }
+    }
+    if pending_keys.queue.is_empty() {
+        return;
+    }
+    // Most decoded textures are ordinary face textures; when no sculpt build is
+    // pending at all, the whole backlog is irrelevant — drop it with one scan
+    // instead of burning the per-frame scan cap on it.
+    if !state
+        .objects
+        .values()
+        .any(|tracked| matches!(tracked.pending, Some(PendingGeometry::Sculpt(_))))
+    {
+        pending_keys.queue.clear();
+        pending_keys.queued.clear();
+        return;
+    }
+    let mut scans = 0_usize;
+    while budget.remaining > 0 && scans < GEOMETRY_APPLY_SCAN_CAP {
+        let Some(id) = pending_keys.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = pending_keys.queued.remove(&id);
+        scans = scans.saturating_add(1);
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
         // borrow of `manager` ends before the face build borrows it mutably.
         let Some(map) = manager.decoded(id).map(Arc::clone) else {
@@ -4701,6 +4842,7 @@ pub(crate) fn apply_object_sculpts(
                         &pending.intern,
                         &mut material_cache,
                     );
+                    budget.remaining = budget.remaining.saturating_sub(1);
                     debug!(
                         "built sculpt {id}: {} face entities",
                         tracked.face_entities.len()

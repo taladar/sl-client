@@ -348,11 +348,12 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    ObjectState, PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets,
-    adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
-    apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
-    pick_worn_attachment, prune_control_avatars, recenter_objects, spawn_animesh_control_avatars,
-    update_objects,
+    GeometryApplyBudget, ObjectState, PendingDecodedMeshes, PendingDecodedSculpts,
+    PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets, adopt_pending_attachments,
+    apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
+    apply_tree_lod, log_suspicious_objects, pick_object, pick_worn_attachment,
+    prune_control_avatars, recenter_objects, reset_geometry_apply_budget,
+    spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1531,6 +1532,9 @@ fn run_session(
         .init_resource::<ObjectState>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()
+        .init_resource::<GeometryApplyBudget>()
+        .init_resource::<PendingDecodedMeshes>()
+        .init_resource::<PendingDecodedSculpts>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
         .init_resource::<HudState>()
         // The water-render bookkeeping (P23.1) is created by `setup_water` at
@@ -1714,9 +1718,17 @@ fn run_session(
                     (recenter_objects, update_objects).chain(),
                 ),
                 // Build the geometry of any mesh object whose asset just decoded, and
-                // of any sculpted prim whose sculpt map just decoded.
-                apply_object_meshes,
-                apply_object_sculpts,
+                // of any sculpted prim whose sculpt map just decoded — chained after
+                // the shared decode-apply budget refill so a decode burst's builds
+                // spread across frames (`GeometryApplyBudget`;
+                // `apply_rigged_attachments` spends from the same pool via its
+                // `.after(apply_object_meshes)` edge).
+                (
+                    reset_geometry_apply_budget,
+                    apply_object_meshes,
+                    apply_object_sculpts,
+                )
+                    .chain(),
                 // Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
                 // render-material pipeline (P27.1): keep the material store's
                 // `ViewerAsset` cap current, register each newly-spawned face's
