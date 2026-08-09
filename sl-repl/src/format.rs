@@ -742,6 +742,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::DuplicateObjectsOnRay { .. } => "duplicate_objects_on_ray",
         Command::RezRestoreToWorld { .. } => "rez_restore_to_world",
         Command::RezObjectFromNotecard { .. } => "rez_object_from_notecard",
+        Command::CopyInventoryFromNotecard { .. } => "copy_inventory_from_notecard",
         Command::RezObjectFromInventory { .. } => "rez_object_from_inventory",
         Command::RezScript { .. } => "rez_script",
         Command::RevokeScriptPermissions { .. } => "revoke_script_permissions",

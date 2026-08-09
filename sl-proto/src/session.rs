@@ -151,6 +151,14 @@ pub const CAP_UPDATE_NOTECARD_AGENT_INVENTORY: &str = "UpdateNotecardAgentInvent
 /// compiled).
 pub const CAP_UPDATE_NOTECARD_TASK_INVENTORY: &str = "UpdateNotecardTaskInventory";
 
+/// The HTTP capability for copying an inventory item **embedded in a notecard**
+/// into the agent's inventory (`CopyInventoryFromNotecard`). A one-way LLSD POST
+/// of `{notecard-id, object-id, item-id, folder-id, callback-id}`; the simulator
+/// delivers the copied item through the normal inventory-update stream, so there
+/// is no reply to parse. The reference `copy_inventory_from_notecard`
+/// (`llviewerinventory.cpp`) posts under this cap.
+pub const CAP_COPY_INVENTORY_FROM_NOTECARD: &str = "CopyInventoryFromNotecard";
+
 /// The HTTP capability for replacing the source of an existing **script**
 /// inventory item in the agent's own inventory (`UpdateScriptAgent`). Two-step
 /// uploader carrying the `item_id` and a compile `target`; the completion reply
@@ -521,6 +529,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_GESTURE_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_COPY_INVENTORY_FROM_NOTECARD,
     CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
@@ -1319,12 +1328,12 @@ pub use conversions::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
     build_map_block_reply, build_map_item_reply, build_map_layer_reply,
     bulk_update_inventory_to_llsd, chat_session_request_body, chatterbox_invitation_to_llsd,
-    created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
-    enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_to_llsd,
-    establish_agent_communication_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    required_voice_version_to_llsd, server_appearance_update_to_llsd,
+    copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
+    display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
+    environment_to_llsd, establish_agent_communication_to_llsd, group_invite_response_body,
+    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
+    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
+    parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
     teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
 };

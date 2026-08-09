@@ -37,11 +37,14 @@ pub(crate) fn run_object_media_fetch(
     }
 }
 
-/// POSTs a pre-built `ObjectMedia` UPDATE or `ObjectMediaNavigate` `body` to
-/// `cap_url`. Fire-and-forget: the simulator advances the object's media version
-/// rather than replying with media, so a client re-fetches with
-/// [`Command::RequestObjectMedia`] to observe the change.
-pub(crate) fn run_object_media_post(cap_url: &str, body: String) {
+/// POSTs a pre-built LLSD-XML `body` to a capability `cap_url`, fire-and-forget:
+/// no reply is awaited. Used where the simulator acts on the POST and surfaces
+/// the result out-of-band rather than in the POST response — an `ObjectMedia`
+/// UPDATE / `ObjectMediaNavigate` advances the object's media version (observed
+/// by re-fetching with [`Command::RequestObjectMedia`]), and a
+/// `CopyInventoryFromNotecard` copy arrives over the normal inventory-update
+/// stream.
+pub(crate) fn post_caps_llsd_oneway(cap_url: &str, body: String) {
     let Ok(http) = ReqwestBlockingClient::builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()

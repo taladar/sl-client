@@ -593,6 +593,7 @@ pub(crate) fn on_row_drag_end(
         Query<&AgentDropTarget>,
         Query<&AvatarPickTarget>,
         Query<&ContentsDropTarget>,
+        Query<&crate::edit_notecard::NotecardDropTarget>,
     ),
     world: (
         Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
@@ -609,15 +610,17 @@ pub(crate) fn on_row_drag_end(
         MessageWriter<SlCommand>,
         MessageWriter<crate::edit_contents::ContentsMutated>,
         Commands,
+        MessageWriter<crate::edit_notecard::AddEmbeddedItem>,
     ),
 ) {
     let (view, model, identity, mut worn) = session;
     let (viewports, lists, mut rows) = geometry;
     let (hover_map, pickables, node_sizes, child_of) = occlusion;
-    let (agent_targets, pick_targets, contents_targets) = targets;
+    let (agent_targets, pick_targets, contents_targets, notecard_targets) = targets;
     let (camera, picker, mut ray_cast) = world;
     let (keyboard, scene, objects) = resolve;
-    let (mut actions, mut commands, mut contents_mutations, mut commands_bevy) = outputs;
+    let (mut actions, mut commands, mut contents_mutations, mut commands_bevy, mut add_embedded) =
+        outputs;
     let Some(ui) = ui else {
         return;
     };
@@ -713,6 +716,23 @@ pub(crate) fn on_row_drag_end(
                 full: object,
                 added,
             });
+        }
+        return;
+    }
+
+    // 2c. Over the notecard editor while it shows a modifiable notecard: add
+    //     each dragged item to the notecard as an embedded item (the reference's
+    //     drag-into-notecard). Folders are skipped; a Library source works (the
+    //     notecard embeds a copy of the item).
+    let over_editable_notecard = hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .any(|hovered| notecard_target_at(*hovered, &notecard_targets, &child_of));
+    if over_editable_notecard {
+        for (source, _from_library) in &active.sources {
+            if let MenuTarget::Item(item) = source {
+                add_embedded.write(crate::edit_notecard::AddEmbeddedItem { item: item.clone() });
+            }
         }
         return;
     }
@@ -945,6 +965,27 @@ fn contents_target_at(
         match child_of.get(node) {
             Ok(parent) => node = parent.parent(),
             Err(_root) => return None,
+        }
+    }
+}
+
+/// Whether a hovered UI node is (or descends from) the notecard editor while it
+/// accepts a dropped item — the node's own or nearest-ancestor
+/// [`crate::edit_notecard::NotecardDropTarget`] with `editable` set. The
+/// ancestor walk lets the floater stamp its root while a child is hovered.
+fn notecard_target_at(
+    hovered: Entity,
+    notecard_targets: &Query<&crate::edit_notecard::NotecardDropTarget>,
+    child_of: &Query<&ChildOf>,
+) -> bool {
+    let mut node = hovered;
+    loop {
+        if let Ok(target) = notecard_targets.get(node) {
+            return target.editable;
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return false,
         }
     }
 }

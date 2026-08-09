@@ -94,8 +94,9 @@ animation-stop = 停止
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
 notecard-save = 保存
+notecard-view-preview = アイテムを表示
+notecard-view-edit = テキストを編集
 notecard-readonly-note = このノートカードを編集する権限がありません。
-notecard-embedded-header = 埋め込みアイテム:
 notecard-status-loading = 読み込み中…
 notecard-status-saving = 保存中…
 notecard-status-saved = 保存しました。

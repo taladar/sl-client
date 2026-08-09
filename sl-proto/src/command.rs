@@ -1584,6 +1584,26 @@ pub enum Command {
         /// The rez parameters (ray placement, permissions, notecard, items).
         rez: NotecardRez,
     },
+    /// Copy an inventory item **embedded in a notecard** into the agent's own
+    /// inventory (`CopyInventoryFromNotecard`) — the reference's "keep this
+    /// item" action for a landmark / object / notecard a resident dropped into
+    /// a notecard body. A one-way LLSD POST to the
+    /// [`CAP_COPY_INVENTORY_FROM_NOTECARD`](crate::session::CAP_COPY_INVENTORY_FROM_NOTECARD)
+    /// capability; the simulator returns the copied item over the normal
+    /// inventory-update stream.
+    CopyInventoryFromNotecard {
+        /// The notecard's own inventory item id — the agent-inventory item, or
+        /// the notecard's item id within a prim's task inventory.
+        notecard_id: InventoryKey,
+        /// The prim holding the notecard when it lives in a task inventory, or
+        /// `None` for a notecard in the agent's own inventory.
+        object_id: Option<ObjectKey>,
+        /// The embedded item to copy (its own item id inside the notecard).
+        item_id: InventoryKey,
+        /// The destination folder, or `None` to let the simulator choose the
+        /// system folder for the item's type (the reference default).
+        folder_id: Option<InventoryFolderKey>,
+    },
     /// Rez an inventory item into the world as a new object (`RezObject`).
     RezObjectFromInventory {
         /// The rez parameters (ray placement, permission masks, source item).

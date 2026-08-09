@@ -10,35 +10,42 @@
 //! # What this surface does today, and what waits on the rich-text widget
 //!
 //! The reference viewer renders each embedded item as a **clickable inline
-//! box** in the text flow (`llviewertexteditor`'s embedded-item machinery). That
-//! needs a rich-text editor with inline boxes and per-range brushes — the parley
-//! `PlainEditor` fork tracked by [`viewer-lsl-editor-widget`], which is not yet
-//! built. Until it lands, this editor:
+//! box** in the *editable* text flow (`llviewertexteditor`'s embedded-item
+//! machinery). Rendering them inline *while editing* needs a rich-text editor
+//! with inline boxes and per-range brushes — the parley `PlainEditor` fork
+//! tracked by [`viewer-lsl-editor-widget`], which is not yet built. A
+//! **read-only** view needs no caret, so this editor:
 //!
-//! - edits the notecard **text** in the reusable multi-line field
+//! - shows a no-modify notecard as the **rich read-only reader**
+//!   ([`crate::notecard_render`]): its embedded items drawn inline as clickable
+//!   icon-and-name boxes, its prose URLs / SLURLs linkified — the reference's
+//!   reader, minus editing;
+//! - edits a modifiable notecard's **text** in the reusable multi-line field
 //!   ([`crate::ui_text_input`], a stock `EditableText`), preserving each embedded
 //!   item's private-use marker code point in the buffer so a round-trip never
 //!   corrupts or orphans an item ([`sl_notecard::Notecard::with_edited_text`]
-//!   reconciles the item table against the markers on save);
-//! - lists the embedded items below the body (icon + name + type) so the reader
-//!   sees what the notecard carries, rather than rendering them inline;
+//!   reconciles the item table against the markers on save) — and offers a
+//!   **toggle to that same rich read-only preview**, so its embedded items stay
+//!   reachable and clickable until the inline-box editor widget lands (in the
+//!   plain field the markers render as placeholder glyphs);
+//! - lets a resident **drag an inventory item onto the editor to add it** as an
+//!   embedded item ([`crate::inventory_drag`]'s notecard drop target);
 //! - saves back to **agent** inventory over `UpdateNotecardAgentInventory` or,
 //!   for a notecard opened from a prim's contents, to that object's **task**
 //!   inventory over `UpdateNotecardTaskInventory` — one
 //!   [`Command::UpdateInventoryAsset`] whose [`NotecardSource`] picks the
 //!   capability and the "opened-from-task" provenance the reference carries.
 //!
-//! Deferred to their own tasks (all needing machinery this task does not build):
-//! inline clickable items and drag-and-drop *adding* of items
-//! ([`viewer-lsl-editor-widget`]'s inline boxes + the inventory folder tree) and
-//! URL / SLURL linkification ([`viewer-url-linkification`]).
+//! Deferred to [`viewer-lsl-editor-widget`] (needing its inline boxes): drawing
+//! embedded items **inline in the editable flow** and dropping an item **at the
+//! caret** rather than appended.
 //!
 //! # Read-only when you cannot modify
 //!
 //! Editability is gated on the item's owner mask carrying `MODIFY` (the
 //! reference's `LLPreviewNotecard::canModify`). A no-modify notecard — a freebie
-//! someone handed you — opens as a read-only text block with a note and no Save
-//! button, so its text is never presented as editable when a save would be
+//! someone handed you — opens as the rich read-only reader with a note and no
+//! Save button, so its text is never presented as editable when a save would be
 //! refused.
 //!
 //! Reference (Firestorm, read-only): `llpreviewnotecard`, `llfloaternotecard`,
@@ -47,13 +54,15 @@
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AssetKey, AssetType, AssetUpdateLocation, Command, InventoryKey, ObjectKey, SlCommand, SlEvent,
-    SlSessionEvent, UpdatableAssetType, Uuid,
+    AssetKey, AssetType, AssetUpdateLocation, Command, InventoryKey, InventoryType, ItemInfo,
+    ObjectKey, OwnerKey, SaleType, SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::linkified_text::LinkTextStyle;
+use crate::notecard_render::spawn_notecard_body;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_element::ElementCx;
+use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 
 /// The editor's text font size, in logical pixels.
@@ -62,7 +71,7 @@ const FONT_SIZE: f32 = 14.0;
 /// A general-purpose light label colour.
 const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
-/// A dimmer colour for secondary text (the read-only note, the item list).
+/// A dimmer colour for secondary text (the read-only note, the status line).
 const DIM_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 
 /// A red-tinted colour for a failed-save status.
@@ -101,8 +110,9 @@ pub(crate) enum NotecardSource {
 }
 
 impl NotecardSource {
-    /// The notecard item's own id, whichever inventory it lives in.
-    const fn item_id(self) -> InventoryKey {
+    /// The notecard item's own id, whichever inventory it lives in — the
+    /// `notecard-id` a `CopyInventoryFromNotecard` copy names.
+    pub(crate) const fn item_id(self) -> InventoryKey {
         match self {
             Self::Agent { item_id } | Self::Task { item_id, .. } => item_id,
         }
@@ -115,6 +125,16 @@ impl NotecardSource {
             Self::Task { task_id, item_id } => {
                 AssetUpdateLocation::TaskInventory { task_id, item_id }
             }
+        }
+    }
+
+    /// The prim holding the notecard when it lives in a task inventory, or
+    /// `None` for an agent-inventory notecard — the `object-id` a
+    /// `CopyInventoryFromNotecard` copy of an embedded item names.
+    pub(crate) const fn object_id(self) -> Option<ObjectKey> {
+        match self {
+            Self::Agent { .. } => None,
+            Self::Task { task_id, .. } => Some(task_id),
         }
     }
 }
@@ -137,6 +157,29 @@ pub(crate) struct OpenNotecard {
     pub(crate) source: NotecardSource,
 }
 
+/// Add a dropped inventory item to the open notecard as an **embedded item**.
+/// Written by [`crate::inventory_drag`] when an inventory row is dropped onto
+/// the notecard editor; consumed by [`ingest_added_items`], which appends the
+/// item to the baseline item table and its marker to the edit buffer (the
+/// reference's drag-into-notecard, minus the caret-precise placement the
+/// inline-box widget will add).
+#[derive(Message, Debug, Clone)]
+pub(crate) struct AddEmbeddedItem {
+    /// The inventory item to embed.
+    pub(crate) item: ItemInfo,
+}
+
+/// Marks the notecard editor floater as an **inventory drop target**: dropping
+/// an inventory item on it while [`editable`](Self::editable) adds the item as
+/// an embedded item. [`crate::inventory_drag`] walks up from the hovered node to
+/// find it; [`open_notecard`] keeps [`editable`](Self::editable) in step with
+/// the notecard currently shown (a no-modify notecard rejects drops).
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub(crate) struct NotecardDropTarget {
+    /// Whether the notecard currently shown accepts an added embedded item.
+    pub(crate) editable: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Plugin, resources.
 // ---------------------------------------------------------------------------
@@ -149,13 +192,20 @@ impl Plugin for EditNotecardPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NotecardEditorState>()
             .add_message::<OpenNotecard>()
+            .add_message::<AddEmbeddedItem>()
             .add_systems(
                 Startup,
                 spawn_notecard_floater.after(UiScaffoldSystems::SpawnRoot),
             )
             .add_systems(
                 Update,
-                (open_notecard, ingest_notecard_asset, report_notecard_save).chain(),
+                (
+                    open_notecard,
+                    ingest_notecard_asset,
+                    ingest_added_items,
+                    report_notecard_save,
+                )
+                    .chain(),
             );
     }
 }
@@ -207,10 +257,13 @@ fn spawn_notecard_floater(mut commands: Commands, root: Res<UiRoot>) {
         },
     );
     // Subject-bound: the shown notecard is not persisted, so neither is the
-    // floater's position (matching the previews / properties floater).
-    commands
-        .entity(handle.root)
-        .insert(crate::floater_persist::FloaterPersistExempt);
+    // floater's position (matching the previews / properties floater). The root
+    // is the inventory-drag drop target (no drop accepted until a modifiable
+    // notecard is shown).
+    commands.entity(handle.root).insert((
+        crate::floater_persist::FloaterPersistExempt,
+        NotecardDropTarget::default(),
+    ));
     commands.insert_resource(NotecardEditorState {
         panel: Some(handle.root),
         content: Some(handle.content),
@@ -259,6 +312,11 @@ fn open_notecard(
     state.baseline = None;
     state.source = Some(open.source);
     state.editable = open.editable;
+
+    // A modifiable notecard accepts a dragged item as a new embedded item.
+    commands.entity(panel).insert(NotecardDropTarget {
+        editable: open.editable,
+    });
 
     sl_commands.write(SlCommand(Command::FetchAsset {
         asset_id: AssetKey::from(open.asset_id),
@@ -319,6 +377,7 @@ fn ingest_notecard_asset(
             content,
             &notecard,
             editable,
+            source,
             editable.then_some(source),
             FONT_SIZE,
         );
@@ -337,64 +396,216 @@ struct BuiltEditor {
     status: Option<Entity>,
 }
 
-/// Build the editor's content under `content`: the body (editable field or
-/// read-only block), the embedded-item list, and — when editable — a Save
-/// button wired to `save_target` plus a status line.
+/// Build the editor's content under `content`. A no-modify notecard is the
+/// **rich read-only reader** ([`crate::notecard_render`]) — its embedded items
+/// drawn inline and clickable, its prose linkified. An editable notecard shows
+/// the plain text field by default, with a **toggle to that same read-only
+/// preview** so its embedded items stay reachable until the inline-box editor
+/// widget lands, plus a Save button wired to `save_target` and a status line.
 ///
-/// `save_target` is where to write back to, or `None` for a specimen that has
-/// no live notecard (the Save button is shown for layout but does nothing).
+/// `source` locates the notecard (so a copied embedded item names the right
+/// notecard / holding prim); `save_target` is where to write edits back, or
+/// `None` for a specimen with no live notecard (the Save button is shown for
+/// layout but does nothing).
 fn populate_editor(
     commands: &mut Commands,
     content: Entity,
     notecard: &sl_notecard::Notecard,
     editable: bool,
+    source: NotecardSource,
     save_target: Option<NotecardSource>,
     font_size: f32,
 ) -> BuiltEditor {
+    let style = LinkTextStyle::at(font_size);
+
+    // A no-modify notecard: the note, then the rich reader (items inline).
     if !editable {
         spawn_note(commands, content, "notecard-readonly-note", font_size);
+        spawn_reader_block(commands, content, notecard, source, style, true);
+        return BuiltEditor::default();
     }
 
-    let body_field = if editable {
-        Some(spawn_body_field(
-            commands,
-            content,
-            &notecard.text,
-            font_size,
-        ))
-    } else {
-        spawn_readonly_body(commands, content, &notecard.text, font_size);
-        None
-    };
-
-    spawn_embedded_list(commands, content, notecard, font_size);
-
-    let status = editable.then(|| {
-        let bar = commands
-            .spawn((
-                Node {
-                    ..row(Val::Px(8.0))
-                },
-                ChildOf(content),
-            ))
-            .id();
-        let save = spawn_save_button(commands, bar, font_size);
-        // The status node sits after the Save button, empty until a save runs.
-        let status = commands
-            .spawn((
-                Text::default(),
-                UiFont::Sans.at(font_size),
-                TextColor(DIM_COLOR),
-                ChildOf(bar),
-            ))
-            .id();
-        if let (Some(target), Some(field)) = (save_target, body_field) {
-            attach_save(commands, save, target, field, status);
-        }
-        status
+    // Editable: a view toggle, the plain edit field (shown) and the rich reader
+    // (hidden), built once — the toggle flips which is displayed. The plain
+    // field keeps each embedded item's private-use marker in the buffer so a
+    // round-trip never corrupts an item; the preview is where those items become
+    // legible and clickable meanwhile.
+    let (toggle_button, toggle_label) = spawn_view_toggle(commands, content, font_size);
+    let body_field = spawn_body_field(commands, content, &notecard.text, font_size);
+    let reader = spawn_reader_block(commands, content, notecard, source, style, false);
+    commands.entity(toggle_button).insert(NotecardViewToggle {
+        edit_field: body_field,
+        reader,
+        label: toggle_label,
+        preview: false,
     });
 
-    BuiltEditor { body_field, status }
+    let bar = commands
+        .spawn((
+            Node {
+                ..row(Val::Px(8.0))
+            },
+            ChildOf(content),
+        ))
+        .id();
+    let save = spawn_save_button(commands, bar, font_size);
+    // The status node sits after the Save button, empty until a save runs.
+    let status = commands
+        .spawn((
+            Text::default(),
+            UiFont::Sans.at(font_size),
+            TextColor(DIM_COLOR),
+            ChildOf(bar),
+        ))
+        .id();
+    if let Some(target) = save_target {
+        attach_save(commands, save, target, body_field, status);
+    }
+
+    BuiltEditor {
+        body_field: Some(body_field),
+        status: Some(status),
+    }
+}
+
+/// A view-mode toggle on an editable notecard: which of the plain edit field or
+/// the rich read-only preview is shown. Carried by the toggle button so its
+/// observer can flip the two `display`s and its own label.
+#[derive(Component, Debug, Clone, Copy)]
+struct NotecardViewToggle {
+    /// The plain multi-line edit field (shown when not previewing).
+    edit_field: Entity,
+    /// The rich read-only reader (shown when previewing).
+    reader: Entity,
+    /// The toggle button's own label node (retitled on flip).
+    label: Entity,
+    /// Whether the read-only preview is currently shown.
+    preview: bool,
+}
+
+/// Spawn the view-mode toggle button, returning `(button, label)`.
+fn spawn_view_toggle(commands: &mut Commands, parent: Entity, font_size: f32) -> (Entity, Entity) {
+    let button = commands
+        .spawn((
+            Button,
+            bevy::input_focus::tab_navigation::TabIndex(0),
+            Node {
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                align_self: AlignSelf::FlexStart,
+                ..default()
+            },
+            BorderColor::all(Color::srgb(0.32, 0.36, 0.44)),
+            BackgroundColor(Color::srgb(0.13, 0.15, 0.20)),
+            Pickable::default(),
+            Name::new("notecard-view-toggle"),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = commands
+        .spawn((
+            Text::default(),
+            crate::i18n::Translated::new("notecard-view-preview"),
+            UiFont::Sans.at(font_size),
+            TextColor(LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(button),
+        ))
+        .id();
+    commands.entity(button).observe(on_toggle_view);
+    (button, label)
+}
+
+/// Flip an editable notecard between the plain edit field and the rich
+/// read-only preview on a primary press.
+fn on_toggle_view(
+    press: On<Pointer<Press>>,
+    mut toggles: Query<&mut NotecardViewToggle>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(mut toggle) = toggles.get_mut(press.entity) else {
+        return;
+    };
+    toggle.preview = !toggle.preview;
+    let (preview, edit_field, reader, label) = (
+        toggle.preview,
+        toggle.edit_field,
+        toggle.reader,
+        toggle.label,
+    );
+    if let Ok(mut node) = nodes.get_mut(edit_field) {
+        node.display = if preview {
+            Display::None
+        } else {
+            Display::Flex
+        };
+    }
+    if let Ok(mut node) = nodes.get_mut(reader) {
+        node.display = if preview {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+    let key = if preview {
+        "notecard-view-edit"
+    } else {
+        "notecard-view-preview"
+    };
+    commands
+        .entity(label)
+        .insert(crate::i18n::Translated::new(key));
+}
+
+/// Spawn the rich read-only reader in a bounded, wheel-scrollable block. Shown
+/// or hidden per `visible` (an editable notecard builds it hidden behind the
+/// edit field).
+fn spawn_reader_block(
+    commands: &mut Commands,
+    parent: Entity,
+    notecard: &sl_notecard::Notecard,
+    source: NotecardSource,
+    style: LinkTextStyle,
+    visible: bool,
+) -> Entity {
+    let block = commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                max_height: Val::Px(READONLY_BODY_HEIGHT),
+                overflow: Overflow::scroll_y(),
+                flex_direction: FlexDirection::Column,
+                display: if visible {
+                    Display::Flex
+                } else {
+                    Display::None
+                },
+                ..default()
+            },
+            ScrollPosition::default(),
+            Pickable::default(),
+            Name::new("notecard-reader"),
+            ChildOf(parent),
+        ))
+        .id();
+    commands.entity(block).observe(on_reader_scroll);
+    spawn_notecard_body(commands, block, notecard, source, style);
+    block
+}
+
+/// Scroll the reader block with the mouse wheel (its own `ScrollPosition`),
+/// matching the search / world-map result lists.
+fn on_reader_scroll(mut event: On<Pointer<Scroll>>, mut positions: Query<&mut ScrollPosition>) {
+    /// Logical pixels one wheel notch scrolls.
+    const LINE_SCROLL_PIXELS: f32 = 24.0;
+    if let Ok(mut position) = positions.get_mut(event.entity) {
+        position.0.y = (position.0.y - event.y * LINE_SCROLL_PIXELS).max(0.0);
+    }
+    event.propagate(false);
 }
 
 /// Wire a Save button to reconcile the edited text against the baseline and
@@ -489,6 +700,182 @@ fn report_notecard_save(
 }
 
 // ---------------------------------------------------------------------------
+// Drag-add: a dropped inventory item becomes an embedded item.
+// ---------------------------------------------------------------------------
+
+/// Fold each dropped inventory item into the open notecard: add it to the
+/// baseline item table with a fresh index and append its marker code point to
+/// the edit buffer, so a Save reconciles it in via
+/// [`sl_notecard::Notecard::with_edited_text`]. The marker renders as a
+/// placeholder glyph in the plain field until the inline-box editor widget
+/// draws it inline; the read-only preview shows it as a clickable item at once.
+fn ingest_added_items(
+    mut adds: MessageReader<AddEmbeddedItem>,
+    mut state: ResMut<NotecardEditorState>,
+    mut fields: Query<&mut EditableText>,
+) {
+    for add in adds.read() {
+        // Only a modifiable notecard with a live edit field and baseline can
+        // take an added item.
+        if !state.editable {
+            continue;
+        }
+        let Some(field_entity) = state.body_field else {
+            continue;
+        };
+        if state.baseline.is_none() {
+            continue;
+        }
+        // A fresh index past every existing one, so it never aliases a marker
+        // already in the text (`with_edited_text` resolves markers by index).
+        let next_index = state.baseline.as_ref().map_or(0, |notecard| {
+            notecard
+                .items
+                .iter()
+                .map(|embedded| embedded.char_index)
+                .max()
+                .map_or(0, |max| max.saturating_add(1))
+        });
+        let Some(marker) = sl_notecard::embedded_char(next_index) else {
+            warn!("notecard already holds the maximum embedded items; drop ignored");
+            continue;
+        };
+        let embedded = to_embedded_item(&add.item);
+        if let Some(baseline) = state.baseline.as_mut() {
+            baseline.items.push(sl_notecard::EmbeddedItem {
+                char_index: next_index,
+                item: embedded,
+            });
+        }
+        if let Ok(mut editable) = fields.get_mut(field_entity) {
+            let mut value = editable.value().to_string();
+            value.push(marker);
+            editable.editor_mut().set_text(&value);
+        }
+    }
+}
+
+/// Convert a viewer inventory-item snapshot into the notecard's embedded-item
+/// model, so a dropped item round-trips through the Linden-text encoder faithful
+/// to its ids, type, permissions and sale terms (the reference embeds the whole
+/// `LLInventoryItem`).
+fn to_embedded_item(item: &ItemInfo) -> sl_notecard::InventoryItem {
+    let mask = |bits: u32| sl_notecard::PermissionMask(bits);
+    let (owner_id, group_owned) = match item.owner {
+        OwnerKey::Agent(agent) => (agent.0, false),
+        OwnerKey::Group(group) => (group.0, true),
+    };
+    let permissions = sl_notecard::Permissions {
+        base_mask: mask(item.permissions.base.bits()),
+        owner_mask: mask(item.permissions.owner.bits()),
+        group_mask: mask(item.permissions.group.bits()),
+        everyone_mask: mask(item.permissions.everyone.bits()),
+        next_owner_mask: mask(item.permissions.next_owner.bits()),
+        creator_id: item.creator_id.0,
+        owner_id,
+        last_owner_id: sl_types::key::Key(item.last_owner_id),
+        group_id: item.group.map_or(sl_types::key::NULL_KEY, |group| group.0),
+        group_owned,
+    };
+    let (sale_type, sale_price) = match &item.sale {
+        Some((sale_type, amount)) => (
+            notecard_sale_type(*sale_type),
+            i32::try_from(amount.0).unwrap_or(0),
+        ),
+        None => (sl_notecard::SaleType::NotForSale, 0),
+    };
+    sl_notecard::InventoryItem {
+        item_id: item.item_id.0,
+        parent_id: item.folder_id.0,
+        permissions,
+        metadata: None,
+        // Store the asset id in the clear; the encoder re-obfuscates only what
+        // was decoded as a shadow id.
+        asset_id: sl_types::key::Key(item.asset_id),
+        asset_id_encoding: sl_notecard::AssetIdEncoding::Plain,
+        asset_type: sl_notecard::AssetType::from_type_name(proto_asset_type_name(item.asset_type)),
+        inventory_type: sl_notecard::InventoryType::from_type_name(proto_inv_type_name(
+            item.inv_type,
+        )),
+        flags: item.flags,
+        sale_info: sl_notecard::SaleInfo {
+            sale_type,
+            sale_price,
+        },
+        name: item.name.clone(),
+        description: item.description.clone(),
+        creation_date: i64::from(item.creation_date),
+        unknown_fields: Vec::new(),
+    }
+}
+
+/// The Linden-text short type name for a viewer [`AssetType`] — the inverse of
+/// the shared `from_type_name` vocabulary, so the notecard encoder writes the
+/// name the simulator expects. An unrecognised class falls back to `object`.
+const fn proto_asset_type_name(asset_type: AssetType) -> &'static str {
+    match asset_type {
+        AssetType::Texture => "texture",
+        AssetType::Sound => "sound",
+        AssetType::CallingCard => "callcard",
+        AssetType::Landmark => "landmark",
+        AssetType::Clothing => "clothing",
+        AssetType::Object => "object",
+        AssetType::Notecard => "notecard",
+        AssetType::ScriptText => "lsltext",
+        AssetType::ScriptBytecode => "lslbyte",
+        AssetType::TextureTga => "txtr_tga",
+        AssetType::Bodypart => "bodypart",
+        AssetType::SoundWav => "snd_wav",
+        AssetType::ImageTga => "img_tga",
+        AssetType::ImageJpeg => "jpeg",
+        AssetType::Animation => "animatn",
+        AssetType::Gesture => "gesture",
+        AssetType::Mesh => "mesh",
+        AssetType::Settings => "settings",
+        AssetType::Material => "material",
+        AssetType::Gltf => "gltf",
+        AssetType::GltfBin => "glbin",
+        AssetType::Folder => "category",
+        // `Other`, and any future non-exhaustive variant, embeds as an object.
+        _other => "object",
+    }
+}
+
+/// The Linden-text short inventory-type name for a viewer [`InventoryType`].
+const fn proto_inv_type_name(inv_type: InventoryType) -> &'static str {
+    match inv_type {
+        InventoryType::Texture => "texture",
+        InventoryType::Sound => "sound",
+        InventoryType::CallingCard => "callcard",
+        InventoryType::Landmark => "landmark",
+        InventoryType::Object => "object",
+        InventoryType::Notecard => "notecard",
+        InventoryType::Category => "category",
+        InventoryType::Script => "script",
+        InventoryType::Snapshot => "snapshot",
+        InventoryType::Attachment => "attach",
+        InventoryType::Wearable => "wearable",
+        InventoryType::Animation => "animation",
+        InventoryType::Gesture => "gesture",
+        InventoryType::Mesh => "mesh",
+        InventoryType::Settings => "settings",
+        InventoryType::Material => "material",
+        _other => "object",
+    }
+}
+
+/// Map a viewer [`SaleType`] to the notecard's sale-type model.
+const fn notecard_sale_type(sale_type: SaleType) -> sl_notecard::SaleType {
+    match sale_type {
+        SaleType::NotForSale => sl_notecard::SaleType::NotForSale,
+        SaleType::Original => sl_notecard::SaleType::Original,
+        SaleType::Copy => sl_notecard::SaleType::Copy,
+        SaleType::Contents => sl_notecard::SaleType::Contents,
+        _other => sl_notecard::SaleType::NotForSale,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Content builders.
 // ---------------------------------------------------------------------------
 
@@ -555,60 +942,6 @@ fn spawn_body_field(commands: &mut Commands, parent: Entity, text: &str, font_si
     )
 }
 
-/// Spawn the read-only body: a bounded, clipped block showing the notecard
-/// text (no caret, no edit).
-fn spawn_readonly_body(commands: &mut Commands, parent: Entity, text: &str, font_size: f32) {
-    commands
-        .spawn((
-            Node {
-                max_width: Val::Px(READONLY_BODY_WIDTH),
-                max_height: Val::Px(READONLY_BODY_HEIGHT),
-                overflow: Overflow::clip(),
-                ..column(Val::Px(2.0))
-            },
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(text.to_owned()),
-            UiFont::Sans.at(font_size),
-            TextColor(LABEL_COLOR),
-        ));
-}
-
-/// Spawn the embedded-item list, one row per item (icon + name + type). Emits
-/// nothing when the notecard carries no embedded items.
-fn spawn_embedded_list(
-    commands: &mut Commands,
-    parent: Entity,
-    notecard: &sl_notecard::Notecard,
-    font_size: f32,
-) {
-    if notecard.items.is_empty() {
-        return;
-    }
-    commands.spawn((
-        Text::default(),
-        crate::i18n::Translated::new("notecard-embedded-header"),
-        UiFont::Sans.at(font_size),
-        TextColor(DIM_COLOR),
-        ChildOf(parent),
-    ));
-    for embedded in &notecard.items {
-        let label = format!(
-            "{}  {}  ({})",
-            embedded_icon(&embedded.item.asset_type),
-            embedded.item.name,
-            embedded.item.asset_type.type_name(),
-        );
-        commands.spawn((
-            Text::new(label),
-            UiFont::Sans.at(font_size),
-            TextColor(DIM_COLOR),
-            ChildOf(parent),
-        ));
-    }
-}
-
 /// Spawn the Save button, returning its entity for the caller to wire.
 fn spawn_save_button(commands: &mut Commands, parent: Entity, font_size: f32) -> Entity {
     commands
@@ -638,8 +971,8 @@ fn spawn_save_button(commands: &mut Commands, parent: Entity, font_size: f32) ->
 
 /// The emoji glyph for an embedded item, keyed on its asset class — matching
 /// [`crate::inventory::item_icon`]'s vocabulary, but over [`sl_notecard`]'s own
-/// asset-type enum.
-const fn embedded_icon(asset_type: &sl_notecard::AssetType) -> &'static str {
+/// asset-type enum. Shared with the rich reader ([`crate::notecard_render`]).
+pub(crate) const fn embedded_icon(asset_type: &sl_notecard::AssetType) -> &'static str {
     use sl_notecard::AssetType as A;
     match asset_type {
         A::Landmark => "\u{1f4cd}",
@@ -683,7 +1016,72 @@ pub(crate) fn spawn_notecard_editor_specimen(
         ))
         .id();
     let notecard = specimen_notecard(&cx.text(SPECIMEN_TEXT));
-    populate_editor(commands, col, &notecard, true, None, cx.font_size);
+    // A specimen has no live notecard: a nil source (the reader's copy dispatch
+    // never fires without a session) and no Save target.
+    let source = NotecardSource::Agent {
+        item_id: InventoryKey::from(Uuid::nil()),
+    };
+    populate_editor(commands, col, &notecard, true, source, None, cx.font_size);
+    col
+}
+
+/// Spawn the rich read-only reader specimen: prose with a linkified URL and an
+/// inline embedded item, built with no floater / session so [`crate::ui_test`]
+/// sweeps the interleaved prose-run / item-box layout across every script,
+/// scale and font.
+pub(crate) fn spawn_notecard_reader_specimen(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: ElementCx,
+) -> Entity {
+    let col = commands
+        .spawn((
+            Node {
+                ..column(Val::Px(6.0))
+            },
+            TextMayClip {
+                reason: "a linkified URL is a single unbreakable node and may exceed the width",
+            },
+            ChildOf(parent),
+        ))
+        .id();
+    let marker = sl_notecard::embedded_char(0).unwrap_or(' ');
+    // The connective prose runs through the cell's string transform (so the
+    // matrix sweeps translations); the URL stays native — a mangled URL would
+    // not linkify, which is not what this specimen tests.
+    let item = sl_notecard::InventoryItem {
+        item_id: sl_types::key::NULL_KEY,
+        parent_id: sl_types::key::NULL_KEY,
+        permissions: sl_notecard::Permissions::default(),
+        metadata: None,
+        asset_id: sl_types::key::NULL_KEY,
+        asset_id_encoding: sl_notecard::AssetIdEncoding::Plain,
+        asset_type: sl_notecard::AssetType::Landmark,
+        inventory_type: sl_notecard::InventoryType::Landmark,
+        flags: 0,
+        sale_info: sl_notecard::SaleInfo::default(),
+        name: "Our Home".to_owned(),
+        description: String::new(),
+        creation_date: 0,
+        unknown_fields: Vec::new(),
+    };
+    let notecard = sl_notecard::Notecard {
+        source_version: sl_notecard::NotecardVersion::V2,
+        embedded_items_version: 1,
+        items: vec![sl_notecard::EmbeddedItem {
+            char_index: 0,
+            item,
+        }],
+        text: format!(
+            "{welcome} https://example.com\n{visit} {marker}",
+            welcome = cx.text("Welcome! See"),
+            visit = cx.text("or drop by"),
+        ),
+    };
+    let source = NotecardSource::Agent {
+        item_id: InventoryKey::from(Uuid::nil()),
+    };
+    populate_editor(commands, col, &notecard, false, source, None, cx.font_size);
     col
 }
 
@@ -715,5 +1113,92 @@ fn specimen_notecard(text: &str) -> sl_notecard::Notecard {
             item,
         }],
         text: format!("{text} {marker}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{proto_asset_type_name, proto_inv_type_name, to_embedded_item};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, OwnerKey,
+        Permissions, Permissions5, Uuid,
+    };
+
+    /// A boxed-error result so the round-trip test can `?` decode failures.
+    type TestResult = Result<(), String>;
+
+    /// The viewer type names map onto the shared Linden-text vocabulary the
+    /// notecard decoder classifies (rather than falling through to `Other`).
+    #[test]
+    fn type_names_match_the_notecard_vocabulary() {
+        assert_eq!(proto_asset_type_name(AssetType::Landmark), "landmark");
+        assert_eq!(proto_asset_type_name(AssetType::Notecard), "notecard");
+        assert_eq!(proto_inv_type_name(InventoryType::Attachment), "attach");
+        assert_eq!(
+            sl_notecard::AssetType::from_type_name(proto_asset_type_name(AssetType::Object)),
+            sl_notecard::AssetType::Object
+        );
+        assert_eq!(
+            sl_notecard::InventoryType::from_type_name(proto_inv_type_name(
+                InventoryType::Landmark
+            )),
+            sl_notecard::InventoryType::Landmark
+        );
+    }
+
+    /// A dropped inventory item survives conversion + a notecard encode/decode
+    /// round-trip with its type, name and permissions intact.
+    #[test]
+    fn dropped_item_round_trips_through_the_notecard() -> TestResult {
+        let item = ItemInfo {
+            item_id: InventoryKey::from(Uuid::from_u128(0x10)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(0x20)),
+            name: "My Landmark".to_owned(),
+            description: "A place".to_owned(),
+            asset_id: Uuid::from_u128(0x30),
+            asset_type: AssetType::Landmark,
+            inv_type: InventoryType::Landmark,
+            flags: 7,
+            sale: None,
+            creation_date: 1_700_000_000,
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x40))),
+            last_owner_id: Uuid::from_u128(0x50),
+            creator_id: AgentKey::from(Uuid::from_u128(0x60)),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::from_bits(0x0008_2000),
+            },
+        };
+        let marker = sl_notecard::embedded_char(0).ok_or("no marker")?;
+        let notecard = sl_notecard::Notecard {
+            source_version: sl_notecard::NotecardVersion::V2,
+            embedded_items_version: 1,
+            items: vec![sl_notecard::EmbeddedItem {
+                char_index: 0,
+                item: to_embedded_item(&item),
+            }],
+            text: format!("See {marker}"),
+        };
+        let decoded =
+            sl_notecard::Notecard::decode(&notecard.encode()).map_err(|error| error.to_string())?;
+        let survivor = decoded.items.first().ok_or("no embedded item")?;
+        assert_eq!(survivor.item.asset_type, sl_notecard::AssetType::Landmark);
+        assert_eq!(
+            survivor.item.inventory_type,
+            sl_notecard::InventoryType::Landmark
+        );
+        assert_eq!(survivor.item.name, "My Landmark");
+        assert_eq!(survivor.item.permissions.owner_mask.0, 0x7fff_ffff);
+        assert_eq!(
+            survivor.item.permissions.creator_id.0,
+            Uuid::from_u128(0x60)
+        );
+        assert_eq!(survivor.item.asset_id.0, Uuid::from_u128(0x30));
+        Ok(())
     }
 }

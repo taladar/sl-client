@@ -622,8 +622,9 @@ animation-stop = Stop
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
 notecard-save = Save
+notecard-view-preview = View items
+notecard-view-edit = Edit text
 notecard-readonly-note = You do not have permission to modify this notecard.
-notecard-embedded-header = Embedded items:
 notecard-status-loading = Loading…
 notecard-status-saving = Saving…
 notecard-status-saved = Saved.

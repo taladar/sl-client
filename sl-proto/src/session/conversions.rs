@@ -3192,6 +3192,37 @@ pub fn group_invite_response_body(group_id: GroupKey) -> String {
     llsd_map(vec![("group", Llsd::Uuid(group_id.uuid()))]).to_llsd_xml()
 }
 
+/// The LLSD-XML body of a `CopyInventoryFromNotecard` capability POST — the
+/// `{notecard-id, object-id, item-id, folder-id, callback-id}` payload the
+/// reference `copy_inventory_from_notecard` (`llviewerinventory.cpp`) posts to
+/// copy an item embedded in a notecard into the agent's inventory. A nil
+/// `object-id` names an agent-inventory notecard (no holding prim); a nil
+/// `folder-id` lets the simulator pick the system folder for the item's type.
+#[must_use]
+pub fn copy_inventory_from_notecard_body(
+    notecard_id: InventoryKey,
+    object_id: Option<ObjectKey>,
+    item_id: InventoryKey,
+    folder_id: Option<InventoryFolderKey>,
+) -> String {
+    llsd_map(vec![
+        ("notecard-id", Llsd::Uuid(notecard_id.uuid())),
+        (
+            "object-id",
+            Llsd::Uuid(object_id.map_or_else(Uuid::nil, |key| key.uuid())),
+        ),
+        ("item-id", Llsd::Uuid(item_id.uuid())),
+        (
+            "folder-id",
+            Llsd::Uuid(folder_id.map_or_else(Uuid::nil, |key| key.uuid())),
+        ),
+        // The reference sends a per-request callback id used only to route the
+        // upload-complete UI callback; we do not track one, so 0 is fine.
+        ("callback-id", Llsd::Integer(0)),
+    ])
+    .to_llsd_xml()
+}
+
 /// Decodes the agent roster carried by a `ChatSessionRequest` `"accept
 /// invitation"` reply into the participant agent ids. Handles both the modern
 /// `agent_info` map (whose keys are the agent uuids) and the deprecated `agents`
@@ -5314,6 +5345,41 @@ mod caps_serializer_tests {
         assert_eq!(
             parsed.get("group").and_then(Llsd::as_uuid),
             Some(group.uuid())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn copy_from_notecard_body_carries_the_ids() -> Result<(), String> {
+        let notecard = InventoryKey::from(Uuid::from_u128(0x0001));
+        let object = ObjectKey::from(Uuid::from_u128(0x0002));
+        let item = InventoryKey::from(Uuid::from_u128(0x0003));
+        let body = super::copy_inventory_from_notecard_body(notecard, Some(object), item, None);
+        let parsed = sl_wire::parse_llsd_xml(&body).map_err(|error| error.to_string())?;
+        assert_eq!(
+            parsed.get("notecard-id").and_then(Llsd::as_uuid),
+            Some(notecard.uuid())
+        );
+        assert_eq!(
+            parsed.get("object-id").and_then(Llsd::as_uuid),
+            Some(object.uuid())
+        );
+        assert_eq!(
+            parsed.get("item-id").and_then(Llsd::as_uuid),
+            Some(item.uuid())
+        );
+        // A `None` destination folder is a nil id — "let the simulator choose".
+        assert_eq!(
+            parsed.get("folder-id").and_then(Llsd::as_uuid),
+            Some(Uuid::nil())
+        );
+        // An agent-inventory notecard (no holding prim) sends a nil object id.
+        let agent_body = super::copy_inventory_from_notecard_body(notecard, None, item, None);
+        let agent_parsed =
+            sl_wire::parse_llsd_xml(&agent_body).map_err(|error| error.to_string())?;
+        assert_eq!(
+            agent_parsed.get("object-id").and_then(Llsd::as_uuid),
+            Some(Uuid::nil())
         );
         Ok(())
     }

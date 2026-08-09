@@ -135,6 +135,7 @@ mod mutes;
 mod name_tag_billboard;
 mod name_tag_content;
 mod nearby_chat_bar;
+mod notecard_render;
 mod notification_host;
 mod notification_persist;
 mod notifications;
@@ -1109,6 +1110,7 @@ fn run_session(
     // modifiable, and save it back to agent inventory. Embedded items are
     // listed (inline clickable rendering waits on the rich-text widget).
     .add_plugins(crate::edit_notecard::EditNotecardPlugin)
+    .add_plugins(crate::notecard_render::NotecardRenderPlugin)
     .add_plugins(crate::edit_wearable::EditWearablePlugin)
     .add_plugins(crate::edit_material_asset::EditMaterialAssetPlugin)
     // The LSL script editor floater (viewer-lsl-editor-save-compile): open a

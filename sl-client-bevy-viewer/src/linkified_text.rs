@@ -154,7 +154,9 @@ pub(crate) fn spawn_linkified_text(
 }
 
 /// Segment `text` and spawn one child node per segment under `container`.
-fn populate_linkified_text(
+/// Public within the crate so a rich reader (the notecard body) can interleave
+/// linkified prose runs with its own inline nodes in a shared wrapping row.
+pub(crate) fn populate_linkified_text(
     commands: &mut Commands,
     container: Entity,
     text: &str,
