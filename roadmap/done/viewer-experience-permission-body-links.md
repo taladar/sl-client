@@ -2,7 +2,7 @@
 id: viewer-experience-permission-body-links
 title: Experience card name — clickable experience-profile SLURL
 topic: viewer
-status: ready
+status: done
 origin: deferred from viewer-experience-permission-dialog (2026-07-29) — the
   experience-name link parked like the sibling toasts', pending the linkification
   layer
@@ -26,3 +26,12 @@ will ([[viewer-group-notice-body-links]], [[viewer-script-dialog-body-links]],
 This is the same deferral chat's links carry: the card's name node becomes a
 link-decorated text context instead of a bare `Text`. (The permission lines and
 the object / owner names stay plain text — only the experience name is a link.)
+
+## Outcome (2026-08-09)
+
+Wired: the experience-acceptance card renders the experience name as a
+clickable `secondlife:///app/experience/<id>/profile` link (a labelled link fed
+through `crate::linkified_text`, keeping the experience accent as the link
+colour). Added `secondlife:///app/experience/<uuid>/profile` recognition to the
+linkification registry (`LinkTarget::Experience`) for it; the SLURL click
+dispatch remains [[viewer-slurl-parse-dispatch]]'s job.

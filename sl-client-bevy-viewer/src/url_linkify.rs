@@ -60,7 +60,7 @@ use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use sl_client_bevy::{AgentKey, GroupKey, ObjectKey, ParcelKey, Uuid};
+use sl_client_bevy::{AgentKey, ExperienceKey, GroupKey, ObjectKey, ParcelKey, Uuid};
 
 // ---------------------------------------------------------------------------
 // The public output model: a run of plain / link segments.
@@ -220,6 +220,14 @@ pub(crate) enum LinkTarget {
         owner: Option<Uuid>,
         /// The object's location SLURL, from the `slurl` query parameter, if any.
         slurl: Option<String>,
+        /// The grid the link names, or `None` for the current grid.
+        grid: Grid,
+    },
+    /// A `secondlife:///app/experience/<uuid>/profile` link — an experience
+    /// profile.
+    Experience {
+        /// The experience the link addresses.
+        key: ExperienceKey,
         /// The grid the link names, or `None` for the current grid.
         grid: Grid,
     },
@@ -466,6 +474,10 @@ static REGISTRY: LazyLock<Vec<UrlEntry>> = LazyLock::new(|| {
             build: build_object,
         },
         UrlEntry {
+            regex: compile(&format!(r"(?i){APP_HEADER}/experience/[0-9a-f-]+/profile")),
+            build: build_experience,
+        },
+        UrlEntry {
             regex: compile(&format!(r"(?i){APP_HEADER}/region/[^/ ]+(/\d+){{0,3}}/?")),
             build: build_region,
         },
@@ -691,6 +703,24 @@ fn build_object(matched: &str) -> Option<LinkMatch> {
             grid,
         },
         label: LinkLabel::Fixed(label),
+        icon: LinkIcon::None,
+        tooltip_key: TOOLTIP_SLAPP,
+    })
+}
+
+/// Build a `/app/experience/<uuid>/profile` record — an experience profile. The
+/// experience name is not resolved here (the fallback URL stands in), matching the
+/// reference `LLUrlEntryExperienceProfile`, so a caller that already knows the
+/// name (the experience-permission card) supplies it via a labelled link.
+fn build_experience(matched: &str) -> Option<LinkMatch> {
+    let (grid, rest) = split_app(matched, "experience")?;
+    let (id_str, _profile) = rest.split_once('/')?;
+    let key = ExperienceKey::from(parse_uuid(id_str)?);
+    Some(LinkMatch {
+        matched: matched.to_owned(),
+        url: matched.to_owned(),
+        target: LinkTarget::Experience { key, grid },
+        label: LinkLabel::Fixed(matched.to_owned()),
         icon: LinkIcon::None,
         tooltip_key: TOOLTIP_SLAPP,
     })
@@ -1097,6 +1127,20 @@ mod tests {
             LinkTarget::Parcel { grid: None, .. }
         ));
         assert!(matches!(parcel.label, LinkLabel::Parcel(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn experience_profile_link() -> Result<(), TestError> {
+        let uuid = "0e346d8b-4433-4d66-a6b0-fd37083abc4c";
+        let link = only_link(&format!("secondlife:///app/experience/{uuid}/profile"))?;
+        assert!(matches!(
+            link.target,
+            LinkTarget::Experience { grid: None, .. }
+        ));
+        // No experience-name cache, so the label is the URL (a caller that knows
+        // the name supplies it via a labelled link).
+        assert!(matches!(link.label, LinkLabel::Fixed(_)));
         Ok(())
     }
 

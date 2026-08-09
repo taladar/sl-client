@@ -70,10 +70,11 @@ use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{
     Command, ExperienceInfo, ExperienceKey, ExperiencePermission, InventoryKey, MuteFlags,
-    MuteType, ObjectKey, ScriptPermissions, SlCommand, SlEvent, SlSessionEvent,
+    MuteType, ObjectKey, ScriptPermissions, SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
 use crate::i18n::{TransArgs, Translator};
+use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -296,6 +297,10 @@ struct ExperienceContent {
     intro: String,
     /// The experience name (its own accent line).
     experience_name: String,
+    /// The experience's id, so the name renders as a clickable
+    /// `secondlife:///app/experience/<id>/profile` link (the reference
+    /// `[EXPERIENCE]` SLURL). `None` renders the name as plain text.
+    experience_id: Option<ExperienceKey>,
     /// The note that acceptance is remembered until revoked.
     once_note: String,
     /// The header preceding the permission lines.
@@ -363,12 +368,15 @@ fn build_experience_card(commands: &mut Commands, content: &ExperienceContent) -
     // bulleted) and the confirm line (primary) — each a width-bounded box so a
     // long paragraph wraps within the card.
     spawn_bounded_text(commands, root, &content.intro, LEAD_FONT_SIZE, TEXT_COLOR);
-    spawn_bounded_text(
+    // The experience name is a link to its profile
+    // (`secondlife:///app/experience/<id>/profile`, the reference `[EXPERIENCE]`
+    // SLURL) — viewer-experience-permission-body-links. It keeps the experience
+    // accent as its link colour so the card's identity holds.
+    spawn_experience_name(
         commands,
         root,
+        content.experience_id,
         &content.experience_name,
-        LEAD_FONT_SIZE,
-        ACCENT_COLOR,
     );
     spawn_bounded_text(
         commands,
@@ -451,7 +459,7 @@ fn spawn_experience_card(
     info: &ExperienceInfo,
 ) -> NotificationId {
     let name = experience_display_name(translator, info);
-    let content = experience_content(translator, question, info, &name);
+    let content = experience_content(translator, question, info, experience_id, &name);
     let card = build_experience_card(commands, &content);
 
     // The history line names the experience, so the notification well shows what
@@ -614,6 +622,7 @@ fn experience_content(
     translator: &Translator,
     question: &PendingExperienceQuestion,
     info: &ExperienceInfo,
+    experience_id: ExperienceKey,
     name: &str,
 ) -> ExperienceContent {
     let permission_lines = other_permission_keys(question.permissions)
@@ -629,6 +638,7 @@ fn experience_content(
                 .text("scope", &translator.get(scope_key(info))),
         ),
         experience_name: name.to_owned(),
+        experience_id: Some(experience_id),
         once_note: translator.get("experience-permission-once"),
         scripts_intro: translator.get("experience-permission-scripts"),
         permission_lines,
@@ -772,6 +782,44 @@ fn spawn_bounded_text(
     ));
 }
 
+/// Render the experience-name line: when the experience id is known, as a
+/// clickable `secondlife:///app/experience/<id>/profile` link carrying the name
+/// (a labelled link fed through the shared widget), tinted in the experience
+/// accent; otherwise as plain accent text. An empty name spawns nothing.
+fn spawn_experience_name(
+    commands: &mut Commands,
+    parent: Entity,
+    experience_id: Option<ExperienceKey>,
+    name: &str,
+) {
+    if name.is_empty() {
+        return;
+    }
+    let Some(experience_id) = experience_id else {
+        spawn_bounded_text(commands, parent, name, LEAD_FONT_SIZE, ACCENT_COLOR);
+        return;
+    };
+    let box_entity = commands
+        .spawn((
+            Node {
+                max_width: Val::Px(FULL_TEXT_MAX_WIDTH),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(parent),
+        ))
+        .id();
+    // A labelled link `[url  name]`: the widget shows the name and targets the
+    // experience-profile SLURL. The accent is kept as the link colour.
+    let linked = format!(
+        "[secondlife:///app/experience/{}/profile {name}]",
+        experience_id.uuid()
+    );
+    let mut style = LinkTextStyle::at(LEAD_FONT_SIZE);
+    style.link_color = ACCENT_COLOR;
+    spawn_linkified_text(commands, box_entity, &linked, style);
+}
+
 /// The gallery / `ui_test` specimen: a static experience card, so the intro /
 /// name / note / permission-line / action layout is swept login-free (a live card
 /// needs a scripted object running under an experience). Registered in
@@ -787,6 +835,7 @@ pub(crate) fn spawn_experience_specimen(
              in the grid-wide experience:",
         ),
         experience_name: cx.text("Neon Speedway"),
+        experience_id: Some(ExperienceKey::from(Uuid::from_u128(0xE29E_5A11))),
         once_note: cx.text(
             "Once permission is granted you will not see this message again for this experience \
              unless it is revoked from the experience profile.",

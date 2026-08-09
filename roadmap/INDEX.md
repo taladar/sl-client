@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 244 |
+| ready | 243 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 737 |
+| done | 738 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -321,9 +321,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-event-details`](ready/viewer-event-details.md) — Event details
   floater + reminders (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-experience-permission-body-links`](ready/viewer-experience-permission-body-links.md)
-  — Experience card name — clickable experience-profile SLURL (blocked by
-  `viewer-url-linkification` (done))
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
@@ -1068,7 +1065,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (737)
+## done (738)
 
 ### protocol
 
@@ -1318,6 +1315,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-emoji-picker-floater`](done/viewer-emoji-picker-floater.md) — Emoji
   picker floater (blocked by `viewer-emoji-data` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-experience-permission-body-links`](done/viewer-experience-permission-body-links.md)
+  — Experience card name — clickable experience-profile SLURL (blocked by
+  `viewer-url-linkification` (done))
 - [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host` (done))
