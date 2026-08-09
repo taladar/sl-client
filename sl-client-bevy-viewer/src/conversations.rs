@@ -695,7 +695,7 @@ fn line_text(line: &TranscriptLine, you: &str) -> String {
         SpeakerLink::Own => you.to_owned(),
         SpeakerLink::Agent(agent) => {
             format!(
-                "[secondlife:///app/agent/{}/about {}]",
+                "[secondlife:///app/agent/{}/inspect {}]",
                 agent.uuid(),
                 sanitize_label(&line.speaker)
             )
@@ -2199,7 +2199,7 @@ mod tests {
         assert_eq!(
             line_text(&remote, "You"),
             format!(
-                "[secondlife:///app/agent/{}/about Avatar Five]: hi",
+                "[secondlife:///app/agent/{}/inspect Avatar Five]: hi",
                 agent.uuid()
             )
         );

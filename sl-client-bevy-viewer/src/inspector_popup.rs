@@ -122,6 +122,13 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 /// An action button's border.
 const BUTTON_BORDER: Color = Color::srgb(0.38, 0.46, 0.58);
 
+/// The card's global z-order: above every UI surface it can be opened over — the
+/// bottom bar ([`crate::bottom_toolbar::BOTTOM_BAR_Z`] = 9000) and any docked /
+/// floating window — but just below the hover tooltip (`i32::MAX`) so a tip can
+/// still appear over the card. A too-low z was why an inspector opened over the
+/// docked chat window was hidden behind it.
+const INSPECTOR_Z: i32 = i32::MAX - 1000;
+
 // ---------------------------------------------------------------------------
 // Public messages.
 // ---------------------------------------------------------------------------
@@ -469,7 +476,14 @@ fn open_object_inspector(
             owner,
             slurl,
         } => {
-            let shown = object_title(&name, &translator);
+            // The link may carry a name; show it at once, else a placeholder until
+            // the properties reply lands. The location line + Show on Map only
+            // appear when the link carried a SLURL.
+            let shown = if name.trim().is_empty() {
+                translator.get("inspector-loading")
+            } else {
+                name.clone()
+            };
             set_text(&mut commands, card.title, &shown);
             set_text(&mut commands, card.detail, slurl.as_deref().unwrap_or(""));
             if let Some(slurl) = slurl {
@@ -489,7 +503,7 @@ fn open_object_inspector(
                     },
                 );
             }
-            (key, owner, shown)
+            (key, owner, name)
         }
         ObjectInspectTarget::InWorld { key } => {
             set_text(
@@ -498,13 +512,17 @@ fn open_object_inspector(
                 &translator.get("inspector-loading"),
             );
             set_text(&mut commands, card.detail, "");
-            sl.write(SlCommand(Command::RequestObjectPropertiesFamily {
-                request_flags: 0,
-                object_id: key,
-            }));
             (key, None, String::new())
         }
     };
+
+    // Fetch the object's real name / owner / description — our chat `objectim`
+    // links carry only the key, so the card fills in from the reply
+    // ([`update_inspector_content`]) regardless of which sub-kind opened it.
+    sl.write(SlCommand(Command::RequestObjectPropertiesFamily {
+        request_flags: 0,
+        object_id: key,
+    }));
 
     // Block (mute) the object — both sub-kinds.
     let block_id = key.uuid();
@@ -740,7 +758,7 @@ fn build_card(
             },
             BackgroundColor(CARD_BACKGROUND),
             BorderColor::all(CARD_BORDER),
-            GlobalZIndex(1200),
+            GlobalZIndex(INSPECTOR_Z),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
