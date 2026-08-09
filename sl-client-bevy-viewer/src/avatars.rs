@@ -668,6 +668,14 @@ pub(crate) struct AvatarState {
     /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
     /// a newly spawned body, drained by [`apply_avatar_appearance`].
     appearance_dirty: HashSet<AgentKey>,
+    /// The debounce ledger behind [`appearance_dirty`](Self::appearance_dirty):
+    /// per still-unserviced avatar, when (app elapsed seconds) it was first and
+    /// last marked dirty. [`apply_avatar_appearance`] folds fresh marks in each
+    /// frame and picks avatars from here under its per-frame budget — a
+    /// never-shaped avatar immediately, a re-marked one only after a quiet
+    /// window, so the appearance → body-spawn → bake-decode trigger cascade
+    /// resolves once instead of once per trigger.
+    appearance_pending: HashMap<AgentKey, AppearanceDirtyStamps>,
     /// A generation counter over every input the skeleton pose fold consumes from
     /// this state (deformations, volume deformations, joint overrides, body
     /// physics): bumped by [`bump_pose_inputs`](Self::bump_pose_inputs) whenever
@@ -2602,6 +2610,7 @@ impl AvatarState {
         self.pending_name_requests.retain(keep);
         self.appearances.retain(|agent, _| keep(agent));
         self.appearance_dirty.retain(keep);
+        self.appearance_pending.retain(|agent, _| keep(agent));
         self.joint_overrides.retain(|agent, _| keep(agent));
         self.worn_rigged_meshes.retain(|agent, _| keep(agent));
         self.skirt_visible.retain(|agent, _| keep(agent));
@@ -3962,6 +3971,54 @@ pub(crate) fn apply_own_shape_from_wearables(
     debug!("resolved own avatar shape from worn wearables");
 }
 
+/// When an avatar was first and last marked appearance-dirty, in
+/// [`Time::elapsed_secs_f64`] seconds (see
+/// [`AvatarState::appearance_pending`]).
+#[derive(Debug, Clone, Copy)]
+struct AppearanceDirtyStamps {
+    /// When the avatar entered the pending set (unchanged by re-marks).
+    first: f64,
+    /// When the avatar was most recently marked (each re-mark refreshes it).
+    last: f64,
+}
+
+/// How long a re-marked avatar's dirty state must stay quiet (no further
+/// marks) before its appearance is re-applied — coalesces the appearance →
+/// body-spawn → bake-decode trigger cascade, whose triggers land frames
+/// apart, into one rebuild instead of one per trigger.
+const APPEARANCE_QUIET_SECS: f64 = 0.3;
+
+/// The longest a re-marked avatar may be deferred by the quiet window — a
+/// steady re-mark stream (e.g. a live appearance edit) still resolves at
+/// least this often.
+const APPEARANCE_MAX_WAIT_SECS: f64 = 1.0;
+
+/// The default for [`AppearanceApplyBudget`]: resolving an avatar's shape
+/// re-morphs every base body part and re-uploads their meshes (multi-ms for a
+/// heavy avatar), so a crowd streaming in is spread across frames rather than
+/// resolved in one.
+const DEFAULT_APPEARANCE_APPLY_BUDGET: usize = 2;
+
+/// The per-frame cap on avatars whose appearance
+/// [`apply_avatar_appearance`] resolves and re-meshes (see
+/// [`DEFAULT_APPEARANCE_APPLY_BUDGET`]).
+#[derive(Resource)]
+pub(crate) struct AppearanceApplyBudget {
+    /// How many avatars may be resolved + re-meshed each frame.
+    per_frame: usize,
+}
+
+impl Default for AppearanceApplyBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_APPEARANCE_APPLY_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_APPEARANCE_APPLY_BUDGET);
+        Self { per_frame }
+    }
+}
+
 /// Apply each rigged avatar's appearance (P13.3 morphs + P13.4 skeletal shape):
 /// resolve an `AvatarAppearance.visual_params` vector once into its
 /// driver-propagated, sex-gated weights, then (a) rebuild every affected base
@@ -3975,6 +4032,14 @@ pub(crate) fn apply_own_shape_from_wearables(
 /// appearance is (re)built from the cached vector — so an appearance that arrives
 /// before the body still lands once the body exists. A no-op when no avatar asset
 /// library loaded (avatars stay as un-shaped bodies or spheres).
+///
+/// The rebuild is budgeted and debounced: at most [`AppearanceApplyBudget`]
+/// avatars resolve per frame (own avatar first), a never-shaped avatar
+/// resolves immediately, and a re-marked one waits [`APPEARANCE_QUIET_SECS`]
+/// of quiet (capped at [`APPEARANCE_MAX_WAIT_SECS`]) so the appearance →
+/// body-spawn → bake-decode cascade coalesces instead of re-meshing the whole
+/// body once per trigger. Deferral is safe: a later pass re-reads the newest
+/// cached appearance vector.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system folding appearances and bakes into the morphed body meshes"
@@ -3990,6 +4055,9 @@ pub(crate) fn apply_avatar_appearance(
     manager: Res<TextureManager>,
     mut state: ResMut<AvatarState>,
     volume_gain: Res<VolumeMorphGain>,
+    time: Res<Time>,
+    budget: Res<AppearanceApplyBudget>,
+    identity: Res<SlIdentity>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
@@ -4058,14 +4126,54 @@ pub(crate) fn apply_avatar_appearance(
             state.appearance_dirty.insert(part.agent);
         }
     }
-    if state.appearance_dirty.is_empty() {
+    // Fold this frame's fresh marks into the debounce ledger. The marking
+    // sites stay cheap set-inserts; draining the set here means a re-mark of
+    // a still-pending avatar refreshes its `last` stamp and restarts the
+    // quiet window.
+    let now = time.elapsed_secs_f64();
+    let marks = std::mem::take(&mut state.appearance_dirty);
+    for agent in marks {
+        state
+            .appearance_pending
+            .entry(agent)
+            .and_modify(|stamps| stamps.last = now)
+            .or_insert(AppearanceDirtyStamps {
+                first: now,
+                last: now,
+            });
+    }
+    if state.appearance_pending.is_empty() {
         return;
     }
     let Some(library) = library else {
-        state.appearance_dirty.clear();
+        state.appearance_pending.clear();
         return;
     };
-    // The dirty avatars' deformations / volumes / physics are about to be
+    // Pick this frame's avatars: a never-shaped avatar (no recorded
+    // deformations) resolves immediately — first visibility wins — while a
+    // re-marked one waits for its trigger cascade to go quiet (bounded by the
+    // max wait). The own avatar goes first so our own body never queues
+    // behind a crowd, and the per-frame budget spreads a crowd across frames.
+    let mut eligible: Vec<AgentKey> = state
+        .appearance_pending
+        .iter()
+        .filter(|(agent, stamps)| {
+            !state.deformations.contains_key(agent)
+                || now - stamps.last >= APPEARANCE_QUIET_SECS
+                || now - stamps.first >= APPEARANCE_MAX_WAIT_SECS
+        })
+        .map(|(&agent, _)| agent)
+        .collect();
+    if eligible.is_empty() {
+        return;
+    }
+    if let Some(own) = identity.agent_id
+        && let Some(position) = eligible.iter().position(|&agent| agent == own)
+    {
+        eligible.swap(0, position);
+    }
+    eligible.truncate(budget.per_frame);
+    // The chosen avatars' deformations / volumes / physics are about to be
     // re-resolved below: wake the pose gate so it re-poses them next frame.
     state.bump_pose_inputs();
     // Piggybacks on the pose-gate diagnostics: a steady stream here means some
@@ -4073,8 +4181,9 @@ pub(crate) fn apply_avatar_appearance(
     // re-resolves the shape — real per-event cost worth tracing).
     if std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
         info!(
-            "appearance re-apply: {} avatar(s) dirty",
-            state.appearance_dirty.len()
+            "appearance re-apply: {} of {} pending avatar(s)",
+            eligible.len(),
+            state.appearance_pending.len()
         );
     }
     // Resolve each dirty avatar's appearance once into its morph weights and the
@@ -4106,7 +4215,7 @@ pub(crate) fn apply_avatar_appearance(
     // The rest deformed joint **world** matrices per avatar, kept only for the
     // geometry diagnostic (R13) so it can reproduce the GPU skinning on the CPU.
     let mut world_matrices: HashMap<AgentKey, Vec<Mat4>> = HashMap::new();
-    for &agent in &state.appearance_dirty {
+    for &agent in &eligible {
         if let Some(bytes) = state.appearances.get(&agent) {
             let resolved = ResolvedParams::from_appearance(library.params(), bytes);
             // Bake every shape morph except the per-frame runtime params, which
@@ -4317,7 +4426,9 @@ pub(crate) fn apply_avatar_appearance(
             morph_weights.len()
         );
     }
-    state.appearance_dirty.clear();
+    for agent in &eligible {
+        let _stamps = state.appearance_pending.remove(agent);
+    }
 }
 
 /// Per-frame overrides for avatar runtime morph params (P31.12a): the eye-blink

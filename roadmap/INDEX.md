@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 740 |
+| done | 741 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1192** |
+| **total** | **1193** |
 
 ## ideas (57)
 
@@ -1073,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (740)
+## done (741)
 
 ### protocol
 
@@ -1797,6 +1797,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-perf-avatar-appearance-budget`](done/viewer-perf-avatar-appearance-budget.md)
+  — Budget + debounce avatar appearance application
 - [`viewer-perf-avatar-bake-apply-spikes`](done/viewer-perf-avatar-bake-apply-spikes.md)
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)

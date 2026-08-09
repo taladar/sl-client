@@ -270,8 +270,8 @@ use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
 use crate::avatars::{
-    AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake, VolumeMorphGain,
-    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
+    AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake,
+    VolumeMorphGain, apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
     apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
     apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
     fit_avatar_pick_colliders, focus_camera_on_volume_shape, ingest_avatar_bakes,
@@ -1549,6 +1549,7 @@ fn run_session(
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
+        .init_resource::<AppearanceApplyBudget>()
         .init_resource::<mutes::MuteModel>()
         .init_resource::<name_tag_content::NameTagStatuses>()
         .init_resource::<AvatarRuntimeMorphs>()
