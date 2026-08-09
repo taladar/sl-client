@@ -2,7 +2,7 @@
 id: viewer-perf-write-on-change-uploads
 title: Write GPU-visible state only when it changed (morphs, sky, water)
 topic: viewer
-status: ideas
+status: done
 origin: performance survey of the implemented viewer (2026-07-22)
 refs: [viewer-profiling, viewer-perf-texture-anim-pause]
 ---
@@ -57,3 +57,20 @@ frame should drop to near zero on an idle scene).
 
 Confidence: high for the write patterns (all verified); medium for the
 magnitude of the extraction/upload savings until profiled.
+
+## Done (2026-08-09, `performance` branch)
+
+All three instances landed, plus the sun/ambient/exposure guards and the
+sky-family boosted-texture request gating the survey had not listed:
+
+- morph weights: compare-all-slots before the mutable deref
+- sky: compare-then-`get_mut` on every sky-family material; sun
+  Transforms `set_if_neq` on the texel-snapped direction (the mirror sun
+  snaps too)
+- water / clouds / stars: the time/scroll/camera phases moved in-shader
+  (`globals.time`, `view.world_position`; clouds use the face-material
+  wrap-unwind anchor), remaining params compare-then-write
+
+The codebase-wide idiom is established; the pose gate
+(`perf(viewer): pose gate` commit) extends the same discipline to the
+skeleton drivers.

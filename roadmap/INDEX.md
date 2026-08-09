@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 58 |
+| ideas | 57 |
 | ready | 248 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 738 |
+| done | 739 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1191** |
 
-## ideas (58)
+## ideas (57)
 
 ### viewer
 
@@ -91,8 +91,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
-- [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
-  — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
@@ -1075,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (738)
+## done (739)
 
 ### protocol
 
@@ -1820,6 +1818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
   — Cut per-frame UI layout cost — structural bevy_ui floor
+- [`viewer-perf-write-on-change-uploads`](done/viewer-perf-write-on-change-uploads.md)
+  — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))
