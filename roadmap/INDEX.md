@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 741 |
+| done | 742 |
 | deferred | 21 |
 | wont-do | 9 |
-| **total** | **1193** |
+| **total** | **1194** |
 
 ## ideas (57)
 
@@ -1073,7 +1073,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (741)
+## done (742)
 
 ### protocol
 
@@ -1810,6 +1810,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
+- [`viewer-perf-object-update-coalesce`](done/viewer-perf-object-update-coalesce.md)
+  — Coalesce repeated object updates in the pending queue
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)

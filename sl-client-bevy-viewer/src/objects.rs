@@ -1350,11 +1350,14 @@ const fn local_translation(position: &Vector) -> Vec3 {
 const DEFAULT_OBJECT_SPAWN_BUDGET: usize = 16;
 
 /// One buffered object-stream event awaiting processing under the per-frame spawn
-/// budget (see [`PendingObjectEvents`]).
+/// budget (see [`PendingObjectEvents`]). Upsert snapshots live out-of-line in
+/// [`PendingObjectEvents::payloads`] so a newer snapshot for a still-queued
+/// object can replace the queued one in place.
 enum PendingObjectEvent {
     /// An `ObjectAdded` / `ObjectUpdated`: (re)apply the object — spawn, move, or
-    /// reshape. Boxed because [`Object`] dwarfs the other variant.
-    Upsert(Box<Object>),
+    /// reshape — from its oldest queued snapshot in
+    /// [`PendingObjectEvents::payloads`].
+    Upsert(ScopedObjectId),
     /// An `ObjectRemoved`: despawn the object and its tracked subtree.
     Remove(ScopedObjectId),
 }
@@ -1365,18 +1368,74 @@ enum PendingObjectEvent {
 /// one frame. Kept in strict arrival order, so a linkset's root still spawns before
 /// its children and an update / remove still lands after the add it targets — exactly
 /// as inline processing did, just spread across frames.
+///
+/// Repeated updates for one object **coalesce**: every `ObjectAdded` /
+/// `ObjectUpdated` carries a full merged snapshot (`sl-proto`'s
+/// `upsert_object` re-emits the whole cached object), so an update arriving
+/// for an object whose newest queued event is a still-undrained upsert just
+/// replaces that queued snapshot — one build from the newest data instead of
+/// one per update, at the original queue position (ordering intact). An
+/// upsert queued behind a remove for the same id never merges across it.
 #[derive(Resource, Default)]
 pub(crate) struct PendingObjectEvents {
     /// Events not yet processed, oldest at the front.
     queue: VecDeque<PendingObjectEvent>,
+    /// The queued upsert snapshots, per object in queue order (front =
+    /// oldest). Almost always one element; only an upsert → remove → upsert
+    /// interleave for one id holds two.
+    payloads: HashMap<ScopedObjectId, VecDeque<Box<Object>>>,
+    /// How many removes are queued per object id — an upsert only coalesces
+    /// into the previous one when no remove sits between them.
+    queued_removes: HashMap<ScopedObjectId, usize>,
 }
 
 impl PendingObjectEvents {
+    /// Buffer an upsert, coalescing it into the object's newest still-queued
+    /// snapshot where ordering allows (see the type docs).
+    fn push_upsert(&mut self, object: &Object) {
+        let scoped = object.scoped_id();
+        if !self.queued_removes.contains_key(&scoped)
+            && let Some(slots) = self.payloads.get_mut(&scoped)
+            && let Some(back) = slots.back_mut()
+        {
+            **back = object.clone();
+            return;
+        }
+        self.payloads
+            .entry(scoped)
+            .or_default()
+            .push_back(Box::new(object.clone()));
+        self.queue.push_back(PendingObjectEvent::Upsert(scoped));
+    }
+
+    /// Buffer a remove.
+    fn push_remove(&mut self, scoped: ScopedObjectId) {
+        let count = self.queued_removes.entry(scoped).or_insert(0);
+        *count = count.saturating_add(1);
+        self.queue.push_back(PendingObjectEvent::Remove(scoped));
+    }
+
     /// Drop the whole backlog — a distant teleport purged the scene, so any
     /// buffered upsert / remove targets a now-gone (old-region local-id) object.
     pub(crate) fn clear(&mut self) {
         self.queue.clear();
+        self.payloads.clear();
+        self.queued_removes.clear();
     }
+}
+
+/// Take the oldest queued upsert snapshot for `scoped` (see
+/// [`PendingObjectEvents::payloads`]), dropping the id's slot once emptied.
+fn pop_upsert_payload(
+    payloads: &mut HashMap<ScopedObjectId, VecDeque<Box<Object>>>,
+    scoped: ScopedObjectId,
+) -> Option<Box<Object>> {
+    let slots = payloads.get_mut(&scoped)?;
+    let object = slots.pop_front();
+    if slots.is_empty() {
+        let _empty = payloads.remove(&scoped);
+    }
+    object
 }
 
 /// The per-frame object geometry-build budget (see [`DEFAULT_OBJECT_SPAWN_BUDGET`]).
@@ -1421,46 +1480,6 @@ fn drain_budgeted<T>(
     builds
 }
 
-/// Apply one buffered object event (from the backlog), returning whether it built
-/// geometry (see [`apply_object`]). The inline fast path in [`update_objects`] calls
-/// [`apply_object`] / [`remove_object`] directly on the borrowed event instead, so it
-/// need not clone; this handles the owned, already-deferred events.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the ECS resources apply_object / remove_object need through one call"
-)]
-fn apply_pending_object_event(
-    state: &mut ObjectState,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    prim_textures: &mut PrimTextures,
-    mesh_manager: &mut MeshManager,
-    cache: &mut GeometryCache,
-    material_cache: &mut MaterialCache,
-    event: PendingObjectEvent,
-) -> bool {
-    match event {
-        PendingObjectEvent::Upsert(object) => apply_object(
-            state,
-            &object,
-            commands,
-            meshes,
-            materials,
-            manager,
-            prim_textures,
-            mesh_manager,
-            cache,
-            material_cache,
-        ),
-        PendingObjectEvent::Remove(scoped) => {
-            remove_object(state, scoped, commands);
-            false
-        }
-    }
-}
-
 /// Fold the object event stream into the scene graph: spawn / update / despawn
 /// entities, classify them, keep their transforms current, and maintain linkset
 /// parenting — draining any earlier-frame backlog first, then applying new events
@@ -1488,20 +1507,43 @@ pub(crate) fn update_objects(
     // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
     //    events never jump ahead of it. Only a spawn / re-tessellation (`apply_object`
     //    returns `true`) costs budget; a move or remove is free.
-    let drained = drain_budgeted(&mut pending.queue, budget, |event| {
-        apply_pending_object_event(
-            &mut state,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &mut prim_textures,
-            &mut mesh_manager,
-            &mut cache,
-            &mut material_cache,
-            event,
-        )
-    });
+    let drained = {
+        let PendingObjectEvents {
+            queue,
+            payloads,
+            queued_removes,
+        } = &mut *pending;
+        drain_budgeted(queue, budget, |event| match event {
+            PendingObjectEvent::Upsert(scoped) => {
+                let Some(object) = pop_upsert_payload(payloads, scoped) else {
+                    warn!("queued upsert for {scoped:?} had no snapshot (coalescing bug)");
+                    return false;
+                };
+                apply_object(
+                    &mut state,
+                    &object,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut manager,
+                    &mut prim_textures,
+                    &mut mesh_manager,
+                    &mut cache,
+                    &mut material_cache,
+                )
+            }
+            PendingObjectEvent::Remove(scoped) => {
+                if let Some(count) = queued_removes.get_mut(&scoped) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        let _empty = queued_removes.remove(&scoped);
+                    }
+                }
+                remove_object(&mut state, scoped, &mut commands);
+                false
+            }
+        })
+    };
     budget = budget.saturating_sub(drained);
     // 2. Process new events in arrival order: while the backlog is fully drained and
     //    budget remains, apply them **inline without cloning**; once the budget is
@@ -1537,16 +1579,12 @@ pub(crate) fn update_objects(
         } else {
             match &event.0 {
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                    // `object` is already a `Box<Object>`, so clone the box (only now,
-                    // on the overflow) rather than re-boxing it.
-                    pending
-                        .queue
-                        .push_back(PendingObjectEvent::Upsert(object.clone()));
+                    // Cloned only now, on the overflow; a snapshot already
+                    // queued for this object is replaced in place instead.
+                    pending.push_upsert(object);
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                    pending
-                        .queue
-                        .push_back(PendingObjectEvent::Remove(*local_id));
+                    pending.push_remove(*local_id);
                 }
                 _other => {}
             }
@@ -5045,6 +5083,60 @@ mod tests {
         let builds = drain_budgeted(&mut queue, 10, |item| item);
         assert_eq!(builds, 2);
         assert!(queue.is_empty(), "the backlog fully drains");
+    }
+
+    /// Repeated upserts for one still-queued object coalesce into a single
+    /// queue slot holding the newest snapshot (every event carries a full
+    /// merged snapshot, so only the newest matters), while a remove queued
+    /// between two upserts blocks the merge so replay order stays
+    /// upsert → remove → upsert.
+    #[test]
+    fn pending_object_events_coalesce_repeated_upserts() {
+        let mut first = bare_object(pcode::PRIMITIVE);
+        first.crc = 1;
+        let mut second = bare_object(pcode::PRIMITIVE);
+        second.crc = 2;
+        let scoped = first.scoped_id();
+
+        let mut pending = super::PendingObjectEvents::default();
+        pending.push_upsert(&first);
+        pending.push_upsert(&second);
+        assert_eq!(
+            pending.queue.len(),
+            1,
+            "the second upsert merged into the queued slot"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(2),
+            "the newest snapshot won"
+        );
+        assert!(
+            pending.payloads.is_empty(),
+            "the drained id's payload slot is dropped"
+        );
+
+        // An upsert queued behind a remove for the same id must not merge
+        // across it — the replay must still remove before re-adding.
+        pending.clear();
+        pending.push_upsert(&first);
+        pending.push_remove(scoped);
+        pending.push_upsert(&second);
+        assert_eq!(
+            pending.queue.len(),
+            3,
+            "upsert → remove → upsert stays three ordered events"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(1),
+            "the pre-remove snapshot survives unmerged"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(2),
+            "the post-remove snapshot queues separately"
+        );
     }
 
     /// A [`TrackedObject`](super::TrackedObject) stub for the stale-guard tests: a
