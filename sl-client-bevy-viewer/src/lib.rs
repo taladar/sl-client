@@ -1526,6 +1526,7 @@ fn run_session(
         // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
+        .init_resource::<crate::terrain::CurrentTerrainLighting>()
         .init_resource::<ObjectState>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()

@@ -60,15 +60,34 @@ const fn default_terrain_lighting() -> TerrainLighting {
     }
 }
 
+/// The terrain lighting most recently applied to the region materials (and the
+/// value a newly created region material is seeded with), so
+/// [`drive_terrain_lighting`] can skip its `Assets::iter_mut` — which marks
+/// **every** terrain material modified, re-preparing each one's bind group —
+/// on the (typical) frame where the resolved sky lighting is unchanged.
+#[derive(Resource)]
+pub(crate) struct CurrentTerrainLighting(pub(crate) TerrainLighting);
+
+impl Default for CurrentTerrainLighting {
+    fn default() -> Self {
+        Self(default_terrain_lighting())
+    }
+}
+
 /// Drive every region's terrain material with the sky frame's atmospheric sun
-/// (`sunlit`) and ambient (`amblit`) colours each frame, so the ground is lit like
+/// (`sunlit`) and ambient (`amblit`) colours, so the ground is lit like
 /// the reference legacy terrain — warm at dawn / dusk, cool at night — rather than
 /// by the raw (blue) reflection-probe irradiance. The colours are the same
 /// [`resolve_sky`](crate::sky::resolve_sky) derives for the scene directional light
 /// and the sky ambient, so the terrain agrees with the rest of the scene lighting.
+///
+/// The materials are only touched when the resolved lighting differs from the
+/// last applied value ([`CurrentTerrainLighting`]): under a static sky this
+/// system does no ECS/asset writes at all.
 pub(crate) fn drive_terrain_lighting(
     environment: Res<crate::environment::EnvironmentState>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    mut current: ResMut<CurrentTerrainLighting>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
@@ -84,6 +103,10 @@ pub(crate) fn drive_terrain_lighting(
         sun_color: Vec3::from_array(resolved.diffuse),
         ambient_color: Vec3::from_array(resolved.ambient),
     };
+    if current.0 == lighting {
+        return;
+    }
+    current.0 = lighting;
     for (_id, material) in materials.iter_mut() {
         material.lighting = lighting;
     }
@@ -329,6 +352,7 @@ pub(crate) fn update_terrain(
     mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<TerrainState>,
     mut manager: ResMut<TextureManager>,
+    lighting: Res<CurrentTerrainLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -338,7 +362,13 @@ pub(crate) fn update_terrain(
         match &event.0 {
             SlSessionEvent::TerrainPatch(patch) if patch.layer.is_land() => {
                 let key = (patch.region_handle, patch.patch_x, patch.patch_y);
-                ensure_region(&mut state, patch.region_handle, &mut images, &mut materials);
+                ensure_region(
+                    &mut state,
+                    patch.region_handle,
+                    lighting.0,
+                    &mut images,
+                    &mut materials,
+                );
                 state.raw_patches.insert(key, (**patch).clone());
                 state.map_revision = state.map_revision.wrapping_add(1);
                 spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
@@ -365,9 +395,15 @@ pub(crate) fn update_terrain(
 /// material exist, creating the material (with all four detail slots on the
 /// placeholder) on the region's first patch and reconciling any already-decoded
 /// textures into it.
+///
+/// A new material is seeded with the *current* resolved lighting, not the
+/// static default: [`drive_terrain_lighting`] only rewrites the materials when
+/// the lighting changes, so a material created under a stable sky would
+/// otherwise keep the default forever.
 fn ensure_region(
     state: &mut TerrainState,
     region: RegionHandle,
+    lighting: TerrainLighting,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
@@ -382,7 +418,7 @@ fn ensure_region(
             detail1: placeholder.clone(),
             detail2: placeholder.clone(),
             detail3: placeholder,
-            lighting: default_terrain_lighting(),
+            lighting,
         }));
     }
     reconcile_region(state, region, materials);
@@ -1279,6 +1315,37 @@ mod tests {
         assert_eq!(
             metres_to_f32(0x0010_0100).to_bits(),
             1_048_832.0_f32.to_bits()
+        );
+    }
+
+    /// A region material created after the sky lighting has moved on from the
+    /// default is seeded with the *current* lighting: `drive_terrain_lighting`
+    /// only rewrites materials when the lighting changes, so a stale default
+    /// seed would otherwise persist until the next sky change.
+    #[test]
+    fn ensure_region_seeds_current_lighting() {
+        let mut state = super::TerrainState::default();
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let mut materials = bevy::asset::Assets::<sl_client_bevy::TerrainMaterial>::default();
+        let lighting = sl_client_bevy::TerrainLighting {
+            sun_color: bevy::math::Vec3::new(0.9, 0.5, 0.2),
+            ambient_color: bevy::math::Vec3::new(0.1, 0.2, 0.3),
+        };
+        super::ensure_region(
+            &mut state,
+            RegionHandle(7),
+            lighting,
+            &mut images,
+            &mut materials,
+        );
+        let material = state
+            .regions
+            .get(&RegionHandle(7))
+            .and_then(|entry| entry.material.as_ref())
+            .and_then(|handle| materials.get(handle));
+        assert!(
+            material.is_some_and(|material| material.lighting == lighting),
+            "the new region material should carry the passed-in lighting"
         );
     }
 }

@@ -32,7 +32,11 @@ use bevy::shader::{Shader, ShaderRef};
 /// the *atmospheric* ambient rather than the raw reflection-probe irradiance is
 /// what keeps a sun-shaded slope reading the ground's own colour instead of going
 /// sky-blue at dawn / dusk — matching `softenLight`'s legacy branch.
-#[derive(Clone, Copy, Debug, ShaderType)]
+/// `PartialEq` (exact float equality) lets the driver skip the per-material
+/// update when the resolved lighting is unchanged: both sides of the compare
+/// are re-derived from the same sky inputs, so bit-equality is the correct
+/// "nothing changed" test (no epsilon needed).
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root as `TerrainLighting`, where the name reads clearly"
