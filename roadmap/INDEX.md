@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 78 |
 | in-progress | 12 |
 | bugs | 19 |
-| done | 763 |
+| done | 764 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1205** |
+| **total** | **1206** |
 
 ## ideas (56)
 
@@ -1047,7 +1047,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (763)
+## done (764)
 
 ### protocol
 
@@ -1805,6 +1805,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Amortise inventory row rebuilds and the skeleton merge
 - [`viewer-perf-inventory-view-visibility-gate`](done/viewer-perf-inventory-view-visibility-gate.md)
   — Don't rebuild the inventory view while the floater is closed
+- [`viewer-perf-lod-apply-budget`](done/viewer-perf-lod-apply-budget.md) —
+  Budget prim/tree LOD re-tessellation application across frames
 - [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
   face materials by content for shared handles + draw batching (blocked by
   `viewer-perf-prim-tessellation-cache` (done))

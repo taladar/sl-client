@@ -358,11 +358,11 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    GeometryApplyBudget, ObjectState, PendingDecodedMeshes, PendingDecodedSculpts,
+    GeometryApplyBudget, LodApplyBudget, ObjectState, PendingDecodedMeshes, PendingDecodedSculpts,
     PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets, adopt_pending_attachments,
     apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
     apply_tree_lod, log_suspicious_objects, pick_object, pick_worn_attachment,
-    prune_control_avatars, recenter_objects, reset_geometry_apply_budget,
+    prune_control_avatars, recenter_objects, reset_geometry_apply_budget, reset_lod_apply_budget,
     spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
@@ -1567,6 +1567,7 @@ fn run_session(
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()
         .init_resource::<GeometryApplyBudget>()
+        .init_resource::<LodApplyBudget>()
         .init_resource::<PendingDecodedMeshes>()
         .init_resource::<PendingDecodedSculpts>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
@@ -2005,11 +2006,16 @@ fn run_session(
                 // entity despawned) — the cache holds only weak asset ids, so
                 // that is bookkeeping, not asset freeing.
                 (
-                    apply_prim_lod.after(drive_render_priority),
-                    // Tree level of detail (P26.2): regenerate any tree whose
-                    // branching / billboard tier the driver changed, after it has
-                    // picked the tiers.
-                    apply_tree_lod.after(drive_render_priority),
+                    // Budget the LOD re-tessellations across frames: refill the
+                    // shared `LodApplyBudget`, then `apply_prim_lod` and (P26.2)
+                    // `apply_tree_lod` — which regenerates any tree whose
+                    // branching / billboard tier the driver changed — each spend
+                    // from it, so a tick's whole batch spreads over frames instead
+                    // of a single command-flush spike. Chained so tree sees the
+                    // budget prim spent; all after the driver has picked levels.
+                    (reset_lod_apply_budget, apply_prim_lod, apply_tree_lod)
+                        .chain()
+                        .after(drive_render_priority),
                     geometry_cache::prune_geometry_cache.run_if(
                         bevy::time::common_conditions::on_timer(geometry_cache::PRUNE_INTERVAL),
                     ),

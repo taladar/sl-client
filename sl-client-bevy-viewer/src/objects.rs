@@ -1561,6 +1561,98 @@ pub(crate) fn reset_geometry_apply_budget(mut budget: ResMut<GeometryApplyBudget
     budget.remaining = budget.per_frame;
 }
 
+/// The default for [`LodApplyBudget`]: prim/tree LOD re-tessellations applied
+/// per frame across [`apply_prim_lod`] and [`apply_tree_lod`].
+const DEFAULT_LOD_APPLY_BUDGET: usize = 8;
+
+/// The shared per-frame budget for **LOD re-tessellation** application, spent by
+/// [`apply_prim_lod`] and [`apply_tree_lod`] from one pool and refilled by
+/// [`reset_lod_apply_budget`] each frame. Kept separate from
+/// [`GeometryApplyBudget`] (as that is from [`SpawnBudget`]) so a login decode
+/// burst does not starve LOD catch-up and a camera-sweep LOD burst does not
+/// starve decode application — the two rarely coincide (decode is login, LOD is
+/// camera movement).
+///
+/// `drive_render_priority` re-derives the whole visible-object LOD target set
+/// every throttled tick (`REPRIORITIZE_INTERVAL_SECS`, 4 Hz): it clears the maps
+/// and re-inserts a desired level for every visible prim/tree. Without a budget,
+/// the one frame per tick that applied a freshly repopulated set re-tessellated
+/// the entire batch at once (a ~358 ms `apply_prim_lod` command-flush spike in
+/// the 2026-08-10 aditi capture). Budgeting spreads that batch across the frames
+/// until the next tick; a target left un-applied is simply re-derived then (its
+/// actual level has not changed), so no work is lost.
+#[derive(Resource)]
+pub(crate) struct LodApplyBudget {
+    /// The per-frame pool (env `SL_VIEWER_LOD_APPLY_BUDGET`).
+    per_frame: usize,
+    /// What remains this frame; refilled by [`reset_lod_apply_budget`].
+    remaining: usize,
+}
+
+impl Default for LodApplyBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_LOD_APPLY_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_LOD_APPLY_BUDGET);
+        Self {
+            per_frame,
+            remaining: per_frame,
+        }
+    }
+}
+
+/// Refill the shared [`LodApplyBudget`] at the start of each frame's LOD apply
+/// pass (runs before [`apply_prim_lod`] / [`apply_tree_lod`]).
+pub(crate) fn reset_lod_apply_budget(mut budget: ResMut<LodApplyBudget>) {
+    budget.remaining = budget.per_frame;
+}
+
+/// The outcome of examining one LOD target in [`retain_lod_budgeted`].
+enum LodOutcome {
+    /// Resolved or irrelevant (object gone, wrong kind, or already at the
+    /// desired level) — drop the target, free (no budget charged).
+    Resolved,
+    /// A genuine re-tessellation was performed — drop the target, one unit spent.
+    Rebuilt,
+    /// Out of budget this frame — keep the target for a later frame.
+    Deferred,
+}
+
+/// Budgeted `retain` over a LOD target map. For each `(key, value)`, `apply` is
+/// given the budget still remaining this frame and returns whether it was a free
+/// skip ([`LodOutcome::Resolved`]), did a budgeted rebuild
+/// ([`LodOutcome::Rebuilt`], allowed only while `remaining > 0`), or must wait
+/// ([`LodOutcome::Deferred`]). Resolved and Rebuilt targets are removed; Deferred
+/// targets are kept for the next frame. Returns the number of rebuilds performed.
+///
+/// Unlike [`drain_budgeted`], the target set is a `HashMap` keyed by
+/// [`ScopedObjectId`], so it is **already deduplicated per object** — a re-insert
+/// for the same object overwrites its desired level, and `drive_render_priority`
+/// visits each object at most once per tick — so there is no duplicate LOD apply
+/// to guard against and no FIFO to preserve. Iteration order does not matter:
+/// any target left un-applied is re-derived on the next tick.
+fn retain_lod_budgeted<K: Copy + Eq + std::hash::Hash, V: Copy>(
+    map: &mut HashMap<K, V>,
+    budget: usize,
+    mut apply: impl FnMut(K, V, usize) -> LodOutcome,
+) -> usize {
+    let mut builds = 0usize;
+    map.retain(|&key, &mut value| {
+        let remaining = budget.saturating_sub(builds);
+        match apply(key, value, remaining) {
+            LodOutcome::Resolved => false,
+            LodOutcome::Rebuilt => {
+                builds = builds.saturating_add(1);
+                false
+            }
+            LodOutcome::Deferred => true,
+        }
+    });
+    builds
+}
+
 /// Decoded mesh keys awaiting application by [`apply_object_meshes`], deduped
 /// — a key already queued absorbs later decode events (the apply always reads
 /// the store's current block).
@@ -4223,6 +4315,7 @@ pub(crate) fn apply_object_meshes(
 )]
 pub(crate) fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
+    mut budget: ResMut<LodApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4232,61 +4325,78 @@ pub(crate) fn apply_prim_lod(
     mut cache: ResMut<GeometryCache>,
     mut material_cache: ResMut<MaterialCache>,
 ) {
-    for (scoped, desired) in targets.0.drain() {
-        let Some(tracked) = state.objects.get_mut(&scoped) else {
-            continue;
-        };
-        // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
-        // avatar has none and is left untouched.
-        let Some(rebuild) = tracked.prim_rebuild.as_ref() else {
-            continue;
-        };
-        if tracked.prim_lod == desired {
-            continue;
-        }
-        // Clone the rebuild inputs out so the immutable borrow of `tracked` ends
-        // before the mutable rebuild of its face entities below.
-        let shape = rebuild.shape;
-        let texture_entry = rebuild.texture_entry.clone();
-        let scale = rebuild.scale;
-        let priority = rebuild.priority;
-        let intern = rebuild.intern.clone();
-        let geometry = tracked.geometry;
-        despawn_prim_faces(&tracked.face_entities, &mut commands);
-        tracked.face_entities = spawn_cached_prim_faces(
-            GeometryKey::Prim {
-                shape,
-                lod: desired,
-            },
-            || tessellate(&PrimShapeFloat::from_params(&shape), desired),
-            &texture_entry,
-            scale,
-            geometry,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &mut prim_textures,
-            priority,
-            &mut cache,
-            &intern,
-            &mut material_cache,
-        );
-        tracked.prim_lod = desired;
-        debug!(
-            "re-tessellated prim {scoped} at {desired:?}: {} faces",
-            tracked.face_entities.len()
-        );
-    }
+    // Budgeted so a tick's worth of re-tessellations spreads across frames
+    // instead of a single command-flush spike (see `LodApplyBudget`). Shared
+    // with `apply_tree_lod`, which runs after and sees the remaining budget.
+    let builds = retain_lod_budgeted(
+        &mut targets.0,
+        budget.remaining,
+        |scoped, desired, remaining| {
+            let Some(tracked) = state.objects.get_mut(&scoped) else {
+                return LodOutcome::Resolved;
+            };
+            // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
+            // avatar has none and is left untouched.
+            let Some(rebuild) = tracked.prim_rebuild.as_ref() else {
+                return LodOutcome::Resolved;
+            };
+            if tracked.prim_lod == desired {
+                return LodOutcome::Resolved;
+            }
+            if remaining == 0 {
+                return LodOutcome::Deferred;
+            }
+            // Clone the rebuild inputs out so the immutable borrow of `tracked` ends
+            // before the mutable rebuild of its face entities below.
+            let shape = rebuild.shape;
+            let texture_entry = rebuild.texture_entry.clone();
+            let scale = rebuild.scale;
+            let priority = rebuild.priority;
+            let intern = rebuild.intern.clone();
+            let geometry = tracked.geometry;
+            despawn_prim_faces(&tracked.face_entities, &mut commands);
+            tracked.face_entities = spawn_cached_prim_faces(
+                GeometryKey::Prim {
+                    shape,
+                    lod: desired,
+                },
+                || tessellate(&PrimShapeFloat::from_params(&shape), desired),
+                &texture_entry,
+                scale,
+                geometry,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                priority,
+                &mut cache,
+                &intern,
+                &mut material_cache,
+            );
+            tracked.prim_lod = desired;
+            debug!(
+                "re-tessellated prim {scoped} at {desired:?}: {} faces",
+                tracked.face_entities.len()
+            );
+            LodOutcome::Rebuilt
+        },
+    );
+    budget.remaining = budget.remaining.saturating_sub(builds);
 }
 
 /// Regenerate each tree the render-priority driver picked a new [`TreeTier`] for
-/// (P26.2) — the tree counterpart of [`apply_prim_lod`]. Drains
-/// [`TreeLodTargets`] and, for any tree whose desired tier differs from its
-/// current one, despawns its face and regenerates the branch / leaf geometry (or
-/// the billboard imposter) at the new tier.
+/// (P26.2) — the tree counterpart of [`apply_prim_lod`], sharing its
+/// [`LodApplyBudget`]. For any tree whose desired tier differs from its current
+/// one, despawns its face and regenerates the branch / leaf geometry (or the
+/// billboard imposter) at the new tier, up to the remaining per-frame budget.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading the LOD targets and the ECS resources the geometry build needs"
+)]
 pub(crate) fn apply_tree_lod(
     mut targets: ResMut<TreeLodTargets>,
+    mut budget: ResMut<LodApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4294,35 +4404,45 @@ pub(crate) fn apply_tree_lod(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
-    for (scoped, desired) in targets.0.drain() {
-        let Some(tracked) = state.objects.get_mut(&scoped) else {
-            continue;
-        };
-        // Only a tree carries regeneration inputs; anything else is left untouched.
-        let Some(rebuild) = tracked.tree_rebuild.as_ref() else {
-            continue;
-        };
-        if tracked.tree_tier == desired {
-            continue;
-        }
-        let species = rebuild.species;
-        let priority = rebuild.priority;
-        let geometry = tracked.geometry;
-        despawn_prim_faces(&tracked.face_entities, &mut commands);
-        tracked.face_entities = build_tree_faces(
-            species,
-            desired,
-            geometry,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &mut prim_textures,
-            priority,
-        );
-        tracked.tree_tier = desired;
-        debug!("regenerated tree {scoped} at {desired:?}");
-    }
+    // Budgeted from the shared `LodApplyBudget`, spent after `apply_prim_lod`.
+    let builds = retain_lod_budgeted(
+        &mut targets.0,
+        budget.remaining,
+        |scoped, desired, remaining| {
+            let Some(tracked) = state.objects.get_mut(&scoped) else {
+                return LodOutcome::Resolved;
+            };
+            // Only a tree carries regeneration inputs; anything else is left untouched.
+            let Some(rebuild) = tracked.tree_rebuild.as_ref() else {
+                return LodOutcome::Resolved;
+            };
+            if tracked.tree_tier == desired {
+                return LodOutcome::Resolved;
+            }
+            if remaining == 0 {
+                return LodOutcome::Deferred;
+            }
+            let species = rebuild.species;
+            let priority = rebuild.priority;
+            let geometry = tracked.geometry;
+            despawn_prim_faces(&tracked.face_entities, &mut commands);
+            tracked.face_entities = build_tree_faces(
+                species,
+                desired,
+                geometry,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                priority,
+            );
+            tracked.tree_tier = desired;
+            debug!("regenerated tree {scoped} at {desired:?}");
+            LodOutcome::Rebuilt
+        },
+    );
+    budget.remaining = budget.remaining.saturating_sub(builds);
 }
 
 /// Whether worn rigged meshes' joint position overrides (R1) are applied to the
@@ -4952,8 +5072,8 @@ pub(crate) fn apply_object_sculpts(
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectCategory, ShapeFingerprint, classify, drain_budgeted, geometry_transform,
-        holder_transform, object_transform,
+        LodOutcome, ObjectCategory, ShapeFingerprint, classify, drain_budgeted, geometry_transform,
+        holder_transform, object_transform, retain_lod_budgeted,
     };
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -4961,7 +5081,7 @@ mod tests {
         CircuitId, MeshKey, Object, ObjectMotion, RegionHandle, RegionLocalObjectId, Rotation,
         SculptData, SculptOrMeshKey, TextureKey, Uuid, Vector, pcode,
     };
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
 
     /// The zero vector (`Vector` does not derive `Default`).
     const fn zero() -> Vector {
@@ -5320,6 +5440,66 @@ mod tests {
         let builds = drain_budgeted(&mut queue, 10, |item| item);
         assert_eq!(builds, 2);
         assert!(queue.is_empty(), "the backlog fully drains");
+    }
+
+    /// Value convention for the LOD-budget tests: an **even** key is a free skip
+    /// (resolved / already at the desired level), an **odd** key needs a rebuild.
+    fn classify_lod(key: u32, remaining: usize, built: &mut Vec<u32>) -> LodOutcome {
+        if key.is_multiple_of(2) {
+            LodOutcome::Resolved
+        } else if remaining == 0 {
+            LodOutcome::Deferred
+        } else {
+            built.push(key);
+            LodOutcome::Rebuilt
+        }
+    }
+
+    /// The LOD budget spends only on rebuilds (free skips are removed for free),
+    /// caps rebuilds at the budget, and keeps the over-budget rebuild targets in
+    /// the map for a later frame while dropping every resolved one.
+    #[test]
+    fn lod_budget_charges_rebuilds_only_and_keeps_overflow() {
+        // Keys 0..6: evens {0,2,4} are free skips, odds {1,3,5} need a rebuild.
+        let mut map: HashMap<u32, u32> = (0..6).map(|key| (key, 0)).collect();
+        let mut built = Vec::new();
+        let builds = retain_lod_budgeted(&mut map, 2, |key, _value, remaining| {
+            classify_lod(key, remaining, &mut built)
+        });
+
+        assert_eq!(builds, 2, "stops after the second rebuild");
+        assert_eq!(built.len(), 2, "exactly two rebuilds ran");
+        assert!(
+            built.iter().all(|key| key % 2 == 1),
+            "only rebuild (odd) keys were built, never a free skip",
+        );
+        assert_eq!(
+            map.len(),
+            1,
+            "the third rebuild waits; all three free skips are dropped",
+        );
+        assert!(
+            map.keys().all(|key| !key.is_multiple_of(2)),
+            "the deferred target is an un-built (odd) rebuild, not a free skip",
+        );
+        assert!(
+            map.keys().all(|key| !built.contains(key)),
+            "the deferred target was not also built",
+        );
+    }
+
+    /// Under budget, every rebuild is applied and the whole target map empties
+    /// (both the rebuilds and the free skips are removed).
+    #[test]
+    fn lod_budget_applies_all_when_under_budget() {
+        let mut map: HashMap<u32, u32> = (0..6).map(|key| (key, 0)).collect();
+        let mut built = Vec::new();
+        let builds = retain_lod_budgeted(&mut map, 10, |key, _value, remaining| {
+            classify_lod(key, remaining, &mut built)
+        });
+
+        assert_eq!(builds, 3, "all three odd keys rebuilt");
+        assert!(map.is_empty(), "nothing deferred, all skips dropped");
     }
 
     /// Repeated upserts for one still-queued object coalesce into a single
