@@ -63,14 +63,22 @@ means; the specialization/visibility systems run on **main-app worker
 threads**, so their wall-clock contribution to PostUpdate's 22 ms is the
 critical chain, not the raw sum):
 
-**PostUpdate — the steady median:**
+**PostUpdate — the steady median.** ⚠️ **Corrected 2026-08-10:** the
+material-spec row below is a **sum of concurrent `par_iter` systems** — a
+`-u` unwrap shows all 15 finish inside a ~2 ms overlapping span, so its real
+wall-clock is **~2 ms, not 8.44 ms** (the summed-parallel-work over-count).
+`check_dir_light_mesh_visibility`, by contrast, is a **single serial** system
+at **~5–6 ms** real wall-clock — the genuine top single-threaded cost. A
+proper critical-path breakdown (per-instance wall-clock, single-threaded vs
+`par_iter`) is still owed; the "8.4 + 8.2 = 17 of 22" claim below is **wrong**
+(it summed concurrent work).
 
-| Cluster | ms/frame | note |
-| --- | --- | --- |
-| `material::check_entities_needing_specialization<M>` ×15 | **8.44** | main-world, per material type — see [[viewer-perf-main-world-material-specialization-check]] |
-| `check_dir_light_mesh_visibility` (+ its commands) | **8.18** | sun shadow-caster visibility over all meshes — see [[viewer-perf-pbr-shadow-cluster-rez]] |
-| `calculate_bounds` | 2.06 | AABB recompute for changed geometry |
-| everything else (propagate, change-detect, UI layout, text) | small | each ≤1.2 ms |
+| Cluster | summed ms | real wall-clock | note |
+| --- | --- | --- | --- |
+| `check_dir_light_mesh_visibility` (+ commands) | 8.18 | **~5–6 ms serial** | sun shadow-caster visibility — the real target, [[viewer-perf-pbr-shadow-cluster-rez]] |
+| `material::check_entities_needing_specialization<M>` ×15 | 8.44 | **~2 ms (parallel)** | 15 concurrent `par_iter` systems — [[viewer-perf-main-world-material-specialization-check]] (downgraded) |
+| `calculate_bounds` | 2.06 | ~2 ms | AABB recompute for changed geometry |
+| everything else (propagate, change-detect, UI layout, text) | — | small | each ≤1.2 ms |
 
 **Update — the spiky tail:**
 
@@ -85,11 +93,16 @@ Render thread (non-gating today): `render_system` 12.6 ms, `camera_driver`
 7.0 ms, `specialize_shadows` 4.2 ms, `queue_shadows` 3.8 ms. These matter
 only if PostUpdate is cut enough that render becomes the gater.
 
-The two dominant **average-frame** levers are therefore both PostUpdate:
-the main-world material-specialization checks (8.4 ms) and directional
-shadow-caster visibility (8.2 ms) — together ~17 ms of the 22 ms
-PostUpdate. Ground-probe (6 ms) is the third, and it doubles as the
-biggest steady spike source.
+**Corrected takeaway:** once parallel work is discounted, the material
+checks are ~2 ms wall-clock, not a dominant cost. The clearest real
+average-frame lever in PostUpdate is the **single-threaded**
+`check_dir_light_mesh_visibility` (~5–6 ms). What fills the rest of the
+22 ms is a **chain of many smaller serial systems** (transform propagation,
+visibility, change-detection, extract-prep, UI/text, our own) — no other
+single dominant cluster — so beyond the shadow system this is death-by-many
+and needs a critical-path (not summed-self-time) redo. Ground-probe (6 ms,
+Update) was the biggest *spike* source and is now addressed
+([[viewer-perf-avatar-ground-probe]] Stage 1).
 
 ### Outlier frames (why some frames are much slower)
 

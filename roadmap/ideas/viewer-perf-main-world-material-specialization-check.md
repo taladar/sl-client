@@ -12,6 +12,23 @@ refs:
 
 Context: [context/viewer.md](../context/viewer.md).
 
+## ⚠️ Correction (2026-08-10): real wall-clock is ~2 ms, not 8.44 ms
+
+The 8.44 ms below is the **sum** of the 15 systems' per-call times — but a
+`-u` unwrap over a steady window shows they all **start within ~0.4 ms of
+each other and finish inside a ~2 ms span**, running **concurrently** across
+worker threads (each does a `par_iter`). Their real contribution to
+PostUpdate's wall-clock is therefore **~2 ms**, not 8.44 ms — the classic
+summed-self-time-of-parallel-work over-count (see the profiling notes). The
+system is also **already change-filtered** (`Query<Entity, Or<(Changed<Mesh3d>,
+AssetChanged<Mesh3d>, Changed<MeshMaterial3d<M>>, AssetChanged<..>)>>`), so a
+static material's per-frame cost is mostly `par_iter` **dispatch overhead**,
+not an entity scan. A run-condition gate would still only reclaim ~2 ms of
+*summed* worker time (little wall-clock), so **this is now a low-priority
+lever.** The real single-threaded PostUpdate cost is
+`check_dir_light_mesh_visibility` (~5–6 ms serial) — see
+[[viewer-perf-pbr-shadow-cluster-rez]]. Kept below for the record.
+
 Distinct from the **render-world** `specialize_material_meshes` /
 `queue_material_meshes` cost (that is
 [[viewer-perf-probe-material-respecialize]]): this is the **main-world**
