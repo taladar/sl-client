@@ -71,6 +71,43 @@ re-tested every frame against the cascades — the single most valuable
 shadow lever to make cheaper or gate. Item 3 below is now the priority,
 not just a nice-to-have.
 
+### Confirmed the top real serial PostUpdate cost (2026-08-10)
+
+A `-u` critical-path pass (correcting the summed-self-time numbers in
+[[viewer-perf-steady-state-46fps-ceiling]]) confirms this is the genuine
+top single-threaded PostUpdate cost: it is **one serial system at ~5–6 ms**
+wall-clock (up to ~12 ms), one zone per frame on a worker, sitting **near
+the PostUpdate tail** (runs right after `check_visibility`, before the ~2 ms
+close-out). Unlike the material-spec family (which parallelises to ~2 ms,
+downgraded), nothing hides this cost — cutting it directly shortens the
+critical chain. **This is the #1 average-frame target.**
+
+### Plan of record: budgeted round-robin (exploit slow sun/cascade drift)
+
+Key property: the system re-tests **every** mesh against the directional
+light's cascade frustums every frame, but those frustums only shift
+**slightly** frame-to-frame (the sun angle changes a little, the camera
+drifts), so almost no mesh's shadow-visibility actually flips. So a full
+per-frame retest is nearly all redundant.
+
+- **Round-robin the retest (the elegant lever):** re-test only 1/N of the
+  casters each frame, cycling so every caster is re-tested every N frames
+  (same shape as the LOD-apply budget). A caster's shadow-visibility is then
+  up to N frames stale, which is invisible at slow sun/camera speeds. Must
+  still test **newly-spawned / moved** meshes immediately (change-detection),
+  and ideally re-test all when the camera turns fast (cascades shift a lot).
+  **Feasibility caveat:** `check_dir_light_mesh_visibility` lives in
+  **`bevy_light`**, so round-robining it means replacing the Bevy system
+  with our own (a `[patch.crates-io]` fork, the
+  `sl-client-fork-upstream-for-upstream-bugs` path — and upstreamable).
+- **No-patch levers (reduce N):** cap / distance-cull shadow casters
+  (`NotShadowCaster` on distant or small meshes — the reference viewer is
+  far more conservative about what casts), shorten the shadow distance, and
+  reduce cascade count. These cut the mesh count tested without touching
+  Bevy, and compose with the round-robin.
+
+Expect a follow-up session after the [[viewer-r26]] mesh errors are fixed.
+
 Investigate / tune:
 
 - **`check_dir_light_mesh_visibility` gating/cheapening — now the priority

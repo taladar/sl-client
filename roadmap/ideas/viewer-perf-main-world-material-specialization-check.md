@@ -68,33 +68,36 @@ change-tick scan) that scales with the **number of material types
 registered**, not the number of entities. We have registered a lot of
 bespoke sky/environment materials, so we pay this 15×.
 
-## Levers (measure first, then pick)
+## Feasibility (checked 2026-08-10) — gating is NOT easy
 
-- **Gate the check for static-material types.** For materials whose
-  entity set and content are effectively fixed after setup (sky, stars,
-  sun disc, clouds — the `sky.rs`/`water.rs`-style world-root builders),
-  the specialization set only changes at (re)build. A run
-  condition that skips `check_entities_needing_specialization<M>` unless a
-  material/entity of that type actually changed would drop most of the
-  8.4 ms. Confirm Bevy 0.19 lets us add a run condition to the
-  bevy-registered system (or replace the registration).
-- **Collapse material types.** Several of these could share one material +
-  a mode uniform (the sky-family shaders already share a gbuffer clamp
-  path). Fewer registered `M` types = fewer per-frame check systems.
-  Larger change, verify it does not regress the render-world
-  specialization.
-- **Upstream:** if the per-type fixed overhead is inherent to Bevy 0.19's
-  design, a cheaper "any entity of this material changed" gate is a
-  `bevy_pbr` improvement (the fork-and-upstream path).
+The obvious fix (a run-condition that skips the check for static materials)
+is **not readily available**: the system is registered by Bevy's
+`MaterialPlugin<M>` (`bevy_pbr/src/material.rs:384`, added directly with
+`.after(AssetEventSystems)`, not in a named set), and Bevy 0.19 offers no
+clean way to bolt a `run_if` onto another plugin's already-scheduled system.
+So the realistic levers are both **bigger than a one-liner**:
 
-## Measure
+- **Reduce the number of material *types* (most promising).** We register
+  15; the cheap-but-numerous ones are our env singletons (`SkyMaterial`,
+  `StarMaterial`, `SunDiscMaterial`, `CloudMaterial`). Collapsing those into
+  one `EnvironmentMaterial` (mode via a uniform; the sky-family shaders
+  already share a gbuffer-clamp path) removes ~3 systems' worth from the
+  chain. A rendering refactor — verify it does not regress the render-world
+  specialization or the individual shaders.
+- **Fork/patch Bevy** to gate or serialise the check for change-free
+  materials (the `[patch.crates-io]` path) — heavier, upstreamable.
 
-A/B on the same aditi region (or headlessly in the gallery, which
-instantiates the sky/star/sun materials): steady-state PostUpdate median
-and the summed `check_entities_needing_specialization<*>` self-time before
-and after, window visible. Target: recover most of the 8.4 ms from
-PostUpdate's 22 ms — the biggest single average-frame lever found in the
-2026-08-10 capture.
+## A/B first — is it even on the critical path?
 
-Confidence: high on the measurement (15 systems, 8.44 ms summed, isolated
-zones); medium on the fix (needs the Bevy 0.19 run-condition check).
+Before either refactor, **confirm the ~2 ms is reclaimable**: the material
+systems sit in the PostUpdate sequential chain (before
+`check_visibility` → `check_dir_light_mesh_visibility`), so they are
+*plausibly* on the critical path, but they might overlap otherwise-idle
+workers, in which case removing them saves ~0 wall-clock. Cheap experiment:
+temporarily stop registering the 4 env-material types (render them stubbed)
+and measure whether **PostUpdate median actually drops ~2 ms**. Only invest
+in the type-collapse refactor if it does.
+
+Priority: **secondary** to [[viewer-perf-pbr-shadow-cluster-rez]] (the
+`check_dir_light_mesh_visibility` ~5–6 ms serial cost, unambiguously on the
+critical path). Revisit after the [[viewer-r26]] mesh errors are fixed.
