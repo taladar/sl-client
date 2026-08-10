@@ -839,7 +839,8 @@ impl Plugin for ConversationsPlugin {
                     respond_to_invites,
                     close_conversations,
                     spawn_conversation_tabs,
-                    refresh_conversations,
+                    refresh_conversations
+                        .run_if(crate::floater::floater_shown(CONVERSATIONS_FLOATER_ID)),
                 )
                     .chain(),
             )

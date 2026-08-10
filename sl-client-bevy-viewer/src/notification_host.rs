@@ -178,7 +178,7 @@ const MAX_VISIBLE_TOASTS: usize = 1;
 /// notifications shortly after startup, so the live stacking / timeout / fade /
 /// modal behaviour can be watched without a server alert. A source-level debug
 /// affordance (see the memory note on CLI vs env), off by default.
-const DEMO_ENV: &str = "SL_VIEWER_NOTIFICATION_DEMO";
+pub(crate) const DEMO_ENV: &str = "SL_VIEWER_NOTIFICATION_DEMO";
 
 /// How long the demo waits before raising the corner toasts, in seconds — enough
 /// for the async Fluent bundle to load so their text resolves through i18n.

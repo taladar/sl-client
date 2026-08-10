@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 246 |
 | blocked | 87 |
 | in-progress | 12 |
-| bugs | 18 |
-| done | 753 |
+| bugs | 19 |
+| done | 754 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1202** |
+| **total** | **1204** |
 
 ## ideas (55)
 
@@ -74,13 +74,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
+- [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
+  App-level login state to gate world/streaming systems pre-login
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
   — Skip capture for occluded reflection probes (blocked by
   `viewer-perf-probe-scheduling`)
-- [`viewer-perf-run-condition-gating`](ideas/viewer-perf-run-condition-gating.md)
-  — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
   — Solve each avatar skeleton once per frame unless an adjuster needs two
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
@@ -1014,7 +1014,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (18)
+## bugs (19)
 
 ### protocol
 
@@ -1049,6 +1049,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
+  — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -1065,7 +1067,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (753)
+## done (754)
 
 ### protocol
 
@@ -1822,6 +1824,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-prim-texture-apply-burst`](done/viewer-perf-prim-texture-apply-burst.md)
   — Throttle prim-texture application + GPU asset uploads during rez bursts
+- [`viewer-perf-run-condition-gating`](done/viewer-perf-run-condition-gating.md)
+  — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-session-network-thread`](done/viewer-perf-session-network-thread.md)
   — Run the Bevy session on a dedicated network thread
 - [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)

@@ -294,8 +294,8 @@ use crate::chat::{
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
 use crate::diagnostics::{
-    PipelineOverlayVisible, setup_pipeline_overlay, toggle_pipeline_overlay,
-    update_pipeline_overlay,
+    PipelineOverlayVisible, pipeline_overlay_active, setup_pipeline_overlay,
+    toggle_pipeline_overlay, update_pipeline_overlay,
 };
 use crate::edit_selection::EditSelectionPlugin;
 use crate::edit_tool::EditToolPlugin;
@@ -1251,11 +1251,10 @@ fn run_session(
     // After the host, whose PersistNotification / NotificationResponse it records.
     .add_plugins(NotificationPersistPlugin)
     // Surface the simulator's `AlertMessage` / `AgentAlertMessage` (a stream
-    // nothing consumed before) as notifications, and — only when
-    // `SL_VIEWER_NOTIFICATION_DEMO` is set — raise a sample spread on startup so
-    // the live stacking / fade / modal behaviour can be watched without a server
-    // alert.
-    .add_systems(Update, (ingest_alert_messages, spawn_notification_demo))
+    // nothing consumed before) as notifications. The `SL_VIEWER_NOTIFICATION_DEMO`
+    // sample spread is registered conditionally with the other env-gated debug
+    // systems below.
+    .add_systems(Update, ingest_alert_messages)
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout
@@ -1839,10 +1838,6 @@ fn run_session(
                             .after(crate::groups::ingest_group_events),
                     )
                         .chain(),
-                    // R22b diagnostic census of unresolved coarse "blue sphere"
-                    // avatars (gated by `SL_VIEWER_LOG_AVATAR_INTEREST`; a
-                    // no-op otherwise).
-                    log_avatar_interest_census,
                     // Fit each avatar's pick-collider box to its posed skeleton, after
                     // the bodies (and their skeleton instances) exist.
                     fit_avatar_pick_colliders.after(update_avatar_objects),
@@ -1943,15 +1938,13 @@ fn run_session(
                 drive_avatar_controls,
             ),
         )
-        // Opt-in diagnostic (SL_VIEWER_LOG_OBJECTS): flag region-sized / sky objects
-        // so a live session can tell an unculled large object from a wrongly decoded one.
-        // Plus the crosshair pick tool (press `P`) to identify the object under the
+        // The crosshair pick tool (press `P`) to identify the object under the
         // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
-        // system limit.
+        // system limit. (The SL_VIEWER_LOG_OBJECTS diagnostic is registered
+        // conditionally with the other env-gated debug systems below.)
         .add_systems(
             Update,
             (
-                log_suspicious_objects,
                 pick_object.run_if(world_has_keyboard),
                 pick_worn_attachment.run_if(world_has_keyboard),
                 // The screen-space HUD (P35.2): keep each HUD point anchored to its
@@ -1998,21 +1991,27 @@ fn run_session(
                 // resource on the toggle key, then drive the panel's visibility and
                 // (while shown) its text from the live store snapshots.
                 toggle_pipeline_overlay,
-                update_pipeline_overlay.after(toggle_pipeline_overlay),
+                update_pipeline_overlay
+                    .run_if(pipeline_overlay_active)
+                    .after(toggle_pipeline_overlay),
                 // UI text & font foundation (viewer-ui-text-foundation): toggle /
                 // apply the demo panel's visibility (the F4 key). Nested into one
                 // tuple to stay within Bevy's per-tuple system limit.
                 (
                     toggle_text_demo,
-                    apply_text_demo_visibility.after(toggle_text_demo),
+                    apply_text_demo_visibility
+                        .run_if(resource_changed::<TextDemoVisible>)
+                        .after(toggle_text_demo),
                 ),
                 // Reusable text-input widget (viewer-ui-text-input-widget): toggle /
                 // apply the demo panel's visibility (the F8 key), and keep the numeric
                 // rows' live parsed-value read-outs current.
                 (
                     toggle_text_input_demo,
-                    apply_text_input_demo_visibility.after(toggle_text_input_demo),
-                    update_demo_value_readouts,
+                    apply_text_input_demo_visibility
+                        .run_if(resource_changed::<TextInputDemoVisible>)
+                        .after(toggle_text_input_demo),
+                    update_demo_value_readouts.run_if(crate::ui_text_input::text_input_demo_active),
                 ),
                 // Local lights (P25.2): render the nearest / brightest light-flagged
                 // prims as Bevy point / spot lights, after the fly-camera so the
@@ -2022,23 +2021,10 @@ fn run_session(
                 // rebuild its camera-facing billboard mesh, after the fly-camera so the
                 // billboards face the current viewpoint.
                 drive_particles.after(position_camera),
-                // Debug (env `SL_VIEWER_CAMERA_DUMP`): log the camera pose as a
-                // ready-to-paste `--camera-position`/`--camera-look-at` for repeatable
-                // benchmark / screenshot framing, after the camera is positioned.
-                dump_camera_pose.after(position_camera),
                 // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
                 // and rewrite its deformed geometry in place, after `update_objects` so
                 // this frame's spawns / rebuilds have seeded their chain state.
                 simulate_flexi.after(update_objects),
-                // Debug (env `SL_VIEWER_PARTICLE_FOCUS`): aim the camera at the busiest
-                // particle cloud so an unattended screenshot frames a real emitter.
-                focus_camera_on_particles
-                    .after(drive_particles)
-                    .after(position_camera),
-                // Debug (env `SL_VIEWER_VOLUME_FOCUS`): aim the camera at the avatar whose
-                // shape displaces its collision volumes the most (P34.3), the only subject
-                // on which the effect is visible at all.
-                focus_camera_on_volume_shape.after(position_camera),
                 // Debug (`V`): toggle the shape's collision-volume displacement live, so
                 // the effect can be A/B'd on one avatar in one session (P34.3).
                 toggle_volume_morphs.run_if(world_has_keyboard),
@@ -2144,7 +2130,6 @@ fn run_session(
                 hand_pose::drive_hand_poses
                     .after(drive_avatar_skeletons)
                     .before(apply_avatar_runtime_morphs),
-                repeat_debug_animation,
                 report_camera_interest,
                 report_agent_viewport,
                 // Head & eye look-at tracking (P31.12): derive the own avatar's look-at
@@ -2189,9 +2174,6 @@ fn run_session(
         .add_systems(
             PostUpdate,
             (
-                // The env-gated pose-gate churn tracer, before the driver so it
-                // reports the same frame's Transform churn the gate reacts to.
-                crate::animations::log_pose_gate_churn.before(pose_avatar_skeletons),
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
                 pose_control_avatars.after(TransformSystems::Propagate),
                 // Re-place worn rigid attachments (earrings, piercings) from the
@@ -2236,6 +2218,55 @@ fn run_session(
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
     if let Some(library) = load_avatar_library(viewer_assets) {
         app.insert_resource(library);
+    }
+    // Env-gated debug / demo systems, registered only when their switch is set
+    // (the `capture_screenshots` pattern) — a normal session pays no scheduler
+    // dispatch for them at all. Each predicate mirrors the system's own
+    // internal env check.
+    if std::env::var_os("SL_VIEWER_LOG_OBJECTS").is_some() {
+        app.add_systems(Update, log_suspicious_objects);
+    }
+    if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
+        // R22b diagnostic census of unresolved coarse "blue sphere" avatars.
+        app.add_systems(Update, log_avatar_interest_census);
+    }
+    if std::env::var_os("SL_VIEWER_CAMERA_DUMP").is_some() {
+        // Log the camera pose as a ready-to-paste
+        // `--camera-position`/`--camera-look-at` for repeatable framing.
+        app.add_systems(Update, dump_camera_pose.after(position_camera));
+    }
+    if std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some() {
+        // Aim the camera at the busiest particle cloud so an unattended
+        // screenshot frames a real emitter.
+        app.add_systems(
+            Update,
+            focus_camera_on_particles
+                .after(drive_particles)
+                .after(position_camera),
+        );
+    }
+    if std::env::var_os("SL_VIEWER_VOLUME_FOCUS").is_some() {
+        // Aim the camera at the avatar whose shape displaces its collision
+        // volumes the most (P34.3).
+        app.add_systems(Update, focus_camera_on_volume_shape.after(position_camera));
+    }
+    if std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
+        // The pose-gate churn tracer, before the driver so it reports the same
+        // frame's Transform churn the gate reacts to.
+        app.add_systems(
+            PostUpdate,
+            crate::animations::log_pose_gate_churn.before(pose_avatar_skeletons),
+        );
+    }
+    if std::env::var_os(crate::notification_host::DEMO_ENV).is_some() {
+        // Raise a sample notification spread on startup so the live stacking /
+        // fade / modal behaviour can be watched without a server alert.
+        app.add_systems(Update, spawn_notification_demo);
+    }
+    if repeat_animation && !play_animation.is_empty() {
+        // Keep re-issuing the `--play-animation` motions (`--repeat-animation`)
+        // so a one-shot animation still plays once the avatar has loaded.
+        app.add_systems(Update, repeat_debug_animation);
     }
     // Avatar-state capture (viewer-avatar-state-dump-replay): only when
     // `SL_VIEWER_DUMP_DIR` is set — retain the raw avatar/appearance/animation
