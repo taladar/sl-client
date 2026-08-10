@@ -2,7 +2,7 @@
 id: viewer-volume-panel
 title: Volume panel (master + per-category sliders)
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07)
 blocked_by: [viewer-ui-widget-scaffold, viewer-audio-backend]
 refs: [viewer-quick-preferences]
@@ -43,3 +43,28 @@ Reference (Firestorm, read-only): `llfloatervolumepulldown`,
 
 Deps: [[viewer-ui-widget-scaffold]] (the pulldown panel),
 [[viewer-audio-backend]] (the mixer buses the sliders drive).
+
+## Done (2026-08-10)
+
+New `volume_panel.rs`, live-verified on OpenSim (placement + reference defaults
+confirmed). Mirrors the reference Vintage layout: an inline **master slider +
+mute** and a **▲** button in the bottom bar's `upper_trailing` slot, ordered
+`parcel-audio · volume · quick-prefs` (quick-prefs trailing-most); **▲** opens a
+pulldown of the six categories (Sounds, Ambient, UI, Music, Media, Voice), each
+a slider + mute.
+
+- Every control binds through the two-way settings layer to a persisted
+  `[audio.bus]` `<bus>_volume` / `<bus>_mute` setting; a bridge system pushes
+  those live onto the [[viewer-audio-backend]] mixer buses each frame. Mute is a
+  separate bool from the volume, so muting zeroes the bus gain while the slider
+  (remembered level) is untouched — the reference's "mute retains level".
+- Defaults match the reference `AudioLevel*` / `MuteAudio` settings: Master 1.0,
+  SFX/Ambient/UI 0.5, Music/Media 0.3, Voice 0.7, mute off.
+- Master volume added to Quick Preferences (`default_entries`), same setting key
+  so panel / quick-prefs / a future audio tab agree; Fluent labels in `en`.
+
+Deferred (own tasks / follow-ups): the [[viewer-preferences-audio-tab]] (third
+view over the same store), and mute-on-focus-loss / mute-on-minimise. Audible
+effect awaits the per-source producers that feed the buses; a cleanup note was
+added to [[viewer-gst-audio-mixer-handoff]] to retire the parcel-audio cluster's
+own volume slider once the parcel stream routes through the music bus.

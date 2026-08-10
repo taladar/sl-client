@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 247 |
+| ready | 246 |
 | blocked | 79 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 742 |
+| done | 743 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -662,9 +662,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
-- [`viewer-volume-panel`](ready/viewer-volume-panel.md) — Volume panel (master +
-  per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-audio-backend` (done))
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -947,7 +944,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   video recording (machinima capture) (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-video-playback`)
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
-  (Vintage) bottom-bar arrangement (blocked by `viewer-volume-panel`)
+  (Vintage) bottom-bar arrangement (blocked by `viewer-animation-overrider`,
+  `viewer-toolbar-customization`)
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
@@ -1056,7 +1054,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (742)
+## done (743)
 
 ### protocol
 
@@ -2087,6 +2085,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
+- [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
+  per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-audio-backend` (done))
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life

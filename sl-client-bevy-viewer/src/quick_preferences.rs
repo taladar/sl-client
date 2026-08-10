@@ -196,6 +196,18 @@ fn default_entries() -> Vec<QuickPrefEntry> {
             max: 8192.0,
             increment: 256.0,
         },
+        // Master audio volume — the volume panel's master bus, surfaced here too
+        // (viewer-volume-panel); same setting key, so all three views agree.
+        QuickPrefEntry {
+            control_name: crate::volume_panel::master_volume_setting(),
+            label: QuickPrefLabel::Key("quick-prefs-master-volume".to_owned()),
+            scope: Scope::Global,
+            kind: QuickPrefKind::Slider,
+            integer: false,
+            min: 0.0,
+            max: 1.0,
+            increment: 0.05,
+        },
     ]
 }
 
@@ -874,7 +886,7 @@ fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEn
 
 /// Spawn the gear button into the bottom area's trailing slot, once (the
 /// [`Local`] latch waits for the toolbar host to exist).
-fn spawn_quick_prefs_button(
+pub(crate) fn spawn_quick_prefs_button(
     mut commands: Commands,
     area: Option<Res<BottomArea>>,
     mut spawned: Local<bool>,

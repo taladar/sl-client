@@ -4,7 +4,7 @@ title: Classic (Vintage) bottom-bar arrangement
 topic: viewer
 status: blocked
 origin: Vintage-parity coverage audit (2026-07-22)
-blocked_by: [viewer-volume-panel]
+blocked_by: [viewer-animation-overrider, viewer-toolbar-customization]
 refs: [viewer-toolbar-customization, viewer-animation-overrider, viewer-quick-preferences, viewer-movement-controls-floater]
 ---
 

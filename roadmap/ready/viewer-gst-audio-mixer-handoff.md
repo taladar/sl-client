@@ -41,3 +41,9 @@ simply start driving mixer-bus gains instead of `playbin` properties (the
 
 Builds on: `sl-gst` (both players), `parcel_audio.rs`, `media_prim.rs` —
 all shipped with the interim path and an API already shaped for this swap.
+
+Cleanup when this lands: `parcel_audio.rs`'s cluster has its **own** stream
+volume slider + mute (driving `playbin` via the interim path). Once the parcel
+stream routes through the mixer's **music** bus, remove those in favour of the
+[[viewer-volume-panel]] music-bus control (or make them drive the bus), so there
+is one volume for the stream, not two in series.

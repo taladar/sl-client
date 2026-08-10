@@ -226,6 +226,7 @@ mod ui_texture_picker;
 mod underwater_fog;
 mod url_linkify;
 mod virtual_list;
+mod volume_panel;
 mod water;
 mod water_exclusion;
 mod web_auth;
@@ -1215,6 +1216,7 @@ fn run_session(
     // Parcel streaming audio (viewer-streaming-audio): the GStreamer radio
     // stream following the agent's parcel, with its bottom-bar controls.
     .add_plugins(crate::parcel_audio::ParcelAudioPlugin)
+    .add_plugins(crate::volume_panel::VolumePanelPlugin)
     // The emoji-picker floater (viewer-emoji-picker-floater): a grouped,
     // searchable grid of emoji in a floater, toggled with `Ctrl+E`; clicking a
     // glyph inserts it into the text field the picker last saw focused. On the

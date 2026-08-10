@@ -186,7 +186,7 @@ fn register_parcel_audio_settings(settings: Option<ResMut<ViewerSettings>>) {
 
 /// Spawn the control cluster into the bottom area's upper stack, once (the
 /// [`Local`] latch waits for the bottom toolbar's host to exist).
-fn spawn_parcel_audio_bar(
+pub(crate) fn spawn_parcel_audio_bar(
     mut commands: Commands,
     area: Option<Res<BottomArea>>,
     mut spawned: Local<bool>,

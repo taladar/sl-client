@@ -553,6 +553,17 @@ bottom-toolbar-camera = Camera
 # command (singular).
 bottom-toolbar-snapshot = Snapshot
 
+## The volume panel (viewer-volume-panel): the master control in the bottom bar
+## and the per-category pulldown behind its ▲ button. Labels name the mixer buses.
+volume-panel-title = Volume
+volume-panel-master = Master
+volume-panel-sfx = Sounds
+volume-panel-ambient = Ambient
+volume-panel-ui = UI
+volume-panel-music = Music
+volume-panel-media = Media
+volume-panel-voice = Voice
+
 ## The Stand Up / Stop flycam state button (viewer-sit-target-and-stand-button) —
 ## the reference's combined stand / stop-flying panel, in the toolbar's reserved
 ## leading slot. Only one is ever shown: Stand while seated, Stop flycam in flycam.
@@ -3178,6 +3189,7 @@ quick-prefs-time-midnight = Midnight
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles
+quick-prefs-master-volume = Master volume
 
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip
 # box adds around the object / owner data it fetches.
