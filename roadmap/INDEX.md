@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 246 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 19 |
+| bugs | 20 |
 | done | 764 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1206** |
+| **total** | **1207** |
 
 ## ideas (56)
 
@@ -994,7 +994,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (19)
+## bugs (20)
 
 ### protocol
 
@@ -1029,6 +1029,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
+  — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
