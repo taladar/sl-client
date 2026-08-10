@@ -4,10 +4,17 @@ title: Motion-only fast path for terse object updates
 topic: viewer
 status: ideas
 origin: performance survey of the implemented viewer (2026-07-22)
-refs: [viewer-profiling]
+refs: [viewer-profiling, viewer-perf-object-update-coalesce]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+> 2026-08-10: the **backlog** half of this is now covered —
+> [[viewer-perf-object-update-coalesce]] merges repeated updates for one
+> still-queued object into a single newest-snapshot build under the spawn
+> budget. This task remains for the **inline** (no-backlog) path below,
+> which still runs the full helper cascade per terse packet; its
+> "per-object rebuild rate cap" follow-up idea is the same territory.
 
 Terse motion updates are the **highest-frequency object event** in a
 populated region — every walking avatar's attachments and every

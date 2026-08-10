@@ -24,6 +24,17 @@ rebuild of a possibly 10k+ item tree **producing a row Vec nobody can
 see**, floater closed or not. The cost concentrates exactly where frame
 time is already tight: login streaming and appearance changes.
 
+> 2026-08-10 (the amortisation pass,
+> [[viewer-perf-inventory-rows-amortise]]): `rebuild_view` now debounces
+> query-text-only changes by 0.15 s, so the per-keystroke rebuilds are
+> gone — but every *model* change still rebuilds immediately, so this
+> task's login-streaming case stands. It got slightly **more** relevant:
+> the chunked login-skeleton merge marks the model changed once per
+> drained chunk (one `build_rows` pass per merge frame). When adding the
+> visibility gate, keep it compatible with the debounce locals (mark
+> dirty while hidden; one forced rebuild on the open transition clears
+> both). Line references predate the pass — anchor on the function names.
+
 ## Proposed fix
 
 The specific, highest-value instance of

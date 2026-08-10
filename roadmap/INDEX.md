@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 247 |
+| ready | 246 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 749 |
+| done | 750 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1201** |
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -486,8 +486,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
   — Pipeline debug overlay rewrites its Text unconditionally every frame
-- [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
-  — Throttle prim-texture application + GPU asset uploads during rez bursts
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
 - [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)
@@ -1071,7 +1069,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (749)
+## done (750)
 
 ### protocol
 
@@ -1822,6 +1820,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-prim-texture-apply-burst`](done/viewer-perf-prim-texture-apply-burst.md)
+  — Throttle prim-texture application + GPU asset uploads during rez bursts
 - [`viewer-perf-session-network-thread`](done/viewer-perf-session-network-thread.md)
   — Run the Bevy session on a dedicated network thread
 - [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)

@@ -32,10 +32,20 @@ completes.
   before the circuit is even up. Gate on `resource_exists::<SlState>` /
   an `agent_in_world` condition.
 - **Event-fed systems** that only act on drained messages
-  (`update_objects`, `apply_object_meshes`, `apply_object_sculpts`,
-  `ingest_environment`, `capture_login_outcome`, `drive_session`,
-  look-at/point-at receivers): gate on `on_message::<SlEvent>()` /
-  `on_message::<TextureDecoded>()` etc.
+  (`ingest_environment`, `capture_login_outcome`, look-at/point-at
+  receivers): gate on `on_message::<SlEvent>()` /
+  `on_message::<TextureDecoded>()` etc. **Caveat (2026-08-10, the
+  budgeted-drain pass):** several former candidates now carry cross-frame
+  backlogs and must NOT be gated on messages alone — `update_objects`
+  (`PendingObjectEvents`), `apply_object_meshes` / `apply_object_sculpts`
+  (`PendingDecodedMeshes` / `PendingDecodedSculpts` +
+  `GeometryApplyBudget`), `drain_patch_rebuilds`, `drain_skeleton_merge`,
+  `apply_avatar_appearance` (its debounced `appearance_pending` ledger),
+  and `layout_tag_text` (its budget-deferred retry queue). A gate for
+  those must also fire while their backlog is non-empty. `drive` itself is
+  now a thin channel pump to the session network thread
+  ([[viewer-perf-session-network-thread]]) — cheap, but still gateable on
+  the link existing.
 - **Camera-mode drivers** (`camera.rs:454-466`): `orbit_third_person`,
   `aim_look`, `drive_flycam` all run every frame; two of three
   early-return (flycam fetches 11 params for nothing). Make `CameraMode`
