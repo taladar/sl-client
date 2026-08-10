@@ -49,12 +49,33 @@ independent; land opportunistically.
   particle win is [[viewer-perf-gpu-particles]]; this quick fix is
   independent and should land first.)
 
+## Measured — these are NOT where frame time goes (2026-08-10)
+
+The full-session aditi Tracy capture (visible steady state) measured the
+three headline items directly, and they are **negligible** — do not do
+these for frame-rate reasons:
+
+- `drive_local_lights` — **0.037 ms/frame** (the Vec/HashSet churn is real
+  but the system is tiny; the ECS refresh below it is already gated).
+- `update_status_readouts` — **0.077 ms/frame** (the 60 Hz re-shape is not
+  actually hot; runs ~half the frames already).
+- `position_name_tags` — **negligible** (nametag zones ~0.03 ms).
+
+The real average-frame cost is elsewhere: main-world material
+specialization checks (8.4 ms) and directional shadow-caster visibility
+(8.2 ms) in PostUpdate, plus the ground probe (6 ms) in Update — see
+[[viewer-perf-steady-state-46fps-ceiling]] and
+[[viewer-perf-main-world-material-specialization-check]]. Keep these
+churn items only as **correctness/idiom** cleanups (steadier pacing,
+fewer allocations, reference-faithful FPS median), not as a perf lever.
+
 ## Estimated impact
 
-Low individually; collectively removes a constant per-frame allocation
-and relayout hum (most visible in Tracy memory mode as recurring small
-allocations, and as steadier frame pacing on idle scenes). Good
-first-contact tasks for the [[viewer-profiling]] workflow — each item is
-a before/after measurement exercise in miniature.
+Low individually, and now **measured low** — collectively removes a
+constant per-frame allocation and relayout hum (most visible in Tracy
+memory mode as recurring small allocations), but does not move the frame
+budget. Good first-contact tasks for the [[viewer-profiling]] workflow —
+each item is a before/after measurement exercise in miniature.
 
-Confidence: high — all call sites and existing throttles/gates verified.
+Confidence: high — all call sites and existing throttles/gates verified,
+and the top three now measured.

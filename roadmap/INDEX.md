@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 56 |
 | ready | 246 |
 | blocked | 78 |
 | in-progress | 12 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 763 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1204** |
+| **total** | **1205** |
 
-## ideas (55)
+## ideas (56)
 
 ### viewer
 
@@ -76,6 +76,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
   App-level login state to gate world/streaming systems pre-login
+- [`viewer-perf-main-world-material-specialization-check`](ideas/viewer-perf-main-world-material-specialization-check.md)
+  — Main-world per-material specialization checks cost ~8.4 ms/frame
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)

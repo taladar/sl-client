@@ -39,14 +39,29 @@ ray sources and inside the `contains` scan.
    already track avatar distances for interest/priority); distant
    avatars' foot placement is sub-pixel.
 
+## Measured (Tracy full-session aditi capture, 2026-08-10)
+
+The full-session aditi capture confirms this with numbers (visible
+steady state, `t ≥ 140 s`): `probe_avatar_ground` is **6.14 ms/frame
+mean** (p50 5.64, p95 10.3, **max 169.7 ms**) — the tallest single system
+in the `Update` schedule and the third-biggest average-frame cost overall
+(after the two PostUpdate clusters in
+[[viewer-perf-steady-state-46fps-ceiling]]). It is also the **top steady
+spike source**: repeated 30–35 ms instances scattered across the visible
+window plus the one 169.7 ms outlier @164 s (avatars landing/moving). It
+runs on worker threads, but as the `Update` tall pole it gates the
+schedule barrier. Both the throttle (layer 2) and the HashSet/marker
+(layer 1) are worth doing; the throttle caps the spikes, the HashSet cuts
+the mean.
+
 ## Estimated impact
 
-High; this is the survey's top per-frame CPU finding. Scales down from
-`O(avatars × scene)` per frame to `O(near-avatars × scene)` per throttle
-tick — on a 20-avatar, prim-dense scene plausibly several ms/frame
-recovered. The HashSet change alone is a cheap guaranteed win even
-before throttling. Verify with [[viewer-profiling]] Tracy zones around
-the probe (span already isolatable per system).
+High; this is the survey's top per-frame CPU finding, now measured at
+6 ms mean / 170 ms peak. Scales down from `O(avatars × scene)` per frame
+to `O(near-avatars × scene)` per throttle tick. The HashSet change alone
+is a cheap guaranteed win even before throttling. Verify with
+[[viewer-profiling]] Tracy zones around the probe (span already isolatable
+per system).
 
 Confidence: high (code path and registration verified; no run condition
-on the system).
+on the system; cost now measured directly).

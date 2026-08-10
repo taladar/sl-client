@@ -56,14 +56,32 @@ overlap the known probe-capture-shadow work
 ([[viewer-perf-probe-capture-shadows]]); `specialize_shadows` is genuinely
 content-driven and view-independent (the pipeline cache is shared).
 
+## `check_dir_light_mesh_visibility` is a *steady-state* cost, not just rez
+
+The 2026-07-30 table above measured `check_dir_light_mesh_visibility` at
+0.42 ms/frame during rez. The full-session aditi capture (2026-08-10)
+re-measures it in the **visible steady state** (`t ≥ 140 s`) at **6.5 ms
+mean + 1.7 ms for its command flush = 8.2 ms/frame** — ~15× higher and
+now one of the two dominant `PostUpdate` clusters
+([[viewer-perf-steady-state-46fps-ceiling]]). Unlike `specialize_shadows`/
+`queue_shadows` (which are on the Render thread, which currently has
+headroom), this one is on the **main-thread-bound** side, so it directly
+gates the frame. It is the sun casting shadows over **all** meshes,
+re-tested every frame against the cascades — the single most valuable
+shadow lever to make cheaper or gate. Item 3 below is now the priority,
+not just a nice-to-have.
+
 Investigate / tune:
 
+- **`check_dir_light_mesh_visibility` gating/cheapening — now the priority
+  (8.2 ms/frame steady, main thread).** Whether the sun-shadow caster set
+  can be spatially culled, throttled, or gated on scene change instead of
+  a full per-frame retest.
 - How many SL point/spot lights cast real-time shadows at once, and whether they
   should at all (the reference viewer is far more conservative); cap shadow
   casters or disable per-prim light shadows.
 - The clustered-forward config (cluster dimensions / max lights per cluster) vs.
   the number of small local lights a rezzing region produces.
-- Whether `check_dir_light_mesh_visibility` can be gated / cheaper.
 
 Measure the main-view shadow/cluster self-time before/after with a ≤10 s
 `tracy-capture` capture during active rez.
