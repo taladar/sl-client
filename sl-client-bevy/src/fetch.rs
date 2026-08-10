@@ -1,13 +1,11 @@
 //! Binary asset fetch over HTTP (textures, mesh, generic assets).
 
-use crate::SlEvent;
 use crate::http::{blocking_get_bytes, blocking_get_range};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
-    Asset, AssetType, DiscardLevel, DisconnectReason, ImageCodec, Texture, TextureKey,
-    TransferStatus, Uuid, j2c,
+    Asset, AssetType, DiscardLevel, ImageCodec, Texture, TextureKey, TransferStatus, Uuid, j2c,
 };
 
 /// GETs a texture from the `GetTexture` capability and forwards a
@@ -118,9 +116,4 @@ pub(crate) fn run_generic_asset_fetch(
                 .ok();
         }
     }
-}
-
-/// Emits a disconnect event.
-pub(crate) fn emit_disconnect(events: &mut MessageWriter<SlEvent>, reason: DisconnectReason) {
-    events.write(SlEvent(SessionEvent::Disconnected(reason)));
 }

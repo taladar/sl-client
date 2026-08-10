@@ -31,7 +31,11 @@ use crate::{
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+///
+/// `Clone` so an I/O driver that hands commands to a dedicated network
+/// thread can forward an owned copy while other in-process observers (e.g.
+/// the Bevy viewer's outgoing-command taps) still read the original.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     /// Send an application message.
     Send {

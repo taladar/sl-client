@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-use std::io::ErrorKind;
 use std::net::UdpSocket;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -352,7 +351,7 @@ pub fn preserve_glow_mask_alpha(
 use crate::caps::{CAPS_FAILURE_PREFIX, post_neighbour_seed, start_caps};
 use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
-use crate::fetch::{emit_disconnect, run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
+use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
     run_caps_oneway, run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax,
     run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
@@ -550,50 +549,88 @@ struct SlConfig {
     offline: bool,
 }
 
-/// The driver's runtime state resource.
+/// The driver's runtime state resource: the channel pair to the session's
+/// dedicated network thread, or `None` in offline (replay) mode, where
+/// synthetic [`SlEvent`]s are injected instead of a live session.
 #[derive(Resource)]
 struct SlState {
-    /// The current phase of the driver.
-    inner: SlInner,
+    /// The live network-thread link, absent offline.
+    link: Option<NetLink>,
 }
 
-/// The driver phases.
-enum SlInner {
-    /// Awaiting the result of the (threaded, blocking) XML-RPC login.
-    LoggingIn {
-        /// The session whose circuit will be bootstrapped on success.
-        session: Box<Session>,
-        /// Receives the login response body (or an error string).
-        rx: Receiver<Result<String, String>>,
-    },
-    /// The circuit is up; pumping the socket each frame.
-    Running {
-        /// The driven session.
-        session: Box<Session>,
-        /// The non-blocking UDP socket.
-        socket: UdpSocket,
-        /// A reusable receive buffer.
-        recv_buf: Vec<u8>,
-        /// The CAPS subsystem for the current region, if a seed capability is
-        /// known. Restarted on each region change.
-        caps: Option<Caps>,
-        /// The local chat-log writer/reader (a no-op when disabled).
-        chat_log: Box<ChatLog>,
-        /// The inventory disk-cache reader/writer (a no-op when disabled).
-        inventory_cache: Box<InventoryCache>,
-        /// The `LSLSyntax` fetch/cache state (boxed, like the caches above, to
-        /// keep this hot per-frame variant small).
-        lsl_syntax: Box<LslSyntaxState>,
-    },
-    /// The session is finished.
-    Done,
+/// The Bevy side of the network thread: [`drive`] forwards each frame's
+/// [`SlCommand`]s into `command_tx` and drains `outbound_rx` into the Bevy
+/// messages / resources. Dropping this (app teardown) closes the command
+/// channel, which the thread notices within one tick and exits on.
+struct NetLink {
+    /// Commands to the network thread.
+    command_tx: Sender<Command>,
+    /// Everything the network thread reports back.
+    outbound_rx: Receiver<NetOutbound>,
 }
 
-/// The `LSLSyntax` state carried across frames: the by-id disk cache plus the
+/// One message from the network thread to the Bevy side, drained by
+/// [`drive`] into the corresponding message writer or resource.
+enum NetOutbound {
+    /// A session event, surfaced as [`SlEvent`].
+    Event(SessionEvent),
+    /// A protocol diagnostic, surfaced as [`SlDiagnostic`].
+    Diagnostic(Diagnostic),
+    /// A freshly discovered capability map, surfaced as [`SlCapabilities`].
+    Capabilities(HashMap<String, String>),
+    /// The login-derived identity, mirrored into the [`SlIdentity`] resource.
+    Identity(Box<SlIdentity>),
+    /// The agent's parcel / fly / seat mirror, sent whenever it changes and
+    /// mirrored into the [`SlAgentParcel`] resource.
+    AgentParcel(Box<SlAgentParcel>),
+    /// The grid requires a multi-factor one-time code ([`SlMfaChallenge`]).
+    Mfa(MfaChallenge),
+    /// A retryable "already logged in" rejection ([`SlLoginRejected`]).
+    Rejected(LoginFailure),
+}
+
+/// The configuration the network thread carries away from [`SlConfig`] (the
+/// resource itself stays on the Bevy side).
+struct NetThreadConfig {
+    /// The local chat-log configuration (default off).
+    chat_log_config: ChatLogConfig,
+    /// The per-account filesystem directories the optional disk features use.
+    directories: ClientDirectories,
+    /// Optional per-avatar directory derivation, resolved at login.
+    account_dirs: Option<AccountDirsConfig>,
+    /// The inventory disk-cache configuration (default off).
+    inventory_cache_config: InventoryCacheConfig,
+}
+
+/// The running session's owned state, stepped once per network-thread tick by
+/// [`advance_running`].
+struct RunningSession {
+    /// The driven session.
+    session: Box<Session>,
+    /// The UDP socket, in blocking mode with a [`NET_TICK`] read timeout —
+    /// the thread sleeps *in* `recv_from`, so an inbound datagram is parsed
+    /// (and ACKed) the moment it arrives instead of on the next render frame.
+    socket: UdpSocket,
+    /// A reusable receive buffer.
+    recv_buf: Vec<u8>,
+    /// The CAPS subsystem for the current region, if a seed capability is
+    /// known. Re-targeted on each region change.
+    caps: Option<Caps>,
+    /// The local chat-log writer/reader (a no-op when disabled).
+    chat_log: Box<ChatLog>,
+    /// The inventory disk-cache reader/writer (a no-op when disabled).
+    inventory_cache: Box<InventoryCache>,
+    /// The `LSLSyntax` fetch/cache state.
+    lsl_syntax: Box<LslSyntaxState>,
+    /// The last agent parcel / fly / seat mirror sent to the app, so only a
+    /// change crosses the channel.
+    agent_parcel: SlAgentParcel,
+}
+
+/// The `LSLSyntax` state carried across ticks: the by-id disk cache plus the
 /// last syntax id resolved, so an unchanged id costs nothing and a change
 /// triggers exactly one fetch. Persists across region changes (the language
-/// definition rarely differs between them). Boxed into
-/// [`SlInner::Running`](SlInner::Running) so it does not enlarge that variant.
+/// definition rarely differs between them). Boxed into [`RunningSession`].
 struct LslSyntaxState {
     /// The `LSLSyntax` document disk-cache, keyed by syntax id (a no-op when
     /// disabled).
@@ -632,39 +669,89 @@ pub(crate) struct Caps {
     pub(crate) command_tx: crossbeam_channel::Sender<crate::caps::EqCommand>,
 }
 
-/// Startup system: builds the session and spawns the blocking login thread.
+/// How long one network-thread tick blocks in `recv_from` waiting for a
+/// datagram before it services timers, CAPS payloads, and queued commands
+/// anyway. Small enough that outbound commands and retransmits never wait
+/// noticeably; large enough that an idle session barely spins.
+const NET_TICK: Duration = Duration::from_millis(15);
+
+/// Startup system: builds the session and spawns its dedicated network
+/// thread, which performs the blocking XML-RPC login and then pumps the
+/// socket / CAPS / timers / commands continuously — LLUDP parse, ACKs and
+/// retransmits no longer wait for a render frame, and the chat-log /
+/// inventory-cache disk writes stay off the frame thread.
 fn start_login(mut commands: Commands, config: Res<SlConfig>) {
-    // Offline (replay) mode: register nothing on the wire — go straight to
-    // `Done`, so `drive` is a no-op and the session is fed only by synthetic
-    // `SlEvent`s injected by the replay loader.
+    // Offline (replay) mode: register nothing on the wire — no thread, so
+    // `drive` is a no-op and the session is fed only by synthetic `SlEvent`s
+    // injected by the replay loader.
     if config.offline {
-        commands.insert_resource(SlState {
-            inner: SlInner::Done,
-        });
+        commands.insert_resource(SlState { link: None });
         return;
     }
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
     session.set_background_inventory_fetch(config.background_inventory_fetch);
-    let inner = match session.login_http_request() {
-        Some(request) => {
-            let (tx, rx) = unbounded();
-            std::thread::spawn(move || {
-                tx.send(perform_login(
-                    request.url.as_str(),
-                    &request.user_agent,
-                    request.body,
-                ))
-                .ok();
-            });
-            SlInner::LoggingIn {
-                session: Box::new(session),
-                rx,
+    let (command_tx, command_rx) = unbounded();
+    let (outbound_tx, outbound_rx) = unbounded();
+    let net_config = NetThreadConfig {
+        chat_log_config: config.chat_log_config.clone(),
+        directories: config.directories.clone(),
+        account_dirs: config.account_dirs.clone(),
+        inventory_cache_config: config.inventory_cache_config,
+    };
+    let spawned = std::thread::Builder::new()
+        .name("sl-session-net".to_owned())
+        .spawn(move || {
+            run_network_thread(Box::new(session), &net_config, &command_rx, &outbound_tx);
+        });
+    if let Err(error) = spawned {
+        tracing::error!("could not spawn the session network thread: {error}");
+        commands.insert_resource(SlState { link: None });
+        return;
+    }
+    commands.insert_resource(SlState {
+        link: Some(NetLink {
+            command_tx,
+            outbound_rx,
+        }),
+    });
+}
+
+/// The dedicated session network thread: the blocking XML-RPC login, then the
+/// running pump until the session ends or the command channel closes (app
+/// teardown).
+fn run_network_thread(
+    session: Box<Session>,
+    config: &NetThreadConfig,
+    commands: &Receiver<Command>,
+    outbound: &Sender<NetOutbound>,
+) {
+    let Some(request) = session.login_http_request() else {
+        return;
+    };
+    let body = perform_login(request.url.as_str(), &request.user_agent, request.body);
+    let Some(mut running) = login_phase(session, body, config, Instant::now(), outbound) else {
+        return;
+    };
+    // Sleep *inside* `recv_from`: a datagram wakes the tick immediately, and
+    // an idle tick still services timers / CAPS / commands every NET_TICK.
+    running.socket.set_read_timeout(Some(NET_TICK)).ok();
+    loop {
+        // Drain this tick's commands; a disconnected channel means the app is
+        // shutting down (the `SlState` resource dropped), so stop pumping.
+        let mut pending: Vec<Command> = Vec::new();
+        loop {
+            match commands.try_recv() {
+                Ok(command) => pending.push(command),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return,
             }
         }
-        None => SlInner::Done,
-    };
-    commands.insert_resource(SlState { inner });
+        match advance_running(running, pending, Instant::now(), outbound) {
+            Some(next) => running = next,
+            None => return,
+        }
+    }
 }
 
 /// Performs the blocking XML-RPC login POST, returning the response body.
@@ -679,15 +766,19 @@ fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, St
         .map_err(|error| error.to_string())
 }
 
-/// Update system: advances the session each frame.
+/// Update system: the thin pump between the ECS and the session's network
+/// thread — forwards this frame's [`SlCommand`]s (cloned, so other in-process
+/// observers still read the originals) and drains everything the thread
+/// reported since last frame into the Bevy messages / resources. All protocol
+/// work (LLUDP parse, CAPS ingestion, timers, disk caches) happens on the
+/// thread; see [`run_network_thread`].
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected ECS resources and event \
-              writers/readers; the chat-log config is one more such resource"
+    reason = "a Bevy system's parameters are its injected ECS resources and the message \
+              writers the network thread's reports fan out into"
 )]
 fn drive(
-    mut state: ResMut<SlState>,
-    config: Res<SlConfig>,
+    state: Res<SlState>,
     mut events: MessageWriter<SlEvent>,
     mut diagnostics: MessageWriter<SlDiagnostic>,
     mut capabilities: MessageWriter<SlCapabilities>,
@@ -696,88 +787,93 @@ fn drive(
     mut mfa: MessageWriter<SlMfaChallenge>,
     mut rejected: MessageWriter<SlLoginRejected>,
     mut commands: MessageReader<SlCommand>,
+    mut session_ended: Local<bool>,
 ) {
-    let now = Instant::now();
-    let inner = std::mem::replace(&mut state.inner, SlInner::Done);
-    state.inner = match inner {
-        SlInner::LoggingIn { session, rx } => advance_login(
-            session,
-            rx,
-            &config.chat_log_config,
-            &config.directories,
-            config.account_dirs.as_ref(),
-            &config.inventory_cache_config,
-            now,
-            &mut events,
-            &mut identity,
-            &mut mfa,
-            &mut rejected,
-        ),
-        SlInner::Running {
-            session,
-            socket,
-            recv_buf,
-            caps,
-            chat_log,
-            inventory_cache,
-            lsl_syntax,
-        } => advance_running(
-            session,
-            socket,
-            recv_buf,
-            caps,
-            chat_log,
-            inventory_cache,
-            lsl_syntax,
-            now,
-            &mut events,
-            &mut diagnostics,
-            &mut capabilities,
-            &mut commands,
-        ),
-        SlInner::Done => SlInner::Done,
+    let Some(link) = &state.link else {
+        return;
     };
-    // Mirror the driven session's current parcel / fly permission for ECS systems
-    // (e.g. the viewer's take-off gate) to read as a resource.
-    if let SlInner::Running { session, .. } = &state.inner {
-        agent_parcel.refresh_from(session);
+    for command in commands.read() {
+        // A send failure means the thread is gone; the drain below surfaces it.
+        if link.command_tx.send(command.0.clone()).is_err() {
+            break;
+        }
+    }
+    loop {
+        match link.outbound_rx.try_recv() {
+            Ok(NetOutbound::Event(event)) => {
+                if matches!(
+                    event,
+                    SessionEvent::Disconnected(_) | SessionEvent::LoggedOut
+                ) {
+                    *session_ended = true;
+                }
+                events.write(SlEvent(event));
+            }
+            Ok(NetOutbound::Diagnostic(diagnostic)) => {
+                diagnostics.write(SlDiagnostic(diagnostic));
+            }
+            Ok(NetOutbound::Capabilities(map)) => {
+                capabilities.write(SlCapabilities(map));
+            }
+            Ok(NetOutbound::Identity(new_identity)) => *identity = *new_identity,
+            Ok(NetOutbound::AgentParcel(parcel)) => *agent_parcel = *parcel,
+            Ok(NetOutbound::Mfa(challenge)) => {
+                mfa.write(SlMfaChallenge(challenge));
+            }
+            Ok(NetOutbound::Rejected(failure)) => {
+                rejected.write(SlLoginRejected(failure));
+            }
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => {
+                // The thread ended. After a clean LoggedOut / Disconnected
+                // this is expected teardown; anything else (a panic) must
+                // still surface as a disconnect rather than a silent hang.
+                if !*session_ended {
+                    *session_ended = true;
+                    events.write(SlEvent(SessionEvent::Disconnected(
+                        DisconnectReason::ProtocolError,
+                    )));
+                }
+                break;
+            }
+        }
     }
 }
 
-/// Handles the logging-in phase, transitioning to `Running` once the login
-/// response arrives.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the login step threads the session, its channel, the chat-log and \
-              inventory-cache configs and directories, and several Bevy writers it \
-              emits to on success"
-)]
-fn advance_login(
+/// Send a synthetic [`SessionEvent::Disconnected`] to the app side.
+fn send_disconnect(outbound: &Sender<NetOutbound>, reason: DisconnectReason) {
+    outbound
+        .send(NetOutbound::Event(SessionEvent::Disconnected(reason)))
+        .ok();
+}
+
+/// Handles the login response (on the network thread), building the
+/// [`RunningSession`] on success; `None` ends the thread (a failure, an MFA
+/// challenge, or a retryable rejection — each surfaced over `outbound`).
+fn login_phase(
     mut session: Box<Session>,
-    rx: Receiver<Result<String, String>>,
-    chat_log_config: &ChatLogConfig,
-    directories: &ClientDirectories,
-    account_dirs: Option<&AccountDirsConfig>,
-    inventory_cache_config: &InventoryCacheConfig,
+    body: Result<String, String>,
+    config: &NetThreadConfig,
     now: Instant,
-    events: &mut MessageWriter<SlEvent>,
-    identity: &mut SlIdentity,
-    mfa: &mut MessageWriter<SlMfaChallenge>,
-    rejected: &mut MessageWriter<SlLoginRejected>,
-) -> SlInner {
-    match rx.try_recv() {
-        Ok(Ok(body)) => match parse_login_response(&body) {
-            Ok(LoginResponse::Success(success)) => {
-                if session
-                    .handle_login_response(LoginResponse::Success(success), now)
-                    .is_err()
-                {
-                    emit_disconnect(events, DisconnectReason::ProtocolError);
-                    return SlInner::Done;
-                }
-                match bind_socket() {
-                    Ok(socket) => {
-                        *identity = SlIdentity {
+    outbound: &Sender<NetOutbound>,
+) -> Option<RunningSession> {
+    let Ok(body) = body else {
+        send_disconnect(outbound, DisconnectReason::ProtocolError);
+        return None;
+    };
+    match parse_login_response(&body) {
+        Ok(LoginResponse::Success(success)) => {
+            if session
+                .handle_login_response(LoginResponse::Success(success), now)
+                .is_err()
+            {
+                send_disconnect(outbound, DisconnectReason::ProtocolError);
+                return None;
+            }
+            match bind_socket() {
+                Ok(socket) => {
+                    outbound
+                        .send(NetOutbound::Identity(Box::new(SlIdentity {
                             agent_id: session.agent_id(),
                             session_id: session.session_id(),
                             circuit_code: session.circuit_code(),
@@ -788,81 +884,75 @@ fn advance_login(
                             openid_token: session.openid_token().map(str::to_owned),
                             region_handle: session.region_handle(),
                             circuit_id: session.root_circuit_id(),
-                        };
-                        let caps = start_caps(&session);
-                        // Resolve the per-avatar directory now that the login
-                        // response has yielded the agent UUID — inline, before
-                        // any disk feature is built, so nothing races.
-                        let effective_directories = resolve_account_directories(
-                            directories,
-                            account_dirs,
-                            session.agent_id(),
-                        );
-                        let chat_log = Box::new(ChatLog::new(
-                            chat_log_config.clone(),
-                            effective_directories.agent_chat_log_dir.clone(),
-                            session.agent_legacy_name(),
-                            session.agent_id(),
-                        ));
-                        let inventory_cache = Box::new(InventoryCache::new(
-                            *inventory_cache_config,
-                            effective_directories.agent_cache_dir.clone(),
-                            session.agent_id(),
-                            now,
-                        ));
-                        let lsl_syntax = Box::new(LslSyntaxState {
-                            cache: LslSyntaxCache::new(
-                                effective_directories.shared_cache_dir.clone(),
-                            ),
-                            last_id: None,
-                        });
-                        SlInner::Running {
-                            session,
-                            socket,
-                            recv_buf: vec![0u8; RECV_BUFFER_SIZE],
-                            caps,
-                            chat_log,
-                            inventory_cache,
-                            lsl_syntax,
-                        }
-                    }
-                    Err(()) => {
-                        emit_disconnect(events, DisconnectReason::ProtocolError);
-                        SlInner::Done
-                    }
-                }
-            }
-            Ok(LoginResponse::MfaChallenge(challenge)) => {
-                mfa.write(SlMfaChallenge(challenge));
-                SlInner::Done
-            }
-            Ok(LoginResponse::Failure(failure)) => {
-                // A retryable "already logged in" rejection is surfaced like an
-                // MFA challenge — its own event the driver can act on (consult
-                // the user, re-add the plugin) — rather than a fatal disconnect.
-                if failure.kind() == LoginRejectKind::AlreadyLoggedIn {
-                    rejected.write(SlLoginRejected(failure));
-                } else {
-                    emit_disconnect(
-                        events,
-                        DisconnectReason::LoginFailed {
-                            reason: failure.reason,
-                            message: failure.message,
-                        },
+                        })))
+                        .ok();
+                    let caps = start_caps(&session);
+                    // Resolve the per-avatar directory now that the login
+                    // response has yielded the agent UUID — inline, before
+                    // any disk feature is built, so nothing races.
+                    let effective_directories = resolve_account_directories(
+                        &config.directories,
+                        config.account_dirs.as_ref(),
+                        session.agent_id(),
                     );
+                    let chat_log = Box::new(ChatLog::new(
+                        config.chat_log_config.clone(),
+                        effective_directories.agent_chat_log_dir.clone(),
+                        session.agent_legacy_name(),
+                        session.agent_id(),
+                    ));
+                    let inventory_cache = Box::new(InventoryCache::new(
+                        config.inventory_cache_config,
+                        effective_directories.agent_cache_dir.clone(),
+                        session.agent_id(),
+                        now,
+                    ));
+                    let lsl_syntax = Box::new(LslSyntaxState {
+                        cache: LslSyntaxCache::new(effective_directories.shared_cache_dir.clone()),
+                        last_id: None,
+                    });
+                    Some(RunningSession {
+                        session,
+                        socket,
+                        recv_buf: vec![0u8; RECV_BUFFER_SIZE],
+                        caps,
+                        chat_log,
+                        inventory_cache,
+                        lsl_syntax,
+                        agent_parcel: SlAgentParcel::default(),
+                    })
                 }
-                SlInner::Done
+                Err(()) => {
+                    send_disconnect(outbound, DisconnectReason::ProtocolError);
+                    None
+                }
             }
-            Err(_parse) => {
-                emit_disconnect(events, DisconnectReason::ProtocolError);
-                SlInner::Done
-            }
-        },
-        Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
-            emit_disconnect(events, DisconnectReason::ProtocolError);
-            SlInner::Done
         }
-        Err(TryRecvError::Empty) => SlInner::LoggingIn { session, rx },
+        Ok(LoginResponse::MfaChallenge(challenge)) => {
+            outbound.send(NetOutbound::Mfa(challenge)).ok();
+            None
+        }
+        Ok(LoginResponse::Failure(failure)) => {
+            // A retryable "already logged in" rejection is surfaced like an
+            // MFA challenge — its own event the driver can act on (consult
+            // the user, re-add the plugin) — rather than a fatal disconnect.
+            if failure.kind() == LoginRejectKind::AlreadyLoggedIn {
+                outbound.send(NetOutbound::Rejected(failure)).ok();
+            } else {
+                send_disconnect(
+                    outbound,
+                    DisconnectReason::LoginFailed {
+                        reason: failure.reason,
+                        message: failure.message,
+                    },
+                );
+            }
+            None
+        }
+        Err(_parse) => {
+            send_disconnect(outbound, DisconnectReason::ProtocolError);
+            None
+        }
     }
 }
 
@@ -973,38 +1063,47 @@ fn route_ais3(caps: Option<&Caps>, suffix: &str, verb: Ais3Verb, body: Option<St
     true
 }
 
-/// Handles the running phase: receive UDP and CAPS events, apply commands, time
-/// out, transmit, and surface events and diagnostics.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the ECS driver fans the session's output to several Bevy writers \
-              (events, diagnostics) alongside its state"
-)]
+/// One tick of the running session (on the network thread): receive UDP and
+/// CAPS events, apply the tick's queued commands, time out, transmit, and
+/// report events / diagnostics / the agent-parcel mirror over `outbound`.
+/// Returns the state for the next tick, or `None` once the session finished
+/// (persisting the inventory cache on the way out).
 fn advance_running(
-    mut session: Box<Session>,
-    socket: UdpSocket,
-    mut recv_buf: Vec<u8>,
-    mut caps: Option<Caps>,
-    mut chat_log: Box<ChatLog>,
-    mut inventory_cache: Box<InventoryCache>,
-    mut lsl_syntax: Box<LslSyntaxState>,
+    state: RunningSession,
+    commands: Vec<Command>,
     now: Instant,
-    events: &mut MessageWriter<SlEvent>,
-    diagnostics: &mut MessageWriter<SlDiagnostic>,
-    capabilities: &mut MessageWriter<SlCapabilities>,
-    commands: &mut MessageReader<SlCommand>,
-) -> SlInner {
-    // Drain all available inbound datagrams.
-    loop {
-        match socket.recv_from(&mut recv_buf) {
-            Ok((len, from)) => {
-                if let Some(datagram) = recv_buf.get(..len) {
-                    session.handle_datagram(from, datagram, now).ok();
+    outbound: &Sender<NetOutbound>,
+) -> Option<RunningSession> {
+    let RunningSession {
+        mut session,
+        socket,
+        mut recv_buf,
+        mut caps,
+        mut chat_log,
+        mut inventory_cache,
+        mut lsl_syntax,
+        mut agent_parcel,
+    } = state;
+    // Wait for inbound data with ONE blocking receive (its [`NET_TICK`] read
+    // timeout is the thread's tick cadence — a datagram wakes the tick
+    // immediately, an idle tick still runs timers / commands), then drain the
+    // rest of the backlog non-blocking so the ACK flush below is never
+    // delayed by a second timeout wait.
+    match socket.recv_from(&mut recv_buf) {
+        Ok((len, from)) => {
+            if let Some(datagram) = recv_buf.get(..len) {
+                session.handle_datagram(from, datagram, now).ok();
+            }
+            socket.set_nonblocking(true).ok();
+            while let Ok((more_len, more_from)) = socket.recv_from(&mut recv_buf) {
+                if let Some(datagram) = recv_buf.get(..more_len) {
+                    session.handle_datagram(more_from, datagram, now).ok();
                 }
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => break,
-            Err(_other) => break,
+            socket.set_nonblocking(false).ok();
+            socket.set_read_timeout(Some(NET_TICK)).ok();
         }
+        Err(_timeout_or_other) => {}
     }
 
     // Cache the capability map once the poller discovers it, then drain any CAPS
@@ -1040,7 +1139,7 @@ fn advance_running(
                     run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
                 });
             }
-            capabilities.write(SlCapabilities(map.clone()));
+            outbound.send(NetOutbound::Capabilities(map.clone())).ok();
             caps.map = map;
         }
         while let Ok((message, body)) = caps.events_rx.try_recv() {
@@ -1050,10 +1149,12 @@ fn advance_running(
             if let Some(cap) = message.strip_prefix(CAPS_FAILURE_PREFIX) {
                 tracing::warn!(capability = cap, "CAPS request failed; no reply surfaced");
                 if session.diagnostics_enabled() {
-                    diagnostics.write(SlDiagnostic(Diagnostic::ExpectedReplyMissing {
-                        request: cap.to_owned(),
-                        sequence: None,
-                    }));
+                    outbound
+                        .send(NetOutbound::Diagnostic(Diagnostic::ExpectedReplyMissing {
+                            request: cap.to_owned(),
+                            sequence: None,
+                        }))
+                        .ok();
                 }
             } else {
                 session.handle_caps_event(&message, &body, now).ok();
@@ -1061,7 +1162,7 @@ fn advance_running(
         }
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
-            events.write(SlEvent(event));
+            outbound.send(NetOutbound::Event(event)).ok();
         }
 
         // Background inventory crawl: when enabled, sweep the next bounded batch
@@ -1125,8 +1226,8 @@ fn advance_running(
     }
 
     // Apply queued commands.
-    for command in commands.read() {
-        match &command.0 {
+    for command in &commands {
+        match command {
             Command::Send {
                 message,
                 reliability,
@@ -2797,9 +2898,11 @@ fn advance_running(
             Command::QueryScriptPermissions => {
                 // Local query: synthesize the snapshot from the session and surface
                 // it on the event stream (no wire send).
-                events.write(SlEvent(SessionEvent::ScriptPermissionState(
-                    session.script_permission_state(),
-                )));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::ScriptPermissionState(
+                        session.script_permission_state(),
+                    )))
+                    .ok();
             }
             Command::DetachAttachmentIntoInventory { item_id } => {
                 session.detach_attachment_into_inventory(*item_id, now).ok();
@@ -3584,9 +3687,11 @@ fn advance_running(
                 // Local query: build the light session list and surface it on the
                 // event stream. (A bevy system may instead borrow the Session and
                 // call `chat_sessions_info()` directly, skipping the round-trip.)
-                events.write(SlEvent(SessionEvent::ChatSessions(
-                    session.chat_sessions_info().collect(),
-                )));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::ChatSessions(
+                        session.chat_sessions_info().collect(),
+                    )))
+                    .ok();
             }
             Command::QueryChatHistoryPage {
                 session: chat_session,
@@ -3615,11 +3720,13 @@ fn advance_running(
                         None => (Vec::new().into(), None),
                     }
                 };
-                events.write(SlEvent(SessionEvent::ChatHistoryPage {
-                    session: *chat_session,
-                    messages,
-                    prev,
-                }));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::ChatHistoryPage {
+                        session: *chat_session,
+                        messages,
+                        prev,
+                    }))
+                    .ok();
             }
             Command::QueryNearbyChatHistoryPage {
                 already_shown,
@@ -3635,7 +3742,12 @@ fn advance_running(
                         Some((page, cursor)) => (page.into(), cursor),
                         None => (Vec::new().into(), None),
                     };
-                events.write(SlEvent(SessionEvent::NearbyChatHistoryPage { lines, prev }));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::NearbyChatHistoryPage {
+                        lines,
+                        prev,
+                    }))
+                    .ok();
             }
             Command::QueryInventoryFolder {
                 folder,
@@ -3653,32 +3765,40 @@ fn advance_running(
                 if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
                     fetch_folder_contents(&mut session, *folder, caps.as_ref(), now);
                 }
-                events.write(SlEvent(SessionEvent::InventoryFolderPage {
-                    folder: *folder,
-                    folders: folders.into(),
-                    items: items.into(),
-                    prev,
-                }));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::InventoryFolderPage {
+                        folder: *folder,
+                        folders: folders.into(),
+                        items: items.into(),
+                        prev,
+                    }))
+                    .ok();
             }
             Command::QueryInventoryRoots => {
                 // Local query: surface the agent + library roots (both `Copy`).
-                events.write(SlEvent(SessionEvent::InventoryRoots {
-                    agent_root: session.inventory_root(),
-                    library_root: session.library_root(),
-                }));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::InventoryRoots {
+                        agent_root: session.inventory_root(),
+                        library_root: session.library_root(),
+                    }))
+                    .ok();
             }
             Command::QueryInventoryFolders => {
                 // Local query: snapshot the agent tree's known folders (seeded
                 // from the login skeleton, so present before any contents fetch).
-                events.write(SlEvent(SessionEvent::InventoryFolders(
-                    session.inventory_folder_infos().into(),
-                )));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::InventoryFolders(
+                        session.inventory_folder_infos().into(),
+                    )))
+                    .ok();
             }
             Command::QueryFriends => {
                 // Local query: build the buddy snapshot with online flags.
-                events.write(SlEvent(SessionEvent::FriendsSnapshot(
-                    session.friends_presence().collect(),
-                )));
+                outbound
+                    .send(NetOutbound::Event(SessionEvent::FriendsSnapshot(
+                        session.friends_presence().collect(),
+                    )))
+                    .ok();
             }
             Command::RetrieveInstantMessages => {
                 session.retrieve_instant_messages(now).ok();
@@ -3797,7 +3917,7 @@ fn advance_running(
     // failures, unhandled messages, unknown CAPS events, missing replies). Only
     // populated while diagnostics are enabled.
     while let Some(diagnostic) = session.poll_diagnostic() {
-        diagnostics.write(SlDiagnostic(diagnostic));
+        outbound.send(NetOutbound::Diagnostic(diagnostic)).ok();
     }
 
     // Surface events. A region change brings a new seed capability, so restart
@@ -3866,7 +3986,7 @@ fn advance_running(
         if chat_log.any_enabled() {
             chat_log.observe_event(&session, &event);
         }
-        events.write(SlEvent(event));
+        outbound.send(NetOutbound::Event(event)).ok();
     }
     if region_changed {
         // Re-target the single event-queue worker at the new root region rather
@@ -3884,20 +4004,31 @@ fn advance_running(
         // Persist the inventory cache before exit (Firestorm's save-at-cleanup);
         // a no-op when the cache is disabled.
         inventory_cache.save(&mut session);
-        SlInner::Done
-    } else {
-        // The optional dirty/idle inventory-cache save (crash-safety beyond
-        // Firestorm's shutdown-only save); self-gating on the dirty flag and the
-        // save interval, so a clean or disabled cache costs nothing.
-        inventory_cache.maybe_save(&mut session, now);
-        SlInner::Running {
-            session,
-            socket,
-            recv_buf,
-            caps,
-            chat_log,
-            inventory_cache,
-            lsl_syntax,
-        }
+        return None;
     }
+    // The optional dirty/idle inventory-cache save (crash-safety beyond
+    // Firestorm's shutdown-only save); self-gating on the dirty flag and the
+    // save interval, so a clean or disabled cache costs nothing.
+    inventory_cache.maybe_save(&mut session, now);
+    // Mirror the agent's parcel / fly / seat for the ECS side (e.g. the
+    // viewer's take-off gate), sending only when something changed so a quiet
+    // tick crosses the channel with nothing.
+    let mut refreshed = agent_parcel.clone();
+    refreshed.refresh_from(&session);
+    if refreshed != agent_parcel {
+        agent_parcel = refreshed;
+        outbound
+            .send(NetOutbound::AgentParcel(Box::new(agent_parcel.clone())))
+            .ok();
+    }
+    Some(RunningSession {
+        session,
+        socket,
+        recv_buf,
+        caps,
+        chat_log,
+        inventory_cache,
+        lsl_syntax,
+        agent_parcel,
+    })
 }

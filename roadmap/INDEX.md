@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 748 |
+| done | 749 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1200** |
+| **total** | **1201** |
 
 ## ideas (57)
 
@@ -1071,7 +1071,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (748)
+## done (749)
 
 ### protocol
 
@@ -1822,6 +1822,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-session-network-thread`](done/viewer-perf-session-network-thread.md)
+  — Run the Bevy session on a dedicated network thread
 - [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)
   — Settings persistence writes on the IO task pool
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
