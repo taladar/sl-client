@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 246 |
+| ready | 244 |
 | blocked | 79 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 743 |
+| done | 745 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (246)
+## ready (244)
 
 ### protocol
 
@@ -252,9 +252,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`
   (done))
-- [`viewer-cef-audio-mixer-handoff`](ready/viewer-cef-audio-mixer-handoff.md) —
-  CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
-  `viewer-audio-backend` (done))
 - [`viewer-chat-autoreplace`](ready/viewer-chat-autoreplace.md) — Chat
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
@@ -345,9 +342,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Group profile — set the group insignia
 - [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
   — Group notices — attach on send, open on receive
-- [`viewer-gst-audio-mixer-handoff`](ready/viewer-gst-audio-mixer-handoff.md) —
-  GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked by
-  `viewer-audio-backend` (done))
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -1054,7 +1048,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (743)
+## done (745)
 
 ### protocol
 
@@ -1255,6 +1249,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-caps-event-queue-stops-after-teleport-spree`](done/viewer-caps-event-queue-stops-after-teleport-spree.md)
   — CAPS EventQueueGet stops delivering (no CrossedRegion) after a rapid
   teleport spree, freezing the avatar at a crossing
+- [`viewer-cef-audio-mixer-handoff`](done/viewer-cef-audio-mixer-handoff.md) —
+  CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
+  `viewer-audio-backend` (done))
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
@@ -1335,6 +1332,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
+- [`viewer-gst-audio-mixer-handoff`](done/viewer-gst-audio-mixer-handoff.md) —
+  GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked by
+  `viewer-audio-backend` (done))
 - [`viewer-hover-text`](done/viewer-hover-text.md) — Object hover text
   (llSetText floating text)
 - [`viewer-hover-tooltips`](done/viewer-hover-tooltips.md) — In-world hover

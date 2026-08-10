@@ -25,23 +25,30 @@
 //! - [`AudioStreamPlayer`] — the parcel radio stream (audio only, no
 //!   surface): play / stop / volume plus the ICY "now playing" title.
 //!
-//! **Interim audio path**: GStreamer currently outputs audio straight to the
-//! system device (`autoaudiosink`), exactly like the CEF engine does — the
-//! shared viewer mixer (`viewer-audio-backend`) does not exist yet. When it
-//! lands, both consumers switch their audio sink to an `appsink` feeding the
-//! mixer's resampling channel and gain spatialisation; the public API here
-//! already keeps volume / mute per surface so that switch stays internal.
-//! Until then GStreamer owns its own clock and audio device, which also
-//! settles A/V sync the boring way: both sinks sync to the pipeline clock.
+//! **Audio path**: when the viewer attaches an [`AudioSink`] (its shared mixer
+//! input) via [`MediaSurface::set_audio_sink`] / [`AudioStreamPlayer::set_audio_sink`],
+//! both consumers replace `playbin3`'s default `autoaudiosink` with an `appsink`
+//! feeding that sink — the parcel stream onto the mixer's music bus (stereo,
+//! 2-D) and prim video onto its media bus (spatialised at the prim). The
+//! `audio_sink` module holds the bin and the A/V-sync / clock-ownership
+//! decision (the audio `appsink` stays paced to the pipeline clock; the mixer's
+//! resampling channel corrects only the device-clock drift). The parcel stream
+//! player, whose sink is attached before playback starts, falls back to the
+//! interim `autoaudiosink` when no sink is attached (the crate's own tests, or a
+//! viewer with no mixer). A media surface always routes audio to the `appsink` —
+//! the viewer attaches its sink immediately after creation — so a surface with
+//! no sink yet is simply silent rather than opening its own device.
 
 use std::sync::{Arc, Mutex, Weak};
 
 use sl_media::{MediaBackend, MediaError, MediaSurface, SurfaceConfig};
 
+mod audio_sink;
 mod messages;
 pub mod stream;
 mod surface;
 
+pub use sl_media::AudioSink;
 pub use stream::{AudioStreamPlayer, AudioStreamState, AudioStreamStatus};
 
 /// Initialises the process-global GStreamer runtime (idempotent).

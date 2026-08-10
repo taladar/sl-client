@@ -22,11 +22,12 @@ use std::sync::{Arc, Mutex};
 use gstreamer::prelude::*;
 use gstreamer_video::VideoFrameExt as _;
 use sl_media::{
-    FrameView, KeyInput, MediaError, MediaSurface, Modifiers, MouseButton, PlaybackState,
-    PlaybackStatus, SurfaceConfig, SurfaceStatus,
+    AudioSink, FrameView, KeyInput, MediaError, MediaSurface, Modifiers, MouseButton,
+    PlaybackState, PlaybackStatus, SurfaceConfig, SurfaceStatus,
 };
 use tracing::{debug, warn};
 
+use crate::audio_sink::{self, SharedAudioSink};
 use crate::lock_shared;
 use crate::messages::{friendly_error, missing_plugin_description, title_from_tags};
 
@@ -99,6 +100,10 @@ pub(crate) struct SurfaceInner {
     bus: gstreamer::Bus,
     /// The state shared with the appsink streaming thread.
     shared: Arc<Mutex<Shared>>,
+    /// The shared-mixer audio hand-off (attached by the viewer after creation);
+    /// the pipeline's audio always goes here, spatialised at the prim, rather
+    /// than to the sound card.
+    audio: SharedAudioSink,
 }
 
 impl SurfaceInner {
@@ -173,9 +178,16 @@ impl SurfaceInner {
         let playbin = gstreamer::ElementFactory::make("playbin3")
             .property("uri", &config.initial_url)
             .property("video-sink", sink_bin.upcast_ref::<gstreamer::Element>())
-            .property("mute", config.muted)
             .build()
             .map_err(|error| creation(format!("playbin3: {error}")))?;
+        // Route audio to the shared mixer (spatialised at the prim by the
+        // viewer). The sink is attached after creation; the `appsink` discards
+        // blocks until then, and mute is applied at the mixer input, so no
+        // `playbin` `mute` property is set here (that would attenuate twice).
+        let audio = audio_sink::shared();
+        if let Some(bin) = audio_sink::build_bin(&audio) {
+            playbin.set_property("audio-sink", &bin);
+        }
         let bus = playbin
             .bus()
             .ok_or_else(|| creation(String::from("playbin3 has no bus")))?;
@@ -189,6 +201,7 @@ impl SurfaceInner {
             playbin,
             bus,
             shared,
+            audio,
         }))
     }
 
@@ -397,6 +410,7 @@ impl SurfaceInner {
             }
         }
         let _result = self.playbin.set_state(gstreamer::State::Null);
+        audio_sink::mark_stopped(&self.audio);
         let mut shared = lock_shared(&self.shared);
         shared.status.closed = true;
         shared.touch();
@@ -563,13 +577,27 @@ impl MediaSurface for GstMediaSurface {
     }
 
     fn set_muted(&self, muted: bool) {
-        self.inner.playbin.set_property("mute", muted);
-        let mut shared = lock_shared(&self.inner.shared);
-        shared.muted = muted;
+        {
+            let mut shared = lock_shared(&self.inner.shared);
+            shared.muted = muted;
+        }
+        // With a mixer sink attached the mute is applied at the mixer input;
+        // otherwise it drives `playbin`'s mute property (the fallback path).
+        if !audio_sink::set_muted(&self.inner.audio, muted) {
+            self.inner.playbin.set_property("mute", muted);
+        }
     }
 
     fn muted(&self) -> bool {
         lock_shared(&self.inner.shared).muted
+    }
+
+    fn set_audio_sink(&self, sink: Arc<dyn AudioSink>) {
+        audio_sink::attach(&self.inner.audio, Arc::clone(&sink));
+        // Apply the surface's current mute to the freshly attached mixer input
+        // (a surface created muted keeps that state through the hand-off).
+        let muted = lock_shared(&self.inner.shared).muted;
+        sink.set_muted(muted);
     }
 
     fn play(&self) {
@@ -610,9 +638,14 @@ impl MediaSurface for GstMediaSurface {
     }
 
     fn set_volume(&self, volume: f64) {
-        self.inner
-            .playbin
-            .set_property("volume", volume.clamp(0.0, 1.0));
+        // With a mixer sink attached, the media bus owns the level; driving
+        // `playbin`'s volume too would attenuate twice. Only the fallback path
+        // (no mixer) applies it directly.
+        if !audio_sink::is_attached(&self.inner.audio) {
+            self.inner
+                .playbin
+                .set_property("volume", volume.clamp(0.0, 1.0));
+        }
     }
 
     #[expect(

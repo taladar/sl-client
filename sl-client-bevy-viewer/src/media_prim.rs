@@ -214,6 +214,7 @@ impl Plugin for MediaPrimPlugin {
                 (
                     ingest_media_events,
                     drive_media_surfaces,
+                    place_media_audio,
                     hover_media_faces,
                     handle_media_clicks,
                     forward_media_release,
@@ -399,6 +400,29 @@ fn ingest_media_events(
                 );
             }
             _ => {}
+        }
+    }
+}
+
+/// Keep each live prim surface's mixer input on its prim face, so its audio is
+/// spatialised at the right world position (the mixer recomputes the
+/// listener-relative offset each frame; this feeds it the source position). Runs
+/// every frame — the surface driver's coarse half-second cadence would lag a
+/// moving prim's audio.
+fn place_media_audio(
+    state: Res<MediaPrimState>,
+    mut surfaces: NonSendMut<MediaSurfaces>,
+    transforms: Query<&GlobalTransform>,
+) {
+    for active in state.active.values() {
+        let Ok(transform) = transforms.get(active.face_entity) else {
+            continue;
+        };
+        let position = transform.translation();
+        if let Some(slot) = surfaces.get_mut(active.surface)
+            && let Some(audio) = slot.audio.as_mut()
+        {
+            audio.set_position(position);
         }
     }
 }
@@ -643,7 +667,9 @@ fn start_media_surface(
         muted: false,
         loop_media: entry.auto_loop,
     };
-    let Some(id) = surfaces.create_kind(engine, images, &config, kind) else {
+    // Prim media is spatialised at the prim — the positional media-on-a-prim
+    // audio no reference viewer manages.
+    let Some(id) = surfaces.create_kind(engine, images, &config, kind, true) else {
         return false;
     };
     debug!("media surface started for {target:?} at {url} ({kind:?})");

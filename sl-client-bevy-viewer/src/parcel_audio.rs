@@ -25,14 +25,16 @@
 //! `♫ <now playing / stream host> ⏵/⏹ 🔊/🔇 [volume]`. While the current parcel
 //! has no stream URL the row is greyed and its play / mute buttons are
 //! disabled — the volume slider stays live, so a user can set it before
-//! entering a loud parcel. The volume slider is bound to the persisted
-//! `MusicStreamVolume` setting through [`crate::settings_binding`], so the
-//! preference survives restarts and any future volume panel
-//! ([[viewer-volume-panel]]) edits the same value.
+//! entering a loud parcel. The inline volume slider and mute drive the shared
+//! mixer's **music bus** directly (the same `music_volume` / `music_mute`
+//! settings the [volume panel](crate::volume_panel) edits), so the stream has
+//! one volume, not a stream-level gain in series with the bus.
 //!
-//! Audio goes straight to the system device for now (the `sl-gst` interim —
-//! see that crate's docs); when the shared mixer (`viewer-audio-backend`)
-//! lands this stream moves onto its music bus unchanged.
+//! Audio flows through the shared [`sl_audio`] mixer: the player is handed a
+//! music-bus [`MixerStream`] input (2-D, stereo), so the parcel radio shares
+//! the one audio device and the one set of buses with every other source
+//! (`viewer-gst-audio-mixer-handoff`). The GStreamer engine owns the network
+//! and decode; the mixer owns the device.
 //!
 //! Reference (Firestorm, read-only): `llviewermedia_streamingaudio`,
 //! `llviewerparcelmedia`, `llpanelnearbymedia`.
@@ -43,16 +45,19 @@ use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
 };
+use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState};
 
 use crate::bottom_toolbar::BottomArea;
+use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
 use crate::ui::{LogicalInset, LogicalRect, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::volume_panel::{bus_mute_setting, bus_volume_setting};
 
 /// The `element` the bar attributes its actions to.
 pub(crate) const PARCEL_AUDIO_ELEMENT: &str = "parcel-audio";
@@ -63,12 +68,6 @@ const AUDIO_SECTION: &[&str] = &["audio"];
 /// Whether the parcel music stream starts automatically (the reference's
 /// streaming-music preference).
 const MUSIC_ENABLED_SETTING: &str = "MusicStreamEnabled";
-
-/// The music-stream volume in `[0, 1]`.
-const MUSIC_VOLUME_SETTING: &str = "MusicStreamVolume";
-
-/// The default music volume.
-const DEFAULT_MUSIC_VOLUME: f32 = 0.5;
 
 /// The control cluster's font size, in logical pixels.
 const BAR_FONT_SIZE: f32 = 12.0;
@@ -113,11 +112,11 @@ pub(crate) struct ParcelAudio {
     /// The user stopped this URL's stream; autoplay stays off until the
     /// parcel URL changes.
     user_stopped: bool,
-    /// The volume last pushed into the player (a change detector for the
-    /// setting).
-    applied_volume: Option<f32>,
     /// The enabled flag last seen (a change detector for the setting).
     applied_enabled: Option<bool>,
+    /// The player's bridge into the mixer's **music** bus (2-D, stereo). Opened
+    /// lazily once the mixer exists and the sink is attached to the player.
+    audio: Option<MixerStream>,
 }
 
 /// The bar's entities.
@@ -176,12 +175,9 @@ fn register_parcel_audio_settings(settings: Option<ResMut<ViewerSettings>>) {
         "Play the parcel's music stream automatically (off by default; the \
          play button on the audio bar starts a stream on demand)",
     );
-    settings.register_in(
-        AUDIO_SECTION,
-        MUSIC_VOLUME_SETTING,
-        sl_settings::SettingValue::F32(DEFAULT_MUSIC_VOLUME),
-        "Parcel music stream volume (0-1)",
-    );
+    // The stream's volume / mute are the mixer's music bus, registered by the
+    // volume panel; the inline slider and mute button below bind those same
+    // settings, so there is one music volume, not two in series.
 }
 
 /// Spawn the control cluster into the bottom area's upper stack, once (the
@@ -267,7 +263,9 @@ pub(crate) fn spawn_parcel_audio_bar(
     let slider = commands
         .spawn((
             bound_slider(
-                SettingBinding::global(MUSIC_VOLUME_SETTING),
+                // The inline stream volume *is* the music bus (the volume
+                // panel's `music_volume`), so the two stay in lockstep.
+                SettingBinding::global(bus_volume_setting(Bus::Music)),
                 SliderRange::new(0.0, 1.0),
                 SliderStep(0.05),
             ),
@@ -373,23 +371,27 @@ fn drive_parcel_audio(
     mut audio: ResMut<ParcelAudio>,
     parcel: Option<Res<SlAgentParcel>>,
     settings: Option<Res<ViewerSettings>>,
+    mut mixer: Option<NonSendMut<Mixer>>,
 ) {
     audio.player.poll();
+
+    // Open the music-bus mixer input the first time the mixer is available and
+    // hand its sink to the player, so playback routes through the shared mixer
+    // (music bus, 2-D) rather than the sound card. Volume / mute are the music
+    // bus itself, so nothing is pushed into the player here.
+    if audio.audio.is_none() && mixer.is_some() {
+        let (stream, sink) = MixerStream::new(Bus::Music, false);
+        audio.player.set_audio_sink(sink);
+        audio.audio = Some(stream);
+    }
+    if let (Some(mixer), Some(stream)) = (mixer.as_deref_mut(), audio.audio.as_mut()) {
+        stream.service(mixer);
+    }
 
     let enabled = settings
         .as_ref()
         .and_then(|settings| settings.store().get_bool(MUSIC_ENABLED_SETTING).ok())
         .unwrap_or(false);
-    let volume = settings
-        .as_ref()
-        .and_then(|settings| settings.store().get_f32(MUSIC_VOLUME_SETTING).ok())
-        .unwrap_or(DEFAULT_MUSIC_VOLUME);
-
-    // Volume: push into the player only when the setting changed.
-    if audio.applied_volume != Some(volume) {
-        audio.applied_volume = Some(volume);
-        audio.player.set_volume(f64::from(volume));
-    }
 
     // Parcel switch: a new music URL re-arms autoplay; losing the URL stops.
     let parcel_url = parcel
@@ -431,6 +433,7 @@ fn drive_parcel_audio(
 fn handle_parcel_audio_actions(
     mut actions: MessageReader<UiAction>,
     mut audio: ResMut<ParcelAudio>,
+    mut settings: Option<ResMut<ViewerSettings>>,
 ) {
     for action in actions.read() {
         if action.element != PARCEL_AUDIO_ELEMENT {
@@ -453,8 +456,17 @@ fn handle_parcel_audio_actions(
                 }
             }
             "mute-toggle" => {
-                let muted = audio.player.muted();
-                audio.player.set_muted(!muted);
+                // Mute is the music bus (the stream's single volume path); the
+                // volume panel's music row reflects the same flip.
+                if let Some(settings) = settings.as_mut() {
+                    let key = bus_mute_setting(Bus::Music);
+                    let now = settings.store().get_bool(&key).unwrap_or(false);
+                    settings.set(
+                        sl_settings::Scope::Global,
+                        &key,
+                        sl_settings::SettingValue::Bool(!now),
+                    );
+                }
             }
             _other => {}
         }
@@ -490,6 +502,7 @@ fn sync_parcel_audio_ui(
     ui: Option<Res<ParcelAudioUi>>,
     audio: Res<ParcelAudio>,
     diagnostics: Res<MediaDiagnostics>,
+    settings: Option<Res<ViewerSettings>>,
     disabled: Query<(), With<InteractionDisabled>>,
     mut texts: Query<&mut Text>,
     mut text_colors: Query<&mut TextColor>,
@@ -499,6 +512,16 @@ fn sync_parcel_audio_ui(
 ) {
     let Some(ui) = ui else { return };
     let active = audio.parcel_url.is_some();
+    // The mute glyph reflects the music bus (the stream's mute lives there now).
+    let music_muted = settings
+        .as_ref()
+        .and_then(|settings| {
+            settings
+                .store()
+                .get_bool(&bus_mute_setting(Bus::Music))
+                .ok()
+        })
+        .unwrap_or(false);
 
     // Grey the tintable glyphs (the ♫ marker and the ▶/■ play glyph; the mute
     // 🔊/🔇 is a colour emoji that ignores tint, so the button chrome carries
@@ -552,7 +575,7 @@ fn sync_parcel_audio_ui(
         }
     }
     if let Ok(mut mute) = texts.get_mut(ui.mute_label) {
-        let want = if audio.player.muted() { "🔇" } else { "🔊" };
+        let want = if music_muted { "🔇" } else { "🔊" };
         if mute.0 != want {
             want.clone_into(&mut mute.0);
         }

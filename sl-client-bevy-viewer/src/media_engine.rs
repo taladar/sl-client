@@ -28,10 +28,12 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use sl_audio::{Bus, Mixer};
 use sl_cef::chromium::CefMediaBackend;
 use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, SurfaceStatus};
 
 use crate::face_material::FaceMaterial;
+use crate::media_audio::MixerStream;
 
 /// System sets ordering the media engine's frame work: consumers that create
 /// or drive surfaces run **after** [`MediaEngineSystems::Pump`], which is when
@@ -141,6 +143,10 @@ pub(crate) struct MediaSlot {
     /// Whether a close was requested; the slot is pruned once the engine
     /// reports the browser closed.
     closing: bool,
+    /// The surface's bridge into the shared mixer: the surface pushes its PCM
+    /// here (media bus — spatial for a prim, 2-D for a UI panel) instead of
+    /// opening its own audio device. `None` only when the mixer never opened.
+    pub(crate) audio: Option<MixerStream>,
 }
 
 /// The table of live surfaces (non-send resource).
@@ -162,18 +168,23 @@ impl MediaSurfaces {
         images: &mut Assets<Image>,
         config: &SurfaceConfig,
     ) -> Option<MediaSurfaceId> {
-        self.create_kind(engine, images, config, MediaEngineKind::Web)
+        // UI browser panels (floaters, login, profile web tab) are 2-D on the
+        // media bus.
+        self.create_kind(engine, images, config, MediaEngineKind::Web, false)
     }
 
     /// Creates a surface on the backend for `kind` (web pages on CEF, direct
-    /// video / audio on GStreamer), allocating its mirror [`Image`]. Returns
-    /// `None` when that engine is not live or refuses the surface.
+    /// video / audio on GStreamer), allocating its mirror [`Image`] and opening
+    /// its shared-mixer audio bridge (`spatial` = positional at a prim, false =
+    /// 2-D for a UI panel). Returns `None` when that engine is not live or
+    /// refuses the surface.
     pub(crate) fn create_kind(
         &mut self,
         engine: &mut MediaEngine,
         images: &mut Assets<Image>,
         config: &SurfaceConfig,
         kind: MediaEngineKind,
+        spatial: bool,
     ) -> Option<MediaSurfaceId> {
         let backend = match kind {
             MediaEngineKind::Web => engine.backend.as_mut()?,
@@ -184,6 +195,9 @@ impl MediaSurfaces {
                 let id = MediaSurfaceId(self.next);
                 self.next = self.next.wrapping_add(1);
                 let image = images.add(placeholder_image());
+                // Route the surface's audio into the shared mixer's media bus.
+                let (audio_stream, sink) = MixerStream::new(Bus::Media, spatial);
+                surface.set_audio_sink(sink);
                 self.slots.insert(
                     id,
                     MediaSlot {
@@ -195,6 +209,7 @@ impl MediaSurfaces {
                         touch_materials: Vec::new(),
                         seen_frame: 0,
                         closing: false,
+                        audio: Some(audio_stream),
                     },
                 );
                 Some(id)
@@ -349,6 +364,10 @@ fn pump_media_engine(
     mut engine: NonSendMut<MediaEngine>,
     mut surfaces: NonSendMut<MediaSurfaces>,
     mut images: ResMut<Assets<Image>>,
+    // Optional: the shared mixer exists in the full viewer but may be absent (no
+    // audio device, or a UI-only host), in which case the surfaces' audio bridges
+    // simply never open — the frames still mirror.
+    mut mixer: Option<NonSendMut<Mixer>>,
     // Optional: the in-world PBR face-material store exists in the full viewer but
     // not in a UI-only host (the gallery renders the browser surface into a UI
     // `ImageNode`, which registers no `touch_materials`), so a missing store just
@@ -364,6 +383,12 @@ fn pump_media_engine(
 
     let mut finished: Vec<MediaSurfaceId> = Vec::new();
     for (&id, slot) in &mut surfaces.slots {
+        // Reconcile the surface's mixer input with its format / stop / position.
+        if let Some(mixer) = mixer.as_deref_mut()
+            && let Some(audio) = slot.audio.as_mut()
+        {
+            audio.service(mixer);
+        }
         slot.status = slot.surface.status();
         if slot.status.closed {
             if slot.closing {
@@ -446,7 +471,12 @@ fn pump_media_engine(
         }
     }
     for id in finished {
-        let _removed = surfaces.slots.remove(&id);
+        if let Some(mut slot) = surfaces.slots.remove(&id)
+            && let Some(mixer) = mixer.as_deref_mut()
+            && let Some(mut audio) = slot.audio.take()
+        {
+            audio.close(mixer);
+        }
     }
 }
 

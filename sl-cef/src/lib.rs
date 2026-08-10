@@ -31,8 +31,14 @@
 //! [`pause`](MediaSurface::pause) / [`seek`](MediaSurface::seek) /
 //! [`set_volume`](MediaSurface::set_volume), [`SurfaceStatus::playback`]) is
 //! left at its default no-op implementations here: a browser surface has no
-//! media clock — in-page audio/video control stays with the page itself, and
-//! the one host-side control CEF exposes is [`MediaSurface::set_muted`].
+//! media clock — in-page audio/video control stays with the page itself.
+//!
+//! Page **audio**, though, is captured: when the viewer attaches an
+//! [`AudioSink`] via [`MediaSurface::set_audio_sink`], a `CefAudioHandler`
+//! delivers the page's planar f32 PCM into the shared mixer instead of CEF
+//! opening its own output stream — so media-on-a-prim browser audio becomes
+//! positional and [`MediaSurface::set_muted`] mutes at the mixer input. Without
+//! a sink, CEF plays to the OS device and `set_muted` drives its device mute.
 
 pub use sl_media::*;
 

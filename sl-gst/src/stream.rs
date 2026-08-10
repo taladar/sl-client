@@ -14,9 +14,13 @@
 //! the pipeline bus. Audio goes straight to the system device for now — the
 //! shared-mixer hand-off is the same interim noted in the crate docs.
 
+use std::sync::Arc;
+
 use gstreamer::prelude::*;
+use sl_media::AudioSink;
 use tracing::{debug, warn};
 
+use crate::audio_sink::{self, SharedAudioSink};
 use crate::messages::{
     friendly_error, is_http_source_failure, missing_plugin_description, title_from_tags,
 };
@@ -75,13 +79,18 @@ pub struct AudioStreamPlayer {
     muted: bool,
     /// `missing-plugin` descriptions collected for the current stream.
     missing_plugins: Vec<String>,
+    /// The shared-mixer audio hand-off. When a sink is attached (via
+    /// [`set_audio_sink`](Self::set_audio_sink)) the stream routes audio to the
+    /// mixer's music bus instead of the sound card; otherwise it falls back to
+    /// the interim `autoaudiosink`.
+    audio: SharedAudioSink,
 }
 
 impl AudioStreamPlayer {
     /// Creates an idle player (initialises GStreamer on first use instead —
     /// construction never fails).
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             playbin: None,
             bus: None,
@@ -95,7 +104,16 @@ impl AudioStreamPlayer {
             volume: 1.0,
             muted: false,
             missing_plugins: Vec::new(),
+            audio: audio_sink::shared(),
         }
+    }
+
+    /// Route this stream's audio into `sink` (the viewer's shared-mixer music
+    /// bus) instead of the sound card. Takes effect on the next
+    /// [`play`](Self::play); a stream already playing keeps its current sink
+    /// until it is restarted.
+    pub fn set_audio_sink(&self, sink: Arc<dyn AudioSink>) {
+        audio_sink::attach(&self.audio, sink);
     }
 
     /// Starts playing `url`, replacing any current stream.
@@ -111,10 +129,19 @@ impl AudioStreamPlayer {
         self.status.error = None;
         self.status.network_diagnosable = false;
         self.missing_plugins.clear();
+        // With a mixer sink attached the bus owns volume / mute, so `playbin`
+        // stays at unity — otherwise the stream would be attenuated twice, once
+        // here and once on the music bus.
+        let mixer_audio = audio_sink::is_attached(&self.audio);
+        let (playbin_mute, playbin_volume) = if mixer_audio {
+            (false, 1.0)
+        } else {
+            (self.muted, self.volume)
+        };
         let playbin = match gstreamer::ElementFactory::make("playbin3")
             .property("uri", url)
-            .property("mute", self.muted)
-            .property("volume", self.volume)
+            .property("mute", playbin_mute)
+            .property("volume", playbin_volume)
             .build()
         {
             Ok(playbin) => playbin,
@@ -127,6 +154,11 @@ impl AudioStreamPlayer {
         // Audio only: deselect the video / subtitle streams so a video URL in
         // the parcel's music field costs no decode and opens no surface.
         playbin.set_property_from_str("flags", "audio+soft-volume+buffering");
+        // Route audio to the shared mixer when a sink is attached; otherwise
+        // `playbin3` keeps its default `autoaudiosink` (the interim path).
+        if mixer_audio && let Some(bin) = audio_sink::build_bin(&self.audio) {
+            playbin.set_property("audio-sink", &bin);
+        }
         self.bus = playbin.bus();
         if let Err(error) = playbin.set_state(gstreamer::State::Playing) {
             // The detailed reason follows on the bus; poll() surfaces it.
@@ -142,23 +174,35 @@ impl AudioStreamPlayer {
         if let Some(playbin) = self.playbin.take() {
             let _result = playbin.set_state(gstreamer::State::Null);
         }
+        // Tell the mixer input (if any) the source stopped, so it closes.
+        audio_sink::mark_stopped(&self.audio);
         self.bus = None;
         self.status.state = AudioStreamState::Stopped;
         self.status.title = None;
     }
 
     /// Sets the stream volume in `[0, 1]`.
+    ///
+    /// With a mixer sink attached this only records the level (the music bus
+    /// owns the actual gain, so the stream is not attenuated twice); otherwise it
+    /// drives `playbin`'s soft-volume directly.
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume.clamp(0.0, 1.0);
-        if let Some(playbin) = &self.playbin {
+        if !audio_sink::is_attached(&self.audio)
+            && let Some(playbin) = &self.playbin
+        {
             playbin.set_property("volume", self.volume);
         }
     }
 
-    /// Mutes or unmutes the stream (retaining the volume level).
+    /// Mutes or unmutes the stream (retaining the volume level). With a mixer
+    /// sink attached the mute is applied at the mixer input; otherwise it drives
+    /// `playbin`'s mute property.
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
-        if let Some(playbin) = &self.playbin {
+        if !audio_sink::set_muted(&self.audio, muted)
+            && let Some(playbin) = &self.playbin
+        {
             playbin.set_property("mute", muted);
         }
     }

@@ -28,6 +28,46 @@
 //! are required to be `Send`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// A realtime PCM sink a media engine pushes decoded audio into, so the viewer's
+/// **shared mixer** — not the engine — owns the audio device.
+///
+/// This is the audio counterpart of the BGRA frame path: both GStreamer and CEF
+/// produce PCM on their own threads and their own clocks (a network stream's
+/// clock, a decoder's clock, the browser's audio thread), all different from the
+/// sound card's. An implementation must therefore be cheap and thread-safe — it
+/// may only hand the samples to a realtime-safe channel and must never block on,
+/// or touch, engine or UI state. The viewer supplies the implementation (a bridge
+/// to one mixer input, with the clock-drift correction living there); the engines
+/// call it.
+///
+/// Samples are always 32-bit float. The engines deliver whatever channel count
+/// the source produces; the implementation is free to down-/up-mix to the layout
+/// its mixer input expects.
+pub trait AudioSink: Send + Sync {
+    /// (Re)establish the source PCM format: `sample_rate` in Hz and `channels`
+    /// (the source's channel count). Called once when a stream starts and again
+    /// whenever the source changes format — CEF may switch sample rate / channels
+    /// several times within one page. The implementation rebuilds its resampling
+    /// channel for the new rate; pushes are dropped until the new format is in
+    /// place.
+    fn configure(&self, sample_rate: u32, channels: u16);
+    /// Push interleaved f32 PCM (`samples.len() == frames * channels`), the shape
+    /// GStreamer's `appsink` delivers.
+    fn push_interleaved(&self, samples: &[f32], channels: u16);
+    /// Push planar (de-interleaved) f32 PCM, one slice of `frames` samples per
+    /// channel — the shape CEF's `on_audio_stream_packet` delivers.
+    fn push_planar(&self, planes: &[&[f32]]);
+    /// Mute or unmute this source at the mixer input, retaining the level. This is
+    /// the per-surface control the reference viewer reduces to; the mixer keeps
+    /// feeding the input (silence while muted) rather than tearing the source
+    /// down, so a looped / attached source stays time-coherent.
+    fn set_muted(&self, muted: bool);
+    /// The source stopped producing (end of stream, or the stream was stopped);
+    /// the mixer input may be closed until the next [`configure`](Self::configure).
+    fn stopped(&self);
+}
 
 /// Errors surfaced by a media backend.
 #[derive(Debug, thiserror::Error)]
@@ -311,6 +351,17 @@ pub trait MediaSurface {
     fn set_muted(&self, muted: bool);
     /// Whether the surface's audio is muted.
     fn muted(&self) -> bool;
+    /// Routes this surface's audio into `sink` (one input of the viewer's shared
+    /// mixer) instead of the engine's own audio device, so media-on-a-prim audio
+    /// becomes positional and every source shares one device and one set of
+    /// buses. The default is a no-op for surfaces with no separable audio path.
+    ///
+    /// Once a sink is attached, [`set_muted`](Self::set_muted) drives the sink's
+    /// mute rather than the engine's device mute, so the surface delivers
+    /// full-level PCM into the mixer and the mixer owns the volume.
+    fn set_audio_sink(&self, sink: Arc<dyn AudioSink>) {
+        let _unused = sink;
+    }
     /// Starts / resumes time-based playback (no-op on web surfaces).
     fn play(&self) {}
     /// Pauses time-based playback at the current position (no-op on web

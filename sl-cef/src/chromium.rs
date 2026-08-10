@@ -20,25 +20,27 @@ use std::os::raw::{c_int, c_ulong};
 use std::path::Path;
 use std::rc::{Rc as StdRc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use cef::args::Args;
 use cef::rc::Rc as _;
 use cef::{
-    App, Browser, BrowserHost, BrowserSettings, CefString, Client, CommandLine, Cookie, CursorInfo,
-    CursorType, DisplayHandler, Errorcode, Frame, ImplApp, ImplBrowser, ImplBrowserHost,
-    ImplClient, ImplCommandLine, ImplCookieManager, ImplDisplayHandler, ImplFrame,
-    ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler, KeyEvent, KeyEventType,
-    LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent, PaintElementType,
-    PopupFeatures, Rect, RenderHandler, RequestContext, RequestContextSettings, ScreenInfo,
-    Settings, WindowInfo, WindowOpenDisposition, WrapApp, WrapClient, WrapDisplayHandler,
-    WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler, browser_host_create_browser_sync,
-    cookie_manager_get_global_manager, request_context_create_context, wrap_app, wrap_client,
+    App, AudioHandler, AudioParameters, Browser, BrowserHost, BrowserSettings, CefString, Client,
+    CommandLine, Cookie, CursorInfo, CursorType, DisplayHandler, Errorcode, Frame, ImplApp,
+    ImplAudioHandler, ImplBrowser, ImplBrowserHost, ImplClient, ImplCommandLine, ImplCookieManager,
+    ImplDisplayHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, ImplRenderHandler,
+    KeyEvent, KeyEventType, LifeSpanHandler, LoadHandler, LogSeverity, MouseButtonType, MouseEvent,
+    PaintElementType, PopupFeatures, Rect, RenderHandler, RequestContext, RequestContextSettings,
+    ScreenInfo, Settings, WindowInfo, WindowOpenDisposition, WrapApp, WrapAudioHandler, WrapClient,
+    WrapDisplayHandler, WrapLifeSpanHandler, WrapLoadHandler, WrapRenderHandler,
+    browser_host_create_browser_sync, cookie_manager_get_global_manager,
+    request_context_create_context, wrap_app, wrap_audio_handler, wrap_client,
     wrap_display_handler, wrap_life_span_handler, wrap_load_handler, wrap_render_handler,
 };
 
 use crate::{
-    BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError, MediaSurface,
-    Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus,
+    AudioSink, BackendConfig, CursorKind, FrameView, KeyInput, MediaBackend, MediaError,
+    MediaSurface, Modifiers, MouseButton, SharedCookie, SurfaceConfig, SurfaceStatus,
 };
 
 /// Whether the global CEF runtime was initialised in this process. CEF can
@@ -321,6 +323,113 @@ wrap_life_span_handler! {
     }
 }
 
+/// Audio state shared between one surface's CEF audio handler and its
+/// [`CefMediaSurface`] handle. **Only this `Arc<Mutex<…>>` is touched from CEF's
+/// audio thread** — never the `!Send` [`SurfaceShared`] — because
+/// `on_audio_stream_packet` fires off the pump thread, exactly as the roadmap's
+/// watch-out records.
+#[derive(Default)]
+struct CefAudioState {
+    /// The mixer input to push into, attached by the viewer after creation.
+    sink: Option<Arc<dyn AudioSink>>,
+    /// The current stream's channel count (from `on_audio_stream_started`),
+    /// needed to read each planar packet's per-channel pointers.
+    channels: usize,
+    /// Whether this surface is muted at the mixer input.
+    muted: bool,
+}
+
+wrap_audio_handler! {
+    // Per-surface audio handler. Installing it makes CEF deliver the page's PCM
+    // here — planar f32, on CEF's audio thread — instead of opening its own
+    // output stream, so page audio joins the shared mixer (positional for a prim
+    // surface, 2-D for a UI panel). This is the escape from Firestorm's Dullahan
+    // limitation the `viewer-cef-audio-mixer-handoff` task targets.
+    struct OsrAudioHandler {
+        audio: Arc<Mutex<CefAudioState>>,
+    }
+    impl AudioHandler {
+        fn on_audio_stream_started(
+            &self,
+            _browser: Option<&mut Browser>,
+            params: Option<&AudioParameters>,
+            channels: c_int,
+        ) {
+            let rate = params
+                .and_then(|params| u32::try_from(params.sample_rate).ok())
+                .unwrap_or(48_000);
+            let channel_count = usize::try_from(channels).unwrap_or(2).max(1);
+            let sink = match self.audio.lock() {
+                Ok(mut guard) => {
+                    guard.channels = channel_count;
+                    guard.sink.clone()
+                }
+                Err(_poisoned) => None,
+            };
+            if let Some(sink) = sink {
+                sink.configure(rate, u16::try_from(channel_count).unwrap_or(2));
+            }
+        }
+        fn on_audio_stream_packet(
+            &self,
+            _browser: Option<&mut Browser>,
+            data: *mut *const f32,
+            frames: c_int,
+            _pts: i64,
+        ) {
+            if data.is_null() {
+                return;
+            }
+            let Ok(frames) = usize::try_from(frames) else {
+                return;
+            };
+            let (channels, sink) = match self.audio.lock() {
+                Ok(guard) => (guard.channels, guard.sink.clone()),
+                Err(_poisoned) => return,
+            };
+            let Some(sink) = sink else {
+                return;
+            };
+            if channels == 0 {
+                return;
+            }
+            // SAFETY: CEF's `on_audio_stream_packet` contract — `data` points to
+            // `channels` channel pointers, each addressing `frames` f32 samples
+            // valid for the duration of this call. `channels` came from the
+            // paired `on_audio_stream_started`; `frames` is the argument.
+            let plane_ptrs = unsafe { std::slice::from_raw_parts(data, channels) };
+            let mut planes: Vec<&[f32]> = Vec::with_capacity(channels);
+            for &plane in plane_ptrs {
+                if plane.is_null() {
+                    return;
+                }
+                // SAFETY: as above — each channel pointer addresses `frames` f32.
+                planes.push(unsafe { std::slice::from_raw_parts(plane, frames) });
+            }
+            sink.push_planar(&planes);
+        }
+        fn on_audio_stream_stopped(&self, _browser: Option<&mut Browser>) {
+            let sink = self.audio.lock().ok().and_then(|guard| guard.sink.clone());
+            if let Some(sink) = sink {
+                sink.stopped();
+            }
+        }
+        fn on_audio_stream_error(
+            &self,
+            _browser: Option<&mut Browser>,
+            message: Option<&CefString>,
+        ) {
+            if let Some(message) = message {
+                tracing::debug!("CEF audio stream error: {}", message.to_string());
+            }
+            let sink = self.audio.lock().ok().and_then(|guard| guard.sink.clone());
+            if let Some(sink) = sink {
+                sink.stopped();
+            }
+        }
+    }
+}
+
 wrap_client! {
     // The per-surface CEF client wiring the handlers above together.
     struct OsrClient {
@@ -328,6 +437,7 @@ wrap_client! {
         load: LoadHandler,
         display: DisplayHandler,
         life_span: LifeSpanHandler,
+        audio: AudioHandler,
     }
     impl Client {
         fn render_handler(&self) -> Option<RenderHandler> {
@@ -341,6 +451,9 @@ wrap_client! {
         }
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(self.life_span.clone())
+        }
+        fn audio_handler(&self) -> Option<AudioHandler> {
+            Some(self.audio.clone())
         }
     }
 }
@@ -414,6 +527,9 @@ fn path_string(path: &Path) -> CefString {
 pub struct CefMediaSurface {
     /// State shared with the CEF handler callbacks.
     shared: StdRc<RefCell<SurfaceShared>>,
+    /// Audio state shared with the CEF audio handler (a separate `Send + Sync`
+    /// cell, because audio callbacks fire off the pump thread).
+    audio: Arc<Mutex<CefAudioState>>,
 }
 
 impl std::fmt::Debug for CefMediaSurface {
@@ -590,13 +706,51 @@ impl MediaSurface for CefMediaSurface {
     }
 
     fn set_muted(&self, muted: bool) {
-        if let Some(host) = self.host() {
-            host.set_audio_muted(c_int::from(muted));
+        // With a mixer sink attached the mute lives at the mixer input (the page
+        // keeps delivering PCM, muted downstream, so the media bus and future
+        // per-surface volume govern it); otherwise fall back to CEF's own device
+        // mute.
+        let routed = match self.audio.lock() {
+            Ok(mut guard) => {
+                guard.muted = muted;
+                guard.sink.clone()
+            }
+            Err(_poisoned) => None,
+        };
+        match routed {
+            Some(sink) => sink.set_muted(muted),
+            None => {
+                if let Some(host) = self.host() {
+                    host.set_audio_muted(c_int::from(muted));
+                }
+            }
         }
     }
 
     fn muted(&self) -> bool {
-        self.host().is_some_and(|host| host.is_audio_muted() != 0)
+        // Prefer the mixer-input mute once a sink is attached; otherwise report
+        // CEF's device mute.
+        match self.audio.lock() {
+            Ok(guard) if guard.sink.is_some() => guard.muted,
+            _other => self.host().is_some_and(|host| host.is_audio_muted() != 0),
+        }
+    }
+
+    fn set_audio_sink(&self, sink: Arc<dyn AudioSink>) {
+        let muted = match self.audio.lock() {
+            Ok(mut guard) => {
+                guard.sink = Some(Arc::clone(&sink));
+                guard.muted
+            }
+            Err(_poisoned) => false,
+        };
+        // Carry any pre-existing mute across the hand-off, and drop CEF's own
+        // device mute now that the mixer input owns muting (the handler keeps
+        // delivering PCM).
+        sink.set_muted(muted);
+        if let Some(host) = self.host() {
+            host.set_audio_muted(c_int::from(false));
+        }
     }
 
     fn with_new_frame(
@@ -750,11 +904,13 @@ impl MediaBackend for CefMediaBackend {
             &config.initial_url,
         )));
 
+        let audio = Arc::new(Mutex::new(CefAudioState::default()));
         let render = OsrRenderHandler::new(StdRc::clone(&shared));
         let load = OsrLoadHandler::new(StdRc::clone(&shared));
         let display = OsrDisplayHandler::new(StdRc::clone(&shared));
         let life_span = OsrLifeSpanHandler::new(StdRc::clone(&shared));
-        let mut client = OsrClient::new(render, load, display, life_span);
+        let audio_handler = OsrAudioHandler::new(Arc::clone(&audio));
+        let mut client = OsrClient::new(render, load, display, life_span, audio_handler);
 
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
@@ -787,6 +943,7 @@ impl MediaBackend for CefMediaBackend {
         shared.borrow_mut().browser = Some(browser);
         let surface = CefMediaSurface {
             shared: StdRc::clone(&shared),
+            audio,
         };
         if config.muted {
             surface.set_muted(true);

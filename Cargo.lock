@@ -8891,6 +8891,7 @@ dependencies = [
  "sl-gst",
  "sl-l10n",
  "sl-map-apis",
+ "sl-media",
  "sl-mesh",
  "sl-notecard",
  "sl-proto",

@@ -120,6 +120,7 @@ mod look_at;
 mod material_cache;
 mod material_preview;
 mod materials;
+mod media_audio;
 mod media_controls;
 mod media_diagnostics;
 mod media_engine;

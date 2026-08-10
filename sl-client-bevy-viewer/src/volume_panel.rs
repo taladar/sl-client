@@ -74,6 +74,19 @@ const fn default_gain(bus: Bus) -> f32 {
     }
 }
 
+/// The setting name for a bus's remembered linear volume (`0.0..=1.0`). Public so
+/// the parcel-stream bar can bind its inline volume slider to the **music** bus
+/// (the stream's single volume, not one in series with the bus).
+pub(crate) fn bus_volume_setting(bus: Bus) -> String {
+    volume_key(bus)
+}
+
+/// The setting name for a bus's mute flag. Public for the parcel-stream bar's
+/// inline mute (see [`bus_volume_setting`]).
+pub(crate) fn bus_mute_setting(bus: Bus) -> String {
+    mute_key(bus)
+}
+
 /// The setting name for a bus's remembered linear volume (`0.0..=1.0`).
 fn volume_key(bus: Bus) -> String {
     format!("{}_volume", bus.key())
