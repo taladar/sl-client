@@ -363,6 +363,20 @@ pub(crate) struct PhysicalObject {
 /// [`drive_physical_objects`] from this marker's presence.
 pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
     if is_physical_root(object) {
+        refresh_physical_motion(entity, object, commands);
+    } else {
+        commands.entity(entity).remove::<PhysicalObject>();
+    }
+}
+
+/// Re-seed a **physical** root prim's authoritative motion snapshot (a fresh
+/// [`PhysicalObject`] insert restarts the dead-reckoning from it) without the
+/// [`apply_physics`] remove side — the motion-only fast path in the object
+/// update, where the physics flag is known unchanged, calls this so a
+/// non-physical mover no longer pays a no-op remove per motion packet. A
+/// no-op for a non-physical object.
+pub(crate) fn refresh_physical_motion(entity: Entity, object: &Object, commands: &mut Commands) {
+    if is_physical_root(object) {
         commands.entity(entity).insert(PhysicalObject {
             full_key: object.full_id,
             position: object.motion.position.clone(),
@@ -373,8 +387,6 @@ pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Comm
             region_handle: object.region_handle,
             scale: object.scale.clone(),
         });
-    } else {
-        commands.entity(entity).remove::<PhysicalObject>();
     }
 }
 

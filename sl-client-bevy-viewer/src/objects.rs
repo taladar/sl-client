@@ -47,8 +47,8 @@ use sl_client_bevy::{
     JointOverrides, MeshKey, MeshSkin, Object, ObjectExtraParams, ObjectKey, PrimFaceId, PrimLod,
     PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
     SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
-    TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
-    decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
+    TREE_YAW_DEGREES, TextureAnimation, TextureFace, TextureKey, TreeLod, Uuid, Vector,
+    avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
     rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
     texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh,
     to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
@@ -182,7 +182,7 @@ pub(crate) struct SceneObject {
 /// crosshair tool can report exactly what the camera is looking at — the object's
 /// full id, its mesh/sculpt asset id (the thing to fetch and decode offline when
 /// its geometry looks wrong), and its Second Life scale/position.
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ObjectDebugInfo {
     /// The object's full (asset) id.
     full_id: Uuid,
@@ -244,7 +244,7 @@ pub(crate) struct FaceTextureDebug(pub(crate) TextureFace);
 /// exactly the frame `MultipleObjectUpdate` expects them back in. Refreshed on
 /// every object update (including a local echo applied by the edit tools), so
 /// readers never re-derive Second Life values from the Bevy transform.
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, PartialEq)]
 pub(crate) struct ObjectSlMotion {
     /// The position, in region-local metres (root) or parent-relative metres
     /// (linkset child).
@@ -340,8 +340,19 @@ struct TrackedObject {
     /// `ObjectExtraParams` edit (the build floater's Features tab) can resend
     /// the **full** set — the message states the object's complete
     /// extra-parameter state, so a partial send would clear whatever it
-    /// omitted (sculpt, animesh, render materials, …).
+    /// omitted (sculpt, animesh, render materials, …). Also a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
     extra: ObjectExtraParams,
+    /// The last-applied texture-animation block — a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input,
+    /// so a motion-only update skips the texture-animation refresh.
+    texture_animation: Option<TextureAnimation>,
+    /// The last-applied floating text (`llSetText`) — a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
+    text: String,
+    /// The last-applied floating-text colour (alongside
+    /// [`text`](Self::text)).
+    text_color: [u8; 4],
     /// The per-face child entities carrying this object's geometry: one per
     /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
     /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
@@ -392,6 +403,35 @@ struct TrackedObject {
     /// `ObjectImage` send so a texture edit does not clear it (the wire message
     /// carries the whole media-URL field, so omitting it would blank it).
     media_url: Option<String>,
+}
+
+impl TrackedObject {
+    /// Whether any **non-motion** input of the known-object component refresh
+    /// differs from the last applied update — the gate that lets a terse
+    /// motion update (whose merged snapshot changes only the motion fields)
+    /// skip the per-block component helpers and their no-op removes entirely.
+    /// Compares exactly what those helpers read: the extra params (light /
+    /// particles / flexi / reflection probe / render materials), the texture
+    /// animation, the floating text, the update flags (the physics toggle
+    /// among them), the material byte, and the linkset / attachment identity
+    /// (which decides the HUD routing and root marker).
+    fn non_motion_blocks_changed(
+        &self,
+        object: &Object,
+        is_root: bool,
+        parent: ScopedObjectId,
+        attachment_point: Option<u8>,
+    ) -> bool {
+        self.update_flags != object.update_flags
+            || self.material != object.material
+            || self.is_root != is_root
+            || self.parent != parent
+            || self.attachment_point != attachment_point
+            || self.text != object.text
+            || self.text_color != object.text_color
+            || self.texture_animation != object.texture_animation
+            || self.extra != object.extra
+    }
 }
 
 /// The `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag (`llprimitive.h`): the object
@@ -3367,29 +3407,13 @@ fn apply_object(
     // sculpt / LOD rebuilds).
     let intern = MaterialInternContext::for_object(object, is_hud);
 
+    // The per-block components (light P25.1, particles P30.1, flexi P32.1,
+    // reflection probe P33) are derived from the object where they are applied
+    // — the spawn path below, and the known-object path's block refresh (which
+    // a motion-only update skips entirely, derivations included).
+
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
-    // The object's light block (P25.1): present only if the prim is a light
-    // source. Refreshed on every update so a light toggled off / retuned in-world
-    // is reflected — [`apply_light`] inserts the component when present and
-    // removes it when absent.
-    let light = light_from_object(object);
-    // The object's particle-system block (P30.1): present only when the prim is a
-    // live particle source. Refreshed on every update so a source toggled off /
-    // retuned in-world is reflected — [`apply_particles`] inserts the component
-    // when present and removes it when absent (or null).
-    let particles = particles_from_object(object);
-    // The object's flexible-object block (P32.1): present only when the prim is a
-    // flexi prim. Refreshed on every update so a prim toggled flexi off / on
-    // in-world is reflected — [`apply_flexi`] inserts the component when present
-    // and removes it when absent.
-    let flexi = flexi_from_object(object);
-    // The object's reflection-probe block (P33): present only when the prim is a
-    // PBR reflection probe. Refreshed on every update so a probe toggled off /
-    // resized in-world is reflected — [`apply_reflection_probe`] inserts the
-    // component when present and removes it when absent.
-    let reflection_probe = reflection_probe_from_object(object);
-
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
         asset: mesh_key(object)
@@ -3450,18 +3474,24 @@ fn apply_object(
                 current.set_if_neq(transform);
             })
             .or_insert(transform);
-        commands.entity(existing.entity).insert((
-            SceneObject {
-                scoped_id: scoped,
-                category,
-            },
-            debug_info,
-            sl_motion,
-        ));
-        // Keep the world-root marker in step with a live relink/unlink so
-        // [`recenter_objects`] re-bases exactly the roots (a child that just
-        // became a root gains it; a root demoted to a child loses it).
-        sync_world_root_marker(existing.entity, is_root, commands);
+        // The pick/edit mirrors go through `set_if_neq` too: they genuinely
+        // change on every motion packet for a mover, but a repeated identical
+        // update (a select echo on a static object) must not mark them changed.
+        commands
+            .entity(existing.entity)
+            .entry::<ObjectDebugInfo>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(debug_info);
+            })
+            .or_insert(debug_info);
+        let sl_motion_modify = sl_motion.clone();
+        commands
+            .entity(existing.entity)
+            .entry::<ObjectSlMotion>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(sl_motion_modify);
+            })
+            .or_insert(sl_motion);
         let holder = holder_transform(object, category);
         commands
             .entity(existing.geometry)
@@ -3470,18 +3500,6 @@ fn apply_object(
                 current.set_if_neq(holder);
             })
             .or_insert(holder);
-        apply_render_materials(existing.geometry, scoped, object, commands);
-        apply_texture_animation(existing.geometry, object, commands);
-        apply_light(existing.entity, light, commands);
-        apply_particles(existing.entity, particles, commands);
-        apply_flexi(existing.entity, flexi, commands);
-        apply_reflection_probe(existing.entity, reflection_probe, commands);
-        // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
-        // physical (or moved by this terse update) is driven kinematically.
-        apply_physics(existing.entity, object, commands);
-        // Mirror the object's floating text (`llSetText`, viewer-hover-text) so a
-        // script setting / changing / clearing it is reflected live.
-        apply_floating_text(existing.entity, object, is_hud, commands);
         // A texture-only change (same shape, a new `TextureEntry` from a retexture
         // in-world or the sim's echo of the build floater's `ObjectImage` send)
         // re-tessellates too: the per-face materials (tint / repeats / offset /
@@ -3495,6 +3513,52 @@ fn apply_object(
         // captured here, before `existing.shape` is overwritten below, so it can be
         // returned as this call's "built geometry" verdict for the spawn budget.
         let rebuilt = existing.shape != shape || texture_changed;
+        // The terse-update fast path: a motion-only update (the overwhelmingly
+        // most frequent object event — every mover at up to sim frame rate)
+        // changes none of the per-block component inputs, so the whole helper
+        // cascade below — and each absent block's no-op remove command — is
+        // skipped. The merged snapshot semantics make the comparison exact:
+        // sl-proto re-emits the full cached object, so an unchanged block is
+        // byte-identical to the one last applied.
+        let refresh_blocks = rebuilt
+            || existing.non_motion_blocks_changed(object, is_root, parent, attachment_point);
+        if refresh_blocks {
+            commands.entity(existing.entity).insert(SceneObject {
+                scoped_id: scoped,
+                category,
+            });
+            // Keep the world-root marker in step with a live relink/unlink so
+            // [`recenter_objects`] re-bases exactly the roots (a child that just
+            // became a root gains it; a root demoted to a child loses it) — an
+            // is_root change always lands here via the fingerprint.
+            sync_world_root_marker(existing.entity, is_root, commands);
+            apply_render_materials(existing.geometry, scoped, object, commands);
+            apply_texture_animation(existing.geometry, object, commands);
+            // The light (P25.1) / particle (P30.1) / flexi (P32.1) / probe
+            // (P33) blocks: each helper inserts its component when the block is
+            // present and removes it when absent, so one toggled off / retuned
+            // in-world is reflected.
+            apply_light(existing.entity, light_from_object(object), commands);
+            apply_particles(existing.entity, particles_from_object(object), commands);
+            apply_flexi(existing.entity, flexi_from_object(object), commands);
+            apply_reflection_probe(
+                existing.entity,
+                reflection_probe_from_object(object),
+                commands,
+            );
+            // Attach / refresh / drop the physics body marker (P31.2) so a prim
+            // toggled physical is driven kinematically.
+            apply_physics(existing.entity, object, commands);
+            // Mirror the object's floating text (`llSetText`, viewer-hover-text)
+            // so a script setting / changing / clearing it is reflected live.
+            apply_floating_text(existing.entity, object, is_hud, commands);
+        } else {
+            // Motion-only: a physical mover still needs its authoritative
+            // motion snapshot re-seeded (a fresh `PhysicalObject` insert
+            // restarts the dead-reckoning); the physics flag itself is known
+            // unchanged, so the non-physical case pays nothing.
+            crate::physics::refresh_physical_motion(existing.entity, object, commands);
+        }
         if rebuilt {
             // A genuine shape (or category) change, or a texture change: drop the
             // old face meshes and re-tessellate. A category change is subsumed
@@ -3548,7 +3612,8 @@ fn apply_object(
         // attachment keeps its skeleton-joint parent (managed by
         // [`adopt_pending_attachments`]) rather than reconciling a linkset root.
         if attachment_point.is_none() {
-            reconcile_parent(existing, is_root, parent_entity, commands);
+            let parent_changed = existing.parent != parent;
+            reconcile_parent(existing, is_root, parent_entity, parent_changed, commands);
         }
         existing.parent = parent;
         existing.is_root = is_root;
@@ -3558,6 +3623,9 @@ fn apply_object(
         existing.update_flags = object.update_flags;
         existing.material = object.material;
         existing.extra = object.extra.clone();
+        existing.texture_animation = object.texture_animation;
+        existing.text.clone_from(&object.text);
+        existing.text_color = object.text_color;
         // Retain the current texture entry / media URL for the Texture-tab editor.
         // A terse (motion-only) update carries neither, so both are refreshed only
         // when a full update brings a texture entry — keeping the last known media
@@ -3608,16 +3676,16 @@ fn apply_object(
     };
     // A light-source prim carries its decoded light block (P25.1); a plain prim
     // gets nothing.
-    apply_light(entity, light, commands);
+    apply_light(entity, light_from_object(object), commands);
     // A particle-source prim carries its decoded particle system (P30.1); a plain
     // prim gets nothing.
-    apply_particles(entity, particles, commands);
+    apply_particles(entity, particles_from_object(object), commands);
     // A flexi prim carries its decoded flexible-object block (P32.1); a rigid prim
     // gets nothing.
-    apply_flexi(entity, flexi, commands);
+    apply_flexi(entity, flexi_from_object(object), commands);
     // A reflection-probe prim carries its decoded probe block (P33); any other
     // object gets nothing.
-    apply_reflection_probe(entity, reflection_probe, commands);
+    apply_reflection_probe(entity, reflection_probe_from_object(object), commands);
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
     apply_physics(entity, object, commands);
@@ -3686,6 +3754,9 @@ fn apply_object(
             animated: is_animated_object(object),
             texture_entry: object.texture_entry.clone(),
             media_url: object.media_url.as_ref().map(url::Url::to_string),
+            texture_animation: object.texture_animation,
+            text: object.text.clone(),
+            text_color: object.text_color,
         },
     );
     debug!(
@@ -3709,6 +3780,7 @@ fn reconcile_parent(
     existing: &mut TrackedObject,
     is_root: bool,
     parent_entity: Option<Entity>,
+    parent_changed: bool,
     commands: &mut Commands,
 ) {
     if is_root {
@@ -3720,10 +3792,17 @@ fn reconcile_parent(
     }
     match parent_entity {
         Some(root_entity) => {
-            commands
-                .entity(existing.entity)
-                .insert(ChildOf(root_entity));
-            existing.parented = true;
+            // Re-inserting `ChildOf` on an already-parented child marks the
+            // hierarchy changed — for a moving vehicle's children that used to
+            // be one re-insert per motion packet — so only (re)parent when not
+            // yet parented or when the update actually moved it to a new root
+            // (a relink arrives with `parented` still true).
+            if !existing.parented || parent_changed {
+                commands
+                    .entity(existing.entity)
+                    .insert(ChildOf(root_entity));
+                existing.parented = true;
+            }
         }
         None => {
             if existing.parented {
@@ -5298,9 +5377,12 @@ mod tests {
             is_root: true,
             parented: false,
             attachment_point: None,
-            update_flags: 0,
-            material: 0,
-            extra: sl_client_bevy::ObjectExtraParams::default(),
+            update_flags: object.update_flags,
+            material: object.material,
+            extra: object.extra.clone(),
+            texture_animation: object.texture_animation,
+            text: object.text.clone(),
+            text_color: object.text_color,
             face_entities: Vec::new(),
             pending: None,
             mesh_rebuild: None,
@@ -5312,6 +5394,49 @@ mod tests {
             texture_entry: Vec::new(),
             media_url: None,
         }
+    }
+
+    /// The terse-update fast path's gate: a motion-only update (the merged
+    /// snapshot moves, but every per-block component input is identical)
+    /// reports unchanged — while a flipped block input (floating text, update
+    /// flags / physics toggle, material byte, linkset identity) trips it.
+    #[test]
+    fn non_motion_gate_ignores_motion_and_tracks_block_inputs() {
+        use bevy::prelude::World;
+
+        let object = bare_object(pcode::PRIMITIVE);
+        let scoped = object.scoped_id();
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let geometry = world.spawn_empty().id();
+        let tracked = tracked_stub(&object, entity, geometry);
+
+        // A pure motion change: position and velocity move, nothing else.
+        let mut moved = object.clone();
+        moved.motion.position.x += 5.0;
+        moved.motion.velocity.z = 1.5;
+        assert!(
+            !tracked.non_motion_blocks_changed(&moved, true, scoped, None),
+            "a motion-only update must take the fast path"
+        );
+
+        // Floating text set by a script.
+        let mut texted = object.clone();
+        texted.text = "hello".to_owned();
+        assert!(tracked.non_motion_blocks_changed(&texted, true, scoped, None));
+
+        // An update-flags change (e.g. the physics toggle).
+        let mut flagged = object.clone();
+        flagged.update_flags |= 1;
+        assert!(tracked.non_motion_blocks_changed(&flagged, true, scoped, None));
+
+        // A material-byte change.
+        let mut rematerialed = object.clone();
+        rematerialed.material = rematerialed.material.wrapping_add(1);
+        assert!(tracked.non_motion_blocks_changed(&rematerialed, true, scoped, None));
+
+        // A linkset-identity change (unlink/relink).
+        assert!(tracked.non_motion_blocks_changed(&object, false, scoped, None));
     }
 
     /// The stale-entity guard drops a tracked object whose entity Bevy's recursive

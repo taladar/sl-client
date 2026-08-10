@@ -2,7 +2,7 @@
 id: viewer-perf-terse-update-fast-path
 title: Motion-only fast path for terse object updates
 topic: viewer
-status: ideas
+status: done
 origin: performance survey of the implemented viewer (2026-07-22)
 refs: [viewer-profiling, viewer-perf-object-update-coalesce]
 ---
@@ -69,3 +69,39 @@ run on the test grid.
 
 Confidence: high — event frequency verified in `sl-proto`, the
 per-update helper cascade and no-op removes verified in `objects.rs`.
+
+## Done (2026-08-10, `performance` branch) — option (b)
+
+Implemented as the per-sub-block comparison (option b), which also dedupes
+full updates that repeat identical blocks:
+
+- `TrackedObject::non_motion_blocks_changed` compares exactly what the
+  helper cascade reads against the last applied update: the extra params
+  (light / particles / flexi / probe / render materials — already stored),
+  the newly stored `texture_animation` / `text` / `text_color`, the update
+  flags (physics toggle), the material byte, and the linkset / attachment
+  identity. The merged-snapshot semantics make the compare exact.
+- When nothing changed (the terse motion case), the whole helper cascade —
+  including every absent block's no-op remove and the four block
+  derivations — is skipped; a **physical** mover still re-seeds its
+  dead-reckoning via the new `refresh_physical_motion` (insert-only, no
+  remove side).
+- `SceneObject` re-inserts only on a block change; `ObjectDebugInfo` /
+  `ObjectSlMotion` write through `set_if_neq` (a repeated identical full
+  update no longer marks them changed); the world-root marker sync moved
+  behind the same gate (an `is_root` change always trips it).
+- `reconcile_parent` no longer re-inserts `ChildOf` on an already-parented
+  child unless the parent actually changed — previously one hierarchy
+  change-mark per motion packet for every moving linkset child.
+
+Unit-tested (`non_motion_gate_ignores_motion_and_tracks_block_inputs`:
+motion-only passes the gate; text / flags / material / linkset changes trip
+it) plus the existing objects suite. Live verification first surfaced (and
+was briefly blocked by) a pre-existing debug-build crash, root-caused and
+fixed upstream as
+[[viewer-flair-style-panic-on-caps-failure-notification]]; with that patch
+in place, debug-build logins on the local grid run the full login → render
+(terrain / prims / avatar / lights / name tag intact, terse updates
+streaming through the fast path) → screenshot → clean-logout cycle. The
+Tracy command-apply / `apply_object` per-event measure with scripted movers
+remains the standard follow-up profiling exercise.

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 57 |
+| ideas | 56 |
 | ready | 246 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 750 |
+| done | 752 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1201** |
+| **total** | **1202** |
 
-## ideas (57)
+## ideas (56)
 
 ### viewer
 
@@ -85,8 +85,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
   — Solve each avatar skeleton once per frame unless an adjuster needs two
-- [`viewer-perf-terse-update-fast-path`](ideas/viewer-perf-terse-update-fast-path.md)
-  — Motion-only fast path for terse object updates
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
@@ -1069,7 +1067,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (750)
+## done (752)
 
 ### protocol
 
@@ -1332,6 +1330,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-facelight-too-bright`](done/viewer-facelight-too-bright.md) —
   Facelights render far brighter than in Firestorm
+- [`viewer-flair-style-panic-on-caps-failure-notification`](done/viewer-flair-style-panic-on-caps-failure-notification.md)
+  — bevy_flair debug panic — recalculate_style on a freshly spawned
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
@@ -1830,6 +1830,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)
   — Dirty-gate terrain::update_terrain (runs every frame)
+- [`viewer-perf-terse-update-fast-path`](done/viewer-perf-terse-update-fast-path.md)
+  — Motion-only fast path for terse object updates
 - [`viewer-perf-ui-layout-gate-open-widget-churn`](done/viewer-perf-ui-layout-gate-open-widget-churn.md)
   — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
