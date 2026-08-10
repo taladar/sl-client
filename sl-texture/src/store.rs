@@ -297,7 +297,7 @@ impl TextureStore {
         self.ensure_codestream(entry, target, false).await?;
         let bytes = entry.codestream.load().bytes.clone();
         entry.set_progress(TextureProgress::Decoding);
-        let decoded = match self.decode(bytes, target).await {
+        let mut decoded = match self.decode(bytes, target).await {
             Ok(decoded) => decoded,
             Err(error) => {
                 // The per-LOD byte estimate is only an *estimate* of the prefix a
@@ -311,14 +311,50 @@ impl TextureStore {
                 if entry.codestream.load().complete {
                     return Err(error);
                 }
-                self.ensure_codestream(entry, target, true).await?;
-                let bytes = entry.codestream.load().bytes.clone();
-                self.decode(bytes, target).await?
+                self.grow_full_and_decode(entry, target).await?
             }
         };
+        // A short prefix can also decode *successfully* to a resolution coarser
+        // than `target`: a resolution-progressive codestream cut at the 1/8-rate
+        // estimate (a poorly-compressing texture — a sign with sharp text), or a
+        // grow that stopped short on a transient fetch error, hands OpenJPEG fewer
+        // resolution levels than requested, which it reconstructs to a smaller image
+        // *without erroring*, so the decode-error arm above never fires. If the
+        // whole codestream is not yet in hand, grow to the full bound and decode
+        // once more so the requested resolution is actually reached.
+        if let Some((native_w, native_h)) = entry.native_dimensions() {
+            if achieved_discard(native_w, native_h, decoded.width, decoded.height) > target.get()
+                && !entry.codestream.load().complete
+            {
+                decoded = self.grow_full_and_decode(entry, target).await?;
+            }
+            // Label the image with the resolution actually reconstructed, never a
+            // finer level than the pixels hold. A mislabel wedges the pixel-area LOD
+            // driver (its `desired == current` no-op guard) and the store's own
+            // `is_at_least_as_fine_as` early-outs, stranding the texture blurry with
+            // nothing left to fetch — the F3 overlay then shows it "ready" while it
+            // is visibly stuck coarse.
+            let achieved = achieved_discard(native_w, native_h, decoded.width, decoded.height);
+            decoded.discard_level = DiscardLevel::from_clamped(achieved);
+        }
         entry.image.store(Some(Arc::new(decoded)));
         drop(guard);
         Ok(())
+    }
+
+    /// Grows `entry`'s codestream to the full-resolution byte bound (enough to
+    /// cover the whole asset) and decodes it at `target`. The fallback that both
+    /// the decode-*error* and the decoded-*too-coarse* paths of
+    /// [`upgrade`](Self::upgrade) share when the small per-LOD estimate did not
+    /// deliver `target`. Assumes the caller holds the entry's write lock.
+    async fn grow_full_and_decode(
+        &self,
+        entry: &Arc<TextureEntry>,
+        target: DiscardLevel,
+    ) -> Result<DecodedImage, TextureError> {
+        self.ensure_codestream(entry, target, true).await?;
+        let bytes = entry.codestream.load().bytes.clone();
+        self.decode(bytes, target).await
     }
 
     /// The downgrade path: downsample the current pixels to `target` (no decode),
@@ -554,6 +590,38 @@ fn store_codestream(entry: &Arc<TextureEntry>, bytes: Bytes, complete: bool) {
     let _header = entry.header();
 }
 
+/// The discard level a decode actually reached: how many halvings separate a
+/// codestream's native dimensions from the image OpenJPEG reconstructed. A
+/// truncated prefix decodes to a *coarser* image than requested, so this achieved
+/// level — derived from the pixels in hand, not the requested target — is what
+/// must label the image, so no downstream check believes it holds a finer level
+/// than it does.
+///
+/// Takes the coarser (larger) of the two axes and ceil-halves, matching OpenJPEG's
+/// `ceil(native / 2^level)` resolution reduction for non-power-of-two images;
+/// clamped to [`j2c::MAX_DISCARD_LEVEL`].
+const fn achieved_discard(native_w: u32, native_h: u32, decoded_w: u32, decoded_h: u32) -> u8 {
+    const fn halvings(native: u32, decoded: u32) -> u8 {
+        if decoded == 0 {
+            return j2c::MAX_DISCARD_LEVEL;
+        }
+        let mut size = native;
+        let mut level = 0_u8;
+        while size > decoded && level < j2c::MAX_DISCARD_LEVEL {
+            size = size.div_ceil(2);
+            level = level.saturating_add(1);
+        }
+        level
+    }
+    let (width_level, height_level) =
+        (halvings(native_w, decoded_w), halvings(native_h, decoded_h));
+    if width_level >= height_level {
+        width_level
+    } else {
+        height_level
+    }
+}
+
 /// A `usize` widened to `u64` for a stats counter, saturating on the (only
 /// theoretically possible, on a >64-bit target) overflow.
 fn as_u64(value: usize) -> u64 {
@@ -671,6 +739,111 @@ mod tests {
     #[test]
     fn now_unix_is_nonzero() {
         assert!(now_unix() > 0);
+    }
+
+    #[test]
+    fn achieved_discard_counts_halvings_from_native() {
+        use super::achieved_discard;
+        // A decode that reached the requested resolution: native == decoded ⇒ 0.
+        assert_eq!(achieved_discard(1024, 1024, 1024, 1024), 0);
+        // A prefix that reconstructed a coarser image than full: 1024 → 256 is two
+        // halvings, so the pixels are really discard 2 (not the requested finer 0).
+        assert_eq!(achieved_discard(1024, 1024, 256, 256), 2);
+        // The coarser of the two axes wins (a non-square native).
+        assert_eq!(achieved_discard(1024, 512, 256, 256), 2);
+        // Ceil-halving matches OpenJPEG for a non-power-of-two native (63 → 32 → 16).
+        assert_eq!(achieved_discard(63, 63, 16, 16), 2);
+        // An empty decode is the coarsest level, never mislabeled as fine.
+        assert_eq!(
+            achieved_discard(1024, 1024, 0, 0),
+            super::j2c::MAX_DISCARD_LEVEL
+        );
+    }
+
+    /// A fetcher backing a real encoded codestream that serves a *truncated*
+    /// prefix for a small (estimate-sized) range and the whole asset only once the
+    /// range reaches the full byte bound — reproducing the resolution-progressive
+    /// under-fetch that used to wedge a texture at a coarse level.
+    #[derive(Debug)]
+    struct TruncatingFetcher {
+        /// The complete encoded `.j2c` codestream.
+        full: Bytes,
+    }
+
+    #[async_trait::async_trait]
+    impl TextureFetcher for TruncatingFetcher {
+        async fn fetch_range(
+            &self,
+            _id: TextureKey,
+            _source: &RemoteTextureSource,
+            start: usize,
+            end: usize,
+        ) -> Result<FetchChunk, FetchError> {
+            let cap = self.full.len();
+            // A request reaching (or past) the whole asset gets the complete
+            // codestream; a shorter request gets only the truncated tail.
+            if end >= cap {
+                return Ok(FetchChunk {
+                    bytes: self.full.clone(),
+                    whole: true,
+                });
+            }
+            let start = start.min(end);
+            let tail = self.full.get(start..end).unwrap_or_default();
+            Ok(FetchChunk {
+                bytes: Bytes::copy_from_slice(tail),
+                whole: false,
+            })
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(feature = "encode"),
+        ignore = "requires the `encode` feature to build a real codestream"
+    )]
+    fn under_fetched_upgrade_escalates_and_labels_honestly() {
+        use crate::decode::DecodedImage;
+        // A high-frequency 256² image compresses far worse than the viewer's 1/8
+        // estimate, so the estimate-sized prefix cannot reconstruct the requested
+        // level — the exact "blurry sign" case.
+        let side: u32 = 256;
+        let pixels: Vec<u8> = (0..side.saturating_mul(side))
+            .flat_map(|index| {
+                let x = index % side;
+                let y = index / side;
+                let r = u8::try_from((x.wrapping_mul(7) ^ y.wrapping_mul(13)) & 0xFF).unwrap_or(0);
+                let g = u8::try_from((x.wrapping_mul(3) ^ y.wrapping_mul(29)) & 0xFF).unwrap_or(0);
+                let b = u8::try_from((x ^ y.wrapping_mul(5)) & 0xFF).unwrap_or(0);
+                [r, g, b, 255]
+            })
+            .collect();
+        let source =
+            DecodedImage::new(side, side, 4, DiscardLevel::FULL, Bytes::from(pixels), None);
+        let full = crate::encode::encode_j2c(&source)
+            .unwrap_or_else(|_error| unreachable!("the `encode` feature builds a codestream"));
+        let fetcher: Arc<dyn TextureFetcher> = Arc::new(TruncatingFetcher {
+            full: Bytes::from(full),
+        });
+        let store = TextureStore::new(fetcher, None, crate::disk::CacheLimits::default())
+            .unwrap_or_else(|_error| unreachable!("no disk cache cannot fail"));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(11));
+        let target = DiscardLevel::from_clamped(1);
+        let entry = pollster::block_on(async {
+            store
+                .get(id, target, RemoteTextureSource::Default)
+                .await
+                .unwrap_or_else(|_error| unreachable!("the escalation reaches the target"))
+        });
+        // Despite the initial under-fetch, the store escalated to the full bound and
+        // reached discard 1 — the image is half-native (128²) and, crucially, is
+        // *labeled* at the level its pixels actually hold, so the LOD driver will not
+        // treat it as already-fine and wedge it.
+        let image = entry
+            .image()
+            .unwrap_or_else(|| unreachable!("a decoded image is present"));
+        assert_eq!(image.discard_level, target);
+        assert_eq!((image.width, image.height), (side / 2, side / 2));
     }
 
     #[test]
