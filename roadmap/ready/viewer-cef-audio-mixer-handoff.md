@@ -2,7 +2,7 @@
 id: viewer-cef-audio-mixer-handoff
 title: CEF page audio into the shared mixer (OnAudioStreamPacket)
 topic: viewer
-status: blocked
+status: ready
 origin: follow-up filed while implementing viewer-media-prim-browser with
   the interim direct audio path (2026-07-22)
 blocked_by: [viewer-audio-backend]

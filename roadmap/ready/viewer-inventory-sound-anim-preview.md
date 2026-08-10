@@ -2,7 +2,7 @@
 id: viewer-inventory-sound-anim-preview
 title: Inventory sound & animation preview
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-audio-backend]
 refs: [viewer-inventory-open-and-properties]

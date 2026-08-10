@@ -2,7 +2,7 @@
 id: viewer-ambient-wind-sound
 title: Ambient wind sound
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-audio-backend]
 ---

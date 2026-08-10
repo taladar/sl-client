@@ -1,0 +1,45 @@
+[package]
+name = "sl-audio"
+description = "Engine-agnostic audio mixer, clip decode, buses, listener & spatialisation for Second Life / OpenSim viewers"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["secondlife", "opensim", "audio", "mixer", "viewer"]
+categories = ["game-development", "multimedia::audio"]
+
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[dependencies]
+firewheel = { version = "0.12.1", features = [
+    "spatial_basic_node",
+    "mix_node",
+    "peak_meter_node",
+    "fast_rms_node",
+] }
+fixed-resample = { version = "0.12.1" }
+# Direct dependency purely to enable the codec features on the `symphonium`
+# instance that `firewheel-symphonium` pulls in with only `decode-native`
+# (feature unification turns these on for the shared crate).
+symphonium = { version = "0.12.2", default-features = false, features = [
+    "decode-native",
+    "ogg",
+    "vorbis",
+    "wav",
+    "pcm",
+    "fft-resampler",
+] }
+thiserror = { version = "2.0.18" }
+tracing = { version = "0.1.44" }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[lints]
+workspace = true

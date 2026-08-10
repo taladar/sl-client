@@ -34,6 +34,7 @@ mod animations;
 mod animesh;
 mod appearance;
 mod attachment_menu;
+mod audio;
 mod avatar_assets;
 mod avatar_dump;
 mod avatar_menu;
@@ -1086,6 +1087,7 @@ fn run_session(
     // unused). Registered once here — and *before* the editor plugins below,
     // whose `FromWorld` resources (the selection highlight / face-cursor overlay
     // materials) build against `Assets<FaceMaterial>` at plugin-build time.
+    .add_plugins(crate::audio::AudioPlugin)
     .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     // The build tool (viewer-object-edit-floater-shell): the Build Tools
     // floater, the edit-mode switch, and the numeric transform fields.

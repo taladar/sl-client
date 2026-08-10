@@ -153,6 +153,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145" }
 sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
 sl-anim = { version = "0.1.0", path = "../sl-anim" }
+sl-audio = { version = "0.1.0", path = "../sl-audio" }
 sl-cef = { version = "0.1.0", path = "../sl-cef" }
 sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy", features = [
     "bevy_pbr",

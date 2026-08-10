@@ -2,7 +2,7 @@
 id: viewer-audio-backend
 title: Audio backend — device, decode, listener & mixer
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07)
 ---
 
@@ -94,3 +94,33 @@ cautionary tale.
 
 Builds on: `sl-asset` fetch + cache and the existing `AssetType::Sound` classes.
 Supersedes the MVP "no sound" non-goal.
+
+## Done (2026-08-10)
+
+New crate **`sl-audio`** (engine-agnostic mixer) + a thin Bevy `AudioPlugin` in
+the viewer. Live-verified: the `sl-audio` `play_test` example opened the default
+device and the clip / panning spatial clip / pushed tone (with bus mute) were
+audible.
+
+- **Backend = `firewheel` 0.12 core** (its `volume`, `spatial_basic`, `sampler`
+  nodes) + `symphonium` decode + `fixed-resample` for pushed PCM. The mixer sits
+  behind our own `AudioMixer` trait so the backend stays a swap. No
+  `bevy_seedling` — the Bevy glue is ours.
+- **Implemented:** the 7-bus graph (`Bus`/`BusLevel`, master + per-category,
+  with mute-retains-level that never stops a source); Ogg-Vorbis/WAV clip decode
+  cached by asset id (`decode_clip`/`ClipCache`, resampled to device rate);
+  2-D + spatial clip playback; the realtime-safe pushed-PCM path
+  (`PushProducer`, interleaved + planar) for the GStreamer/CEF/Opus hand-offs;
+  the listener (`Listener`/`EarMode`) + listener-relative offset math; source
+  cap + priority eviction (`SoundPriority`/`VoicePool`); device selection; and
+  **seamless hot-plug** (on device loss the graph is rebuilt on a fresh context
+  and each stream re-established on its existing producer slot, preserving bus
+  levels). The viewer `AudioPlugin` owns the `Mixer` as a `NonSend` resource,
+  pumps it in `Last`, and drives the listener from the camera.
+- **Deliberately deferred (separate tasks / follow-ups):** the per-source
+  producers — [[viewer-in-world-sounds]], [[viewer-ui-sound-effects]],
+  [[viewer-gst-audio-mixer-handoff]], [[viewer-cef-audio-mixer-handoff]],
+  [[viewer-voice-audio]] — and the [[viewer-volume-panel]] UI, all of which now
+  plug into this mixer. The `EarMode::AvatarHead` *pose* is wired with the
+  avatar-anchored producers (the viewer currently keeps the ears on the camera);
+  the mic-in-graph / AEC concern belongs to [[viewer-voice-audio]].

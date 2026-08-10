@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 240 |
-| blocked | 87 |
+| ready | 247 |
+| blocked | 79 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 741 |
+| done | 742 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (240)
+## ready (247)
 
 ### protocol
 
@@ -177,6 +177,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   About Landmark floater — full detail view
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
+- [`viewer-ambient-wind-sound`](ready/viewer-ambient-wind-sound.md) — Ambient
+  wind sound (blocked by `viewer-audio-backend` (done))
 - [`viewer-animation-explorer`](ready/viewer-animation-explorer.md) — Animation
   explorer — what is animating whom (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -197,8 +199,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-audio-backend`](ready/viewer-audio-backend.md) — Audio backend —
-  device, decode, listener & mixer
 - [`viewer-auto-reject-offers`](ready/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
@@ -252,6 +252,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Script control of the camera (llSetCameraParams / follow-cam) (blocked by
   `viewer-camera-third-person-orbit` (done), `viewer-permission-request-dialog`
   (done))
+- [`viewer-cef-audio-mixer-handoff`](ready/viewer-cef-audio-mixer-handoff.md) —
+  CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
+  `viewer-audio-backend` (done))
 - [`viewer-chat-autoreplace`](ready/viewer-chat-autoreplace.md) — Chat
   auto-replace rules (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
@@ -342,6 +345,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Group profile — set the group insignia
 - [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
   — Group notices — attach on send, open on receive
+- [`viewer-gst-audio-mixer-handoff`](ready/viewer-gst-audio-mixer-handoff.md) —
+  GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked by
+  `viewer-audio-backend` (done))
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -354,6 +360,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
 - [`viewer-image-upload`](ready/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-in-world-sounds`](ready/viewer-in-world-sounds.md) — In-world spatial
+  sounds (blocked by `viewer-audio-backend` (done))
 - [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
   — Keyboard bindings stable across physical keyboard layouts (blocked by
   `viewer-input-action-map` (done))
@@ -380,6 +388,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-secondary-window`](ready/viewer-inventory-secondary-window.md)
   — Secondary inventory windows
+- [`viewer-inventory-sound-anim-preview`](ready/viewer-inventory-sound-anim-preview.md)
+  — Inventory sound & animation preview (blocked by `viewer-audio-backend`
+  (done))
 - [`viewer-inventory-thumbnails`](ready/viewer-inventory-thumbnails.md) —
   Inventory thumbnails — view & edit (blocked by `viewer-ui-texture-picker`
   (done))
@@ -640,11 +651,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
+- [`viewer-ui-sound-effects`](ready/viewer-ui-sound-effects.md) — UI sound
+  effects (blocked by `viewer-audio-backend` (done), `viewer-ui-widget-scaffold`
+  (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
 - [`viewer-viewer-effect-render`](ready/viewer-viewer-effect-render.md) — Render
   inbound ViewerEffects (beams, spheres)
+- [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
+  (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-audio-backend` (done))
+- [`viewer-volume-panel`](ready/viewer-volume-panel.md) — Volume panel (master +
+  per-category sliders) (blocked by `viewer-ui-widget-scaffold` (done),
+  `viewer-audio-backend` (done))
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -724,7 +744,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (87)
+## blocked (79)
 
 ### protocol
 
@@ -750,17 +770,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`viewer-ambient-wind-sound`](blocked/viewer-ambient-wind-sound.md) — Ambient
-  wind sound (blocked by `viewer-audio-backend`)
 - [`viewer-avatar-render-settings-manager`](blocked/viewer-avatar-render-settings-manager.md)
   — Per-avatar render-settings manager (blocked by
   `viewer-avatar-complexity-limit`)
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
-- [`viewer-cef-audio-mixer-handoff`](blocked/viewer-cef-audio-mixer-handoff.md)
-  — CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
-  `viewer-audio-backend`)
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -791,14 +806,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by
   `viewer-preferences-graphics-tab`)
-- [`viewer-gst-audio-mixer-handoff`](blocked/viewer-gst-audio-mixer-handoff.md)
-  — GStreamer audio into the shared mixer (parcel stream + video PCM) (blocked
-  by `viewer-audio-backend`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
-- [`viewer-in-world-sounds`](blocked/viewer-in-world-sounds.md) — In-world
-  spatial sounds (blocked by `viewer-audio-backend`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
   — Key-binding conflict detection (blocked by
   `viewer-input-rebinding-persistence`)
@@ -811,8 +821,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-settings-binding` (done))
 - [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
-- [`viewer-inventory-sound-anim-preview`](blocked/viewer-inventory-sound-anim-preview.md)
-  — Inventory sound & animation preview (blocked by `viewer-audio-backend`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -924,9 +932,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-keyboard-text-harness`](blocked/viewer-ui-keyboard-text-harness.md)
   — Keyboard focus, bindings and text entry, headless (blocked by
   `viewer-ui-interaction-harness`)
-- [`viewer-ui-sound-effects`](blocked/viewer-ui-sound-effects.md) — UI sound
-  effects (blocked by `viewer-audio-backend`, `viewer-ui-widget-scaffold`
-  (done))
 - [`viewer-ui-styling-interaction-tests`](blocked/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness`)
@@ -943,18 +948,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-video-playback`)
 - [`viewer-vintage-bottom-bar`](blocked/viewer-vintage-bottom-bar.md) — Classic
   (Vintage) bottom-bar arrangement (blocked by `viewer-volume-panel`)
-- [`viewer-voice-audio`](blocked/viewer-voice-audio.md) — Voice audio transport
-  (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
-  `viewer-audio-backend`)
 - [`viewer-voice-call-dialogs`](blocked/viewer-voice-call-dialogs.md) — Voice
   call dialogs — incoming / outgoing, channel switching (blocked by
   `viewer-voice-audio`)
 - [`viewer-voice-controls`](blocked/viewer-voice-controls.md) — Voice controls —
   talk button, PTT, participants, per-speaker volume (blocked by
   `viewer-voice-audio`)
-- [`viewer-volume-panel`](blocked/viewer-volume-panel.md) — Volume panel
-  (master + per-category sliders) (blocked by `viewer-ui-widget-scaffold`
-  (done), `viewer-audio-backend`)
 - [`viewer-windlight-bulk-import`](blocked/viewer-windlight-bulk-import.md) —
   Legacy Windlight bulk import (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-world-drag-drop-reactions`](blocked/viewer-world-drag-drop-reactions.md)
@@ -1057,7 +1056,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (741)
+## done (742)
 
 ### protocol
 
@@ -1206,6 +1205,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-avatar-context-menu` (done))
 - [`viewer-attachment-earrings-not-rigged`](done/viewer-attachment-earrings-not-rigged.md)
   — Worn rigid attachments freeze at the T-pose instead of following the
+- [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
+  device, decode, listener & mixer
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))

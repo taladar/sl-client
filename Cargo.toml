@@ -4,6 +4,7 @@ members = [
     "sl-anim",
     "sl-asset",
     "sl-asset-sched",
+    "sl-audio",
     "sl-avatar",
     "sl-bake",
     "sl-cef",

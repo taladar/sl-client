@@ -2,7 +2,7 @@
 id: viewer-gst-audio-mixer-handoff
 title: GStreamer audio into the shared mixer (parcel stream + video PCM)
 topic: viewer
-status: blocked
+status: ready
 origin: follow-up filed while implementing viewer-video-playback /
   viewer-streaming-audio with the interim direct audio path (2026-07-22)
 blocked_by: [viewer-audio-backend]
