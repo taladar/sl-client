@@ -278,3 +278,13 @@ unescaped_backticks = "deny"
 [patch.crates-io]
 fontique = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }
 parley = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }
+# bevy_flair 0.8.0 + the recalculate_style-on-Reset fix (debug-build panic /
+# release-build silent reset downgrade when a freshly spawned widget is swept
+# into a sibling/descendant recalculation in the same frame) — submitted
+# upstream; drop the patch once a release carries it. All flair crates come
+# from the same rev so the graph never mixes registry and git copies.
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }

@@ -313,7 +313,18 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # **Temporary.** Remove this entry together with the `[patch.crates-io]` block
 # once `bevy_text` moves to parley >= 0.10 and our two submitted fixes land — see
 # roadmap/deferred/viewer-ui-text-parley-pr-*.
-allow-git = ["https://github.com/taladar/parley.git"]
+#
+# Our fork of bevy_flair, patched in the same way: 0.8.0 plus the
+# recalculate_style-on-Reset fix (debug-build panic / release-build silent
+# reset downgrade), submitted upstream as eckz/bevy_flair#56.
+#
+# **Temporary.** Remove together with its `[patch.crates-io]` block once a
+# bevy_flair release carries the fix — see
+# roadmap/done/viewer-flair-style-panic-on-caps-failure-notification.
+allow-git = [
+  "https://github.com/taladar/parley.git",
+  "https://github.com/taladar/bevy_flair.git",
+]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
