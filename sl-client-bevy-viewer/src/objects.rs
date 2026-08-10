@@ -3338,7 +3338,11 @@ fn build_mesh_submeshes(
     cache.ensure_entry(key, decoded.submeshes.len());
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
-        if submesh.no_geometry {
+        // Skip a submesh with no renderable geometry — the explicit `NoGeometry`
+        // marker *or* a `no_geometry == false` submesh that still decoded to zero
+        // vertices. Converting the latter yields a zero-vertex mesh the GPU mesh
+        // allocator floods the log over (viewer-r26) and which renders nothing.
+        if !submesh.has_geometry() {
             continue;
         }
         let texture_face = entry.face(index).unwrap_or(&default_face);
@@ -4858,7 +4862,11 @@ fn build_rigged_submeshes(
     let log_faces = agent.is_some() && log_avatar_faces_enabled();
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
-        if submesh.no_geometry {
+        // Skip a submesh with no renderable geometry — the explicit `NoGeometry`
+        // marker *or* a `no_geometry == false` submesh that still decoded to zero
+        // vertices. Converting the latter yields a zero-vertex mesh the GPU mesh
+        // allocator floods the log over (viewer-r26) and which renders nothing.
+        if !submesh.has_geometry() {
             continue;
         }
         let mesh = meshes.add(to_bevy_rigged_mesh(submesh));

@@ -2,11 +2,61 @@
 id: viewer-r26
 title: bevy_render slab-allocator "use-after-free / unallocated key" log spam
 topic: viewer
-status: bugs
+status: done
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Fixed (2026-08-11) — live-verified on aditi
+
+Root cause re-confirmed against the Bevy 0.19 source: `MeshAllocator`
+`allocate_meshes` skips a mesh whose vertex buffer is zero bytes
+(`if vertex_buffer_size == 0 { continue }`) so no slab key is created, but the
+following copy loop calls `copy_element_data` for **every** extracted mesh —
+including that one — and the key lookup misses, logging the "unallocated key"
+error. It is asset-driven (fires whether or not the entity is visible), once per
+frame the empty mesh is added or modified.
+
+Audited every per-frame / on-stream mesh producer in the viewer for a
+zero-vertex output. Two genuinely unguarded producers found and fixed; the
+documented suspects (flexi, particles, terrain, prim/mesh LOD re-tessellation)
+were all already guarded (`face.is_empty()` / fixed-grid geometry / shared
+static quad) and are **not** the source.
+
+1. **Name-tag / hover-text billboards — the dominant, bursty flood.**
+   `build_tag_meshes` built page 0 from `build_tag_mesh_data`, which returns a
+   single **empty** page whenever the tag has no renderable glyphs — a
+   just-spawned tag whose name has not resolved yet, or one whose glyph atlas is
+   still streaming. Both the add path (`empty_tag_mesh()` + `meshes.add`) and
+   the in-place update path (`meshes.get_mut` + `write_page_mesh`) then handed
+   the allocator a zero-vertex mesh. Because a name tag carries a per-frame
+   distance line and tags stream in as avatars enter draw distance, this churns
+   through the whole run — matching the 30× / 298× bursts. Fix: guard on
+   `!page0.positions.is_empty()`; the tag rebuilds with geometry on the next
+   `TextLayoutInfo` change (name resolves, or the distance line ticks), so
+   nothing is lost and it self-heals.
+
+2. **Mesh / rigged-mesh object submeshes — matches "objects not rezzed".**
+   `build_mesh_submeshes` / `build_rigged_submeshes` skipped only
+   `submesh.no_geometry`, but the decoder sets `no_geometry: false` whenever the
+   LLSD map merely lacks the `NoGeometry` marker — a malformed / LOD-stripped
+   submesh with an absent `Position` blob decodes to **zero vertices** yet
+   passes that guard, becoming a zero-vertex Bevy mesh that both spams the
+   allocator and renders nothing (the object face silently fails to rez). Fix: a
+   new `Submesh::has_geometry()` (`!no_geometry && !positions.is_empty()`)
+   replaces the bare `no_geometry` guard at both call sites and in the shared
+   `to_bevy_meshes`.
+
+Client-side unit tests added (`sl-mesh` `has_geometry`, `sl-client-bevy`
+`to_bevy_meshes` skip, viewer `empty_page_writes_a_zero_vertex_mesh`).
+Live-verified on aditi (2026-08-11): a ~4-minute session in a populated region
+with several other avatars (so multiple nameplates spawning / resolving / their
+per-frame distance lines updating, the exact pre-fix flood scenario) logged
+**zero** `slab_allocator` / "unallocated key" errors, down from the 30× / 298×
+of the recurrence. Producer #2 (a malformed / LOD-stripped object submesh) is
+asset-dependent and was not forced live, but its guard + unit test can only
+remove errors, never add them.
 
 ## ⚠️ Recurred (2026-08-10) — and now with visible corruption
 

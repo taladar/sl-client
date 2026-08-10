@@ -154,9 +154,9 @@ pub fn rigged_inverse_bindposes(skin: &MeshSkin) -> Vec<Mat4> {
         .collect()
 }
 
-/// Converts a whole decoded mesh into one Bevy [`Mesh`] per face (skipping empty
-/// `NoGeometry` faces), preserving face order so the app can pair each with its
-/// per-face material.
+/// Converts a whole decoded mesh into one Bevy [`Mesh`] per face (skipping faces
+/// with no renderable geometry, see [`Submesh::has_geometry`]), preserving face
+/// order so the app can pair each with its per-face material.
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root, where `to_bevy_meshes` reads clearly"
@@ -166,7 +166,7 @@ pub fn to_bevy_meshes(decoded: &DecodedMesh) -> Vec<Mesh> {
     decoded
         .submeshes
         .iter()
-        .filter(|submesh| !submesh.no_geometry)
+        .filter(|submesh| submesh.has_geometry())
         .map(to_bevy_mesh)
         .collect()
 }
@@ -334,14 +334,22 @@ mod tests {
     }
 
     #[test]
-    fn skips_no_geometry_faces() {
-        let empty = Submesh {
+    fn skips_faces_with_no_geometry() {
+        let marked_empty = Submesh {
             no_geometry: true,
+            ..Submesh::default()
+        };
+        // A `no_geometry == false` face that still decoded to zero vertices: it
+        // must be skipped too, or `to_bevy_mesh` builds a zero-vertex mesh that
+        // floods the GPU mesh allocator (viewer-r26).
+        let unmarked_empty = Submesh {
+            no_geometry: false,
+            positions: Vec::new(),
             ..Submesh::default()
         };
         let decoded = DecodedMesh {
             lod: MeshLod::High,
-            submeshes: vec![triangle(), empty],
+            submeshes: vec![triangle(), marked_empty, unmarked_empty],
         };
         // Only the real face becomes a Bevy mesh.
         assert_eq!(to_bevy_meshes(&decoded).len(), 1);

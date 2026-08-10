@@ -1067,14 +1067,26 @@ pub(crate) fn build_tag_meshes(
         let page0 = page_geometries.next().unwrap_or_default();
         let page0_atlas = atlas_pages.first().copied().unwrap_or_default();
         let page0_material = registry.material_for(page0_atlas, &mut images, &mut materials);
-        if let Some(handle) = mesh3d {
-            if let Some(mut mesh) = meshes.get_mut(handle) {
+        // Never hand the GPU mesh allocator a zero-vertex mesh: it skips
+        // allocating an empty vertex buffer but still tries to copy into the
+        // (now absent) slab key, flooding the log with `slab_allocator`
+        // use-after-free errors (viewer-r26). Page 0 is empty whenever the tag
+        // has no renderable glyphs yet — a just-spawned tag whose name has not
+        // resolved, or one whose glyph atlas has not finished streaming. A
+        // later `TextLayoutInfo` change rebuilds it with geometry (the name
+        // resolving, or the per-frame distance line updating), so skipping the
+        // empty write loses nothing and self-heals; a tag that already has a
+        // mesh keeps its last geometry rather than blanking to zero vertices.
+        if !page0.positions.is_empty() {
+            if let Some(handle) = mesh3d {
+                if let Some(mut mesh) = meshes.get_mut(handle) {
+                    write_page_mesh(&mut mesh, page0);
+                }
+            } else {
+                let mut mesh = empty_tag_mesh();
                 write_page_mesh(&mut mesh, page0);
+                commands.entity(entity).insert(Mesh3d(meshes.add(mesh)));
             }
-        } else {
-            let mut mesh = empty_tag_mesh();
-            write_page_mesh(&mut mesh, page0);
-            commands.entity(entity).insert(Mesh3d(meshes.add(mesh)));
         }
         commands
             .entity(entity)
@@ -1769,8 +1781,9 @@ impl Plugin for NameTagBillboardPlugin {
 #[cfg(test)]
 mod tests {
     use super::{
-        GlyphQuadInput, NEUTRAL_MESH_TAG, TagText, build_tag_mesh_data, pack_overlap_offset,
-        sync_tag_spans, unpack_overlap_offset,
+        GlyphQuadInput, NEUTRAL_MESH_TAG, TagPageGeometry, TagText, build_tag_mesh_data,
+        empty_tag_mesh, pack_overlap_offset, sync_tag_spans, unpack_overlap_offset,
+        write_page_mesh,
     };
     use crate::name_tag_content::{TagContent, TagLine, TagLineSize};
     use bevy::prelude::*;
@@ -2275,5 +2288,19 @@ mod tests {
         assert_eq!(data.pages.len(), 1);
         assert_eq!(data.pages.first().map(|p| p.positions.len()), Some(0));
         assert_eq!(data.bubble_size, Vec2::ZERO);
+    }
+
+    /// Writing an empty page yields a zero-vertex mesh — exactly the input
+    /// `build_tag_meshes` must NOT hand the GPU mesh allocator (it cannot
+    /// allocate an empty vertex buffer but still tries to copy into it, flooding
+    /// the log with `slab_allocator` use-after-free errors, viewer-r26). The
+    /// system guards on `page.positions.is_empty()`; this pins the hazard the
+    /// guard exists for, alongside `empty_content_builds_empty_mesh` which shows
+    /// an unresolved tag produces exactly this empty page.
+    #[test]
+    fn empty_page_writes_a_zero_vertex_mesh() {
+        let mut mesh = empty_tag_mesh();
+        write_page_mesh(&mut mesh, TagPageGeometry::default());
+        assert_eq!(mesh.count_vertices(), 0);
     }
 }

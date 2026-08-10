@@ -155,6 +155,24 @@ pub struct Submesh {
     pub no_geometry: bool,
 }
 
+impl Submesh {
+    /// Whether this submesh carries renderable geometry: it is not flagged
+    /// `NoGeometry` *and* actually decoded at least one vertex.
+    ///
+    /// The two conditions are distinct: `decode_submesh` only sets
+    /// [`no_geometry`](Self::no_geometry) when the LLSD map carries the
+    /// `NoGeometry` marker, so a malformed or LOD-stripped submesh can lack the
+    /// marker yet still decode to zero vertices (an absent / empty `Position`
+    /// blob). Such a submesh must be skipped rather than converted into a
+    /// zero-vertex Bevy mesh, which the GPU mesh allocator cannot allocate but
+    /// still tries to copy into — flooding the log with `slab_allocator`
+    /// use-after-free errors (viewer-r26) and rendering nothing regardless.
+    #[must_use]
+    pub const fn has_geometry(&self) -> bool {
+        !self.no_geometry && !self.positions.is_empty()
+    }
+}
+
 /// One vertex's rig influences: up to four `(joint index, weight)` pairs.
 #[derive(Clone, Debug, Default)]
 pub struct VertexWeights {
@@ -918,5 +936,39 @@ mod tests {
         // A request for the (absent) Lowest falls up to the finest present.
         assert_eq!(header.best_lod(MeshLod::Lowest), Some(MeshLod::Medium));
         assert_eq!(MeshHeader::default().best_lod(MeshLod::High), None);
+    }
+
+    #[test]
+    fn has_geometry_requires_a_marker_free_submesh_with_vertices() {
+        use super::Submesh;
+        // The explicit `NoGeometry` face carries no geometry.
+        assert!(
+            !Submesh {
+                no_geometry: true,
+                ..Submesh::default()
+            }
+            .has_geometry()
+        );
+        // A `no_geometry == false` submesh with an absent / empty position blob
+        // still decodes to zero vertices — it must NOT count as renderable, or
+        // it becomes a zero-vertex Bevy mesh that floods the GPU mesh allocator
+        // (viewer-r26).
+        assert!(
+            !Submesh {
+                no_geometry: false,
+                positions: Vec::new(),
+                ..Submesh::default()
+            }
+            .has_geometry()
+        );
+        // A submesh with real vertices is renderable.
+        assert!(
+            Submesh {
+                no_geometry: false,
+                positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                ..Submesh::default()
+            }
+            .has_geometry()
+        );
     }
 }
