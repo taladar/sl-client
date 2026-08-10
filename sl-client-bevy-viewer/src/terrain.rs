@@ -40,6 +40,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -493,6 +494,14 @@ fn spawn_or_replace_patch(
     let Some(mesh_data) = build_patch_mesh(&state.raw_patches, composition.as_ref(), key) else {
         return;
     };
+    // Ground-probe fast path (Stage 1): a static trimesh collider matching this
+    // patch's rendered surface, so avian's `SpatialQuery` can find the land in the
+    // ground probe (`ground.rs`). Built from the same mesh, so it shares the patch
+    // entity's transform exactly — no orientation mismatch. Only when the env
+    // toggle is on, so the default build carries no terrain colliders.
+    let collider = crate::ground::ground_probe_spatial_enabled()
+        .then(|| Collider::trimesh_from_mesh(&mesh_data))
+        .flatten();
     let mesh = meshes.add(mesh_data);
     let size = state.raw_patches.get(&key).map_or(0, |patch| patch.size);
     let material = state
@@ -503,22 +512,26 @@ fn spawn_or_replace_patch(
     let transform = patch_transform(state.origin, region, patch_x, patch_y, size);
     match state.patches.get(&key).copied() {
         Some(entity) => {
-            commands
-                .entity(entity)
-                .insert((Mesh3d(mesh), MeshMaterial3d(material), transform));
+            let mut entity = commands.entity(entity);
+            entity.insert((Mesh3d(mesh), MeshMaterial3d(material), transform));
+            if let Some(collider) = collider {
+                entity.insert((RigidBody::Static, collider));
+            }
         }
         None => {
-            let entity = commands
-                .spawn((
-                    Mesh3d(mesh),
-                    MeshMaterial3d(material),
-                    transform,
-                    TerrainSurface,
-                    // Environment content: also visible to reflection-probe
-                    // captures (including the environment-only default probe).
-                    environment_render_layers(),
-                ))
-                .id();
+            let mut entity = commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                transform,
+                TerrainSurface,
+                // Environment content: also visible to reflection-probe
+                // captures (including the environment-only default probe).
+                environment_render_layers(),
+            ));
+            if let Some(collider) = collider {
+                entity.insert((RigidBody::Static, collider));
+            }
+            let entity = entity.id();
             state.patches.insert(key, entity);
             debug!(
                 "spawned terrain patch {region:?} ({patch_x}, {patch_y}) ({} rendered)",

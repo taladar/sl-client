@@ -25,6 +25,7 @@
 
 use std::collections::HashMap;
 
+use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
 use sl_client_bevy::AgentKey;
 
@@ -40,6 +41,25 @@ const PROBE_ABOVE: f32 = 1.0;
 /// Deliberately short: the ground is what the avatar is standing *on*, not the land a
 /// hundred metres below the skybox platform it is standing on.
 const PROBE_BELOW: f32 = 1.0;
+
+/// When the avian terrain hit sits within this many metres of the foot, the avatar
+/// is standing on land (or a physical mover), so the still-unaccelerated object
+/// `MeshRayCast` is skipped. Kept tight so a low prim step is not mistaken for land.
+const ON_LAND_BAND: f32 = 0.15;
+
+/// `SL_VIEWER_GROUND_PROBE_SPATIAL=1` routes the terrain half of the ground probe
+/// through avian's BVH-accelerated `SpatialQuery` (Stage 1 of the
+/// `viewer-perf-avatar-ground-probe` plan) instead of the unaccelerated
+/// whole-scene `MeshRayCast`; the object half still uses `MeshRayCast` until
+/// static prims get colliders (Stage 2). Off by default — read once. When off,
+/// nothing changes: no terrain colliders are built and the probe casts as before.
+pub(crate) fn ground_probe_spatial_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SL_VIEWER_GROUND_PROBE_SPATIAL")
+            .is_ok_and(|value| value == "1" || value == "true")
+    })
+}
 
 /// One ground sample, in **Bevy world** space: where the surface is, and which way it
 /// faces. The caller converts into whatever frame it needs.
@@ -103,12 +123,42 @@ impl AvatarGround {
 
 /// Cast one ground ray straight down through `point` (Bevy world), returning the
 /// surface it lands on. `accept` decides which entities count as ground.
+///
+/// When `spatial` is `Some` (the `SL_VIEWER_GROUND_PROBE_SPATIAL` fast path), the
+/// avian BVH — which covers the terrain (and physical movers) — is cast first: if
+/// it reports a surface right at the foot, the avatar is standing on it and the
+/// whole-scene `MeshRayCast` is skipped. Otherwise (elevated on a static prim, or
+/// the fast path off) it falls through to the `MeshRayCast` as before. Both paths
+/// are computed **fresh every frame** — no caching, so no stale-ground foot IK.
 fn probe(
     ray_cast: &mut MeshRayCast,
+    spatial: Option<&SpatialQuery>,
+    filter: &SpatialQueryFilter,
     point: Vec3,
     accept: &(impl Fn(Entity) -> bool + Sync),
 ) -> Option<GroundHit> {
     let origin = Vec3::new(point.x, point.y + PROBE_ABOVE, point.z);
+    if let Some(spatial) = spatial
+        && let Some(hit) =
+            spatial.cast_ray(origin, Dir3::NEG_Y, PROBE_ABOVE + PROBE_BELOW, true, filter)
+        && hit.distance <= PROBE_ABOVE + ON_LAND_BAND
+    {
+        // Standing on an avian-covered surface (land / physical mover): use it and
+        // skip the object MeshRayCast. `normal` is world-space; flip a down-facing
+        // hit so a two-sided surface still reads as ground (as the mesh path does).
+        // Per-component arithmetic to stay clear of the `arithmetic_side_effects`
+        // lint on the glam vector operators; the ray is straight down, so the hit
+        // point is the origin dropped by the hit distance.
+        let normal = if hit.normal.y < 0.0 {
+            Vec3::new(-hit.normal.x, -hit.normal.y, -hit.normal.z)
+        } else {
+            hit.normal
+        };
+        return Some(GroundHit {
+            point: Vec3::new(origin.x, origin.y - hit.distance, origin.z),
+            normal: normal.normalize_or(Vec3::Y),
+        });
+    }
     let ray = Ray3d::new(origin, Dir3::NEG_Y);
     let settings = MeshRayCastSettings::default()
         .with_filter(accept)
@@ -148,6 +198,7 @@ fn probe(
 )]
 pub(crate) fn probe_avatar_ground(
     mut ray_cast: MeshRayCast,
+    spatial: SpatialQuery,
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
     globals: Query<&GlobalTransform>,
@@ -160,6 +211,10 @@ pub(crate) fn probe_avatar_ground(
     let Some(body) = body else {
         return;
     };
+    // Fast path: avian's BVH (terrain colliders + physical movers). `None` when the
+    // env toggle is off, so the probe casts only the `MeshRayCast` as before.
+    let spatial = ground_probe_spatial_enabled().then_some(&spatial);
+    let filter = SpatialQueryFilter::default();
     let agents = state.rigged_agents();
     // Every avatar's root, so the filter can reject anything hanging off one — its base
     // body, its worn mesh, its shoes, and any other avatar standing nearby.
@@ -194,6 +249,12 @@ pub(crate) fn probe_avatar_ground(
     );
     let mut probed: Vec<(AgentKey, AgentGround)> = Vec::with_capacity(agents.len());
     for agent in agents {
+        // A seated avatar's pose is owned by the sit animation, not the ground, so
+        // it needs no probe. Safe because `locomotion_ik` gates the airborne branch
+        // on `seated` — otherwise the absent ground would read as airborne.
+        if state.is_seated(agent) {
+            continue;
+        }
         let Some(root) = state.body_root_of(agent) else {
             continue;
         };
@@ -210,9 +271,17 @@ pub(crate) fn probe_avatar_ground(
             None => (rest_ankle(ankles.0), rest_ankle(ankles.1)),
         };
         let probes = AgentGround {
-            root: probe(&mut ray_cast, root_global.translation(), &accept),
-            left: left_point.and_then(|point| probe(&mut ray_cast, point, &accept)),
-            right: right_point.and_then(|point| probe(&mut ray_cast, point, &accept)),
+            root: probe(
+                &mut ray_cast,
+                spatial,
+                &filter,
+                root_global.translation(),
+                &accept,
+            ),
+            left: left_point
+                .and_then(|point| probe(&mut ray_cast, spatial, &filter, point, &accept)),
+            right: right_point
+                .and_then(|point| probe(&mut ray_cast, spatial, &filter, point, &accept)),
         };
         probed.push((agent, probes));
     }

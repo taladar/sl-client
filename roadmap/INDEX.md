@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 246 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 20 |
-| done | 764 |
+| bugs | 21 |
+| done | 763 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1207** |
@@ -994,7 +994,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (20)
+## bugs (21)
 
 ### protocol
 
@@ -1033,6 +1033,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-r26`](bugs/viewer-r26-slab-allocator-use-after-free-spam.md) —
+  bevy_render slab-allocator "use-after-free / unallocated key" log spam
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -1049,7 +1051,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (764)
+## done (763)
 
 ### protocol
 
@@ -1922,8 +1924,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Prims that should be transparent render opaque
 - [`viewer-r25a`](done/viewer-r25a-transparency-lost-after-lod-cycle.md) — Prim
   transparency lost again after a LoD / derender cycle
-- [`viewer-r26`](done/viewer-r26-slab-allocator-use-after-free-spam.md) —
-  bevy_render slab-allocator "use-after-free / unallocated key" log spam
 - [`viewer-r28`](done/viewer-r28-text-caret-invisible-until-typing.md) —
   Text-field caret nearly invisible — color, blink, focus cues
 - [`viewer-r2b`](done/viewer-r2b-broader-static-tga-bake-layers.md) — Broader

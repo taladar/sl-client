@@ -479,6 +479,12 @@ pub(crate) struct AdjustInput<'a> {
     pub(crate) ground: AgentGround,
     /// Which adjusters the playing animation set calls for.
     pub(crate) anims: AdjusterAnims,
+    /// Whether the avatar is **seated** — its pose is owned by the sit animation,
+    /// not the ground, so the airborne / fall / foot-plant adjusters are all
+    /// suppressed (the reference's `!isSitting()` gate). This also lets the ground
+    /// probe skip a seated avatar entirely (its absent ground must not read as
+    /// airborne — see [`crate::ground::probe_avatar_ground`]).
+    pub(crate) seated: bool,
     /// The frame time, seconds.
     pub(crate) dt: f32,
 }
@@ -594,8 +600,11 @@ pub(crate) fn apply(
     // --- LLFlyAdjustMotion: bank into a turn while airborne ---
     // The reference gates this on `mInAir && !isSitting()`. An avatar with no ground
     // within the probe's reach is exactly that — and unlike the reference's `mInAir`
-    // (which only its *own* avatar tracks) the probe answers it for every avatar.
-    let airborne = !input.anims.walking && input.ground.root.is_none();
+    // (which only its *own* avatar tracks) the probe answers it for every avatar. The
+    // `!seated` term is load-bearing: a seated avatar is not probed (and a high seat
+    // has no ground within reach anyway), so without it a sitter would read as
+    // airborne and bank its pelvis.
+    let airborne = !input.seated && !input.anims.walking && input.ground.root.is_none();
     if airborne {
         fly_adjust(state, motion, dt);
     } else {

@@ -2,11 +2,36 @@
 id: viewer-r26
 title: bevy_render slab-allocator "use-after-free / unallocated key" log spam
 topic: viewer
-status: done
+status: bugs
 origin: VIEWER_ROADMAP.md — Known rendering issues (to fix)
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## ⚠️ Recurred (2026-08-10) — and now with visible corruption
+
+The flood is **back** on aditi: 30 occurrences in one session and **298** in
+another (both this date), in bursts through the whole run, not just startup.
+Unlike the original "cosmetic" flood, a resident reported **some objects did
+not look properly rezzed** — consistent with a mesh whose GPU slab was freed
+while still referenced (it simply does not render). So this is no longer
+purely log spam.
+
+- **Not** the avian ground-probe work (`viewer-perf-avatar-ground-probe`
+  Stage 1): the flood appears with `SL_VIEWER_GROUND_PROBE_SPATIAL` **off**
+  too (30×), and that change adds colliders, not mesh churn. The higher
+  count with it on (298×) was a **different, denser region** (more cloud /
+  particle activity — R26's known trigger), so it is confounded; a
+  same-region on/off A/B is needed before blaming it.
+- Same signature and system as the original (`allocate_and_free_meshes` →
+  `slab_allocator` "unallocated key"), so a producer is again handing the
+  allocator an empty / churned mesh. The original cloud producer was fixed;
+  re-bisect the recent viewer commits for a **new** per-frame / on-stream
+  empty-mesh producer (flexi, particles, terrain patch rebuilds, prim-LOD
+  re-tessellation are the mesh-mutating suspects). Capture the offending
+  entity by turning the allocator's log into a one-shot with a backtrace.
+
+## Original fix (2026, since regressed)
 
 **FIXED.** Root cause was **zero-vertex meshes reaching the mesh allocator**:
 `MeshAllocator::allocate_meshes` skips allocating a mesh whose vertex buffer is

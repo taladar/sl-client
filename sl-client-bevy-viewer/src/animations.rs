@@ -1461,6 +1461,7 @@ pub(crate) fn pose_avatar_skeletons(
                 motion: avatar_motion,
                 ground: ground.get(agent),
                 anims,
+                seated: state.is_seated(agent),
                 dt,
             },
         );
