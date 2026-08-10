@@ -22,6 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::tasks::IoTaskPool;
 use sl_client_bevy::SlIdentity;
 use sl_settings::{Scope, SettingValue, SettingsStore};
 use tracing::{info, warn};
@@ -180,6 +181,35 @@ impl ViewerSettings {
         {
             warn!("settings: could not save {}: {error}", path.display());
         }
+    }
+
+    /// Save both scopes without blocking the frame on disk I/O: serialize on
+    /// the calling (frame) thread — the TOML is small — and write the files on
+    /// a detached [`IoTaskPool`] task, logging (never hiding) write failures.
+    /// For the in-session persistence paths (floater geometry flush, table
+    /// column widths, preferences apply, list sort changes); the logout / exit
+    /// path keeps the synchronous [`save`](Self::save), where a detached write
+    /// racing process exit could be lost.
+    pub(crate) fn save_async(&self) {
+        let mut writes: Vec<(String, PathBuf)> = vec![(
+            self.store.serialize_scope(Scope::Global),
+            self.global_path.clone(),
+        )];
+        if let Some(path) = &self.account_path {
+            writes.push((self.store.serialize_scope(Scope::Account), path.clone()));
+        }
+        IoTaskPool::get()
+            .spawn(async move {
+                for (text, path) in writes {
+                    match fs_err::write(&path, text) {
+                        Ok(()) => info!("settings: saved {}", path.display()),
+                        Err(error) => {
+                            warn!("settings: could not save {}: {error}", path.display());
+                        }
+                    }
+                }
+            })
+            .detach();
     }
 
     /// Build a store-backed resource with no persistence paths, for unit tests

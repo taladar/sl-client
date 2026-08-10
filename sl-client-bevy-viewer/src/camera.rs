@@ -526,10 +526,14 @@ impl Plugin for CameraPlugin {
                 (
                     switch_camera_mode,
                     reset_camera_view,
-                    orbit_third_person,
-                    aim_look,
+                    // Each mode driver runs only in its own mode (the internal
+                    // early-returns keep the `context.is_world()` half of the
+                    // gate). `focus_on_object` stays ungated: its
+                    // movement-resets-focus branch applies in every mode.
+                    orbit_third_person.run_if(resource_equals(CameraMode::ThirdPerson)),
+                    aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
-                    drive_flycam,
+                    drive_flycam.run_if(resource_equals(CameraMode::Flycam)),
                     position_camera,
                 )
                     .chain()

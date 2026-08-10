@@ -3190,6 +3190,7 @@ quick-prefs-time-midnight = Midnight
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles
 quick-prefs-master-volume = Master volume
+quick-prefs-probe-dynamic = Avatars in reflections
 
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip
 # box adds around the object / owner data it fetches.

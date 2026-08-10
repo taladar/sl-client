@@ -49,6 +49,7 @@
 
 use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
 use bevy::ecs::query::QueryItem;
+use bevy::math::FloatOrd;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
@@ -129,10 +130,15 @@ fn sort_transparent_by_water(
     let level = water_level.map_or(DEFAULT_WATER_HEIGHT, |water_level| water_level.0);
     let water: HashSet<MainEntity> = water_surfaces.iter().copied().collect();
     for phase in phases.values_mut() {
-        phase.items.sort_by(|a_key, a, b_key, b| {
-            water_bucket(a, a_key.1, &water, level)
-                .cmp(&water_bucket(b, b_key.1, &water, level))
-                .then_with(|| a.distance.total_cmp(&b.distance))
+        // Decorate-sort: compute each item's `(bucket, distance)` key exactly once
+        // (`sort_by_cached_key` is stable, like the `sort_by` it replaces), instead
+        // of re-running the bucket lookup for both operands of every comparison —
+        // that was ~2·n·log n hash lookups per view per frame.
+        phase.items.sort_by_cached_key(|key, item| {
+            (
+                water_bucket(item, key.1, &water, level),
+                FloatOrd(item.distance),
+            )
         });
     }
 }

@@ -25,6 +25,10 @@ Sketch:
   the cache is per-grid, not per-avatar; store it under the XDG cache
   root alongside the existing codestream handling in `TextureStore`
   (`sl-texture/src/store.rs`).
+- Cache loads must rebuild images through `DecodedImage::new` (2026-08-10:
+  it computes the `min_alpha`/`max_alpha` stats the frame-thread alpha
+  classifiers now rely on — [[viewer-perf-bake-alpha-classify-offthread]])
+  or persist the two stat bytes alongside the pixels.
 - Candidate on-disk formats to evaluate:
   1. Raw RGBA — simplest, largest (4 MB per 1024×1024 level).
   2. BCn in KTX2 — Bevy loads KTX2/BCn natively; 4:1–8:1 smaller than

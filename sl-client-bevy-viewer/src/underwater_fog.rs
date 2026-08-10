@@ -85,7 +85,7 @@ const FOG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f2a9c17-54e8-4b6d-a90c-
 /// The per-frame underwater-fog parameters, extracted to the render world and
 /// uploaded as a dynamic uniform. Attached to the camera; also selects the camera
 /// the fog pass runs on.
-#[derive(Component, Clone, Copy, ShaderType)]
+#[derive(Component, Clone, Copy, PartialEq, ShaderType)]
 pub(crate) struct UnderwaterFog {
     /// World-from-clip, to reconstruct a fragment's world position from its depth.
     pub(crate) world_from_clip: Mat4,
@@ -208,7 +208,10 @@ pub(crate) fn update_underwater_fog(
         // Debug override: a zero density makes the fog shader a pass-through.
         let fog_density = if disabled { 0.0 } else { fog_density };
 
-        *fog = UnderwaterFog {
+        // Write-on-change: with a parked camera and stable water settings the
+        // recomputed params are bit-identical, and an unconditional write would
+        // mark the component changed every frame.
+        fog.set_if_neq(UnderwaterFog {
             world_from_clip,
             camera_pos: camera_pos.extend(0.0),
             fog_color: fog_color.extend(0.0),
@@ -216,7 +219,7 @@ pub(crate) fn update_underwater_fog(
             fog_density,
             fog_ks,
             padding: 0.0,
-        };
+        });
     }
 }
 

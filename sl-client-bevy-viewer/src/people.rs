@@ -1248,8 +1248,12 @@ impl Plugin for PeoplePlugin {
                     apply_people_selection,
                     seed_sort_from_settings.after(load_account_settings),
                     apply_sort,
-                    rebuild_friends_view,
-                    refresh_people,
+                    rebuild_friends_view.run_if(crate::floater::floater_shown(
+                        crate::conversations::CONVERSATIONS_FLOATER_ID,
+                    )),
+                    refresh_people.run_if(crate::floater::floater_shown(
+                        crate::conversations::CONVERSATIONS_FLOATER_ID,
+                    )),
                     drive_grant_confirm,
                 )
                     .chain()
@@ -1996,7 +2000,7 @@ fn apply_sort(
         && settings.account_loaded()
     {
         settings.set_account(FRIENDS_SORT_SETTING, SettingValue::String(encoded));
-        settings.save();
+        settings.save_async();
     }
 }
 

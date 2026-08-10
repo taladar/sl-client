@@ -30,6 +30,15 @@ decode threads run on otherwise-idle cores on many-core desktops.
 **Evaluation criterion: end-to-end frame pacing + scene-load wall
 time, not per-image decode latency.**
 
+> 2026-08-10: the CPU decode now also produces per-image alpha
+> statistics (`DecodedImage::min_alpha` / `max_alpha`, computed in the
+> decode task — [[viewer-perf-bake-alpha-classify-offthread]]) that the
+> frame-thread bake / transparency classifiers consume as O(1) reads. A
+> GPU decode path must deliver the same stats — either a small GPU
+> reduction over the alpha channel read back with the pixels, or a CPU
+> pass over the readback buffer (still off the frame thread) — or those
+> consumers regress to frame-thread pixel scans.
+
 ## Two workload regimes
 
 - **Burst (teleport/login storm)** — dozens to hundreds of textures

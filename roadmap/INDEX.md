@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 58 |
-| ready | 243 |
+| ideas | 55 |
+| ready | 246 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 18 |
-| done | 747 |
-| deferred | 21 |
+| bugs | 19 |
+| done | 763 |
+| deferred | 22 |
 | wont-do | 9 |
-| **total** | **1186** |
+| **total** | **1204** |
 
-## ideas (58)
+## ideas (55)
 
 ### viewer
 
@@ -74,25 +74,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
-- [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
-  — Don't rebuild the inventory view while the floater is closed
+- [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
+  App-level login state to gate world/streaming systems pre-login
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
   — Skip capture for occluded reflection probes (blocked by
   `viewer-perf-probe-scheduling`)
-- [`viewer-perf-run-condition-gating`](ideas/viewer-perf-run-condition-gating.md)
-  — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
   — Solve each avatar skeleton once per frame unless an adjuster needs two
-- [`viewer-perf-terse-update-fast-path`](ideas/viewer-perf-terse-update-fast-path.md)
-  — Motion-only fast path for terse object updates
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
-- [`viewer-perf-write-on-change-uploads`](ideas/viewer-perf-write-on-change-uploads.md)
-  — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
@@ -147,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (246)
 
 ### protocol
 
@@ -477,10 +471,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
+- [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
+  — Minimap / world-map hover tooltips write Node + Visibility unconditionally
+- [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
+  — Minimap minor-compass labels write Visibility unconditionally
 - [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
-- [`viewer-perf-prim-texture-apply-burst`](ready/viewer-perf-prim-texture-apply-burst.md)
-  — Throttle prim-texture application + GPU asset uploads during rez bursts
+- [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
+  — Pipeline debug overlay rewrites its Text unconditionally every frame
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
 - [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)
@@ -495,8 +493,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
-- [`viewer-perf-terrain-update-per-frame`](ready/viewer-perf-terrain-update-per-frame.md)
-  — Dirty-gate terrain::update_terrain (runs every frame)
+- [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
+  — Teleport progress overlay writes Hidden visibility every idle frame
+- [`viewer-perf-worldmap-label-node-writes`](ready/viewer-perf-worldmap-label-node-writes.md)
+  — World-map region labels write Node unconditionally every frame
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
@@ -992,7 +992,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (18)
+## bugs (19)
 
 ### protocol
 
@@ -1027,6 +1027,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
+  — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -1043,7 +1045,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (747)
+## done (763)
 
 ### protocol
 
@@ -1314,6 +1316,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-facelight-too-bright`](done/viewer-facelight-too-bright.md) —
   Facelights render far brighter than in Firestorm
+- [`viewer-flair-style-panic-on-caps-failure-notification`](done/viewer-flair-style-panic-on-caps-failure-notification.md)
+  — bevy_flair debug panic — recalculate_style on a freshly spawned
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
@@ -1783,27 +1787,57 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-perf-avatar-appearance-budget`](done/viewer-perf-avatar-appearance-budget.md)
+  — Budget + debounce avatar appearance application
 - [`viewer-perf-avatar-bake-apply-spikes`](done/viewer-perf-avatar-bake-apply-spikes.md)
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
+- [`viewer-perf-bake-alpha-classify-offthread`](done/viewer-perf-bake-alpha-classify-offthread.md)
+  — Precompute alpha classification in the decode task
+- [`viewer-perf-decoded-geometry-budget`](done/viewer-perf-decoded-geometry-budget.md)
+  — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)
+  — Amortise inventory row rebuilds and the skeleton merge
+- [`viewer-perf-inventory-view-visibility-gate`](done/viewer-perf-inventory-view-visibility-gate.md)
+  — Don't rebuild the inventory view while the floater is closed
 - [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
   face materials by content for shared handles + draw batching (blocked by
   `viewer-perf-prim-tessellation-cache` (done))
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
+- [`viewer-perf-name-tag-layout-budget`](done/viewer-perf-name-tag-layout-budget.md)
+  — Per-frame budget for name-tag text layout
+- [`viewer-perf-object-update-coalesce`](done/viewer-perf-object-update-coalesce.md)
+  — Coalesce repeated object updates in the pending queue
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-prim-texture-apply-burst`](done/viewer-perf-prim-texture-apply-burst.md)
+  — Throttle prim-texture application + GPU asset uploads during rez bursts
+- [`viewer-perf-run-condition-gating`](done/viewer-perf-run-condition-gating.md)
+  — Gate idle systems with run conditions (pause off-screen/inactive work)
+- [`viewer-perf-session-network-thread`](done/viewer-perf-session-network-thread.md)
+  — Run the Bevy session on a dedicated network thread
+- [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)
+  — Settings persistence writes on the IO task pool
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
+- [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)
+  — Dirty-gate terrain::update_terrain (runs every frame)
+- [`viewer-perf-terse-update-fast-path`](done/viewer-perf-terse-update-fast-path.md)
+  — Motion-only fast path for terse object updates
 - [`viewer-perf-ui-layout-gate-open-widget-churn`](done/viewer-perf-ui-layout-gate-open-widget-churn.md)
   — Layout gate defeated per-frame by the minimap compass and status readouts
 - [`viewer-perf-ui-layout-per-frame-relayout`](done/viewer-perf-ui-layout-per-frame-relayout.md)
   — Cut per-frame UI layout cost — structural bevy_ui floor
+- [`viewer-perf-world-map-composite-offthread`](done/viewer-perf-world-map-composite-offthread.md)
+  — Composite the world-map surface on the compute pool
+- [`viewer-perf-write-on-change-uploads`](done/viewer-perf-write-on-change-uploads.md)
+  — Write GPU-visible state only when it changed (morphs, sky, water)
 - [`viewer-permission-request-dialog`](done/viewer-permission-request-dialog.md)
   — Script permission-request dialog (ScriptQuestion) (blocked by
   `viewer-ui-notification-host` (done))
@@ -2637,7 +2671,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (21)
+## deferred (22)
 
 ### protocol
 
@@ -2689,6 +2723,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — About Land — the controls that have no protocol write path yet
 - [`viewer-perf-gpu-particle-sim`](deferred/viewer-perf-gpu-particle-sim.md) —
   GPU compute particle simulation (+ raising the particle cap)
+- [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
+  — Per-frame byte budget for media-surface uploads
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 

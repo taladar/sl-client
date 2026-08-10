@@ -398,14 +398,14 @@ mod tests {
 
     #[test]
     fn converts_rgba_to_a_bevy_image() {
-        let decoded = DecodedImage {
-            width: 2,
-            height: 2,
-            components: 4,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(vec![0x7F_u8; 2 * 2 * 4]),
-            aux: None,
-        };
+        let decoded = DecodedImage::new(
+            2,
+            2,
+            4,
+            DiscardLevel::FULL,
+            Bytes::from(vec![0x7F_u8; 2 * 2 * 4]),
+            None,
+        );
         let image = to_bevy_image(&decoded);
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 2);

@@ -328,7 +328,7 @@ impl Plugin for StatusBarPlugin {
                     // Throttling to 10 Hz leaves most frames with no status-text
                     // change at all.
                     update_status_readouts.run_if(on_timer(Duration::from_millis(100))),
-                    update_parcel_icons,
+                    update_parcel_icons.run_if(parcel_icon_inputs_changed),
                 ),
             );
     }
@@ -763,11 +763,24 @@ fn fps_text(translator: &Translator, diagnostics: &DiagnosticsStore) -> String {
     translator.format("status-bar-fps", &TransArgs::new().text("fps", &fps))
 }
 
-/// Update each parcel-permission icon each frame: show it only while its
-/// restriction is in force for the current parcel + region (the reference
-/// viewer's semantics), hiding it otherwise. Visibility (not display) toggles, so
-/// the icon bar keeps a constant width either way. An unresolved parcel leaves
-/// them all hidden.
+/// Run condition for [`update_parcel_icons`]: one of its inputs moved this
+/// frame — the agent's parcel record (written upstream only on a real
+/// change), the current region's identity (its flags feed the icon
+/// predicates), or a freshly spawned icon needing its initial visibility.
+fn parcel_icon_inputs_changed(
+    agent_parcel: Res<SlAgentParcel>,
+    regions: Query<(), (With<SlCurrentRegion>, Changed<SlRegionIdentity>)>,
+    icons: Query<(), Added<ParcelIcon>>,
+) -> bool {
+    agent_parcel.is_changed() || !regions.is_empty() || !icons.is_empty()
+}
+
+/// Update each parcel-permission icon when an input changed: show it only
+/// while its restriction is in force for the current parcel + region (the
+/// reference viewer's semantics), hiding it otherwise. Visibility (not
+/// display) toggles, so the icon bar keeps a constant width either way. An
+/// unresolved parcel leaves them all hidden. Gated on
+/// [`parcel_icon_inputs_changed`].
 fn update_parcel_icons(
     agent_parcel: Res<SlAgentParcel>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,

@@ -126,14 +126,14 @@ mod tests {
                 pixels.extend_from_slice(&[r, g, b, alpha(x, y)]);
             }
         }
-        DecodedImage {
+        DecodedImage::new(
             width,
             height,
-            components: 4,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+            4,
+            DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     /// The mean absolute per-channel difference between two equal-length buffers.
@@ -202,14 +202,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_sized_image() {
-        let image = DecodedImage {
-            width: 0,
-            height: 4,
-            components: 4,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::new(),
-            aux: None,
-        };
+        let image = DecodedImage::new(0, 4, 4, DiscardLevel::FULL, Bytes::new(), None);
         // Errors either way: `Empty` with the encoder linked, `Disabled` without.
         let rejected = encode_j2c(&image).is_err();
         assert!(rejected, "zero-sized image should be rejected");

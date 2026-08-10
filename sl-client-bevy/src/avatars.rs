@@ -297,7 +297,11 @@ pub struct BevySkeleton {
 /// and never shears a child — an animated shaped avatar's limbs keep their length,
 /// unlike overlaying the rotation onto the baked-scale rest [`Transform`] (which
 /// composes as `T·R·S` and shears a non-uniformly-scaled joint).
-#[derive(Clone, Debug, Default)]
+/// `PartialEq` (exact float equality) backs the viewer's pose-change tick: two
+/// identically-sampled poses (a held stand, a single-frame hold) compare equal,
+/// while any animating joint differs every frame — exactly the "did the
+/// keyframe pose move" question, no epsilon wanted.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AnimationPose {
     /// Animated local rotations by joint index.
     rotations: HashMap<usize, Quat>,

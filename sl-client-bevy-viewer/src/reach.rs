@@ -300,6 +300,17 @@ impl ReachMotion {
     pub(crate) fn retain(&mut self, live: &impl Fn(AgentKey) -> bool) {
         self.states.retain(|&agent, _state| live(agent));
     }
+
+    /// Whether `agent`'s reach / aim fold is fully released — both eased weights
+    /// exactly at zero (the linear ease clamps, so they *reach* zero) — meaning
+    /// re-running the fold would leave the pose untouched. Part of the pose
+    /// gate's settle test; the gate separately requires no live point-at target
+    /// and no gun-aim animation (which would ease the weights back in).
+    pub(crate) fn is_settled(&self, agent: AgentKey) -> bool {
+        self.states
+            .get(&agent)
+            .is_none_or(|state| state.edit_weight == 0.0 && state.aim_weight == 0.0)
+    }
 }
 
 /// The skeleton indices of the joints the reach / aim adjusters drive, resolved once per

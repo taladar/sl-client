@@ -382,14 +382,14 @@ fn uv_grid_image() -> Image {
         }
     }
     let width = u32::try_from(size).unwrap_or(0);
-    let decoded = DecodedTexture {
+    let decoded = DecodedTexture::new(
         width,
-        height: width,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    };
+        width,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(pixels),
+        None,
+    );
     let mut image = to_bevy_image(&decoded);
     // Nearest + repeat: crisp grid lines, and tiling if a UV strays outside [0, 1].
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -668,6 +668,20 @@ pub(crate) struct AvatarState {
     /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
     /// a newly spawned body, drained by [`apply_avatar_appearance`].
     appearance_dirty: HashSet<AgentKey>,
+    /// The debounce ledger behind [`appearance_dirty`](Self::appearance_dirty):
+    /// per still-unserviced avatar, when (app elapsed seconds) it was first and
+    /// last marked dirty. [`apply_avatar_appearance`] folds fresh marks in each
+    /// frame and picks avatars from here under its per-frame budget — a
+    /// never-shaped avatar immediately, a re-marked one only after a quiet
+    /// window, so the appearance → body-spawn → bake-decode trigger cascade
+    /// resolves once instead of once per trigger.
+    appearance_pending: HashMap<AgentKey, AppearanceDirtyStamps>,
+    /// A generation counter over every input the skeleton pose fold consumes from
+    /// this state (deformations, volume deformations, joint overrides, body
+    /// physics): bumped by [`bump_pose_inputs`](Self::bump_pose_inputs) whenever
+    /// one is (re)applied. The pose gate re-evaluates **all** avatars for one
+    /// frame on any bump — coarse but simple, and these are rare events.
+    pose_inputs_generation: u64,
     /// The joint position overrides each avatar's worn rigged meshes impose (R1),
     /// keyed by agent id then by the contributing **mesh asset id**. Kept per-mesh
     /// (rather than pre-merged) so the set can be rebuilt as meshes come and go — the
@@ -1552,8 +1566,16 @@ pub(crate) fn fit_avatar_pick_colliders(
         }
         // Height from the joint `z` span, grown to the crown and the soles; depth
         // (local x) and width (local y) fixed; centred on the body axis (x = y = 0).
-        let bottom = min_z - PICK_COLLIDER_FOOT_MARGIN;
-        let top = max_z + PICK_COLLIDER_HEAD_MARGIN;
+        // Quantised to a 1 cm grid: the box is a broad-phase volume with ±10 cm
+        // margins, but it is fitted from the *posed* joints, so the idle
+        // breathe/sway would otherwise move it a hair every evaluated frame —
+        // dirtying the avatar's transform tree, which makes Bevy propagation
+        // revert the driver-written joint globals and re-wakes the pose gate (a
+        // self-sustaining feedback loop). On the grid it only moves when the
+        // body's extent genuinely changes.
+        let quantise = |value: f32| (value * 100.0).round() / 100.0;
+        let bottom = quantise(min_z - PICK_COLLIDER_FOOT_MARGIN);
+        let top = quantise(max_z + PICK_COLLIDER_HEAD_MARGIN);
         let height = (top - bottom).clamp(PICK_COLLIDER_MIN_HEIGHT, PICK_COLLIDER_MAX_HEIGHT);
         // The mesh is a unit cube (full extent 1), so `scale = size` gives it the
         // wanted extents: local x = depth, local y = width, local z = height.
@@ -2143,7 +2165,19 @@ impl AvatarState {
                     }
                     None => Transform::from_translation(sphere_translation(object, region_offset)),
                 };
-                anchor.insert(transform).remove::<Seated>();
+                // `set_if_neq` via `entry`, NOT a plain `insert`: the simulator
+                // streams updates for the own avatar continuously even when it
+                // stands still, and re-inserting an identical Transform marks it
+                // changed — which re-propagated the whole avatar subtree and
+                // woke the pose gate every frame (the "anchor wake, delta 0"
+                // signature in the gate meter).
+                anchor
+                    .entry::<Transform>()
+                    .and_modify(move |mut existing| {
+                        existing.set_if_neq(transform);
+                    })
+                    .or_insert(transform);
+                anchor.remove::<Seated>();
             }
             return;
         }
@@ -2398,6 +2432,19 @@ impl AvatarState {
         self.body_physics.get(&agent)
     }
 
+    /// The current pose-inputs generation (see the field doc): the pose gate
+    /// stores it per avatar and re-evaluates when it moved.
+    pub(crate) const fn pose_inputs_generation(&self) -> u64 {
+        self.pose_inputs_generation
+    }
+
+    /// Record that an input the skeleton pose fold consumes (deformations, volume
+    /// deformations, joint overrides, body physics) was (re)applied. Over-bumping
+    /// is harmless — an extra bump costs one frame of full re-evaluation.
+    pub(crate) const fn bump_pose_inputs(&mut self) {
+        self.pose_inputs_generation = self.pose_inputs_generation.wrapping_add(1);
+    }
+
     /// The effective joint position overrides for `agent` (R1): the per-joint winner
     /// across every worn rigged mesh, resolved to the **highest mesh id** on a
     /// conflict (the reference viewer's `findActiveOverride`) with the scale lock
@@ -2422,6 +2469,7 @@ impl AvatarState {
     pub(crate) fn clear_joint_overrides(&mut self, agent: AgentKey) {
         let _prev = self.joint_overrides.remove(&agent);
         let _worn = self.worn_rigged_meshes.remove(&agent);
+        self.bump_pose_inputs();
     }
 
     /// The agent whose avatar a worn object `scoped` hangs off — chasing parent
@@ -2562,6 +2610,7 @@ impl AvatarState {
         self.pending_name_requests.retain(keep);
         self.appearances.retain(|agent, _| keep(agent));
         self.appearance_dirty.retain(keep);
+        self.appearance_pending.retain(|agent, _| keep(agent));
         self.joint_overrides.retain(|agent, _| keep(agent));
         self.worn_rigged_meshes.retain(|agent, _| keep(agent));
         self.skirt_visible.retain(|agent, _| keep(agent));
@@ -3261,7 +3310,7 @@ impl AvatarBakeMaterials {
             return Some((handle.clone(), alpha));
         }
         let decoded = manager.decoded(id)?;
-        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        let alpha = classify_bake_alpha(decoded);
         if log_avatar_faces_enabled() {
             info!(
                 "bake {id}: {}x{} {}c discard={:?} -> {alpha:?}",
@@ -3465,31 +3514,23 @@ impl BakeAlpha {
 /// alpha bytes are scanned once — all at or above the cutoff is `Opaque`, all
 /// below is [`Transparent`](BakeAlpha::Transparent), and any mix is
 /// [`Masked`](BakeAlpha::Masked).
-fn classify_bake_alpha(components: u16, pixels: &[u8]) -> BakeAlpha {
+const fn classify_bake_alpha(decoded: &DecodedTexture) -> BakeAlpha {
     // No alpha channel: the decoder filled alpha to fully opaque.
-    if components < 4 {
+    if decoded.components < 4 {
         return BakeAlpha::Opaque;
     }
-    let mut any_kept = false;
-    let mut any_carved = false;
-    for &alpha in pixels.iter().skip(3).step_by(4) {
-        if alpha < BAKE_ALPHA_CUTOFF {
-            any_carved = true;
-        } else {
-            any_kept = true;
-        }
-        // Once both kinds are seen the region is masked; stop scanning.
-        if any_kept && any_carved {
-            return BakeAlpha::Masked;
-        }
-    }
-    match (any_kept, any_carved) {
+    // O(1) off the precomputed alpha range (the pixel scan happened once in
+    // the decode / composite task, never on the frame thread). Checked
+    // min-first so an empty image (range `(255, 0)`) classifies opaque.
+    if decoded.min_alpha >= BAKE_ALPHA_CUTOFF {
         // Nothing carved (or no pixels at all) → opaque.
-        (_, false) => BakeAlpha::Opaque,
+        BakeAlpha::Opaque
+    } else if decoded.max_alpha < BAKE_ALPHA_CUTOFF {
         // Every pixel carved → wholly transparent.
-        (false, true) => BakeAlpha::Transparent,
-        // A mix is returned inside the loop; kept here for totality.
-        (true, true) => BakeAlpha::Masked,
+        BakeAlpha::Transparent
+    } else {
+        // A mix of kept and carved pixels → masked.
+        BakeAlpha::Masked
     }
 }
 
@@ -3750,7 +3791,7 @@ fn run_local_bake_job(job: &LocalBakeJob) -> CompositedRegions {
         let Some(decoded) = composite_region_from_layers(*region, layers) else {
             continue;
         };
-        let alpha = classify_bake_alpha(decoded.components, &decoded.pixels);
+        let alpha = classify_bake_alpha(&decoded);
         regions.push((region.slot(), to_bevy_image(&decoded), alpha));
         summary.push(format!(
             "{}={} layer(s)/{alpha:?}",
@@ -3922,6 +3963,54 @@ pub(crate) fn apply_own_shape_from_wearables(
     debug!("resolved own avatar shape from worn wearables");
 }
 
+/// When an avatar was first and last marked appearance-dirty, in
+/// [`Time::elapsed_secs_f64`] seconds (see
+/// [`AvatarState::appearance_pending`]).
+#[derive(Debug, Clone, Copy)]
+struct AppearanceDirtyStamps {
+    /// When the avatar entered the pending set (unchanged by re-marks).
+    first: f64,
+    /// When the avatar was most recently marked (each re-mark refreshes it).
+    last: f64,
+}
+
+/// How long a re-marked avatar's dirty state must stay quiet (no further
+/// marks) before its appearance is re-applied — coalesces the appearance →
+/// body-spawn → bake-decode trigger cascade, whose triggers land frames
+/// apart, into one rebuild instead of one per trigger.
+const APPEARANCE_QUIET_SECS: f64 = 0.3;
+
+/// The longest a re-marked avatar may be deferred by the quiet window — a
+/// steady re-mark stream (e.g. a live appearance edit) still resolves at
+/// least this often.
+const APPEARANCE_MAX_WAIT_SECS: f64 = 1.0;
+
+/// The default for [`AppearanceApplyBudget`]: resolving an avatar's shape
+/// re-morphs every base body part and re-uploads their meshes (multi-ms for a
+/// heavy avatar), so a crowd streaming in is spread across frames rather than
+/// resolved in one.
+const DEFAULT_APPEARANCE_APPLY_BUDGET: usize = 2;
+
+/// The per-frame cap on avatars whose appearance
+/// [`apply_avatar_appearance`] resolves and re-meshes (see
+/// [`DEFAULT_APPEARANCE_APPLY_BUDGET`]).
+#[derive(Resource)]
+pub(crate) struct AppearanceApplyBudget {
+    /// How many avatars may be resolved + re-meshed each frame.
+    per_frame: usize,
+}
+
+impl Default for AppearanceApplyBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_APPEARANCE_APPLY_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_APPEARANCE_APPLY_BUDGET);
+        Self { per_frame }
+    }
+}
+
 /// Apply each rigged avatar's appearance (P13.3 morphs + P13.4 skeletal shape):
 /// resolve an `AvatarAppearance.visual_params` vector once into its
 /// driver-propagated, sex-gated weights, then (a) rebuild every affected base
@@ -3935,6 +4024,14 @@ pub(crate) fn apply_own_shape_from_wearables(
 /// appearance is (re)built from the cached vector — so an appearance that arrives
 /// before the body still lands once the body exists. A no-op when no avatar asset
 /// library loaded (avatars stay as un-shaped bodies or spheres).
+///
+/// The rebuild is budgeted and debounced: at most [`AppearanceApplyBudget`]
+/// avatars resolve per frame (own avatar first), a never-shaped avatar
+/// resolves immediately, and a re-marked one waits [`APPEARANCE_QUIET_SECS`]
+/// of quiet (capped at [`APPEARANCE_MAX_WAIT_SECS`]) so the appearance →
+/// body-spawn → bake-decode cascade coalesces instead of re-meshing the whole
+/// body once per trigger. Deferral is safe: a later pass re-reads the newest
+/// cached appearance vector.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system folding appearances and bakes into the morphed body meshes"
@@ -3950,6 +4047,9 @@ pub(crate) fn apply_avatar_appearance(
     manager: Res<TextureManager>,
     mut state: ResMut<AvatarState>,
     volume_gain: Res<VolumeMorphGain>,
+    time: Res<Time>,
+    budget: Res<AppearanceApplyBudget>,
+    identity: Res<SlIdentity>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
@@ -4018,13 +4118,66 @@ pub(crate) fn apply_avatar_appearance(
             state.appearance_dirty.insert(part.agent);
         }
     }
-    if state.appearance_dirty.is_empty() {
+    // Fold this frame's fresh marks into the debounce ledger. The marking
+    // sites stay cheap set-inserts; draining the set here means a re-mark of
+    // a still-pending avatar refreshes its `last` stamp and restarts the
+    // quiet window.
+    let now = time.elapsed_secs_f64();
+    let marks = std::mem::take(&mut state.appearance_dirty);
+    for agent in marks {
+        state
+            .appearance_pending
+            .entry(agent)
+            .and_modify(|stamps| stamps.last = now)
+            .or_insert(AppearanceDirtyStamps {
+                first: now,
+                last: now,
+            });
+    }
+    if state.appearance_pending.is_empty() {
         return;
     }
     let Some(library) = library else {
-        state.appearance_dirty.clear();
+        state.appearance_pending.clear();
         return;
     };
+    // Pick this frame's avatars: a never-shaped avatar (no recorded
+    // deformations) resolves immediately — first visibility wins — while a
+    // re-marked one waits for its trigger cascade to go quiet (bounded by the
+    // max wait). The own avatar goes first so our own body never queues
+    // behind a crowd, and the per-frame budget spreads a crowd across frames.
+    let mut eligible: Vec<AgentKey> = state
+        .appearance_pending
+        .iter()
+        .filter(|(agent, stamps)| {
+            !state.deformations.contains_key(agent)
+                || now - stamps.last >= APPEARANCE_QUIET_SECS
+                || now - stamps.first >= APPEARANCE_MAX_WAIT_SECS
+        })
+        .map(|(&agent, _)| agent)
+        .collect();
+    if eligible.is_empty() {
+        return;
+    }
+    if let Some(own) = identity.agent_id
+        && let Some(position) = eligible.iter().position(|&agent| agent == own)
+    {
+        eligible.swap(0, position);
+    }
+    eligible.truncate(budget.per_frame);
+    // The chosen avatars' deformations / volumes / physics are about to be
+    // re-resolved below: wake the pose gate so it re-poses them next frame.
+    state.bump_pose_inputs();
+    // Piggybacks on the pose-gate diagnostics: a steady stream here means some
+    // caller re-marks appearances dirty (each re-apply rebuilds part meshes and
+    // re-resolves the shape — real per-event cost worth tracing).
+    if std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
+        info!(
+            "appearance re-apply: {} of {} pending avatar(s)",
+            eligible.len(),
+            state.appearance_pending.len()
+        );
+    }
     // Resolve each dirty avatar's appearance once into its morph weights and the
     // deformed joint transforms (both share one `ResolvedParams`).
     let log_geometry = std::env::var_os("SL_VIEWER_LOG_AVATAR_GEOMETRY").is_some();
@@ -4054,7 +4207,7 @@ pub(crate) fn apply_avatar_appearance(
     // The rest deformed joint **world** matrices per avatar, kept only for the
     // geometry diagnostic (R13) so it can reproduce the GPU skinning on the CPU.
     let mut world_matrices: HashMap<AgentKey, Vec<Mat4>> = HashMap::new();
-    for &agent in &state.appearance_dirty {
+    for &agent in &eligible {
         if let Some(bytes) = state.appearances.get(&agent) {
             let resolved = ResolvedParams::from_appearance(library.params(), bytes);
             // Bake every shape morph except the per-frame runtime params, which
@@ -4244,10 +4397,16 @@ pub(crate) fn apply_avatar_appearance(
         }
     }
     // Re-set every joint transform of a resolved avatar's skeleton instance.
+    // Write-on-change: a re-apply with an unchanged shape re-derives identical
+    // transforms, and an unguarded write would dirty the whole avatar transform
+    // tree — which makes Bevy propagation revert the pose driver's joint
+    // globals to rest and forces the pose gate to re-evaluate (see
+    // `log_pose_gate_churn`).
     let mut deformed_joints = 0_usize;
     for (joint, mut transform) in &mut joints {
         if let Some(transforms) = joint_transforms.get(&joint.agent)
             && let Some(deformed) = transforms.get(joint.index)
+            && *transform != *deformed
         {
             *transform = *deformed;
             deformed_joints = deformed_joints.saturating_add(1);
@@ -4259,7 +4418,9 @@ pub(crate) fn apply_avatar_appearance(
             morph_weights.len()
         );
     }
-    state.appearance_dirty.clear();
+    for agent in &eligible {
+        let _stamps = state.appearance_pending.remove(agent);
+    }
 }
 
 /// Per-frame overrides for avatar runtime morph params (P31.12a): the eye-blink
@@ -4371,17 +4532,41 @@ fn attach_runtime_morphs(
 /// override if one is present, else to its appearance-resolved rest weight — so
 /// a driver need only push the params it is currently animating and everything
 /// else holds the avatar's own shape.
+///
+/// The weights are compared before any mutable deref: a `Mut` deref alone marks
+/// `MeshMorphWeights` changed and re-uploads the part's morph weights, so an
+/// idle avatar (no blink mid-cycle, no body-physics displacement) must take the
+/// read-only path and upload nothing.
 pub(crate) fn apply_avatar_runtime_morphs(
     morphs: Res<AvatarRuntimeMorphs>,
     mut parts: Query<(&AvatarBodyPart, &RuntimeMorphParams, &mut MeshMorphWeights)>,
 ) {
     for (part, params, mut weights) in &mut parts {
+        let MeshMorphWeights::Value { weights: current } = weights.as_ref() else {
+            continue;
+        };
+        let desired = |index: usize, name: &String| {
+            let rest = params.rest.get(index).copied().unwrap_or(0.0);
+            morphs.weight(part.agent, name).unwrap_or(rest)
+        };
+        // A slot missing from the weight vector cannot be written below either,
+        // so it never counts as a difference (else it would force the mutable
+        // pass every frame without effect). Bit-equality is deliberate: the
+        // question is "would the write change the stored value", not a numeric
+        // tolerance.
+        let unchanged = params.names.iter().enumerate().all(|(index, name)| {
+            current
+                .get(index)
+                .is_none_or(|slot| slot.to_bits() == desired(index, name).to_bits())
+        });
+        if unchanged {
+            continue;
+        }
         let MeshMorphWeights::Value { weights } = &mut *weights else {
             continue;
         };
         for (index, name) in params.names.iter().enumerate() {
-            let rest = params.rest.get(index).copied().unwrap_or(0.0);
-            let value = morphs.weight(part.agent, name).unwrap_or(rest);
+            let value = desired(index, name);
             if let Some(slot) = weights.get_mut(index) {
                 *slot = value;
             }
@@ -5427,37 +5612,52 @@ mod tests {
     /// masked.
     #[test]
     fn classify_bake_alpha_reads_the_alpha_channel() {
+        /// A one-row bake stand-in whose alpha range is computed from `pixels`
+        /// exactly as the decode task does ([`DecodedTexture::new`]).
+        fn bake(components: u16, pixels: &[u8]) -> sl_client_bevy::DecodedTexture {
+            sl_client_bevy::DecodedTexture::new(
+                u32::try_from(pixels.len() / 4).unwrap_or(0),
+                1,
+                components,
+                sl_client_bevy::DiscardLevel::FULL,
+                bytes::Bytes::copy_from_slice(pixels),
+                None,
+            )
+        }
         // No alpha channel (RGB source): opaque regardless of the filled byte.
-        assert_eq!(classify_bake_alpha(3, &[10, 20, 30, 0]), BakeAlpha::Opaque);
+        assert_eq!(
+            classify_bake_alpha(&bake(3, &[10, 20, 30, 0])),
+            BakeAlpha::Opaque
+        );
         // Every alpha at/above the cutoff → opaque.
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 255, 1, 1, 1, 200]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 255, 1, 1, 1, 200])),
             BakeAlpha::Opaque
         );
         // Every alpha below the cutoff → wholly transparent (hide the region).
         assert_eq!(
-            classify_bake_alpha(4, &[9, 9, 9, 0, 9, 9, 9, 10]),
+            classify_bake_alpha(&bake(4, &[9, 9, 9, 0, 9, 9, 9, 10])),
             BakeAlpha::Transparent
         );
         // A mix of kept and carved pixels → masked.
         assert_eq!(
-            classify_bake_alpha(4, &[9, 9, 9, 255, 9, 9, 9, 0]),
+            classify_bake_alpha(&bake(4, &[9, 9, 9, 255, 9, 9, 9, 0])),
             BakeAlpha::Masked
         );
         // The cutoff is the reference `sMinimumAlpha` (0.2 → 51): a pixel at alpha
         // 60 is *kept* (opaque), where the old 0.5 cutoff (128) would have carved it
         // — which is what stopped bare mesh-body skin rendering see-through (R22d).
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 60, 1, 1, 1, 255]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 60, 1, 1, 1, 255])),
             BakeAlpha::Opaque
         );
         // A pixel just below the cutoff (40 < 51) still carves, so it masks.
         assert_eq!(
-            classify_bake_alpha(4, &[0, 0, 0, 40, 1, 1, 1, 255]),
+            classify_bake_alpha(&bake(4, &[0, 0, 0, 40, 1, 1, 1, 255])),
             BakeAlpha::Masked
         );
         // No pixels at all → opaque (nothing is carved away).
-        assert_eq!(classify_bake_alpha(4, &[]), BakeAlpha::Opaque);
+        assert_eq!(classify_bake_alpha(&bake(4, &[])), BakeAlpha::Opaque);
     }
 
     /// Each classification maps to the right render behaviour: opaque skin stays

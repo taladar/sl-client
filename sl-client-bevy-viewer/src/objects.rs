@@ -47,8 +47,8 @@ use sl_client_bevy::{
     JointOverrides, MeshKey, MeshSkin, Object, ObjectExtraParams, ObjectKey, PrimFaceId, PrimLod,
     PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
     SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, TREE_RADIUS_SCALE_FACTOR,
-    TREE_YAW_DEGREES, TextureFace, TextureKey, TreeLod, Uuid, Vector, avatar_texture,
-    decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
+    TREE_YAW_DEGREES, TextureAnimation, TextureFace, TextureKey, TreeLod, Uuid, Vector,
+    avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
     rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
     texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh,
     to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
@@ -182,7 +182,7 @@ pub(crate) struct SceneObject {
 /// crosshair tool can report exactly what the camera is looking at — the object's
 /// full id, its mesh/sculpt asset id (the thing to fetch and decode offline when
 /// its geometry looks wrong), and its Second Life scale/position.
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ObjectDebugInfo {
     /// The object's full (asset) id.
     full_id: Uuid,
@@ -244,7 +244,7 @@ pub(crate) struct FaceTextureDebug(pub(crate) TextureFace);
 /// exactly the frame `MultipleObjectUpdate` expects them back in. Refreshed on
 /// every object update (including a local echo applied by the edit tools), so
 /// readers never re-derive Second Life values from the Bevy transform.
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, PartialEq)]
 pub(crate) struct ObjectSlMotion {
     /// The position, in region-local metres (root) or parent-relative metres
     /// (linkset child).
@@ -340,8 +340,19 @@ struct TrackedObject {
     /// `ObjectExtraParams` edit (the build floater's Features tab) can resend
     /// the **full** set — the message states the object's complete
     /// extra-parameter state, so a partial send would clear whatever it
-    /// omitted (sculpt, animesh, render materials, …).
+    /// omitted (sculpt, animesh, render materials, …). Also a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
     extra: ObjectExtraParams,
+    /// The last-applied texture-animation block — a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input,
+    /// so a motion-only update skips the texture-animation refresh.
+    texture_animation: Option<TextureAnimation>,
+    /// The last-applied floating text (`llSetText`) — a
+    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
+    text: String,
+    /// The last-applied floating-text colour (alongside
+    /// [`text`](Self::text)).
+    text_color: [u8; 4],
     /// The per-face child entities carrying this object's geometry: one per
     /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
     /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
@@ -392,6 +403,35 @@ struct TrackedObject {
     /// `ObjectImage` send so a texture edit does not clear it (the wire message
     /// carries the whole media-URL field, so omitting it would blank it).
     media_url: Option<String>,
+}
+
+impl TrackedObject {
+    /// Whether any **non-motion** input of the known-object component refresh
+    /// differs from the last applied update — the gate that lets a terse
+    /// motion update (whose merged snapshot changes only the motion fields)
+    /// skip the per-block component helpers and their no-op removes entirely.
+    /// Compares exactly what those helpers read: the extra params (light /
+    /// particles / flexi / reflection probe / render materials), the texture
+    /// animation, the floating text, the update flags (the physics toggle
+    /// among them), the material byte, and the linkset / attachment identity
+    /// (which decides the HUD routing and root marker).
+    fn non_motion_blocks_changed(
+        &self,
+        object: &Object,
+        is_root: bool,
+        parent: ScopedObjectId,
+        attachment_point: Option<u8>,
+    ) -> bool {
+        self.update_flags != object.update_flags
+            || self.material != object.material
+            || self.is_root != is_root
+            || self.parent != parent
+            || self.attachment_point != attachment_point
+            || self.text != object.text
+            || self.text_color != object.text_color
+            || self.texture_animation != object.texture_animation
+            || self.extra != object.extra
+    }
 }
 
 /// The `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag (`llprimitive.h`): the object
@@ -1366,11 +1406,14 @@ const fn local_translation(position: &Vector) -> Vec3 {
 const DEFAULT_OBJECT_SPAWN_BUDGET: usize = 16;
 
 /// One buffered object-stream event awaiting processing under the per-frame spawn
-/// budget (see [`PendingObjectEvents`]).
+/// budget (see [`PendingObjectEvents`]). Upsert snapshots live out-of-line in
+/// [`PendingObjectEvents::payloads`] so a newer snapshot for a still-queued
+/// object can replace the queued one in place.
 enum PendingObjectEvent {
     /// An `ObjectAdded` / `ObjectUpdated`: (re)apply the object — spawn, move, or
-    /// reshape. Boxed because [`Object`] dwarfs the other variant.
-    Upsert(Box<Object>),
+    /// reshape — from its oldest queued snapshot in
+    /// [`PendingObjectEvents::payloads`].
+    Upsert(ScopedObjectId),
     /// An `ObjectRemoved`: despawn the object and its tracked subtree.
     Remove(ScopedObjectId),
 }
@@ -1381,18 +1424,74 @@ enum PendingObjectEvent {
 /// one frame. Kept in strict arrival order, so a linkset's root still spawns before
 /// its children and an update / remove still lands after the add it targets — exactly
 /// as inline processing did, just spread across frames.
+///
+/// Repeated updates for one object **coalesce**: every `ObjectAdded` /
+/// `ObjectUpdated` carries a full merged snapshot (`sl-proto`'s
+/// `upsert_object` re-emits the whole cached object), so an update arriving
+/// for an object whose newest queued event is a still-undrained upsert just
+/// replaces that queued snapshot — one build from the newest data instead of
+/// one per update, at the original queue position (ordering intact). An
+/// upsert queued behind a remove for the same id never merges across it.
 #[derive(Resource, Default)]
 pub(crate) struct PendingObjectEvents {
     /// Events not yet processed, oldest at the front.
     queue: VecDeque<PendingObjectEvent>,
+    /// The queued upsert snapshots, per object in queue order (front =
+    /// oldest). Almost always one element; only an upsert → remove → upsert
+    /// interleave for one id holds two.
+    payloads: HashMap<ScopedObjectId, VecDeque<Box<Object>>>,
+    /// How many removes are queued per object id — an upsert only coalesces
+    /// into the previous one when no remove sits between them.
+    queued_removes: HashMap<ScopedObjectId, usize>,
 }
 
 impl PendingObjectEvents {
+    /// Buffer an upsert, coalescing it into the object's newest still-queued
+    /// snapshot where ordering allows (see the type docs).
+    fn push_upsert(&mut self, object: &Object) {
+        let scoped = object.scoped_id();
+        if !self.queued_removes.contains_key(&scoped)
+            && let Some(slots) = self.payloads.get_mut(&scoped)
+            && let Some(back) = slots.back_mut()
+        {
+            **back = object.clone();
+            return;
+        }
+        self.payloads
+            .entry(scoped)
+            .or_default()
+            .push_back(Box::new(object.clone()));
+        self.queue.push_back(PendingObjectEvent::Upsert(scoped));
+    }
+
+    /// Buffer a remove.
+    fn push_remove(&mut self, scoped: ScopedObjectId) {
+        let count = self.queued_removes.entry(scoped).or_insert(0);
+        *count = count.saturating_add(1);
+        self.queue.push_back(PendingObjectEvent::Remove(scoped));
+    }
+
     /// Drop the whole backlog — a distant teleport purged the scene, so any
     /// buffered upsert / remove targets a now-gone (old-region local-id) object.
     pub(crate) fn clear(&mut self) {
         self.queue.clear();
+        self.payloads.clear();
+        self.queued_removes.clear();
     }
+}
+
+/// Take the oldest queued upsert snapshot for `scoped` (see
+/// [`PendingObjectEvents::payloads`]), dropping the id's slot once emptied.
+fn pop_upsert_payload(
+    payloads: &mut HashMap<ScopedObjectId, VecDeque<Box<Object>>>,
+    scoped: ScopedObjectId,
+) -> Option<Box<Object>> {
+    let slots = payloads.get_mut(&scoped)?;
+    let object = slots.pop_front();
+    if slots.is_empty() {
+        let _empty = payloads.remove(&scoped);
+    }
+    object
 }
 
 /// The per-frame object geometry-build budget (see [`DEFAULT_OBJECT_SPAWN_BUDGET`]).
@@ -1411,6 +1510,78 @@ impl Default for SpawnBudget {
             .unwrap_or(DEFAULT_OBJECT_SPAWN_BUDGET);
         Self { per_frame }
     }
+}
+
+/// The default for [`GeometryApplyBudget`]: geometry builds per frame across
+/// the three decode-result apply passes.
+const DEFAULT_GEOMETRY_APPLY_BUDGET: usize = 8;
+
+/// The most decoded keys [`apply_object_meshes`] / [`apply_object_sculpts`]
+/// pop per frame: each popped key costs one scan of the tracked-object map
+/// even when nothing is pending on it (most `TextureDecoded` ids are ordinary
+/// face textures, not sculpt maps), so the scans are capped separately from
+/// the build budget.
+const GEOMETRY_APPLY_SCAN_CAP: usize = 64;
+
+/// The shared per-frame budget for decode-result geometry builds: mesh
+/// submesh builds ([`apply_object_meshes`]), sculpt face builds
+/// ([`apply_object_sculpts`]), and rigged binds
+/// ([`apply_rigged_attachments`]) spend from one pool, refilled by
+/// [`reset_geometry_apply_budget`] each frame — so a cache-warm login (every
+/// asset decodes at once) builds a few objects per frame instead of the whole
+/// backlog in one. Deliberately separate from [`SpawnBudget`], so a decode
+/// burst cannot starve object spawning (or vice versa). A key whose objects
+/// number more than the remaining budget still finishes that key (soft
+/// overrun) — per-key work is not resumable without duplicate LOD rebuilds.
+#[derive(Resource)]
+pub(crate) struct GeometryApplyBudget {
+    /// The per-frame pool (env `SL_VIEWER_GEOMETRY_APPLY_BUDGET`).
+    per_frame: usize,
+    /// What remains this frame; refilled by [`reset_geometry_apply_budget`].
+    remaining: usize,
+}
+
+impl Default for GeometryApplyBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_GEOMETRY_APPLY_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_GEOMETRY_APPLY_BUDGET);
+        Self {
+            per_frame,
+            remaining: per_frame,
+        }
+    }
+}
+
+/// Refill the shared [`GeometryApplyBudget`] at the start of each frame's
+/// apply pass (runs before the three spending systems).
+pub(crate) fn reset_geometry_apply_budget(mut budget: ResMut<GeometryApplyBudget>) {
+    budget.remaining = budget.per_frame;
+}
+
+/// Decoded mesh keys awaiting application by [`apply_object_meshes`], deduped
+/// — a key already queued absorbs later decode events (the apply always reads
+/// the store's current block).
+#[derive(Resource, Default)]
+pub(crate) struct PendingDecodedMeshes {
+    /// Keys not yet applied, oldest at the front.
+    queue: VecDeque<MeshKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<MeshKey>,
+}
+
+/// Decoded texture keys awaiting the sculpt-build check by
+/// [`apply_object_sculpts`], deduped (see [`PendingDecodedMeshes`]). Most
+/// entries are ordinary face textures that no sculpt waits on; they drain as
+/// free scans under [`GEOMETRY_APPLY_SCAN_CAP`].
+#[derive(Resource, Default)]
+pub(crate) struct PendingDecodedSculpts {
+    /// Keys not yet checked, oldest at the front.
+    queue: VecDeque<TextureKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<TextureKey>,
 }
 
 /// Process queued items front-to-back, calling `process` on each; `process` returns
@@ -1435,46 +1606,6 @@ fn drain_budgeted<T>(
         }
     }
     builds
-}
-
-/// Apply one buffered object event (from the backlog), returning whether it built
-/// geometry (see [`apply_object`]). The inline fast path in [`update_objects`] calls
-/// [`apply_object`] / [`remove_object`] directly on the borrowed event instead, so it
-/// need not clone; this handles the owned, already-deferred events.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "threads the ECS resources apply_object / remove_object need through one call"
-)]
-fn apply_pending_object_event(
-    state: &mut ObjectState,
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
-    manager: &mut TextureManager,
-    prim_textures: &mut PrimTextures,
-    mesh_manager: &mut MeshManager,
-    cache: &mut GeometryCache,
-    material_cache: &mut MaterialCache,
-    event: PendingObjectEvent,
-) -> bool {
-    match event {
-        PendingObjectEvent::Upsert(object) => apply_object(
-            state,
-            &object,
-            commands,
-            meshes,
-            materials,
-            manager,
-            prim_textures,
-            mesh_manager,
-            cache,
-            material_cache,
-        ),
-        PendingObjectEvent::Remove(scoped) => {
-            remove_object(state, scoped, commands);
-            false
-        }
-    }
 }
 
 /// Fold the object event stream into the scene graph: spawn / update / despawn
@@ -1504,20 +1635,43 @@ pub(crate) fn update_objects(
     // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
     //    events never jump ahead of it. Only a spawn / re-tessellation (`apply_object`
     //    returns `true`) costs budget; a move or remove is free.
-    let drained = drain_budgeted(&mut pending.queue, budget, |event| {
-        apply_pending_object_event(
-            &mut state,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &mut manager,
-            &mut prim_textures,
-            &mut mesh_manager,
-            &mut cache,
-            &mut material_cache,
-            event,
-        )
-    });
+    let drained = {
+        let PendingObjectEvents {
+            queue,
+            payloads,
+            queued_removes,
+        } = &mut *pending;
+        drain_budgeted(queue, budget, |event| match event {
+            PendingObjectEvent::Upsert(scoped) => {
+                let Some(object) = pop_upsert_payload(payloads, scoped) else {
+                    warn!("queued upsert for {scoped:?} had no snapshot (coalescing bug)");
+                    return false;
+                };
+                apply_object(
+                    &mut state,
+                    &object,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut manager,
+                    &mut prim_textures,
+                    &mut mesh_manager,
+                    &mut cache,
+                    &mut material_cache,
+                )
+            }
+            PendingObjectEvent::Remove(scoped) => {
+                if let Some(count) = queued_removes.get_mut(&scoped) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        let _empty = queued_removes.remove(&scoped);
+                    }
+                }
+                remove_object(&mut state, scoped, &mut commands);
+                false
+            }
+        })
+    };
     budget = budget.saturating_sub(drained);
     // 2. Process new events in arrival order: while the backlog is fully drained and
     //    budget remains, apply them **inline without cloning**; once the budget is
@@ -1553,16 +1707,12 @@ pub(crate) fn update_objects(
         } else {
             match &event.0 {
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
-                    // `object` is already a `Box<Object>`, so clone the box (only now,
-                    // on the overflow) rather than re-boxing it.
-                    pending
-                        .queue
-                        .push_back(PendingObjectEvent::Upsert(object.clone()));
+                    // Cloned only now, on the overflow; a snapshot already
+                    // queued for this object is replaced in place instead.
+                    pending.push_upsert(object);
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                    pending
-                        .queue
-                        .push_back(PendingObjectEvent::Remove(*local_id));
+                    pending.push_remove(*local_id);
                 }
                 _other => {}
             }
@@ -3273,29 +3423,13 @@ fn apply_object(
     // sculpt / LOD rebuilds).
     let intern = MaterialInternContext::for_object(object, is_hud);
 
+    // The per-block components (light P25.1, particles P30.1, flexi P32.1,
+    // reflection probe P33) are derived from the object where they are applied
+    // — the spawn path below, and the known-object path's block refresh (which
+    // a motion-only update skips entirely, derivations included).
+
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
-    // The object's light block (P25.1): present only if the prim is a light
-    // source. Refreshed on every update so a light toggled off / retuned in-world
-    // is reflected — [`apply_light`] inserts the component when present and
-    // removes it when absent.
-    let light = light_from_object(object);
-    // The object's particle-system block (P30.1): present only when the prim is a
-    // live particle source. Refreshed on every update so a source toggled off /
-    // retuned in-world is reflected — [`apply_particles`] inserts the component
-    // when present and removes it when absent (or null).
-    let particles = particles_from_object(object);
-    // The object's flexible-object block (P32.1): present only when the prim is a
-    // flexi prim. Refreshed on every update so a prim toggled flexi off / on
-    // in-world is reflected — [`apply_flexi`] inserts the component when present
-    // and removes it when absent.
-    let flexi = flexi_from_object(object);
-    // The object's reflection-probe block (P33): present only when the prim is a
-    // PBR reflection probe. Refreshed on every update so a probe toggled off /
-    // resized in-world is reflected — [`apply_reflection_probe`] inserts the
-    // component when present and removes it when absent.
-    let reflection_probe = reflection_probe_from_object(object);
-
     let debug_info = ObjectDebugInfo {
         full_id: object.full_id.uuid(),
         asset: mesh_key(object)
@@ -3343,34 +3477,45 @@ fn apply_object(
         // motion-only update stops here — the geometry is untouched). The scale
         // rides the geometry holder, refreshed here so a live resize is applied
         // without a re-tessellation.
-        commands.entity(existing.entity).insert((
-            transform,
-            SceneObject {
-                scoped_id: scoped,
-                category,
-            },
-            debug_info,
-            sl_motion,
-        ));
-        // Keep the world-root marker in step with a live relink/unlink so
-        // [`recenter_objects`] re-bases exactly the roots (a child that just
-        // became a root gains it; a root demoted to a child loses it).
-        sync_world_root_marker(existing.entity, is_root, commands);
+        // The pose transforms go through `set_if_neq` via `entry`, NOT a plain
+        // `insert`: re-inserting an identical `Transform` marks it changed,
+        // which dirties the whole transform tree above the object — for a worn
+        // (HUD) object whose script draws a steady update stream, that reverted
+        // the wearer's driver-written joint globals to rest every update and
+        // pinned the pose gate awake.
+        commands
+            .entity(existing.entity)
+            .entry::<Transform>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(transform);
+            })
+            .or_insert(transform);
+        // The pick/edit mirrors go through `set_if_neq` too: they genuinely
+        // change on every motion packet for a mover, but a repeated identical
+        // update (a select echo on a static object) must not mark them changed.
+        commands
+            .entity(existing.entity)
+            .entry::<ObjectDebugInfo>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(debug_info);
+            })
+            .or_insert(debug_info);
+        let sl_motion_modify = sl_motion.clone();
+        commands
+            .entity(existing.entity)
+            .entry::<ObjectSlMotion>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(sl_motion_modify);
+            })
+            .or_insert(sl_motion);
+        let holder = holder_transform(object, category);
         commands
             .entity(existing.geometry)
-            .insert(holder_transform(object, category));
-        apply_render_materials(existing.geometry, scoped, object, commands);
-        apply_texture_animation(existing.geometry, object, commands);
-        apply_light(existing.entity, light, commands);
-        apply_particles(existing.entity, particles, commands);
-        apply_flexi(existing.entity, flexi, commands);
-        apply_reflection_probe(existing.entity, reflection_probe, commands);
-        // Attach / refresh / drop the physics body marker (P31.2) so a prim toggled
-        // physical (or moved by this terse update) is driven kinematically.
-        apply_physics(existing.entity, object, commands);
-        // Mirror the object's floating text (`llSetText`, viewer-hover-text) so a
-        // script setting / changing / clearing it is reflected live.
-        apply_floating_text(existing.entity, object, is_hud, commands);
+            .entry::<Transform>()
+            .and_modify(move |mut current| {
+                current.set_if_neq(holder);
+            })
+            .or_insert(holder);
         // A texture-only change (same shape, a new `TextureEntry` from a retexture
         // in-world or the sim's echo of the build floater's `ObjectImage` send)
         // re-tessellates too: the per-face materials (tint / repeats / offset /
@@ -3384,6 +3529,52 @@ fn apply_object(
         // captured here, before `existing.shape` is overwritten below, so it can be
         // returned as this call's "built geometry" verdict for the spawn budget.
         let rebuilt = existing.shape != shape || texture_changed;
+        // The terse-update fast path: a motion-only update (the overwhelmingly
+        // most frequent object event — every mover at up to sim frame rate)
+        // changes none of the per-block component inputs, so the whole helper
+        // cascade below — and each absent block's no-op remove command — is
+        // skipped. The merged snapshot semantics make the comparison exact:
+        // sl-proto re-emits the full cached object, so an unchanged block is
+        // byte-identical to the one last applied.
+        let refresh_blocks = rebuilt
+            || existing.non_motion_blocks_changed(object, is_root, parent, attachment_point);
+        if refresh_blocks {
+            commands.entity(existing.entity).insert(SceneObject {
+                scoped_id: scoped,
+                category,
+            });
+            // Keep the world-root marker in step with a live relink/unlink so
+            // [`recenter_objects`] re-bases exactly the roots (a child that just
+            // became a root gains it; a root demoted to a child loses it) — an
+            // is_root change always lands here via the fingerprint.
+            sync_world_root_marker(existing.entity, is_root, commands);
+            apply_render_materials(existing.geometry, scoped, object, commands);
+            apply_texture_animation(existing.geometry, object, commands);
+            // The light (P25.1) / particle (P30.1) / flexi (P32.1) / probe
+            // (P33) blocks: each helper inserts its component when the block is
+            // present and removes it when absent, so one toggled off / retuned
+            // in-world is reflected.
+            apply_light(existing.entity, light_from_object(object), commands);
+            apply_particles(existing.entity, particles_from_object(object), commands);
+            apply_flexi(existing.entity, flexi_from_object(object), commands);
+            apply_reflection_probe(
+                existing.entity,
+                reflection_probe_from_object(object),
+                commands,
+            );
+            // Attach / refresh / drop the physics body marker (P31.2) so a prim
+            // toggled physical is driven kinematically.
+            apply_physics(existing.entity, object, commands);
+            // Mirror the object's floating text (`llSetText`, viewer-hover-text)
+            // so a script setting / changing / clearing it is reflected live.
+            apply_floating_text(existing.entity, object, is_hud, commands);
+        } else {
+            // Motion-only: a physical mover still needs its authoritative
+            // motion snapshot re-seeded (a fresh `PhysicalObject` insert
+            // restarts the dead-reckoning); the physics flag itself is known
+            // unchanged, so the non-physical case pays nothing.
+            crate::physics::refresh_physical_motion(existing.entity, object, commands);
+        }
         if rebuilt {
             // A genuine shape (or category) change, or a texture change: drop the
             // old face meshes and re-tessellate. A category change is subsumed
@@ -3437,7 +3628,8 @@ fn apply_object(
         // attachment keeps its skeleton-joint parent (managed by
         // [`adopt_pending_attachments`]) rather than reconciling a linkset root.
         if attachment_point.is_none() {
-            reconcile_parent(existing, is_root, parent_entity, commands);
+            let parent_changed = existing.parent != parent;
+            reconcile_parent(existing, is_root, parent_entity, parent_changed, commands);
         }
         existing.parent = parent;
         existing.is_root = is_root;
@@ -3447,6 +3639,9 @@ fn apply_object(
         existing.update_flags = object.update_flags;
         existing.material = object.material;
         existing.extra = object.extra.clone();
+        existing.texture_animation = object.texture_animation;
+        existing.text.clone_from(&object.text);
+        existing.text_color = object.text_color;
         // Retain the current texture entry / media URL for the Texture-tab editor.
         // A terse (motion-only) update carries neither, so both are refreshed only
         // when a full update brings a texture entry — keeping the last known media
@@ -3497,16 +3692,16 @@ fn apply_object(
     };
     // A light-source prim carries its decoded light block (P25.1); a plain prim
     // gets nothing.
-    apply_light(entity, light, commands);
+    apply_light(entity, light_from_object(object), commands);
     // A particle-source prim carries its decoded particle system (P30.1); a plain
     // prim gets nothing.
-    apply_particles(entity, particles, commands);
+    apply_particles(entity, particles_from_object(object), commands);
     // A flexi prim carries its decoded flexible-object block (P32.1); a rigid prim
     // gets nothing.
-    apply_flexi(entity, flexi, commands);
+    apply_flexi(entity, flexi_from_object(object), commands);
     // A reflection-probe prim carries its decoded probe block (P33); any other
     // object gets nothing.
-    apply_reflection_probe(entity, reflection_probe, commands);
+    apply_reflection_probe(entity, reflection_probe_from_object(object), commands);
     // A server-flagged physical root prim gets the kinematic-body marker (P31.2);
     // any other object gets nothing (the marker's absence is the signal).
     apply_physics(entity, object, commands);
@@ -3575,6 +3770,9 @@ fn apply_object(
             animated: is_animated_object(object),
             texture_entry: object.texture_entry.clone(),
             media_url: object.media_url.as_ref().map(url::Url::to_string),
+            texture_animation: object.texture_animation,
+            text: object.text.clone(),
+            text_color: object.text_color,
         },
     );
     debug!(
@@ -3598,6 +3796,7 @@ fn reconcile_parent(
     existing: &mut TrackedObject,
     is_root: bool,
     parent_entity: Option<Entity>,
+    parent_changed: bool,
     commands: &mut Commands,
 ) {
     if is_root {
@@ -3609,10 +3808,17 @@ fn reconcile_parent(
     }
     match parent_entity {
         Some(root_entity) => {
-            commands
-                .entity(existing.entity)
-                .insert(ChildOf(root_entity));
-            existing.parented = true;
+            // Re-inserting `ChildOf` on an already-parented child marks the
+            // hierarchy changed — for a moving vehicle's children that used to
+            // be one re-insert per motion packet — so only (re)parent when not
+            // yet parented or when the update actually moved it to a new root
+            // (a relink arrives with `parented` still true).
+            if !existing.parented || parent_changed {
+                commands
+                    .entity(existing.entity)
+                    .insert(ChildOf(root_entity));
+                existing.parented = true;
+            }
         }
         None => {
             if existing.parented {
@@ -3832,12 +4038,20 @@ fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedO
 /// object pending on that key (texturing them via the Phase 6 pipeline). A decode
 /// that failed leaves the objects geometry-less (they keep waiting until a later
 /// update re-requests the mesh).
+///
+/// Budgeted: freshly decoded keys park in [`PendingDecodedMeshes`] and drain
+/// under the shared [`GeometryApplyBudget`], so a decode burst (a cache-warm
+/// login resolves everything at once) builds a few keys per frame instead of
+/// the whole backlog in one. Deferral is safe — the apply reads the store's
+/// current (newest) block when its key's turn comes.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading decoded meshes and the ECS resources the geometry build needs"
 )]
 pub(crate) fn apply_object_meshes(
     mut decoded: MessageReader<MeshDecoded>,
+    mut pending_keys: ResMut<PendingDecodedMeshes>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -3849,6 +4063,17 @@ pub(crate) fn apply_object_meshes(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     for &MeshDecoded(key) in decoded.read() {
+        if pending_keys.queued.insert(key) {
+            pending_keys.queue.push_back(key);
+        }
+    }
+    let mut scans = 0_usize;
+    while budget.remaining > 0 && scans < GEOMETRY_APPLY_SCAN_CAP {
+        let Some(key) = pending_keys.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = pending_keys.queued.remove(&key);
+        scans = scans.saturating_add(1);
         let Some(mesh) = mesh_manager.decoded(key).map(Arc::clone) else {
             // The fetch failed: objects pending on this key stay geometry-less.
             continue;
@@ -3926,6 +4151,7 @@ pub(crate) fn apply_object_meshes(
                         &pending.intern,
                         &mut material_cache,
                     );
+                    budget.remaining = budget.remaining.saturating_sub(1);
                     debug!(
                         "built mesh {key}: {} submesh entities",
                         tracked.face_entities.len()
@@ -3968,6 +4194,7 @@ pub(crate) fn apply_object_meshes(
                     &intern,
                     &mut material_cache,
                 );
+                budget.remaining = budget.remaining.saturating_sub(1);
                 debug!(
                     "rebuilt mesh {key} at new LOD: {} submesh entities",
                     tracked.face_entities.len()
@@ -4156,6 +4383,11 @@ pub(crate) fn animesh_root(
 /// unknown-joint fallback). The object is marked parented so
 /// [`adopt_pending_attachments`] does not also pin it to a rigid
 /// attachment-point node.
+///
+/// Budgeted: skinned builds spend from the shared [`GeometryApplyBudget`], so
+/// a crowd's rigged bodies bind over several frames; the not-yet-built rest
+/// stays pending and is re-collected next frame (the cheap not-ready retries
+/// — skeleton or finest LOD still loading — are free, as before).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system joining the object, avatar, and mesh state with the ECS resources the skinned build needs"
@@ -4166,6 +4398,7 @@ pub(crate) fn apply_rigged_attachments(
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4187,6 +4420,14 @@ pub(crate) fn apply_rigged_attachments(
         })
         .collect();
     for scoped in pending {
+        // A skinned build is among the heaviest per-object costs (submesh
+        // meshes + inverse bindposes + skeleton binding); spend from the
+        // shared decode-apply budget so a crowd's worth of rigged bodies
+        // binds over several frames. The unbuilt rest stays pending and is
+        // re-collected next frame.
+        if budget.remaining == 0 {
+            break;
+        }
         let Some(tracked) = state.objects.get(&scoped) else {
             continue;
         };
@@ -4294,6 +4535,7 @@ pub(crate) fn apply_rigged_attachments(
             &mut manager,
             &mut prim_textures,
         );
+        budget.remaining = budget.remaining.saturating_sub(1);
         if let Some(tracked) = state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
             tracked.pending = None;
@@ -4617,12 +4859,19 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
 /// flows through the shared [`TextureManager`] like any face texture — but keys off
 /// a *pending sculpt build* rather than a parked face material, so the two
 /// consumers never contend for the same decoded texture.
+///
+/// Budgeted: decoded keys park in [`PendingDecodedSculpts`] and drain under
+/// the shared [`GeometryApplyBudget`] (and the per-frame scan cap, since most
+/// decoded textures are not sculpt maps), spreading a decode burst's sculpt
+/// tessellation across frames.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading decoded sculpt maps and the ECS resources the geometry build needs"
 )]
 pub(crate) fn apply_object_sculpts(
     mut decoded: MessageReader<TextureDecoded>,
+    mut pending_keys: ResMut<PendingDecodedSculpts>,
+    mut budget: ResMut<GeometryApplyBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4633,6 +4882,32 @@ pub(crate) fn apply_object_sculpts(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     for &TextureDecoded(id) in decoded.read() {
+        if pending_keys.queued.insert(id) {
+            pending_keys.queue.push_back(id);
+        }
+    }
+    if pending_keys.queue.is_empty() {
+        return;
+    }
+    // Most decoded textures are ordinary face textures; when no sculpt build is
+    // pending at all, the whole backlog is irrelevant — drop it with one scan
+    // instead of burning the per-frame scan cap on it.
+    if !state
+        .objects
+        .values()
+        .any(|tracked| matches!(tracked.pending, Some(PendingGeometry::Sculpt(_))))
+    {
+        pending_keys.queue.clear();
+        pending_keys.queued.clear();
+        return;
+    }
+    let mut scans = 0_usize;
+    while budget.remaining > 0 && scans < GEOMETRY_APPLY_SCAN_CAP {
+        let Some(id) = pending_keys.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = pending_keys.queued.remove(&id);
+        scans = scans.saturating_add(1);
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
         // borrow of `manager` ends before the face build borrows it mutably.
         let Some(map) = manager.decoded(id).map(Arc::clone) else {
@@ -4662,6 +4937,7 @@ pub(crate) fn apply_object_sculpts(
                         &pending.intern,
                         &mut material_cache,
                     );
+                    budget.remaining = budget.remaining.saturating_sub(1);
                     debug!(
                         "built sculpt {id}: {} face entities",
                         tracked.face_entities.len()
@@ -5046,6 +5322,60 @@ mod tests {
         assert!(queue.is_empty(), "the backlog fully drains");
     }
 
+    /// Repeated upserts for one still-queued object coalesce into a single
+    /// queue slot holding the newest snapshot (every event carries a full
+    /// merged snapshot, so only the newest matters), while a remove queued
+    /// between two upserts blocks the merge so replay order stays
+    /// upsert → remove → upsert.
+    #[test]
+    fn pending_object_events_coalesce_repeated_upserts() {
+        let mut first = bare_object(pcode::PRIMITIVE);
+        first.crc = 1;
+        let mut second = bare_object(pcode::PRIMITIVE);
+        second.crc = 2;
+        let scoped = first.scoped_id();
+
+        let mut pending = super::PendingObjectEvents::default();
+        pending.push_upsert(&first);
+        pending.push_upsert(&second);
+        assert_eq!(
+            pending.queue.len(),
+            1,
+            "the second upsert merged into the queued slot"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(2),
+            "the newest snapshot won"
+        );
+        assert!(
+            pending.payloads.is_empty(),
+            "the drained id's payload slot is dropped"
+        );
+
+        // An upsert queued behind a remove for the same id must not merge
+        // across it — the replay must still remove before re-adding.
+        pending.clear();
+        pending.push_upsert(&first);
+        pending.push_remove(scoped);
+        pending.push_upsert(&second);
+        assert_eq!(
+            pending.queue.len(),
+            3,
+            "upsert → remove → upsert stays three ordered events"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(1),
+            "the pre-remove snapshot survives unmerged"
+        );
+        assert_eq!(
+            super::pop_upsert_payload(&mut pending.payloads, scoped).map(|object| object.crc),
+            Some(2),
+            "the post-remove snapshot queues separately"
+        );
+    }
+
     /// A [`TrackedObject`](super::TrackedObject) stub for the stale-guard tests: a
     /// plain-prim root at `entity` / `geometry`, every other field at its spawn
     /// default. Only the `entity` field is under test.
@@ -5063,9 +5393,12 @@ mod tests {
             is_root: true,
             parented: false,
             attachment_point: None,
-            update_flags: 0,
-            material: 0,
-            extra: sl_client_bevy::ObjectExtraParams::default(),
+            update_flags: object.update_flags,
+            material: object.material,
+            extra: object.extra.clone(),
+            texture_animation: object.texture_animation,
+            text: object.text.clone(),
+            text_color: object.text_color,
             face_entities: Vec::new(),
             pending: None,
             mesh_rebuild: None,
@@ -5077,6 +5410,49 @@ mod tests {
             texture_entry: Vec::new(),
             media_url: None,
         }
+    }
+
+    /// The terse-update fast path's gate: a motion-only update (the merged
+    /// snapshot moves, but every per-block component input is identical)
+    /// reports unchanged — while a flipped block input (floating text, update
+    /// flags / physics toggle, material byte, linkset identity) trips it.
+    #[test]
+    fn non_motion_gate_ignores_motion_and_tracks_block_inputs() {
+        use bevy::prelude::World;
+
+        let object = bare_object(pcode::PRIMITIVE);
+        let scoped = object.scoped_id();
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let geometry = world.spawn_empty().id();
+        let tracked = tracked_stub(&object, entity, geometry);
+
+        // A pure motion change: position and velocity move, nothing else.
+        let mut moved = object.clone();
+        moved.motion.position.x += 5.0;
+        moved.motion.velocity.z = 1.5;
+        assert!(
+            !tracked.non_motion_blocks_changed(&moved, true, scoped, None),
+            "a motion-only update must take the fast path"
+        );
+
+        // Floating text set by a script.
+        let mut texted = object.clone();
+        texted.text = "hello".to_owned();
+        assert!(tracked.non_motion_blocks_changed(&texted, true, scoped, None));
+
+        // An update-flags change (e.g. the physics toggle).
+        let mut flagged = object.clone();
+        flagged.update_flags |= 1;
+        assert!(tracked.non_motion_blocks_changed(&flagged, true, scoped, None));
+
+        // A material-byte change.
+        let mut rematerialed = object.clone();
+        rematerialed.material = rematerialed.material.wrapping_add(1);
+        assert!(tracked.non_motion_blocks_changed(&rematerialed, true, scoped, None));
+
+        // A linkset-identity change (unlink/relink).
+        assert!(tracked.non_motion_blocks_changed(&object, false, scoped, None));
     }
 
     /// The stale-entity guard drops a tracked object whose entity Bevy's recursive

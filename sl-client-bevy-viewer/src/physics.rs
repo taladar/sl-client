@@ -365,6 +365,20 @@ pub(crate) struct PhysicalObject {
 /// [`drive_physical_objects`] from this marker's presence.
 pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
     if is_physical_root(object) {
+        refresh_physical_motion(entity, object, commands);
+    } else {
+        commands.entity(entity).remove::<PhysicalObject>();
+    }
+}
+
+/// Re-seed a **physical** root prim's authoritative motion snapshot (a fresh
+/// [`PhysicalObject`] insert restarts the dead-reckoning from it) without the
+/// [`apply_physics`] remove side — the motion-only fast path in the object
+/// update, where the physics flag is known unchanged, calls this so a
+/// non-physical mover no longer pays a no-op remove per motion packet. A
+/// no-op for a non-physical object.
+pub(crate) fn refresh_physical_motion(entity: Entity, object: &Object, commands: &mut Commands) {
+    if is_physical_root(object) {
         commands.entity(entity).insert(PhysicalObject {
             full_key: object.full_id,
             position: object.motion.position.clone(),
@@ -375,8 +389,6 @@ pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Comm
             region_handle: object.region_handle,
             scale: object.scale.clone(),
         });
-    } else {
-        commands.entity(entity).remove::<PhysicalObject>();
     }
 }
 
@@ -506,6 +518,14 @@ pub(crate) struct PhysicsInterp {
     /// rotation counterpart of [`PhysicsInterp::render_offset`], so a turning
     /// vehicle's per-update rotation snap eases away too.
     render_rot_offset: Quat,
+    /// The rest latch (the flexi settle-latch pattern): `Some(region_offset)` once
+    /// the authoritative motion is stationary and the render residuals have
+    /// settled — the pose was written exactly once and the per-frame drive is
+    /// skipped, so a parked physical prim stops dirtying its `Transform` every
+    /// frame. The latched scene-origin offset is stored because the per-frame
+    /// write *is* the re-baser across an origin move: a latched prim wakes when
+    /// the offset changes (and on any fresh server update via [`Self::reseed`]).
+    rest: Option<Vec3>,
 }
 
 impl PhysicsInterp {
@@ -526,6 +546,7 @@ impl PhysicsInterp {
             // A freshly-seeded object renders exactly at truth (no correction yet).
             render_offset: Vec3::ZERO,
             render_rot_offset: Quat::IDENTITY,
+            rest: None,
         }
     }
 
@@ -545,6 +566,8 @@ impl PhysicsInterp {
         // Keep the cached scale current so the ground-floor bounding radius (and a
         // later collider resize by [`refine_physical_colliders`]) track a resize.
         self.collider_scale = collider_extents(&phys.scale);
+        // Fresh server truth wakes a latched prim: the update may set it moving.
+        self.rest = None;
     }
 }
 
@@ -553,6 +576,48 @@ impl PhysicsInterp {
 /// workspace `arithmetic_side_effects` lint — see [`crate::camera`]).
 const fn vector_to_array(vector: &Vector) -> [f32; 3] {
     [vector.x, vector.y, vector.z]
+}
+
+/// The per-axis motion magnitude (m/s, m/s², rad/s) below which a dead-reckoned
+/// physical prim counts as stationary for the rest latch. A settled server object
+/// reports exact zeros (and the phase-out taper multiplies the prediction to
+/// exactly zero at its end), so this margin only has to absorb denormal noise.
+const REST_MOTION_EPSILON: f32 = 1.0e-4;
+
+/// The squared render-residual length (metres²) below which the positional
+/// correction counts as absorbed for the rest latch (~0.1 mm — far below a
+/// pixel at any usable camera distance).
+const REST_OFFSET_EPSILON_SQ: f32 = 1.0e-8;
+
+/// The squared length of the residual quaternion's vector part below which the
+/// rotation correction counts as absorbed for the rest latch: `|xyz| ≈ angle/2`
+/// for a small rotation, so `5e-5` is ~1e-4 rad (~0.006°) — invisible. (A cosine
+/// margin on `w` cannot express this: `1 - 1e-8` is not representable in `f32`.)
+const REST_ROTATION_EPSILON_SQ: f32 = 2.5e-9;
+
+/// Whether a physical prim's dead-reckoned motion and render residuals have
+/// settled enough to latch it at rest ([`PhysicsInterp::rest`]): the
+/// authoritative motion is stationary on every axis and both residual
+/// corrections are visually fully absorbed. Pure, so it is unit-testable.
+fn physical_object_settled(
+    motion: &MotionState,
+    render_offset: Vec3,
+    render_rot_offset: Quat,
+) -> bool {
+    let stationary = motion
+        .velocity
+        .iter()
+        .chain(motion.acceleration.iter())
+        .chain(motion.angular_velocity.iter())
+        .all(|component| component.abs() < REST_MOTION_EPSILON);
+    let residual_axis = Vec3::new(
+        render_rot_offset.x,
+        render_rot_offset.y,
+        render_rot_offset.z,
+    );
+    stationary
+        && render_offset.length_squared() < REST_OFFSET_EPSILON_SQ
+        && residual_axis.length_squared() < REST_ROTATION_EPSILON_SQ
 }
 
 /// The cuboid collider extents for a prim scale, each floored to a valid
@@ -736,6 +801,12 @@ fn translation_smoothing_alpha(dt: f32) -> f32 {
     smoothing_alpha(dt, TRANSLATION_SMOOTHING_TAU_SECS)
 }
 
+/// The squared residual distance (metres²) below which [`eased_translation`]
+/// converges exactly (~0.1 mm): the exponential ease is asymptotic and `f32`
+/// rounding can stall it just short of the target, which would keep the anchor
+/// `Transform` marked changed — and its whole subtree re-propagated — forever.
+const TRANSLATION_SETTLE_EPSILON_SQ: f32 = 1.0e-8;
+
 /// The next eased rendered anchor translation, given the last `rendered`
 /// position, the current authoritative/dead-reckoned `target`, whether a region
 /// crossing occurred this frame, and the frame's easing `alpha`. Called every
@@ -744,28 +815,53 @@ fn translation_smoothing_alpha(dt: f32) -> f32 {
 /// Snaps (returns `target`) across a region crossing or any region-scale jump
 /// (a teleport / 256 m rebase) so the world does not glide across it; otherwise
 /// eases from `rendered` toward `target`, spreading an ordinary per-update
-/// prediction correction over a few frames instead of the visible hard snap.
+/// prediction correction over a few frames instead of the visible hard snap —
+/// with a terminal snap once the residual is sub-visible, so an idle avatar's
+/// anchor actually reaches equality and settles.
 fn eased_translation(rendered: Vec3, target: Vec3, region_crossed: bool, alpha: f32) -> Vec3 {
     if region_crossed || target.distance(rendered) > TRANSLATION_SNAP_DISTANCE_M {
         target
     } else {
-        rendered.lerp(target, alpha)
+        let next = rendered.lerp(target, alpha);
+        if next.distance_squared(target) < TRANSLATION_SETTLE_EPSILON_SQ {
+            target
+        } else {
+            next
+        }
     }
 }
 
+/// The per-component margin for the rotation ease's terminal snap: an eased
+/// quaternion within this of the target on every component is a sub-0.005°
+/// residual — invisible, so the slerp converges exactly instead of stalling a
+/// hair short (which would keep the anchor marked changed forever). (A cosine
+/// margin cannot express this in `f32`: `1 - 1e-8` rounds to `1.0`.)
+const ROTATION_SETTLE_EPSILON: f32 = 1.0e-5;
+
 /// Ease the avatar anchor's rendered orientation toward its current authoritative /
-/// dead-reckoned facing and write it to the anchor (P31.7). A no-op for a
+/// dead-reckoned facing and return the value to write (P31.7), or `None` for a
 /// placeholder sphere (which does not carry the object rotation), so only rigged
 /// bodies smooth-turn. `dt` is the real (undilated) frame time — the smoothing is a
 /// visual concern, independent of the physics clock.
-fn apply_smoothed_rotation(interp: &mut AvatarInterp, transform: &mut Transform, dt: f32) {
+///
+/// Deliberately returns the rotation instead of taking the anchor's `Transform`:
+/// passing a `Mut<Transform>` into a `&mut Transform` parameter deref-mut-coerces
+/// and marks the component changed **every call**, no matter what is written
+/// inside — which kept every idle avatar's anchor dirty per frame and defeated
+/// the pose gate. The caller writes through the `Mut` only on an actual change.
+fn smoothed_rotation(interp: &mut AvatarInterp, dt: f32) -> Option<Quat> {
     if !interp.apply_rotation {
-        return;
+        return None;
     }
     let target = bevy_rotation_of(&interp.motion);
     let alpha = rotation_smoothing_alpha(dt);
-    interp.rendered_rotation = interp.rendered_rotation.slerp(target, alpha);
-    transform.rotation = interp.rendered_rotation;
+    let next = interp.rendered_rotation.slerp(target, alpha);
+    interp.rendered_rotation = if next.abs_diff_eq(target, ROTATION_SETTLE_EPSILON) {
+        target
+    } else {
+        next
+    };
+    Some(interp.rendered_rotation)
 }
 
 /// Which of the four axis-neighbour regions (`[-x, +x, -y, +y]`) are currently
@@ -1011,20 +1107,29 @@ pub(crate) fn drive_physical_objects(
             continue;
         }
 
-        // Between updates: dead-reckon forward.
+        // At rest (the flexi settle-latch pattern): a stationary prim whose
+        // residuals are absorbed was written exactly once at latch time, so
+        // skip the dead-reckon and the per-frame Transform write entirely. The
+        // latched scene-origin offset must still match — the per-frame write is
+        // the re-baser across an origin move — and any fresh server update
+        // cleared the latch above (`reseed`).
         let region = interp.motion.region_handle;
+        let region_offset = region_offset_bevy(region, origin);
+        if let Some(rest_offset) = interp.rest {
+            if rest_offset == region_offset {
+                continue;
+            }
+            interp.rest = None;
+        }
+
+        // Between updates: dead-reckon forward.
         let region_dilation = dilations.per_region.get(&region).copied().unwrap_or(1.0);
         let dt = clamp_dilation(region_dilation) * dt_raw;
         let time_since_last_update = now - interp.last_message_secs;
         if dt <= 0.0 || time_since_last_update <= 0.0 {
             interp.last_interp_secs = now;
             // Keep easing any outstanding residual even on a stalled physics frame.
-            place_smoothed(
-                &mut interp,
-                &mut transform,
-                dt_raw,
-                region_offset_bevy(region, origin),
-            );
+            place_smoothed(&mut interp, &mut transform, dt_raw, region_offset);
             continue;
         }
 
@@ -1064,12 +1169,21 @@ pub(crate) fn drive_physical_objects(
         interp.last_interp_secs = now;
         // Render the freshly dead-reckoned pose, easing away any residual left over
         // from the last authoritative correction (zero in steady prediction).
-        place_smoothed(
-            &mut interp,
-            &mut transform,
-            dt_raw,
-            region_offset_bevy(region, origin),
-        );
+        place_smoothed(&mut interp, &mut transform, dt_raw, region_offset);
+
+        // Settled? Zero the residuals exactly, write the exact pose one final
+        // time, and latch — the next frames skip this prim entirely until a
+        // server update or an origin move wakes it.
+        if physical_object_settled(
+            &interp.motion,
+            interp.render_offset,
+            interp.render_rot_offset,
+        ) {
+            interp.render_offset = Vec3::ZERO;
+            interp.render_rot_offset = Quat::IDENTITY;
+            place_smoothed(&mut interp, &mut transform, dt_raw, region_offset);
+            interp.rest = Some(region_offset);
+        }
     }
 }
 
@@ -1550,8 +1664,18 @@ pub(crate) fn drive_avatar_motion(
             region_crossed,
             translation_smoothing_alpha(dt_raw),
         );
-        transform.translation = interp.rendered_translation;
-        apply_smoothed_rotation(&mut interp, &mut transform, dt_raw);
+        // Write-on-change: once the ease's terminal snap converges, an idle
+        // avatar's anchor stops being marked changed — which stops Bevy's
+        // change-gated propagation re-walking its ~200-entity subtree every
+        // frame (and is the precondition for skipping the skeleton driver).
+        if transform.translation != interp.rendered_translation {
+            transform.translation = interp.rendered_translation;
+        }
+        if let Some(rotation) = smoothed_rotation(&mut interp, dt_raw)
+            && transform.rotation != rotation
+        {
+            transform.rotation = rotation;
+        }
     }
 }
 
@@ -2329,6 +2453,7 @@ mod tests {
             collider_scale: [1.0, 1.0, 1.0],
             render_offset: Vec3::ZERO,
             render_rot_offset: Quat::IDENTITY,
+            rest: None,
         }
     }
 
@@ -2466,6 +2591,76 @@ mod tests {
         assert!(
             next.distance(truth) < 1.0e-6,
             "a region-scale jump snaps to truth"
+        );
+    }
+
+    /// A near-target ease converges *exactly* (the terminal snap): the asymptotic
+    /// lerp alone can stall a hair short of the target in `f32`, which would keep
+    /// the anchor `Transform` marked changed forever.
+    #[test]
+    fn eased_translation_settles_exactly_near_the_target() {
+        let truth = Vec3::new(12.0, 3.0, -7.0);
+        let rendered = Vec3::new(12.000_05, 3.0, -7.0);
+        let next = eased_translation(rendered, truth, false, 0.3);
+        assert_eq!(next, truth, "a sub-epsilon residual snaps to the target");
+    }
+
+    /// The rest-latch predicate: a stationary motion with absorbed residuals
+    /// settles; any residual motion component, offset, or rotation keeps driving.
+    #[test]
+    fn physical_object_settled_requires_stationary_and_absorbed() {
+        let zero = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let stationary = MotionState::new(
+            &Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 22.0,
+            },
+            &zero,
+            &zero,
+            &identity_rotation(),
+            &zero,
+            RegionHandle(0),
+        );
+        assert!(
+            super::physical_object_settled(&stationary, Vec3::ZERO, Quat::IDENTITY),
+            "zeros settle"
+        );
+        let moving = MotionState::new(
+            &Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 22.0,
+            },
+            &Vector {
+                x: 0.5,
+                y: 0.0,
+                z: 0.0,
+            },
+            &zero,
+            &identity_rotation(),
+            &zero,
+            RegionHandle(0),
+        );
+        assert!(
+            !super::physical_object_settled(&moving, Vec3::ZERO, Quat::IDENTITY),
+            "a live velocity keeps driving"
+        );
+        assert!(
+            !super::physical_object_settled(&stationary, Vec3::new(0.01, 0.0, 0.0), Quat::IDENTITY),
+            "an unabsorbed positional residual keeps driving"
+        );
+        assert!(
+            !super::physical_object_settled(
+                &stationary,
+                Vec3::ZERO,
+                Quat::from_rotation_y(0.05_f32)
+            ),
+            "an unabsorbed rotation residual keeps driving"
         );
     }
 }

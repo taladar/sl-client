@@ -1074,6 +1074,13 @@ const DEMO_TITLE: &str = "Text-input demo (F8) - Tab between the fields and type
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub(crate) struct TextInputDemoVisible(pub(crate) bool);
 
+/// Run condition for [`update_demo_value_readouts`]: only while the demo panel
+/// is shown — the parsed-value read-outs are invisible otherwise, and they
+/// re-derive from the live field state on the first shown frame.
+pub(crate) fn text_input_demo_active(visible: Res<TextInputDemoVisible>) -> bool {
+    visible.0
+}
+
 impl TextInputDemoVisible {
     /// The initial visibility, seeded from [`DEMO_ENV`]: set to start shown, unset
     /// to start hidden (the interactive default).

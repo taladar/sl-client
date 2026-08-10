@@ -33,19 +33,16 @@ fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 }
 
 // The water inputs for one frame: the region's EEP `LLSettingsWater` values the
-// reference binds as water-shader uniforms, plus the per-frame sun direction, the
-// camera position (for the view vector — the terrain material's convention of
-// avoiding the view bind group), a sky-reflection tint, and the wave-scroll time.
+// reference binds as water-shader uniforms, plus the per-frame sun direction and
+// a sky-reflection tint. The wave-scroll clock is `globals.time` and the view
+// vector comes from the view bind group's `world_position`, so neither dirties
+// the uniform block per frame.
 //
 // Laid out as `vec3` + trailing scalar pairs (and a `vec2` + `vec2` pair) so the
 // std140 uniform layout matches the Rust `WaterParams` (`ShaderType`) exactly.
 struct WaterParams {
     // The direction toward the sun (or, at night, the moon), Bevy Y-up.
     light_dir: vec3<f32>,
-    // Accumulated seconds, scrolling the wave texcoords (`waterV.glsl` `time`).
-    time: f32,
-    // The camera world position, for the per-fragment view vector.
-    camera_position: vec3<f32>,
     // The fresnel scale (`fresnelScale`): how strongly grazing angles reflect.
     fresnel_scale: f32,
     // The normal-map (wavelet) scale (`normScale`), X/Y horizontal, Z up.
@@ -157,10 +154,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     v.x += (cos(v.x * 0.08) + sin(v.y * 0.02)) * 6.0;
 
     // Three layered wave texcoords, each scrolling with the wave directions and
-    // time (`waterV.glsl` bigWave / littleWave.xy / littleWave.zw).
-    let big_wave = v * vec2<f32>(0.04, 0.04) + water.wave1_dir * water.time * 0.055;
-    let little_wave_a = v * vec2<f32>(0.45, 0.9) + water.wave2_dir * water.time * 0.13;
-    let little_wave_b = v * vec2<f32>(0.1, 0.2) + water.wave1_dir * water.time * 0.1;
+    // time (`waterV.glsl` bigWave / littleWave.xy / littleWave.zw). The clock is
+    // `globals.time` (read GPU-side so a running wave never rewrites the
+    // uniform block); it wraps hourly, which re-seeds the scroll phase with a
+    // one-frame jump — imperceptible on a repeating wave normal map.
+    let wave_time = view_bindings::globals.time;
+    let big_wave = v * vec2<f32>(0.04, 0.04) + water.wave1_dir * wave_time * 0.055;
+    let little_wave_a = v * vec2<f32>(0.45, 0.9) + water.wave2_dir * wave_time * 0.13;
+    let little_wave_b = v * vec2<f32>(0.1, 0.2) + water.wave1_dir * wave_time * 0.1;
 
     // --- waterF.glsl generateWaveNormals + wavef. ---
     // The three tangent-space wave normals (z is the surface up), mapped to world
@@ -181,8 +182,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         wavef.z * water.normal_scale.y,
     ));
 
-    // The eye->surface view vector (the reference `view.xyz` = surface - eye).
-    let vv = normalize(in.world_position - water.camera_position);
+    // The eye->surface view vector (the reference `view.xyz` = surface - eye),
+    // from the view bind group's camera position so a moving camera never
+    // rewrites the uniform block.
+    let vv = normalize(in.world_position - view_bindings::view.world_position);
 
     // --- waterF.glsl calculateFresnelFactors. ---
     // `df3` is three squared fresnel terms (from three wave normals) summed into the

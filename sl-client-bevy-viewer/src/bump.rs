@@ -493,14 +493,14 @@ mod tests {
     fn flat_texture_generates_flat_normals() {
         // A uniform-luminance texture has no gradient, so every normal points
         // straight up (0.5, 0.5, 1.0) → (128, 128, 255).
-        let decoded = Arc::new(DecodedTexture {
-            width: 2,
-            height: 2,
-            components: 3,
-            discard_level: sl_client_bevy::DiscardLevel::FULL,
-            pixels: bytes::Bytes::from(vec![200_u8; 2 * 2 * 4]),
-            aux: None,
-        });
+        let decoded = Arc::new(DecodedTexture::new(
+            2,
+            2,
+            3,
+            sl_client_bevy::DiscardLevel::FULL,
+            bytes::Bytes::from(vec![200_u8; 2 * 2 * 4]),
+            None,
+        ));
         let image = generate_normal_map(&decoded, false);
         let data = image.data.unwrap_or_default();
         assert_eq!(data.get(..4), Some([128, 128, 255, 255].as_slice()));

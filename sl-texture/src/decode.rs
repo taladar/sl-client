@@ -39,9 +39,61 @@ pub struct DecodedImage {
     /// mask — one byte per pixel, `width * height` bytes, row-major. `None` for
     /// any source with four or fewer components.
     pub aux: Option<Bytes>,
+    /// The smallest alpha byte over all [`Self::pixels`], computed once at
+    /// construction (off the frame thread — see [`alpha_range`]) so consumers
+    /// classify transparency without rescanning the image:
+    /// `min_alpha < cutoff` ⇔ "at least one texel below cutoff". `255` for a
+    /// source without an alpha channel (the decoder fills alpha opaque) and
+    /// for an empty image.
+    pub min_alpha: u8,
+    /// The largest alpha byte over all [`Self::pixels`] (see
+    /// [`Self::min_alpha`]): `max_alpha < cutoff` ⇔ "every texel below
+    /// cutoff". `0` for an empty image — test [`Self::min_alpha`] first.
+    pub max_alpha: u8,
+}
+
+/// The `(min, max)` alpha byte over tightly packed RGBA8 `pixels` — the
+/// one-pass scan backing [`DecodedImage::min_alpha`] / \
+/// [`DecodedImage::max_alpha`], run where the pixels are produced (the decode
+/// / composite tasks, off the frame thread). `(255, 0)` for an empty slice.
+#[must_use]
+pub fn alpha_range(pixels: &[u8]) -> (u8, u8) {
+    let mut min = u8::MAX;
+    let mut max = u8::MIN;
+    for &alpha in pixels.iter().skip(3).step_by(RGBA_CHANNELS) {
+        min = min.min(alpha);
+        max = max.max(alpha);
+    }
+    (min, max)
 }
 
 impl DecodedImage {
+    /// Build a decoded image, computing [`Self::min_alpha`] /
+    /// [`Self::max_alpha`] from `pixels` (see [`alpha_range`]). Prefer this
+    /// over a struct literal so no construction site can forget the
+    /// precomputed alpha stats.
+    #[must_use]
+    pub fn new(
+        width: u32,
+        height: u32,
+        components: u16,
+        discard_level: DiscardLevel,
+        pixels: Bytes,
+        aux: Option<Bytes>,
+    ) -> Self {
+        let (min_alpha, max_alpha) = alpha_range(&pixels);
+        Self {
+            width,
+            height,
+            components,
+            discard_level,
+            pixels,
+            aux,
+            min_alpha,
+            max_alpha,
+        }
+    }
+
     /// The number of bytes [`Self::pixels`] should contain for this geometry
     /// (`width * height * 4`), saturating rather than overflowing.
     #[must_use]
@@ -119,6 +171,7 @@ pub fn decode_j2c(
     if pixels.is_empty() {
         return Err(DecodeError::Empty);
     }
+    let (min_alpha, max_alpha) = alpha_range(&pixels);
     Ok(DecodedImage {
         width: data.width,
         height: data.height,
@@ -126,6 +179,8 @@ pub fn decode_j2c(
         discard_level,
         pixels: Bytes::from(pixels),
         aux: None,
+        min_alpha,
+        max_alpha,
     })
 }
 
@@ -188,6 +243,7 @@ fn decode_multicomponent(
         let mask = channel(4);
         (mask.len() >= pixel_count).then(|| Bytes::from(mask))
     };
+    let (min_alpha, max_alpha) = alpha_range(&pixels);
     Ok(DecodedImage {
         width,
         height,
@@ -195,6 +251,8 @@ fn decode_multicomponent(
         discard_level,
         pixels: Bytes::from(pixels),
         aux,
+        min_alpha,
+        max_alpha,
     })
 }
 
@@ -326,6 +384,7 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         width = next_width;
         height = next_height;
     }
+    let (min_alpha, max_alpha) = alpha_range(&pixels);
     DecodedImage {
         width,
         height,
@@ -333,6 +392,8 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         discard_level: target,
         pixels: Bytes::from(pixels),
         aux: aux.map(Bytes::from),
+        min_alpha,
+        max_alpha,
     }
 }
 
@@ -402,14 +463,14 @@ mod tests {
             .unwrap_or(0)
             .saturating_mul(usize::try_from(height).unwrap_or(0));
         let pixels: Vec<u8> = std::iter::repeat_n(rgba, count).flatten().collect();
-        DecodedImage {
+        DecodedImage::new(
             width,
             height,
-            components: 4,
-            discard_level: DiscardLevel::FULL,
-            pixels: Bytes::from(pixels),
-            aux: None,
-        }
+            4,
+            DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
     }
 
     #[test]

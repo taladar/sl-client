@@ -92,6 +92,13 @@ pub(crate) fn toggle_pipeline_overlay(
     }
 }
 
+/// Run condition for [`update_pipeline_overlay`]: the overlay is shown, or its
+/// visibility just flipped (the changed arm runs the hide write on toggle-off
+/// and the initial sync) — a hidden overlay costs no dispatch at all.
+pub(crate) fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> bool {
+    visible.0 || visible.is_changed()
+}
+
 /// Drive the pipeline-status node's visibility from [`PipelineOverlayVisible`],
 /// and — while it is shown — rewrite it from the live texture / mesh store and
 /// gate snapshots (P19.2). The stats are only sampled when the panel is visible,

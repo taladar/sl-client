@@ -47,14 +47,16 @@ const WATER_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d6c14-9b3a-4e57-8c0
 
 /// The per-frame inputs for the water surface: the region's EEP `LLSettingsWater`
 /// values the reference binds as water-shader uniforms, plus the per-frame sun
-/// direction, camera position (for the view vector), sky-reflection tint, and
-/// wave-scroll time.
+/// direction and sky-reflection tint. The wave-scroll clock and the camera
+/// position are **not** CPU-driven: `water.wgsl` reads Bevy's `globals.time`
+/// and the view's `world_position` directly, so running waves and a moving
+/// camera never dirty the material.
 ///
 /// Laid out as `vec3` + trailing scalar pairs (and a `vec2` + `vec2` pair) so the
 /// std140 uniform layout matches the `water.wgsl` `WaterParams` (`ShaderType`)
 /// exactly: a `vec3` occupies 12 bytes with 16-byte alignment, and the following
 /// scalar fills the 4-byte remainder of that 16-byte slot.
-#[derive(Clone, Copy, Debug, ShaderType)]
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root as `WaterParams`, where the name reads clearly"
@@ -62,10 +64,6 @@ const WATER_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2f8d6c14-9b3a-4e57-8c0
 pub struct WaterParams {
     /// The direction toward the sun (or, at night, the moon) in Bevy Y-up space.
     pub light_dir: Vec3,
-    /// Accumulated seconds, scrolling the wave texcoords (`waterV.glsl` `time`).
-    pub time: f32,
-    /// The camera world position, for the per-fragment view vector.
-    pub camera_position: Vec3,
     /// The fresnel scale (`fresnelScale`): how strongly grazing angles reflect.
     pub fresnel_scale: f32,
     /// The normal-map (wavelet) scale (`normScale`), X/Y horizontal, Z up.

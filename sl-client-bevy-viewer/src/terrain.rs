@@ -38,7 +38,7 @@
 //! [`sl_to_bevy_rotation`], converting to Bevy's Y-up world only at the entity
 //! boundary.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -60,15 +60,34 @@ const fn default_terrain_lighting() -> TerrainLighting {
     }
 }
 
+/// The terrain lighting most recently applied to the region materials (and the
+/// value a newly created region material is seeded with), so
+/// [`drive_terrain_lighting`] can skip its `Assets::iter_mut` — which marks
+/// **every** terrain material modified, re-preparing each one's bind group —
+/// on the (typical) frame where the resolved sky lighting is unchanged.
+#[derive(Resource)]
+pub(crate) struct CurrentTerrainLighting(pub(crate) TerrainLighting);
+
+impl Default for CurrentTerrainLighting {
+    fn default() -> Self {
+        Self(default_terrain_lighting())
+    }
+}
+
 /// Drive every region's terrain material with the sky frame's atmospheric sun
-/// (`sunlit`) and ambient (`amblit`) colours each frame, so the ground is lit like
+/// (`sunlit`) and ambient (`amblit`) colours, so the ground is lit like
 /// the reference legacy terrain — warm at dawn / dusk, cool at night — rather than
 /// by the raw (blue) reflection-probe irradiance. The colours are the same
 /// [`resolve_sky`](crate::sky::resolve_sky) derives for the scene directional light
 /// and the sky ambient, so the terrain agrees with the rest of the scene lighting.
+///
+/// The materials are only touched when the resolved lighting differs from the
+/// last applied value ([`CurrentTerrainLighting`]): under a static sky this
+/// system does no ECS/asset writes at all.
 pub(crate) fn drive_terrain_lighting(
     environment: Res<crate::environment::EnvironmentState>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    mut current: ResMut<CurrentTerrainLighting>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
@@ -84,6 +103,10 @@ pub(crate) fn drive_terrain_lighting(
         sun_color: Vec3::from_array(resolved.diffuse),
         ambient_color: Vec3::from_array(resolved.ambient),
     };
+    if current.0 == lighting {
+        return;
+    }
+    current.0 = lighting;
     for (_id, material) in materials.iter_mut() {
         material.lighting = lighting;
     }
@@ -315,9 +338,60 @@ pub(crate) fn recenter_terrain(
     }
 }
 
+/// The default for [`TerrainRebuildBudget`]: deferred patch-mesh rebuilds per
+/// frame.
+const DEFAULT_TERRAIN_REBUILD_BUDGET: usize = 8;
+
+/// The per-frame cap on deferred terrain patch-mesh rebuilds drained by
+/// [`drain_patch_rebuilds`] (env `SL_VIEWER_TERRAIN_REBUILD_BUDGET`).
+#[derive(Resource)]
+pub(crate) struct TerrainRebuildBudget {
+    /// How many queued patch rebuilds may run each frame.
+    per_frame: usize,
+}
+
+impl Default for TerrainRebuildBudget {
+    fn default() -> Self {
+        let per_frame = std::env::var("SL_VIEWER_TERRAIN_REBUILD_BUDGET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_TERRAIN_REBUILD_BUDGET);
+        Self { per_frame }
+    }
+}
+
+/// Patch-mesh rebuilds deferred to [`drain_patch_rebuilds`]'s per-frame
+/// budget, deduped — during a region stream the neighbour-seam pass re-queues
+/// the same patches over and over, and a `RegionInfoHandshake` queues a whole
+/// region (up to 256 patches); each queued patch rebuilds once, from the
+/// state current at drain time (never stale).
+#[derive(Resource, Default)]
+pub(crate) struct PendingPatchRebuilds {
+    /// Patches awaiting a rebuild, oldest at the front.
+    queue: VecDeque<PatchKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<PatchKey>,
+}
+
+impl PendingPatchRebuilds {
+    /// Queue a patch rebuild (a no-op if it is already queued).
+    fn push(&mut self, key: PatchKey) {
+        if self.queued.insert(key) {
+            self.queue.push_back(key);
+        }
+    }
+}
+
 /// Fold terrain events into the scene: build (or rebuild) each land patch's
 /// heightfield mesh, learn each region's compositing parameters and request its
 /// detail textures, and swap each decoded texture into the right material(s).
+///
+/// A freshly arrived patch still builds inline (its own latency matters); the
+/// seam-closing neighbour rebuilds and the handshake's whole-region rebuild
+/// are **queued** into [`PendingPatchRebuilds`] and drained a few per frame by
+/// [`drain_patch_rebuilds`], so a region streaming in no longer rebuilds an
+/// unbounded number of patch meshes in one frame.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected ECS resources and event \
@@ -328,7 +402,9 @@ pub(crate) fn update_terrain(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<TerrainState>,
+    mut rebuilds: ResMut<PendingPatchRebuilds>,
     mut manager: ResMut<TextureManager>,
+    lighting: Res<CurrentTerrainLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -338,18 +414,25 @@ pub(crate) fn update_terrain(
         match &event.0 {
             SlSessionEvent::TerrainPatch(patch) if patch.layer.is_land() => {
                 let key = (patch.region_handle, patch.patch_x, patch.patch_y);
-                ensure_region(&mut state, patch.region_handle, &mut images, &mut materials);
+                ensure_region(
+                    &mut state,
+                    patch.region_handle,
+                    lighting.0,
+                    &mut images,
+                    &mut materials,
+                );
                 state.raw_patches.insert(key, (**patch).clone());
                 state.map_revision = state.map_revision.wrapping_add(1);
                 spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
                 // This patch supplies the shared far edge for its west / south
-                // neighbours in the same region, so rebuild them to close seams.
-                rebuild_neighbours(&state, key, &mut meshes, &mut commands);
+                // neighbours in the same region, so rebuild them (a few per
+                // frame, deduped) to close seams.
+                queue_neighbour_rebuilds(&state, key, &mut rebuilds);
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
                 learn_composition(&mut state, identity, &mut manager, &mut materials);
                 state.map_revision = state.map_revision.wrapping_add(1);
-                rebuild_region_patches(&state, identity.region_handle, &mut meshes, &mut commands);
+                queue_region_rebuilds(&state, identity.region_handle, &mut rebuilds);
             }
             _other => {}
         }
@@ -365,9 +448,15 @@ pub(crate) fn update_terrain(
 /// material exist, creating the material (with all four detail slots on the
 /// placeholder) on the region's first patch and reconciling any already-decoded
 /// textures into it.
+///
+/// A new material is seeded with the *current* resolved lighting, not the
+/// static default: [`drive_terrain_lighting`] only rewrites the materials when
+/// the lighting changes, so a material created under a stable sky would
+/// otherwise keep the default forever.
 fn ensure_region(
     state: &mut TerrainState,
     region: RegionHandle,
+    lighting: TerrainLighting,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
@@ -382,7 +471,7 @@ fn ensure_region(
             detail1: placeholder.clone(),
             detail2: placeholder.clone(),
             detail3: placeholder,
-            lighting: default_terrain_lighting(),
+            lighting,
         }));
     }
     reconcile_region(state, region, materials);
@@ -462,16 +551,17 @@ fn rebuild_existing(
     commands.entity(entity).insert(Mesh3d(mesh));
 }
 
-/// Rebuild the west / south / south-west neighbours of the patch at `key`: they
-/// share their far edge with this one, so a newly arrived patch closes their
-/// seam. The step crosses region boundaries — a patch on a region's west / south
-/// edge is the shared far edge of the **adjacent region's** east / north edge
-/// patch, so a border seam closes as the neighbouring region streams in.
-fn rebuild_neighbours(
+/// Queue a rebuild of the west / south / south-west neighbours of the patch at
+/// `key`: they share their far edge with this one, so a newly arrived patch
+/// closes their seam. The step crosses region boundaries — a patch on a
+/// region's west / south edge is the shared far edge of the **adjacent
+/// region's** east / north edge patch, so a border seam closes as the
+/// neighbouring region streams in. The rebuilds themselves run in
+/// [`drain_patch_rebuilds`] under its per-frame budget.
+fn queue_neighbour_rebuilds(
     state: &TerrainState,
     key: PatchKey,
-    meshes: &mut Assets<Mesh>,
-    commands: &mut Commands,
+    rebuilds: &mut PendingPatchRebuilds,
 ) {
     let (region, patch_x, patch_y) = key;
     let Some(size) = state.raw_patches.get(&key).map(|patch| patch.size) else {
@@ -482,49 +572,55 @@ fn rebuild_neighbours(
     let south = step_back(global_y, patch_y, size);
     if let Some((west_metre, west_patch_x)) = west {
         let west_region = RegionHandle::from_global(west_metre, global_y);
-        rebuild_existing(
-            state,
-            (west_region, west_patch_x, patch_y),
-            meshes,
-            commands,
-        );
+        rebuilds.push((west_region, west_patch_x, patch_y));
     }
     if let Some((south_metre, south_patch_y)) = south {
         let south_region = RegionHandle::from_global(global_x, south_metre);
-        rebuild_existing(
-            state,
-            (south_region, patch_x, south_patch_y),
-            meshes,
-            commands,
-        );
+        rebuilds.push((south_region, patch_x, south_patch_y));
     }
     if let (Some((west_metre, west_patch_x)), Some((south_metre, south_patch_y))) = (west, south) {
         let corner_region = RegionHandle::from_global(west_metre, south_metre);
-        rebuild_existing(
-            state,
-            (corner_region, west_patch_x, south_patch_y),
-            meshes,
-            commands,
-        );
+        rebuilds.push((corner_region, west_patch_x, south_patch_y));
     }
 }
 
-/// Rebuild every already-rendered patch of `region`, called once that region's
-/// elevation bands arrive after its patches.
-fn rebuild_region_patches(
+/// Queue a rebuild of every already-rendered patch of `region`, called once
+/// that region's elevation bands arrive after its patches — up to a whole
+/// region's 16×16 patches, which is exactly the burst the budgeted drain
+/// spreads across frames.
+fn queue_region_rebuilds(
     state: &TerrainState,
     region: RegionHandle,
-    meshes: &mut Assets<Mesh>,
-    commands: &mut Commands,
+    rebuilds: &mut PendingPatchRebuilds,
 ) {
-    let keys: Vec<PatchKey> = state
-        .patches
-        .keys()
-        .copied()
-        .filter(|(patch_region, _, _)| *patch_region == region)
-        .collect();
-    for key in keys {
-        rebuild_existing(state, key, meshes, commands);
+    for &key in state.patches.keys() {
+        let (patch_region, _, _) = key;
+        if patch_region == region {
+            rebuilds.push(key);
+        }
+    }
+}
+
+/// Drain up to [`TerrainRebuildBudget`] queued patch-mesh rebuilds. A queued
+/// key whose patch has since vanished is free; a rebuild always reads the
+/// state current at drain time, so a deferred rebuild is never stale.
+pub(crate) fn drain_patch_rebuilds(
+    mut rebuilds: ResMut<PendingPatchRebuilds>,
+    budget: Res<TerrainRebuildBudget>,
+    state: Res<TerrainState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    let mut built = 0_usize;
+    while built < budget.per_frame {
+        let Some(key) = rebuilds.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = rebuilds.queued.remove(&key);
+        if state.patches.contains_key(&key) {
+            rebuild_existing(&state, key, &mut meshes, &mut commands);
+            built = built.saturating_add(1);
+        }
     }
 }
 
@@ -1279,6 +1375,37 @@ mod tests {
         assert_eq!(
             metres_to_f32(0x0010_0100).to_bits(),
             1_048_832.0_f32.to_bits()
+        );
+    }
+
+    /// A region material created after the sky lighting has moved on from the
+    /// default is seeded with the *current* lighting: `drive_terrain_lighting`
+    /// only rewrites materials when the lighting changes, so a stale default
+    /// seed would otherwise persist until the next sky change.
+    #[test]
+    fn ensure_region_seeds_current_lighting() {
+        let mut state = super::TerrainState::default();
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let mut materials = bevy::asset::Assets::<sl_client_bevy::TerrainMaterial>::default();
+        let lighting = sl_client_bevy::TerrainLighting {
+            sun_color: bevy::math::Vec3::new(0.9, 0.5, 0.2),
+            ambient_color: bevy::math::Vec3::new(0.1, 0.2, 0.3),
+        };
+        super::ensure_region(
+            &mut state,
+            RegionHandle(7),
+            lighting,
+            &mut images,
+            &mut materials,
+        );
+        let material = state
+            .regions
+            .get(&RegionHandle(7))
+            .and_then(|entry| entry.material.as_ref())
+            .and_then(|handle| materials.get(handle));
+        assert!(
+            material.is_some_and(|material| material.lighting == lighting),
+            "the new region material should carry the passed-in lighting"
         );
     }
 }

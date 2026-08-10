@@ -9,7 +9,7 @@
 //! pipeline a bare *"Internal data stream error."* / flow-return `-5`. So the
 //! true reason never reaches the application bus (see
 //! [`sl_gst::AudioStreamStatus::network_diagnosable`] /
-//! [`sl_media::SurfaceStatus::network_diagnosable`]).
+//! `sl_media::SurfaceStatus::network_diagnosable`).
 //!
 //! This module recovers it the only way left: when a stream reports such a
 //! generic HTTP-source failure, [`MediaDiagnostics::request`] probes the URL

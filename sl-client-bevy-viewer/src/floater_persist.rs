@@ -383,7 +383,7 @@ fn flush_floater_settings(
         return;
     };
     if time.elapsed_secs() - since >= FLUSH_INTERVAL_SECS {
-        settings.save();
+        settings.save_async();
         dirty.since = None;
     }
 }

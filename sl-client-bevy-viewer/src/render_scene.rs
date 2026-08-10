@@ -1109,14 +1109,7 @@ fn uv_reference_texture() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 4, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// [`SCENES`] `prim-textured-tiling`: a prim whose texture must repeat.
@@ -1265,14 +1258,7 @@ fn sculpt_sphere_map() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 3,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 3, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// [`SCENES`] `sculpt-sphere`: a sculpted prim stitched from [`sculpt_sphere_map`].
@@ -2774,14 +2760,15 @@ fn legacy_material_face(
 /// the second half's input is a fetched asset, which is what this stands in for.
 fn normal_map_texture(source: &Arc<DecodedTexture>) -> DecodedTexture {
     let generated = generate_normal_map(source, false);
-    DecodedTexture {
-        width: generated.width(),
-        height: generated.height(),
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(generated.data.unwrap_or_default()),
-        aux: None,
-    }
+    let (width, height) = (generated.width(), generated.height());
+    DecodedTexture::new(
+        width,
+        height,
+        4,
+        DiscardLevel::FULL,
+        Bytes::from(generated.data.unwrap_or_default()),
+        None,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2940,8 +2927,11 @@ fn spawn_sky_at(
             resolved.lightnorm,
             resolved.sun_up_factor,
             resolved.glow_factor,
-            // No scroll: `drive_clouds` accumulates it from the frame clock, and a
-            // scene that declared a still sky must not quietly drift.
+            // No scroll (zero rate): the shader's GPU-side integration is a
+            // no-op, and a scene that declared a still sky must not quietly
+            // drift.
+            0.0,
+            Vec2::ZERO,
             Vec2::ZERO,
         ),
         cloud_noise: placeholder.clone(),
@@ -2973,8 +2963,7 @@ fn spawn_sky_at(
             // `drive_stars` folds in, so the field fades with the time of day
             // rather than being pinned visible.
             custom_alpha: (sky.star_brightness / 500.0).min(1.0),
-            time: 0.0,
-            reserved: Vec2::ZERO,
+            reserved: Vec3::ZERO,
         },
         diffuse: placeholder.clone(),
     });
@@ -3192,14 +3181,7 @@ fn water_wavelet_texture() -> DecodedTexture {
             pixels.push(255);
         }
     }
-    DecodedTexture {
-        width: SIZE,
-        height: SIZE,
-        components: 4,
-        discard_level: DiscardLevel::FULL,
-        pixels: Bytes::from(pixels),
-        aux: None,
-    }
+    DecodedTexture::new(SIZE, SIZE, 4, DiscardLevel::FULL, Bytes::from(pixels), None)
 }
 
 /// Where the [`water_surface`] scene's camera stands, in Second Life metres.
@@ -3238,19 +3220,15 @@ fn water_surface(
         .add(water_normal_image(&water_wavelet_texture()));
     // Midday's sun, so the sea is lit from where the sky scenes put it.
     let resolved = resolve_sky(&sky_settings_from(&MIDDAY));
-    // The scene's own declared camera pose, in Bevy space — the water's frame.
-    let camera = sl_to_bevy_rotation().mul_vec3(WATER_CAMERA);
     let material = assets.water_materials.add(WaterMaterial {
         params: water_params(
             &WaterSettings::legacy_default("Default"),
             resolved.light_dir,
-            camera,
             // The sky's own horizon colour would need the atmosphere resolved per
             // pixel; `drive_water` uses a sampled reflection tint, and this is its
             // pre-environment seed.
             Vec3::new(0.5, 0.6, 0.8),
             Vec3::from_array(resolved.diffuse),
-            0.0,
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.

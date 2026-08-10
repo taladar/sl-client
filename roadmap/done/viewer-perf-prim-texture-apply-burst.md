@@ -2,7 +2,7 @@
 id: viewer-perf-prim-texture-apply-burst
 title: Throttle prim-texture application + GPU asset uploads during rez bursts
 topic: viewer
-status: ready
+status: done
 origin: Tracy profiling of Aditi rezzing (2026-07-31, 2-min capture)
 refs: [viewer-perf-texture-decode-cache, viewer-perf-write-on-change-uploads]
 ---
@@ -42,3 +42,24 @@ Investigate:
 Measure the per-event max (not just mean) of these systems before/after with a
 multi-minute capture during an active rez burst (the mean hides them; see
 `book/src/tools/profiling.md` for the capture/export recipe).
+
+## Done (2026-08-10, `performance` branch)
+
+All three investigate items are covered by shipped mechanisms:
+
+- **Prim faces per frame are capped**: `TextureApplyBudget` (textures.rs) —
+  a per-frame image-build budget (default 6) + face re-prep budget
+  (default 48) with deferred-overflow queues, spent by
+  `apply_prim_textures` / `patch_parked_decoded_textures` and drained by
+  `drain_deferred_face_textures` / `drain_lod_reuploads`.
+- **GPU image uploads are rate-limited** by the same image budget: Bevy
+  only uploads `Image`s we insert, and at most `image_per_frame` decoded
+  textures become `Image`s per frame.
+- **Mesh (de)allocation churn is bounded** by the spawn/apply budgets:
+  `SpawnBudget` (object geometry builds), and this branch's
+  `GeometryApplyBudget` ([[viewer-perf-decoded-geometry-budget]]) capping
+  the decode-result mesh / sculpt / rigged builds — so
+  `allocate_and_free_meshes` sees a budgeted trickle instead of a burst.
+
+Still open (not blocking): the multi-minute Tracy before/after re-measure
+of the per-event max distribution during an aditi rez burst.

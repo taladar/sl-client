@@ -1322,7 +1322,7 @@ fn persist_table_state(
         }
     }
     if wrote {
-        settings.save();
+        settings.save_async();
     }
 }
 

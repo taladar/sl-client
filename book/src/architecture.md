@@ -67,7 +67,12 @@ different runtimes.
 
 - **`sl-client-bevy`** — an alternative I/O driver that integrates the same
   `sl-proto` core into the [Bevy](https://bevyengine.org/) ECS, for clients
-  built as Bevy apps.
+  built as Bevy apps. The session (socket, LLUDP parse, CAPS ingestion,
+  timers, and the optional chat-log / inventory disk caches) runs on its own
+  dedicated network thread; the per-frame `drive` system is only a thin
+  channel pump between that thread and the Bevy messages, so ACKs and
+  retransmits do not wait for render frames and a login burst's protocol
+  decode never stalls one.
 
 - **`sl-survey`** — a headless binary (built on the tokio driver) that logs in,
   walks the map, and collects region/parcel metadata. A good worked example of

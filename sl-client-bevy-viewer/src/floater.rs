@@ -612,6 +612,31 @@ pub(crate) fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> O
         .find_map(|(entity, floater)| (floater.id == id).then_some(entity))
 }
 
+/// Run-condition builder: `true` while the floater with the stable id `id`
+/// exists and is shown (`UiPanelShown(true)`), `false` before its first spawn
+/// and while it is closed — the shared gate for a floater's per-frame
+/// view-refresh systems, so a closed panel costs no dispatch at all.
+///
+/// A `run_if`-skipped system keeps its change-detection ticks, so model
+/// changes accumulating while the floater is hidden fold into one catch-up
+/// run on the open transition — no explicit dirty flag is needed.
+///
+/// Setting `SL_VIEWER_DISABLE_PANEL_GATE` (checked once, at registration)
+/// makes every gate pass unconditionally — the A/B toggle for comparing
+/// against the ungated pre-change scheduling, in the same spirit as the
+/// other `SL_VIEWER_DISABLE_*` render toggles.
+pub(crate) fn floater_shown(
+    id: &'static str,
+) -> impl FnMut(Query<(&Floater, &UiPanelShown)>) -> bool {
+    let disabled = std::env::var_os("SL_VIEWER_DISABLE_PANEL_GATE").is_some();
+    move |floaters: Query<(&Floater, &UiPanelShown)>| {
+        disabled
+            || floaters
+                .iter()
+                .any(|(floater, shown)| floater.id == id && shown.0)
+    }
+}
+
 /// Toggle the floater with the given stable id, when its chrome exists — the
 /// shared open/close primitive for every by-id opener (toolbar, menu bar,
 /// module-internal open paths).

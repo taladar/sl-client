@@ -90,7 +90,7 @@ pub struct SlIdentity {
 /// [`can_fly`](Self::can_fly) combines the region-wide fly block and the parcel's
 /// `ALLOW_FLY`, and is permissive while the parcel is unknown (so a take-off is
 /// not blocked before the push arrives) — but `false` before login.
-#[derive(Resource, Default, Debug, Clone)]
+#[derive(Resource, Default, Debug, Clone, PartialEq)]
 pub struct SlAgentParcel {
     /// The parcel the agent currently stands on, or `None` before it resolves.
     pub current: Option<ParcelInfo>,
