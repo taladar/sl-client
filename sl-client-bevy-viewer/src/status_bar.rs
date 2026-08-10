@@ -609,12 +609,32 @@ fn request_balance_on_entry(
     }
 }
 
-/// Fold each [`SlSessionEvent::MoneyBalance`] into the [`AgentBalance`] mirror.
-fn track_balance(mut events: MessageReader<SlEvent>, mut agent_balance: ResMut<AgentBalance>) {
+/// Fold each [`SlSessionEvent::MoneyBalance`] into the [`AgentBalance`] mirror,
+/// and chime the money up / down UI sound on a real balance change (not the first
+/// reply, which is the initial read rather than a transaction).
+fn track_balance(
+    mut events: MessageReader<SlEvent>,
+    mut agent_balance: ResMut<AgentBalance>,
+    mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,
+) {
     for event in events.read() {
         if let SlSessionEvent::MoneyBalance(money) = &event.0 {
             let next = Some(LindenBalance::from(money.balance.clone()));
             if agent_balance.balance != next {
+                if let (Some(before), Some(after)) = (
+                    agent_balance
+                        .balance
+                        .as_ref()
+                        .and_then(LindenBalance::to_i64),
+                    next.as_ref().and_then(LindenBalance::to_i64),
+                ) {
+                    use crate::ui_sounds::{PlayUiSound, UiSound};
+                    if after > before {
+                        ui_sound.write(PlayUiSound(UiSound::MoneyUp));
+                    } else if after < before {
+                        ui_sound.write(PlayUiSound(UiSound::MoneyDown));
+                    }
+                }
                 agent_balance.balance = next;
             }
         }

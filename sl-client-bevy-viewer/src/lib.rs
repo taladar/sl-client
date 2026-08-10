@@ -185,6 +185,7 @@ mod sky;
 mod sky_presets;
 mod slurl_dispatch;
 mod snapshot_floater;
+mod sound_cache;
 mod spacenav;
 mod stand_stop_button;
 mod status_bar;
@@ -217,6 +218,7 @@ mod ui_perf;
 mod ui_pseudoloc;
 mod ui_radio;
 mod ui_search;
+mod ui_sounds;
 mod ui_tab;
 mod ui_table;
 #[cfg(test)]
@@ -235,6 +237,7 @@ mod web_floater;
 mod world_map;
 mod world_map_math;
 mod world_map_tiles;
+mod world_sounds;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -1090,6 +1093,15 @@ fn run_session(
     // whose `FromWorld` resources (the selection highlight / face-cursor overlay
     // materials) build against `Assets<FaceMaterial>` at plugin-build time.
     .add_plugins(crate::audio::AudioPlugin)
+    // The shared sound-asset fetch/decode/cache (viewer-in-world-sounds,
+    // viewer-ui-sound-effects) and the in-world spatial-sound producer that
+    // feeds the mixer's Sfx bus (llTriggerSound one-shots + attached sounds).
+    .add_plugins(crate::sound_cache::SoundCachePlugin)
+    .add_plugins(crate::world_sounds::WorldSoundsPlugin)
+    // The viewer's own 2-D UI feedback sounds on the mixer's UI bus
+    // (viewer-ui-sound-effects): the typing chirp, money up/down, teleport,
+    // snapshot shutter — raised as PlayUiSound messages by their surfaces.
+    .add_plugins(crate::ui_sounds::UiSoundsPlugin)
     .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     // The build tool (viewer-object-edit-floater-shell): the Build Tools
     // floater, the edit-mode switch, and the numeric transform fields.

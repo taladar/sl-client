@@ -227,6 +227,15 @@ pub trait AudioMixer {
     fn play_spatial(&mut self, clip: &DecodedClip, params: SpatialParams) -> Option<VoiceId>;
     /// Stop a playing voice.
     fn stop_voice(&mut self, id: VoiceId);
+    /// Move a spatial voice's source position (a no-op for a 2-D voice or an
+    /// unknown id). The new offset is recomputed against the listener on the next
+    /// [`update`](AudioMixer::update), so an attached / looped sound can follow
+    /// its object as it moves.
+    fn set_voice_position(&mut self, id: VoiceId, position: [f32; 3]);
+    /// Set a playing voice's gain (linear `[0.0, 1.0]`), applied live — the path
+    /// an `AttachedSoundGainChange` takes without restarting the loop. A no-op for
+    /// an unknown id.
+    fn set_voice_gain(&mut self, id: VoiceId, gain: f32);
     /// Whether a voice is still playing.
     fn is_playing(&self, id: VoiceId) -> bool;
     /// Commit queued graph edits and parameter changes; call once per frame.
@@ -862,6 +871,44 @@ impl AudioMixer for Mixer {
         self.remove_voice(id);
     }
 
+    fn set_voice_position(&mut self, id: VoiceId, position: [f32; 3]) {
+        if let Some(voice) = self.voices.get_mut(&id) {
+            voice.position = Some(position);
+        }
+    }
+
+    fn set_voice_gain(&mut self, id: VoiceId, gain: f32) {
+        let gain = gain.clamp(0.0, 1.0);
+        let Some(voice) = self.voices.get_mut(&id) else {
+            return;
+        };
+        if (voice.gain - gain).abs() < f32::EPSILON {
+            return;
+        }
+        // Diff only the sampler's volume against a baseline that matches every
+        // other field, so a single live volume patch reaches the RT node without
+        // restarting playback.
+        let repeat_mode = if voice.looped {
+            firewheel::nodes::sampler::RepeatMode::RepeatEndlessly
+        } else {
+            firewheel::nodes::sampler::RepeatMode::default()
+        };
+        let baseline = SamplerNode {
+            volume: firewheel::Volume::Linear(voice.gain.clamp(0.0, 1.0)),
+            repeat_mode,
+            ..Default::default()
+        };
+        let updated = SamplerNode {
+            volume: firewheel::Volume::Linear(gain),
+            repeat_mode,
+            ..Default::default()
+        };
+        let sampler_id = voice.sampler_id;
+        voice.gain = gain;
+        let mut queue = self.cx.event_queue(sampler_id);
+        updated.diff(&baseline, PathBuilder::default(), &mut queue);
+    }
+
     fn is_playing(&self, id: VoiceId) -> bool {
         self.voices.contains_key(&id)
     }
@@ -958,5 +1005,18 @@ mod tests {
         assert!(!mixer.is_started());
         mixer.set_listener(Listener::default());
         assert_eq!(mixer.listener(), Listener::default());
+    }
+
+    #[test]
+    fn voice_position_and_gain_on_unknown_id_are_no_ops() {
+        let Ok(mut mixer) = Mixer::new(&MixerConfig::default()) else {
+            unreachable!("graph builds")
+        };
+        // No voices exist without a device; moving / regaining a phantom voice
+        // must not panic (the path an AttachedSound update takes before its clip
+        // has decoded, or after the sound has already been evicted).
+        mixer.set_voice_position(VoiceId(123), [1.0, 2.0, 3.0]);
+        mixer.set_voice_gain(VoiceId(123), 0.5);
+        assert!(!mixer.is_playing(VoiceId(123)));
     }
 }

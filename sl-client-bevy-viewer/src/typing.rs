@@ -40,15 +40,17 @@
 //! state — start typing when the bar gains a character, stop on send / close —
 //! without touching this driver.
 //!
-//! The typing UI *sound* the reference viewer also plays is deliberately left out:
-//! the viewer has no sound-effect playback yet (that is a separate roadmap task),
-//! so only the animation and the wire signal are implemented here.
+//! The typing UI *sound* the reference viewer plays (`UISndTyping`) is now raised
+//! on the typing rising edge through [`PlayUiSound`](crate::ui_sounds::PlayUiSound)
+//! — the UI-sound bus (`viewer-ui-sound-effects`) closed the gap this module used
+//! to record.
 
 use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::avatars::AvatarState;
+use crate::ui_sounds::{PlayUiSound, UiSound};
 
 /// The short name of the built-in `ANIM_AGENT_TYPE` animation in the [`sl_anim`]
 /// registry — the hands-on-keyboard gesture played and requested while typing.
@@ -97,6 +99,12 @@ impl TypingState {
 /// back as an `AvatarAnimation` the Phase 18 path also plays, but they share the
 /// one `ANIM_AGENT_TYPE` id so the pose merge collapses them to a single motion
 /// rather than doubling.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's params are its dependencies; the typing driver reads time, \
+              identity, avatars, its state, the animation manager + playback, and writes both \
+              the command stream and the UI-sound stream"
+)]
 pub(crate) fn drive_own_typing(
     time: Res<Time>,
     identity: Res<SlIdentity>,
@@ -105,6 +113,7 @@ pub(crate) fn drive_own_typing(
     mut manager: ResMut<AnimationManager>,
     mut playback: ResMut<AnimationPlayback>,
     mut writer: MessageWriter<SlCommand>,
+    mut ui_sound: MessageWriter<PlayUiSound>,
 ) {
     let now = time.elapsed_secs();
     let active = state.is_active();
@@ -124,6 +133,10 @@ pub(crate) fn drive_own_typing(
             }));
         }
         writer.write(SlCommand(Command::Typing(active)));
+        // The reference viewer's typing chirp, on the rising edge only.
+        if active {
+            ui_sound.write(PlayUiSound(UiSound::Typing));
+        }
         state.advertised = active;
         if std::env::var("SL_VIEWER_LOG_TYPING").as_deref() == Ok("1") {
             info!("P31.9 own typing -> {active}");

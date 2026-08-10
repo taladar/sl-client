@@ -995,6 +995,7 @@ fn drive_capture(
     mut nodes: Query<&mut Node>,
     mut hud: Query<&mut Visibility, (With<HudScreen>, Without<BalanceReadout>)>,
     mut balance: Query<&mut Visibility, (With<BalanceReadout>, Without<HudScreen>)>,
+    mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,
 ) {
     match state.phase {
         CapturePhase::Idle => {}
@@ -1002,6 +1003,10 @@ fn drive_capture(
             state.phase = CapturePhase::Waiting(frames.saturating_sub(1));
         }
         CapturePhase::Waiting(_zero) => {
+            // The shutter fires now — play the reference viewer's shutter click.
+            ui_sound.write(crate::ui_sounds::PlayUiSound(
+                crate::ui_sounds::UiSound::Snapshot,
+            ));
             // Read the window frame back into `CapturedShot`; `process_shot` finishes.
             commands.spawn(Screenshot::primary_window()).observe(
                 |captured: On<ScreenshotCaptured>,

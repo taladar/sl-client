@@ -207,6 +207,10 @@ impl Plugin for ViewerSkinPlugin {
         app.add_plugins(FlairPlugin);
         register_logical_properties(app);
         register_caret_properties(app);
+        // The `-sk-uisnd-<key>` UI-sound overrides (`viewer-ui-sound-effects`):
+        // registered here because the skin plugin owns `bevy_flair`, before the
+        // CSS loader snapshots the property registry.
+        crate::ui_sounds::register_skin_sound_properties(app);
         app.init_resource::<SkinSelection>()
             .add_systems(
                 Startup,

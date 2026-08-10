@@ -459,6 +459,7 @@ fn ingest_events(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     mut flow: ResMut<TeleportFlow>,
+    mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,
 ) {
     let now = time.elapsed_secs_f64();
     for event in events.read() {
@@ -467,6 +468,10 @@ fn ingest_events(
                 let entry = flow.pending_entry(now);
                 entry.phase = Phase::Requested;
                 entry.updated_at = now;
+                // The reference viewer's "teleport out" chime as the flow begins.
+                ui_sound.write(crate::ui_sounds::PlayUiSound(
+                    crate::ui_sounds::UiSound::TeleportOut,
+                ));
             }
             SlSessionEvent::TeleportProgress { message, .. } => {
                 let entry = flow.pending_entry(now);

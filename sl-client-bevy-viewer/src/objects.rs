@@ -697,6 +697,15 @@ impl ObjectState {
         self.origin = None;
     }
 
+    /// The region the Bevy scene is currently anchored at (scene origin), or
+    /// [`None`] before the first root region streams. In-world sounds
+    /// (`viewer-in-world-sounds`) need it to place a `SoundTrigger`'s
+    /// region-local position into absolute scene space
+    /// ([`region_offset_bevy`]).
+    pub(crate) const fn origin(&self) -> Option<RegionHandle> {
+        self.origin
+    }
+
     /// The full (grid-wide) [`ObjectKey`] of a tracked object, looked up by its
     /// region-scoped id. Used by the physics module (P31.3) to translate a pushed
     /// `ObjectPhysicsProperties` event — which keys by [`ScopedObjectId`] — onto the
@@ -711,6 +720,13 @@ impl ObjectState {
     /// (`ForceObjectSelect`) onto scene entities.
     pub(crate) fn entity_by_scoped(&self, scoped: &ScopedObjectId) -> Option<Entity> {
         self.objects.get(scoped).map(|tracked| tracked.entity)
+    }
+
+    /// The object's physical-material byte (`LL_MCODE_*`), looked up by its
+    /// region-scoped id. In-world collision sounds (`viewer-in-world-sounds`)
+    /// read it to pick the reference default material collision sound.
+    pub(crate) fn material_by_scoped(&self, scoped: &ScopedObjectId) -> Option<u8> {
+        self.objects.get(scoped).map(|tracked| tracked.material)
     }
 
     /// The geometry-holder child entity of the object with region-scoped id

@@ -78,7 +78,9 @@
 use std::collections::{HashMap, HashSet};
 
 use avian3d::physics_transform::PhysicsTransformConfig;
-use avian3d::prelude::{Collider, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody};
+use avian3d::prelude::{
+    Collider, CollisionEventsEnabled, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody,
+};
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -976,6 +978,10 @@ pub(crate) fn drive_physical_objects(
             commands.entity(entity).insert((
                 RigidBody::Kinematic,
                 Collider::cuboid(ex, ey, ez),
+                // Emit avian collision events for this prim, so in-world collision
+                // sounds (`viewer-in-world-sounds`) hear physical prims meet. The
+                // event fires if *either* collider carries this marker.
+                CollisionEventsEnabled,
                 PhysicsInterp::seeded(&phys, now),
             ));
             continue;
@@ -1168,9 +1174,13 @@ pub(crate) fn detach_physical_bodies(
     mut commands: Commands,
 ) {
     for entity in &stale {
-        commands
-            .entity(entity)
-            .remove::<(RigidBody, Collider, PhysicsInterp, RefinedCollider)>();
+        commands.entity(entity).remove::<(
+            RigidBody,
+            Collider,
+            CollisionEventsEnabled,
+            PhysicsInterp,
+            RefinedCollider,
+        )>();
     }
 }
 

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 58 |
-| ready | 244 |
-| blocked | 79 |
+| ready | 243 |
+| blocked | 78 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 745 |
+| done | 747 |
 | deferred | 21 |
 | wont-do | 9 |
 | **total** | **1186** |
@@ -147,7 +147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -354,8 +354,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-i18n-fluent-scaffold` (done), `viewer-ui-settings-store` (done))
 - [`viewer-image-upload`](ready/viewer-image-upload.md) — Image / texture (and
   sound / animation) upload (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-in-world-sounds`](ready/viewer-in-world-sounds.md) — In-world spatial
-  sounds (blocked by `viewer-audio-backend` (done))
 - [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
   — Keyboard bindings stable across physical keyboard layouts (blocked by
   `viewer-input-action-map` (done))
@@ -609,6 +607,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
   profile extras — land/money, experiences, bans, create/invite (blocked by
   `viewer-social-group-profile` (done))
+- [`viewer-sound-explorer`](ready/viewer-sound-explorer.md) — Sound explorer —
+  nearby sound sources (blocked by `viewer-in-world-sounds` (done))
 - [`viewer-statistics-floater`](ready/viewer-statistics-floater.md) — Statistics
   floater (viewer + sim stats, lag meter) (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -645,9 +645,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
-- [`viewer-ui-sound-effects`](ready/viewer-ui-sound-effects.md) — UI sound
-  effects (blocked by `viewer-audio-backend` (done), `viewer-ui-widget-scaffold`
-  (done))
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
@@ -735,7 +732,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (79)
+## blocked (78)
 
 ### protocol
 
@@ -905,8 +902,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater` (done), `viewer-image-upload`)
-- [`viewer-sound-explorer`](blocked/viewer-sound-explorer.md) — Sound explorer —
-  nearby sound sources (blocked by `viewer-in-world-sounds`)
 - [`viewer-spacenav-input-tests`](blocked/viewer-spacenav-input-tests.md) —
   6-DOF input reactions via the SpacenavInput seam (blocked by
   `viewer-world-test-harness`)
@@ -1048,7 +1043,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (745)
+## done (747)
 
 ### protocol
 
@@ -1347,6 +1342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-number-datetime-formats`](done/viewer-i18n-number-datetime-formats.md)
   — Locale-aware number, currency & date/time formatting (blocked by
   `viewer-i18n-fluent-scaffold` (done))
+- [`viewer-in-world-sounds`](done/viewer-in-world-sounds.md) — In-world spatial
+  sounds (blocked by `viewer-audio-backend` (done))
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action
   map & per-context binding profiles (blocked by `viewer-input-focus-contexts`
   (done))
@@ -2046,6 +2043,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   persistent settings store
 - [`viewer-ui-skin-tokens`](done/viewer-ui-skin-tokens.md) — Skin system —
   design tokens (bevy_flair CSS) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-sound-effects`](done/viewer-ui-sound-effects.md) — UI sound
+  effects (blocked by `viewer-audio-backend` (done), `viewer-ui-widget-scaffold`
+  (done))
 - [`viewer-ui-status-bar`](done/viewer-ui-status-bar.md) — Status area (region /
   parcel / balance / time / FPS / permission icons) (blocked by
   `viewer-ui-menu-bar` (done))

@@ -2,7 +2,7 @@
 id: viewer-sound-explorer
 title: Sound explorer — nearby sound sources
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-in-world-sounds]
 refs: [viewer-derender-blacklist, viewer-block-list]

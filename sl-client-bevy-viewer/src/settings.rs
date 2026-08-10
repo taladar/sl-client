@@ -230,6 +230,7 @@ impl ViewerSettings {
         crate::preferences_general::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
         crate::particles::register_settings(&mut settings);
+        crate::ui_sounds::register_settings(&mut settings);
         settings.load_global();
         settings
     }

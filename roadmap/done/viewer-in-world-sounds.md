@@ -2,7 +2,7 @@
 id: viewer-in-world-sounds
 title: In-world spatial sounds
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-07)
 blocked_by: [viewer-audio-backend]
 ---
@@ -65,3 +65,32 @@ Builds on: `protocol-22` sound-receive, `sl-asset` fetch, and the P31 physics
 contacts.
 
 Deps: [[viewer-audio-backend]] (device, decode, listener, mixer).
+
+## Progress (2026-08-10)
+
+Shipped: `sound_cache.rs` (shared fetch/decode/cache of `AssetType::Sound` over
+`ViewerAsset`, parked until cap + device sample rate) and `world_sounds.rs` —
+`SoundTrigger` one-shots, `AttachedSound` (looped, follows its object, `LOOP` /
+`STOP`), `AttachedSoundGainChange`, `PreloadSound`, and mute-list muting (owner
+or object). The mixer's own priority pool handles the source budget; two new
+`sl-audio` mixer methods (`set_voice_position` / `set_voice_gain`) let attached
+loops follow and re-gain without a restart.
+
+- **Parcel-local `SOUND_LOCAL`** is faithful to the reference's
+  `LLViewerParcelMgr::canHearSound`: the own-parcel bitmap
+  (`ParcelInfo::contains_point`), the agent parcel's flag, and the overlay
+  per-square `sound_local` bit at the source. One-shots are dropped when
+  inaudible; attached sounds are driven to silence (time-coherent) and return on
+  re-entry. No flood-fill needed (the reference anchors on the agent's own
+  parcel, which we know exactly).
+- **Collision sounds** are the viewer-*synthesized* layer only: a scripted
+  `llCollisionSound` already arrives as an ordinary `SoundTrigger`.
+  Material-pair defaults (Firestorm `sound_ids.cpp`, reduced to the primary
+  object's material) play on avian `CollisionStart`, gated by a per-pair
+  cooldown. `physics.rs` now puts `CollisionEventsEnabled` on every physical
+  prim. Coverage is prim–prim (avatars/terrain carry no collider); no
+  impact-scaled gain (kinematic bodies give avian no reliable contact velocity).
+
+Deferred (own follow-ups): sample-accurate **sync-master/slave & queue**
+phase-locking across objects, and the **phase-2 occlusion / HRTF** pass (Steam
+Audio) the task describes.
