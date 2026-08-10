@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 746 |
-| deferred | 21 |
+| done | 748 |
+| deferred | 22 |
 | wont-do | 9 |
-| **total** | **1197** |
+| **total** | **1200** |
 
 ## ideas (57)
 
@@ -1071,7 +1071,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (746)
+## done (748)
 
 ### protocol
 
@@ -1807,6 +1807,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
+- [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)
+  — Amortise inventory row rebuilds and the skeleton merge
 - [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
   face materials by content for shared handles + draw batching (blocked by
   `viewer-perf-prim-tessellation-cache` (done))
@@ -1820,6 +1822,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)
   — Cross-instance prim tessellation cache + shared mesh handles
+- [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)
+  — Settings persistence writes on the IO task pool
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)
@@ -2657,7 +2661,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (21)
+## deferred (22)
 
 ### protocol
 
@@ -2709,6 +2713,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — About Land — the controls that have no protocol write path yet
 - [`viewer-perf-gpu-particle-sim`](deferred/viewer-perf-gpu-particle-sim.md) —
   GPU compute particle simulation (+ raising the particle cap)
+- [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
+  — Per-frame byte budget for media-surface uploads
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 

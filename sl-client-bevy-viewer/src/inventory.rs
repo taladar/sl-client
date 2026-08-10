@@ -38,7 +38,8 @@
 //! ([`InventoryModel::build_rows`]) is a pure function tested in isolation; the
 //! Bevy half only turns its output into pooled row entities.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -159,6 +160,8 @@ impl Plugin for InventoryPlugin {
         app.init_resource::<InventoryModel>()
             .init_resource::<InventoryState>()
             .init_resource::<InventoryView>()
+            .init_resource::<PendingSkeletonMerge>()
+            .init_resource::<SkeletonMergeBudget>()
             .init_resource::<InventorySelection>()
             .init_resource::<InlineRename>()
             .init_resource::<PendingReveal>()
@@ -177,6 +180,7 @@ impl Plugin for InventoryPlugin {
                     toggle_inventory,
                     refresh_inventory_on_show,
                     ingest_inventory,
+                    drain_skeleton_merge,
                     bridge_tab_selection,
                     route_gear_menu,
                     update_gear_conditions,
@@ -1942,42 +1946,130 @@ fn refresh_inventory_on_show(
 // Event ingestion
 // ---------------------------------------------------------------------------
 
+/// The default for [`SkeletonMergeBudget`]: skeleton folders merged per frame.
+const DEFAULT_INVENTORY_MERGE_BUDGET: usize = 1000;
+
+/// The per-frame cap on login-skeleton folders [`drain_skeleton_merge`] folds
+/// into the model (env `SL_VIEWER_INVENTORY_MERGE_BUDGET`) — a large
+/// inventory's skeleton (thousands of folders) lands over a few frames
+/// instead of one allocation-heavy burst.
+#[derive(Resource)]
+struct SkeletonMergeBudget {
+    /// How many folders may merge each frame.
+    per_frame: usize,
+}
+
+impl Default for SkeletonMergeBudget {
+    fn default() -> Self {
+        Self {
+            per_frame: crate::textures::env_budget(
+                "SL_VIEWER_INVENTORY_MERGE_BUDGET",
+                DEFAULT_INVENTORY_MERGE_BUDGET,
+            ),
+        }
+    }
+}
+
+/// The parked login-skeleton batches awaiting the budgeted merge: each entry
+/// is the event's shared folder slice plus the next-unmerged offset, drained
+/// front-first by [`drain_skeleton_merge`]. `finalize_first_load` latches the
+/// one-shot first-load work (root expansion) until the whole backlog has
+/// merged.
+#[derive(Resource, Default)]
+struct PendingSkeletonMerge {
+    /// Batches not yet fully merged, oldest first.
+    batches: VecDeque<(Arc<[FolderInfo]>, usize)>,
+    /// Run the first-load finalisation once the backlog empties.
+    finalize_first_load: bool,
+}
+
+/// Merge up to [`SkeletonMergeBudget`] parked skeleton folders into the model
+/// per frame; when the backlog empties, prefetch the COF (one-shot) and, on
+/// the first load, expand the agent roots (not the huge read-only Library)
+/// and pull their items — exactly the work the unchunked ingest used to do
+/// inline after its single monolithic merge.
+fn drain_skeleton_merge(
+    mut pending: ResMut<PendingSkeletonMerge>,
+    budget: Res<SkeletonMergeBudget>,
+    mut model: ResMut<InventoryModel>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if pending.batches.is_empty() {
+        return;
+    }
+    let mut merged = 0_usize;
+    while merged < budget.per_frame {
+        let Some((batch, cursor)) = pending.batches.front_mut() else {
+            break;
+        };
+        let take = batch
+            .len()
+            .saturating_sub(*cursor)
+            .min(budget.per_frame.saturating_sub(merged));
+        let end = cursor.saturating_add(take);
+        if let Some(chunk) = batch.get(*cursor..end) {
+            model.merge_folders(chunk, false);
+        }
+        *cursor = end;
+        merged = merged.saturating_add(take);
+        if *cursor >= batch.len() {
+            let _done = pending.batches.pop_front();
+        }
+    }
+    if !pending.batches.is_empty() {
+        return;
+    }
+    // The whole skeleton is merged. The COF is now (or already) known: fetch
+    // its contents once, up front, so the `(worn)` / bold markers appear
+    // without the user first opening Current Outfit / the Worn tab (and
+    // without waiting on the background crawl). A one-shot, so the repeated
+    // `InventoryFolders` a re-bake produces do not re-fire it.
+    if let Some(cof) = model.claim_cof_prefetch() {
+        commands.write(SlCommand(Command::RequestFolderContents(cof)));
+    }
+    if pending.finalize_first_load {
+        pending.finalize_first_load = false;
+        // Show the top level: expand the agent roots (not the huge read-only
+        // Library) and pull their items.
+        let roots: Vec<InventoryFolderKey> = model
+            .roots
+            .iter()
+            .copied()
+            .filter(|root| !model.library_folders.contains(root))
+            .collect();
+        for root in roots {
+            model.expanded.insert(root);
+            request_folder(&mut model, root, &mut commands);
+        }
+    }
+}
+
 /// Fold the high-level inventory events into [`InventoryModel`], marking the view
 /// dirty (via `InventoryModel`'s change tick) whenever something it draws moved.
 fn ingest_inventory(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<InventoryModel>,
+    mut pending_merge: ResMut<PendingSkeletonMerge>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::InventoryFolders(folders) => {
-                let first_load = !model.folders_loaded;
-                model.merge_folders(folders, false);
+                // The login skeleton can carry thousands of folders; park the
+                // (shared) slice and merge it a budgeted chunk per frame in
+                // [`drain_skeleton_merge`] (chained right after this system,
+                // so a small skeleton still lands the same frame). The
+                // first-load finalisation (COF prefetch, root expansion) runs
+                // once the whole backlog has merged.
+                if !model.folders_loaded {
+                    pending_merge.finalize_first_load = true;
+                }
+                // Mark the skeleton as known immediately so a repeat
+                // `InventoryFolders` during the chunked merge (a re-bake) does
+                // not re-queue the first-load work, and the raw
+                // `InventorySkeleton` fallback stays suppressed.
                 model.folders_loaded = true;
-                // The COF is now (or already) known from the skeleton: fetch its
-                // contents once, up front, so the `(worn)` / bold markers appear
-                // without the user first opening Current Outfit / the Worn tab
-                // (and without waiting on the background crawl). A one-shot, so
-                // the repeated `InventoryFolders` a re-bake produces do not
-                // re-fire it.
-                if let Some(cof) = model.claim_cof_prefetch() {
-                    commands.write(SlCommand(Command::RequestFolderContents(cof)));
-                }
-                if first_load {
-                    // Show the top level: expand the agent roots (not the huge
-                    // read-only Library) and pull their items.
-                    let roots: Vec<InventoryFolderKey> = model
-                        .roots
-                        .iter()
-                        .copied()
-                        .filter(|root| !model.library_folders.contains(root))
-                        .collect();
-                    for root in roots {
-                        model.expanded.insert(root);
-                        request_folder(&mut model, root, &mut commands);
-                    }
-                }
+                pending_merge.batches.push_back((Arc::clone(folders), 0));
             }
             SlSessionEvent::LibraryInventory(folders) => {
                 model.merge_library_folders(folders);
@@ -2278,9 +2370,17 @@ fn read_search_field(
     }
 }
 
+/// Seconds of typing quiet before a search-query edit re-flattens the view:
+/// [`InventoryModel::build_rows`] walks the **whole** inventory (O(total
+/// items)), so re-running it per keystroke on a large inventory is a
+/// per-frame CPU burst the debounce collapses to one run per pause. Every
+/// other trigger (tab, sort, filter, model change) stays immediate.
+const QUERY_DEBOUNCE_SECS: f32 = 0.15;
+
 /// Recompute the flattened view whenever the model, tab or query changed, keep
 /// the list's item count in step, and reset the scroll so a shorter new list is
-/// not left scrolled past its end.
+/// not left scrolled past its end. A query-text edit is debounced by
+/// [`QUERY_DEBOUNCE_SECS`]; everything else rebuilds immediately.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the model, the window / \
@@ -2295,8 +2395,35 @@ fn rebuild_view(
     ui: Option<Res<InventoryUi>>,
     mut view: ResMut<InventoryView>,
     mut lists: Query<&mut VirtualList>,
+    time: Res<Time>,
+    mut last_query: Local<String>,
+    mut deferred_since: Local<Option<f32>>,
 ) {
-    if !model.is_changed() && !state.is_changed() && !worn.is_changed() && !filters.is_changed() {
+    // A state change that ONLY moved the query text defers behind the typing
+    // debounce; any other change (or a ripe deferral) rebuilds now.
+    let mut due = model.is_changed() || worn.is_changed() || filters.is_changed();
+    let mut reset_scroll = filters.is_changed();
+    if state.is_changed() {
+        let query_only = !due && state.query != *last_query;
+        last_query.clone_from(&state.query);
+        if query_only {
+            *deferred_since = Some(time.elapsed_secs());
+        } else {
+            due = true;
+            reset_scroll = true;
+        }
+    }
+    if let Some(since) = *deferred_since {
+        // A deferral ripens after the quiet window — or folds into an
+        // immediate rebuild triggered by something else (the rebuild always
+        // reads the newest query).
+        if due || time.elapsed_secs() - since >= QUERY_DEBOUNCE_SECS {
+            *deferred_since = None;
+            due = true;
+            reset_scroll = true;
+        }
+    }
+    if !due {
         return;
     }
     let Some(ui) = ui else {
@@ -2306,7 +2433,6 @@ fn rebuild_view(
     // a new search, a filter edit, or an open. Expanding or collapsing a folder
     // changes only the model, so the position is kept (the reference viewer
     // keeps it too); the generic list clamps it if the list got shorter.
-    let reset_scroll = state.is_changed() || filters.is_changed();
     let now_unix = i64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4086,6 +4212,7 @@ mod tests {
         app.add_message::<SlEvent>();
         app.add_message::<SlCommand>();
         app.insert_resource(model);
+        app.init_resource::<super::PendingSkeletonMerge>();
         app.add_systems(Update, super::ingest_inventory);
         app.world_mut()
             .resource_mut::<Messages<SlEvent>>()
