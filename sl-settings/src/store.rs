@@ -312,6 +312,16 @@ impl SettingsStore {
     ///
     /// [`SettingError::Io`] if the file cannot be written.
     pub fn save_scope(&self, scope: Scope, path: impl AsRef<Path>) -> Result<(), SettingError> {
+        fs_err::write(path, self.serialize_scope(scope))?;
+        Ok(())
+    }
+
+    /// Serialize a scope's persistable overrides to the TOML text
+    /// [`save_scope`](Self::save_scope) would write, without touching the
+    /// filesystem — so a caller can serialize cheaply on its own thread and
+    /// move the disk write onto a background task.
+    #[must_use]
+    pub fn serialize_scope(&self, scope: Scope) -> String {
         let mut entries: Vec<Entry<'_>> = Vec::new();
         for (name, value) in self.scope_map(scope) {
             match self.decls.get(name) {
@@ -333,9 +343,7 @@ impl SettingsStore {
                 }),
             }
         }
-        let text = toml_format::to_toml(&entries);
-        fs_err::write(path, text)?;
-        Ok(())
+        toml_format::to_toml(&entries)
     }
 
     /// Load a scope's overrides from a TOML file, replacing that scope's current

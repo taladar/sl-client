@@ -801,7 +801,7 @@ fn on_preferences_ok(
         return;
     };
     state.snapshot = snapshot_bindings(settings.store(), ui.root, &bindings, &parents);
-    settings.save();
+    settings.save_async();
     applied.write(PreferencesApplied);
     floater_commands.write(FloaterCommand {
         floater: ui.root,

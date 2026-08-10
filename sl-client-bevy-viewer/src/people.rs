@@ -1996,7 +1996,7 @@ fn apply_sort(
         && settings.account_loaded()
     {
         settings.set_account(FRIENDS_SORT_SETTING, SettingValue::String(encoded));
-        settings.save();
+        settings.save_async();
     }
 }
 
