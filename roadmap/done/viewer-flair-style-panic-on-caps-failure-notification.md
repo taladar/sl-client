@@ -38,7 +38,7 @@ Reproduced identically on a clean committed tree — pre-existing, and an
   `debug_assert` compiles out and the pending `Reset` was downgraded to
   `CalculateStyle`, skipping the animation/transition reset.
 
-Fixed per [[sl-client-fork-upstream-for-upstream-bugs]]: fork
+Fixed per the fork-upstream-for-upstream-bugs convention: fork
 `github.com/taladar/bevy_flair`, branch `fix-recalculate-style-on-reset` —
 `recalculate_style()` keeps a pending `Reset` (which already implies a full
 recalculation, mirroring the early-return the two other marking setters

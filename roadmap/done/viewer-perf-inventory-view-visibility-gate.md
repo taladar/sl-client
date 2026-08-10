@@ -2,7 +2,7 @@
 id: viewer-perf-inventory-view-visibility-gate
 title: Don't rebuild the inventory view while the floater is closed
 topic: viewer
-status: ideas
+status: done
 origin: performance survey of the implemented viewer (2026-07-22)
 refs: [viewer-profiling, viewer-perf-run-condition-gating]
 ---
@@ -65,3 +65,37 @@ one on first open.
 Confidence: medium-high — the change-only gate and `build_rows` call
 verified; `build_rows`' absolute cost unprofiled (the count reduction is
 certain regardless).
+
+## Done (2026-08-10)
+
+Implemented exactly as proposed, via a new reusable run-condition builder
+`floater_shown(id)` in `floater.rs` (keyed on the stable `Floater::id` +
+`UiPanelShown`, next to `floater_panel`):
+
+- `rebuild_view` and `update_gear_conditions` are registered
+  `.run_if(floater_shown(INVENTORY_FLOATER_ID))` — neither runs while the
+  floater is closed (or before its first spawn), so login streaming and
+  outfit changes no longer trigger hidden `build_rows` flattens.
+- No explicit dirty flag was needed: a `run_if`-skipped system keeps its
+  change-detection ticks, so model/worn/filter changes accumulate while
+  hidden and fold into one catch-up rebuild on the open transition. That
+  rebuild is guaranteed: `refresh_inventory_on_show` (ungated, earlier in
+  the same chain) takes `ResMut<InventoryModel>` on every open, marking
+  the model changed.
+- The debounce locals persist across skipped frames unchanged; a deferral
+  pending at close ripens on the next real run.
+- `update_gear_conditions` now also rebuilds its wanted-conditions list
+  into a reused `Local<Vec<&'static str>>` scratch buffer (zero
+  steady-state allocation; `SmallVec` rejected — not a direct workspace
+  dependency, and the list holds at most five entries).
+
+Deliberately not gated: `toggle_inventory` / `refresh_inventory_on_show`
+(the open path), `ingest_inventory` / `drain_skeleton_merge` (model fold +
+cross-frame backlog), `bridge_tab_selection` / `route_gear_menu` /
+`apply_ui_actions` / `read_search_field` (consumers of 2-frame-expiry
+messages), `apply_pending_reveal` (a reveal request must survive until the
+panel opens), and everything after `layout_virtual_lists` (already free
+via the virtual list's zero-viewport early-out). External
+`InventoryView` readers (drag observers, row context menu, hotkeys) are
+all interaction-driven on visible rows, so a stale view while hidden is
+unreachable.

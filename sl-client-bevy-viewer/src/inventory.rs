@@ -183,10 +183,11 @@ impl Plugin for InventoryPlugin {
                     drain_skeleton_merge,
                     bridge_tab_selection,
                     route_gear_menu,
-                    update_gear_conditions,
+                    update_gear_conditions
+                        .run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
                     apply_ui_actions,
                     read_search_field,
-                    rebuild_view,
+                    rebuild_view.run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
                     apply_pending_reveal,
                 )
                     .chain()
@@ -1635,13 +1636,17 @@ static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
 struct InventoryGearHost;
 
 /// Keep the gear host's [`MenuConditions`] current: which sort mode is
-/// active, and whether the filters floater is open.
+/// active, and whether the filters floater is open. Gated on the inventory
+/// floater being shown (the gear menu is unreachable while it is closed);
+/// the condition list is rebuilt into a reused `Local` scratch buffer, so
+/// the steady state allocates nothing.
 fn update_gear_conditions(
     state: Res<InventoryState>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     gallery_ui: Option<Res<crate::inventory_gallery::GalleryUi>>,
     panels: Query<&UiPanelShown>,
     mut hosts: Query<&mut MenuConditions, With<InventoryGearHost>>,
+    mut wanted: Local<Vec<&'static str>>,
 ) {
     // By stable id — the lazily-built filters floater has no resource until
     // its first open.
@@ -1652,7 +1657,7 @@ fn update_gear_conditions(
     let gallery_open = gallery_ui
         .and_then(|ui| panels.get(ui.panel()).ok().map(|shown| shown.0))
         .unwrap_or(false);
-    let mut wanted: Vec<&'static str> = Vec::new();
+    wanted.clear();
     wanted.push(if state.sort.by_date {
         GEAR_SORT_DATE
     } else {
@@ -1669,7 +1674,7 @@ fn update_gear_conditions(
         wanted.push(GEAR_GALLERY_OPEN);
     }
     for mut conditions in &mut hosts {
-        if conditions.0 != wanted {
+        if conditions.0 != *wanted {
             conditions.0.clone_from(&wanted);
         }
     }
@@ -2381,6 +2386,13 @@ const QUERY_DEBOUNCE_SECS: f32 = 0.15;
 /// the list's item count in step, and reset the scroll so a shorter new list is
 /// not left scrolled past its end. A query-text edit is debounced by
 /// [`QUERY_DEBOUNCE_SECS`]; everything else rebuilds immediately.
+///
+/// Registered behind [`crate::floater::floater_shown`], so no rebuild runs
+/// while the floater is closed (login streaming would otherwise trigger one
+/// full O(inventory) flatten per skeleton-merge frame that nobody can see).
+/// Change ticks accumulate across the skipped frames, and
+/// [`refresh_inventory_on_show`] marks the model on every open transition, so
+/// the panel always opens onto exactly one catch-up rebuild.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the model, the window / \

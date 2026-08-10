@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
+| ideas | 55 |
 | ready | 246 |
 | blocked | 87 |
 | in-progress | 12 |
 | bugs | 18 |
-| done | 752 |
+| done | 753 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1202** |
 
-## ideas (56)
+## ideas (55)
 
 ### viewer
 
@@ -74,8 +74,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
-- [`viewer-perf-inventory-view-visibility-gate`](ideas/viewer-perf-inventory-view-visibility-gate.md)
-  — Don't rebuild the inventory view while the floater is closed
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
@@ -1067,7 +1065,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (752)
+## done (753)
 
 ### protocol
 
@@ -1807,6 +1805,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)
   — Amortise inventory row rebuilds and the skeleton merge
+- [`viewer-perf-inventory-view-visibility-gate`](done/viewer-perf-inventory-view-visibility-gate.md)
+  — Don't rebuild the inventory view while the floater is closed
 - [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
   face materials by content for shared handles + draw batching (blocked by
   `viewer-perf-prim-tessellation-cache` (done))
