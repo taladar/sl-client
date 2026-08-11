@@ -4526,6 +4526,41 @@ pub(crate) fn animesh_root(
     None
 }
 
+/// Whether the worn-attachment bind trace is enabled
+/// (`SL_VIEWER_LOG_ATTACHMENT_BIND=1`): logs, once per reason-change, why each
+/// worn rigged attachment is not yet bound, so an attachment that never binds
+/// (boots / hair missing while the rest of the avatar draws — roadmap
+/// viewer-mesh-hair-not-rendering) reveals *which* stall it is stuck on — the
+/// mesh not decoding, an in-flight LOD upgrade, an unresolved wearer, or the
+/// wearer's body not spawned — instead of retrying silently every frame.
+pub(crate) fn log_attachment_bind_enabled() -> bool {
+    std::env::var("SL_VIEWER_LOG_ATTACHMENT_BIND").as_deref() == Ok("1")
+}
+
+/// Diagnostic state for [`log_attachment_bind_enabled`]: the last-logged
+/// not-yet-bound reason per worn rigged attachment, so [`apply_rigged_attachments`]
+/// logs a stuck attachment's reason once per change rather than every frame, and
+/// re-logs when the reason advances (progress) or clears when it finally binds.
+#[derive(Resource, Default)]
+pub(crate) struct RiggedBindSkipLog(HashMap<ScopedObjectId, &'static str>);
+
+impl RiggedBindSkipLog {
+    /// Note that `scoped` is still unbound for `reason`, logging it only when the
+    /// reason changed since last time (the caller has already checked the trace is
+    /// enabled).
+    fn note(&mut self, scoped: ScopedObjectId, reason: &'static str) {
+        if self.0.insert(scoped, reason) != Some(reason) {
+            info!("rigged attachment {scoped} not yet bound: {reason}");
+        }
+    }
+
+    /// Forget `scoped`'s stall reason — it bound (or is gone), so a later
+    /// re-attach traces afresh.
+    fn bound(&mut self, scoped: ScopedObjectId) {
+        let _prev = self.0.remove(&scoped);
+    }
+}
+
 /// Bind every worn rigged mesh attachment whose skeleton instance is now
 /// available (P17.2): for each object holding a [`PendingGeometry::RiggedMesh`],
 /// resolve the wearer avatar's skeleton-instance joint entities and spawn the
@@ -4565,7 +4600,11 @@ pub(crate) fn apply_rigged_attachments(
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut skip_log: ResMut<RiggedBindSkipLog>,
 ) {
+    // The worn-attachment bind trace (off unless SL_VIEWER_LOG_ATTACHMENT_BIND=1),
+    // read once so the per-object skips below cost nothing in the normal case.
+    let trace = log_attachment_bind_enabled();
     // Without loaded avatar assets there are no rigged bodies to bind to.
     let Some(body) = body else {
         return;
@@ -4602,6 +4641,9 @@ pub(crate) fn apply_rigged_attachments(
         // (`apply_object_meshes`), so it would stay frozen at that block — an animesh
         // rendered from its few-vertex coarsest LOD (P29). Wait for the finest decode.
         if mesh_manager.lod_change_inflight(key) {
+            if trace {
+                skip_log.note(scoped, "finest-LOD upgrade in flight");
+            }
             continue;
         }
         // Resolve the skeleton this rigged mesh binds to: an animated object
@@ -4621,6 +4663,9 @@ pub(crate) fn apply_rigged_attachments(
             // parent to the linkset root prim, not the avatar directly, so its direct
             // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
             let Some(agent) = avatars.wearer_of(scoped) else {
+                if trace {
+                    skip_log.note(scoped, "wearer avatar not resolved (parent chain)");
+                }
                 continue;
             };
             // The wearer's rigged body and its skeleton-instance joints; retry next
@@ -4631,11 +4676,17 @@ pub(crate) fn apply_rigged_attachments(
                 avatars.body_root_of(agent),
                 avatars.joint_entities_of(agent).cloned(),
             ) else {
+                if trace {
+                    skip_log.note(scoped, "wearer body / skeleton not spawned yet");
+                }
                 continue;
             };
             (root, joints, Some(agent))
         };
         let Some(fallback) = joints.first().copied() else {
+            if trace {
+                skip_log.note(scoped, "wearer skeleton has no joints");
+            }
             continue;
         };
         // The decoded geometry + skin, cloned out so the immutable `mesh_manager`
@@ -4644,6 +4695,9 @@ pub(crate) fn apply_rigged_attachments(
             mesh_manager.decoded(key).map(Arc::clone),
             mesh_manager.skin(key).map(Arc::clone),
         ) else {
+            if trace {
+                skip_log.note(scoped, "attachment mesh / skin not decoded yet");
+            }
             continue;
         };
         // Resolve the rig's own joint-name table against the avatar's skeleton
@@ -4696,6 +4750,11 @@ pub(crate) fn apply_rigged_attachments(
             &mut prim_textures,
         );
         budget.remaining = budget.remaining.saturating_sub(1);
+        if trace {
+            // Bound (or built as empty — the `rendered no geometry` warn covers
+            // that): stop tracing this attachment so a later re-attach starts fresh.
+            skip_log.bound(scoped);
+        }
         if let Some(tracked) = state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
             tracked.pending = None;
@@ -4989,6 +5048,28 @@ fn build_rigged_submeshes(
             spawned.insert(WornPickTarget { scoped });
         }
         face_entities.push(spawned.id());
+    }
+    // Every submesh was dropped as empty above, so this worn rigged attachment
+    // renders NOTHING — the "boots / hair missing while the rest of the avatar
+    // draws" symptom (roadmap viewer-mesh-hair-not-rendering). Surface it, with the
+    // decoded LOD and per-submesh vertex counts, so an intermittent and otherwise
+    // silent drop is observable: it distinguishes a genuinely-empty chosen LOD
+    // block (the author put no geometry there — the fix is a coarser-LOD fallback)
+    // from an `sl-mesh` decode gap yielding zero vertices for a block that has data
+    // (a decoder bug to fix, not mask). Rigged meshes are forced to the finest
+    // block (`upgrade_to_finest`), so this is the finest available LOD.
+    if face_entities.is_empty() && !decoded.submeshes.is_empty() {
+        let vertex_counts: Vec<usize> = decoded
+            .submeshes
+            .iter()
+            .map(|submesh| submesh.positions.len())
+            .collect();
+        warn!(
+            "rigged attachment {mesh_key} rendered no geometry: all {} submesh(es) \
+             empty at LOD {:?} (vertex counts {vertex_counts:?}); agent={agent:?} worn={worn:?}",
+            decoded.submeshes.len(),
+            decoded.lod,
+        );
     }
     face_entities
 }

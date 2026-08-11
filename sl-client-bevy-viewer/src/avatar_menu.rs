@@ -88,7 +88,7 @@ use sl_client_bevy::{
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatar_pick::{AvatarPicker, PickAccuracy};
 use crate::avatar_profile::OpenAvatarProfile;
-use crate::avatars::{AvatarPickTarget, AvatarState};
+use crate::avatars::{AvatarPickTarget, AvatarState, RefetchAvatarTextures};
 use crate::camera::ViewerCamera;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::hud::{HudCamera, on_hud_layer};
@@ -188,11 +188,65 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
     ],
 };
 
+/// The nested "More >" of the other-avatar `More >` sub-pie (reference slot 5 /
+/// south-west of the first `More >`), which is where the reference buries the
+/// per-avatar debug actions. Populated from the reference's own level up to
+/// **Tex Refresh** — the one entry wired here (its manual bake re-fetch is a real
+/// feature now); Textures / Script Info / Call / Zoom In keep their reference
+/// addresses as disabled placeholders, and the reference's later Reset / Dump XML
+/// / Display tails are deferred (see the module doc's "stop there" rule).
+static OTHER_MORE_MORE_PIE: PieMenuDef = PieMenuDef {
+    label: "More",
+    entries: &[
+        PieEntry {
+            at: Compass::East,
+            content: PieContent::Action(PieAction {
+                label: "Textures",
+                action: "textures",
+                when: Some(UNIMPLEMENTED),
+            }),
+        },
+        PieEntry {
+            at: Compass::NorthEast,
+            content: PieContent::Action(PieAction {
+                label: "Script Info",
+                action: "script-info",
+                when: Some(UNIMPLEMENTED),
+            }),
+        },
+        PieEntry {
+            at: Compass::North,
+            content: PieContent::Action(PieAction {
+                label: "Call",
+                action: "call",
+                when: Some(UNIMPLEMENTED),
+            }),
+        },
+        PieEntry {
+            at: Compass::NorthWest,
+            content: PieContent::Action(PieAction {
+                label: "Zoom In",
+                action: "zoom-in",
+                when: Some(UNIMPLEMENTED),
+            }),
+        },
+        PieEntry {
+            at: Compass::West,
+            content: PieContent::Action(PieAction {
+                label: "Tex Refresh",
+                action: "tex-refresh",
+                when: None,
+            }),
+        },
+    ],
+};
+
 /// The "More >" sub-pie of the other-avatar pie (reference slot 6 / south).
 ///
 /// Populated from the reference `More >`'s own first level (Freeze, Give Card,
-/// Invite to Group, Face towards, Eject); the reference's deeper debug / derender
-/// tails are deferred rather than reproduced as dead slices (see the module doc).
+/// Invite to Group, Face towards, Eject, and its nested `More >` at south-west);
+/// the reference's deeper derender tails are deferred rather than reproduced as
+/// dead slices (see the module doc).
 static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
     label: "More",
     entries: &[
@@ -235,6 +289,10 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
                 action: "eject",
                 when: Some(UNIMPLEMENTED),
             }),
+        },
+        PieEntry {
+            at: Compass::SouthWest,
+            content: PieContent::SubPie(&OTHER_MORE_MORE_PIE),
         },
     ],
 };
@@ -466,7 +524,7 @@ static SELF_APPEARANCE_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Texture Refresh",
                 action: "tex-refresh",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -1084,6 +1142,11 @@ fn open_avatar_menu(
 /// Only the actions this viewer can honour today are matched; every other slice
 /// is a disabled placeholder that never emits, so the fall-through is the whole of
 /// the not-yet-implemented set and is intentionally silent.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system reading the picked target / avatar state and the several action \
+              channels each wired slice dispatches on (command, conversation, profile, tex-refresh)"
+)]
 fn handle_avatar_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AvatarMenuTarget>,
@@ -1092,6 +1155,7 @@ fn handle_avatar_menu_actions(
     mut commands: MessageWriter<SlCommand>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
+    mut refetch: MessageWriter<RefetchAvatarTextures>,
 ) {
     for action in actions.read() {
         if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
@@ -1116,6 +1180,9 @@ fn handle_avatar_menu_actions(
             }
             "profile" => {
                 profiles.write(OpenAvatarProfile { agent });
+            }
+            "tex-refresh" => {
+                refetch.write(RefetchAvatarTextures { agent });
             }
             "mute" => {
                 let name = avatars
@@ -1226,6 +1293,26 @@ mod tests {
             ("invite-to-group", vec![Compass::South, Compass::North]),
             ("face-towards", vec![Compass::South, Compass::NorthWest]),
             ("eject", vec![Compass::South, Compass::West]),
+            (
+                "textures",
+                vec![Compass::South, Compass::SouthWest, Compass::East],
+            ),
+            (
+                "script-info",
+                vec![Compass::South, Compass::SouthWest, Compass::NorthEast],
+            ),
+            (
+                "call",
+                vec![Compass::South, Compass::SouthWest, Compass::North],
+            ),
+            (
+                "zoom-in",
+                vec![Compass::South, Compass::SouthWest, Compass::NorthWest],
+            ),
+            (
+                "tex-refresh",
+                vec![Compass::South, Compass::SouthWest, Compass::West],
+            ),
             ("im", vec![Compass::SouthEast]),
         ];
         assert_eq!(

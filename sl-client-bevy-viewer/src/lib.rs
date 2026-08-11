@@ -280,14 +280,15 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
+use crate::avatars::RefetchAvatarTextures;
 use crate::avatars::{
     AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake,
     VolumeMorphGain, apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
     apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
     apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
-    fit_avatar_pick_colliders, focus_camera_on_volume_shape, ingest_avatar_bakes,
-    log_avatar_interest_census, recenter_avatars, setup_avatar_body, toggle_volume_morphs,
-    update_avatar_objects, update_coarse_avatars,
+    fit_avatar_pick_colliders, focus_camera_on_volume_shape, handle_refetch_avatar_textures,
+    ingest_avatar_bakes, log_avatar_interest_census, recenter_avatars, setup_avatar_body,
+    toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
@@ -360,11 +361,11 @@ use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
     GeometryApplyBudget, LodApplyBudget, ObjectState, PendingDecodedMeshes, PendingDecodedSculpts,
-    PendingObjectEvents, PrimLodTargets, SpawnBudget, TreeLodTargets, adopt_pending_attachments,
-    apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
-    apply_tree_lod, log_suspicious_objects, pick_object, pick_worn_attachment,
-    prune_control_avatars, recenter_objects, reset_geometry_apply_budget, reset_lod_apply_budget,
-    spawn_animesh_control_avatars, update_objects,
+    PendingObjectEvents, PrimLodTargets, RiggedBindSkipLog, SpawnBudget, TreeLodTargets,
+    adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
+    apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
+    pick_worn_attachment, prune_control_avatars, recenter_objects, reset_geometry_apply_budget,
+    reset_lod_apply_budget, spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1568,6 +1569,7 @@ fn run_session(
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()
         .init_resource::<GeometryApplyBudget>()
+        .init_resource::<RiggedBindSkipLog>()
         .init_resource::<LodApplyBudget>()
         .init_resource::<PendingDecodedMeshes>()
         .init_resource::<PendingDecodedSculpts>()
@@ -1643,6 +1645,7 @@ fn run_session(
         .add_message::<TextureDecoded>()
         .add_message::<MeshDecoded>()
         .add_message::<WearableAssetFetched>()
+        .add_message::<RefetchAvatarTextures>()
         .add_message::<crate::chat::LocalChatNotice>()
         // The pie-menu widget's `commit_pie_selection` runs every frame and writes a
         // `UiAction`, so the message must be registered here too — it was previously
@@ -1922,6 +1925,10 @@ fn run_session(
                     apply_own_shape_from_wearables.after(apply_avatar_appearance),
                     apply_avatar_part_visibility,
                     ingest_avatar_bakes,
+                    // The avatar pies' manual Tex Refresh: re-issue an agent's bake
+                    // fetches, before assignment so a refreshed bake is picked up
+                    // the same frame it re-decodes.
+                    handle_refetch_avatar_textures,
                     assign_avatar_bake_materials,
                     apply_avatar_bake_textures,
                     apply_own_local_bake.after(assign_avatar_bake_materials),

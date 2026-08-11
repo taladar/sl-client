@@ -2636,6 +2636,49 @@ impl AvatarState {
         self.origin = None;
     }
 
+    /// Re-issue the baked-texture fetches for `agent` — the avatar pies' manual
+    /// **Tex Refresh**. Each recorded bake slot is re-requested through the
+    /// [`TextureManager`], which clears any retry-exhausted state and spawns a
+    /// fresh fetch ([`request_from`](TextureManager::request_from) drops the id
+    /// from its `retry` map and starts a new task), so an avatar left grey by a
+    /// transient bake-service failure gets another set of tries without waiting
+    /// for a fresh `AvatarAppearance`. The recorded COF version is also forgotten
+    /// so the next appearance resend re-fetches too. A no-op for an agent with no
+    /// bakes recorded yet. Slots are re-requested by the same rule the initial
+    /// ingest uses ([`bake_service_slot_name`]): the server bake service when the
+    /// grid central-bakes and the slot has a service name, else a by-UUID fetch.
+    pub(crate) fn refetch_bakes(
+        &mut self,
+        agent: AgentKey,
+        manager: &mut TextureManager,
+        appearance_service: Option<&url::Url>,
+    ) {
+        let Some(bakes) = self.baked_textures.get(&agent) else {
+            debug!("tex refresh: no baked textures recorded for {agent} yet");
+            return;
+        };
+        let count = bakes.len();
+        // Snapshot the ids: `forget` + the re-request borrow `manager` mutably, so
+        // the immutable borrow of `self.baked_textures` must end first.
+        let slots: Vec<(usize, TextureKey)> = bakes.iter().map(|(&slot, &id)| (slot, id)).collect();
+        for (slot, id) in slots {
+            // Evict first so a cached (or retry-exhausted) bake actually re-fetches
+            // rather than the request short-circuiting on the cache — a true refresh.
+            manager.forget(id);
+            match appearance_service.zip(bake_service_slot_name(slot)) {
+                Some((service, name)) => {
+                    let url = format!("{service}texture/{}/{name}/{id}", agent.uuid());
+                    manager.request_server_bake(id, url);
+                }
+                None => {
+                    manager.request_boosted(id, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                }
+            }
+        }
+        let _forgotten = self.baked_cof_version.remove(&agent);
+        info!("tex refresh: re-requested {count} baked texture(s) for {agent}");
+    }
+
     /// Record a resolved legacy name. (The tag itself refreshes via the
     /// content composer, which recomposes whenever this state changes.)
     fn set_name(&mut self, name: &AvatarName) {
@@ -3152,6 +3195,30 @@ pub(crate) fn flush_name_requests(
     let batch: Vec<AgentKey> = state.pending_name_requests.drain().collect();
     commands.write(SlCommand(Command::RequestAvatarNames(batch.clone())));
     commands.write(SlCommand(Command::RequestDisplayNames(batch)));
+}
+
+/// A request to re-fetch an avatar's baked textures — the avatar pies' manual
+/// **Tex Refresh** action, for kicking another set of tries at a bake left grey
+/// by a transient bake-service failure.
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct RefetchAvatarTextures {
+    /// The avatar whose bakes to re-request.
+    pub(crate) agent: AgentKey,
+}
+
+/// Handle a [`RefetchAvatarTextures`] request by re-issuing the agent's baked-
+/// texture fetches ([`AvatarState::refetch_bakes`]), using the same server-bake /
+/// by-UUID rule the initial ingest does.
+pub(crate) fn handle_refetch_avatar_textures(
+    mut requests: MessageReader<RefetchAvatarTextures>,
+    mut state: ResMut<AvatarState>,
+    mut manager: ResMut<TextureManager>,
+    identity: Res<SlIdentity>,
+) {
+    let service = identity.agent_appearance_service.clone();
+    for request in requests.read() {
+        state.refetch_bakes(request.agent, &mut manager, service.as_ref());
+    }
 }
 
 /// Ingest each avatar's server-published baked textures (P14.1): on an

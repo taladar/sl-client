@@ -30,6 +30,7 @@ sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
 sl-lsl = { version = "0.1.0", path = "../sl-lsl" }
 sl-types = { version = "0.8.0" }
 thiserror = { version = "2.0.18" }
+tracing = { version = "0.1.44" }
 url = { version = "2.5.8" }
 uuid = { version = "1.18.1" }
 

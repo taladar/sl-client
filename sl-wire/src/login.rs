@@ -648,9 +648,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id")
             .map(AgentKey::from),
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
-        agent_appearance_service: members
-            .get("agent_appearance_service")
-            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        agent_appearance_service: parse_appearance_service(&members),
         map_server_url: members
             .get("map-server-url")
             .and_then(|s| url::Url::parse(s.trim()).ok()),
@@ -857,6 +855,47 @@ fn array_structs<'a>(
 
 /// Collects the direct `<member>` children of a `<struct>` node into a map of
 /// member name to scalar text value.
+/// Parse the `agent_appearance_service` login field (the server-side bake service
+/// base URL), logging the outcome so a grid that returns baked-avatar textures
+/// grey — because the field is absent, named differently, or not a parseable URL,
+/// forcing the viewer onto the by-UUID CDN fallback the CDN rejects — is
+/// diagnosable. On an absent field, logs the members that *do* look service-ish
+/// (any key or value mentioning "appearance"/"bake") so a rename is spotted.
+fn parse_appearance_service(members: &HashMap<String, String>) -> Option<url::Url> {
+    match members.get("agent_appearance_service") {
+        Some(raw) => match url::Url::parse(raw.trim()) {
+            Ok(url) => {
+                tracing::debug!("login agent_appearance_service = {url}");
+                Some(url)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "login agent_appearance_service present but not a URL ({error}): {raw:?}"
+                );
+                None
+            }
+        },
+        None => {
+            let service_ish: Vec<&str> = members
+                .iter()
+                .filter(|(key, value)| {
+                    let hay = format!("{key} {value}").to_lowercase();
+                    hay.contains("appearance") || hay.contains("bake")
+                })
+                .map(|(key, _value)| key.as_str())
+                .collect();
+            tracing::warn!(
+                "login response has no agent_appearance_service field (baked avatars will \
+                 fall back to the by-UUID CDN fetch); appearance/bake-ish keys present: {service_ish:?}"
+            );
+            None
+        }
+    }
+}
+
+/// Collect an XML-RPC `<struct>` node's `<member>` entries into a name → scalar
+/// value map (the typed child's text via [`scalar_text`]), the flat form the
+/// login-response parsers read their fields out of.
 fn collect_members(struct_node: roxmltree::Node<'_, '_>) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for member in struct_node.children().filter(|n| n.has_tag_name("member")) {

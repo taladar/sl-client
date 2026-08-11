@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 19 |
+| bugs | 20 |
 | done | 769 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1212** |
+| **total** | **1213** |
 
 ## ideas (56)
 
@@ -997,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (19)
+## bugs (20)
 
 ### protocol
 
@@ -1023,6 +1023,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
+- [`viewer-grey-avatars-bakes-not-showing`](bugs/viewer-grey-avatars-bakes-not-showing.md)
+  — Most other avatars render grey (baked skin/textures not showing) on aditi
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)

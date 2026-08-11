@@ -585,10 +585,28 @@ pub(crate) fn assemble_own_bake(
 
     if ready || timed_out {
         if timed_out && !ready {
+            // Name the wearable types still in flight so a recurring stall is
+            // diagnosable: which layer never arrived within the grace window, and
+            // whether it is the same one across runs. On a server-bake grid these
+            // feed only shape params (the body is textured by the server bake), so
+            // a pending clothing asset is cosmetically harmless there; a pending
+            // shape / skin skews the own-avatar proportions toward the defaults.
+            let pending_types: Vec<WearableType> = state
+                .wearables
+                .iter()
+                .filter(|wearable| {
+                    wearable
+                        .asset_id
+                        .is_some_and(|id| state.pending_assets.contains(&AssetKey::from(id)))
+                })
+                .map(|wearable| wearable.wearable_type)
+                .collect();
             warn!(
-                "assembling own bake inputs after grace period ({} asset(s), {} texture(s) still pending)",
+                "assembling own bake inputs after grace period ({} asset(s) {pending_types:?}, \
+                 {} texture(s) still pending; server_bake_grid={})",
                 state.pending_assets.len(),
-                state.pending_textures.len()
+                state.pending_textures.len(),
+                state.server_bake_grid,
             );
         }
         // On a server-bake grid the composite is superseded, so skip building it

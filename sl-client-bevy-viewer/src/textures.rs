@@ -302,6 +302,24 @@ impl TextureManager {
         );
     }
 
+    /// Evict `id` so the next request re-fetches it from scratch — the manual
+    /// **Tex Refresh** path (avatar bakes). Drops the decoded image, the retained
+    /// request handle (releasing the store's weak cache entry so the fetch is not
+    /// short-circuited by the cache), and any in-flight / retry / pending
+    /// bookkeeping. The material currently displaying the texture keeps its own
+    /// Bevy `Handle`, so the avatar does not blank; the image is replaced when the
+    /// fresh fetch re-decodes.
+    pub(crate) fn forget(&mut self, id: TextureKey) {
+        let _decoded = self.decoded.remove(&id);
+        let _request = self.requests.remove(&id);
+        let _inflight = self.inflight.remove(&id);
+        let _lod = self.lod_inflight.remove(&id);
+        let _managed = self.managed.remove(&id);
+        let _pending = self.pending_default.remove(&id);
+        let _params = self.in_flight_params.remove(&id);
+        let _retry = self.retry.remove(&id);
+    }
+
     /// Spawn a background fetch of `id` from `source` at `priority` if it is not
     /// already decoded or in flight; the decode runs off-thread on the store's own
     /// pool. The fetch is admitted through the store's priority gate — the request

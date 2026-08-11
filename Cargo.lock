@@ -9333,6 +9333,7 @@ dependencies = [
  "sl-msg-template",
  "sl-types",
  "thiserror 2.0.19",
+ "tracing",
  "url",
  "uuid",
 ]
