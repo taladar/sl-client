@@ -2286,6 +2286,14 @@ type ObjectGeometryBuild = (
     Option<PendingPrim>,
     Option<PendingTree>,
     Option<FlexiChain>,
+    // The mesh LOD-rebuild inputs, set when a mesh is built immediately from an
+    // already-decoded (warm-cache) asset — the cold-cache path instead sets them
+    // in `apply_object_meshes` when its `PendingGeometry::Mesh` resolves. Without
+    // this a warm-built shared mesh has no `mesh_rebuild` and so never rebuilds its
+    // submeshes when the pixel-area driver swaps the shared geometry's LOD, leaving
+    // it frozen at the level the first instance decoded at (the coarse
+    // `INITIAL_MANAGED_LOD`).
+    Option<PendingMesh>,
 );
 
 /// Build an object's renderable geometry for its category, returning the spawned
@@ -2348,7 +2356,7 @@ fn build_object_geometry(
                 intern,
                 material_cache,
             );
-            (faces, None, None, None, Some(chain))
+            (faces, None, None, None, Some(chain), None)
         }
         ObjectCategory::Prim => (
             build_prim_faces(
@@ -2378,10 +2386,11 @@ fn build_object_geometry(
             }),
             None,
             None,
+            None,
         ),
         ObjectCategory::Mesh => {
             let Some(key) = mesh_key(object) else {
-                return (Vec::new(), None, None, None, None);
+                return (Vec::new(), None, None, None, None, None);
             };
             mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -2410,6 +2419,7 @@ fn build_object_geometry(
                         None,
                         None,
                         None,
+                        None,
                     )
                 }
                 Some(decoded) => (
@@ -2433,6 +2443,18 @@ fn build_object_geometry(
                     None,
                     None,
                     None,
+                    // Warm cache: the submeshes were built immediately above, so
+                    // (unlike the cold path) no `PendingGeometry::Mesh` will later
+                    // set the rebuild inputs. Carry them out here so the pixel-area
+                    // LOD driver can rebuild this instance when the shared geometry's
+                    // level of detail changes on approach (the stuck-low-LOD fix).
+                    Some(PendingMesh {
+                        key,
+                        texture_entry: object.texture_entry.clone(),
+                        scale: [object.scale.x, object.scale.y, object.scale.z],
+                        priority,
+                        intern: intern.clone(),
+                    }),
                 ),
                 None => (
                     Vec::new(),
@@ -2446,12 +2468,13 @@ fn build_object_geometry(
                     None,
                     None,
                     None,
+                    None,
                 ),
             }
         }
         ObjectCategory::Sculpt => {
             let Some((map, sculpt_type)) = sculpt_key(object) else {
-                return (Vec::new(), None, None, None, None);
+                return (Vec::new(), None, None, None, None, None);
             };
             manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -2479,6 +2502,7 @@ fn build_object_geometry(
                     None,
                     None,
                     None,
+                    None,
                 ),
                 None => (
                     Vec::new(),
@@ -2490,6 +2514,7 @@ fn build_object_geometry(
                         priority,
                         intern: intern.clone(),
                     })),
+                    None,
                     None,
                     None,
                     None,
@@ -2517,6 +2542,7 @@ fn build_object_geometry(
                 priority,
             }),
             None,
+            None,
         ),
         ObjectCategory::Grass => (
             build_grass_faces(
@@ -2538,8 +2564,11 @@ fn build_object_geometry(
             None,
             None,
             None,
+            None,
         ),
-        ObjectCategory::Avatar | ObjectCategory::Other => (Vec::new(), None, None, None, None),
+        ObjectCategory::Avatar | ObjectCategory::Other => {
+            (Vec::new(), None, None, None, None, None)
+        }
     }
 }
 
@@ -3677,7 +3706,7 @@ fn apply_object(
             // here, since the fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape/texture changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain) =
+            let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain, mesh_rebuild) =
                 build_object_geometry(
                     object,
                     category,
@@ -3707,11 +3736,13 @@ fn apply_object(
             existing.pending = pending;
             // The geometry was re-requested from scratch; any prior LOD-rebuild
             // inputs are stale (the mesh key, scale, or category may have changed)
-            // and are re-established from the new build: a mesh's on its next
-            // decode (P21.2), a plain prim's immediately here (P21.3), a tree's here
-            // (P26.2). An object that changed category drops the rebuild inputs it no
-            // longer has (`prim_rebuild` / `tree_rebuild` is `None`).
-            existing.mesh_rebuild = None;
+            // and are re-established from the new build: a cold-cache mesh's on its
+            // next decode (P21.2), a warm-cache mesh's immediately here (built now,
+            // so `mesh_rebuild` is set from the build — the stuck-low-LOD fix), a
+            // plain prim's immediately here (P21.3), a tree's here (P26.2). An object
+            // that changed category drops the rebuild inputs it no longer has (each
+            // is `None`).
+            existing.mesh_rebuild = mesh_rebuild;
             existing.prim_rebuild = prim_rebuild;
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
             existing.tree_rebuild = tree_rebuild;
@@ -3820,21 +3851,22 @@ fn apply_object(
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain) = build_object_geometry(
-        object,
-        category,
-        geometry,
-        is_hud,
-        commands,
-        meshes,
-        materials,
-        manager,
-        prim_textures,
-        mesh_manager,
-        cache,
-        &intern,
-        material_cache,
-    );
+    let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain, mesh_rebuild) =
+        build_object_geometry(
+            object,
+            category,
+            geometry,
+            is_hud,
+            commands,
+            meshes,
+            materials,
+            manager,
+            prim_textures,
+            mesh_manager,
+            cache,
+            &intern,
+            material_cache,
+        );
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
     apply_flexi_sim(entity, flexi_chain, object, &face_entities, commands);
@@ -3854,7 +3886,11 @@ fn apply_object(
             extra: object.extra.clone(),
             face_entities,
             pending,
-            mesh_rebuild: None,
+            // Set when this object built a warm-cache mesh immediately (so no
+            // later decode sets it): lets the pixel-area driver rebuild it on an
+            // LOD swap. A cold-cache mesh keeps `None` here and has it set on decode
+            // in `apply_object_meshes`; a non-mesh keeps `None`.
+            mesh_rebuild,
             // A plain prim is first tessellated at the coarse placeholder level
             // (P21.3); a non-prim keeps `prim_rebuild` None and stays at FINEST.
             prim_rebuild,

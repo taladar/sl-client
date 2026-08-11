@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 246 |
+| ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
 | bugs | 19 |
-| done | 768 |
+| done | 769 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1210** |
+| **total** | **1212** |
 
 ## ideas (56)
 
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (246)
+## ready (247)
 
 ### protocol
 
@@ -400,6 +400,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
+- [`viewer-mesh-lod-factor-preference`](ready/viewer-mesh-lod-factor-preference.md)
+  — Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail"
+  slider)
 - [`viewer-minimap-menu-cam-face`](ready/viewer-minimap-menu-cam-face.md) —
   Minimap context menu — Cam / Face towards avatar
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
@@ -1046,7 +1049,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (768)
+## done (769)
 
 ### protocol
 
@@ -1459,6 +1462,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
+- [`viewer-mesh-stuck-low-lod-warm-cache`](done/viewer-mesh-stuck-low-lod-warm-cache.md)
+  — Shared / warm-cache meshes stuck at a coarse LOD, never refining on approach
 - [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
   surface, zoom, rotation, frustum (blocked by `viewer-ui-widget-scaffold`
   (done))

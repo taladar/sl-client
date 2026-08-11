@@ -187,7 +187,27 @@ impl MeshManager {
     ///
     /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
     pub(crate) fn request(&mut self, id: MeshKey, priority: Priority) {
-        if id.uuid().is_nil() || self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
+        if id.uuid().is_nil() {
+            return;
+        }
+        // A boosted mesh (a worn attachment) loads at full detail and is not LOD
+        // managed; an ordinary scene mesh starts at a coarse placeholder block the
+        // driver then refines (P21.2).
+        let managed = !crate::render_priority::is_boost_priority(priority);
+        // Already decoded (a shared mesh asset a prior instance fetched): no fetch
+        // is needed, but THIS reference still has to be LOD-managed, or the shared
+        // geometry stays frozen at the coarse level the first instance decoded at
+        // ([`INITIAL_MANAGED_LOD`]) and never refines on approach. Register a
+        // managed slot + retained handle without re-fetching, then return.
+        if self.decoded.contains_key(&id) {
+            if managed {
+                self.ensure_managed(id, priority);
+            }
+            return;
+        }
+        // A fetch is already in flight for this id (an earlier instance's request);
+        // it registers the managed slot on completion, so there is nothing to add.
+        if self.inflight.contains_key(&id) {
             return;
         }
         // The fetch needs the region's mesh capability. If it is not set yet (a
@@ -199,10 +219,6 @@ impl MeshManager {
             return;
         }
         self.pending.remove(&id);
-        // A boosted mesh (a worn attachment) loads at full detail and is not LOD
-        // managed; an ordinary scene mesh starts at a coarse placeholder block the
-        // driver then refines (P21.2).
-        let managed = !crate::render_priority::is_boost_priority(priority);
         let target = if managed {
             INITIAL_MANAGED_LOD
         } else {
@@ -249,6 +265,39 @@ impl MeshManager {
         let _retried = self.retry.remove(&id);
         let _prev_priority = self.in_flight_priority.insert(id, priority);
         self.inflight.insert(id, task);
+    }
+
+    /// Register an already-decoded mesh for pixel-area LOD management (P21.2),
+    /// retaining a schedulable handle to its store entry so [`set_lod_for_area`]
+    /// can drive later LOD changes. Used when a shared mesh asset — already fetched
+    /// and decoded by an earlier instance — is referenced by a **new** object:
+    /// without this the new reference is never LOD-managed, so the shared geometry
+    /// stays frozen at the (coarse) level the first instance decoded at and never
+    /// refines as the camera approaches.
+    ///
+    /// A no-op when a retained handle already exists (the mesh is then already
+    /// managed) or the mesh is **rigged** (it carries a decoded skin — a worn
+    /// attachment that must stay at the finest block via [`upgrade_to_finest`],
+    /// never pixel-area reduced): re-registering either as managed would let the
+    /// driver wrongly LOD-reduce it.
+    ///
+    /// The retained [`MeshRequest`] engages no admission-gate slot and spawns no
+    /// fetch (only [`MeshRequest::resolved`] does); it simply keeps the decoded
+    /// store entry live for a later [`MeshStore::set_lod`].
+    fn ensure_managed(&mut self, id: MeshKey, priority: Priority) {
+        if self.requests.contains_key(&id) || self.skins.contains_key(&id) {
+            return;
+        }
+        // Rank later changes against the level actually decoded, not the coarse
+        // placeholder — the shared geometry may already be finer than a fresh
+        // request would start.
+        let current = self
+            .decoded
+            .get(&id)
+            .map_or(INITIAL_MANAGED_LOD, |mesh| mesh.lod);
+        let request = self.store.request(id, current, priority);
+        let _previous = self.requests.insert(id, (request, priority));
+        let _existing = self.managed.insert(id, ManagedMeshLod { current });
     }
 
     /// Upgrade or downgrade a pixel-area-managed mesh (P21.2) toward `desired` —
