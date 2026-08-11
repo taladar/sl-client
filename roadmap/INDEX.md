@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
-| ready | 246 |
+| ideas | 57 |
+| ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 20 |
-| done | 764 |
+| bugs | 19 |
+| done | 766 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1207** |
+| **total** | **1210** |
 
-## ideas (56)
+## ideas (57)
 
 ### viewer
 
@@ -64,6 +64,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
+- [`viewer-perf-async-asset-fetchers`](ideas/viewer-perf-async-asset-fetchers.md)
+  — Async (non-blocking) asset fetchers — lift the IoTaskPool 4-thread download
+  ceiling
 - [`viewer-perf-avatar-ground-probe`](ideas/viewer-perf-avatar-ground-probe.md)
   — Avatar ground probe — stop per-frame full-scene raycasts
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
@@ -143,7 +146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (246)
+## ready (247)
 
 ### protocol
 
@@ -317,6 +320,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-f3-overlay-additional-asset-stores`](ready/viewer-f3-overlay-additional-asset-stores.md)
+  — Extend the F3 pipeline overlay to the asset stores added since it was built
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -994,7 +999,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (20)
+## bugs (19)
 
 ### protocol
 
@@ -1041,15 +1046,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
-- [`viewer-texture-stuck-low-lod`](bugs/viewer-texture-stuck-low-lod.md) — A
-  texture can stay stuck at a low-res prefix and never upgrade to a finer level
-  that exists
 - [`viewer-underwater-fog-background-flicker`](bugs/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (764)
+## done (766)
 
 ### protocol
 
@@ -1193,6 +1195,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-appearance-editor-shell` (done))
 - [`viewer-appearance-editor-shell`](done/viewer-appearance-editor-shell.md) —
   Appearance editor shell — wearable editing mode, params, save
+- [`viewer-asset-failure-edge-retry`](done/viewer-asset-failure-edge-retry.md) —
+  Retry failed asset fetches and make the F3 overlay honest about deferred work
 - [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
   Attachment context / pie menu entries (worn on self + on others) (blocked by
   `viewer-avatar-context-menu` (done))
@@ -2027,6 +2031,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))
+- [`viewer-texture-stuck-low-lod`](done/viewer-texture-stuck-low-lod.md) — A
+  texture can stay stuck at a low-res prefix and never upgrade to a finer level
+  that exists
 - [`viewer-third-person-cam-lag-vertical-flight`](done/viewer-third-person-cam-lag-vertical-flight.md)
   — Third-person camera lags behind an avatar flying up or down
 - [`viewer-tonemap-auto-exposure`](done/viewer-tonemap-auto-exposure.md) —
