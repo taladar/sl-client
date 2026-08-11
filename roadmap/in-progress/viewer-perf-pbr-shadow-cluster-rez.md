@@ -176,3 +176,44 @@ floor above, and the `specialize_shadows` / `queue_shadows` / clustered-
 lighting items. A fast-turn "retest all" (the "ideally" in the plan) was
 skipped: the stride already bounds a static caster's staleness to `stride`
 frames, invisible at slow sun / camera speeds.
+
+## Update — cull moved off the critical path (async double-buffer, 2026-08-11)
+
+The round-robin above was superseded by the stronger form of the same insight:
+we only ever stale the **frustum-culling decision**, never the shadow (the
+shadow map is re-rendered from live transforms every frame), so the whole cull
+can run **off the per-frame critical path**. `shadow_visibility.rs` now:
+
+- **dispatches** an [`AsyncComputeTaskPool`] task each frame that snapshots the
+  casters + cascade frusta out of the ECS and does the full `intersects_obb`
+  cull off-thread;
+- **applies** the most recently completed pass — moves its per-cascade
+  include-lists into each light's `CascadesVisibleEntities` — and every frame
+  reconciles that structure to the current frusta (the bookkeeping Bevy's own
+  system does; skipping it panics the shadow render, "Failed to get directional
+  light visible entities for cascade");
+- **marks** `ViewVisibility` for the last result's casters every frame (so
+  off-camera shadow casters keep rendering).
+
+Verified on aditi (correctness: shadow angle correct, no flicker/missing
+shadows walking past objects). Steady-state Tracy on a **dense ~40 k-caster**
+spot (denser than the round-robin trace's ~3 k):
+
+| critical-path system | mean | p99 |
+| --- | --- | --- |
+| `dispatch_shadow_cull` (snapshot) | 1.84 ms | 3.9 |
+| `mark_shadow_caster_visibility` | 0.98 ms | 2.1 |
+| `apply_shadow_cull` | 0.02 ms | 0.08 |
+| **shadow total on the frame** | **~2.84 ms** | |
+
+The full cull itself was ~13 ms **off-thread** and appears in no main-schedule
+system. So the shadow critical-path cost fell from the round-robin's ~10.5 ms
+(on a 3 k-caster scene) to ~2.84 ms **on a 13× denser scene** — dominated now
+by the snapshot (scales with caster count). PostUpdate came in at 15.3 ms vs
+26.5 ms.
+
+v1 limitations: the snapshot is new per-frame main-thread work (eliminated on a
+still scene by [[viewer-perf-shadow-cull-change-driven]]), and `VisibilityRange`
+LOD is not honoured for shadow casters on the async path (rare on SL). The
+per-view multiplication that makes the *off-thread* pass ~13 ms is the probe
+views ([[viewer-perf-probe-capture-shadows]]).

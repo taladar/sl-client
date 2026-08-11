@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
+| ideas | 57 |
 | ready | 246 |
 | blocked | 78 |
 | in-progress | 13 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 770 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1216** |
+| **total** | **1217** |
 
-## ideas (56)
+## ideas (57)
 
 ### viewer
 
@@ -83,6 +83,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
   — Skip capture for occluded reflection probes (blocked by
   `viewer-perf-probe-scheduling`)
+- [`viewer-perf-shadow-cull-change-driven`](ideas/viewer-perf-shadow-cull-change-driven.md)
+  — Change-driven sun shadow-caster cull (idle static scene = zero re-test)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
   — Solve each avatar skeleton once per frame unless an adjuster needs two
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —

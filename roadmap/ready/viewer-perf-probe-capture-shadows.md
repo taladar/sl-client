@@ -42,3 +42,22 @@ shadowless — may be imperceptible after roughness filtering at 128²).
 Acceptance: per-face GPU time on a shadow-heavy scene approaches the
 same face rendered with shadows fully off (within ~2×), measured via
 [[viewer-perf-probe-instrumentation]].
+
+## The CPU cull cost also scales with probe-view count (2026-08-11)
+
+Measured while profiling the sun shadow-caster cull
+([[viewer-perf-pbr-shadow-cluster-rez]]): the directional cull
+(`check_dir_light_mesh_visibility`) runs **once per shadow view**, and each
+probe capture face-camera is a view in the light's `CascadesFrusta`. On a
+rezzed aditi scene with ~3 k casters the cull iterated **~127 k caster×view
+pairs** — i.e. the probe cameras multiply the CPU cull work ~40×, and that
+fixed floor (list rebuild/sort + `ViewVisibility` marking) is what remains
+after the caster test itself is amortised.
+
+Implication for this task's approach: **excluding the sun from probe capture
+views entirely** (the capture-view `RenderLayers` / unshadowed-clone route, or
+simply not giving probe cameras cascade frusta) fixes **both** the per-face GPU
+shadow-render cost this task targets **and** this CPU cull floor — whereas
+merely *reducing* the cascade count for probe views (2 of 4) still leaves the
+cull iterating every caster for every probe view. Prefer the exclusion route
+where the mirror/golden tests allow shadowless reflections.
