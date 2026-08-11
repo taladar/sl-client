@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 19 |
+| bugs | 20 |
 | done | 770 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1213** |
+| **total** | **1214** |
 
 ## ideas (56)
 
@@ -997,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (19)
+## bugs (20)
 
 ### protocol
 
@@ -1041,6 +1041,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   never teleported to
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
+- [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
+  — Worn rigged attachments (e.g. own shoes) don't render — wearer never
+  resolved / too many rigged-pending objects
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
