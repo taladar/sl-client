@@ -37,6 +37,7 @@ use sl_client_bevy::{
     TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
 };
 
+use crate::asset_retry::RetryState;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::material_cache::{MaterialCache, MaterialKey};
 
@@ -161,6 +162,16 @@ pub(crate) struct TextureManager {
     /// the ground would stay flat (R15). These are drained and issued for real by
     /// [`retry_pending_default`](Self::retry_pending_default) once the cap is set.
     pending_default: HashMap<TextureKey, PendingDefaultRequest>,
+    /// How to re-issue each in-flight fetch, kept so a failed one can be retried
+    /// with the same source / priority / LOD / managed flag. Removed once the fetch
+    /// resolves (moved into [`retry`](Self::retry) on failure).
+    in_flight_params: HashMap<TextureKey, DeferredRequest>,
+    /// Fetches that failed and are waiting to be re-issued (bounded backoff —
+    /// [`asset_retry`](crate::asset_retry)). Without this a transient `GetTexture`
+    /// failure would strand a one-shot boosted consumer's texture (terrain, an
+    /// avatar bake) for the whole session, invisible to the F3 overlay. Drained by
+    /// [`poll_textures`] once each entry is due.
+    retry: HashMap<TextureKey, (DeferredRequest, RetryState)>,
 }
 
 /// A default-source texture request deferred until the `GetTexture` capability is
@@ -173,6 +184,20 @@ struct PendingDefaultRequest {
     initial_lod: DiscardLevel,
     /// Whether the texture is pixel-area LOD managed (an ordinary face) rather than
     /// fetched at full resolution (a boosted consumer such as terrain).
+    managed: bool,
+}
+
+/// Everything [`TextureManager::request_from`] needs to (re-)issue a fetch: enough
+/// to retry one that failed transiently without the original caller re-asking.
+#[derive(Clone)]
+struct DeferredRequest {
+    /// Where the texture is fetched from (the default CDN, or a bake's URL).
+    source: RemoteTextureSource,
+    /// The request-time (base) priority.
+    priority: Priority,
+    /// The discard level (resolution) to fetch first.
+    initial_lod: DiscardLevel,
+    /// Whether the texture is pixel-area LOD managed rather than boosted full-res.
     managed: bool,
 }
 
@@ -193,6 +218,8 @@ impl FromWorld for TextureManager {
             managed: HashMap::new(),
             lod_inflight: HashMap::new(),
             pending_default: HashMap::new(),
+            in_flight_params: HashMap::new(),
+            retry: HashMap::new(),
         }
     }
 }
@@ -321,6 +348,19 @@ impl TextureManager {
             return;
         }
         self.pending_default.remove(&id);
+        // Record how to re-issue this fetch so a transient failure can be retried
+        // (`poll_textures`) with the same source / priority / LOD; a fresh explicit
+        // request supersedes any pending retry for the id.
+        let _retried = self.retry.remove(&id);
+        let _prev_params = self.in_flight_params.insert(
+            id,
+            DeferredRequest {
+                source: source.clone(),
+                priority,
+                initial_lod,
+                managed,
+            },
+        );
         let request = self.store.request(id, initial_lod, priority, source);
         let task_request = request.clone();
         let task = IoTaskPool::get().spawn(async move {
@@ -552,6 +592,15 @@ impl TextureManager {
     pub(crate) fn gate_stats(&self) -> GateStats {
         self.store.gate_stats()
     }
+
+    /// How many fetches are parked outside the store's own accounting — held for a
+    /// capability that is not up yet, or waiting out a post-failure retry backoff.
+    /// The store keeps only weak references, so a failed / not-yet-issued fetch is
+    /// invisible to [`stats`](Self::stats); the pipeline overlay adds this so
+    /// "nothing left to load" does not lie while such work is still outstanding.
+    pub(crate) fn deferred_count(&self) -> usize {
+        self.pending_default.len().saturating_add(self.retry.len())
+    }
 }
 
 /// Build a [`TextureStore`] over `fetcher`, backed
@@ -606,9 +655,11 @@ pub(crate) fn update_texture_caps(
 /// cache and announce it with a [`TextureDecoded`] message (emitted on failure
 /// too, so parked consumers can release their fallback state).
 pub(crate) fn poll_textures(
+    time: Res<Time>,
     mut manager: ResMut<TextureManager>,
     mut decoded: MessageWriter<TextureDecoded>,
 ) {
+    let now = time.elapsed_secs_f64();
     // Collect the ids whose task has finished, then apply — the borrow of the
     // task map cannot overlap the mutation of the decoded map.
     let mut finished: Vec<(TextureKey, FetchResult)> = Vec::new();
@@ -619,6 +670,7 @@ pub(crate) fn poll_textures(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
+        let params = manager.in_flight_params.remove(&id);
         // Drop the schedulable request handle now the initial fetch is done — the
         // decoded pixels live in `decoded`, independent of the store entry (P20.2)
         // — *unless* the texture is pixel-area LOD managed (P21.1), where the
@@ -626,10 +678,62 @@ pub(crate) fn poll_textures(
         if !manager.managed.contains_key(&id) {
             let _request = manager.requests.remove(&id);
         }
-        if let Some(image) = result {
-            manager.record_decoded(id, image);
+        match result {
+            Some(image) => {
+                let _cleared = manager.retry.remove(&id);
+                manager.record_decoded(id, image);
+                decoded.write(TextureDecoded(id));
+            }
+            None => {
+                // The fetch or decode failed. Rather than give up — which strands a
+                // one-shot consumer's texture (terrain, an avatar bake) for the whole
+                // session while the F3 overlay shows nothing left to load — schedule a
+                // bounded backoff retry with the same parameters. Only announce the
+                // failure (releasing parked faces to their fallback tint) once the
+                // retry budget is exhausted, so the faces stay parked meanwhile.
+                let previous = manager.retry.get(&id).map(|(_params, state)| *state);
+                match (params, RetryState::after_failure(previous, now)) {
+                    (Some(params), Some(state)) => {
+                        // Logged so a transient GetTexture 503 and its recovery are
+                        // observable in any test run (there is no other way to
+                        // live-verify the retry). Grep `scheduling retry`.
+                        warn!(
+                            "texture {id} fetch failed; scheduling retry {}/{} in {:.1}s",
+                            state.attempts,
+                            crate::asset_retry::MAX_RETRY_ATTEMPTS,
+                            state.next_at - now
+                        );
+                        let _prev = manager.retry.insert(id, (params, state));
+                    }
+                    _exhausted_or_unknown => {
+                        warn!(
+                            "texture {id} fetch failed; gave up after {} attempts",
+                            crate::asset_retry::MAX_RETRY_ATTEMPTS
+                        );
+                        let _cleared = manager.retry.remove(&id);
+                        decoded.write(TextureDecoded(id));
+                    }
+                }
+            }
         }
-        decoded.write(TextureDecoded(id));
+    }
+
+    // Re-issue any failed fetches whose backoff has now elapsed.
+    let due: Vec<(TextureKey, DeferredRequest)> = manager
+        .retry
+        .iter()
+        .filter(|(_id, (_params, state))| state.due(now))
+        .map(|(&id, (params, _state))| (id, params.clone()))
+        .collect();
+    for (id, params) in due {
+        let _removed = manager.retry.remove(&id);
+        manager.request_from(
+            id,
+            params.source,
+            params.priority,
+            params.initial_lod,
+            params.managed,
+        );
     }
 
     // Fold in completed level-of-detail changes (P21.1): the store entry now

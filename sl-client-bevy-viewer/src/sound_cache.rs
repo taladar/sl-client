@@ -171,6 +171,20 @@ impl SoundCache {
             self.request(id);
         }
     }
+
+    /// Re-park every sound previously marked [`unavailable`](Self::unavailable) so
+    /// the next [`retry_pending`](Self::retry_pending) re-fetches it. Called on a
+    /// capability refresh (a region cross / reconnect): a sound whose fetch failed
+    /// transiently would otherwise stay silent for the session.
+    fn rearm_unavailable(&mut self) {
+        if self.unavailable.is_empty() {
+            return;
+        }
+        let failed: Vec<AssetKey> = self.unavailable.drain().collect();
+        for id in failed {
+            let _inserted = self.pending.insert(id);
+        }
+    }
 }
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
@@ -208,8 +222,15 @@ pub(crate) fn update_sound_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut cache: ResMut<SoundCache>,
 ) {
+    let mut caps_refreshed = false;
     for SlCapabilities(map) in capabilities.read() {
         cache.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
+        caps_refreshed = true;
+    }
+    // A capability refresh (region cross / reconnect) re-arms any sound a post-cap
+    // transient failure had marked permanently unavailable.
+    if caps_refreshed {
+        cache.rearm_unavailable();
     }
     cache.retry_pending();
 }

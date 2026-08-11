@@ -126,8 +126,10 @@ pub(crate) fn update_pipeline_overlay(
     *text = Text::new(format_pipeline(
         textures.stats(),
         textures.gate_stats(),
+        textures.deferred_count(),
         meshes.stats(),
         meshes.gate_stats(),
+        meshes.deferred_count(),
         geometry.stats(),
         material.stats(),
     ));
@@ -145,15 +147,16 @@ fn format_bytes(bytes: u64) -> String {
 /// Format one store's two-line block: the per-stage entry counts on the first
 /// line, then the in-memory footprint, cumulative cache-hit / GC counters, and
 /// the admission gate's in-flight / capacity / waiting figures on the second.
-fn format_store_block(label: &str, stats: StoreStats, gate: GateStats) -> String {
+fn format_store_block(label: &str, stats: StoreStats, gate: GateStats, deferred: usize) -> String {
     format!(
-        "{label:<5} queued {}  dl {}  dec {}  ready {}  fail {}\n\
+        "{label:<5} queued {}  dl {}  dec {}  ready {}  fail {}  defer {}\n\
          {:<5} mem {} ({})  cached {}  gc {}  gate {}/{} wait {}",
         stats.queued,
         stats.downloading,
         stats.decoding,
         stats.ready,
         stats.failed,
+        deferred,
         "",
         stats.in_memory,
         format_bytes(stats.bytes),
@@ -189,18 +192,24 @@ fn format_material_block(stats: MaterialCacheStats) -> String {
 /// Format the whole pipeline-status panel: a header, then one two-line block per
 /// pipeline (texture, then mesh), then the geometry-cache and material-cache
 /// lines.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one snapshot value per pipeline stage rendered in the overlay"
+)]
 fn format_pipeline(
     tex: StoreStats,
     tex_gate: GateStats,
+    tex_deferred: usize,
     mesh: StoreStats,
     mesh_gate: GateStats,
+    mesh_deferred: usize,
     geometry: GeometryCacheStats,
     material: MaterialCacheStats,
 ) -> String {
     format!(
         "PIPELINE  (F3)\n{}\n{}\n{}\n{}",
-        format_store_block("tex", tex, tex_gate),
-        format_store_block("mesh", mesh, mesh_gate),
+        format_store_block("tex", tex, tex_gate, tex_deferred),
+        format_store_block("mesh", mesh, mesh_gate, mesh_deferred),
         format_geometry_block(geometry),
         format_material_block(material),
     )
@@ -248,8 +257,8 @@ mod tests {
             waiting: 0,
         };
         assert_eq!(
-            format_store_block("tex", stats, gate),
-            "tex   queued 3  dl 2  dec 1  ready 840  fail 0\n      \
+            format_store_block("tex", stats, gate, 7),
+            "tex   queued 3  dl 2  dec 1  ready 840  fail 0  defer 7\n      \
              mem 840 (128.0 MiB)  cached 512  gc 4  gate 6/8 wait 0"
         );
     }
@@ -293,8 +302,10 @@ mod tests {
         let panel = format_pipeline(
             StoreStats::default(),
             GateStats::default(),
+            0,
             StoreStats::default(),
             GateStats::default(),
+            0,
             GeometryCacheStats::default(),
             MaterialCacheStats::default(),
         );

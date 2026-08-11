@@ -35,6 +35,8 @@ use sl_client_bevy::{
     StoreStats,
 };
 
+use crate::asset_retry::RetryState;
+
 /// The outcome of one background mesh fetch: the decoded geometry paired with the
 /// decoded rig skin (`None` when the mesh carries no skin block), or `None` for
 /// the whole fetch if the geometry could not be fetched or decoded.
@@ -122,6 +124,16 @@ pub(crate) struct MeshManager {
     /// the cap is set. (Object updates normally arrive after the caps, so this is a
     /// latent-race guard rather than a routinely-hit path.)
     pending: HashMap<MeshKey, Priority>,
+    /// The request-time priority of each in-flight fetch, kept so a failed one can
+    /// be retried at the same priority. Removed once the fetch resolves (moved into
+    /// [`retry`](Self::retry) on failure).
+    in_flight_priority: HashMap<MeshKey, Priority>,
+    /// Fetches that failed and are waiting to be re-issued (bounded backoff —
+    /// [`asset_retry`](crate::asset_retry)). Without this a transient `GetMesh`
+    /// failure would leave a static mesh geometry-less for the whole session
+    /// (nothing re-requests it), invisible to the F3 overlay. Drained by
+    /// [`poll_meshes`] once each entry is due.
+    retry: HashMap<MeshKey, (Priority, RetryState)>,
 }
 
 impl FromWorld for MeshManager {
@@ -142,6 +154,8 @@ impl FromWorld for MeshManager {
             decoded: HashMap::new(),
             skins: HashMap::new(),
             pending: HashMap::new(),
+            in_flight_priority: HashMap::new(),
+            retry: HashMap::new(),
         }
     }
 }
@@ -204,7 +218,13 @@ impl MeshManager {
             // never decodes.
             let geometry = match task_request.resolved().await {
                 Ok(entry) => entry.mesh(),
-                Err(_error) => None,
+                Err(error) => {
+                    // Logged (the texture path already logs its failures) so a
+                    // transient GetMesh 503 is not silent — `poll_meshes` then
+                    // schedules the retry.
+                    warn!("mesh {id} fetch/decode failed: {error}");
+                    None
+                }
             }?;
             // Also decode the rig skin so a worn rigged mesh can be bound to the
             // avatar skeleton (P17.2); a mesh with no skin block yields `None`
@@ -224,6 +244,10 @@ impl MeshManager {
                 .entry(id)
                 .or_insert(ManagedMeshLod { current: target });
         }
+        // Record the priority so a transient failure can be retried (`poll_meshes`)
+        // at the same priority; a fresh explicit request supersedes a pending retry.
+        let _retried = self.retry.remove(&id);
+        let _prev_priority = self.in_flight_priority.insert(id, priority);
         self.inflight.insert(id, task);
     }
 
@@ -375,6 +399,14 @@ impl MeshManager {
     pub(crate) fn gate_stats(&self) -> GateStats {
         self.store.gate_stats()
     }
+
+    /// How many fetches are parked outside the store's own accounting — held for
+    /// the mesh capability, or waiting out a post-failure retry backoff — so the
+    /// pipeline overlay can show work the weak-referenced store cannot see (a failed
+    /// or not-yet-issued fetch), rather than reporting "nothing left to load".
+    pub(crate) fn deferred_count(&self) -> usize {
+        self.pending.len().saturating_add(self.retry.len())
+    }
 }
 
 /// Build a [`MeshStore`] over `fetcher`, backed by the on-disk cache at `disk_dir`
@@ -431,9 +463,11 @@ pub(crate) fn update_mesh_caps(
 /// cache and announce it with a [`MeshDecoded`] message (emitted on failure too,
 /// so the object system can stop waiting on it).
 pub(crate) fn poll_meshes(
+    time: Res<Time>,
     mut manager: ResMut<MeshManager>,
     mut decoded: MessageWriter<MeshDecoded>,
 ) {
+    let now = time.elapsed_secs_f64();
     // Collect the ids whose task has finished, then apply — the borrow of the task
     // map cannot overlap the mutation of the decoded map.
     let mut finished: Vec<(MeshKey, FetchResult)> = Vec::new();
@@ -444,6 +478,7 @@ pub(crate) fn poll_meshes(
     }
     for (id, result) in finished {
         let _removed = manager.inflight.remove(&id);
+        let priority = manager.in_flight_priority.remove(&id);
         // Drop the schedulable request handle now the fetch is done — the decoded
         // geometry lives in `decoded`, independent of the store entry (P20.2) —
         // *unless* the mesh is pixel-area LOD managed (P21.2), where the retained
@@ -451,19 +486,64 @@ pub(crate) fn poll_meshes(
         if !manager.managed.contains_key(&id) {
             let _request = manager.requests.remove(&id);
         }
-        if let Some((mesh, skin)) = result {
-            // Record the level actually decoded (the store may have fallen back to
-            // a coarser available block than requested), so the driver ranks
-            // further changes against the real current level (P21.2).
-            if let Some(state) = manager.managed.get_mut(&id) {
-                state.current = mesh.lod;
+        match result {
+            Some((mesh, skin)) => {
+                let _cleared = manager.retry.remove(&id);
+                // Record the level actually decoded (the store may have fallen back
+                // to a coarser available block than requested), so the driver ranks
+                // further changes against the real current level (P21.2).
+                if let Some(state) = manager.managed.get_mut(&id) {
+                    state.current = mesh.lod;
+                }
+                let _previous = manager.decoded.insert(id, mesh);
+                if let Some(skin) = skin {
+                    let _prev_skin = manager.skins.insert(id, skin);
+                }
+                decoded.write(MeshDecoded(id));
             }
-            let _previous = manager.decoded.insert(id, mesh);
-            if let Some(skin) = skin {
-                let _prev_skin = manager.skins.insert(id, skin);
+            None => {
+                // The fetch or decode failed. Schedule a bounded backoff retry at the
+                // same priority rather than leaving the mesh geometry-less for the
+                // session — nothing else re-requests a static mesh, and the failure
+                // is invisible to the F3 overlay. Only announce it (so the object
+                // system stops waiting) once the retry budget is exhausted; until
+                // then the object stays pending and rebuilds on the retry's success.
+                let previous = manager.retry.get(&id).map(|(_priority, state)| *state);
+                match (priority, RetryState::after_failure(previous, now)) {
+                    (Some(priority), Some(state)) => {
+                        // Logged so a transient GetMesh 503 and its recovery are
+                        // observable in any test run. Grep `scheduling retry`.
+                        warn!(
+                            "mesh {id} fetch failed; scheduling retry {}/{} in {:.1}s",
+                            state.attempts,
+                            crate::asset_retry::MAX_RETRY_ATTEMPTS,
+                            state.next_at - now
+                        );
+                        let _prev = manager.retry.insert(id, (priority, state));
+                    }
+                    _exhausted_or_unknown => {
+                        warn!(
+                            "mesh {id} fetch failed; gave up after {} attempts",
+                            crate::asset_retry::MAX_RETRY_ATTEMPTS
+                        );
+                        let _cleared = manager.retry.remove(&id);
+                        decoded.write(MeshDecoded(id));
+                    }
+                }
             }
         }
-        decoded.write(MeshDecoded(id));
+    }
+
+    // Re-issue any failed fetches whose backoff has now elapsed.
+    let due: Vec<(MeshKey, Priority)> = manager
+        .retry
+        .iter()
+        .filter(|(_id, (_priority, state))| state.due(now))
+        .map(|(&id, (priority, _state))| (id, *priority))
+        .collect();
+    for (id, priority) in due {
+        let _removed = manager.retry.remove(&id);
+        manager.request(id, priority);
     }
 
     // Fold in completed level-of-detail changes (P21.2): the store entry now holds

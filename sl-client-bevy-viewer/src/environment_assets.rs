@@ -147,6 +147,21 @@ impl EnvironmentAssetManager {
             self.request(id);
         }
     }
+
+    /// Re-park every settings asset previously marked
+    /// [`unavailable`](Self::unavailable) so the next
+    /// [`retry_pending`](Self::retry_pending) re-fetches it. Called on a capability
+    /// refresh (a region cross / reconnect): a settings asset whose fetch failed
+    /// transiently would otherwise keep its fallback for the session.
+    fn rearm_unavailable(&mut self) {
+        if self.unavailable.is_empty() {
+            return;
+        }
+        let failed: Vec<AssetKey> = self.unavailable.drain().collect();
+        for id in failed {
+            let _inserted = self.pending.insert(id);
+        }
+    }
 }
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
@@ -184,8 +199,15 @@ pub(crate) fn update_environment_asset_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<EnvironmentAssetManager>,
 ) {
+    let mut caps_refreshed = false;
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
+        caps_refreshed = true;
+    }
+    // A capability refresh (region cross / reconnect) re-arms any settings asset a
+    // post-cap transient failure had marked permanently unavailable.
+    if caps_refreshed {
+        manager.rearm_unavailable();
     }
     manager.retry_pending();
 }

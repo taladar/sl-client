@@ -566,6 +566,24 @@ impl MaterialManager {
         }
     }
 
+    /// Move every material previously marked [`unavailable`](Self::unavailable) back
+    /// into the parked set so the next [`retry_pending`](Self::retry_pending)
+    /// re-fetches it. Called on a capability refresh (a region cross / reconnect):
+    /// a material marked unavailable by a *post-cap* transient failure — a
+    /// `ViewerAsset` 503, or an in-flight fetch caught by the region-cross URL swap —
+    /// would otherwise leave its faces on the neutral white default for the rest of
+    /// the session. Re-arming on a cap refresh (rather than every frame) bounds the
+    /// re-attempts to region changes, so a genuinely-absent material is not hammered.
+    fn rearm_unavailable(&mut self) {
+        if self.unavailable.is_empty() {
+            return;
+        }
+        let failed: Vec<AssetKey> = self.unavailable.drain().collect();
+        for id in failed {
+            let _inserted = self.pending_cap.insert(id);
+        }
+    }
+
     /// The uploaded PBR-slot [`Image`] for `id` in the requested colour space,
     /// uploading it from `decoded` on first use and caching it.
     fn slot_image(
@@ -648,8 +666,15 @@ pub(crate) fn update_material_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<MaterialManager>,
 ) {
+    let mut caps_refreshed = false;
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
+        caps_refreshed = true;
+    }
+    // A capability refresh (region cross / reconnect) is a fresh chance for any
+    // material a post-cap transient failure had marked permanently unavailable.
+    if caps_refreshed {
+        manager.rearm_unavailable();
     }
     manager.retry_pending();
 }

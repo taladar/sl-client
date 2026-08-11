@@ -1,0 +1,114 @@
+//! Bounded exponential-backoff retry shared by the asset managers.
+//!
+//! A background asset fetch that fails (a transient `GetTexture` / `GetMesh` 503,
+//! a connection reset, a decode blip) used to be terminal: the manager dropped the
+//! request and never asked again, so a one-shot consumer — a terrain detail
+//! texture, an avatar bake, a static mesh whose one object update already
+//! arrived — was missing for the rest of the session, while the F3 pipeline
+//! overlay showed nothing left to load (the store keeps only weak references, so a
+//! failed entry with no strong holder is swept from its stats). This policy lets a
+//! failed fetch be re-issued a bounded number of times with growing backoff, so a
+//! transient failure recovers instead of stranding the asset.
+
+/// The number of attempts (the initial fetch plus retries) after which a fetch is
+/// given up on. With [`backoff_secs`] this spans roughly half a minute of
+/// retrying — long enough to ride out a transient service blip without hammering a
+/// genuinely-dead endpoint forever.
+pub(crate) const MAX_RETRY_ATTEMPTS: u32 = 6;
+
+/// The first retry's delay; each subsequent retry doubles it.
+const BASE_BACKOFF_SECS: f64 = 0.5;
+
+/// The ceiling on a single retry's delay.
+const MAX_BACKOFF_SECS: f64 = 30.0;
+
+/// The delay before the `attempts`-th retry (1-based): `0.5, 1, 2, 4, 8, 16, …`
+/// seconds, doubling each time and capped at [`MAX_BACKOFF_SECS`]. `attempts` of
+/// `0` is treated as the first wait.
+pub(crate) fn backoff_secs(attempts: u32) -> f64 {
+    let steps = attempts.saturating_sub(1).min(16);
+    let mut secs = BASE_BACKOFF_SECS;
+    for _step in 0..steps {
+        secs *= 2.0;
+        if secs >= MAX_BACKOFF_SECS {
+            break;
+        }
+    }
+    secs.min(MAX_BACKOFF_SECS)
+}
+
+/// The per-asset retry bookkeeping: how many attempts have failed and when the
+/// next one is due (in monotonic [`Time::elapsed_secs_f64`] seconds).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RetryState {
+    /// The number of failed attempts so far.
+    pub(crate) attempts: u32,
+    /// The monotonic time at which the next retry is due.
+    pub(crate) next_at: f64,
+}
+
+impl RetryState {
+    /// The retry state after another failed attempt at `now`, or `None` once the
+    /// attempts are exhausted ([`MAX_RETRY_ATTEMPTS`]) and the fetch should be given
+    /// up on. `previous` is the id's prior retry state, if it had already failed.
+    pub(crate) fn after_failure(previous: Option<Self>, now: f64) -> Option<Self> {
+        let attempts = previous.map_or(0, |state| state.attempts).saturating_add(1);
+        if attempts >= MAX_RETRY_ATTEMPTS {
+            return None;
+        }
+        Some(Self {
+            attempts,
+            next_at: now + backoff_secs(attempts),
+        })
+    }
+
+    /// Whether the next retry is due at `now`.
+    pub(crate) const fn due(&self, now: f64) -> bool {
+        now >= self.next_at
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_RETRY_ATTEMPTS, RetryState, backoff_secs};
+    use pretty_assertions::assert_eq;
+
+    /// Floats compare with a tolerance (the workspace forbids exact `f64` equality).
+    fn close(actual: f64, expected: f64) -> bool {
+        (actual - expected).abs() < 1e-9
+    }
+
+    #[test]
+    fn backoff_doubles_then_caps() {
+        assert!(close(backoff_secs(0), 0.5));
+        assert!(close(backoff_secs(1), 0.5));
+        assert!(close(backoff_secs(2), 1.0));
+        assert!(close(backoff_secs(3), 2.0));
+        assert!(close(backoff_secs(4), 4.0));
+        // Deep attempts saturate at the ceiling rather than growing unbounded.
+        assert!(close(backoff_secs(20), 30.0));
+    }
+
+    #[test]
+    fn after_failure_counts_up_then_gives_up() {
+        // First failure schedules attempt 1, due after the base backoff.
+        let Some(first) = RetryState::after_failure(None, 100.0) else {
+            unreachable!("the first retry is scheduled");
+        };
+        assert_eq!(first.attempts, 1);
+        assert!(close(first.next_at, 100.5));
+        assert!(!first.due(100.4));
+        assert!(first.due(100.5));
+        // Each subsequent failure increments the count until exhaustion.
+        let mut state = first;
+        for expected in 2..MAX_RETRY_ATTEMPTS {
+            let Some(next) = RetryState::after_failure(Some(state), 0.0) else {
+                unreachable!("still within the retry budget");
+            };
+            state = next;
+            assert_eq!(state.attempts, expected);
+        }
+        // The final failure exhausts the budget and gives up (no further retry).
+        assert!(RetryState::after_failure(Some(state), 0.0).is_none());
+    }
+}

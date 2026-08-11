@@ -431,7 +431,13 @@ pub(crate) fn update_terrain(
                 queue_neighbour_rebuilds(&state, key, &mut rebuilds);
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
-                learn_composition(&mut state, identity, &mut manager, &mut materials);
+                learn_composition(
+                    &mut state,
+                    identity,
+                    &mut manager,
+                    &mut images,
+                    &mut materials,
+                );
                 state.map_revision = state.map_revision.wrapping_add(1);
                 queue_region_rebuilds(&state, identity.region_handle, &mut rebuilds);
             }
@@ -656,6 +662,7 @@ fn learn_composition(
     state: &mut TerrainState,
     identity: &RegionIdentity,
     manager: &mut TextureManager,
+    images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
     let region = identity.region_handle;
@@ -696,6 +703,22 @@ fn learn_composition(
         debug!("learned terrain composition for {region:?} ({requested} detail textures)");
     }
     reconcile_region(state, region, materials);
+    // A detail texture may already be decoded — a prim face fetched the same default
+    // Linden UUID earlier, so the store's one-shot `TextureDecoded` for it fired
+    // before this region existed and `apply_detail_texture` (driven by that message
+    // stream) will never see it. Seed any already-decoded slot inline now, so the
+    // ground is textured rather than left on the olive placeholder while the F3
+    // overlay shows nothing left to load.
+    let decoded_keys: Vec<TextureKey> = state
+        .regions
+        .get(&region)
+        .map(|entry| entry.detail_keys.iter().flatten().copied().collect())
+        .unwrap_or_default();
+    for key in decoded_keys {
+        if manager.decoded(key).is_some() {
+            apply_detail_texture(state, key, manager, images, materials);
+        }
+    }
 }
 
 /// Route a store-decoded texture into every region material that requested it as

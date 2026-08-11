@@ -223,6 +223,24 @@ impl AnimationManager {
             self.request(id);
         }
     }
+
+    /// Re-park every id previously marked [`unavailable`](Self::unavailable) so the
+    /// next [`retry_pending`](Self::retry_pending) re-resolves it. Called on a
+    /// capability refresh (a region cross / reconnect): an animation whose fetch
+    /// failed transiently (a `ViewerAsset` 503, a region-cross URL swap) would
+    /// otherwise never play for the rest of the session. A procedural built-in that
+    /// shares the `unavailable` set is harmlessly re-marked (its re-request hits the
+    /// same built-in branch and does no network work); re-arming on a cap refresh
+    /// rather than every frame bounds that to region changes.
+    fn rearm_unavailable(&mut self) {
+        if self.unavailable.is_empty() {
+            return;
+        }
+        let failed: Vec<AssetKey> = self.unavailable.drain().collect();
+        for id in failed {
+            let _inserted = self.pending.insert(id);
+        }
+    }
 }
 
 /// Build an [`AssetStore`] over `fetcher`, disk-backed when the cache opens and
@@ -260,8 +278,15 @@ pub(crate) fn update_animation_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<AnimationManager>,
 ) {
+    let mut caps_refreshed = false;
     for SlCapabilities(map) in capabilities.read() {
         manager.set_cap_url(map.get(CAP_VIEWER_ASSET).cloned());
+        caps_refreshed = true;
+    }
+    // A capability refresh (region cross / reconnect) re-arms any animation a
+    // post-cap transient failure had marked permanently unavailable.
+    if caps_refreshed {
+        manager.rearm_unavailable();
     }
     // Re-issue any animation resolves parked while the cap was still unknown.
     manager.retry_pending();

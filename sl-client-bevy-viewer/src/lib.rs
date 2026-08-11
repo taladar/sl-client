@@ -33,6 +33,7 @@ mod about_region;
 mod animations;
 mod animesh;
 mod appearance;
+mod asset_retry;
 mod attachment_menu;
 mod audio;
 mod avatar_assets;
