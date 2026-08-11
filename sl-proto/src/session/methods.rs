@@ -1868,6 +1868,66 @@ impl Session {
                         .collect(),
                 });
             }
+            // A neighbour region also streams its avatars' `AvatarAppearance` (the
+            // baked-texture ids + visual params) on this child circuit. Without
+            // handling it here a neighbour-region avatar renders **grey** — its
+            // body spawns from the object stream (`try_dispatch_object` above) but
+            // no baked texture is ever ingested, since the bake ingest only fires
+            // on this event. Mirror the root-circuit handler so it textures.
+            AnyMessage::AvatarAppearance(appearance) => {
+                self.events
+                    .push_back(Event::AvatarAppearance(Box::new(avatar_appearance(
+                        appearance,
+                    ))));
+            }
+            // A neighbour region's spatial audio also streams on this child
+            // circuit: a scripted `llTriggerSound` / attached `llLoopSound` in the
+            // adjacent region is audible from ours, so dropping these silenced a
+            // whole neighbouring parcel for no reason (the sounds attach to objects
+            // the child object stream already tracks). Mirror the root handlers.
+            AnyMessage::SoundTrigger(trigger) => {
+                let block = &trigger.sound_data;
+                self.events.push_back(Event::SoundTrigger {
+                    sound_id: block.sound_id,
+                    owner_id: block.owner_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    parent_id: (!block.parent_id.is_nil())
+                        .then_some(ObjectKey::from(block.parent_id)),
+                    region_handle: RegionHandle(block.handle),
+                    position: block.position.clone(),
+                    gain: block.gain,
+                });
+            }
+            AnyMessage::AttachedSound(sound) => {
+                let block = &sound.data_block;
+                self.events.push_back(Event::AttachedSound {
+                    sound_id: block.sound_id,
+                    object_id: ObjectKey::from(block.object_id),
+                    owner_id: block.owner_id,
+                    gain: block.gain,
+                    flags: SoundFlags(block.flags),
+                });
+            }
+            AnyMessage::AttachedSoundGainChange(change) => {
+                let block = &change.data_block;
+                self.events.push_back(Event::AttachedSoundGainChange {
+                    object_id: ObjectKey::from(block.object_id),
+                    gain: block.gain,
+                });
+            }
+            AnyMessage::PreloadSound(preload) => {
+                self.events.push_back(Event::PreloadSound {
+                    sounds: preload
+                        .data_block
+                        .iter()
+                        .map(|block| SoundPreload {
+                            sound_id: block.sound_id,
+                            object_id: ObjectKey::from(block.object_id),
+                            owner_id: block.owner_id,
+                        })
+                        .collect(),
+                });
+            }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
                     id: message.id(),

@@ -6185,6 +6185,63 @@ mod test {
         Ok(())
     }
 
+    /// A neighbour-region avatar's `AvatarAppearance`, arriving on the child-agent
+    /// circuit, is dispatched into an `Event::AvatarAppearance` exactly like the
+    /// root circuit's. Without this a neighbour-region avatar renders **grey** —
+    /// its body spawns from the child object stream, but no bake is ever ingested
+    /// (the bake ingest only fires on this event).
+    #[test]
+    fn child_circuit_avatar_appearance_is_dispatched() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let avatar = uuid::Uuid::from_u128(0xB2);
+        let head_bake = uuid::Uuid::from_u128(0xCAFE);
+        // Same minimal packed TextureEntry as the root test: the head-baked slot
+        // (index 8) overridden, the rest left default.
+        let mut te = Writer::new();
+        te.put_uuid(uuid::Uuid::nil());
+        te.put_u8(0x82);
+        te.put_u8(0x00);
+        te.put_uuid(head_bake);
+        te.put_u8(0);
+        let message = AnyMessage::AvatarAppearance(AvatarAppearance {
+            sender: AvatarAppearanceSenderBlock {
+                id: avatar,
+                is_trial: false,
+            },
+            object_data: AvatarAppearanceObjectDataBlock {
+                texture_entry: te.into_bytes(),
+            },
+            visual_param: vec![AvatarAppearanceVisualParamBlock { param_value: 42 }],
+            appearance_data: Vec::new(),
+            appearance_hover: Vec::new(),
+            attachment_block: Vec::new(),
+        });
+        // Delivered from the NEIGHBOUR (child circuit), not the root.
+        session.handle_datagram(sim_b(), &server_message(&message, 5, true)?, now)?;
+
+        let appearance = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarAppearance(appearance) => Some(appearance),
+                _ => None,
+            })
+            .ok_or("expected an AvatarAppearance event from the child circuit")?;
+        assert_eq!(appearance.avatar_id, AgentKey::from(avatar));
+        assert_eq!(
+            appearance
+                .texture_entry
+                .texture_id(avatar_texture::HEAD_BAKED),
+            Some(TextureKey::from(head_bake))
+        );
+        Ok(())
+    }
+
     #[test]
     fn agent_wearables_update_surfaces_worn_wearables() -> Result<(), TestError> {
         let now = Instant::now();

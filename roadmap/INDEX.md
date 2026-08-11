@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 20 |
-| done | 769 |
+| bugs | 19 |
+| done | 770 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1213** |
@@ -997,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (20)
+## bugs (19)
 
 ### protocol
 
@@ -1023,8 +1023,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
-- [`viewer-grey-avatars-bakes-not-showing`](bugs/viewer-grey-avatars-bakes-not-showing.md)
-  — Most other avatars render grey (baked skin/textures not showing) on aditi
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1051,7 +1049,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (769)
+## done (770)
 
 ### protocol
 
@@ -1335,6 +1333,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom
+- [`viewer-grey-avatars-bakes-not-showing`](done/viewer-grey-avatars-bakes-not-showing.md)
+  — Most other avatars render grey (baked skin/textures not showing) on aditi
 - [`viewer-group-notice-body-links`](done/viewer-group-notice-body-links.md) —
   Group notice body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
