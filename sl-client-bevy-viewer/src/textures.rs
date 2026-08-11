@@ -744,7 +744,13 @@ pub(crate) fn poll_textures(
         .map(|(&id, (params, _state))| (id, params.clone()))
         .collect();
     for (id, params) in due {
-        let _removed = manager.retry.remove(&id);
+        // Park the retry state (keeping its attempt count) rather than removing it:
+        // the re-issued fetch's result reschedules or clears it. Removing it here
+        // dropped the count, so the next failure reset to attempt 1 and the backoff
+        // looped forever at "retry 1/N" without ever giving up.
+        if let Some((_params, state)) = manager.retry.get_mut(&id) {
+            *state = state.issued();
+        }
         manager.request_from(
             id,
             params.source,

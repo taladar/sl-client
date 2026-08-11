@@ -42,6 +42,19 @@ Fixes (all 2026-08-11):
   (a region-cross fetch race, a `ViewerAsset` 503) recovers instead of stranding
   a face on the neutral white default (etc.) for the session.
 
+## Post-landing fix (2026-08-11): re-issue reset the attempt count
+
+Live-verified on aditi (its asset CDN was 503ing with a DNS failure), which also
+exposed a bug: the retry looped forever at `scheduling retry 1/6` — the attempt
+count never escalated and the fetch never gave up. Cause: the poll loop
+re-issued a due retry by **removing** the `retry` entry, so the next failure ran
+`after_failure(None, …)` and reset `attempts` to 1. Fix: `RetryState::issued()`
+keeps the count and parks `next_at` at infinity (so the entry is not re-selected
+as due on its own); the re-issued fetch's result reschedules it (a failure
+increments and eventually gives up) or clears it (a success). Applied to both
+`poll_textures` and `poll_meshes`; regression test
+`issued_preserves_count_so_reissue_escalates_and_gives_up`.
+
 Related still-open perf lever: [[viewer-perf-async-asset-fetchers]] — the
 blocking-fetch-on-`IoTaskPool` design caps concurrent downloads at ~4 regardless
 of the store gate, which is why F3 rarely shows the gate saturated.
