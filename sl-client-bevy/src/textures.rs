@@ -19,7 +19,12 @@ use sl_proto::{TextureFace, TextureKey};
 use sl_texture::{DecodedImage, FetchChunk, FetchError, RemoteTextureSource, TextureFetcher};
 use wgpu_types::{Extent3d, TextureDimension, TextureFormat};
 
+use crate::async_http::{fetch_range_async, shared_async_client};
+use crate::async_runtime::run_on_shared_runtime;
 use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
+/// The `Accept` header a `GetTexture` codestream fetch sends.
+const TEXTURE_ACCEPT: &str = "image/x-j2c";
 
 /// Converts a decoded RGBA8 texture into a Bevy [`Image`] (`Rgba8UnormSrgb`),
 /// ready to insert into `Assets<Image>` and use as a rendered texture.
@@ -291,8 +296,24 @@ impl TextureFetcher for BevyTextureFetcher {
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        // The blocking request runs on whatever thread `block_on`s this future
-        // (a Bevy task/thread dedicated to the fetch), which is the intended use.
+        // Prefer the shared async runtime: the non-blocking request yields at each
+        // `.await`, so this fetch does not monopolise its `IoTaskPool` thread and
+        // the texture store's 16-slot admission gate governs real concurrency.
+        // Fall back to the blocking client only if the shared client / runtime is
+        // unavailable.
+        if let Some(client) = shared_async_client() {
+            let url = self.source_url(id, source)?;
+            if let Some(result) = run_on_shared_runtime(fetch_range_async(
+                client,
+                url,
+                TEXTURE_ACCEPT,
+                Some((start, end)),
+            ))
+            .await
+            {
+                return result;
+            }
+        }
         self.fetch_blocking(id, source, start, end)
     }
 }

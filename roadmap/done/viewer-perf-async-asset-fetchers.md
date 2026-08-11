@@ -2,10 +2,35 @@
 id: viewer-perf-async-asset-fetchers
 title: Async (non-blocking) asset fetchers — lift the IoTaskPool 4-thread download ceiling
 topic: viewer
-status: ideas
+status: done
 origin: noticed while investigating stuck-LOD / F3 slot saturation (2026-08-11)
 refs: [viewer-profiling]
 ---
+
+Done (2026-08-11): took direction 2 (the proper async fix), not the thread-bump
+stopgap. New `sl-client-bevy` modules: `async_runtime.rs` owns a small shared
+multi-threaded tokio runtime (4 worker threads, `LazyLock<Option<Runtime>>`,
+deliberately fetch-agnostic so future async needs — a WebRTC signaller, uploads
+— can share it) exposing `run_on_shared_runtime`; `async_http.rs` holds one
+shared async `reqwest::Client` and a `fetch_range_async` helper (same 404 /
+range-not-satisfiable / transient-503-backoff handling as the blocking path, but
+yielding at each `.await`). The three fetchers (`BevyTextureFetcher`,
+`BevyMeshFetcher`, `BevyAssetFetcher` — the last backs animations, environment,
+sound, wearables, and glTF materials via their shared `AssetStore`) now try the
+shared runtime first: an `IoTaskPool` task does `run_on_shared_runtime(...)` and
+`.await`s the tokio `JoinHandle`, which returns `Pending` on the Bevy executor,
+freeing the IO thread while tokio drives the non-blocking socket IO. Each
+fetcher keeps its blocking `reqwest` client as a graceful fallback if the
+runtime / client fail to build. reqwest's async client needed no feature change
+(it works under the existing `blocking` + `rustls-tls` set). Client-side tests
+cover the cross-executor offload (including a tokio timer, proving the reactor
+drives it) and the reqwest error mapping.
+
+Remaining: the **live-perf measurement** in the Measurement section below — on a
+texture-heavy region F3 `dl` should now climb toward the 16-slot gate and the
+`queued` backlog drain faster than the old `dl ≈ 4`, with no frame-time
+regression. Verified client-side (correctness + offload mechanism), not yet
+measured live.
 
 Context: [context/viewer.md](../context/viewer.md).
 

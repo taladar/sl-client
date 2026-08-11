@@ -287,6 +287,8 @@ pub use crate::water::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 
 pub mod animations;
 pub mod assets;
+mod async_http;
+mod async_runtime;
 pub mod avatars;
 mod caps;
 mod chat_log;

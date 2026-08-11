@@ -1,6 +1,10 @@
 //! The key-toggled **pipeline-status overlay**: a `bevy_ui` text node pinned to
 //! the top-left corner (hidden by default, toggled with [`PIPELINE_TOGGLE_KEY`])
-//! rendering the texture and mesh fetch/decode pipeline status.
+//! rendering the asset fetch/decode pipeline status. The texture and mesh stores
+//! get a full two-line block each; the asset stores added since — animations,
+//! settings/environment, sounds, wearable bake-inputs, and glTF materials — get
+//! one condensed line each, so "nothing left to load" on F3 accounts for every
+//! pipeline rather than just the first two.
 //!
 //! This is the P19.3 slice. The frame rate and per-frame budget the module once
 //! also showed in a top-right overlay now live in the status area
@@ -16,9 +20,14 @@
 use bevy::prelude::*;
 use sl_client_bevy::{GateStats, StoreStats};
 
+use crate::animations::AnimationManager;
+use crate::bake_inputs::WearableAssetManager;
+use crate::environment_assets::EnvironmentAssetManager;
 use crate::geometry_cache::{GeometryCache, GeometryCacheStats};
 use crate::material_cache::{MaterialCache, MaterialCacheStats};
+use crate::materials::MaterialManager;
 use crate::meshes::MeshManager;
+use crate::sound_cache::SoundCache;
 use crate::textures::TextureManager;
 use crate::ui_font::UiFont;
 
@@ -103,10 +112,19 @@ pub(crate) fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> b
 /// and — while it is shown — rewrite it from the live texture / mesh store and
 /// gate snapshots (P19.2). The stats are only sampled when the panel is visible,
 /// so the hidden default costs nothing beyond the toggle check.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one asset-store resource per pipeline sampled into the overlay"
+)]
 pub(crate) fn update_pipeline_overlay(
     visible: Res<PipelineOverlayVisible>,
     textures: Res<TextureManager>,
     meshes: Res<MeshManager>,
+    animations: Res<AnimationManager>,
+    environment: Res<EnvironmentAssetManager>,
+    sounds: Res<SoundCache>,
+    wearables: Res<WearableAssetManager>,
+    gltf_materials: Res<MaterialManager>,
     geometry: Res<GeometryCache>,
     material: Res<MaterialCache>,
     mut panels: Query<(&mut Text, &mut Visibility), With<PipelineStatusText>>,
@@ -123,6 +141,42 @@ pub(crate) fn update_pipeline_overlay(
     if *visibility != Visibility::Visible {
         *visibility = Visibility::Visible;
     }
+    // The asset managers added since the overlay was built get one condensed
+    // line each (a full two-line block per store would make the debug panel too
+    // tall). `gmat` is the glTF-material *asset* store, distinct from the interned
+    // `FaceMaterial` `mat` cache line below.
+    let condensed = [
+        (
+            "anim",
+            animations.stats(),
+            animations.gate_stats(),
+            animations.deferred_count(),
+        ),
+        (
+            "env",
+            environment.stats(),
+            environment.gate_stats(),
+            environment.deferred_count(),
+        ),
+        (
+            "sound",
+            sounds.stats(),
+            sounds.gate_stats(),
+            sounds.deferred_count(),
+        ),
+        (
+            "wear",
+            wearables.stats(),
+            wearables.gate_stats(),
+            wearables.deferred_count(),
+        ),
+        (
+            "gmat",
+            gltf_materials.stats(),
+            gltf_materials.gate_stats(),
+            gltf_materials.deferred_count(),
+        ),
+    ];
     *text = Text::new(format_pipeline(
         textures.stats(),
         textures.gate_stats(),
@@ -130,6 +184,7 @@ pub(crate) fn update_pipeline_overlay(
         meshes.stats(),
         meshes.gate_stats(),
         meshes.deferred_count(),
+        &condensed,
         geometry.stats(),
         material.stats(),
     ));
@@ -168,6 +223,29 @@ fn format_store_block(label: &str, stats: StoreStats, gate: GateStats, deferred:
     )
 }
 
+/// Format one store's **condensed** single line — the compact form used for the
+/// asset stores added since the overlay was built, so five more pipelines do not
+/// each cost the two-line [`format_store_block`] and push the debug panel off the
+/// screen. Carries the per-stage counts, the deferred (parked / retrying) count,
+/// the in-memory footprint, and the admission gate's in-flight / capacity /
+/// waiting figures on one line.
+fn format_store_line(label: &str, stats: StoreStats, gate: GateStats, deferred: usize) -> String {
+    format!(
+        "{label:<5} q{} dl{} dec{} rdy{} f{} def{}  mem {} ({})  gate {}/{} w{}",
+        stats.queued,
+        stats.downloading,
+        stats.decoding,
+        stats.ready,
+        stats.failed,
+        deferred,
+        stats.in_memory,
+        format_bytes(stats.bytes),
+        gate.in_flight,
+        gate.capacity,
+        gate.waiting,
+    )
+}
+
 /// Format the cross-instance geometry cache's one-line block: how many distinct
 /// geometries are cached and the cumulative spawn outcomes (full hits that
 /// skipped tessellation, partial hits that revived some faces, misses).
@@ -189,12 +267,13 @@ fn format_material_block(stats: MaterialCacheStats) -> String {
     )
 }
 
-/// Format the whole pipeline-status panel: a header, then one two-line block per
-/// pipeline (texture, then mesh), then the geometry-cache and material-cache
-/// lines.
+/// Format the whole pipeline-status panel: a header, then the two-line
+/// texture and mesh blocks, then one condensed [`format_store_line`] per
+/// later-added asset store (`condensed`, in display order), then the
+/// geometry-cache and material-cache lines.
 #[expect(
     clippy::too_many_arguments,
-    reason = "one snapshot value per pipeline stage rendered in the overlay"
+    reason = "the two detailed stores plus the condensed slice and two caches rendered in the overlay"
 )]
 fn format_pipeline(
     tex: StoreStats,
@@ -203,16 +282,23 @@ fn format_pipeline(
     mesh: StoreStats,
     mesh_gate: GateStats,
     mesh_deferred: usize,
+    condensed: &[(&str, StoreStats, GateStats, usize)],
     geometry: GeometryCacheStats,
     material: MaterialCacheStats,
 ) -> String {
-    format!(
-        "PIPELINE  (F3)\n{}\n{}\n{}\n{}",
+    let mut panel = format!(
+        "PIPELINE  (F3)\n{}\n{}\n",
         format_store_block("tex", tex, tex_gate, tex_deferred),
         format_store_block("mesh", mesh, mesh_gate, mesh_deferred),
-        format_geometry_block(geometry),
-        format_material_block(material),
-    )
+    );
+    for (label, stats, gate, deferred) in condensed {
+        panel.push_str(&format_store_line(label, *stats, *gate, *deferred));
+        panel.push('\n');
+    }
+    panel.push_str(&format_geometry_block(geometry));
+    panel.push('\n');
+    panel.push_str(&format_material_block(material));
+    panel
 }
 
 #[cfg(test)]
@@ -220,6 +306,7 @@ mod tests {
     use super::{
         GateStats, GeometryCacheStats, MaterialCacheStats, StoreStats, format_bytes,
         format_geometry_block, format_material_block, format_pipeline, format_store_block,
+        format_store_line,
     };
     use pretty_assertions::assert_eq;
 
@@ -263,6 +350,35 @@ mod tests {
         );
     }
 
+    /// The condensed one-line store form places every stage count, the deferred
+    /// count, the footprint, and the gate on a single line, left-padded under the
+    /// label — the compact form for the later-added asset stores.
+    #[test]
+    fn store_line_is_one_line() {
+        let stats = StoreStats {
+            queued: 3,
+            downloading: 2,
+            decoding: 1,
+            ready: 40,
+            failed: 0,
+            in_memory: 40,
+            bytes: 2 * 1024 * 1024,
+            ..StoreStats::default()
+        };
+        let gate = GateStats {
+            capacity: 16,
+            in_flight: 5,
+            waiting: 1,
+        };
+        let line = format_store_line("anim", stats, gate, 4);
+        assert_eq!(
+            line,
+            "anim  q3 dl2 dec1 rdy40 f0 def4  mem 40 (2.0 MiB)  gate 5/16 w1"
+        );
+        // A single line: no embedded newline.
+        assert_eq!(line.lines().count(), 1);
+    }
+
     /// The geometry-cache block renders its entry count and the three spawn
     /// outcome counters on one line.
     #[test]
@@ -295,10 +411,18 @@ mod tests {
         );
     }
 
-    /// The full panel carries the header, both store blocks, and the
-    /// geometry-cache and material-cache lines in order.
+    /// The full panel carries the header, the two detailed store blocks, one
+    /// condensed line per later-added store, and the geometry-cache and
+    /// material-cache lines in order.
     #[test]
     fn pipeline_panel_has_header_and_both_blocks() {
+        let condensed = [
+            ("anim", StoreStats::default(), GateStats::default(), 0),
+            ("env", StoreStats::default(), GateStats::default(), 0),
+            ("sound", StoreStats::default(), GateStats::default(), 0),
+            ("wear", StoreStats::default(), GateStats::default(), 0),
+            ("gmat", StoreStats::default(), GateStats::default(), 0),
+        ];
         let panel = format_pipeline(
             StoreStats::default(),
             GateStats::default(),
@@ -306,16 +430,23 @@ mod tests {
             StoreStats::default(),
             GateStats::default(),
             0,
+            &condensed,
             GeometryCacheStats::default(),
             MaterialCacheStats::default(),
         );
         let mut lines = panel.lines();
         assert_eq!(lines.next(), Some("PIPELINE  (F3)"));
-        // Header, then two lines per store block for two blocks, then the
-        // geometry-cache and material-cache lines.
-        assert_eq!(panel.lines().count(), 7);
+        // Header, two lines per detailed block for two blocks (4), one condensed
+        // line per later-added store (5), then the geometry-cache and
+        // material-cache lines (2): 1 + 4 + 5 + 2 = 12.
+        assert_eq!(panel.lines().count(), 12);
         assert!(panel.contains("tex   queued 0"));
         assert!(panel.contains("mesh  queued 0"));
+        assert!(panel.contains("anim  q0 dl0 dec0 rdy0 f0 def0"));
+        assert!(panel.contains("env   q0"));
+        assert!(panel.contains("sound q0"));
+        assert!(panel.contains("wear  q0"));
+        assert!(panel.contains("gmat  q0"));
         assert!(panel.contains("geom  entries 0"));
         assert!(panel.contains("mat   entries 0"));
     }

@@ -22,7 +22,8 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
-    CAP_VIEWER_ASSET, EnvironmentAsset, SlCapabilities, environment_asset_from_bytes,
+    CAP_VIEWER_ASSET, EnvironmentAsset, GateStats, SlCapabilities, StoreStats,
+    environment_asset_from_bytes,
 };
 
 /// The EEP settings-asset resolve / decode / cache pipeline: an [`AssetStore`]
@@ -128,6 +129,28 @@ impl EnvironmentAssetManager {
     /// in flight, failed, or was never requested.
     pub(crate) fn get(&self, id: AssetKey) -> Option<&Arc<EnvironmentAsset>> {
         self.decoded.get(&id)
+    }
+
+    /// A point-in-time snapshot of the settings-asset fetch/decode pipeline, for
+    /// the F3 diagnostics overlay: entry counts bucketed by stage plus the
+    /// cumulative disk-cache-hit / GC counters. Delegates to the wrapped
+    /// [`AssetStore`].
+    pub(crate) fn stats(&self) -> StoreStats {
+        self.store.stats()
+    }
+
+    /// A point-in-time snapshot of the settings store's admission gate: its
+    /// concurrency capacity, in-flight slots, and queued waiters.
+    pub(crate) fn gate_stats(&self) -> GateStats {
+        self.store.gate_stats()
+    }
+
+    /// How many resolves are parked outside the store's own accounting — held for
+    /// the `ViewerAsset` capability that is not up yet (see
+    /// [`pending`](Self::pending)) — so the pipeline overlay does not report
+    /// "nothing left to load" while such work is still outstanding.
+    pub(crate) fn deferred_count(&self) -> usize {
+        self.pending.len()
     }
 
     /// Point the store's fetcher at the region's current `ViewerAsset` URL.

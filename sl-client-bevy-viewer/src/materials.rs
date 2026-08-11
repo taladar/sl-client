@@ -40,9 +40,10 @@ use bevy::render::render_resource::{Extent3d, Face, TextureDimension, TextureFor
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher, BlobFetcher,
-    CAP_VIEWER_ASSET, DecodedTexture, GltfAlphaMode, GltfMaterial, GltfTexture,
+    CAP_VIEWER_ASSET, DecodedTexture, GateStats, GltfAlphaMode, GltfMaterial, GltfTexture,
     GltfTextureTransform, MaterialOverride, Priority, ScopedObjectId, SlCapabilities, SlEvent,
-    SlSessionEvent, TextureFace, TextureKey, Uuid, parse_material_asset, parse_material_override,
+    SlSessionEvent, StoreStats, TextureFace, TextureKey, Uuid, parse_material_asset,
+    parse_material_override,
 };
 
 use crate::edit_selection::SelectionSet;
@@ -547,6 +548,34 @@ impl MaterialManager {
             }
         });
         let _prev = self.inflight.insert(id, task);
+    }
+
+    /// A point-in-time snapshot of the glTF-material fetch/decode pipeline, for
+    /// the F3 diagnostics overlay: entry counts bucketed by stage plus the
+    /// cumulative disk-cache-hit / GC counters. Delegates to the wrapped
+    /// [`AssetStore`] — distinct from the interned `FaceMaterial` cache the
+    /// overlay shows as `mat`.
+    pub(crate) fn stats(&self) -> StoreStats {
+        self.store.stats()
+    }
+
+    /// A point-in-time snapshot of the material store's admission gate: its
+    /// concurrency capacity, in-flight slots, and queued waiters.
+    pub(crate) fn gate_stats(&self) -> GateStats {
+        self.store.gate_stats()
+    }
+
+    /// How many fetches / slot patches are parked outside the store's own
+    /// accounting: material ids held for the `ViewerAsset` capability that is not
+    /// up yet (see [`pending_cap`](Self::pending_cap)), plus material-slot patches
+    /// parked on a texture id that has not decoded yet (see
+    /// [`texture_pending`](Self::texture_pending)). Shown on the pipeline overlay
+    /// so it does not report "nothing left to load" while such work is still
+    /// outstanding.
+    pub(crate) fn deferred_count(&self) -> usize {
+        self.pending_cap
+            .len()
+            .saturating_add(self.texture_pending.values().map(Vec::len).sum::<usize>())
     }
 
     /// Point the store's fetcher at the region's current `ViewerAsset` URL.

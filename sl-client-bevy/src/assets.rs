@@ -15,7 +15,12 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_asset::{AssetFetcher, AssetRef, FetchChunk, FetchError};
 
+use crate::async_http::{fetch_range_async, shared_async_client};
+use crate::async_runtime::run_on_shared_runtime;
 use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
+/// The `Accept` header a generic-asset fetch sends.
+const ASSET_ACCEPT: &str = "application/octet-stream";
 
 /// Summarizes a failed HTTP response as a one-line `status; body: …` string
 /// (body whitespace-collapsed and truncated), so a fetch error carries what the
@@ -67,13 +72,10 @@ impl BevyAssetFetcher {
         self.cap_url.load().is_some()
     }
 
-    /// Performs the blocking request, returning the chunk.
-    fn fetch_blocking(
-        &self,
-        id: AssetRef,
-        start: usize,
-        end: usize,
-    ) -> Result<FetchChunk, FetchError> {
+    /// The `ViewerAsset` URL a fetch of `id` targets: the capability queried by
+    /// the asset class's query key. Errors if the capability is not set yet or the
+    /// asset class has no fetch query key. Shared by the async and blocking paths.
+    fn resolve_url(&self, id: AssetRef) -> Result<String, FetchError> {
         let cap = self.cap_url.load_full().ok_or_else(|| {
             FetchError::Transport("ViewerAsset capability not available".to_owned())
         })?;
@@ -83,7 +85,18 @@ impl BevyAssetFetcher {
                 id.asset_type
             ))
         })?;
-        let url = format!("{cap}/?{key}={}", id.id);
+        Ok(format!("{cap}/?{key}={}", id.id))
+    }
+
+    /// Performs the blocking request, returning the chunk — the fallback path when
+    /// the shared async runtime / client is unavailable.
+    fn fetch_blocking(
+        &self,
+        id: AssetRef,
+        start: usize,
+        end: usize,
+    ) -> Result<FetchChunk, FetchError> {
+        let url = self.resolve_url(id)?;
         let mut attempt = 0_u32;
         loop {
             let mut request = self
@@ -144,8 +157,24 @@ impl AssetFetcher<AssetRef> for BevyAssetFetcher {
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        // The blocking request runs on whatever thread `block_on`s this future
-        // (a Bevy task/thread dedicated to the fetch), which is the intended use.
+        // Prefer the shared async runtime: the non-blocking request yields at each
+        // `.await`, so this fetch does not monopolise its `IoTaskPool` thread and
+        // the store's admission gate governs real concurrency. Fall back to the
+        // blocking client only if the shared client / runtime is unavailable.
+        if let Some(client) = shared_async_client() {
+            let url = self.resolve_url(id)?;
+            // `0..usize::MAX` means "the whole asset": send no `Range` header.
+            let range = if start == 0 && end == usize::MAX {
+                None
+            } else {
+                Some((start, end))
+            };
+            if let Some(result) =
+                run_on_shared_runtime(fetch_range_async(client, url, ASSET_ACCEPT, range)).await
+            {
+                return result;
+            }
+        }
         self.fetch_blocking(id, start, end)
     }
 }

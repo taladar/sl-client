@@ -47,8 +47,8 @@ use sl_anim::{
 };
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
-    BlobFetcher, CAP_VIEWER_ASSET, SlCapabilities, SlEvent, SlSessionEvent, Uuid,
-    VolumeDeformations, sample_motion,
+    BlobFetcher, CAP_VIEWER_ASSET, GateStats, SlCapabilities, SlEvent, SlSessionEvent, StoreStats,
+    Uuid, VolumeDeformations, sample_motion,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -204,6 +204,27 @@ impl AnimationManager {
     /// ([`drive_avatar_skeletons`]).
     pub(crate) fn motion(&self, id: AssetKey) -> Option<&Arc<Motion>> {
         self.motions.get(&id)
+    }
+
+    /// A point-in-time snapshot of the animation fetch/decode pipeline, for the
+    /// F3 diagnostics overlay: entry counts bucketed by stage plus the cumulative
+    /// disk-cache-hit / GC counters. Delegates to the wrapped [`AssetStore`].
+    pub(crate) fn stats(&self) -> StoreStats {
+        self.store.stats()
+    }
+
+    /// A point-in-time snapshot of the animation store's admission gate: its
+    /// concurrency capacity, in-flight slots, and queued waiters.
+    pub(crate) fn gate_stats(&self) -> GateStats {
+        self.store.gate_stats()
+    }
+
+    /// How many fetches are parked outside the store's own accounting — held for
+    /// the `ViewerAsset` capability that is not up yet (see
+    /// [`pending`](Self::pending)) — so the pipeline overlay does not report
+    /// "nothing left to load" while such work is still outstanding.
+    pub(crate) fn deferred_count(&self) -> usize {
+        self.pending.len()
     }
 
     /// Point the store's fetcher at the region's current `ViewerAsset` URL.

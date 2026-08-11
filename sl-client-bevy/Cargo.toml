@@ -55,6 +55,12 @@ sl-texture = { version = "0.1.0", path = "../sl-texture" }
 sl-tree = { version = "0.1.0", path = "../sl-tree" }
 sl-wire = { version = "0.1.0", path = "../sl-wire" }
 time = { version = "0.3.49", features = ["local-offset"] }
+# The small shared runtime the async asset fetchers drive (`async_runtime.rs`):
+# a few-thread multi-thread runtime so non-blocking `reqwest` downloads are no
+# longer pinned at Bevy's 4-wide `IoTaskPool` funnel. `rt-multi-thread` for the
+# pool, `net` + `time` for `enable_all()` (the reqwest IO driver and the
+# transient-retry backoff sleeps).
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "net", "time"] }
 tracing = { version = "0.1.44" }
 url = { version = "2.5.8" }
 uuid = { version = "1.18.1", features = ["v4"] }

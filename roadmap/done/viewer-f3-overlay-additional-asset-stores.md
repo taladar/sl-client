@@ -2,9 +2,23 @@
 id: viewer-f3-overlay-additional-asset-stores
 title: Extend the F3 pipeline overlay to the asset stores added since it was built
 topic: viewer
-status: ready
+status: done
 origin: noticed while adding the failure-edge deferred count to F3 (2026-08-11)
 ---
+
+Done (2026-08-11): each of the five later-added managers (`AnimationManager`,
+`EnvironmentAssetManager`, `SoundCache`, `WearableAssetManager`,
+`MaterialManager`) gained `stats()` / `gate_stats()` / `deferred_count()`
+delegating to its wrapped `AssetStore` (deferred = the cap-not-set `pending`
+queue; `MaterialManager` also counts slot patches parked on undecoded textures).
+The overlay shows the texture and mesh stores as full two-line blocks and the
+five new stores as one condensed `format_store_line` each (`anim`, `env`,
+`sound`, `wear`, `gmat` — `gmat` is the glTF-material *asset* store, distinct
+from the interned `FaceMaterial` `mat` cache line), keeping the panel at 12
+lines. Audit confirmed no other `AssetStore`-wrapping managers exist (notecards
+/ LSL scripts fetch ad hoc; `LegacyMaterialManager` / `BumpManager` POST
+`RenderMaterials` directly and hold no store). Tests updated in
+`diagnostics::tests`.
 
 Context: [context/viewer.md](../context/viewer.md).
 

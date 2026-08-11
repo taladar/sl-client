@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 57 |
-| ready | 247 |
+| ideas | 56 |
+| ready | 246 |
 | blocked | 78 |
 | in-progress | 12 |
 | bugs | 19 |
-| done | 766 |
+| done | 768 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1210** |
 
-## ideas (57)
+## ideas (56)
 
 ### viewer
 
@@ -64,9 +64,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
-- [`viewer-perf-async-asset-fetchers`](ideas/viewer-perf-async-asset-fetchers.md)
-  — Async (non-blocking) asset fetchers — lift the IoTaskPool 4-thread download
-  ceiling
 - [`viewer-perf-avatar-ground-probe`](ideas/viewer-perf-avatar-ground-probe.md)
   — Avatar ground probe — stop per-frame full-scene raycasts
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
@@ -146,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -320,8 +317,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-f3-overlay-additional-asset-stores`](ready/viewer-f3-overlay-additional-asset-stores.md)
-  — Extend the F3 pipeline overlay to the asset stores added since it was built
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -1051,7 +1046,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (766)
+## done (768)
 
 ### protocol
 
@@ -1317,6 +1312,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experience-permission-dialog`](done/viewer-experience-permission-dialog.md)
   — Experience permission flow (accept / manage) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-f3-overlay-additional-asset-stores`](done/viewer-f3-overlay-additional-asset-stores.md)
+  — Extend the F3 pipeline overlay to the asset stores added since it was built
 - [`viewer-f3-overlay-covered-by-menu-bar`](done/viewer-f3-overlay-covered-by-menu-bar.md)
   — F3 mesh/texture render display partially covered by the menu bar
 - [`viewer-face-materials-pbr`](done/viewer-face-materials-pbr.md) — Texture tab
@@ -1795,6 +1792,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-color-picker` (done))
 - [`viewer-pbr-material-render-unconfirmed`](done/viewer-pbr-material-render-unconfirmed.md)
   — Actually render PBR (GLTF) materials on a face — and on the material preview
+- [`viewer-perf-async-asset-fetchers`](done/viewer-perf-async-asset-fetchers.md)
+  — Async (non-blocking) asset fetchers — lift the IoTaskPool 4-thread download
+  ceiling
 - [`viewer-perf-avatar-appearance-budget`](done/viewer-perf-avatar-appearance-budget.md)
   — Budget + debounce avatar appearance application
 - [`viewer-perf-avatar-bake-apply-spikes`](done/viewer-perf-avatar-bake-apply-spikes.md)

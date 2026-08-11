@@ -25,6 +25,8 @@ use sl_mesh::{
 };
 use sl_proto::MeshKey;
 
+use crate::async_http::{fetch_range_async, shared_async_client};
+use crate::async_runtime::run_on_shared_runtime;
 use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// The `Accept` MIME type for a mesh asset (the viewer's
@@ -211,18 +213,26 @@ impl BevyMeshFetcher {
         self.cap_url.load().is_some()
     }
 
-    /// Performs the blocking range request, returning the chunk.
+    /// The mesh URL a fetch of `id` targets: the capability queried by mesh id.
+    /// Errors if the capability is not set yet. Shared by the async and blocking
+    /// paths.
+    fn resolve_url(&self, id: MeshKey) -> Result<String, FetchError> {
+        let cap = self
+            .cap_url
+            .load_full()
+            .ok_or_else(|| FetchError::Transport("mesh capability not available".to_owned()))?;
+        Ok(format!("{cap}/?mesh_id={id}"))
+    }
+
+    /// Performs the blocking range request, returning the chunk — the fallback
+    /// path when the shared async runtime / client is unavailable.
     fn fetch_blocking(
         &self,
         id: MeshKey,
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        let cap = self
-            .cap_url
-            .load_full()
-            .ok_or_else(|| FetchError::Transport("mesh capability not available".to_owned()))?;
-        let url = format!("{cap}/?mesh_id={id}");
+        let url = self.resolve_url(id)?;
         let mut attempt = 0_u32;
         loop {
             let response = self
@@ -281,8 +291,23 @@ impl AssetFetcher<MeshKey> for BevyMeshFetcher {
         start: usize,
         end: usize,
     ) -> Result<FetchChunk, FetchError> {
-        // The blocking request runs on whatever thread `block_on`s this future
-        // (a Bevy task/thread dedicated to the fetch), which is the intended use.
+        // Prefer the shared async runtime: the non-blocking request yields at each
+        // `.await`, so this fetch does not monopolise its `IoTaskPool` thread and
+        // the mesh store's admission gate governs real concurrency. Fall back to
+        // the blocking client only if the shared client / runtime is unavailable.
+        if let Some(client) = shared_async_client() {
+            let url = self.resolve_url(id)?;
+            if let Some(result) = run_on_shared_runtime(fetch_range_async(
+                client,
+                url,
+                MESH_ACCEPT,
+                Some((start, end)),
+            ))
+            .await
+            {
+                return result;
+            }
+        }
         self.fetch_blocking(id, start, end)
     }
 }
