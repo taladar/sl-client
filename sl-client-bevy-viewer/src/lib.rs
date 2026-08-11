@@ -381,8 +381,8 @@ use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
     PlayOnLogin, ViewerSession, apply_draw_distance, drive_session, enforce_quit_deadline,
-    handle_quit_input, repeat_debug_animation, report_agent_viewport, report_camera_interest,
-    save_settings_on_logout,
+    handle_quit_input, handle_quit_requests, repeat_debug_animation, report_agent_viewport,
+    report_camera_interest, save_settings_on_logout,
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
@@ -938,6 +938,10 @@ fn run_session(
                     ..default()
                 }),
                 primary_cursor_options: Some(cursor_options),
+                // Don't let Bevy's default close-to-exit despawn the window on a
+                // close request (X button, or a Wayland compositor close): our
+                // `handle_quit_requests` owns it and logs out gracefully first.
+                close_when_requested: false,
                 ..default()
             })
             // Watch the asset directory so an edited skin `.css` re-applies live
@@ -1652,6 +1656,9 @@ fn run_session(
         .add_message::<WearableAssetFetched>()
         .add_message::<RefetchAvatarTextures>()
         .add_message::<crate::chat::LocalChatNotice>()
+        // Menu ▸ Quit writes this; `handle_quit_requests` turns it (and a window
+        // close) into a graceful logout.
+        .add_message::<crate::session::QuitRequested>()
         // The pie-menu widget's `commit_pie_selection` runs every frame and writes a
         // `UiAction`, so the message must be registered here too — it was previously
         // only registered in the gallery / test apps, where the pie menu had been
@@ -1967,6 +1974,9 @@ fn run_session(
                 // under way, whatever has focus.
                 (
                     handle_quit_input.run_if(world_has_keyboard),
+                    // Menu ▸ Quit and the window close button / compositor close
+                    // both route through a graceful logout here.
+                    handle_quit_requests,
                     enforce_quit_deadline,
                     // Load the per-avatar account settings once the agent UUID is
                     // known at login (once; a no-op every frame thereafter).

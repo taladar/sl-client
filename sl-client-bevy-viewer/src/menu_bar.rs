@@ -563,7 +563,7 @@ const fn environment_condition(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the action \
               stream, the by-id floater lookup, the environment state, the parcel, the two \
-              open-request channels, the panel-shown query, and the exit writer"
+              open-request channels, the panel-shown query, and the quit-request writer"
 )]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
@@ -574,7 +574,7 @@ fn handle_top_menu_actions(
     mut about_region: MessageWriter<crate::about_region::OpenAboutRegion>,
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut panels: Query<&mut UiPanelShown>,
-    mut exit: MessageWriter<AppExit>,
+    mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {
     use crate::environment::FixedEnvironment;
     use crate::sky_presets::FixedSky;
@@ -592,7 +592,9 @@ fn handle_top_menu_actions(
         }
         match action.action {
             "quit" => {
-                exit.write(AppExit::Success);
+                // Route through a graceful logout, not an abrupt `AppExit`, so
+                // the grid session closes cleanly (see `handle_quit_requests`).
+                quit.write(crate::session::QuitRequested);
             }
             "toggle-preferences" => {
                 toggle_floater(

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 78 |
 | in-progress | 13 |
 | bugs | 22 |
-| done | 771 |
+| done | 772 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1219** |
+| **total** | **1220** |
 
 ## ideas (57)
 
@@ -1061,7 +1061,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (771)
+## done (772)
 
 ### protocol
 
@@ -1908,6 +1908,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Custom tracing subscriber blocks Bevy's trace_tracy / trace_chrome profilers
 - [`viewer-quick-preferences`](done/viewer-quick-preferences.md) —
   Quick-preferences panel (blocked by `viewer-preferences-floater` (done))
+- [`viewer-quit-graceful-logout`](done/viewer-quit-graceful-logout.md) —
+  Graceful logout on menu Quit and window close (fix intermittent exit hang)
 - [`viewer-r1`](done/viewer-r1-rigged-mesh-skinning-distortion.md) — Rigged-mesh
   skinning distortion
 - [`viewer-r10`](done/viewer-r10-tiled-faces-need-a-repeating-texture-sampler.md)

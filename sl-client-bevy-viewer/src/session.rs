@@ -17,7 +17,7 @@
 //! in later phases.
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{PrimaryWindow, WindowCloseRequested};
 use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
     Throttle,
@@ -305,6 +305,37 @@ pub(crate) fn handle_quit_input(
     }
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
     if ctrl && keyboard.just_pressed(KeyCode::KeyQ) {
+        info!("quit requested; logging out");
+        request_logout(&mut session, &mut commands, time.elapsed_secs());
+    }
+}
+
+/// A viewer-level request to quit — the menu ▸ Quit action (a [`QuitRequested`]
+/// message) or the window's close button / a compositor close
+/// ([`WindowCloseRequested`]). Both route here so the quit goes through a
+/// **graceful** [`request_logout`] rather than an abrupt `AppExit`: an abrupt
+/// exit strands the grid session (which can block the next login) and can leave
+/// an in-flight network request hanging the process teardown. The actual
+/// `AppExit` still follows from [`drive_session`] on `LoggedOut`, with
+/// [`enforce_quit_deadline`] as the grace-period fallback.
+#[derive(Message, Default)]
+pub(crate) struct QuitRequested;
+
+/// Route quit requests — menu ▸ Quit and the window close button (which, on
+/// Wayland, includes a compositor-initiated close) — into a graceful
+/// [`request_logout`]. The window's default close-to-exit is disabled
+/// (`WindowPlugin { close_when_requested: false }`) so this handler owns the
+/// close and can log out first.
+pub(crate) fn handle_quit_requests(
+    mut quit: MessageReader<QuitRequested>,
+    mut closed: MessageReader<WindowCloseRequested>,
+    time: Res<Time>,
+    mut session: ResMut<ViewerSession>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let menu_quit = quit.read().count() > 0;
+    let window_closed = closed.read().count() > 0;
+    if menu_quit || window_closed {
         info!("quit requested; logging out");
         request_logout(&mut session, &mut commands, time.elapsed_secs());
     }
