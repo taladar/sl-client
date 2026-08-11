@@ -187,6 +187,11 @@ pub(crate) struct TerrainState {
     /// derived consumer (the minimap's terrain backdrop) can cheaply notice
     /// staleness without hashing the patch maps.
     map_revision: u64,
+    /// Per-region version of [`map_revision`], bumped only for the region whose
+    /// data actually changed, so a per-region consumer (the parcel-border bands,
+    /// which ground-follow) can rebuild only the terraformed / newly-streamed
+    /// region instead of all of them.
+    region_revisions: HashMap<RegionHandle, u64>,
 }
 
 /// Marks a rendered land-patch entity as a **walkable ground surface**, so the
@@ -221,6 +226,10 @@ impl TerrainState {
         self.regions.clear();
         self.raw_patches.clear();
         self.map_revision = self.map_revision.wrapping_add(1);
+        // The purged regions are gone; a re-streamed region restarts at revision
+        // 1, which a stale per-region stamp (its pre-purge revision) will not
+        // match, so its bands rebuild.
+        self.region_revisions.clear();
         self.origin = None;
     }
 
@@ -228,6 +237,21 @@ impl TerrainState {
     /// composition, so a derived map texture knows when to rebuild.
     pub(crate) const fn map_revision(&self) -> u64 {
         self.map_revision
+    }
+
+    /// This region's terrain revision (see [`region_revisions`](Self::region_revisions));
+    /// `0` before any of its data has arrived.
+    pub(crate) fn region_revision(&self, region: RegionHandle) -> u64 {
+        self.region_revisions.get(&region).copied().unwrap_or(0)
+    }
+
+    /// Bump both the global [`map_revision`](Self::map_revision) and `region`'s
+    /// per-region revision — call wherever `region`'s height / compositing data
+    /// changes.
+    fn bump_revision(&mut self, region: RegionHandle) {
+        self.map_revision = self.map_revision.wrapping_add(1);
+        let revision = self.region_revisions.entry(region).or_insert(0);
+        *revision = revision.wrapping_add(1);
     }
 
     /// Every decoded land patch of `region`, for compositing a top-down map.
@@ -423,7 +447,7 @@ pub(crate) fn update_terrain(
                     &mut materials,
                 );
                 state.raw_patches.insert(key, (**patch).clone());
-                state.map_revision = state.map_revision.wrapping_add(1);
+                state.bump_revision(patch.region_handle);
                 spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
                 // This patch supplies the shared far edge for its west / south
                 // neighbours in the same region, so rebuild them (a few per
@@ -438,7 +462,7 @@ pub(crate) fn update_terrain(
                     &mut images,
                     &mut materials,
                 );
-                state.map_revision = state.map_revision.wrapping_add(1);
+                state.bump_revision(identity.region_handle);
                 queue_region_rebuilds(&state, identity.region_handle, &mut rebuilds);
             }
             _other => {}
@@ -1102,7 +1126,9 @@ fn patch_coord_f32(value: u32) -> f32 {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{DEFAULT_WEIGHTS, PatchKey, build_patch_mesh, metres_to_f32, patch_transform};
+    use super::{
+        DEFAULT_WEIGHTS, PatchKey, TerrainState, build_patch_mesh, metres_to_f32, patch_transform,
+    };
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
     use pretty_assertions::assert_eq;
@@ -1111,6 +1137,29 @@ mod tests {
 
     /// The region and grid position the test patches use.
     const KEY: PatchKey = (RegionHandle(0), 1, 2);
+
+    #[test]
+    fn per_region_revision_bumps_only_its_region() {
+        let mut state = TerrainState::default();
+        let a = RegionHandle(256_000);
+        let b = RegionHandle(256_256);
+        assert_eq!(state.region_revision(a), 0);
+        assert_eq!(state.region_revision(b), 0);
+
+        state.bump_revision(a);
+        state.bump_revision(a);
+        assert_eq!(state.region_revision(a), 2, "region a bumped twice");
+        assert_eq!(state.region_revision(b), 0, "region b left untouched");
+
+        let global_before = state.map_revision();
+        state.bump_revision(b);
+        assert_eq!(state.region_revision(b), 1);
+        assert_eq!(state.region_revision(a), 2, "bumping b leaves a alone");
+        assert!(
+            state.map_revision() > global_before,
+            "the global revision advances on any per-region bump"
+        );
+    }
 
     /// A single-patch map for the land patch of the given edge size whose height
     /// is `f(x, y)`, at [`KEY`].

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 57 |
-| ready | 246 |
+| ready | 247 |
 | blocked | 78 |
 | in-progress | 13 |
 | bugs | 22 |
-| done | 770 |
+| done | 771 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1217** |
+| **total** | **1219** |
 
 ## ideas (57)
 
@@ -145,7 +145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (246)
+## ready (247)
 
 ### protocol
 
@@ -500,6 +500,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Change-driven probe capture scheduling (zero idle cost)
 - [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
   — Teleport progress overlay writes Hidden visibility every idle frame
+- [`viewer-perf-update-objects-budget-moves-removes`](ready/viewer-perf-update-objects-budget-moves-removes.md)
+  — update_objects 124 ms spike — identify cause, then budget moves/removes
 - [`viewer-perf-worldmap-label-node-writes`](ready/viewer-perf-worldmap-label-node-writes.md)
   — World-map region labels write Node unconditionally every frame
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
@@ -1059,7 +1061,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (770)
+## done (771)
 
 ### protocol
 
@@ -1839,6 +1841,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Per-frame budget for name-tag text layout
 - [`viewer-perf-object-update-coalesce`](done/viewer-perf-object-update-coalesce.md)
   — Coalesce repeated object updates in the pending queue
+- [`viewer-perf-parcel-borders-rebuild-spread`](done/viewer-perf-parcel-borders-rebuild-spread.md)
+  — Parcel borders — rebuild only the changed region, spread new regions
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)

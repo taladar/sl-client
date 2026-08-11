@@ -32,7 +32,7 @@
 //! the ownership tint and the band fade, and whose fragment shader adds the
 //! camera-distance fade from the view bind group (so nothing mutates per frame).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::asset::{Asset, RenderAssetUsages, load_internal_asset, uuid_handle};
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology};
@@ -91,9 +91,11 @@ const BAND_INSET_METRES: f32 = 0.0625;
 /// undulations within a cell (one sample per metre, matching the terrain grid).
 const BAND_SUBDIVISIONS: usize = 4;
 
-/// The minimum interval, in seconds, between two full rebuilds — coalesces the
-/// frequent terrain-revision bumps while a region's patches stream in.
-const REBUILD_COOLDOWN_SECS: f32 = 0.5;
+/// How many region band meshes to rebuild per frame. A multi-region refresh
+/// (first enable, or crossing into an area where several neighbours appear at
+/// once) then spreads over a few frames instead of one hitch; property lines
+/// filling in a few frames late is invisible.
+const PARCEL_REBUILD_BUDGET: usize = 2;
 
 /// How far, in metres, a water-clamped band foot sits above the water surface —
 /// the reference's `+0.01` fudge, keeping the band from z-fighting the water
@@ -188,24 +190,36 @@ impl Material for ParcelBorderMaterial {
 struct ParcelBorderSurface;
 
 /// Viewer-side bookkeeping for the in-world property lines: the per-region band
-/// entities and the change-detection stamps that decide when to rebuild them.
+/// entities and the per-region stamps that decide, change-driven, which regions
+/// to rebuild.
 #[derive(Resource, Default)]
 struct ParcelBorderState {
     /// The spawned band entity per region.
     entities: HashMap<RegionHandle, Entity>,
     /// The shared band material, built once on the first rebuild.
     material: Option<Handle<ParcelBorderMaterial>>,
-    /// The terrain [`map_revision`](TerrainState::map_revision) the current bands
-    /// were built against.
-    last_terrain_revision: u64,
     /// The scene origin the current bands were placed against.
     last_origin: Option<RegionHandle>,
     /// Whether the bands are currently shown (the setting was on last frame).
     active: bool,
-    /// A rebuild is wanted but is waiting on the cooldown.
-    rebuild_pending: bool,
-    /// Seconds left before another rebuild is allowed (coalesces streaming churn).
-    cooldown: f32,
+    /// Per-region stamp of everything a rebuild depends on; a region is rebuilt
+    /// only when its current stamp differs (or it is newly present).
+    stamps: HashMap<RegionHandle, RegionStamp>,
+    /// Regions marked dirty and awaiting a (budgeted) rebuild.
+    pending: HashSet<RegionHandle>,
+}
+
+/// The inputs a region's border bands depend on: its parcel-overlay grid, its
+/// water height (as raw bits, so it compares without a float `==`), and its
+/// per-region terrain revision. A rebuild is needed exactly when one of these
+/// differs from the last build.
+struct RegionStamp {
+    /// The parcel-overlay grid the bands were tessellated from.
+    grid: ParcelOverlayGrid,
+    /// The region's water height at build time (`f32::to_bits`), or `None`.
+    water_bits: Option<u32>,
+    /// The region's [`TerrainState::region_revision`] at build time.
+    terrain_revision: u64,
 }
 
 /// Register the property-lines settings (the master `ShowPropertyLines` toggle).
@@ -494,18 +508,20 @@ fn despawn_all(state: &mut ParcelBorderState, commands: &mut Commands) {
     }
 }
 
-/// Rebuild the in-world property-line bands when the overlay, terrain, or scene
-/// origin changes (coalescing the terrain-streaming churn behind a cooldown), and
-/// tear them down when the `ShowPropertyLines` setting is off.
+/// Keep the in-world property-line bands current, **change-driven per region**:
+/// each frame, rebuild only the regions whose stamp (parcel grid + terrain
+/// revision + water height) changed or that are newly present, despawn regions
+/// that left, and spread multi-region rebuilds over a few frames. A parked scene
+/// with a static parcel layout does no rebuilds at all. Tears the bands down when
+/// the `ShowPropertyLines` setting is off.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources / queries: the clock, \
-              the setting, the per-region overlay grids, the terrain heightfield, the per-region \
-              water heights, the region entities, the mesh + material asset stores, this \
-              feature's state, and the command buffer to spawn / despawn band entities"
+    reason = "a Bevy system's parameters are its injected resources / queries: the setting, \
+              the per-region overlay grids, the terrain heightfield, the per-region water \
+              heights, the region entities, the mesh + material asset stores, this feature's \
+              state, and the command buffer to spawn / despawn band entities"
 )]
 fn update_parcel_borders(
-    time: Res<Time>,
     settings: Res<ViewerSettings>,
     overlay: Res<SlParcelOverlay>,
     terrain: Res<TerrainState>,
@@ -523,52 +539,89 @@ fn update_parcel_borders(
     if !show {
         if state.active || !state.entities.is_empty() {
             despawn_all(&mut state, &mut commands);
+            state.stamps.clear();
+            state.pending.clear();
             state.active = false;
-            state.rebuild_pending = false;
         }
         return;
     }
-
-    if state.cooldown > 0.0 {
-        state.cooldown -= time.delta_secs();
-    }
-    // A freshly enabled overlay rebuilds at once, ignoring any stale cooldown.
-    let just_enabled = !state.active;
-    if just_enabled {
-        state.cooldown = 0.0;
-    }
+    // On (re)enable the stamps are empty, so every region reads as new below.
     state.active = true;
 
-    let revision = terrain.map_revision();
     let origin = terrain.origin();
-    if just_enabled
-        || overlay.is_changed()
-        || water.is_changed()
-        || revision != state.last_terrain_revision
-        || origin != state.last_origin
-    {
-        state.rebuild_pending = true;
+    let overlay_changed = overlay.is_changed();
+    let current: HashSet<RegionHandle> = regions.iter().map(|region| region.handle).collect();
+
+    // Despawn (and forget) regions that are no longer loaded.
+    let gone: Vec<RegionHandle> = state
+        .entities
+        .keys()
+        .copied()
+        .filter(|region| !current.contains(region))
+        .collect();
+    for region in gone {
+        if let Some(entity) = state.entities.remove(&region) {
+            commands.entity(entity).despawn();
+        }
+        state.stamps.remove(&region);
+        state.pending.remove(&region);
     }
-    if !state.rebuild_pending || state.cooldown > 0.0 {
+
+    // An origin shift re-places every region; the band meshes are region-relative,
+    // so only their transforms move — rewrite those, never rebuild the geometry.
+    if origin != state.last_origin {
+        for (region, entity) in &state.entities {
+            commands
+                .entity(*entity)
+                .insert(region_transform(origin, *region));
+        }
+        state.last_origin = origin;
+    }
+
+    // Mark regions whose stamp changed (or that are new) for a rebuild. In the
+    // steady state nothing changed → nothing is marked → no work below.
+    for &region in &current {
+        let dirty = match state.stamps.get(&region) {
+            None => true,
+            Some(stamp) => {
+                terrain.region_revision(region) != stamp.terrain_revision
+                    || water.height_of(region).map(f32::to_bits) != stamp.water_bits
+                    // The grid compare is O(cells), so only run it when the
+                    // overlay resource actually changed this frame.
+                    || (overlay_changed && overlay.grid_of(region) != Some(&stamp.grid))
+            }
+        };
+        if dirty {
+            state.pending.insert(region);
+        }
+    }
+    if state.pending.is_empty() {
         return;
     }
 
-    despawn_all(&mut state, &mut commands);
+    // Rebuild a budgeted number of dirty regions this frame; the rest wait.
     let material = state
         .material
         .get_or_insert_with(|| materials.add(ParcelBorderMaterial::default()))
         .clone();
-    for region in &regions {
-        let Some(grid) = overlay.grid_of(region.handle) else {
-            continue;
+    let to_build: Vec<RegionHandle> = state
+        .pending
+        .iter()
+        .copied()
+        .take(PARCEL_REBUILD_BUDGET)
+        .collect();
+    for region in to_build {
+        state.pending.remove(&region);
+        let Some(grid) = overlay.grid_of(region) else {
+            continue; // grid not streamed yet; re-detected as dirty next frame
         };
+        let water_bits = water.height_of(region).map(f32::to_bits);
         // The region's water surface (plus a hair), so a boundary crossing water
         // rides on it rather than sinking to the seabed.
         let water_floor = water
-            .height_of(region.handle)
+            .height_of(region)
             .map(|height| height + WATER_SURFACE_EPSILON);
-        let Some(mesh) = build_region_border_mesh(grid, region.handle, &terrain, water_floor)
-        else {
+        let Some(mesh) = build_region_border_mesh(grid, region, &terrain, water_floor) else {
             continue;
         };
         let handle = meshes.add(mesh);
@@ -576,16 +629,22 @@ fn update_parcel_borders(
             .spawn((
                 Mesh3d(handle),
                 MeshMaterial3d(material.clone()),
-                region_transform(origin, region.handle),
+                region_transform(origin, region),
                 ParcelBorderSurface,
             ))
             .id();
-        state.entities.insert(region.handle, entity);
+        if let Some(old) = state.entities.insert(region, entity) {
+            commands.entity(old).despawn();
+        }
+        state.stamps.insert(
+            region,
+            RegionStamp {
+                grid: grid.clone(),
+                water_bits,
+                terrain_revision: terrain.region_revision(region),
+            },
+        );
     }
-    state.last_terrain_revision = revision;
-    state.last_origin = origin;
-    state.rebuild_pending = false;
-    state.cooldown = REBUILD_COOLDOWN_SECS;
 }
 
 /// The plugin wiring the in-world property lines: it loads the band shader,
