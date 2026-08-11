@@ -1048,8 +1048,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
-  — All tree/plant objects render as the same (large) tree — species not mapped
-  (ferns/small plants shown as trees)
+  — All SL trees render as one large evergreen — species read from `state`
+  instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-underwater-fog-background-flicker`](bugs/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
