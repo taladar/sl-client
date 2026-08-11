@@ -219,6 +219,7 @@ impl Session {
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
             objects: BTreeMap::new(),
+            requested_parents: BTreeSet::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
             region_flags: BTreeMap::new(),
@@ -1989,7 +1990,7 @@ impl Session {
                 let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
                 for block in &update.object_data {
-                    self.upsert_object(from, object_from_full_update(block, region_handle)?);
+                    self.upsert_object(from, now, object_from_full_update(block, region_handle)?);
                 }
             }
             AnyMessage::ObjectUpdateCompressed(update) => {
@@ -2001,7 +2002,7 @@ impl Session {
                         region_handle,
                         block.update_flags,
                     ) {
-                        self.upsert_object(from, object);
+                        self.upsert_object(from, now, object);
                     }
                 }
             }
@@ -2171,7 +2172,7 @@ impl Session {
     /// [`Event::ObjectUpdated`] for one already cached. Any previously merged
     /// [`properties`](Object::properties) are preserved across a refresh that
     /// does not carry its own.
-    fn upsert_object(&mut self, from: SocketAddr, mut object: Object) {
+    fn upsert_object(&mut self, from: SocketAddr, now: Instant, mut object: Object) {
         let Some(circuit_id) = self.circuit_id_for(from) else {
             return;
         };
@@ -2193,7 +2194,16 @@ impl Session {
         {
             self.note_own_avatar(circuit_id, object.local_id);
         }
+        // This object arrived: clear any outstanding parent-request for it (a
+        // child waiting on it can now resolve, and a later re-orphan re-requests).
+        let _arrived = self.requested_parents.remove(&object.scoped_id());
+        // Whether it references a parent we do not (yet) track — an out-of-order
+        // or dropped root update, which would otherwise strand every child of that
+        // root (worn attachments never resolve their wearer and never render).
+        let parent_local = object.parent_id;
         let sim = self.objects.entry(circuit_id).or_default();
+        let parent_missing =
+            parent_local != RegionLocalObjectId(0) && !sim.contains_key(&parent_local);
         match sim.get(&object.local_id) {
             Some(existing) => {
                 if object.properties.is_none() {
@@ -2207,6 +2217,17 @@ impl Session {
                 sim.insert(object.local_id, object.clone());
                 self.events.push_back(Event::ObjectAdded(Box::new(object)));
             }
+        }
+        // Ask the simulator to (re)send the unknown parent so the child's linkset /
+        // attachment chain can resolve; deduped so it is asked once until it
+        // arrives (the reference viewer requests unknown parents in
+        // `LLViewerObjectList::processUpdateCore`).
+        if parent_missing
+            && self
+                .requested_parents
+                .insert(ScopedObjectId::new(circuit_id, parent_local))
+        {
+            self.request_object_ids(from, &[parent_local], now);
         }
     }
 

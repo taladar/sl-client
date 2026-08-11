@@ -327,6 +327,10 @@ struct TrackedObject {
     /// to its avatar's skeleton joint rather than a linkset root, by
     /// [`adopt_pending_attachments`] (P16.1).
     attachment_point: Option<u8>,
+    /// The object's owner (`owner_id` from the object update). For a worn
+    /// attachment this is its wearer, so a stuck attachment can be attributed to
+    /// the avatar it belongs to (the `SL_VIEWER_LOG_ATTACHMENT_BIND` diagnostic).
+    owner_id: AgentKey,
     /// The object's last-seen `PrimFlags` bitfield (the update's `UpdateFlags`),
     /// kept for the object context menu's enable gates
     /// ([`ObjectState::pick_summary`]): the agent-relative permission bits
@@ -3881,6 +3885,7 @@ fn apply_object(
             is_root,
             parented,
             attachment_point,
+            owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
             material: object.material,
             extra: object.extra.clone(),
@@ -4545,11 +4550,19 @@ pub(crate) fn log_attachment_bind_enabled() -> bool {
 pub(crate) struct RiggedBindSkipLog(HashMap<ScopedObjectId, &'static str>);
 
 impl RiggedBindSkipLog {
+    /// Record `reason` as `scoped`'s current not-yet-bound reason, returning
+    /// `true` when it changed since last time — so a caller that wants to log
+    /// something richer than [`note`](Self::note) still fires exactly once per
+    /// reason-change.
+    fn changed(&mut self, scoped: ScopedObjectId, reason: &'static str) -> bool {
+        self.0.insert(scoped, reason) != Some(reason)
+    }
+
     /// Note that `scoped` is still unbound for `reason`, logging it only when the
     /// reason changed since last time (the caller has already checked the trace is
     /// enabled).
     fn note(&mut self, scoped: ScopedObjectId, reason: &'static str) {
-        if self.0.insert(scoped, reason) != Some(reason) {
+        if self.changed(scoped, reason) {
             info!("rigged attachment {scoped} not yet bound: {reason}");
         }
     }
@@ -4558,6 +4571,17 @@ impl RiggedBindSkipLog {
     /// re-attach traces afresh.
     fn bound(&mut self, scoped: ScopedObjectId) {
         let _prev = self.0.remove(&scoped);
+    }
+}
+
+/// One-word description of a tracked object's geometry-pending state, for the
+/// wearer-walk terminus diagnostic ([`log_attachment_bind_enabled`]).
+const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {
+    match pending {
+        None => "built",
+        Some(PendingGeometry::Mesh(_)) => "Mesh-pending",
+        Some(PendingGeometry::Sculpt(_)) => "Sculpt-pending",
+        Some(PendingGeometry::RiggedMesh(_)) => "RiggedMesh-pending",
     }
 }
 
@@ -4663,8 +4687,48 @@ pub(crate) fn apply_rigged_attachments(
             // parent to the linkset root prim, not the avatar directly, so its direct
             // `parent` is not the avatar (P17.2 fix; verified live on a real mesh body).
             let Some(agent) = avatars.wearer_of(scoped) else {
-                if trace {
-                    skip_log.note(scoped, "wearer avatar not resolved (parent chain)");
+                if trace && skip_log.changed(scoped, "wearer avatar not resolved (parent chain)") {
+                    // Classify the failure by walking the parent chain to where it
+                    // stopped: a *tracked in-world* terminus means the object is
+                    // genuinely not worn (an in-world rigged mesh that should never
+                    // be in the attachment bind); an *untracked* terminus means the
+                    // wearer / linkset-root object never arrived (a parenting gap).
+                    match avatars.avatar_root_walk(scoped) {
+                        Ok(_resolved) => {}
+                        Err((terminus, hops)) => {
+                            let kind = match state.objects.get(&terminus) {
+                                Some(tracked) => format!(
+                                    "tracked in-world object (is_root={}, attach_point={:?}, {})",
+                                    tracked.is_root,
+                                    tracked.attachment_point,
+                                    pending_kind(tracked.pending.as_ref()),
+                                ),
+                                None => {
+                                    "UNTRACKED — its parent/root object never arrived".to_owned()
+                                }
+                            };
+                            // Attribute the stuck attachment to the avatar that wears
+                            // it: the update's `owner_id` is the wearer, so resolving
+                            // it to a spawned avatar's name (when present) names which
+                            // avatar is rendering wrong — e.g. a mesh head whose root
+                            // is one of the UNTRACKED termini.
+                            let (attach, owner) = state.objects.get(&scoped).map_or_else(
+                                || ("?".to_owned(), "?".to_owned()),
+                                |worn| {
+                                    let owner = avatars.name_of(worn.owner_id).map_or_else(
+                                        || worn.owner_id.to_string(),
+                                        |name| format!("{name} [{}]", worn.owner_id),
+                                    );
+                                    (format!("{:?}", worn.attachment_point), owner)
+                                },
+                            );
+                            info!(
+                                "rigged attachment {scoped} (attach_point={attach}, \
+                                 owner={owner}): wearer unresolved after {hops} hop(s); \
+                                 chain terminus {terminus} is {kind}"
+                            );
+                        }
+                    }
                 }
                 continue;
             };
@@ -5203,8 +5267,8 @@ mod tests {
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        CircuitId, MeshKey, Object, ObjectMotion, RegionHandle, RegionLocalObjectId, Rotation,
-        SculptData, SculptOrMeshKey, TextureKey, Uuid, Vector, pcode,
+        AgentKey, CircuitId, MeshKey, Object, ObjectMotion, RegionHandle, RegionLocalObjectId,
+        Rotation, SculptData, SculptOrMeshKey, TextureKey, Uuid, Vector, pcode,
     };
     use std::collections::{HashMap, VecDeque};
 
@@ -5698,6 +5762,7 @@ mod tests {
             is_root: true,
             parented: false,
             attachment_point: None,
+            owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
             material: object.material,
             extra: object.extra.clone(),

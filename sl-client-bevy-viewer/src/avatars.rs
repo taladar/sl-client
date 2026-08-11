@@ -2733,6 +2733,31 @@ impl AvatarState {
         None
     }
 
+    /// Diagnostic form of [`avatar_root_of`]: `Ok(agent)` when the parent chain
+    /// reaches a recognised avatar, else `Err((terminus, hops))` — the object the
+    /// walk stopped at (a root with no recorded parent, or the last hop when the
+    /// depth cap is hit) and how many hops it took. Lets a stuck rigged
+    /// attachment's `wearer not resolved` failure be classified against the object
+    /// state: a *tracked in-world* terminus means it is genuinely not worn (an
+    /// in-world rigged mesh), while an *untracked* terminus means the wearer /
+    /// linkset-root object never arrived (a parenting / ordering gap).
+    pub(crate) fn avatar_root_walk(
+        &self,
+        scoped: ScopedObjectId,
+    ) -> Result<AgentKey, (ScopedObjectId, usize)> {
+        let mut current = scoped;
+        for hops in 0..MAX_ATTACHMENT_DEPTH {
+            if let Some(&agent) = self.by_scoped.get(&current) {
+                return Ok(agent);
+            }
+            match self.object_parents.get(&current) {
+                Some(&parent) => current = parent,
+                None => return Err((current, hops)),
+            }
+        }
+        Err((current, MAX_ATTACHMENT_DEPTH))
+    }
+
     /// The set of baked slots to hide for each avatar: every tracked attachment
     /// whose texture entry carries `IMG_USE_BAKED_*` sentinels is attributed to
     /// its avatar (by chasing its chain), and its replaced slots unioned in.

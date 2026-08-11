@@ -2,7 +2,7 @@
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
 use crate::bookkeeping_ids::{PingId, XferId};
-use crate::scoped_id::CircuitId;
+use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{
     Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, ParcelInfo,
     TerrainPatch, Throttle,
@@ -1232,6 +1232,13 @@ pub struct Session {
     /// circuit's objects are dropped when it goes away (`DisableSimulator`,
     /// teleport handover, relogin).
     objects: BTreeMap<CircuitId, BTreeMap<RegionLocalObjectId, Object>>,
+    /// Parent objects we have asked the simulator to (re)send because a child
+    /// object referenced a `parent_id` we had not tracked — an out-of-order or
+    /// dropped root update. Without this a worn attachment (or any linkset child)
+    /// whose root never arrives can never resolve its wearer / chain and so never
+    /// renders. Deduped so one unknown parent is requested once; an entry is
+    /// cleared when that object finally arrives, so a later re-orphan re-requests.
+    requested_parents: BTreeSet<ScopedObjectId>,
     /// The decoded terrain cache, keyed by the circuit instance the patches
     /// belong to (the root region *and* every neighbour streamed over a child
     /// circuit), then by `(layer code, patch x, patch y)` so each layer's

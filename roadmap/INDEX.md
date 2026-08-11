@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 12 |
-| bugs | 20 |
+| bugs | 21 |
 | done | 770 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1214** |
+| **total** | **1215** |
 
 ## ideas (56)
 
@@ -997,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (20)
+## bugs (21)
 
 ### protocol
 
@@ -1047,6 +1047,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
+  — All tree/plant objects render as the same (large) tree — species not mapped
+  (ferns/small plants shown as trees)
 - [`viewer-underwater-fog-background-flicker`](bugs/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)

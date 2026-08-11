@@ -14099,6 +14099,65 @@ mod test {
         })
     }
 
+    /// A child object referencing a `parent_id` we have never tracked triggers a
+    /// `RequestMultipleObjects` for that parent, so its linkset / attachment chain
+    /// can resolve (an out-of-order or dropped root update would otherwise strand
+    /// every child forever). Once the parent arrives, the child is not re-requested.
+    #[test]
+    fn unknown_parent_object_is_requested() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A child (local id 9001) parented to 4200, a root we have never seen.
+        let AnyMessage::ObjectUpdate(mut child) = object_update(9001, 0xC1, zero_vec()) else {
+            return Err("object_update should build an ObjectUpdate".into());
+        };
+        let block = child
+            .object_data
+            .first_mut()
+            .ok_or("the child update must have a block")?;
+        block.parent_id = 4200;
+        let child = AnyMessage::ObjectUpdate(child);
+        session.handle_datagram(sim_addr(), &server_message(&child, 9, true)?, now)?;
+
+        // A RequestMultipleObjects for the unknown parent (4200) goes out.
+        let msg = take_transmit_to(&mut session, sim_addr())
+            .ok_or("expected a RequestMultipleObjects for the unknown parent")?;
+        let AnyMessage::RequestMultipleObjects(req) = msg else {
+            return Err("expected a RequestMultipleObjects".into());
+        };
+        assert!(
+            req.object_data.iter().any(|block| block.id == 4200),
+            "the unknown parent (4200) must be requested"
+        );
+
+        // The parent arrives; re-delivering the child now finds it tracked, so it
+        // is not requested again (dedupe cleared on arrival, parent no longer
+        // missing).
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&object_update(4200, 0xC2, zero_vec()), 10, true)?,
+            now,
+        )?;
+        while session.poll_transmit().is_some() {}
+        session.handle_datagram(sim_addr(), &server_message(&child, 11, true)?, now)?;
+        let mut re_requested = false;
+        while let Some(transmit) = session.poll_transmit() {
+            if transmit.destination == sim_addr()
+                && let Ok(AnyMessage::RequestMultipleObjects(req)) = decode(&transmit)
+                && req.object_data.iter().any(|block| block.id == 4200)
+            {
+                re_requested = true;
+            }
+        }
+        assert!(
+            !re_requested,
+            "a now-tracked parent must not be re-requested"
+        );
+        Ok(())
+    }
+
     #[test]
     fn object_update_adds_then_updates() -> Result<(), TestError> {
         let now = Instant::now();
