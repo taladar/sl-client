@@ -179,6 +179,7 @@ mod search;
 mod session;
 mod settings;
 mod settings_binding;
+mod shadow_visibility;
 mod sit_camera;
 mod sit_offset;
 mod skin;
@@ -1108,6 +1109,10 @@ fn run_session(
     // (viewer-ui-sound-effects): the typing chirp, money up/down, teleport,
     // snapshot shutter — raised as PlayUiSound messages by their surfaces.
     .add_plugins(crate::ui_sounds::UiSoundsPlugin)
+    // Amortise the sun's shadow-caster visibility cull over several frames
+    // (viewer-perf-pbr-shadow-cluster-rez): replace Bevy's per-frame
+    // check_dir_light_mesh_visibility with a round-robin one.
+    .add_plugins(crate::shadow_visibility::ShadowVisibilityPlugin)
     .add_plugins(crate::face_material::SlFaceMaterialPlugin)
     // The build tool (viewer-object-edit-floater-shell): the Build Tools
     // floater, the edit-mode switch, and the numeric transform fields.

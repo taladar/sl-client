@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 247 |
+| ready | 246 |
 | blocked | 78 |
-| in-progress | 12 |
-| bugs | 21 |
+| in-progress | 13 |
+| bugs | 22 |
 | done | 770 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1215** |
+| **total** | **1216** |
 
 ## ideas (56)
 
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -480,8 +480,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
   — Minimap minor-compass labels write Visibility unconditionally
-- [`viewer-perf-pbr-shadow-cluster-rez`](ready/viewer-perf-pbr-shadow-cluster-rez.md)
-  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
   — Pipeline debug overlay rewrites its Text unconditionally every frame
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
@@ -965,7 +963,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (12)
+## in-progress (13)
 
 ### viewer
 
@@ -976,6 +974,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
+  — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
@@ -997,7 +997,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (21)
+## bugs (22)
 
 ### protocol
 
@@ -1036,6 +1036,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-prim-lod-not-reacting-to-camera-distance`](bugs/viewer-prim-lod-not-reacting-to-camera-distance.md)
+  — Prim tessellation LoD does not react to camera distance
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to

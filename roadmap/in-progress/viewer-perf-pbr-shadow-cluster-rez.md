@@ -2,7 +2,7 @@
 id: viewer-perf-pbr-shadow-cluster-rez
 title: Tune main-view shadow specialization + clustered lighting during rez
 topic: viewer
-status: ready
+status: in-progress
 origin: Tracy profiling of Aditi rezzing (2026-07-30)
 refs: [viewer-perf-probe-capture-shadows, viewer-perf-probe-scheduling]
 ---
@@ -122,3 +122,57 @@ Investigate / tune:
 
 Measure the main-view shadow/cluster self-time before/after with a ≤10 s
 `tracy-capture` capture during active rez.
+
+## Update — round-robin caster cull landed + verified (2026-08-11)
+
+The plan-of-record round-robin lever for `check_dir_light_mesh_visibility`
+(the #1 target above) is implemented and **verified as a real win**. Rather
+than forking `bevy_light`, we disable Bevy's
+`SimulationLightSystems::CheckLightVisibility` set (an always-false run
+condition) and run our own copy in `shadow_visibility.rs` — every Bevy type /
+fn it needs is `pub`, and the set is referenced nowhere else in Bevy, so no
+fork or patched graph is needed. It amortises the per-cascade `intersects_obb`
+test: only casters that changed this frame (change-detection) plus a
+round-robin `1/stride` slice of the rest are re-tested; the others reuse a
+cached per-cascade membership bitmask. The cascade lists and `ViewVisibility`
+marking are still rebuilt in full each frame. `SL_VIEWER_SHADOW_CULL_STRIDE`
+sets the stride (default 4; `0` = passthrough to stock Bevy for A/B);
+`Ctrl+Alt+S` cycles it live; `SL_VIEWER_LOG_SHADOW_CULL` prints a per-second
+tested% / cull-time line.
+
+Verified on aditi with a same-scene, same-frame stride sweep (the live toggle
+removes the cross-run scene-density confound that made separate captures
+useless):
+
+| stride | cull median | tested% | fps |
+| --- | --- | --- | --- |
+| 1 (all) | 15.9 ms | 94% | 17 |
+| 4 (default) | 6.3 ms | 38% | 20.5 |
+| 8 | 6.8 ms | 21% | 19 |
+| 60 | 8.2 ms | 8% | 19 |
+
+Stride 4 cuts the cull ~60% (15.9 → 6.3 ms) and lifts fps 17 → 20.5 on the
+identical scene. Correctness confirmed live (shadows at the right angle, no
+popping). Unit tests cover the bitmask helpers, real-frustum membership, and
+the round-robin contract (a static caster re-tested exactly once per stride).
+
+Two findings that redirect the remaining work:
+
+- **Stride 4 is the knee.** Below it the cull *plateaus* at ~6 ms while
+  tested% keeps falling (38 → 8 %), so past stride 4 the frustum test is no
+  longer the bottleneck — a fixed per-frame floor dominates: iterating and
+  rebuilding/sorting the visible lists and marking `ViewVisibility`.
+- **The floor is inflated by view count.** The sun cull runs once *per shadow
+  view*; this scene showed ~127 k caster×view pairs for ~3 k casters because
+  the reflection-probe capture cameras each get the full sun cascade set.
+  Cutting probe views out of the sun cascades
+  ([[viewer-perf-probe-capture-shadows]]) would slash the floor far more than
+  any further stride increase; attacking it in-view would need incremental
+  (not full-rebuild) visible-list maintenance.
+
+Still open on this task: the no-patch caster-count levers (`NotShadowCaster`
+on distant / small meshes, shorter shadow distance, fewer cascades), the fixed
+floor above, and the `specialize_shadows` / `queue_shadows` / clustered-
+lighting items. A fast-turn "retest all" (the "ideally" in the plan) was
+skipped: the stride already bounds a static caster's staleness to `stride`
+frames, invisible at slow sun / camera speeds.
