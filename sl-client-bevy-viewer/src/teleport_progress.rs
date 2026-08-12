@@ -484,7 +484,7 @@ fn ingest_events(
                 entry.phase = Phase::Arriving;
                 entry.updated_at = now;
             }
-            SlSessionEvent::TeleportLocal => {
+            SlSessionEvent::TeleportLocal { .. } => {
                 let entry = flow.pending_entry(now);
                 entry.outcome = Outcome::Succeeded;
                 entry.updated_at = now;

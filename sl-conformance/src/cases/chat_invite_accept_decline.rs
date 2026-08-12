@@ -73,7 +73,7 @@ impl GridTest for ChatInviteAcceptDecline {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -222,7 +222,7 @@ async fn provoke_group_invitation(
     let group = support::membership_group(
         ctx,
         index,
-        &format!("sl-client chat-invite {purpose} {unique}"),
+        &format!("slc inv {purpose} {unique}"),
         "throwaway group for the chat-invite-accept-decline conformance case",
     )
     .await?;

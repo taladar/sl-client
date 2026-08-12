@@ -94,7 +94,7 @@ impl GridTest for TeleportFailed {
                     Event::TeleportFailed { reason, alert_info } => {
                         Some(Ok((reason.clone(), alert_info.is_some())))
                     }
-                    Event::TeleportLocal => Some(Err("TeleportLocal")),
+                    Event::TeleportLocal { .. } => Some(Err("TeleportLocal")),
                     Event::TeleportFinished { .. } => Some(Err("TeleportFinished")),
                     Event::RegionChanged { .. } => Some(Err("RegionChanged")),
                     _ => None,

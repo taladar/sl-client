@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 243 |
+| ready | 233 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 779 |
+| done | 789 |
 | deferred | 23 |
 | wont-do | 11 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (243)
+## ready (233)
 
 ### protocol
 
@@ -679,22 +679,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
   — Calling card — [aditi] variant
-- [`test-chat-hear-other-aditi`](ready/test-chat-hear-other-aditi-add-the-aditi-variant.md)
-  — Chat hear other — [aditi] variant
 - [`test-chat-invite-accept-decline-aditi`](ready/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
   — Chat invite accept/decline — [aditi] variant
 - [`test-chat-whisper-shout-range-aditi`](ready/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
   — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-friendship-offer-accept-aditi`](ready/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
-  — Friendship offer/accept — [aditi] variant
-- [`test-friendship-terminate-aditi`](ready/test-friendship-terminate-aditi-add-the-aditi-variant.md)
-  — Friendship terminate — [aditi] variant
 - [`test-give-inventory-aditi`](ready/test-give-inventory-aditi-add-the-aditi-variant.md)
   — Give inventory — [aditi] variant
-- [`test-grant-user-rights-aditi`](ready/test-grant-user-rights-aditi-add-the-aditi-variant.md)
-  — Grant user rights — [aditi] variant
 - [`test-group-admin-aditi`](ready/test-group-admin-aditi-add-the-aditi-variant.md)
   — Group admin — [aditi] variant
 - [`test-group-join-leave-aditi`](ready/test-group-join-leave-aditi-add-the-aditi-variant.md)
@@ -706,22 +698,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-im-1to1-aditi`](ready/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
-  1:1 — [aditi] variant
-- [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
-  — IM typing — [aditi] variant
 - [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
   — Offline message fetch — [aditi] variant
-- [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
-  — Presence online/offline — [aditi] variant
-- [`test-session-mark-read-aditi`](ready/test-session-mark-read-aditi-add-the-aditi-variant.md)
-  — Session mark-read — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
-- [`test-teleport-offer-accept-aditi`](ready/test-teleport-offer-accept-aditi-add-the-aditi-variant.md)
-  — Teleport offer/accept — [aditi] variant
-- [`test-typing-indicator-aditi`](ready/test-typing-indicator-aditi-add-the-aditi-variant.md)
-  — Typing indicator — [aditi] variant
 
 ### repl
 
@@ -1053,7 +1033,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (779)
+## done (789)
 
 ### protocol
 
@@ -2462,6 +2442,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   offer/accept calling card
 - [`test-chat-hear-other`](done/test-chat-hear-other-second-avatar-says-primary-hears.md)
   — second avatar says, primary hears
+- [`test-chat-hear-other-aditi`](done/test-chat-hear-other-aditi-add-the-aditi-variant.md)
+  — Chat hear other — [aditi] variant
 - [`test-chat-invite-accept-decline`](done/test-chat-invite-accept-decline-acceptchatinvite-declinechatinvite-and-the-caps-chatsessionr.md)
   — AcceptChatInvite / DeclineChatInvite and the CAPS ChatSessionRequest p
 - [`test-chat-self-echo`](done/test-chat-self-echo-say-on-a-channel-and-observe-own-chatfromsimulator.md)
@@ -2496,14 +2478,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
+- [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
+  — Friendship offer/accept — [aditi] variant
 - [`test-friendship-terminate`](done/test-friendship-terminate-terminate-confirm-removal.md)
   — terminate, confirm removal
+- [`test-friendship-terminate-aditi`](done/test-friendship-terminate-aditi-add-the-aditi-variant.md)
+  — Friendship terminate — [aditi] variant
 - [`test-gestures`](done/test-gestures-activate-deactivate-gestures.md) —
   activate / deactivate gestures
 - [`test-give-inventory`](done/test-give-inventory-give-an-item-to-another-avatar-peer-accepts.md)
   — give an item to another avatar; peer accepts
 - [`test-grant-user-rights`](done/test-grant-user-rights-grant-see-online-map-modify-rights-confirm.md)
   — grant see-online / map / modify rights; confirm
+- [`test-grant-user-rights-aditi`](done/test-grant-user-rights-aditi-add-the-aditi-variant.md)
+  — Grant user rights — [aditi] variant
 - [`test-group-accounting`](done/test-group-accounting-account-summary-details-transactions.md)
   — account summary / details / transactions
 - [`test-group-admin`](done/test-group-admin-eject-member-change-role-members.md)
@@ -2522,8 +2510,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Mock-grid simulator harness for deterministic handover/timeout testing
 - [`test-im-1to1`](done/test-im-1to1-send-im-peer-receives-reply-back.md) — send
   IM, peer receives; reply back
+- [`test-im-1to1-aditi`](done/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
+  1:1 — [aditi] variant
 - [`test-im-typing`](done/test-im-typing-im-typing-start-stop.md) — IM typing
   start/stop
+- [`test-im-typing-aditi`](done/test-im-typing-aditi-add-the-aditi-variant.md) —
+  IM typing — [aditi] variant
 - [`test-inventory-cache-skip`](done/test-inventory-cache-skip-refetch-with-matching-version-is-skipped.md)
   — refetch with matching version is skipped
 - [`test-inventory-item-ops`](done/test-inventory-item-ops-create-copy-move-link-an-item.md)
@@ -2598,6 +2590,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request and edit picks / classifieds
 - [`test-presence-online-offline`](done/test-presence-online-offline-observe-onlinenotification-offlinenotification-as-the-peer-l.md)
   — observe OnlineNotification / OfflineNotification as the peer logs in/o
+- [`test-presence-online-offline-aditi`](done/test-presence-online-offline-aditi-add-the-aditi-variant.md)
+  — Presence online/offline — [aditi] variant
 - [`test-profile-edit-roundtrip`](done/test-profile-edit-roundtrip-update-profile-interests-read-back.md)
   — update profile / interests; read back
 - [`test-reliable-retransmit`](done/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
@@ -2616,6 +2610,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — provoke and assert Error / FeatureDisabled
 - [`test-session-mark-read`](done/test-session-mark-read-unread-mark-read-transition.md)
   — unread → mark-read transition
+- [`test-session-mark-read-aditi`](done/test-session-mark-read-aditi-add-the-aditi-variant.md)
+  — Session mark-read — [aditi] variant
 - [`test-set-appearance`](done/test-set-appearance-publish-appearance-agentsetappearance-and-query-the-baked-te.md)
   — publish appearance (AgentSetAppearance) and query the baked-texture ca
 - [`test-setup-cost-appendix-open`](done/test-setup-cost-appendix-open-setup-cost-appendix-opensim.md)
@@ -2632,6 +2628,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — local teleport; assert the phase sequence Starting → Progress → Landin
 - [`test-teleport-offer-accept`](done/test-teleport-offer-accept-offer-a-lure-peer-accepts.md)
   — offer a lure, peer accepts
+- [`test-teleport-offer-accept-aditi`](done/test-teleport-offer-accept-aditi-add-the-aditi-variant.md)
+  — Teleport offer/accept — [aditi] variant
 - [`test-terrain-composition`](done/test-terrain-composition-read-the-region-s-terrain-detail-assets-and-their-elevation.md)
   — read the region's terrain detail assets and their elevation bands, and
 - [`test-terrain-raw-transfer-download`](done/test-terrain-raw-transfer-download-download-the-region-s-raw-heightmap-over-the-xfer-path.md)
@@ -2644,6 +2642,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — apply a Throttle preset and confirm it is accepted
 - [`test-typing-indicator`](done/test-typing-indicator-set-typing-start-stop-observed-by-the-other.md)
   — set_typing start/stop observed by the other
+- [`test-typing-indicator-aditi`](done/test-typing-indicator-aditi-add-the-aditi-variant.md)
+  — Typing indicator — [aditi] variant
 - [`test-wearables-request`](done/test-wearables-request-request-current-wearables-agentwearablesrequest-and-assert-t.md)
   — request current wearables (AgentWearablesRequest) and assert the simul
 

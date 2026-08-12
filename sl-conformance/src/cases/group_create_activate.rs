@@ -61,7 +61,7 @@ impl GridTest for GroupCreateActivate {
             let unique = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_or(0, |since| since.as_millis());
-            let group_name = format!("sl-client group-create {unique}");
+            let group_name = format!("slc create {unique}");
             let created_at = Instant::now();
             session
                 .send(Command::CreateGroup(CreateGroupParams {

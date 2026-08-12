@@ -50,7 +50,7 @@ impl GridTest for ImTyping {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {

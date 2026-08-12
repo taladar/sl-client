@@ -368,7 +368,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::MapLayers { .. } => "map_layers",
         Event::TeleportStarted => "teleport_started",
         Event::TeleportProgress { .. } => "teleport_progress",
-        Event::TeleportLocal => "teleport_local",
+        Event::TeleportLocal { .. } => "teleport_local",
         Event::TeleportFailed { .. } => "teleport_failed",
         Event::TeleportFinished { .. } => "teleport_finished",
         Event::RegionChanged { .. } => "region_changed",

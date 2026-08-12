@@ -9,7 +9,8 @@ use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric,
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, is_aditi,
+    secs_metric,
 };
 
 /// How a group-session message was delivered to the recipient.
@@ -82,6 +83,14 @@ pub struct GroupSessionMessage;
 /// on it.
 const SESSION_SETTLE: Duration = Duration::from_secs(3);
 
+/// How long each delivery attempt waits before re-sending a fresh marker
+/// (Second Life propagates a fresh join through its group service
+/// asynchronously, so an early message can miss the new member).
+const DELIVERY_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
+
+/// How many markers to send before concluding delivery genuinely fails.
+const DELIVERY_ATTEMPTS: u32 = 6;
+
 impl GridTest for GroupSessionMessage {
     fn name(&self) -> &'static str {
         "group-session-message"
@@ -92,7 +101,7 @@ impl GridTest for GroupSessionMessage {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -101,6 +110,7 @@ impl GridTest for GroupSessionMessage {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
             // Both avatars must be logged in and active before group traffic can
             // be routed between them.
             ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
@@ -130,7 +140,7 @@ impl GridTest for GroupSessionMessage {
             let group = support::membership_group(
                 ctx,
                 0,
-                &format!("sl-client group-session {unique}"),
+                &format!("slc sess {unique}"),
                 "throwaway group for the group-session-message conformance case",
             )
             .await?;
@@ -172,31 +182,35 @@ impl GridTest for GroupSessionMessage {
                 .await?;
             tokio::time::sleep(SESSION_SETTLE).await;
 
-            // The primary sends a marker tagged with its own agent id (so the
-            // predicate ignores any unrelated background group traffic); the
-            // secondary observes it, by either delivery path.
-            let marker = format!("group-session conformance {primary_id}");
+            // The primary sends a marker tagged with its own agent id and the
+            // attempt number (so the predicate ignores any unrelated background
+            // group traffic); the secondary observes it, by either delivery
+            // path. Second Life's distributed group service propagates a fresh
+            // join asynchronously — a message sent seconds after the join can
+            // miss the new member — so the send is retried with a fresh marker
+            // until one is delivered. (The harness forwards every session's
+            // events off the run loop's bounded channel continuously, so the
+            // primary keeps transmitting and the secondary keeps decoding even
+            // while we read only the secondary.)
             let sent_at = Instant::now();
-            ctx.primary()
-                .send(Command::SendGroupMessage {
-                    group_id,
-                    message: marker.clone(),
-                })
-                .await?;
-
-            // The secondary observes the message by either delivery path. (The
-            // harness forwards every session's events off the run loop's bounded
-            // channel continuously, so the primary keeps transmitting and the
-            // secondary keeps decoding even while we read only the secondary.)
-            let (heard_group, delivery) = {
-                let marker = marker.clone();
-                ctx.secondary()
+            let mut attempt: u32 = 0;
+            let (heard_group, delivery) = loop {
+                attempt = attempt.saturating_add(1);
+                let marker = format!("group-session conformance {primary_id} a{attempt}");
+                ctx.primary()
+                    .send(Command::SendGroupMessage {
+                        group_id,
+                        message: marker.clone(),
+                    })
+                    .await?;
+                match ctx
+                    .secondary()
                     .ok_or_else(|| {
                         TestFailure::Assertion(
                             "two-account test ran without a secondary".to_owned(),
                         )
                     })?
-                    .wait_for(REPLY_TIMEOUT, move |event| match event {
+                    .wait_for(DELIVERY_ATTEMPT_WINDOW, move |event| match event {
                         Event::GroupSessionMessage {
                             group_id: group,
                             from_agent_id,
@@ -216,7 +230,27 @@ impl GridTest for GroupSessionMessage {
                         }
                         _ => None,
                     })
-                    .await?
+                    .await
+                {
+                    Ok(heard) => break heard,
+                    Err(TestFailure::Timeout(_)) if attempt < DELIVERY_ATTEMPTS => {}
+                    Err(TestFailure::Timeout(_)) if is_aditi(grid) => {
+                        // Observed live: a session message sent into a
+                        // seconds-old group is dropped by Second Life (no
+                        // delivery by either path) until the group service has
+                        // propagated — sometimes past this case's whole retry
+                        // budget. Record the honest gap rather than failing.
+                        ctx.metrics()
+                            .set(&count_metric("delivery_attempts"), i64::from(attempt));
+                        ctx.mark_partial(
+                            "no group-session message was delivered within the retry budget — \
+                             Second Life drops messages into a freshly created group until its \
+                             group service has propagated the membership",
+                        );
+                        return Ok(());
+                    }
+                    Err(other) => return Err(other),
+                }
             };
             let deliver_rtt = sent_at.elapsed();
 

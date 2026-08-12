@@ -357,8 +357,13 @@ pub enum Event {
         teleport_flags: u32,
     },
     /// An intra-region teleport completed (`TeleportLocal`); the circuit did not
-    /// change, so no [`Event::RegionChanged`] follows.
-    TeleportLocal,
+    /// change, so no [`Event::RegionChanged`] follows. Carries the simulator's
+    /// authoritative landing position, which can differ from the requested one
+    /// when parcel routing (a landing point / telehub) redirects the teleport.
+    TeleportLocal {
+        /// The region-local position the agent actually landed at.
+        position: RegionCoordinates,
+    },
     /// A teleport failed (`TeleportFailed` or a teleport timeout); the session
     /// remains connected to the current region.
     TeleportFailed {

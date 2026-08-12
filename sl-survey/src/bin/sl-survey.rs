@@ -723,7 +723,7 @@ impl Survey {
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportFinished { .. }
-            | Event::TeleportLocal
+            | Event::TeleportLocal { .. }
             | Event::ParcelOverlay(_)
             | Event::ParcelMediaCommand { .. }
             | Event::ParcelMediaUpdate(_)

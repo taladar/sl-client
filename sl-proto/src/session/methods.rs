@@ -1104,8 +1104,11 @@ impl Session {
     /// crossing), a distant region clears it — apply the destination seed, unseat
     /// the agent and drop its in-world grants (attachments cross with it), arm the
     /// new root's keep-alives, and emit [`Event::RegionChanged`]. A no-op unless a
-    /// handover to exactly `dest` is pending.
-    fn commit_handover(&mut self, dest: SocketAddr, now: Instant) {
+    /// handover to exactly `dest` is pending. `arrival` is the destination's own
+    /// `AgentMovementComplete` `Data.RegionHandle` — preferred (when non-zero)
+    /// over the pending handover's requested handle, which for a lure teleport
+    /// on Second Life is an opaque-id guess, not a real handle.
+    fn commit_handover(&mut self, dest: SocketAddr, arrival: RegionHandle, now: Instant) {
         let Some(pending) = self.pending_handover.take() else {
             return;
         };
@@ -1129,6 +1132,13 @@ impl Session {
                 alert_info: None,
             });
             return;
+        };
+        // The destination's own statement of where we arrived wins over the
+        // request-time guess; fall back to the guess only if the sim sent 0.
+        let region_handle = if arrival == RegionHandle(0) {
+            pending.region_handle
+        } else {
+            arrival
         };
         self.child_seeds.remove(&dest);
         let old_root = self.circuit.replace(new_root);
@@ -1161,7 +1171,7 @@ impl Session {
         // `EnableSimulator`; a fresh circuit cleared `regions` above and needs it
         // re-added.
         if let Some(circuit_id) = self.circuit.as_ref().map(|circuit| circuit.id) {
-            self.regions.insert(circuit_id, pending.region_handle);
+            self.regions.insert(circuit_id, region_handle);
         }
         // A teleport unseats the agent (a crossing keeps the seat), and leaves its
         // in-world objects behind — drop their permission grants (attachments
@@ -1185,7 +1195,7 @@ impl Session {
             .map(|circuit| (circuit.sim_addr, circuit.id))
         {
             self.events.push_back(Event::RegionChanged {
-                region_handle: pending.region_handle,
+                region_handle,
                 sim,
                 circuit,
                 world_reset: pending.world_reset,
@@ -1787,13 +1797,19 @@ impl Session {
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
             }
-            AnyMessage::AgentMovementComplete(_) => {
+            AnyMessage::AgentMovementComplete(complete) => {
                 // The only child circuit we ever send `CompleteAgentMovement` to
                 // is a **pending teleport destination**, so its
                 // `AgentMovementComplete` confirms our arrival there: commit the
                 // deferred handover (promote it to root, tear down the source). A
-                // no-op if `from` is not the pending destination.
-                self.commit_handover(from, now);
+                // no-op if `from` is not the pending destination. The message's
+                // own `Data.RegionHandle` is the authoritative arrival region —
+                // the pending handover's handle can be a guess (a lure's true
+                // destination is unknowable up front: OpenSim encodes the handle
+                // in the lure id, but Second Life's lure id is opaque, so the
+                // parsed value is garbage there).
+                let arrival = RegionHandle(complete.data.region_handle);
+                self.commit_handover(from, arrival, now);
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -3266,7 +3282,7 @@ impl Session {
                     });
                 }
             }
-            AnyMessage::TeleportLocal(_) => {
+            AnyMessage::TeleportLocal(local) => {
                 // An intra-region teleport: no new circuit, just resume activity.
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
@@ -3277,7 +3293,13 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
-                    self.events.push_back(Event::TeleportLocal);
+                    self.events.push_back(Event::TeleportLocal {
+                        position: RegionCoordinates::new(
+                            local.info.position.x,
+                            local.info.position.y,
+                            local.info.position.z,
+                        ),
+                    });
                 }
             }
             AnyMessage::TeleportFailed(failed) => {

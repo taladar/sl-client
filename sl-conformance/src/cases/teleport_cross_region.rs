@@ -168,7 +168,7 @@ impl GridTest for TeleportCrossRegion {
                         Event::RegionChanged {
                             region_handle, sim, ..
                         } => Some(Step::Changed(*region_handle, *sim)),
-                        Event::TeleportLocal => Some(Step::Local),
+                        Event::TeleportLocal { .. } => Some(Step::Local),
                         Event::TeleportFailed { reason, .. } => Some(Step::Failed(reason.clone())),
                         _ => None,
                     })

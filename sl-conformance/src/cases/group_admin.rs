@@ -28,12 +28,13 @@
 //!   "Officers" role, identified as the role whose id is neither the nil "Everyone"
 //!   role nor the profile's owner role), confirms the pairing appears, then removes
 //!   it and confirms the pairing is gone.
-//! - **Ejection.** `GroupsModule.EjectGroupMember` removes the member and replies
-//!   to the ejector with `EjectGroupMemberReply`
-//!   ([`Event::EjectGroupMemberResult`] carrying `success`) *and* sends the ejectee
-//!   an `AgentDropGroup` ([`Event::DroppedFromGroup`]) — the membership-list update
-//!   that proves the member is genuinely out, not merely acked. The case asserts
-//!   both, mirroring how [`super::group_join_leave`] asserts a voluntary leave.
+//! - **Ejection.** The ejector is acked with `EjectGroupMemberReply`
+//!   ([`Event::EjectGroupMemberResult`] carrying `success`); the ejectee's
+//!   membership drop is then confirmed per grid (OpenSim pushes an
+//!   `AgentDropGroup` / [`Event::DroppedFromGroup`], Second Life sends no drop
+//!   message — the refreshed membership list is the signal) via
+//!   [`support::confirm_group_departure`], mirroring how
+//!   [`super::group_join_leave`] confirms a voluntary leave.
 //!
 //! The group comes from [`support::membership_group`] (index 0): a throwaway
 //! created per run on OpenSim (the primary becomes founder/owner), or a reused
@@ -133,7 +134,7 @@ impl GridTest for GroupAdmin {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -164,7 +165,7 @@ impl GridTest for GroupAdmin {
             let group = support::membership_group(
                 ctx,
                 0,
-                &format!("sl-client group-admin {unique}"),
+                &format!("slc adm {unique}"),
                 "throwaway group for the group-admin conformance case",
             )
             .await?;
@@ -295,12 +296,10 @@ impl GridTest for GroupAdmin {
             .await?;
             let role_remove_rtt = unassigned_at.elapsed();
 
-            // Eject the secondary. OpenSim replies to the ejector with an
-            // `EjectGroupMemberReply` (the ack) and sends the ejectee an
-            // `AgentDropGroup` (the membership-list update). Assert both: the reply
-            // proves the command was accepted, the drop proves the member is
-            // genuinely out of the group — and restores a reused pre-made group to
-            // its founder-only state for next time.
+            // Eject the secondary: the `EjectGroupMemberReply` ack proves the
+            // command was accepted, and the departure confirmation below proves
+            // the member is genuinely out of the group — restoring a reused
+            // pre-made group to its founder-only state for next time.
             let ejected_at = Instant::now();
             ctx.primary()
                 .send(Command::EjectGroupMembers {
@@ -319,17 +318,14 @@ impl GridTest for GroupAdmin {
                 })
                 .await?;
             check(eject_ok, "the eject request was rejected")?;
-            ctx.secondary()
-                .ok_or_else(|| {
-                    TestFailure::Assertion("two-account test ran without a secondary".to_owned())
-                })?
-                .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::DroppedFromGroup { group_id: dropped } if *dropped == group_id => {
-                        Some(())
-                    }
-                    _ => None,
-                })
-                .await?;
+            // Confirm the ejected member's membership genuinely dropped — the
+            // per-grid signal difference (OpenSim pushes `AgentDropGroup`,
+            // Second Life does not) lives in
+            // [`support::confirm_group_departure`].
+            let secondary = ctx.secondary().ok_or_else(|| {
+                TestFailure::Assertion("two-account test ran without a secondary".to_owned())
+            })?;
+            support::confirm_group_departure(secondary, group_id).await?;
             let eject_rtt = ejected_at.elapsed();
 
             let metrics = ctx.metrics();
