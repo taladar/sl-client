@@ -248,11 +248,18 @@ fn format_store_line(label: &str, stats: StoreStats, gate: GateStats, deferred: 
 
 /// Format the cross-instance geometry cache's one-line block: how many distinct
 /// geometries are cached and the cumulative spawn outcomes (full hits that
-/// skipped tessellation, partial hits that revived some faces, misses).
+/// skipped tessellation, partial hits that revived some faces, misses), then
+/// the rigged-submesh slots (entries and per-submesh revive hits / misses).
 fn format_geometry_block(stats: GeometryCacheStats) -> String {
     format!(
-        "geom  entries {}  hit {}  partial {}  miss {}",
-        stats.entries, stats.hits, stats.partial_hits, stats.misses,
+        "geom  entries {}  hit {}  partial {}  miss {}  rigged {} hit {} miss {}",
+        stats.entries,
+        stats.hits,
+        stats.partial_hits,
+        stats.misses,
+        stats.rigged_entries,
+        stats.rigged_hits,
+        stats.rigged_misses,
     )
 }
 
@@ -379,8 +386,8 @@ mod tests {
         assert_eq!(line.lines().count(), 1);
     }
 
-    /// The geometry-cache block renders its entry count and the three spawn
-    /// outcome counters on one line.
+    /// The geometry-cache block renders its entry count, the three spawn
+    /// outcome counters, and the rigged-slot counters on one line.
     #[test]
     fn geometry_block_is_one_line() {
         let stats = GeometryCacheStats {
@@ -388,10 +395,13 @@ mod tests {
             hits: 340,
             partial_hits: 5,
             misses: 48,
+            rigged_entries: 3,
+            rigged_hits: 21,
+            rigged_misses: 7,
         };
         assert_eq!(
             format_geometry_block(stats),
-            "geom  entries 12  hit 340  partial 5  miss 48"
+            "geom  entries 12  hit 340  partial 5  miss 48  rigged 3 hit 21 miss 7"
         );
     }
 

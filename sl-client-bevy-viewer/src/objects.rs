@@ -4649,6 +4649,7 @@ pub(crate) fn apply_rigged_attachments(
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
+    mut cache: ResMut<GeometryCache>,
     mut skip_log: ResMut<RiggedBindSkipLog>,
 ) {
     // The worn-attachment bind trace (off unless SL_VIEWER_LOG_ATTACHMENT_BIND=1),
@@ -4837,6 +4838,7 @@ pub(crate) fn apply_rigged_attachments(
             &mut bindposes,
             &mut manager,
             &mut prim_textures,
+            &mut cache,
         );
         budget.remaining = budget.remaining.saturating_sub(1);
         if trace {
@@ -5017,6 +5019,15 @@ pub(crate) fn prune_control_avatars(
 /// once. The skinned vertices are computed in world space from the joint entities'
 /// global transforms, so the entities are parented under the avatar body root only
 /// for lifecycle and visibility — their own `Transform` does not place them.
+///
+/// The converted submesh [`Mesh`]es and the [`SkinnedMeshInverseBindposes`] are
+/// shared across wearers through the [`GeometryCache`] rigged slots — both are
+/// pure functions of the decoded asset, and sharing the *asset handles* is what
+/// lets Bevy batch N wearers of the same body into one instanced draw per
+/// submesh (batching keys on the mesh asset). The per-wearer state stays
+/// per-entity: `SkinnedMesh::joints` is this wearer's own skeleton-instance
+/// joint entities, and the per-face materials / bake textures are built per
+/// spawn as before.
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the skinned build needs"
@@ -5036,13 +5047,23 @@ fn build_rigged_submeshes(
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
     manager: &mut TextureManager,
     prim_textures: &mut PrimTextures,
+    cache: &mut GeometryCache,
 ) -> Vec<Entity> {
     let entry = decode_texture_entry(texture_entry, decoded.submeshes.len());
     // The slot every face falls back to when the object carries no texture entry.
     let default_face = TextureFace::new(TextureKey::from(Uuid::nil()));
-    let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(
-        rigged_inverse_bindposes(skin),
-    ));
+    // Shared across wearers of the same mesh asset at this decoded level: the
+    // second wearer revives the first wearer's asset instead of minting its own.
+    let rigged_key = (mesh_key, decoded.lod);
+    let inverse_bindposes = cache
+        .revive_rigged_bindposes(rigged_key, bindposes)
+        .unwrap_or_else(|| {
+            let built = bindposes.add(SkinnedMeshInverseBindposes::from(rigged_inverse_bindposes(
+                skin,
+            )));
+            cache.record_rigged_bindposes(rigged_key, built.id());
+            built
+        });
     let log_faces = agent.is_some() && log_avatar_faces_enabled();
     let mut face_entities = Vec::new();
     for (index, submesh) in decoded.submeshes.iter().enumerate() {
@@ -5053,7 +5074,16 @@ fn build_rigged_submeshes(
         if !submesh.has_geometry() {
             continue;
         }
-        let mesh = meshes.add(to_bevy_rigged_mesh(submesh));
+        // Revive the shared converted submesh, or convert once and record it
+        // for the next wearer. The handle — not a per-wearer copy — is what
+        // Bevy's draw batching keys on.
+        let mesh = cache
+            .revive_rigged_submesh(rigged_key, index, meshes)
+            .unwrap_or_else(|| {
+                let converted = meshes.add(to_bevy_rigged_mesh(submesh));
+                cache.record_rigged_submesh(rigged_key, index, converted.id());
+                converted
+            });
         let texture_face = entry.face(index).unwrap_or(&default_face);
         // A bake-on-mesh face (P17.3): its texture id is an `IMG_USE_BAKED_*`
         // sentinel meaning "show the wearer's own baked skin here". Tag it [`BomFace`]

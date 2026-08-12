@@ -22,6 +22,17 @@
 //! faces are shared per *quantized object scale* instead of unconditionally,
 //! so same-scale copies (the common copy-paste case) still share.
 //!
+//! **Rigged submeshes:** worn rigged meshes (mesh bodies, heads, clothing)
+//! get the same treatment through the rigged slots — the converted skinned
+//! [`Mesh`] per `(mesh asset, level of detail, submesh index)` and the skin's
+//! [`SkinnedMeshInverseBindposes`] per `(mesh asset, level of detail)` are
+//! shared across every wearer. Both are pure functions of the decoded asset,
+//! and sharing them is what lets Bevy batch N wearers of one body into
+//! instanced draws (batching keys on the mesh asset). Everything per-wearer —
+//! the `SkinnedMesh::joints` entity list, the per-face
+//! [`FaceMaterial`](crate::face_material::FaceMaterial)s and bake textures —
+//! stays per-entity and is never cached here.
+//!
 //! **Lifetime:** the cache stores weak [`AssetId`]s only — never strong
 //! [`Handle`]s, which would pin every mesh forever. A spawn *revives* a shared
 //! asset via [`Assets::get_strong_handle`], which succeeds exactly while some
@@ -30,6 +41,7 @@
 //! entry is dropped by the periodic [`prune_geometry_cache`] sweep. No
 //! teleport hook is needed.
 
+use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 use bevy::prelude::*;
 use sl_client_bevy::{MeshKey, MeshLod, PrimFaceId, PrimLod, PrimShapeParams, TextureKey};
 use std::collections::HashMap;
@@ -118,6 +130,26 @@ struct GeometryEntry {
     faces: Vec<(PrimFaceId, FaceSlot)>,
 }
 
+/// The identity of one rigged mesh asset's shared skinned assets: the mesh
+/// asset at one decoded level of detail. Both the converted skinned submeshes
+/// and the skin's inverse bindposes are pure functions of the decoded asset,
+/// so every wearer of the same `(mesh, lod)` shares them (the per-wearer
+/// `SkinnedMesh::joints` list is per-entity and never cached).
+pub(crate) type RiggedKey = (MeshKey, MeshLod);
+
+/// The cached shared skinned assets of one rigged mesh asset at one decoded
+/// level of detail, shared across every wearer.
+#[derive(Debug, Clone, Default)]
+struct RiggedEntry {
+    /// The converted skinned [`Mesh`] per submesh (Linden face) index —
+    /// absent until some wearer has built it, or after the asset died and was
+    /// pruned.
+    submeshes: HashMap<usize, AssetId<Mesh>>,
+    /// The skin's inverse bindposes (bind shape folded in), one asset shared
+    /// by all of the mesh's submeshes and all wearers.
+    inverse_bindposes: Option<AssetId<SkinnedMeshInverseBindposes>>,
+}
+
 /// A cumulative snapshot of the cache counters for the pipeline panel.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct GeometryCacheStats {
@@ -129,6 +161,13 @@ pub(crate) struct GeometryCacheStats {
     pub(crate) partial_hits: u64,
     /// Spawns that found nothing to revive.
     pub(crate) misses: u64,
+    /// Distinct rigged `(mesh, lod)` entries currently cached.
+    pub(crate) rigged_entries: usize,
+    /// Rigged submesh revives that reused a live shared skinned mesh.
+    pub(crate) rigged_hits: u64,
+    /// Rigged submesh revives that found nothing live (the caller converted
+    /// and recorded a fresh asset).
+    pub(crate) rigged_misses: u64,
 }
 
 /// One face of a [`GeometryCache::revive`] attempt: the Linden face id and the
@@ -165,12 +204,18 @@ impl RevivedGeometry {
 pub(crate) struct GeometryCache {
     /// The cached geometries by content key.
     entries: HashMap<GeometryKey, GeometryEntry>,
+    /// The cached rigged-mesh shared assets by `(mesh, lod)`.
+    rigged: HashMap<RiggedKey, RiggedEntry>,
     /// Spawns that revived every face without geometry work.
     hits: u64,
     /// Spawns that revived at least one face but still ran the geometry work.
     partial_hits: u64,
     /// Spawns that revived nothing.
     misses: u64,
+    /// Rigged submesh revives that reused a live shared skinned mesh.
+    rigged_hits: u64,
+    /// Rigged submesh revives that found nothing live.
+    rigged_misses: u64,
 }
 
 impl GeometryCache {
@@ -258,6 +303,77 @@ impl GeometryCache {
         }
     }
 
+    /// Try to revive the shared skinned [`Mesh`] built for submesh
+    /// `submesh_index` of rigged mesh `key` — the second and later wearers of
+    /// the same body reuse one converted mesh asset instead of minting their
+    /// own, which is what lets Bevy batch same-body wearers into one
+    /// instanced draw (batching keys on the mesh asset). Counts a rigged hit
+    /// or miss; on `None` the caller converts the submesh and records it via
+    /// [`record_rigged_submesh`](Self::record_rigged_submesh).
+    pub(crate) fn revive_rigged_submesh(
+        &mut self,
+        key: RiggedKey,
+        submesh_index: usize,
+        meshes: &mut Assets<Mesh>,
+    ) -> Option<Handle<Mesh>> {
+        let revived = self
+            .rigged
+            .get(&key)
+            .and_then(|entry| entry.submeshes.get(&submesh_index).copied())
+            .and_then(|id| meshes.get_strong_handle(id));
+        match revived {
+            Some(handle) => {
+                self.rigged_hits = self.rigged_hits.saturating_add(1);
+                Some(handle)
+            }
+            None => {
+                self.rigged_misses = self.rigged_misses.saturating_add(1);
+                None
+            }
+        }
+    }
+
+    /// Record the shared skinned mesh converted for submesh `submesh_index`
+    /// of rigged mesh `key`, creating the rigged entry when absent.
+    pub(crate) fn record_rigged_submesh(
+        &mut self,
+        key: RiggedKey,
+        submesh_index: usize,
+        id: AssetId<Mesh>,
+    ) {
+        let entry = self.rigged.entry(key).or_default();
+        entry.submeshes.insert(submesh_index, id);
+    }
+
+    /// Try to revive the shared [`SkinnedMeshInverseBindposes`] of rigged
+    /// mesh `key` — one asset per mesh asset, shared across every wearer (the
+    /// per-wearer `SkinnedMesh::joints` list is per-entity and never cached).
+    /// Not counted in the rigged hit / miss stats: the bindposes ride along
+    /// with the submesh revives of the same build. On `None` the caller
+    /// builds the bindposes and records them via
+    /// [`record_rigged_bindposes`](Self::record_rigged_bindposes).
+    pub(crate) fn revive_rigged_bindposes(
+        &self,
+        key: RiggedKey,
+        bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
+    ) -> Option<Handle<SkinnedMeshInverseBindposes>> {
+        self.rigged
+            .get(&key)
+            .and_then(|entry| entry.inverse_bindposes)
+            .and_then(|id| bindposes.get_strong_handle(id))
+    }
+
+    /// Record the shared inverse bindposes built for rigged mesh `key`,
+    /// creating the rigged entry when absent.
+    pub(crate) fn record_rigged_bindposes(
+        &mut self,
+        key: RiggedKey,
+        id: AssetId<SkinnedMeshInverseBindposes>,
+    ) {
+        let entry = self.rigged.entry(key).or_default();
+        entry.inverse_bindposes = Some(id);
+    }
+
     /// Count a spawn that revived every face (no geometry work ran).
     pub(crate) const fn note_hit(&mut self) {
         self.hits = self.hits.saturating_add(1);
@@ -280,6 +396,9 @@ impl GeometryCache {
             hits: self.hits,
             partial_hits: self.partial_hits,
             misses: self.misses,
+            rigged_entries: self.rigged.len(),
+            rigged_hits: self.rigged_hits,
+            rigged_misses: self.rigged_misses,
         }
     }
 
@@ -287,8 +406,14 @@ impl GeometryCache {
     /// and every entry with no live asset left. An entry whose geometry had no
     /// non-empty faces holds no assets and is dropped too — the degenerate
     /// (fully cut / dimple-closed) shape re-tessellates on a later spawn,
-    /// which is rare and cheap.
-    pub(crate) fn prune(&mut self, meshes: &Assets<Mesh>) {
+    /// which is rare and cheap. The rigged entries are pruned the same way:
+    /// a dead submesh or bindposes slot is cleared, and an entry with nothing
+    /// live left is dropped (a later wearer rebuilds and re-records it).
+    pub(crate) fn prune(
+        &mut self,
+        meshes: &Assets<Mesh>,
+        bindposes: &Assets<SkinnedMeshInverseBindposes>,
+    ) {
         self.entries.retain(|_key, entry| {
             let mut live = false;
             for (_face_id, slot) in &mut entry.faces {
@@ -302,6 +427,15 @@ impl GeometryCache {
             }
             live
         });
+        self.rigged.retain(|_key, entry| {
+            entry.submeshes.retain(|_index, id| meshes.contains(*id));
+            if let Some(id) = entry.inverse_bindposes
+                && !bindposes.contains(id)
+            {
+                entry.inverse_bindposes = None;
+            }
+            !entry.submeshes.is_empty() || entry.inverse_bindposes.is_some()
+        });
     }
 }
 
@@ -313,18 +447,23 @@ pub(crate) const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// System: periodically drop cache entries whose shared meshes all died (see
 /// [`GeometryCache::prune`]).
-pub(crate) fn prune_geometry_cache(mut cache: ResMut<GeometryCache>, meshes: Res<Assets<Mesh>>) {
-    cache.prune(&meshes);
+pub(crate) fn prune_geometry_cache(
+    mut cache: ResMut<GeometryCache>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    cache.prune(&meshes, &bindposes);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GeometryCache, GeometryCacheStats, GeometryKey, scale_mm};
+    use super::{GeometryCache, GeometryCacheStats, GeometryKey, RiggedKey, scale_mm};
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::PrimitiveTopology;
+    use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{PrimFaceId, PrimLod, PrimShapeParams};
+    use sl_client_bevy::{MeshKey, MeshLod, PrimFaceId, PrimLod, PrimShapeParams, Uuid};
 
     /// A minimal mesh asset to populate a test `Assets<Mesh>` with.
     fn test_mesh() -> Mesh {
@@ -340,6 +479,17 @@ mod tests {
             shape: PrimShapeParams::default(),
             lod,
         }
+    }
+
+    /// A rigged key over a deterministic mesh asset id at the given level.
+    fn rigged_key(asset: u128, lod: MeshLod) -> RiggedKey {
+        (MeshKey::from(Uuid::from_u128(asset)), lod)
+    }
+
+    /// A minimal inverse-bindposes asset to populate a test
+    /// `Assets<SkinnedMeshInverseBindposes>` with.
+    fn test_bindposes() -> SkinnedMeshInverseBindposes {
+        SkinnedMeshInverseBindposes::from(vec![Mat4::IDENTITY])
     }
 
     /// Object scales quantize to millimetres, so sub-millimetre differences
@@ -437,7 +587,7 @@ mod tests {
         cache.record_face(mixed_key, PrimFaceId::new(0), None, dead.id());
         cache.record_face(mixed_key, PrimFaceId::new(1), None, alive.id());
         meshes.remove(dead.id());
-        cache.prune(&meshes);
+        cache.prune(&meshes, &Assets::<SkinnedMeshInverseBindposes>::default());
         assert_eq!(cache.stats().entries, 1);
         assert!(
             cache
@@ -468,7 +618,130 @@ mod tests {
                 hits: 2,
                 partial_hits: 1,
                 misses: 1,
+                rigged_entries: 0,
+                rigged_hits: 0,
+                rigged_misses: 0,
             }
+        );
+    }
+
+    /// Two revives of the same `(mesh, lod, submesh)` return the same shared
+    /// mesh asset; a different submesh index, level of detail, or mesh asset
+    /// is a different slot and revives nothing.
+    #[test]
+    fn rigged_submesh_is_shared_per_key() {
+        let mut cache = GeometryCache::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let handle = meshes.add(test_mesh());
+        let key = rigged_key(1, MeshLod::High);
+        cache.record_rigged_submesh(key, 0, handle.id());
+        let first = cache.revive_rigged_submesh(key, 0, &mut meshes);
+        let second = cache.revive_rigged_submesh(key, 0, &mut meshes);
+        assert_eq!(first.as_ref().map(Handle::id), Some(handle.id()));
+        assert_eq!(
+            first.map(|handle| handle.id()),
+            second.map(|handle| handle.id()),
+            "every wearer revives the one shared mesh asset"
+        );
+        assert!(
+            cache.revive_rigged_submesh(key, 1, &mut meshes).is_none(),
+            "a different submesh index is a different slot"
+        );
+        assert!(
+            cache
+                .revive_rigged_submesh(rigged_key(1, MeshLod::Medium), 0, &mut meshes)
+                .is_none(),
+            "a different level of detail is a different key"
+        );
+        assert!(
+            cache
+                .revive_rigged_submesh(rigged_key(2, MeshLod::High), 0, &mut meshes)
+                .is_none(),
+            "a different mesh asset is a different key"
+        );
+        let stats = cache.stats();
+        assert_eq!(stats.rigged_entries, 1);
+        assert_eq!(stats.rigged_hits, 2);
+        assert_eq!(stats.rigged_misses, 3);
+    }
+
+    /// The inverse bindposes are shared per `(mesh, lod)`; a different level
+    /// of detail or mesh asset revives nothing.
+    #[test]
+    fn rigged_bindposes_are_shared_per_mesh_and_lod() {
+        let mut cache = GeometryCache::default();
+        let mut bindposes = Assets::<SkinnedMeshInverseBindposes>::default();
+        let handle = bindposes.add(test_bindposes());
+        let key = rigged_key(1, MeshLod::High);
+        cache.record_rigged_bindposes(key, handle.id());
+        let first = cache.revive_rigged_bindposes(key, &mut bindposes);
+        let second = cache.revive_rigged_bindposes(key, &mut bindposes);
+        assert_eq!(first.as_ref().map(Handle::id), Some(handle.id()));
+        assert_eq!(
+            first.map(|handle| handle.id()),
+            second.map(|handle| handle.id()),
+            "every wearer revives the one shared bindposes asset"
+        );
+        assert!(
+            cache
+                .revive_rigged_bindposes(rigged_key(1, MeshLod::Medium), &mut bindposes)
+                .is_none(),
+            "a different level of detail is a different key"
+        );
+        assert!(
+            cache
+                .revive_rigged_bindposes(rigged_key(2, MeshLod::High), &mut bindposes)
+                .is_none(),
+            "a different mesh asset is a different key"
+        );
+    }
+
+    /// A rigged entry whose assets all died is pruned, after which a rebuild
+    /// re-records and revives again; an entry with a live slot left survives
+    /// with only the dead slot cleared.
+    #[test]
+    fn rigged_prune_then_revive_after_rebuild() {
+        let mut cache = GeometryCache::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut bindposes = Assets::<SkinnedMeshInverseBindposes>::default();
+        let dead_mesh = meshes.add(test_mesh());
+        let live_bindposes = bindposes.add(test_bindposes());
+        let mixed_key = rigged_key(1, MeshLod::High);
+        cache.record_rigged_submesh(mixed_key, 0, dead_mesh.id());
+        cache.record_rigged_bindposes(mixed_key, live_bindposes.id());
+        let dead_key = rigged_key(2, MeshLod::High);
+        let dead_bindposes = bindposes.add(test_bindposes());
+        cache.record_rigged_bindposes(dead_key, dead_bindposes.id());
+        meshes.remove(dead_mesh.id());
+        bindposes.remove(dead_bindposes.id());
+        cache.prune(&meshes, &bindposes);
+        assert_eq!(
+            cache.stats().rigged_entries,
+            1,
+            "the all-dead entry is gone; the mixed one survives on its live bindposes"
+        );
+        assert!(
+            cache
+                .revive_rigged_submesh(mixed_key, 0, &mut meshes)
+                .is_none(),
+            "the dead submesh slot was cleared"
+        );
+        assert_eq!(
+            cache
+                .revive_rigged_bindposes(mixed_key, &mut bindposes)
+                .map(|handle| handle.id()),
+            Some(live_bindposes.id()),
+            "the live bindposes slot survived the prune"
+        );
+        // A later wearer rebuilds the submesh and records it; revives resume.
+        let rebuilt = meshes.add(test_mesh());
+        cache.record_rigged_submesh(mixed_key, 0, rebuilt.id());
+        assert_eq!(
+            cache
+                .revive_rigged_submesh(mixed_key, 0, &mut meshes)
+                .map(|handle| handle.id()),
+            Some(rebuilt.id()),
+            "a re-recorded slot revives the fresh shared asset"
         );
     }
 }
