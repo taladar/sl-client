@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 233 |
+| ready | 226 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 789 |
+| done | 796 |
 | deferred | 23 |
 | wont-do | 11 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (233)
+## ready (226)
 
 ### protocol
 
@@ -677,24 +677,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
-  — Calling card — [aditi] variant
-- [`test-chat-invite-accept-decline-aditi`](ready/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
-  — Chat invite accept/decline — [aditi] variant
-- [`test-chat-whisper-shout-range-aditi`](ready/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
-  — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-give-inventory-aditi`](ready/test-give-inventory-aditi-add-the-aditi-variant.md)
   — Give inventory — [aditi] variant
-- [`test-group-admin-aditi`](ready/test-group-admin-aditi-add-the-aditi-variant.md)
-  — Group admin — [aditi] variant
-- [`test-group-join-leave-aditi`](ready/test-group-join-leave-aditi-add-the-aditi-variant.md)
-  — Group join/leave — [aditi] variant
-- [`test-group-notice-aditi`](ready/test-group-notice-aditi-add-the-aditi-variant.md)
-  — Group notice — [aditi] variant
-- [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
-  — Group session message — [aditi] variant
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1033,7 +1019,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (789)
+## done (796)
 
 ### protocol
 
@@ -2440,16 +2426,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — upload a client-baked avatar texture over the UploadBakedTexture capab
 - [`test-calling-card`](done/test-calling-card-offer-accept-calling-card.md) —
   offer/accept calling card
+- [`test-calling-card-aditi`](done/test-calling-card-aditi-add-the-aditi-variant.md)
+  — Calling card — [aditi] variant
 - [`test-chat-hear-other`](done/test-chat-hear-other-second-avatar-says-primary-hears.md)
   — second avatar says, primary hears
 - [`test-chat-hear-other-aditi`](done/test-chat-hear-other-aditi-add-the-aditi-variant.md)
   — Chat hear other — [aditi] variant
 - [`test-chat-invite-accept-decline`](done/test-chat-invite-accept-decline-acceptchatinvite-declinechatinvite-and-the-caps-chatsessionr.md)
   — AcceptChatInvite / DeclineChatInvite and the CAPS ChatSessionRequest p
+- [`test-chat-invite-accept-decline-aditi`](done/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
+  — Chat invite accept/decline — [aditi] variant
 - [`test-chat-self-echo`](done/test-chat-self-echo-say-on-a-channel-and-observe-own-chatfromsimulator.md)
   — say on a channel and observe own ChatFromSimulator
 - [`test-chat-whisper-shout-range`](done/test-chat-whisper-shout-range-verify-whisper-shout-reach-vs-normal.md)
   — verify whisper/shout reach vs normal
+- [`test-chat-whisper-shout-range-aditi`](done/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
+  — Chat whisper/shout range — [aditi] variant
 - [`test-current-outfit-folder`](done/test-current-outfit-folder-read-the-current-outfit-folder-the-cof-ais3-way-to-know-what.md)
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)
@@ -2496,16 +2488,24 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — account summary / details / transactions
 - [`test-group-admin`](done/test-group-admin-eject-member-change-role-members.md)
   — eject member / change role members
+- [`test-group-admin-aditi`](done/test-group-admin-aditi-add-the-aditi-variant.md)
+  — Group admin — [aditi] variant
 - [`test-group-create-activate`](done/test-group-create-activate-create-a-group-activate-it.md)
   — create a group, activate it
 - [`test-group-join-leave`](done/test-group-join-leave-join-and-leave.md) — join
   and leave
+- [`test-group-join-leave-aditi`](done/test-group-join-leave-aditi-add-the-aditi-variant.md)
+  — Group join/leave — [aditi] variant
 - [`test-group-notice`](done/test-group-notice-send-and-receive-a-group-notice.md)
   — send and receive a group notice
+- [`test-group-notice-aditi`](done/test-group-notice-aditi-add-the-aditi-variant.md)
+  — Group notice — [aditi] variant
 - [`test-group-roster`](done/test-group-roster-fetch-members-roles-titles-profile.md)
   — fetch members / roles / titles / profile
 - [`test-group-session-message`](done/test-group-session-message-open-a-group-session-send-leave.md)
   — open a group session, send, leave
+- [`test-group-session-message-aditi`](done/test-group-session-message-aditi-add-the-aditi-variant.md)
+  — Group session message — [aditi] variant
 - [`test-handover-mock-grid-harness`](done/test-handover-mock-grid-harness.md) —
   Mock-grid simulator harness for deterministic handover/timeout testing
 - [`test-im-1to1`](done/test-im-1to1-send-im-peer-receives-reply-back.md) — send

@@ -234,13 +234,20 @@ impl GridTest for OfflineMsgFetch {
             // login (no explicit fetch needed), so the region-handshake wait
             // must not discard it: one combined drain waits for the handshake
             // while capturing an early marker replay.
-            let mut auto_replayed = None;
+            // Capture any replayed offline 1:1 IM — preferring the exact
+            // marker — rather than only the strict match, so a field that
+            // decodes differently on this grid fails the later field
+            // assertions with a named mismatch instead of a silent timeout.
+            let mut auto_replayed: Option<sl_client_tokio::InstantMessage> = None;
             ctx.primary()
                 .wait_for(REGION_TIMEOUT, |event| match event {
                     Event::InstantMessageReceived(im)
-                        if im.from_agent_id == secondary_id && im.message == marker =>
+                        if im.offline && im.dialog == ImDialog::Message =>
                     {
-                        auto_replayed = Some((**im).clone());
+                        let exact = im.from_agent_id == secondary_id && im.message == marker;
+                        if exact || auto_replayed.is_none() {
+                            auto_replayed = Some((**im).clone());
+                        }
                         None
                     }
                     Event::RegionHandshakeComplete | Event::RegionChanged { .. } => Some(()),

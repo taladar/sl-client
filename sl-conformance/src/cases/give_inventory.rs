@@ -243,8 +243,11 @@ impl GridTest for GiveInventory {
             let primary_notecards =
                 find_system_folder(primary, primary_root, FolderType::Notecard).await?;
 
-            let wanted = item_name.clone();
-            let original = send_then_wait(
+            // Capture the first created-item reply rather than filtering on the
+            // exact name, then assert the name afterwards — a grid that echoes
+            // the item back differently fails with a named field mismatch
+            // instead of a silent timeout.
+            let created = send_then_wait(
                 primary,
                 Command::CreateInventoryItem(NewInventoryItem {
                     folder_id: primary_notecards,
@@ -258,13 +261,13 @@ impl GridTest for GiveInventory {
                 }),
                 REPLY_TIMEOUT,
                 move |event| match event {
-                    Event::InventoryItemCreated { item, .. } if item.name == wanted => {
-                        Some(item.item_id)
-                    }
+                    Event::InventoryItemCreated { item, .. } => Some(item.clone()),
                     _ => None,
                 },
             )
             .await?;
+            check_eq("created item name", &created.name, &item_name)?;
+            let original = created.item_id;
             poll_items(
                 primary,
                 primary_notecards,
