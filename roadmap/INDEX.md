@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 56 |
 | ready | 246 |
 | blocked | 77 |
-| in-progress | 16 |
+| in-progress | 15 |
 | bugs | 23 |
-| done | 777 |
+| done | 778 |
 | deferred | 22 |
 | wont-do | 10 |
 | **total** | **1227** |
@@ -960,7 +960,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (16)
+## in-progress (15)
 
 ### viewer
 
@@ -978,8 +978,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer & editor (rich text with embedded items)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
-- [`viewer-preferences-audio-tab`](in-progress/viewer-preferences-audio-tab.md)
-  — Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)
@@ -1062,7 +1060,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (777)
+## done (778)
 
 ### protocol
 
@@ -1890,6 +1888,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
   Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
   (done))
+- [`viewer-preferences-audio-tab`](done/viewer-preferences-audio-tab.md) —
+  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))
