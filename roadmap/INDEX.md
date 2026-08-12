@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 13 |
-| bugs | 22 |
-| done | 774 |
+| bugs | 21 |
+| done | 775 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1221** |
@@ -999,7 +999,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (22)
+## bugs (21)
 
 ### protocol
 
@@ -1040,9 +1040,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
-  — Top-bar region name stuck on "Connecting..." after crossing into a region
-  never teleported to
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1059,7 +1056,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (774)
+## done (775)
 
 ### protocol
 
@@ -1973,6 +1970,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   unconfirmed
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
+- [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)
+  — Top-bar region name stuck on "Connecting..." after crossing into a region
+  never teleported to
 - [`viewer-region-options-debug`](done/viewer-region-options-debug.md) — Region
   / Estate floater — region debug tab (blocked by `viewer-ui-widget-scaffold`
   (done))

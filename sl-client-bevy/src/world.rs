@@ -303,7 +303,29 @@ pub(crate) fn maintain_world(
                 }
             }
             SessionEvent::RegionInfoHandshake(region_identity) => {
-                if let Some(entity) = current_entity(&index) {
+                // Attach the identity to the region it actually describes, keyed by
+                // its handle — not merely whichever region is current. A neighbour's
+                // `RegionHandshake` arrives on its child circuit (before any
+                // crossing), so caching it on that neighbour's entity means a later
+                // crossing shows the region name immediately instead of falling back
+                // to "Connecting…". Attributing to "current" also mislabels the
+                // current region when a neighbour's handshake lands while another
+                // region is current. The handle is `0` only when the session never
+                // learned one for the circuit; fall back to the current region then.
+                let handle = region_identity.region_handle;
+                let entity = if handle == RegionHandle(0) {
+                    current_entity(&index)
+                } else {
+                    entity_for_handle(&index, handle)
+                };
+                tracing::debug!(
+                    ?handle,
+                    name = ?region_identity.sim_name,
+                    attributed = entity.is_some(),
+                    current = handle == RegionHandle(0),
+                    "region handshake identity"
+                );
+                if let Some(entity) = entity {
                     commands
                         .entity(entity)
                         .insert(SlRegionIdentity((**region_identity).clone()));
@@ -366,6 +388,13 @@ fn current_entity(index: &SlRegionIndex) -> Option<Entity> {
     index
         .current
         .and_then(|handle| index.by_handle.get(&handle).copied())
+}
+
+/// The entity of the region with the given `handle` (root or neighbour), if one
+/// has been spawned. Used to attribute a `RegionHandshake` to the region it
+/// describes rather than to whichever region is current.
+fn entity_for_handle(index: &SlRegionIndex, handle: RegionHandle) -> Option<Entity> {
+    index.by_handle.get(&handle).copied()
 }
 
 /// Promotes the region identified by `handle` / `sim` to the current root
@@ -458,8 +487,8 @@ mod tests {
     )]
 
     use super::{
-        SlCurrentRegion, SlIdentity, SlNeighbor, SlParcelOverlay, SlRegion, SlRegionIndex,
-        maintain_world,
+        SlCurrentRegion, SlIdentity, SlNeighbor, SlParcelOverlay, SlRegion, SlRegionIdentity,
+        SlRegionIndex, maintain_world,
     };
 
     use std::net::SocketAddr;
@@ -468,15 +497,46 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use sl_proto::{
-        CircuitId, Event as SessionEvent, GridCoordinates, NeighborInfo, ParcelOverlayInfo,
-        ParcelOwnership, RegionHandle,
+        CircuitId, Event as SessionEvent, GridCoordinates, Maturity, NeighborInfo,
+        ParcelOverlayInfo, ParcelOwnership, ProductType, RegionHandle, RegionIdentity, RegionName,
+        RegionTerrainComposition,
     };
+    use uuid::Uuid;
 
     use crate::SlEvent;
 
     /// A loopback simulator address on the given port, for synthesising events.
     fn sim(port: u16) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], port))
+    }
+
+    /// A minimal [`RegionIdentity`] naming the region `name`, tagged with `handle`
+    /// — enough to exercise how a `RegionHandshake` is attributed to a region.
+    fn region_identity(handle: RegionHandle, name: &str) -> RegionIdentity {
+        RegionIdentity {
+            sim_name: RegionName::try_new(name).ok(),
+            region_id: Uuid::nil(),
+            region_handle: handle,
+            grid_coordinates: GridCoordinates::new(1000, 1000),
+            region_flags: 0,
+            region_flags_extended: 0,
+            region_protocols: 0,
+            maturity: Maturity::Pg,
+            product: ProductType::Unknown,
+            product_sku: String::new(),
+            product_name: String::new(),
+            cpu_class_id: 0,
+            cpu_ratio: 0,
+            sim_owner: Uuid::nil(),
+            is_estate_manager: false,
+            water_height: 20.0,
+            billable_factor: 1.0,
+            terrain: RegionTerrainComposition {
+                detail_textures: [Uuid::nil(); 4],
+                start_heights: [0.0; 4],
+                height_ranges: [0.0; 4],
+            },
+        }
     }
 
     /// A minimal app wired exactly like the plugin's world maintenance: the event
@@ -571,6 +631,105 @@ mod tests {
             .query_filtered::<&SlRegion, With<SlNeighbor>>();
         assert_eq!(neighbors_after.iter(app.world()).count(), 0);
         assert_eq!(all.iter(app.world()).count(), 2);
+    }
+
+    /// A neighbour's `RegionHandshake` (delivered on its child circuit before any
+    /// crossing) is cached on that neighbour's own entity — keyed by handle, not
+    /// attributed to the current region — so crossing into it immediately shows
+    /// the region's name instead of "Connecting…". Regression test for the
+    /// top-bar-region-name-stuck-on-Connecting bug.
+    #[test]
+    fn a_neighbour_handshake_is_cached_on_its_own_region() {
+        let mut app = world_app();
+        let home = RegionHandle(0x0000_03e8_0000_03e8);
+        let next = RegionHandle(0x0000_03e9_0000_03e8);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        // The neighbour is discovered, then sends its handshake on the child
+        // circuit while home is still the current region.
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::NeighborDiscovered(NeighborInfo {
+                region_handle: next,
+                sim: sim(9001),
+                grid_coordinates: GridCoordinates::new(1001, 1000),
+            })));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(next, "Next Region"),
+            ))));
+        // The current region also gets its own handshake.
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(home, "Home Region"),
+            ))));
+        app.update();
+
+        // The neighbour's identity landed on the neighbour, not on home — so the
+        // handshakes did not clobber each other.
+        let name_of = |app: &mut App, handle: RegionHandle| -> Option<String> {
+            let mut query = app.world_mut().query::<(&SlRegion, &SlRegionIdentity)>();
+            query
+                .iter(app.world())
+                .find(|(region, _identity)| region.handle == handle)
+                .and_then(|(_region, identity)| {
+                    identity.0.sim_name.as_ref().map(ToString::to_string)
+                })
+        };
+        assert_eq!(name_of(&mut app, home), Some("Home Region".to_owned()));
+        assert_eq!(name_of(&mut app, next), Some("Next Region".to_owned()));
+
+        // Cross into the neighbour: it becomes current and already carries its
+        // name, so the top bar reads it immediately (no "Connecting…").
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionChanged {
+                region_handle: next,
+                sim: sim(9001),
+                circuit: CircuitId(2),
+                world_reset: false,
+            }));
+        app.update();
+
+        let mut current = app
+            .world_mut()
+            .query_filtered::<&SlRegionIdentity, With<SlCurrentRegion>>();
+        let current_name = current
+            .single(app.world())
+            .ok()
+            .and_then(|identity| identity.0.sim_name.as_ref().map(ToString::to_string));
+        assert_eq!(current_name, Some("Next Region".to_owned()));
+    }
+
+    /// A handshake whose handle the session never learned (`0`) still lands on the
+    /// current region — the pre-per-region fallback, so an unattributed handshake
+    /// is not dropped.
+    #[test]
+    fn a_handleless_handshake_falls_back_to_the_current_region() {
+        let mut app = world_app();
+        let home = RegionHandle(0x0000_03e8_0000_03e8);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(RegionHandle(0), "Home Region"),
+            ))));
+        app.update();
+
+        let mut current = app
+            .world_mut()
+            .query_filtered::<&SlRegionIdentity, With<SlCurrentRegion>>();
+        let current_name = current
+            .single(app.world())
+            .ok()
+            .and_then(|identity| identity.0.sim_name.as_ref().map(ToString::to_string));
+        assert_eq!(current_name, Some("Home Region".to_owned()));
     }
 
     #[test]

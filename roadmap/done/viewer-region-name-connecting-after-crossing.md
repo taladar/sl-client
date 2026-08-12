@@ -2,7 +2,7 @@
 id: viewer-region-name-connecting-after-crossing
 title: Top-bar region name stuck on "Connecting..." after crossing into a region never teleported to
 topic: viewer
-status: bugs
+status: done
 origin: user report while live-testing the teleport-handover fixes on local OpenSim (2026-08-07)
 ---
 
@@ -47,3 +47,34 @@ Candidate fixes:
 Diagnose: log every received `RegionHandshake` with its circuit/region on the
 running instrumented build, cross a border, and see whether a handshake arrives
 for the destination (and on which circuit) — that decides which fix applies.
+
+## Done (2026-08-12)
+
+Candidate fix #1 (attribute the identity by handle). The diagnosis's premise —
+that `RegionInfoHandshake` "carries no source region handle" — was stale:
+`RegionIdentity` already carries `region_handle`, and both handshake handlers
+resolve it from the receiving circuit (`methods.rs` root ~2606, child ~1771, via
+`self.regions.get(&circuit_id)`). So `maintain_world`
+(`sl-client-bevy/src/world.rs`) now attaches `SlRegionIdentity` to the entity
+for `region_identity.region_handle` (new `entity_for_handle`), falling back to
+the current region only when the handle is `0` (never learned). This also
+removes the latent misattribution where a neighbour's handshake overwrote the
+current region's identity.
+
+Diagnose answer (settled live): **OpenSim *does* send a `RegionHandshake` for
+every neighbour on its child circuit, right after login, before any crossing.**
+A single Default-Region login logged all four regions' identities attributed to
+their own entities (`attributed=true`): Default (current) + East + North +
+Northeast. So each neighbour's name is cached ahead of time and a crossing shows
+it immediately — no grid-service fallback (candidate #2) was needed. The child
+handshake fires because `EnableSimulator` (UDP or the CAPS event-queue form on
+OpenSim) opens the child circuit, which draws the neighbour's `RegionHandshake`.
+
+Live-verified on local OpenSim (2×2 region grid) across multiple crossings: the
+top-bar region name now reads the destination region's name immediately instead
+of "Connecting…", and reverts correctly when walking back. Unit tests in
+`world.rs` cover both the per-region caching (a neighbour handshake lands on the
+neighbour, not the current region, and a crossing then reads it) and the
+handle-`0` fallback to the current region. A
+`debug!("region handshake identity")` in the handler records the attribution for
+any future regression.
