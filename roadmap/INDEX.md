@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 13 |
-| bugs | 23 |
-| done | 773 |
+| bugs | 22 |
+| done | 774 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1221** |
@@ -999,7 +999,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (23)
+## bugs (22)
 
 ### protocol
 
@@ -1040,8 +1040,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
-- [`viewer-prim-lod-not-reacting-to-camera-distance`](bugs/viewer-prim-lod-not-reacting-to-camera-distance.md)
-  — Prim tessellation LoD does not react to camera distance
 - [`viewer-region-name-connecting-after-crossing`](bugs/viewer-region-name-connecting-after-crossing.md)
   — Top-bar region name stuck on "Connecting..." after crossing into a region
   never teleported to
@@ -1061,7 +1059,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (773)
+## done (774)
 
 ### protocol
 
@@ -1298,6 +1296,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-custom-face-material-shader`](done/viewer-custom-face-material-shader.md)
   — Custom face material shader — PBR per-map transforms + legacy Blinn-Phong
   specular
+- [`viewer-cut-prim-cap-missing-triangle`](done/viewer-cut-prim-cap-missing-triangle.md)
+  — Cut-prim path caps drop a triangle (filed as "prim LOD not reacting")
 - [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
   — Offload the debug screenshot PNG encode off the main thread
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script

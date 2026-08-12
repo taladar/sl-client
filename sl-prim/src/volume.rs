@@ -565,13 +565,29 @@ fn build_cap(
         uvs.push(cap_uv(point.position, top));
     }
 
-    let centre = bounds_centre(&positions);
-    let centre_uv = bounds_centre_2d(&uvs);
-    positions.push(centre);
-    uvs.push(centre_uv);
-    let centre_index = u32_from_usize(ring_count);
+    // The fan apex and triangle count follow Firestorm's `createCap` (non-hollow
+    // branch), which fans `num_vertices - 2` triangles from the **last** vertex:
+    //
+    // - a **closed** ring (a round profile, whose `gen_ngon` repeats the first
+    //   point at the end) adds a bounding-box centre vertex and fans
+    //   `ring_count - 1` triangles around it — the repeated seam point closes the
+    //   loop;
+    // - an **open** ring (a profile / path cut) is *not* given an extra centre:
+    //   `gen_ngon` already pushed the origin centre-pivot as its final point, so
+    //   the fan runs `ring_count - 2` triangles from that last point. Adding a
+    //   second centre and fanning `ring_count - 1` edges (as a closed ring does)
+    //   would leave the closing edge — the last profile point back to the first —
+    //   untriangulated, dropping one triangle and tearing a hole in a cut box's
+    //   wall cap (the observed megaprim-wall artefact).
+    let (apex_index, triangles) = if profile.is_open() {
+        (ring_count.saturating_sub(1), ring_count.saturating_sub(2))
+    } else {
+        positions.push(bounds_centre(&positions));
+        uvs.push(bounds_centre_2d(&uvs));
+        (ring_count, ring_count.saturating_sub(1))
+    };
 
-    let indices = cap_indices(ring_count, centre_index, top);
+    let indices = cap_indices(triangles, u32_from_usize(apex_index), top);
     let normal = cap_normal(&positions, &indices, top);
     let normals = vec![normal; positions.len()];
 
@@ -718,19 +734,19 @@ fn cap_uv(position: [f32; 2], top: bool) -> [f32; 2] {
     }
 }
 
-/// The triangle-fan indices for a cap of `ring_count` ring points around
-/// `centre_index` (Firestorm `createCap`'s fan branch): the underside is wound
-/// the opposite way so its flat normal faces out.
-fn cap_indices(ring_count: usize, centre_index: u32, top: bool) -> Vec<u32> {
-    let triangles = ring_count.saturating_sub(1);
+/// The triangle-fan indices for a cap of `triangles` triangles around the fan
+/// apex `apex_index` (Firestorm `createCap`'s fan branch): each triangle spans
+/// consecutive ring points `i` / `i + 1`, and the underside is wound the opposite
+/// way so its flat normal faces out.
+fn cap_indices(triangles: usize, apex_index: u32, top: bool) -> Vec<u32> {
     let mut indices = Vec::with_capacity(triangles.saturating_mul(3));
     for i in 0..triangles {
         let a = u32_from_usize(i);
         let b = u32_from_usize(i.saturating_add(1));
         if top {
-            indices.extend_from_slice(&[centre_index, a, b]);
+            indices.extend_from_slice(&[apex_index, a, b]);
         } else {
-            indices.extend_from_slice(&[centre_index, b, a]);
+            indices.extend_from_slice(&[apex_index, b, a]);
         }
     }
     indices
@@ -1267,6 +1283,96 @@ mod tests {
             } else {
                 assert!(z <= 0.0, "bottom cap triangle winds -Z, got {z}");
             }
+        }
+    }
+
+    /// The aditi megaprim "wall" box, picked live with the `P` tool: a thin
+    /// path-cut (`[0.48, 0.50]`) + profile-cut (`[0.375, 0.875]`) box, scaled
+    /// `20x20x0.5`. Its big faces are the path caps; because the profile cut opens
+    /// the ring, they take `build_cap`'s fan, where a missing closing triangle used
+    /// to tear a triangular hole in the wall.
+    fn megaprim_wall_params() -> PrimShapeParams {
+        PrimShapeParams {
+            path_curve: 16,
+            profile_curve: 1,
+            path_begin: 24000,
+            path_end: 25000,
+            path_scale_x: 100,
+            path_scale_y: 100,
+            path_shear_x: 0,
+            path_shear_y: 0,
+            path_twist: 0,
+            path_twist_begin: 0,
+            path_radius_offset: 0,
+            path_taper_x: 0,
+            path_taper_y: 0,
+            path_revolutions: 0,
+            path_skew: 0,
+            profile_begin: 18750,
+            profile_end: 6250,
+            profile_hollow: 0,
+        }
+    }
+
+    /// The area of a 3D triangle from three positions.
+    fn triangle_area(p0: [f32; 3], p1: [f32; 3], p2: [f32; 3]) -> f32 {
+        let n = super::cross(super::subtract(p1, p0), super::subtract(p2, p0));
+        (super::dot(n, n)).sqrt() * 0.5
+    }
+
+    /// The total area a face's triangles cover.
+    fn face_covered_area(face: &PrimFace) -> f32 {
+        let mut area = 0.0;
+        for tri in face.indices.chunks_exact(3) {
+            let vertex = |slot: usize| -> [f32; 3] {
+                tri.get(slot)
+                    .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(usize::MAX)))
+                    .copied()
+                    .unwrap_or([0.0; 3])
+            };
+            area += triangle_area(vertex(0), vertex(1), vertex(2));
+        }
+        area
+    }
+
+    /// A cut box's path caps are the flat cross-section; the profile cut opens the
+    /// ring, so the cap is a fan. The fan must cover the **whole** cross-section:
+    /// its triangles' total area equals the flat face's own bounding rectangle
+    /// (the wall panel), with no missing triangle. Before the fix an extra centre
+    /// vertex and a `ring - 1` fan dropped the closing triangle, leaving a hole
+    /// (total area short of the rectangle) — the "megaprim wall degraded to
+    /// triangles" artefact. Verified at every LOD, since the caps are fanned at all
+    /// of them.
+    #[test]
+    fn cut_box_cap_fan_has_no_missing_triangle() {
+        let shape = PrimShape::from_params(&megaprim_wall_params());
+        for lod in PrimLod::ALL {
+            let mesh = tessellate(&shape, lod);
+            let mut caps_checked = 0_usize;
+            for face in &mesh.faces {
+                // The two path caps sit in a constant-Z plane (a line-path box's
+                // cross-section); the swept side strips span Z. Pick the flat ones.
+                let (mut lo_z, mut hi_z) = (f32::MAX, f32::MIN);
+                for position in &face.positions {
+                    let z = position.get(2).copied().unwrap_or(0.0);
+                    lo_z = lo_z.min(z);
+                    hi_z = hi_z.max(z);
+                }
+                if (hi_z - lo_z).abs() > 1.0e-4 {
+                    continue;
+                }
+                caps_checked = caps_checked.saturating_add(1);
+                // The wall panel's own extent: this cut cross-section fills the
+                // rectangle X in [-0.5, 0.5], Y in [0, 0.5] — half the unit square.
+                let expected = 0.5_f32;
+                let covered = face_covered_area(face);
+                assert!(
+                    (covered - expected).abs() < 1.0e-3,
+                    "LOD {lod:?} cap {:?} covers {covered} of {expected} (missing/overlapping triangle)",
+                    face.face_id.get(),
+                );
+            }
+            assert_eq!(caps_checked, 2, "LOD {lod:?}: both path caps were checked");
         }
     }
 
