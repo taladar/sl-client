@@ -40,7 +40,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -176,6 +175,15 @@ pub(crate) struct TerrainState {
     /// The most recent raw patch for each key, kept so a patch's mesh can be
     /// rebuilt (with real weights, or when a neighbour arrives) after the fact.
     raw_patches: HashMap<PatchKey, TerrainPatch>,
+    /// The **last known land patch** for each key, retained across a region
+    /// teardown / rebuild (and, with the disk layer, across sessions) so
+    /// [`Self::land_height`] can still answer while the live [`Self::raw_patches`]
+    /// are gone — a region's ground height is stable, so a stale cached value is a
+    /// far better ground-floor answer than `None`. This is what keeps the avatar
+    /// ground floor (`physics.rs`) working through the login window and the
+    /// region-disappears-then-rebuilds flicker, so the avatar does not fall through
+    /// the terrain while its patches are absent. Land layers only.
+    land_cache: HashMap<PatchKey, TerrainPatch>,
     /// The flat olive placeholder texture, shared by every region's material
     /// until its real detail textures decode.
     placeholder: Option<Handle<Image>>,
@@ -285,31 +293,47 @@ impl TerrainState {
         if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
             return None;
         }
-        for (&(patch_region, _, _), patch) in &self.raw_patches {
-            if patch_region != region || !patch.layer.is_land() {
-                continue;
-            }
-            let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
-            let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
-            let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
-            if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
-                continue;
-            }
-            // The floored offset into the patch, in `0..size`. The subtraction is
-            // non-negative (guarded above) and below `size`, so the truncating cast
-            // is exact.
-            #[expect(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "the offset is in 0.0..size, so it fits u32 exactly"
-            )]
-            let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
-            let last = patch.size.saturating_sub(1);
-            return patch.value(cell_x.min(last), cell_y.min(last));
-        }
-        None
+        // The live patches first; fall back to the retained cache when they are
+        // absent (a region mid-rebuild, or not yet streamed after login), so the
+        // avatar ground floor keeps a stable answer instead of dropping to `None`.
+        land_height_in(&self.raw_patches, region, x, y)
+            .or_else(|| land_height_in(&self.land_cache, region, x, y))
     }
+}
+
+/// Resolve the land height at region-local `(x, y)` from a patch map (the live
+/// [`TerrainState::raw_patches`] or the retained [`TerrainState::land_cache`]).
+/// `None` when no land patch in that map covers the point.
+fn land_height_in(
+    patches: &HashMap<PatchKey, TerrainPatch>,
+    region: RegionHandle,
+    x: f32,
+    y: f32,
+) -> Option<f32> {
+    for (&(patch_region, _, _), patch) in patches {
+        if patch_region != region || !patch.layer.is_land() {
+            continue;
+        }
+        let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
+        let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
+        let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
+        if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
+            continue;
+        }
+        // The floored offset into the patch, in `0..size`. The subtraction is
+        // non-negative (guarded above) and below `size`, so the truncating cast
+        // is exact.
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the offset is in 0.0..size, so it fits u32 exactly"
+        )]
+        let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
+        let last = patch.size.saturating_sub(1);
+        return patch.value(cell_x.min(last), cell_y.min(last));
+    }
+    None
 }
 
 /// Keep the scene origin on the root region: when a border crossing promotes a
@@ -447,6 +471,9 @@ pub(crate) fn update_terrain(
                     &mut materials,
                 );
                 state.raw_patches.insert(key, (**patch).clone());
+                // Retain the land patch across a later teardown / rebuild so the
+                // ground floor keeps answering (see [`TerrainState::land_cache`]).
+                state.land_cache.insert(key, (**patch).clone());
                 state.bump_revision(patch.region_handle);
                 spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
                 // This patch supplies the shared far edge for its west / south
@@ -524,14 +551,6 @@ fn spawn_or_replace_patch(
     let Some(mesh_data) = build_patch_mesh(&state.raw_patches, composition.as_ref(), key) else {
         return;
     };
-    // Ground-probe fast path (Stage 1): a static trimesh collider matching this
-    // patch's rendered surface, so avian's `SpatialQuery` can find the land in the
-    // ground probe (`ground.rs`). Built from the same mesh, so it shares the patch
-    // entity's transform exactly — no orientation mismatch. Only when the env
-    // toggle is on, so the default build carries no terrain colliders.
-    let collider = crate::ground::ground_probe_spatial_enabled()
-        .then(|| Collider::trimesh_from_mesh(&mesh_data))
-        .flatten();
     let mesh = meshes.add(mesh_data);
     let size = state.raw_patches.get(&key).map_or(0, |patch| patch.size);
     let material = state
@@ -544,12 +563,9 @@ fn spawn_or_replace_patch(
         Some(entity) => {
             let mut entity = commands.entity(entity);
             entity.insert((Mesh3d(mesh), MeshMaterial3d(material), transform));
-            if let Some(collider) = collider {
-                entity.insert((RigidBody::Static, collider));
-            }
         }
         None => {
-            let mut entity = commands.spawn((
+            let entity = commands.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
                 transform,
@@ -558,9 +574,6 @@ fn spawn_or_replace_patch(
                 // captures (including the environment-only default probe).
                 environment_render_layers(),
             ));
-            if let Some(collider) = collider {
-                entity.insert((RigidBody::Static, collider));
-            }
             let entity = entity.id();
             state.patches.insert(key, entity);
             debug!(
@@ -1158,6 +1171,31 @@ mod tests {
         assert!(
             state.map_revision() > global_before,
             "the global revision advances on any per-region bump"
+        );
+    }
+
+    #[test]
+    fn land_height_falls_back_to_the_retained_cache() {
+        let mut state = TerrainState::default();
+        // A patch whose height is a recognisable function of the cell.
+        let map = one_patch_map(16, |x, y| {
+            100.0 + f32::from(u16::try_from(x + y).unwrap_or(0))
+        });
+        // Only in the retained cache — the live patches are gone (a region mid-
+        // rebuild, or not yet streamed after login), so `raw_patches` misses.
+        state.land_cache = map;
+        // Point (20.5, 35.5) is cell (4, 3) of the patch at grid (1, 2): height
+        // 100 + (4 + 3) = 107. The cache answers even with no live patch.
+        let height = state.land_height(RegionHandle(0), 20.5, 35.5);
+        assert!(
+            height.is_some_and(|height| (height - 107.0).abs() <= 1.0e-4),
+            "land_height should fall back to the retained cache, got {height:?}"
+        );
+        // A region with no cached patch still returns `None` (nothing to stand on).
+        assert!(
+            state
+                .land_height(RegionHandle(999_000), 20.5, 35.5)
+                .is_none()
         );
     }
 

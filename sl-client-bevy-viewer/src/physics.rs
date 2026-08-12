@@ -1309,6 +1309,57 @@ fn avatar_ground_floor(land_height: Option<f32>, height: f32) -> Option<f32> {
     land_height.map(|land| land + 0.5 * height)
 }
 
+/// A collision plane whose up-axis component is below this is treated as absent (a
+/// near-vertical plane cannot be a floor, and dividing by its tiny `nz` would
+/// explode). Mirrors [`crate::ground`]'s guard.
+const PLANE_NORMAL_EPSILON: f32 = 1.0e-3;
+
+/// `SL_VIEWER_LOG_AVATAR_GROUND=1` traces the avatar ground floor
+/// ([`avatar_collision_floor`]): the reported / floored Second Life Z, the land
+/// height and whether a collision plane was present, the resolved floor, and the
+/// anchor's target vs rendered Y. Fires only when the floor actually lifted the
+/// avatar (or a plane was present), so a settled avatar does not flood the trace.
+/// Silent by default; read once.
+fn log_avatar_ground_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SL_VIEWER_LOG_AVATAR_GROUND")
+            .is_ok_and(|value| value == "1" || value == "true")
+    })
+}
+
+/// The Second Life **capsule-centre Z** floor for an avatar at region-local
+/// `(x, y)`: the terrain land height and, when the simulator reports a collision
+/// (foot) plane, that plane's height there — whichever is higher — each lifted by
+/// half the avatar's height (the reported position is the capsule centre, the feet
+/// `0.5·height` below it). `None` when neither is known.
+///
+/// This is the authoritative-ground version of [`avatar_ground_floor`]: the
+/// simulator's foot plane is the surface it says the avatar is standing on
+/// (including a prim floor above the terrain, and present even while the region's
+/// land patches are mid-rebuild), so flooring the rendered avatar to it is what
+/// keeps a bouncing / low authoritative position from dropping the avatar through
+/// the ground — the same plane the reference viewer plants feet on
+/// ([`crate::ground`]).
+fn avatar_collision_floor(
+    plane: Option<[f32; 4]>,
+    land_height: Option<f32>,
+    x: f32,
+    y: f32,
+    height: f32,
+) -> Option<f32> {
+    let plane_z = plane.and_then(|[nx, ny, nz, w]| {
+        (nz.abs() >= PLANE_NORMAL_EPSILON).then(|| (w - nx * x - ny * y) / nz)
+    });
+    let ground = match (land_height, plane_z) {
+        (Some(land), Some(plane_z)) => Some(land.max(plane_z)),
+        (Some(land), None) => Some(land),
+        (None, Some(plane_z)) => Some(plane_z),
+        (None, None) => None,
+    };
+    ground.map(|ground| ground + 0.5 * height)
+}
+
 /// The authoritative kinematic motion of a full-object avatar (`pcode` 47) as of
 /// its last `ObjectUpdate`, attached to the avatar's anchor entity by
 /// [`apply_object`](crate::avatars) and change-detected: a fresh insert on every
@@ -1334,6 +1385,16 @@ pub(crate) struct AvatarMotion {
     /// Whether the anchor applies the object's orientation (a rigged body root) or
     /// stays upright (a placeholder sphere, which does not visibly rotate).
     apply_rotation: bool,
+    /// The **collision (foot) plane** the simulator reports for this avatar: the
+    /// surface its physics capsule is resting on, as the plane equation
+    /// `[nx, ny, nz, w]` (a unit normal and a distance) in the region-local
+    /// Second Life frame — `n · p = w`. `None` when the update carried no plane
+    /// (a placeholder sphere, or a compressed update). This is the simulator's
+    /// authoritative ground under the avatar — it already accounts for prims the
+    /// avatar stands on, unlike a terrain-only lookup — and is what
+    /// [`crate::ground`] resolves the foot-IK ground from, exactly as the
+    /// reference viewer's `getGround` / `mFootPlane` do.
+    collision_plane: Option<[f32; 4]>,
 }
 
 impl AvatarMotion {
@@ -1416,7 +1477,16 @@ impl AvatarMotion {
             region_handle: object.region_handle,
             height: object.scale.z,
             apply_rotation,
+            collision_plane: object.motion.collision_plane,
         }
+    }
+
+    /// The simulator's collision (foot) plane for this avatar (region-local
+    /// `[nx, ny, nz, w]`), or `None` when the last update carried none. The ground
+    /// probe ([`crate::ground`]) resolves the foot-IK ground from it.
+    #[must_use]
+    pub(crate) const fn collision_plane(&self) -> Option<[f32; 4]> {
+        self.collision_plane
     }
 }
 
@@ -1651,6 +1721,28 @@ pub(crate) fn drive_avatar_motion(
             interp.last_interp_secs = now;
         }
 
+        // Floor the avatar to the simulator's **authoritative ground** — the terrain
+        // land height and, when present, the collision (foot) plane the sim reports
+        // (the surface it says the avatar's feet are on, including a prim floor above
+        // the terrain). Applied to the authoritative *and* dead-reckoned position, so
+        // a bouncing / low reported Z (an unstable avatar the sim reports metres below
+        // the ground it is standing on) can never drop the avatar through it. The
+        // anchor's Bevy Y is a constant offset from the Second Life capsule Z (root
+        // drop + region offset), so raising the capsule Z by `Δ` raises the anchor Y
+        // by the same `Δ` — no root-drop maths needed. Released (`None`) only when the
+        // sim reports no ground at all (airborne over an un-ingested region).
+        let [px, py, reported_z] = interp.motion.position;
+        let land = terrain.land_height(interp.motion.region_handle, px, py);
+        let plane_present = motion.collision_plane().is_some();
+        let floor_z = avatar_collision_floor(motion.collision_plane(), land, px, py, interp.height);
+        let floor_bevy_y = floor_z.map(|floor_z| {
+            // The Bevy anchor Y of the floor, via the constant `anchor.y − capsule.z`.
+            let floor_y = interp.target_translation.y + (floor_z - reported_z);
+            interp.motion.position = [px, py, reported_z.max(floor_z)];
+            interp.target_translation.y = interp.target_translation.y.max(floor_y);
+            floor_y
+        });
+
         // Ease the rendered translation toward the target *every* frame (the
         // translation counterpart of the orientation easing, P31.7) so a per-update
         // correction spreads over a few frames instead of hard-snapping (the
@@ -1664,6 +1756,29 @@ pub(crate) fn drive_avatar_motion(
             region_crossed,
             translation_smoothing_alpha(dt_raw),
         );
+        // Hard-floor the rendered height (no eased glide up from a sink): the avatar
+        // must never render below the authoritative ground even mid-ease.
+        if let Some(floor_y) = floor_bevy_y {
+            interp.rendered_translation.y = interp.rendered_translation.y.max(floor_y);
+        }
+
+        if log_avatar_ground_enabled() {
+            // Only when the floor lifted the avatar (the fall-through it prevents) or a
+            // plane was present (so a trapped jump/fall would show up as a lift while
+            // airborne), to keep the trace readable.
+            let lifted = floor_z.is_some_and(|floor_z| reported_z < floor_z - 0.01);
+            if lifted || plane_present {
+                let floored_z = floor_z.map_or(reported_z, |floor_z| reported_z.max(floor_z));
+                info!(
+                    "avatar-ground {entity}: reported_z={reported_z:.3} floored_z={floored_z:.3} \
+                     land={land:?} plane={plane_present} floor_z={floor_z:?} lifted={lifted} \
+                     target_y={:.3} rendered_y={:.3} update={}",
+                    interp.target_translation.y,
+                    interp.rendered_translation.y,
+                    motion.is_changed(),
+                );
+            }
+        }
         // Write-on-change: once the ease's terminal snap converges, an idle
         // avatar's anchor stops being marked changed — which stops Bevy's
         // change-gated propagation re-walking its ~200-entity subtree every
@@ -1981,10 +2096,10 @@ mod tests {
         ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, PHASE_OUT_START_SECS,
         PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS,
         SL_GRAVITY_Z, TRANSLATION_SNAP_DISTANCE_M, advance_motion, angular_step, append_triangles,
-        avatar_ground_floor, bevy_position_of, bevy_rotation_of, clamp_dilation, clamp_prediction,
-        dead_reckon, eased_translation, extents_differ, ground_floor, neighbours_known,
-        phase_out_factor, place_smoothed, reaim_residual, rotation_smoothing_alpha,
-        shape_wants_geometry, sl_gravity, smoothing_alpha,
+        avatar_collision_floor, avatar_ground_floor, bevy_position_of, bevy_rotation_of,
+        clamp_dilation, clamp_prediction, dead_reckon, eased_translation, extents_differ,
+        ground_floor, neighbours_known, phase_out_factor, place_smoothed, reaim_residual,
+        rotation_smoothing_alpha, shape_wants_geometry, sl_gravity, smoothing_alpha,
     };
     use crate::physics::RegionTimeDilation;
     use avian3d::prelude::{Collider, SimpleCollider as _};
@@ -2307,6 +2422,41 @@ mod tests {
             avatar_ground_floor(None, 2.0).is_none(),
             "no floor without a known land height"
         );
+    }
+
+    #[test]
+    fn collision_floor_takes_the_higher_of_land_and_plane() {
+        // Flat plane at Z = 25 above land 20: the plane wins, +0.5·height 2 = 26.
+        let plane = Some([0.0, 0.0, 1.0, 25.0]);
+        let floor = avatar_collision_floor(plane, Some(20.0), 128.0, 128.0, 2.0);
+        assert!(
+            floor.is_some_and(|floor| (floor - 26.0).abs() <= 1.0e-4),
+            "plane above land should floor at 26, got {floor:?}"
+        );
+        // Plane below the land: the land wins (21).
+        let low_plane = Some([0.0, 0.0, 1.0, 18.0]);
+        let floor = avatar_collision_floor(low_plane, Some(20.0), 128.0, 128.0, 2.0);
+        assert!(
+            floor.is_some_and(|floor| (floor - 21.0).abs() <= 1.0e-4),
+            "plane below land should floor at the land 21, got {floor:?}"
+        );
+    }
+
+    #[test]
+    fn collision_floor_uses_the_plane_when_land_is_unknown() {
+        // Terrain patches mid-rebuild → no land height. The plane still floors the
+        // avatar (Z = 30, +0.5·height 2 = 31), so a bounce cannot sink it.
+        let plane = Some([0.0, 0.0, 1.0, 30.0]);
+        let floor = avatar_collision_floor(plane, None, 128.0, 128.0, 2.0);
+        assert!(
+            floor.is_some_and(|floor| (floor - 31.0).abs() <= 1.0e-4),
+            "plane-only floor should be 31, got {floor:?}"
+        );
+        // Neither → no floor (airborne over an un-ingested region).
+        assert!(avatar_collision_floor(None, None, 128.0, 128.0, 2.0).is_none());
+        // A near-vertical plane is ignored; with no land there is no floor.
+        let vertical = Some([1.0, 0.0, 0.0, 5.0]);
+        assert!(avatar_collision_floor(vertical, None, 128.0, 128.0, 2.0).is_none());
     }
 
     /// A zero-length rotation. The identity Second Life quaternion, for seeding a

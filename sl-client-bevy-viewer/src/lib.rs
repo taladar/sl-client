@@ -2207,10 +2207,11 @@ fn run_session(
                     reach::receive_point_at_effects,
                     reach::drive_aim_animation.run_if(world_has_keyboard),
                 ),
-                // Avatar ground probe (P31.14): raycast what is under each avatar's root
-                // and ankles, for the foot IK and the landing recovery. It reads the joint
-                // globals the pose pass wrote *last* frame — it cannot run inside that pass,
-                // which writes the very `GlobalTransform`s `MeshRayCast` reads.
+                // Avatar ground probe (P31.14): resolve what is under each avatar's root
+                // and ankles — the terrain land height combined with the simulator's
+                // collision (foot) plane, as the reference viewer's `getGround` does — for
+                // the foot IK and the landing recovery. It reads the ankle joint globals
+                // the pose pass wrote *last* frame.
                 ground::probe_avatar_ground,
                 // Animesh (P29): request each animated object's animation motions, drive
                 // its control-avatar skeleton from them (after its rigged meshes bind in

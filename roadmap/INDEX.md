@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
-| ready | 247 |
+| ideas | 55 |
+| ready | 248 |
 | blocked | 78 |
-| in-progress | 13 |
-| bugs | 21 |
+| in-progress | 15 |
+| bugs | 22 |
 | done | 775 |
 | deferred | 22 |
-| wont-do | 9 |
-| **total** | **1221** |
+| wont-do | 10 |
+| **total** | **1225** |
 
-## ideas (56)
+## ideas (55)
 
 ### viewer
 
@@ -64,8 +64,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
-- [`viewer-perf-avatar-ground-probe`](ideas/viewer-perf-avatar-ground-probe.md)
-  — Avatar ground probe — stop per-frame full-scene raycasts
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
   — Chat transcript via virtual list — stop re-shaping the whole history
 - [`viewer-perf-flexi-distance-lod`](ideas/viewer-perf-flexi-distance-lod.md) —
@@ -143,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (248)
 
 ### protocol
 
@@ -624,6 +622,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
   Terrain editing — sculpt brushes (blocked by `viewer-input-action-map` (done),
   `viewer-region-options-debug` (done))
+- [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
+  — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -965,13 +965,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (13)
+## in-progress (15)
 
 ### viewer
 
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
+- [`viewer-avatar-falls-through-ground`](in-progress/viewer-avatar-falls-through-ground.md)
+  — Avatar falls through the ground (simulator reports a bouncing avatar
+  position)
+- [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
+  — Avatar ground probe from the simulator's collision plane (drop the raycast)
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -999,7 +1004,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (21)
+## bugs (22)
 
 ### protocol
 
@@ -1016,8 +1021,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (rotates the whole minimap)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-avatar-falls-through-ground`](bugs/viewer-avatar-falls-through-ground.md)
-  — Avatar falls through the ground (suspected perf-branch ground-probe change)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
@@ -1038,6 +1041,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
+- [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
+  — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
@@ -1045,6 +1050,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
+  — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
@@ -2776,7 +2783,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
 
-## wont-do (9)
+## wont-do (10)
 
 ### viewer
 
@@ -2784,6 +2791,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Screen-space ambient occlusion
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
+- [`viewer-perf-avatar-ground-probe`](wont-do/viewer-perf-avatar-ground-probe.md)
+  — Avatar ground probe — stop per-frame full-scene raycasts
 - [`viewer-perf-per-object-face-merge-entity-count`](wont-do/viewer-perf-per-object-face-merge-entity-count.md)
   — Cut per-frame CPU by reducing world-object entity count (face merge /
   per-object cull unit)

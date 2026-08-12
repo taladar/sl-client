@@ -2,12 +2,26 @@
 id: viewer-perf-avatar-ground-probe
 title: Avatar ground probe — stop per-frame full-scene raycasts
 topic: viewer
-status: ideas
+status: wont-do
 origin: performance survey of the implemented viewer (2026-07-22)
-refs: [viewer-profiling]
+refs:
+  - viewer-profiling
+  - viewer-avatar-ground-from-collision-plane
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+> **Superseded (2026-08-12) by
+> [[viewer-avatar-ground-from-collision-plane]].** The whole premise here —
+> make the *raycast* cheaper (avian `SpatialQuery`, static prim colliders) —
+> is moot: the reference viewer never raycasts object geometry for the avatar
+> ground. It uses the simulator's **collision (foot) plane** plus the terrain
+> land height. Doing the same removes the raycast entirely (both Stage 1's
+> toggle-guarded terrain BVH and Stage 2's per-prim colliders), which is
+> strictly cheaper and server-consistent. Stage 1's committed code (the
+> `SL_VIEWER_GROUND_PROBE_SPATIAL` path + per-patch trimesh collider) was
+> removed with that change. Kept for the diagnosis below (cost is
+> scene-density-bound) and the reverted-gating lessons.
 
 `probe_avatar_ground` (`ground.rs:149-219`) casts, **every frame, for
 every rigged avatar**, three vertical `MeshRayCast` rays (root + both
