@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 13 |
-| bugs | 22 |
+| bugs | 23 |
 | done | 773 |
 | deferred | 22 |
 | wont-do | 9 |
-| **total** | **1220** |
+| **total** | **1221** |
 
 ## ideas (56)
 
@@ -999,7 +999,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (22)
+## bugs (23)
 
 ### protocol
 
@@ -1016,6 +1016,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (rotates the whole minimap)
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-avatar-falls-through-ground`](bugs/viewer-avatar-falls-through-ground.md)
+  — Avatar falls through the ground (suspected perf-branch ground-probe change)
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
