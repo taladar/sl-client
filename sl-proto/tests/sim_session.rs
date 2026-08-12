@@ -3966,6 +3966,184 @@ mod test {
         Ok(())
     }
 
+    /// Losing a reliable client datagram's first transmission must not lose
+    /// the message: the resend timer re-emits the same sequence with the
+    /// `RESENT` wire flag, the simulator processes the retransmitted copy
+    /// normally, and a duplicate delivery of the same datagram is
+    /// acknowledged but not dispatched a second time.
+    #[test]
+    fn client_reliable_resend_survives_loss_and_sim_deduplicates() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        client.say("resend me", ChatType::Normal, ChatChannel(0), now)?;
+
+        // "Lose" the chat datagram: keep its sequence but do not deliver it;
+        // everything else flows normally.
+        let mut lost_sequence = None;
+        while let Some(transmit) = client.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::ChatFromViewer(_)) {
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "chat is sent reliably"
+                );
+                assert!(
+                    !parsed.flags.contains(PacketFlags::RESENT),
+                    "the first transmission is not flagged RESENT"
+                );
+                lost_sequence = Some(parsed.sequence);
+            } else {
+                sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+            }
+        }
+        let lost_sequence = lost_sequence.ok_or("expected the chat datagram")?;
+        assert!(
+            !drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::Chat { .. })),
+            "the dropped chat must not have reached the simulator"
+        );
+
+        // Past the resend timeout the client re-emits the same sequence,
+        // now carrying the RESENT flag.
+        let later = after(now, 1_600)?;
+        client.handle_timeout(later);
+        let mut resent_payload = None;
+        while let Some(transmit) = client.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::ChatFromViewer(_)) {
+                assert_eq!(
+                    parsed.sequence, lost_sequence,
+                    "a resend reuses the original sequence number"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RESENT),
+                    "a resend carries the RESENT wire flag"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "a resend stays reliable"
+                );
+                resent_payload = Some(transmit.payload.clone());
+            } else {
+                sim.handle_datagram(client_addr(), &transmit.payload, later)?;
+            }
+        }
+        let resent_payload = resent_payload.ok_or("expected the chat to be retransmitted")?;
+
+        // The retransmitted copy dispatches normally...
+        sim.handle_datagram(client_addr(), &resent_payload, later)?;
+        let delivered = drain_server(&mut sim)
+            .iter()
+            .filter(|e| matches!(e, ServerEvent::Chat { .. }))
+            .count();
+        assert_eq!(
+            delivered, 1,
+            "the retransmitted chat dispatches exactly once"
+        );
+
+        // ...and a duplicate delivery of the very same datagram is
+        // deduplicated by the inbound seen-window (still acked, not
+        // re-dispatched).
+        sim.handle_datagram(client_addr(), &resent_payload, later)?;
+        let duplicated = drain_server(&mut sim)
+            .iter()
+            .filter(|e| matches!(e, ServerEvent::Chat { .. }))
+            .count();
+        assert_eq!(
+            duplicated, 0,
+            "a duplicate reliable datagram is not re-dispatched"
+        );
+
+        // The ack flow settles the circuit (the client stops resending).
+        pump(&mut client, &mut sim, later)?;
+        Ok(())
+    }
+
+    /// The simulator-side mirror: a lost reliable simulator datagram is
+    /// retransmitted with the `RESENT` flag and the same sequence, the client
+    /// processes the retransmitted copy normally, and a duplicate delivery is
+    /// not surfaced twice.
+    #[test]
+    fn sim_reliable_resend_survives_loss_and_client_deduplicates() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        sim.send_alert_message("resent notice", &[], &[], now)?;
+
+        // "Lose" the alert datagram: keep its sequence but do not deliver it.
+        let mut lost_sequence = None;
+        while let Some(transmit) = sim.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "the alert is sent reliably"
+                );
+                lost_sequence = Some(parsed.sequence);
+            } else {
+                client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+            }
+        }
+        let lost_sequence = lost_sequence.ok_or("expected the alert datagram")?;
+        assert!(
+            !drain_client(&mut client)
+                .iter()
+                .any(|e| matches!(e, Event::AlertMessage { .. })),
+            "the dropped alert must not have reached the client"
+        );
+
+        // Past the resend timeout the simulator re-emits the same sequence
+        // with the RESENT flag.
+        let later = after(now, 1_600)?;
+        sim.handle_timeout(later);
+        let mut resent_payload = None;
+        while let Some(transmit) = sim.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                assert_eq!(
+                    parsed.sequence, lost_sequence,
+                    "a resend reuses the original sequence number"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RESENT),
+                    "a resend carries the RESENT wire flag"
+                );
+                resent_payload = Some(transmit.payload.clone());
+            } else {
+                client.handle_datagram(sim_addr(), &transmit.payload, later)?;
+            }
+        }
+        let resent_payload = resent_payload.ok_or("expected the alert to be retransmitted")?;
+
+        // The retransmitted copy dispatches normally; a duplicate delivery of
+        // the same datagram is deduplicated.
+        client.handle_datagram(sim_addr(), &resent_payload, later)?;
+        let delivered = drain_client(&mut client)
+            .iter()
+            .filter(|e| matches!(e, Event::AlertMessage { .. }))
+            .count();
+        assert_eq!(
+            delivered, 1,
+            "the retransmitted alert dispatches exactly once"
+        );
+        client.handle_datagram(sim_addr(), &resent_payload, later)?;
+        let duplicated = drain_client(&mut client)
+            .iter()
+            .filter(|e| matches!(e, Event::AlertMessage { .. }))
+            .count();
+        assert_eq!(
+            duplicated, 0,
+            "a duplicate reliable datagram is not re-surfaced"
+        );
+
+        pump(&mut client, &mut sim, later)?;
+        Ok(())
+    }
+
     #[test]
     fn inactivity_times_out() -> Result<(), TestError> {
         let now = Instant::now();

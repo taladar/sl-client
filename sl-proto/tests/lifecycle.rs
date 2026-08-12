@@ -523,14 +523,30 @@ mod test {
         session.handle_login_response(success()?, now)?;
         let _initial = drain(&mut session)?; // UseCircuitCode + CompleteAgentMovement
 
-        // Without any ack, the resend timer eventually fires and retransmits.
+        // Without any ack, the resend timer eventually fires and retransmits —
+        // the same message re-encoded with the RESENT wire flag.
         let resend_at = session.poll_timeout().ok_or("resend scheduled")?;
         session.handle_timeout(resend_at);
-        let resent = drain(&mut session)?;
+        let mut resent_use_circuit_code = false;
+        let mut resent = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            let message = decode(&transmit)?;
+            if matches!(message, AnyMessage::UseCircuitCode(_)) {
+                assert!(
+                    parsed.flags.contains(PacketFlags::RESENT),
+                    "a retransmission carries the RESENT wire flag"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "a retransmission stays reliable"
+                );
+                resent_use_circuit_code = true;
+            }
+            resent.push(message);
+        }
         assert!(
-            resent
-                .iter()
-                .any(|m| matches!(m, AnyMessage::UseCircuitCode(_))),
+            resent_use_circuit_code,
             "expected a retransmitted UseCircuitCode, got {resent:?}"
         );
         Ok(())

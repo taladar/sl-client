@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 245 |
+| ready | 244 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 778 |
+| done | 779 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (245)
+## ready (244)
 
 ### protocol
 
@@ -716,8 +716,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Offline message fetch — [aditi] variant
 - [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
   — Presence online/offline — [aditi] variant
-- [`test-reliable-retransmit`](ready/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
-  — exercise reliable resend under loss
 - [`test-session-mark-read-aditi`](ready/test-session-mark-read-aditi-add-the-aditi-variant.md)
   — Session mark-read — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
@@ -1057,7 +1055,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (778)
+## done (779)
 
 ### protocol
 
@@ -2604,6 +2602,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — observe OnlineNotification / OfflineNotification as the peer logs in/o
 - [`test-profile-edit-roundtrip`](done/test-profile-edit-roundtrip-update-profile-interests-read-back.md)
   — update profile / interests; read back
+- [`test-reliable-retransmit`](done/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
+  — exercise reliable resend under loss
 - [`test-script-dialog`](done/test-script-dialog-receive-a-scriptdialog-reply.md)
   — receive a ScriptDialog, reply
 - [`test-script-permissions`](done/test-script-permissions-request-grant-revoke-a-script-permission.md)
