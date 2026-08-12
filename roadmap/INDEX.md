@@ -12,13 +12,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 224 |
+| ready | 223 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 798 |
-| deferred | 23 |
-| wont-do | 11 |
+| done | 799 |
+| deferred | 22 |
+| wont-do | 12 |
 | **total** | **1226** |
 
 ## ideas (55)
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (224)
+## ready (223)
 
 ### protocol
 
@@ -685,10 +685,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-### repl
-
-- [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
-
 ## blocked (78)
 
 ### protocol
@@ -1015,7 +1011,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (798)
+## done (799)
 
 ### protocol
 
@@ -2704,6 +2700,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (book/)
 - [`repl-e2`](done/repl-e2-local-opensim-verification-both-runtimes.md) — Local
   OpenSim verification (both runtimes)
+- [`repl-e3`](done/repl-e3-live-aditi-run.md) — Live aditi run
 
 ### aditi
 
@@ -2714,12 +2711,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (23)
-
-### protocol
-
-- [`protocol-34`](deferred/protocol-34-experience-key-value-store.md) —
-  Experience key-value store
+## deferred (22)
 
 ### viewer
 
@@ -2783,7 +2775,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (11)
+## wont-do (12)
+
+### protocol
+
+- [`protocol-34`](wont-do/protocol-34-experience-key-value-store.md) —
+  Experience key-value store
 
 ### viewer
 

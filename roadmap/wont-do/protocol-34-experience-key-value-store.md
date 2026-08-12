@@ -2,7 +2,7 @@
 id: protocol-34
 title: Experience key-value store
 topic: protocol
-status: deferred
+status: wont-do
 origin: ROADMAP.md — Tier C
 ---
 
