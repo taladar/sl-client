@@ -157,6 +157,7 @@ mod physics;
 mod pie_menu;
 mod preferences;
 mod preferences_alerts;
+mod preferences_audio;
 mod preferences_general;
 mod preferences_graphics;
 mod probe_layers;

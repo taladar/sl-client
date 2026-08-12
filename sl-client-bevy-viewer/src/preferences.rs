@@ -169,6 +169,11 @@ pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
         build: crate::preferences_graphics::build_graphics_tab,
     },
     PreferencesTabDef {
+        id: crate::preferences_audio::TAB_ID,
+        label_key: "preferences-tab-audio",
+        build: crate::preferences_audio::build_audio_tab,
+    },
+    PreferencesTabDef {
         id: "world-ui",
         label_key: "preferences-tab-world-ui",
         build: build_world_ui_tab,

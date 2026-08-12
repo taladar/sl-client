@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 247 |
+| ready | 246 |
 | blocked | 77 |
-| in-progress | 15 |
+| in-progress | 16 |
 | bugs | 23 |
 | done | 777 |
 | deferred | 22 |
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -517,8 +517,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-audio-tab`](ready/viewer-preferences-audio-tab.md) —
-  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
   — Preferences — camera + move-and-view tab (blocked by
   `viewer-preferences-floater` (done))
@@ -962,7 +960,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (15)
+## in-progress (16)
 
 ### viewer
 
@@ -980,6 +978,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   viewer & editor (rich text with embedded items)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
+- [`viewer-preferences-audio-tab`](in-progress/viewer-preferences-audio-tab.md)
+  — Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
   Real-time mirrors (hero probes)
 - [`viewer-region-options-estate`](in-progress/viewer-region-options-estate.md)

@@ -3092,6 +3092,7 @@ preferences-cancel = Cancel
 # The tab strip.
 preferences-tab-general = General
 preferences-tab-graphics = Graphics
+preferences-tab-audio = Sound & media
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
@@ -3216,6 +3217,37 @@ preferences-section-display = Display & frame rate
 preferences-row-vsync = Vertical sync (VSync)
 preferences-row-limit-framerate = Limit frame rate
 preferences-row-fps-limit = Maximum frames per second
+# The audio tab (viewer-preferences-audio-tab): bus volumes and mutes, the
+# behaviour toggles (focus mute, ear position, collision sounds), streaming
+# autoplay and the output device. Device names are their own option "keys"
+# (the Fluent key-fallback renders an undefined key as itself).
+preferences-section-volumes = Volumes
+preferences-row-volume-master = Master volume
+preferences-row-mute-master = Mute all audio
+preferences-row-volume-sfx = Sound effects
+preferences-row-mute-sfx = Mute sound effects
+preferences-row-volume-ambient = Ambient sounds
+preferences-row-mute-ambient = Mute ambient sounds
+preferences-row-volume-ui = UI sounds
+preferences-row-mute-ui = Mute UI sounds
+preferences-row-volume-music = Music stream
+preferences-row-mute-music = Mute the music stream
+preferences-row-volume-media = Media
+preferences-row-mute-media = Mute media
+preferences-row-volume-voice = Voice
+preferences-row-mute-voice = Mute voice
+preferences-section-audio-behaviour = Behaviour
+preferences-row-mute-when-unfocused = Mute audio when the window is minimised or unfocused
+preferences-row-ear-mode = Hear sounds from
+preferences-ear-camera = Camera position
+preferences-ear-avatar = Avatar position
+preferences-row-collision-sounds = Play collision sounds
+preferences-section-streaming = Streaming
+preferences-row-music-autoplay = Play the parcel's music stream automatically
+preferences-row-media-autoplay = Auto-play media on objects
+preferences-section-audio-device = Output device
+preferences-row-output-device = Output device (list refreshes on restart)
+preferences-audio-device-default = System default
 # The alerts tab (viewer-preferences-alerts-tab): headline toggles, then the
 # per-notification popup list.
 preferences-section-alert-headlines = Notices

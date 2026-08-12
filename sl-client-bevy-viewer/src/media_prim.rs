@@ -187,7 +187,9 @@ const MEDIA_SECTION: &[&str] = &["media"];
 
 /// Whether an `auto_play` media face may start unprompted (off by default —
 /// world media makes noise; a user click on the face still starts it).
-const MEDIA_AUTO_PLAY_SETTING: &str = "MediaAutoPlayEnabled";
+/// Public so the preferences audio tab can bind its streaming row to the
+/// same setting.
+pub(crate) const MEDIA_AUTO_PLAY_SETTING: &str = "MediaAutoPlayEnabled";
 
 /// Startup: declare the persisted media settings.
 fn register_media_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {

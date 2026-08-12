@@ -21,6 +21,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue,
 };
+use bevy::window::PrimaryWindow;
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
@@ -35,6 +36,21 @@ use crate::ui_font::UiFont;
 /// The persisted-settings section the bus levels live under (`[audio.bus]`),
 /// kept distinct from the parcel-stream player's own `[audio]` keys.
 const BUS_SECTION: &[&str] = &["audio", "bus"];
+
+/// The persisted-settings section [`SETTING_MUTE_WHEN_MINIMIZED`] lives under
+/// (`[audio]` — a behaviour toggle, not a bus level).
+const AUDIO_SECTION: &[&str] = &["audio"];
+
+/// The reference `MuteWhenMinimized` setting name (the name is kept so a
+/// reference value ports across): silence the master bus while the window is
+/// unfocused. Deliberate deviation: the reference mutes only while
+/// *minimised*; this viewer mutes on focus loss, because Wayland gives an
+/// application no reliable minimised signal — focus is the portable superset.
+/// Applied by [`apply_volume_settings_to_mixer`] as a mixer-side overlay: the
+/// stored `master_mute` setting is never written, so the bar's mute glyph
+/// does not flip, and refocusing restores the exact level (mute retains the
+/// bus gain).
+pub(crate) const SETTING_MUTE_WHEN_MINIMIZED: &str = "MuteWhenMinimized";
 
 /// Slider track width in logical pixels.
 const TRACK_WIDTH: f32 = 90.0;
@@ -172,11 +188,18 @@ impl Plugin for VolumePanelPlugin {
     }
 }
 
-/// Startup: declare a persisted volume + mute setting for every bus.
+/// Startup: declare a persisted volume + mute setting for every bus, plus
+/// the mute-on-focus-loss toggle.
 fn register_volume_settings(settings: Option<ResMut<ViewerSettings>>) {
     let Some(mut settings) = settings else {
         return;
     };
+    register_settings(&mut settings);
+}
+
+/// Declare this module's persisted settings (split from the Startup system so
+/// tests can register on a bare store).
+fn register_settings(settings: &mut ViewerSettings) {
     for bus in Bus::ALL {
         settings.register_in(
             BUS_SECTION,
@@ -191,6 +214,12 @@ fn register_volume_settings(settings: Option<ResMut<ViewerSettings>>) {
             "Whether this audio bus is muted (mute retains the volume level)",
         );
     }
+    settings.register_in(
+        AUDIO_SECTION,
+        SETTING_MUTE_WHEN_MINIMIZED,
+        SettingValue::Bool(false),
+        "Mute audio while the viewer window is minimised / unfocused",
+    );
 }
 
 /// Spawn the volume cluster into the bottom area's trailing slot, once (the
@@ -502,19 +531,36 @@ fn drive_volume_thumbs(
     }
 }
 
+/// Whether the master bus should be silenced for focus reasons: the
+/// mute-on-focus-loss setting is on and the window is unfocused.
+const fn master_silenced(mute_when_minimized: bool, focused: bool) -> bool {
+    mute_when_minimized && !focused
+}
+
 /// Bridge: push every bus's persisted volume + mute into the mixer each frame.
 ///
 /// [`Mixer::set_bus_level`] diffs against its own copy, so an unchanged value is
 /// a no-op — calling every frame is cheap and keeps the buses correct after any
 /// settings change (panel, quick-prefs or preferences tab), a fresh login, or a
 /// device hot-plug that rebuilt the graph.
+///
+/// [`SETTING_MUTE_WHEN_MINIMIZED`] overlays the **master** bus's mute here,
+/// mixer-side only: the stored `master_mute` setting is never written (see
+/// the constant's doc). A missing primary window reads as focused.
 fn apply_volume_settings_to_mixer(
     settings: Option<Res<ViewerSettings>>,
     mixer: Option<NonSendMut<Mixer>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let (Some(settings), Some(mut mixer)) = (settings, mixer) else {
         return;
     };
+    let mute_when_minimized = settings
+        .store()
+        .get_bool(SETTING_MUTE_WHEN_MINIMIZED)
+        .unwrap_or(false);
+    let focused = windows.iter().next().is_none_or(|window| window.focused);
+    let silenced = master_silenced(mute_when_minimized, focused);
     for bus in Bus::ALL {
         let gain = settings
             .store()
@@ -522,7 +568,112 @@ fn apply_volume_settings_to_mixer(
             .unwrap_or_else(|_| default_gain(bus));
         let muted = settings.store().get_bool(&mute_key(bus)).unwrap_or(false);
         let mut level = BusLevel::from_linear(gain);
-        level.set_muted(muted);
+        level.set_muted(muted || (matches!(bus, Bus::Master) && silenced));
         mixer.set_bus_level(bus, level);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
+    use pretty_assertions::assert_eq;
+    use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer, MixerConfig};
+    use sl_settings::{Scope, SettingValue, SettingsStore};
+
+    use super::{
+        SETTING_MUTE_WHEN_MINIMIZED, apply_volume_settings_to_mixer, default_gain, master_silenced,
+        mute_key, volume_key,
+    };
+    use crate::settings::ViewerSettings;
+
+    /// A [`ViewerSettings`] with this module's settings registered.
+    fn settings() -> ViewerSettings {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        super::register_settings(&mut settings);
+        settings
+    }
+
+    #[test]
+    fn registered_defaults_match_consts() {
+        let settings = settings();
+        let store = settings.store();
+        for bus in Bus::ALL {
+            assert_eq!(
+                store.get_f32(&volume_key(bus)).ok(),
+                Some(default_gain(bus)),
+                "volume default of {bus:?}"
+            );
+            assert_eq!(
+                store.get_bool(&mute_key(bus)).ok(),
+                Some(false),
+                "mute default of {bus:?}"
+            );
+        }
+        assert_eq!(
+            store.get_bool(SETTING_MUTE_WHEN_MINIMIZED).ok(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn master_silence_is_focus_and_setting() {
+        assert!(!master_silenced(false, true));
+        assert!(!master_silenced(false, false));
+        assert!(!master_silenced(true, true));
+        assert!(master_silenced(true, false));
+        // The contract the feature rides: mute retains the bus gain. The
+        // values are stored verbatim, so `Option` equality is exact.
+        let mut level = BusLevel::from_linear(0.4);
+        level.set_muted(true);
+        assert_eq!(Some(level.gain()), Some(0.4));
+        assert_eq!(Some(level.effective_gain()), Some(0.0));
+    }
+
+    /// An unfocused window with the setting on silences the master bus in the
+    /// mixer without ever writing the stored `master_mute` setting (so the
+    /// bar's mute glyph stays put, and refocusing restores the exact level).
+    #[test]
+    fn focus_mute_never_writes_the_store() {
+        let Ok(mixer) = Mixer::new(&MixerConfig::default()) else {
+            // No audio backend in this environment; the pure-fn test above
+            // carries the behaviour.
+            return;
+        };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings())
+            .insert_non_send(mixer)
+            .add_systems(Update, apply_volume_settings_to_mixer);
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Global,
+            SETTING_MUTE_WHEN_MINIMIZED,
+            SettingValue::Bool(true),
+        );
+        app.world_mut().spawn((
+            Window {
+                focused: false,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.update();
+        let master = app.world().non_send::<Mixer>().bus_level(Bus::Master);
+        assert_eq!(
+            Some(master.effective_gain()),
+            Some(0.0),
+            "master silenced in the mixer"
+        );
+        assert_eq!(
+            Some(master.gain()),
+            Some(default_gain(Bus::Master)),
+            "level retained"
+        );
+        let settings = app.world().resource::<ViewerSettings>();
+        assert_eq!(
+            settings.store().get_bool(&mute_key(Bus::Master)).ok(),
+            Some(false),
+            "the stored master_mute setting is untouched"
+        );
     }
 }
