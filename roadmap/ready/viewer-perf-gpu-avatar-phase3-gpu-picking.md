@@ -2,7 +2,7 @@
 id: viewer-perf-gpu-avatar-phase3-gpu-picking
 title: GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
 topic: viewer
-status: blocked
+status: ready
 origin: GPU-avatar design (2026-08-12), context/gpu-avatars.md §6, §7 Phase 3
 refs: [viewer-perf-gpu-avatar-crowd, viewer-perf-hover-pick-raycast, viewer-avatar-mesh-accurate-pick]
 blocked_by: [viewer-perf-gpu-avatar-phase0-mesh-dedup]

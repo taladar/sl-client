@@ -90,6 +90,7 @@ mod geometry_cache;
 mod gizmos;
 mod glow;
 mod gpu_avatar_spike;
+mod gpu_avatars;
 mod ground;
 mod group_notice;
 mod group_profile;
@@ -1479,6 +1480,14 @@ fn run_session(
     // de-risking experiment for writing GPU-posed palettes into Bevy's own skin
     // path. Not a feature; delete or graft into Phase 1.
     .add_plugins(crate::gpu_avatar_spike::GpuAvatarSpikePlugin::from_env())
+    // Phase 1a of the GPU-avatar pipeline (context/gpu-avatars.md §1/§2):
+    // flag-gated by SL_VIEWER_GPU_AVATARS=1, read once here. Unset (the
+    // default), this is a no-op plugin and the viewer is byte-for-byte the
+    // normal path. Set, a compute pipeline re-runs the SL skeletal recurrence
+    // on the GPU and renders each avatar a second time as a "GPU ghost" ~2 m
+    // beside the CPU-posed original — the visual A/B for the GPU FK. The CPU
+    // pose path is unchanged either way.
+    .add_plugins(crate::gpu_avatars::GpuAvatarsPlugin::from_env())
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34

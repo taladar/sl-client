@@ -1184,6 +1184,12 @@ pub(crate) fn pose_avatar_skeletons(
     parts: Query<(Entity, &AvatarBodyPart)>,
     anchors: Query<Ref<Transform>, With<crate::avatars::AvatarAnchor>>,
     mut globals: Query<&mut GlobalTransform>,
+    // The GPU-avatar pipeline's pose feed (`crate::gpu_avatars`): exists only
+    // while `SL_VIEWER_GPU_AVATARS` is on, and receives each avatar's FINAL
+    // blended pose (keyframes + idle + look-at + IK + physics, exactly what
+    // the recurrence below consumes) plus its root matrix, so the GPU FK
+    // reproduces this frame's CPU result. `None` = zero cost.
+    mut gpu_feed: Option<ResMut<crate::gpu_avatars::GpuAvatarPoseFeed>>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
         return;
@@ -1376,6 +1382,11 @@ pub(crate) fn pose_avatar_skeletons(
                 joints,
                 &world,
             );
+            // Feed the GPU pipeline the same (empty, T-pose) pose + root this
+            // frame's joint globals were written from.
+            if let Some(feed) = gpu_feed.as_mut() {
+                feed.publish(agent, &pose, joints.len(), root_global.to_matrix());
+            }
             let _prev = gate.stamps.insert(agent, stamp);
             continue;
         }
@@ -1576,6 +1587,12 @@ pub(crate) fn pose_avatar_skeletons(
             joints,
             &world,
         );
+        // Feed the GPU pipeline the FINAL blended pose (all folds applied) +
+        // the root matrix this frame's joint globals were composed under, so
+        // its FK re-derives exactly the `world` written above.
+        if let Some(feed) = gpu_feed.as_mut() {
+            feed.publish(agent, &pose, joints.len(), root_global.to_matrix());
+        }
         let _prev = gate.stamps.insert(agent, stamp);
     }
 

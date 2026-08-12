@@ -2,7 +2,7 @@
 id: viewer-perf-gpu-avatar-phase1-gpu-fk-palettes
 title: GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract)
 topic: viewer
-status: blocked
+status: in-progress
 origin: GPU-avatar design (2026-08-12), context/gpu-avatars.md §2, §7 Phase 1
 refs: [viewer-perf-gpu-avatar-crowd, viewer-perf-avatar-pose-extract-skins]
 blocked_by: [viewer-perf-gpu-avatar-phase0-mesh-dedup, viewer-perf-gpu-avatar-keystone-skinuniforms-spike]
@@ -11,6 +11,26 @@ blocked_by: [viewer-perf-gpu-avatar-phase0-mesh-dedup, viewer-perf-gpu-avatar-ke
 Context: [context/gpu-avatars.md](../context/gpu-avatars.md) §1.2(c/e/f), §2
 (passes C+D, §2.3 scheduling, §2.4 write-in), §7 "Phase 1". Epic:
 [[viewer-perf-gpu-avatar-crowd]].
+
+## Progress — split into 1a (done) + 1b (remaining)
+
+**Phase 1a — GPU pose pipeline as an additive side-by-side ghost — DONE
+(2026-08-13, committed).** Buffers (rest/frame/working), pass C (FK, an
+operation-for-operation port of `deformed_world_matrices` — **bit-exact** in
+golden tests), pass D (palettes → `SkinUniforms` via the keystone write-in),
+and the `Core3d` scheduling all landed in `src/gpu_avatars/`, behind
+`SL_VIEWER_GPU_AVATARS` (default off). The CPU path is **untouched**; instead of
+freezing joints, each rigged avatar renders **twice** — the CPU pose in place
+and a GPU-FK **ghost 2 m aside** (with a floating "GPU" label) — so the two are
+directly comparable. Rigid base parts (the two eyeballs, non-skinned) get
+CPU-placed rigid ghosts. Verified: golden bit-exact FK + headless GPU-vs-CPU
+(4.8e-7); live on OpenSim and **aditi** (Bento-scale mesh body) — the readback
+logs `GPU palette == CPU palette` (worst diff 1.5e-5) and the two copies are
+pose-identical, no validation errors. The defensive `resolve_joint_map`
+(unresolvable joint → root fallback, never a dropped submesh) also landed.
+
+**Phase 1b — capture the win — REMAINING.** Turn the ghost harness into the
+real path: below.
 
 Land the buffers (rest / frame / working, minus clips), compute **pass C**
 (hierarchical FK) and **pass D** (skin palettes → `SkinUniforms`), the `Core3d`

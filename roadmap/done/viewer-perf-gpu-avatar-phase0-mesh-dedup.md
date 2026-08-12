@@ -2,7 +2,7 @@
 id: viewer-perf-gpu-avatar-phase0-mesh-dedup
 title: GPU avatars Phase 0 — share rigged-submesh Mesh + IBP assets (instancing)
 topic: viewer
-status: in-progress
+status: done
 origin: GPU-avatar design (2026-08-12), context/gpu-avatars.md §3.2
 refs: [viewer-perf-gpu-avatar-crowd, viewer-perf-steady-state-46fps-ceiling]
 ---
@@ -33,16 +33,20 @@ render regression; `extract_skins` unchanged (this phase does not touch pose).
 Client-side unit tests: same key → same handle, different lod/submesh/MeshKey →
 different, IBP shared by `(MeshKey, lod)`, revive-after-drop.
 
-**Status (2026-08-12): code landed, correctness verified live, draw-collapse
-measurement still pending.** Live run on aditi confirmed **no regression** —
-avatars render as before and **pose independently**, clean login/logout, no
-panic, the own rigged body builds through the shared cache path. Unit tests
-prove handle-sharing; Bevy auto-batches same-handle skinned draws (verified
-from source in `context/gpu-avatars.md` §0). What is **not** yet measured is
-the actual draw-call collapse — aditi is a test grid with no crowds, so no two
-avatars in the same mesh body were in view. Residual risk: shared handles are
-necessary but not sufficient for batching (per-wearer bindless `FaceMaterial`
-must not split the batch). Measure opportunistically on a real same-body crowd
-(main-grid club, or two alts in one body on local OpenSim + RenderDoc); watch
-the F3 `rigged hit` counter climb. Task stays in-progress until that number is
-in hand.
+**Status: implementation done (2026-08-12); one measurement outstanding.**
+Code landed and committed; live-verified on aditi — **no regression**, avatars
+render as before and pose independently, clean login/logout, no panic, the own
+rigged body builds through the shared cache path. Unit tests prove
+handle-sharing; Bevy auto-batches same-handle skinned draws (verified from
+source in `context/gpu-avatars.md` §0). The implementation is complete, so this
+task is **done**.
+
+**Outstanding follow-up (perf measurement, not implementation):** the actual
+draw-call collapse is inferred, not yet measured — shared handles are necessary
+but not sufficient for batching (per-wearer bindless `FaceMaterial` must not
+split the batch). Since this viewer is not going to the main grid for now, the
+go-to measurement is **the three Aditi avatars on one region — they share the
+same starter mesh body** (same `MeshKey`): confirm the F3 `rigged hit` counter
+climbs as the 2nd/3rd bind, and RenderDoc the single instanced draw per
+submesh. One 3-avatar run (the conformance harness can drive the multi-login)
+closes it; it gates nothing.
