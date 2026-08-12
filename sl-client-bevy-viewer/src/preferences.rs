@@ -420,6 +420,22 @@ pub(crate) fn spawn_pref_combo(
     binding: SettingBinding,
     options: &[(&str, SettingValue)],
 ) -> Entity {
+    let (row, _anchor) =
+        spawn_pref_combo_with_anchor(commands, parent, label_key, binding, options);
+    row
+}
+
+/// [`spawn_pref_combo`], also returning the combo **anchor** entity (the one
+/// carrying the [`SettingBinding`] and emitting `ComboChanged`), for a tab that
+/// must mark the anchor with its own component — e.g. the graphics tab's
+/// quality-tier driver.
+pub(crate) fn spawn_pref_combo_with_anchor(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    options: &[(&str, SettingValue)],
+) -> (Entity, Entity) {
     let row = commands
         .spawn((
             pref_row_node(),
@@ -446,7 +462,7 @@ pub(crate) fn spawn_pref_combo(
         ComboBindingValues(options.iter().map(|(_, value)| value.clone()).collect()),
     ));
     commands.entity(row).insert(PrefSearchRow { label });
-    row
+    (row, anchor)
 }
 
 /// Spawn a searchable **text-field** row: a translated label above a

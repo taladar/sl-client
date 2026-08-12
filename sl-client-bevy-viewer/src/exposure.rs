@@ -100,7 +100,7 @@ const DEFAULT_EXPOSURE_ENABLED: bool = true;
 const EXPOSURE_SECTION: &[&str] = &["render", "exposure"];
 
 /// The reference `RenderDynamicExposureEnabled` setting name.
-const SETTING_ENABLED: &str = "RenderDynamicExposureEnabled";
+pub(crate) const SETTING_ENABLED: &str = "RenderDynamicExposureEnabled";
 /// The reference `RenderDynamicExposureCoefficient` setting name.
 const SETTING_COEFFICIENT: &str = "RenderDynamicExposureCoefficient";
 /// The reference `RenderDynamicExposureSpeedError` setting name (the fraction of the
@@ -115,7 +115,7 @@ const SETTING_SPEED_TARGET: &str = "RenderDynamicExposureSpeedTarget";
 const SETTING_USE_SKY: &str = "RenderUseExposureSkySettings";
 /// The reference `RenderSkyAutoAdjustLegacy` setting name (treat a legacy sky as if
 /// it carried the auto-adjust probe ambiance, so it adapts too).
-const SETTING_AUTO_ADJUST_LEGACY: &str = "RenderSkyAutoAdjustLegacy";
+pub(crate) const SETTING_AUTO_ADJUST_LEGACY: &str = "RenderSkyAutoAdjustLegacy";
 
 /// The environment variable force-disabling the dynamic exposure (an A/B knob: pins
 /// the scale to `1.0` so a capture can tell the dynamic exposure from the static

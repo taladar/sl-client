@@ -84,16 +84,18 @@ pub(crate) const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
 
 /// Read the `SL_VIEWER_SHADOW_CASCADES` experiment env: how many sun shadow
-/// cascades to build (clamped `1..=4`; default 4). The per-frame shadow-caster
-/// cull ([`check_dir_light_mesh_visibility`], ungated) and the shadow-map render
-/// both scale with the cascade count × caster count, so cutting cascades
-/// isolates how much the shadow *view count* costs — an entity/view lever
-/// distinct from the sun-movement churn one.
-fn shadow_cascade_count() -> usize {
+/// cascades to build (clamped `1..=4`; `None` when unset, so the stored
+/// `RenderShadowCascades` preference drives it instead — the env, when set,
+/// **wins** over the preference like the tonemap / glow overrides). The
+/// per-frame shadow-caster cull ([`check_dir_light_mesh_visibility`], ungated)
+/// and the shadow-map render both scale with the cascade count × caster count,
+/// so cutting cascades isolates how much the shadow *view count* costs — an
+/// entity/view lever distinct from the sun-movement churn one.
+pub(crate) fn shadow_cascade_count() -> Option<usize> {
     std::env::var("SL_VIEWER_SHADOW_CASCADES")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
-        .map_or(4, |count| count.clamp(1, 4))
+        .map(|count| count.clamp(1, 4))
 }
 
 /// Cascaded-shadow-map coverage for the scene sun / moon (P24.1). Tuned to a
@@ -103,8 +105,16 @@ fn shadow_cascade_count() -> usize {
 /// detail gets most of the shadow-map resolution. The reference
 /// `LLPipeline::renderShadow` uses four split sun cascades likewise.
 pub(crate) fn shadow_cascades() -> CascadeShadowConfig {
+    shadow_cascades_for(shadow_cascade_count().unwrap_or(4))
+}
+
+/// [`shadow_cascades`] with an explicit cascade count (clamped `1..=4`): the
+/// builder body shared by the spawn-time default above and the
+/// `RenderShadowCascades` preference applier, which rebuilds the sun's
+/// [`CascadeShadowConfig`] when the stored count changes.
+pub(crate) fn shadow_cascades_for(count: usize) -> CascadeShadowConfig {
     CascadeShadowConfigBuilder {
-        num_cascades: shadow_cascade_count(),
+        num_cascades: count.clamp(1, 4),
         // The camera can push right up to an avatar's face (2 cm near plane), so
         // start the near cascade close.
         minimum_distance: 0.1,
@@ -603,7 +613,7 @@ pub(crate) fn center_sky_on_camera(
 /// the directional-shadow subsystem. That cost is the more decisive number than the
 /// sun-churn slice, because the shadow-caster cull runs every frame regardless
 /// of sun movement.
-fn sun_shadows_enabled() -> bool {
+pub(crate) fn sun_shadows_enabled() -> bool {
     !matches!(
         std::env::var("SL_VIEWER_SUN_SHADOWS").ok().as_deref(),
         Some("0")

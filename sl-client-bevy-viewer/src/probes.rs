@@ -1637,11 +1637,11 @@ const HERO_MIN_VOLUME_EXTENT: f32 = 1.0;
 
 /// The persistent settings keys for the mirror feature, grouped under `[render]`, named
 /// after the reference viewer's controls.
-const RENDER_MIRRORS_SETTING: &str = "render_mirrors";
+pub(crate) const RENDER_MIRRORS_SETTING: &str = "render_mirrors";
 /// See [`RENDER_MIRRORS_SETTING`] — the hero-probe cube resolution.
-const HERO_RESOLUTION_SETTING: &str = "render_hero_probe_resolution";
+pub(crate) const HERO_RESOLUTION_SETTING: &str = "render_hero_probe_resolution";
 /// See [`RENDER_MIRRORS_SETTING`] — the hero-probe re-render cadence in frames.
-const HERO_UPDATE_RATE_SETTING: &str = "render_hero_probe_update_rate";
+pub(crate) const HERO_UPDATE_RATE_SETTING: &str = "render_hero_probe_update_rate";
 
 /// The live mirror configuration, mirrored from the persistent `[render]` settings by
 /// [`sync_mirror_settings`] so an edit in the settings file (or a bound preferences

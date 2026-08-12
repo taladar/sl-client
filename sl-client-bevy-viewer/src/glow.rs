@@ -91,13 +91,13 @@ const ENV_WIDTH: &str = "SL_VIEWER_GLOW_WIDTH";
 /// matching the reference's `RenderGlow*` naming.
 const GLOW_SECTION: &[&str] = &["render", "glow"];
 /// The reference `RenderGlow` setting name (the master enable).
-const SETTING_ENABLED: &str = "RenderGlow";
+pub(crate) const SETTING_ENABLED: &str = "RenderGlow";
 /// The reference `RenderGlowStrength` setting name.
-const SETTING_STRENGTH: &str = "RenderGlowStrength";
+pub(crate) const SETTING_STRENGTH: &str = "RenderGlowStrength";
 /// The reference `RenderGlowIterations` setting name.
-const SETTING_ITERATIONS: &str = "RenderGlowIterations";
+pub(crate) const SETTING_ITERATIONS: &str = "RenderGlowIterations";
 /// The reference `RenderGlowWidth` setting name.
-const SETTING_WIDTH: &str = "RenderGlowWidth";
+pub(crate) const SETTING_WIDTH: &str = "RenderGlowWidth";
 
 /// Register the glow settings on the store with the reference defaults, so a user's
 /// Firestorm `RenderGlow*` port across and the (future) preferences UI has something

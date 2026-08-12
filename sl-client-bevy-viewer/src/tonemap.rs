@@ -75,13 +75,13 @@ const TONEMAP_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0c94-3a27-4d58-9
 pub(crate) struct SlTonemapPass;
 
 /// The reference `RenderTonemapType` value selecting the Khronos PBR Neutral curve.
-const TONEMAP_KHRONOS_NEUTRAL: u32 = 0;
+pub(crate) const TONEMAP_KHRONOS_NEUTRAL: u32 = 0;
 /// The reference `RenderTonemapType` value selecting the ACES (Hill) curve — the
 /// reference's default, and so this viewer's.
-const TONEMAP_ACES: u32 = 1;
+pub(crate) const TONEMAP_ACES: u32 = 1;
 /// Not a reference value: no tone curve at all (exposure and clamp only, the
 /// reference's `NO_POST` path), so a capture can A/B what the curve is doing.
-const TONEMAP_NONE: u32 = 2;
+pub(crate) const TONEMAP_NONE: u32 = 2;
 
 /// The reference `RenderTonemapMix` default: how far the tone curve is blended in
 /// over the merely-exposed linear colour.
@@ -155,11 +155,11 @@ const ENV_EXPOSURE: &str = "SL_VIEWER_EXPOSURE";
 const TONEMAP_SECTION: &[&str] = &["render", "tonemap"];
 
 /// The reference `RenderTonemapType` setting name.
-const SETTING_TONEMAP_TYPE: &str = "RenderTonemapType";
+pub(crate) const SETTING_TONEMAP_TYPE: &str = "RenderTonemapType";
 /// The reference `RenderTonemapMix` setting name.
-const SETTING_TONEMAP_MIX: &str = "RenderTonemapMix";
+pub(crate) const SETTING_TONEMAP_MIX: &str = "RenderTonemapMix";
 /// The reference `RenderExposure` setting name.
-const SETTING_EXPOSURE: &str = "RenderExposure";
+pub(crate) const SETTING_EXPOSURE: &str = "RenderExposure";
 
 /// Register the tone-mapper settings on the store with the reference defaults, so
 /// the names exist (and persist) — a user's Firestorm `RenderTonemapType` /
