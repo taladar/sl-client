@@ -40,6 +40,11 @@ independent; land opportunistically.
   per tag → per-frame taffy relayout. Mostly inherent (screen-space
   tracking), but skip the write when the projected position is unchanged
   (sub-pixel delta) — idle camera + idle avatars then cost nothing.
+  **Superseded (2026-08-12):** `position_name_tags` was refactored into the
+  `follow_tag_anchors` / `solve_tag_overlap` / `compose_name_tags` chain;
+  the placement writes are now `set_if_neq`-guarded, and the remaining
+  name-tag per-frame churn is tracked in
+  [[viewer-perf-name-tag-per-frame-churn]].
 - **Render-priority scratch** — `drive_render_priority`
   (`render_priority.rs:144`): allocates 5 `HashMap`/`HashSet` per run.
   Already throttled to 4 Hz, so minor — reuse `Local` scratch maps.

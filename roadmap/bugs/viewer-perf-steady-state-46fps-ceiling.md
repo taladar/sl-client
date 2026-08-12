@@ -128,15 +128,62 @@ A fresh full-session aditi `tracy-capture` (release, `profile-tracy`, 2180
 frames / 2:51, 15.0 M zones, clean disconnect; 56 occluded ~1 s present
 frames = 2.6 %, excluded) re-measures the anatomy after the ground-probe and
 shadow-visibility work landed. Frame is unchanged at the top line — median
-**49.3 ms (~20 fps)**, currently **main-thread bound** (`Main` thread 1 mean
-41.4 ms visible; `RenderApp` thread 2 ~24 ms visible = Extract 7.1 +
-RenderGraph 16.5, present ~0.1 ms). The render thread is only *relatively*
-idle: at ~24 ms it is itself ~44 % over the 16.7 ms a 60 fps frame allows, so
-it is **not free headroom** — it is the **next ceiling (~42 fps)** that the
-frame hits the moment the main thread is cut below 24 ms. Reaching 60 fps
-needs *both* threads under 16.7 ms, so the render side (`camera_driver` /
-3D pass, `extract_skins`, the shadow specialize/queue below) is a real
-second front, not a spectator.
+**49.3 ms (~20 fps)**.
+
+### Critical path — the frame is CO-LIMITED, not main-bound
+
+A per-instance reconstruction of a representative visible frame (Main start
+→ next Main start) shows the period is captured, to **0.3 ms**, by:
+
+```text
+frame_period ≈ ExtractSchedule + max(Main-app, Render-app)
+   49.3 ms    ≈     7.1 ms      + max( 41.4 , 39.6 )
+```
+
+- **Main-app (41.4 ms, thread 1)** and **Render-app (39.6 ms, thread 2)** run
+  **concurrently** (pipelined) and are within ~2 ms; **RenderApp is the
+  *longer* thread in 54 % of visible frames.** So the frame waits for whichever
+  is slower and *both* are on the critical path — cutting only one floors at
+  `extract + the other` (~47 ms). (An earlier draft here wrongly decomposed
+  RenderApp as "Extract 7 + RenderGraph 16.5 = 24 ms"; that is **wrong** —
+  `sub app{name=RenderApp}` does **not** contain ExtractSchedule and holds the
+  whole render-world prepare/queue phase, ~21 ms, *plus* `render_system`
+  ~19 ms.)
+- **ExtractSchedule (7.1 ms) is fully serial** — a hard pipeline sync where the
+  main thread blocks on the render thread finishing the previous frame, then
+  copies the world across with **both threads otherwise idle**. Every ms cut
+  here is a full ms off the frame. It is ~90 % **one system**: `extract_skins`
+  5.4–7.6 ms (avatar joint matrices; scales with avatars × Bento bones) +
+  `extract_lights` 1.4 ms.
+- Main-app and render-app **share one worker pool**, so they contend for the
+  same ~8 workers while overlapping — cutting either frees workers for the
+  other.
+
+The three critical segments' internal chains (representative frame):
+
+- **ExtractSchedule 7.1 ms (serial):** `extract_skins` ≫ `extract_lights`.
+- **Main-app 41 ms:** sequential barriers Update 17 + PostUpdate 16.5 +
+  physics 4.8 + PreUpdate 2.3. PostUpdate chain =
+  `mark_3d_meshes_as_changed` 3.6 → `calculate_bounds` 1.9 →
+  material-spec ×15 ~2.8 (parallel) → `check_visibility_cpu_culling` 1.3 →
+  `pose_avatar_skeletons` 1.1 → `ui_layout_system` 1.1 →
+  `shadow_visibility` ~1.2 → transform propagation ~0.9. Update chain =
+  `drive_render_priority` 4.5 (4 Hz throttle) + `update_hover_tooltip` 3.7
+  (cursor-dependent) + `apply_prim_lod` 1.5 + `prune_control_avatars` 1.2 +
+  a long tail of ~0-cost UI systems.
+- **Render-app 40 ms:** prepare/queue ~21 ms (`prepare_skins` 3.2,
+  `write_indirect_parameters_buffers` 2.8, `collect_visible_cpu_culled` 2.1,
+  `queue_shadows` 1.2, `prepare_material_bind_groups` 1.2, probe bind groups
+  1.1, `specialize_shadows`) + `render_system` ~19 ms (`camera_driver` 14.1 =
+  the 3D + shadow + reflection-probe/hero passes; `submit_pending_command_
+  buffers` 4.1).
+
+**Lever order:** (1) `extract_skins` — best ms-for-ms, alone on the serial
+segment; (2) attack Main *and* Render together (balanced at ~40 ms, shared
+workers); (3) render scales with drawn objects / shadow casters / probes;
+(4) PostUpdate is geometry-change bound (`mark_3d_meshes_as_changed` +
+`calculate_bounds`). See [[viewer-perf-avatar-pose-extract-skins]] and
+[[viewer-perf-name-tag-per-frame-churn]] for the concrete first cuts.
 
 But the two biggest 2026-08-10 single costs are **measured gone**:
 
@@ -160,16 +207,15 @@ But the two biggest 2026-08-10 single costs are **measured gone**:
 `Update` stayed ~17.4 ms only because, with the ground probe gone, the new
 top system is **`update_hover_tooltip` at 5.9 ms** (a `MeshRayCast` over all
 meshes, fired each dwelt frame — pointer was active this run; see
-[[viewer-perf-hover-pick-raycast]]). Render thread (~24 ms — non-gating
-today, but the ~42 fps second ceiling, ~44 % over the 16.7 ms 60 fps
-budget): `camera_driver` 12.4 (inclusive of the 3D pass), `extract_skins`
-5.4, `submit_pending_command_buffers` 3.7, `queue_shadows` 3.5,
-`specialize_shadows` 3.0.
+[[viewer-perf-hover-pick-raycast]]).
 
-**Takeaway:** the two named levers delivered; the ~20 fps median is now a
-genuinely broad main-thread chain (`Update` hover-pick + a `PostUpdate`
-death-by-many) with no single 5 ms+ serial target left except the hover-pick
-raycast under active cursor use.
+**Takeaway:** the two named levers delivered, but the frame is **co-limited
+main/render + a 7 ms serial extract** (see the critical-path section above),
+*not* main-bound. Reaching 60 fps needs all three of: the serial
+`extract_skins` cut, the main-app chain (hover-pick + PostUpdate
+death-by-many), and the render-app 3D/shadow/probe passes — no single 5 ms+
+serial target dominates except `extract_skins` and (under active cursor use)
+the hover-pick raycast.
 
 ### Re-capture outliers (2026-08-12)
 

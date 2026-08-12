@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 56 |
+| ideas | 58 |
 | ready | 248 |
 | blocked | 78 |
 | in-progress | 15 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 775 |
 | deferred | 22 |
 | wont-do | 10 |
-| **total** | **1226** |
+| **total** | **1228** |
 
-## ideas (56)
+## ideas (58)
 
 ### viewer
 
@@ -64,6 +64,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
+- [`viewer-perf-avatar-pose-extract-skins`](ideas/viewer-perf-avatar-pose-extract-skins.md)
+  — Avatar pose path drives extract_skins — the serial critical-path cost
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
   — Chat transcript via virtual list — stop re-shaping the whole history
 - [`viewer-perf-flexi-distance-lod`](ideas/viewer-perf-flexi-distance-lod.md) —
@@ -78,6 +80,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   App-level login state to gate world/streaming systems pre-login
 - [`viewer-perf-main-world-material-specialization-check`](ideas/viewer-perf-main-world-material-specialization-check.md)
   — Main-world per-material specialization checks cost ~8.4 ms/frame
+- [`viewer-perf-name-tag-per-frame-churn`](ideas/viewer-perf-name-tag-per-frame-churn.md)
+  — Name-tag systems recompose / re-solve every frame (ungated)
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
