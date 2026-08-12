@@ -5,6 +5,7 @@
 //! report through the [`Metrics`](crate::metrics::Metrics) collector instead of
 //! stdout, so the runner can stamp and store the result.
 
+pub mod agent_alert;
 pub mod ais3_folder_lifecycle;
 pub mod animation_play_stop;
 pub mod asset_decode;

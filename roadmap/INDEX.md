@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 246 |
+| ready | 245 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 777 |
+| done | 778 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (246)
+## ready (245)
 
 ### protocol
 
@@ -677,8 +677,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-agent-alert`](ready/test-agent-alert-observe-agentalertmessage-alertmessage.md)
-  — observe AgentAlertMessage / AlertMessage
 - [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
   — Calling card — [aditi] variant
 - [`test-chat-hear-other-aditi`](ready/test-chat-hear-other-aditi-add-the-aditi-variant.md)
@@ -1059,7 +1057,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (777)
+## done (778)
 
 ### protocol
 
@@ -2444,6 +2442,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-agent-alert`](done/test-agent-alert-observe-agentalertmessage-alertmessage.md)
+  — observe AgentAlertMessage / AlertMessage
 - [`test-ais3-folder-lifecycle`](done/test-ais3-folder-lifecycle-create-rename-move-remove-purge-a-folder-caps-ais3-on-sl-gat.md)
   — create / rename / move / remove / purge a folder (CAPS AIS3 on SL; gat
 - [`test-animation-play-stop`](done/test-animation-play-stop-play-and-stop-an-animation.md)
