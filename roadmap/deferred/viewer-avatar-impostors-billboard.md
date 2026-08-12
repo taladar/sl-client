@@ -2,12 +2,26 @@
 id: viewer-avatar-impostors-billboard
 title: Billboard impostors for distant avatars
 topic: viewer
-status: ready
+status: deferred
 origin: render-feature gap analysis vs Firestorm (2026-07); split from viewer-avatar-impostors
-refs: [viewer-quick-preferences]
+refs: [viewer-quick-preferences, viewer-perf-gpu-avatar-crowd]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+> **Reframed (2026-08-12): optional low-end / extreme-count fallback,
+> deferred.** Impostors are the reference viewer's *workaround* for a slow
+> full-geometry avatar path — they trade fidelity (a flat, occasionally-
+> refreshed billboard) for speed. On capable hardware the full path already
+> does ~30 avatars fine, and the primary crowd strategy here is to make the
+> *real* path scale ([[viewer-perf-gpu-avatar-crowd]]: compute-pass GPU
+> animation + same-body instancing), which is full-quality and benefits every
+> tier — pushing the "need impostors" threshold far out. So impostors are **no
+> longer a near-term must**: implement them only as an **opt-in fallback**
+> (behind a quality preference, **default off** on capable hardware) for (a)
+> genuinely low-end GPUs and (b) extreme mega-event counts where even instanced
+> real geometry saturates. We copy the reference's *goal* (survive a crowd),
+> not this *mechanism*. The design below still stands for when/if it is built.
 
 The performance feature that makes a crowded region survivable: past a limit,
 distant avatars are rendered as flat **billboard impostors** — a cached snapshot

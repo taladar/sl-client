@@ -4,10 +4,7 @@ title: Name-tag systems recompose / re-solve every frame (ungated)
 topic: viewer
 status: ideas
 origin: per-frame redundant-work audit (2026-08-12)
-refs:
-  - viewer-perf-steady-state-46fps-ceiling
-  - viewer-perf-frame-churn-cleanups
-  - sl-client-name-tag-billboard
+refs: [viewer-perf-steady-state-46fps-ceiling, viewer-perf-frame-churn-cleanups]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).

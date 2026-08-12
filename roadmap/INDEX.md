@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 58 |
+| ideas | 60 |
 | ready | 248 |
-| blocked | 78 |
-| in-progress | 15 |
+| blocked | 83 |
+| in-progress | 16 |
 | bugs | 22 |
 | done | 775 |
-| deferred | 22 |
+| deferred | 23 |
 | wont-do | 10 |
-| **total** | **1228** |
+| **total** | **1237** |
 
-## ideas (58)
+## ideas (60)
 
 ### viewer
 
@@ -64,6 +64,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-viewer tutorial for new and returning Second Life users
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
+- [`viewer-perf-animation-lod-pose-cache`](ideas/viewer-perf-animation-lod-pose-cache.md)
+  — Animation pose cache + temporal/budget pose LOD (no-GPU crowd stopgaps)
 - [`viewer-perf-avatar-pose-extract-skins`](ideas/viewer-perf-avatar-pose-extract-skins.md)
   — Avatar pose path drives extract_skins — the serial critical-path cost
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
@@ -72,6 +74,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Flexi prims — distance / pixel-area LOD and tessellation-allocation reuse
 - [`viewer-perf-frame-churn-cleanups`](ideas/viewer-perf-frame-churn-cleanups.md)
   — Small per-frame churn cleanups (throttles + scratch reuse)
+- [`viewer-perf-gpu-avatar-crowd`](ideas/viewer-perf-gpu-avatar-crowd.md) — GPU
+  avatar crowd — compute-pass animation + same-body instancing
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-hover-pick-raycast`](ideas/viewer-perf-hover-pick-raycast.md) —
@@ -210,8 +214,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
-- [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
-  — Billboard impostors for distant avatars
 - [`viewer-avatar-radar`](ready/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
@@ -480,6 +482,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
+- [`viewer-perf-gpu-avatar-keystone-skinuniforms-spike`](ready/viewer-perf-gpu-avatar-keystone-skinuniforms-spike.md)
+  — GPU avatars keystone spike — validate the SkinUniforms write-in
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
@@ -743,7 +747,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (78)
+## blocked (83)
 
 ### protocol
 
@@ -867,6 +871,23 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
+- [`viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`](blocked/viewer-perf-gpu-avatar-phase1-gpu-fk-palettes.md)
+  — GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract) (blocked
+  by `viewer-perf-gpu-avatar-phase0-mesh-dedup`,
+  `viewer-perf-gpu-avatar-keystone-skinuniforms-spike`)
+- [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](blocked/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
+  — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
+  `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`)
+- [`viewer-perf-gpu-avatar-phase3-gpu-picking`](blocked/viewer-perf-gpu-avatar-phase3-gpu-picking.md)
+  — GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
+  (blocked by `viewer-perf-gpu-avatar-phase0-mesh-dedup`)
+- [`viewer-perf-gpu-avatar-phase4-remove-scaffolding`](blocked/viewer-perf-gpu-avatar-phase4-remove-scaffolding.md)
+  — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding (blocked
+  by `viewer-perf-gpu-avatar-phase2-gpu-sample-blend`,
+  `viewer-perf-gpu-avatar-phase3-gpu-picking`)
+- [`viewer-perf-gpu-avatar-phase5-lod-polish`](blocked/viewer-perf-gpu-avatar-phase5-lod-polish.md)
+  — GPU avatars Phase 5 — LOD, scalability hooks, polish (blocked by
+  `viewer-perf-gpu-avatar-phase4-remove-scaffolding`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
@@ -971,7 +992,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (15)
+## in-progress (16)
 
 ### viewer
 
@@ -987,6 +1008,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-perf-gpu-avatar-phase0-mesh-dedup`](in-progress/viewer-perf-gpu-avatar-phase0-mesh-dedup.md)
+  — GPU avatars Phase 0 — share rigged-submesh Mesh + IBP assets (instancing)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -2722,7 +2745,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (22)
+## deferred (23)
 
 ### protocol
 
@@ -2734,6 +2757,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-menu-reorder-when-implemented`](deferred/viewer-attachment-menu-reorder-when-implemented.md)
   — Re-lay the attachment pies by meaning once most actions are implemented
   (blocked by `viewer-attachment-context-menu` (done))
+- [`viewer-avatar-impostors-billboard`](deferred/viewer-avatar-impostors-billboard.md)
+  — Billboard impostors for distant avatars
 - [`viewer-avatar-menu-reorder-when-implemented`](deferred/viewer-avatar-menu-reorder-when-implemented.md)
   — Re-lay the avatar pie by meaning once most actions are implemented (blocked
   by `viewer-avatar-context-menu` (done))

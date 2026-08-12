@@ -4,12 +4,25 @@ title: Avatar pose path drives extract_skins — the serial critical-path cost
 topic: viewer
 status: ideas
 origin: Tracy critical-path reconstruction + code audit (2026-08-12)
-refs:
-  - viewer-perf-steady-state-46fps-ceiling
-  - viewer-perf-skeleton-single-solve
+refs: [viewer-perf-steady-state-46fps-ceiling, viewer-perf-skeleton-single-solve, viewer-perf-gpu-avatar-crowd, viewer-perf-animation-lod-pose-cache]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+> **Scope correction (2026-08-12): this item is the small, test-scene win.**
+> The idle-avatar framing below is biased by our (mostly-static) test scene.
+> **Real avatars are almost never idle** — they run AO stands, dances, or sit
+> loops, so most joints genuinely change every frame and the 15 Hz idle-wake is
+> moot (the animation wakes them anyway). The per-joint `set_if_neq` skip below
+> then saves only ~2–4× (the joints an animation does *not* move: face during a
+> body dance, fingers during a walk, legs during a sit) — still worth doing
+> (cheap, no divergence), but **not** most of the win. The real target is the
+> **animated crowd / dance club**, where per-joint-skip AND distance-LOD both
+> fail; the structural answer is [[viewer-perf-gpu-avatar-crowd]] and the
+> near-term stopgaps are [[viewer-perf-animation-lod-pose-cache]]. Because Bevy
+> 0.19's `extract_skins` is already incremental (keyed on `Changed<Global
+> Transform>` into a persistent double-buffered joint buffer), this item's job
+> is simply to **stop over-dirtying** — it does not add GPU work.
 
 ## Why this is the top lever
 

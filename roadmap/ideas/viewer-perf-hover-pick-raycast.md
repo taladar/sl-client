@@ -4,10 +4,7 @@ title: Hover-tooltip world pick casts MeshRayCast over all meshes each dwelt fra
 topic: viewer
 status: ideas
 origin: Tracy full-session aditi capture (2026-08-12)
-refs:
-  - viewer-perf-steady-state-46fps-ceiling
-  - viewer-hover-tooltips
-  - viewer-profiling
+refs: [viewer-perf-steady-state-46fps-ceiling, viewer-hover-tooltips, viewer-profiling]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
