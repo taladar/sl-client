@@ -2,7 +2,7 @@
 id: viewer-graphics-presets
 title: Graphics presets — save / load / pulldown
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-preferences-graphics-tab]
 refs: [viewer-quick-preferences]
