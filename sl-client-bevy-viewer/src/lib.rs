@@ -1409,6 +1409,10 @@ fn run_session(
     // the panel build_general_tab plugs into the shell's registry.
     .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
     .add_plugins(crate::preferences_graphics::PreferencesGraphicsPlugin)
+    // The audio tab's live output-device re-enumeration
+    // (viewer-preferences-audio-tab); the tab content itself plugs into the
+    // shell's registry.
+    .add_plugins(crate::preferences_audio::PreferencesAudioPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

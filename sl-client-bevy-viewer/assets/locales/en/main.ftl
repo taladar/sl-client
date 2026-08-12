@@ -3246,7 +3246,7 @@ preferences-section-streaming = Streaming
 preferences-row-music-autoplay = Play the parcel's music stream automatically
 preferences-row-media-autoplay = Auto-play media on objects
 preferences-section-audio-device = Output device
-preferences-row-output-device = Output device (list refreshes on restart)
+preferences-row-output-device = Output device
 preferences-audio-device-default = System default
 # The alerts tab (viewer-preferences-alerts-tab): headline toggles, then the
 # per-notification popup list.
