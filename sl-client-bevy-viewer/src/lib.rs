@@ -89,6 +89,7 @@ pub mod gallery;
 mod geometry_cache;
 mod gizmos;
 mod glow;
+mod gpu_avatar_spike;
 mod ground;
 mod group_notice;
 mod group_profile;
@@ -1470,6 +1471,14 @@ fn run_session(
     // write the glow mask into their alpha (see `glow.rs`); the Bevy `Bloom` above
     // stays active meanwhile.
     .add_plugins(SlGlowPlugin)
+    // The GPU-avatar keystone spike (context/gpu-avatars.md §2.4 / §9.1 risk 1):
+    // flag-gated by SL_VIEWER_GPU_AVATAR_SPIKE (`identity` | `marker`), read once
+    // here. Unset (the default), this is a no-op plugin and the viewer is
+    // byte-for-byte the normal path. Set, a compute pass overwrites one skinned
+    // mesh's palette range inside Bevy's SkinUniforms buffer every frame — the
+    // de-risking experiment for writing GPU-posed palettes into Bevy's own skin
+    // path. Not a feature; delete or graft into Phase 1.
+    .add_plugins(crate::gpu_avatar_spike::GpuAvatarSpikePlugin::from_env())
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34

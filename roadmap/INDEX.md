@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 60 |
-| ready | 248 |
+| ready | 247 |
 | blocked | 83 |
 | in-progress | 16 |
 | bugs | 22 |
-| done | 775 |
+| done | 776 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1237** |
@@ -151,7 +151,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (248)
+## ready (247)
 
 ### protocol
 
@@ -482,8 +482,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
-- [`viewer-perf-gpu-avatar-keystone-skinuniforms-spike`](ready/viewer-perf-gpu-avatar-keystone-skinuniforms-spike.md)
-  — GPU avatars keystone spike — validate the SkinUniforms write-in
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
@@ -874,7 +872,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`](blocked/viewer-perf-gpu-avatar-phase1-gpu-fk-palettes.md)
   — GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract) (blocked
   by `viewer-perf-gpu-avatar-phase0-mesh-dedup`,
-  `viewer-perf-gpu-avatar-keystone-skinuniforms-spike`)
+  `viewer-perf-gpu-avatar-keystone-skinuniforms-spike` (done))
 - [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](blocked/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
   — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
   `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`)
@@ -1092,7 +1090,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (775)
+## done (776)
 
 ### protocol
 
@@ -1857,6 +1855,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
+- [`viewer-perf-gpu-avatar-keystone-skinuniforms-spike`](done/viewer-perf-gpu-avatar-keystone-skinuniforms-spike.md)
+  — GPU avatars keystone spike — validate the SkinUniforms write-in
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)

@@ -31,3 +31,20 @@ level and the PostUpdate joint-propagation cost gone; attachments / name tags /
 camera all still track. This is the phase that turns the ~7 ms serial
 `extract_skins` ([[viewer-perf-avatar-pose-extract-skins]]) into byte-sized
 delta uploads.
+
+## Constraints from the keystone spike (confirmed 2026-08-12)
+
+The `SkinUniforms.current_buffer` write-in is **proven** on a real ~106-joint
+mesh-body avatar (bit-exact, 89/89 `write LANDED`, no validation error) — see
+[[viewer-perf-gpu-avatar-keystone-skinuniforms-spike]]. Reuse its binding /
+scheduling / readback code (the committed `gpu_avatar_spike` diagnostic,
+`SL_VIEWER_GPU_AVATAR_SPIKE`) as the Phase 1 starting point, and honor:
+
+- **`current_buffer` has no `COPY_SRC`** (`STORAGE | COPY_DST`) — the
+  `SL_VIEWER_GPU_AVATARS_VALIDATE` palette readback must be a **compute copy**
+  through the storage binding, not `copy_buffer_to_buffer`.
+- **`current_skin_index` staleness** — Bevy bakes the skin offset into the mesh
+  instance uniform only when the instance re-extracts; a fully static skinned
+  mesh can sit at `u32::MAX` and render nothing. Real avatars re-extract every
+  frame (moving), so Phase 1 is safe, but the Phase 4 frozen-skin endgame must
+  guard against it (keep instances re-extracting, or force the index).
