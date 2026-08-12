@@ -3246,6 +3246,8 @@ quick-prefs-time-midnight = Midnight
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles
+quick-prefs-lod-factor = Mesh detail
+quick-prefs-quality = Quality preset
 quick-prefs-master-volume = Master volume
 quick-prefs-probe-dynamic = Avatars in reflections
 

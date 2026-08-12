@@ -266,8 +266,9 @@ const QUALITY_TIERS: [QualityTier; 7] = [
 ];
 
 /// The quality-tier combo's option keys, in tier order (must stay in step
-/// with [`QUALITY_TIERS`] — a unit test pins the lengths equal).
-const QUALITY_OPTION_KEYS: [&str; 7] = [
+/// with [`QUALITY_TIERS`] — a unit test pins the lengths equal). Shared with
+/// the quick-preferences panel's quality row.
+pub(crate) const QUALITY_OPTION_KEYS: [&str; 7] = [
     "preferences-quality-low",
     "preferences-quality-medium-low",
     "preferences-quality-medium",
@@ -276,6 +277,15 @@ const QUALITY_OPTION_KEYS: [&str; 7] = [
     "preferences-quality-high-ultra",
     "preferences-quality-ultra",
 ];
+
+/// The [`SettingValue`]s a quality-tier combo's options write, in
+/// [`QUALITY_OPTION_KEYS`] order — the tier indices as `U32`s. Shared by
+/// this tab's row and the quick-preferences panel's.
+pub(crate) fn quality_option_values() -> Vec<SettingValue> {
+    (0..u32::try_from(QUALITY_TIERS.len()).unwrap_or(0))
+        .map(SettingValue::U32)
+        .collect()
+}
 
 /// Register the settings this tab itself consumes (see the module doc for
 /// the ownership split). Called from [`ViewerSettings`]'s `load`.
@@ -331,13 +341,8 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-render-quality");
     let quality_options: Vec<(&str, SettingValue)> = QUALITY_OPTION_KEYS
         .iter()
-        .enumerate()
-        .map(|(index, key)| {
-            (
-                *key,
-                SettingValue::U32(u32::try_from(index).unwrap_or(u32::MAX)),
-            )
-        })
+        .copied()
+        .zip(quality_option_values())
         .collect();
     let (_row, quality_anchor) = spawn_pref_combo_with_anchor(
         commands,

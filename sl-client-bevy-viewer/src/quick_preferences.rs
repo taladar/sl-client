@@ -196,6 +196,18 @@ fn default_entries() -> Vec<QuickPrefEntry> {
             max: 8192.0,
             increment: 256.0,
         },
+        // The object LOD factor (RenderVolumeLODFactor) — the other
+        // reached-for-hourly render knob (viewer-preferences-graphics-tab).
+        QuickPrefEntry {
+            control_name: crate::render_priority::SETTING_LOD_FACTOR.to_owned(),
+            label: QuickPrefLabel::Key("quick-prefs-lod-factor".to_owned()),
+            scope: Scope::Global,
+            kind: QuickPrefKind::Slider,
+            integer: false,
+            min: crate::render_priority::LOD_FACTOR_MIN,
+            max: crate::render_priority::LOD_FACTOR_MAX,
+            increment: 0.125,
+        },
         // Master audio volume — the volume panel's master bus, surfaced here too
         // (viewer-volume-panel); same setting key, so all three views agree.
         QuickPrefEntry {
@@ -597,6 +609,8 @@ fn build_quick_prefs_content(
 
     spawn_divider(&mut commands, content);
 
+    spawn_quality_row(&mut commands, content);
+
     let entries = settings
         .as_deref()
         .map_or_else(default_entries, load_entries);
@@ -693,6 +707,46 @@ fn spawn_env_rows(commands: &mut Commands, parent: Entity) -> (Entity, Entity) {
         2,
     );
     (group, time)
+}
+
+/// Spawn the quality-preset combo row: a combo bound to
+/// [`crate::preferences_graphics::SETTING_RENDER_QUALITY`] whose anchor
+/// carries [`crate::preferences_graphics::QualityTierControl`], so a user
+/// pick here applies the tier exactly like the graphics tab's row (one
+/// applier serves both surfaces). Quick prefs has no snapshot / revert, so
+/// the pick simply applies live.
+fn spawn_quality_row(commands: &mut Commands, parent: Entity) {
+    let row = commands
+        .spawn((
+            row_node(),
+            Name::new("quick-prefs:row:quality"),
+            ChildOf(parent),
+        ))
+        .id();
+    spawn_label(commands, row, "quick-prefs-quality");
+    let labels: Vec<String> = crate::preferences_graphics::QUALITY_OPTION_KEYS
+        .iter()
+        .map(|key| (*key).to_owned())
+        .collect();
+    let anchor = spawn_combo(
+        commands,
+        row,
+        &ComboSpec {
+            element: "quick-prefs:quality",
+            labels: &labels,
+            active: 0,
+            tab_index: 3,
+            font_size: FONT,
+            translate_labels: true,
+        },
+    );
+    commands.entity(anchor).insert((
+        SettingBinding::global(crate::preferences_graphics::SETTING_RENDER_QUALITY),
+        crate::settings_binding::ComboBindingValues(
+            crate::preferences_graphics::quality_option_values(),
+        ),
+        crate::preferences_graphics::QualityTierControl,
+    ));
 }
 
 /// Spawn one labelled environment combo, returning its anchor.
