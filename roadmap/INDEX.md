@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 247 |
+| ready | 246 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 776 |
+| done | 777 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (246)
 
 ### protocol
 
@@ -714,8 +714,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   1:1 — [aditi] variant
 - [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
   — IM typing — [aditi] variant
-- [`test-kick-user`](ready/test-kick-user-observe-kickuser-handling.md) —
-  observe KickUser handling
 - [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
   — Offline message fetch — [aditi] variant
 - [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
@@ -1061,7 +1059,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (776)
+## done (777)
 
 ### protocol
 
@@ -2538,6 +2536,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — background/full-tree fetch beyond the root; record folder/item totals
 - [`test-keepalive-ping`](done/test-keepalive-ping-observe-start-complete-ping-round-trip-over-the-circuit-reco.md)
   — observe start/complete ping round-trip over the circuit; record RTT
+- [`test-kick-user`](done/test-kick-user-observe-kickuser-handling.md) — observe
+  KickUser handling
 - [`test-library-tree-fetch`](done/test-library-tree-fetch-fetch-the-read-only-library-tree.md)
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)

@@ -154,6 +154,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::money_balance::MoneyBalanceCase),
         Box::new(crate::cases::money_transfer::MoneyTransfer),
         Box::new(crate::cases::server_error::ServerErrorCase),
+        Box::new(crate::cases::kick_user::KickUser),
     ]
 }
 
