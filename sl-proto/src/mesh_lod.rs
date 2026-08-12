@@ -18,8 +18,9 @@ pub const MESH_LOD_COUNT: usize = 4;
 
 /// The reference viewer's default `RenderVolumeLODFactor`
 /// (`LLVOVolume::sLODFactor`): the object-geometry detail multiplier a larger
-/// value of which keeps finer geometry to a greater distance. The viewer exposes
-/// no LOD-factor setting, so it runs at this default.
+/// value of which keeps finer geometry to a greater distance. The viewer
+/// exposes it as the persisted `RenderVolumeLODFactor` setting (the graphics
+/// preferences "Mesh detail" slider), defaulting to this stock value.
 pub const DEFAULT_LOD_FACTOR: f32 = 1.0;
 
 /// The finest-detail angular-size threshold (`LLVolumeLODGroup::BASE_THRESHOLD`).
