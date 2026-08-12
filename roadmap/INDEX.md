@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 55 |
+| ideas | 56 |
 | ready | 248 |
 | blocked | 78 |
 | in-progress | 15 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 775 |
 | deferred | 22 |
 | wont-do | 10 |
-| **total** | **1225** |
+| **total** | **1226** |
 
-## ideas (55)
+## ideas (56)
 
 ### viewer
 
@@ -72,6 +72,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
+- [`viewer-perf-hover-pick-raycast`](ideas/viewer-perf-hover-pick-raycast.md) —
+  Hover-tooltip world pick casts MeshRayCast over all meshes each dwelt frame
 - [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
   App-level login state to gate world/streaming systems pre-login
 - [`viewer-perf-main-world-material-specialization-check`](ideas/viewer-perf-main-world-material-specialization-check.md)

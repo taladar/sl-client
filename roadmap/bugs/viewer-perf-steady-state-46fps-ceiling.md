@@ -122,9 +122,80 @@ window (t ≈ 156–195 s, 231 s, 263 s) and have three causes:
 - Occasional: `apply_bom_face_materials` 59 ms (avatar bake), `text_system`
   63 ms, `update_parcel_borders` 46 ms (parcel crossing).
 
+## Re-capture 2026-08-12 — both 2026-08-10 levers verified landed
+
+A fresh full-session aditi `tracy-capture` (release, `profile-tracy`, 2180
+frames / 2:51, 15.0 M zones, clean disconnect; 56 occluded ~1 s present
+frames = 2.6 %, excluded) re-measures the anatomy after the ground-probe and
+shadow-visibility work landed. Frame is unchanged at the top line — median
+**49.3 ms (~20 fps)**, currently **main-thread bound** (`Main` thread 1 mean
+41.4 ms visible; `RenderApp` thread 2 ~24 ms visible = Extract 7.1 +
+RenderGraph 16.5, present ~0.1 ms). The render thread is only *relatively*
+idle: at ~24 ms it is itself ~44 % over the 16.7 ms a 60 fps frame allows, so
+it is **not free headroom** — it is the **next ceiling (~42 fps)** that the
+frame hits the moment the main thread is cut below 24 ms. Reaching 60 fps
+needs *both* threads under 16.7 ms, so the render side (`camera_driver` /
+3D pass, `extract_skins`, the shadow specialize/queue below) is a real
+second front, not a spectator.
+
+But the two biggest 2026-08-10 single costs are **measured gone**:
+
+- **Ground probe:** `probe_avatar_ground` **6.14 ms → 0.074 ms**/frame (max
+  169 ms → 2.5 ms) — the collision-plane rewrite
+  ([[viewer-avatar-ground-from-collision-plane]], HEAD commit; supersedes
+  [[viewer-perf-avatar-ground-probe]]) removed the full-scene raycast. 83×.
+- **Shadow-caster visibility:** bevy's `check_dir_light_mesh_visibility`
+  (~5–6 ms serial) is replaced by our `shadow_visibility` module —
+  `mark_shadow_caster` 0.79 + `dispatch_shadow_casters` 0.37 +
+  `apply_shadow_cull` 0.02 + `build_directional_light_cascades` 0.01 ≈
+  **1.2 ms** total ([[viewer-perf-pbr-shadow-cluster-rez]]).
+
+`PostUpdate` dropped **22.3 → 16.5 ms** accordingly, and is now confirmed
+**death-by-many** (no single dominant serial cost): `calculate_bounds`
+2.18, `mark_3d_meshes_as_changed_if_their_assets_changed` 2.14, the 15
+`check_entities_needing_specialization<M>` ≈2 ms (parallel),
+`check_visibility_cpu_culling` 1.56, `collect_meshes_for_gpu_building` 1.38,
+`shadow_visibility` ~1.2, transform/visibility propagation ~0.7, rest ≤1 ms.
+
+`Update` stayed ~17.4 ms only because, with the ground probe gone, the new
+top system is **`update_hover_tooltip` at 5.9 ms** (a `MeshRayCast` over all
+meshes, fired each dwelt frame — pointer was active this run; see
+[[viewer-perf-hover-pick-raycast]]). Render thread (~24 ms — non-gating
+today, but the ~42 fps second ceiling, ~44 % over the 16.7 ms 60 fps
+budget): `camera_driver` 12.4 (inclusive of the 3D pass), `extract_skins`
+5.4, `submit_pending_command_buffers` 3.7, `queue_shadows` 3.5,
+`specialize_shadows` 3.0.
+
+**Takeaway:** the two named levers delivered; the ~20 fps median is now a
+genuinely broad main-thread chain (`Update` hover-pick + a `PostUpdate`
+death-by-many) with no single 5 ms+ serial target left except the hover-pick
+raycast under active cursor use.
+
+### Re-capture outliers (2026-08-12)
+
+Same classes as 2026-08-10, all in the rez/camera-move window (visible
+outliers to 722 ms; ratios are max/mean over the session):
+
+- **Prim/mesh landing bursts** — `update_objects` **261 ms**,
+  `allocate_and_free_meshes` 68 ms, `collect_meshes_for_gpu_building` 17 ms
+  in one frame as a batch of prims rezzes and GPU mesh buffers rebuild.
+- **Terrain rebuild** — `update_terrain` **254 ms** (p50 0; only on a patch
+  edit / region change).
+- **Texture landing** — `prepare_assets<GpuImage>` 92 ms, 87 ms;
+  `patch_parked_decoded_textures` 59 ms; `apply_prim_textures` 36 ms as
+  decoded textures upload.
+- **Avatar landing** — `apply_avatar_bake_textures` 111 ms;
+  `apply_rigged_attachments` 110 ms.
+- **Pipeline specialization stall** — `prepare_view_upscaling_pipelines`
+  101 ms (one-time shader/pipeline compile).
+- **UI text** — `apply_text_edits` 61 ms, `text_system` 61 ms,
+  `measure_text_system` 49 ms (parley layout spikes on a text change).
+
 ## Investigation plan
 
 - Establish when it regressed: rerun the same measurement (status-bar
+  fps + a tracy capture, window visible) on earlier `performance`-branch
+  commits — candidates since the last known-60 observation include the
   fps + a tracy capture, window visible) on earlier `performance`-branch
   commits — candidates since the last known-60 observation include the
   terse-update fast path, the bevy_flair patch pin, the session network

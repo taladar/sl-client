@@ -22,6 +22,11 @@ Context: [context/viewer.md](../context/viewer.md).
 > `SL_VIEWER_GROUND_PROBE_SPATIAL` path + per-patch trimesh collider) was
 > removed with that change. Kept for the diagnosis below (cost is
 > scene-density-bound) and the reverted-gating lessons.
+>
+> **Verified by Tracy (2026-08-12):** `probe_avatar_ground` fell from
+> **6.14 ms → 0.074 ms**/frame (max 169 ms → 2.5 ms) on the aditi re-capture
+> — an 83× cut, the largest single `Update` win to date. See
+> [[viewer-perf-steady-state-46fps-ceiling]].
 
 `probe_avatar_ground` (`ground.rs:149-219`) casts, **every frame, for
 every rigged avatar**, three vertical `MeshRayCast` rays (root + both

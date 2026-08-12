@@ -24,6 +24,16 @@ These are bevy-internal but driven by *our* scene: how many lights cast shadows
 and the clustered-forward configuration. As prims + local lights stream in
 during rez, shadow specialization and cluster preparation scale up.
 
+> **Steady-state visibility cost landed (verified 2026-08-12).** Bevy's
+> `check_dir_light_mesh_visibility` (~5–6 ms serial in PostUpdate on
+> 2026-08-10) is replaced by our `shadow_visibility` module; a fresh aditi
+> capture measures the family at ~**1.2 ms** total (`mark_shadow_caster`
+> 0.79 + `dispatch_shadow_casters` 0.37 + `apply_shadow_cull` 0.02 +
+> `build_directional_light_cascades` 0.01). The remaining work here is the
+> **render-thread** rez-spike side (`specialize_shadows` / `queue_shadows`
+> below), which is still ~3 ms mean each and off the average-frame critical
+> path — see [[viewer-perf-steady-state-46fps-ceiling]] re-capture.
+
 (The reflection-probe / environment-map bind-group cost seen in the same capture
 — `prepare_generated_environment_map_bind_groups` 0.73 ms/frame and our own
 `probes::copy_probe_faces` 0.40 ms/frame — is **out of scope here**; it is
