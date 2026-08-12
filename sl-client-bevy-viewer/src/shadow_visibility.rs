@@ -21,15 +21,20 @@
 //! * **mark** `ViewVisibility` visible for that result's casters (so off-camera
 //!   shadow casters keep rendering — this must run every frame because Bevy
 //!   resets `ViewVisibility` each frame);
-//! * **dispatch** the next cull: snapshot the casters + cascade frusta out of the
-//!   ECS and spawn an [`AsyncComputeTaskPool`] task that does the frustum tests.
+//! * **dispatch** the next cull: fold this frame's caster changes into a
+//!   **persistent snapshot** (only the casters that changed / spawned / despawned
+//!   are re-extracted — O(changed), not O(all)), gather the cascade frusta, and
+//!   spawn an [`AsyncComputeTaskPool`] task that frustum-tests the snapshot.
 //!
 //! The heavy `intersects_obb` work runs on an async-compute thread (not the
 //! render/compute pool render uses) and is picked up next frame — a one-frame
 //! pipeline in the steady state, more frames stale only if a pass overruns
-//! (then the previous result is reused). The per-frame critical-path cost drops
-//! to the snapshot + the `ViewVisibility` marking; the frustum tests leave the
-//! frame timeline entirely.
+//! (then the previous result is reused). The snapshot is shared with the task via
+//! [`Arc`] (a refcount bump, no copy), and updated in place next frame because
+//! `apply` drops the finished task's `Arc` before `dispatch` mutates it. So the
+//! per-frame critical-path cost is just the O(changed) snapshot update + the
+//! `ViewVisibility` marking; the frustum tests leave the frame timeline entirely,
+//! and the extraction cost no longer scales with the (static) caster count.
 //!
 //! ## Why a viewer-side replacement rather than a `bevy_light` fork
 //!
@@ -47,6 +52,7 @@
 //! full cull runs per pass, which is cheap enough off the critical path.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bevy::camera::primitives::{Aabb, CascadesFrusta, Frustum};
@@ -118,7 +124,9 @@ const fn never() -> bool {
 }
 
 /// One caster's immutable inputs, snapshotted out of the ECS for the off-thread
-/// cull. Only inherited-visible casters are snapshotted.
+/// cull. Only inherited-visible casters are snapshotted. `Clone` for the rare
+/// copy-on-write when a cull pass overruns and still holds the shared snapshot.
+#[derive(Clone)]
 struct CasterInput {
     /// The caster mesh entity.
     entity: Entity,
@@ -145,8 +153,9 @@ struct ViewInput {
 
 /// The complete input handed to one off-thread cull pass.
 struct CullJob {
-    /// Every inherited-visible shadow caster to test.
-    casters: Vec<CasterInput>,
+    /// Every inherited-visible shadow caster to test — the pipeline's persistent
+    /// snapshot, shared (not copied) with the task via [`Arc`].
+    casters: Arc<Vec<CasterInput>>,
     /// Every shadow view to test them against.
     views: Vec<ViewInput>,
 }
@@ -176,7 +185,7 @@ fn run_shadow_cull(job: CullJob) -> CullOutput {
     for view in &job.views {
         let mut cascades: Vec<VisibleMeshEntities> =
             vec![VisibleMeshEntities::default(); view.frusta.len()];
-        for caster in &job.casters {
+        for caster in job.casters.iter() {
             if !view.view_mask.intersects(&caster.layers) {
                 continue;
             }
@@ -255,6 +264,17 @@ struct ShadowCullPipeline {
     /// Whether to emit the once-a-second `shadow_cull` line
     /// (`SL_VIEWER_LOG_SHADOW_CULL`, off by default).
     log_diag: bool,
+    /// The persistent caster snapshot, maintained **incrementally**: each frame
+    /// only the entries for casters that changed / spawned / despawned are
+    /// updated, so the per-frame extraction cost is O(changed), not O(all).
+    /// Shared with the in-flight cull pass via [`Arc`] (a refcount bump, no copy);
+    /// [`Arc::make_mut`] mutates it in place because [`apply_shadow_cull`] drops
+    /// the finished task — releasing its `Arc` — before [`dispatch_shadow_cull`]
+    /// updates it. Only a rare pass *overrun* forces a copy-on-write.
+    snapshot: Arc<Vec<CasterInput>>,
+    /// Position of each caster in [`Self::snapshot`], for O(1) incremental
+    /// update / swap-remove.
+    index: EntityHashMap<usize>,
     /// Rolling once-a-second diagnostics.
     diag: ShadowCullDiag,
 }
@@ -357,16 +377,38 @@ fn mark_shadow_caster_visibility(
     }
 }
 
-/// Snapshot the casters + cascade frusta out of the ECS and spawn the next
-/// off-thread cull pass, unless one is already in flight. Also flushes the
-/// once-a-second diagnostics.
+/// Remove `entity` from the persistent snapshot (and its index) if present, via
+/// an O(1) swap-remove — repointing the index of whatever caster the swap moved.
+fn remove_caster(index: &mut EntityHashMap<usize>, casters: &mut Vec<CasterInput>, entity: Entity) {
+    if let Some(position) = index.remove(&entity) {
+        casters.swap_remove(position);
+        // Whatever was last is now at `position` (unless `position` was itself
+        // the last) — repoint its index.
+        if let Some(moved) = casters.get(position) {
+            index.insert(moved.entity, position);
+        }
+    }
+}
+
+/// Keep the persistent caster snapshot current — **incrementally**, updating only
+/// the casters that changed / spawned / despawned this frame — gather the cascade
+/// frusta, and spawn the next off-thread cull pass over the shared snapshot.
+///
+/// This is the critical-path work, and the incremental update keeps it O(changed)
+/// rather than O(all casters): most casters (buildings, trees) never change, so
+/// their snapshot entries are left untouched, and only the handful that moved
+/// (an avatar, a scripted mover) are re-extracted. The snapshot is shared with
+/// the task via [`Arc`] — a refcount bump, no copy — and [`Arc::make_mut`] below
+/// mutates it in place because [`apply_shadow_cull`] (chained before this) has
+/// already dropped the finished task's `Arc`; only a rare pass overrun forces a
+/// copy-on-write. Also flushes the once-a-second diagnostics.
 #[expect(
     clippy::type_complexity,
-    reason = "the caster query mirrors Bevy's own tuple + filter set (minus the range test)"
+    reason = "the changed-caster query mirrors Bevy's own tuple + filter set (minus the range test)"
 )]
 fn dispatch_shadow_cull(
     mut pipeline: ResMut<ShadowCullPipeline>,
-    casters: Query<
+    changed_casters: Query<
         (
             Entity,
             &InheritedVisibility,
@@ -376,12 +418,20 @@ fn dispatch_shadow_cull(
             Has<NoFrustumCulling>,
         ),
         (
+            Or<(
+                Changed<GlobalTransform>,
+                Changed<Aabb>,
+                Changed<RenderLayers>,
+                Added<Mesh3d>,
+                Changed<InheritedVisibility>,
+            )>,
             Without<NotShadowCaster>,
             Without<DirectionalLight>,
             Without<NoCpuCulling>,
             With<Mesh3d>,
         ),
     >,
+    mut removed_casters: RemovedComponents<Mesh3d>,
     lights: Query<
         (
             Entity,
@@ -395,10 +445,49 @@ fn dispatch_shadow_cull(
 ) {
     flush_shadow_cull_diag(&mut pipeline);
 
-    if pipeline.task.is_some() {
-        return;
+    // 1. Fold this frame's caster changes into the persistent snapshot. Split the
+    //    borrow so the snapshot and its index can be updated together; `make_mut`
+    //    is in-place unless a prior pass is still holding the shared snapshot.
+    {
+        let ShadowCullPipeline {
+            snapshot, index, ..
+        } = &mut *pipeline;
+        let casters = Arc::make_mut(snapshot);
+        for entity in removed_casters.read() {
+            remove_caster(index, casters, entity);
+        }
+        for (entity, inherited, maybe_layers, maybe_aabb, maybe_transform, no_frustum_culling) in
+            &changed_casters
+        {
+            if !inherited.get() {
+                // A caster that went hidden leaves the cull set.
+                remove_caster(index, casters, entity);
+                continue;
+            }
+            let input = CasterInput {
+                entity,
+                bounds: match (maybe_aabb, maybe_transform) {
+                    (Some(aabb), Some(transform)) => Some((*aabb, transform.affine())),
+                    _ => None,
+                },
+                layers: maybe_layers.cloned().unwrap_or_default(),
+                no_frustum_culling,
+            };
+            match index.get(&entity).copied() {
+                Some(position) => {
+                    if let Some(slot) = casters.get_mut(position) {
+                        *slot = input;
+                    }
+                }
+                None => {
+                    index.insert(entity, casters.len());
+                    casters.push(input);
+                }
+            }
+        }
     }
 
+    // 2. Gather the shadow views' frusta (few — cheap to rebuild each frame).
     let mut views: Vec<ViewInput> = Vec::new();
     for (light, directional_light, frusta, maybe_mask, light_visibility) in &lights {
         if !directional_light.shadow_maps_enabled || !light_visibility.get() {
@@ -420,27 +509,12 @@ fn dispatch_shadow_cull(
         return;
     }
 
-    let mut caster_inputs: Vec<CasterInput> = Vec::new();
-    for (entity, inherited, maybe_layers, maybe_aabb, maybe_transform, no_frustum_culling) in
-        &casters
-    {
-        if !inherited.get() {
-            continue;
-        }
-        let bounds = match (maybe_aabb, maybe_transform) {
-            (Some(aabb), Some(transform)) => Some((*aabb, transform.affine())),
-            _ => None,
-        };
-        caster_inputs.push(CasterInput {
-            entity,
-            bounds,
-            layers: maybe_layers.cloned().unwrap_or_default(),
-            no_frustum_culling,
-        });
+    // 3. Spawn the pass over the shared snapshot, unless one is still running.
+    if pipeline.task.is_some() {
+        return;
     }
-
     let job = CullJob {
-        casters: caster_inputs,
+        casters: Arc::clone(&pipeline.snapshot),
         views,
     };
     pipeline.task = Some(AsyncComputeTaskPool::get().spawn(async move { run_shadow_cull(job) }));
@@ -607,7 +681,7 @@ mod tests {
                 frusta: vec![test_frustum()],
                 view_mask: RenderLayers::default(),
             }],
-            casters: vec![
+            casters: Arc::new(vec![
                 CasterInput {
                     entity: inside,
                     bounds: Some((
@@ -629,7 +703,7 @@ mod tests {
                     layers: RenderLayers::default(),
                     no_frustum_culling: false,
                 },
-            ],
+            ]),
         };
         let output = run_shadow_cull(job);
         assert_eq!(

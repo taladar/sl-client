@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 57 |
+| ideas | 56 |
 | ready | 247 |
 | blocked | 78 |
 | in-progress | 13 |
 | bugs | 22 |
-| done | 772 |
+| done | 773 |
 | deferred | 22 |
 | wont-do | 9 |
 | **total** | **1220** |
 
-## ideas (57)
+## ideas (56)
 
 ### viewer
 
@@ -83,8 +83,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
   — Skip capture for occluded reflection probes (blocked by
   `viewer-perf-probe-scheduling`)
-- [`viewer-perf-shadow-cull-change-driven`](ideas/viewer-perf-shadow-cull-change-driven.md)
-  — Change-driven sun shadow-caster cull (idle static scene = zero re-test)
 - [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
   — Solve each avatar skeleton once per frame unless an adjuster needs two
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
@@ -1061,7 +1059,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (772)
+## done (773)
 
 ### protocol
 
@@ -1855,6 +1853,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Run the Bevy session on a dedicated network thread
 - [`viewer-perf-settings-save-offthread`](done/viewer-perf-settings-save-offthread.md)
   — Settings persistence writes on the IO task pool
+- [`viewer-perf-shadow-cull-change-driven`](done/viewer-perf-shadow-cull-change-driven.md)
+  — Incremental shadow-caster extraction (O(changed), not O(all) per frame)
 - [`viewer-perf-slfaceext-material-reprep`](done/viewer-perf-slfaceext-material-reprep.md)
   — Investigate per-frame re-prep of SlFaceExt face materials during rez
 - [`viewer-perf-terrain-update-per-frame`](done/viewer-perf-terrain-update-per-frame.md)

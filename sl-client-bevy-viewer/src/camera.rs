@@ -127,6 +127,16 @@ const FLYCAM_FAST: f32 = 4.0;
 /// `1 - 0.5^(dt / HALF_LIFE)`.
 const SMOOTH_HALF_LIFE: f32 = 0.1;
 
+/// Below this squared positional delta (`(0.5 mm)^2`) the smoothed camera pose
+/// is treated as settled and [`apply_pose`] leaves the transform untouched, so a
+/// parked camera stops re-writing (and thus `Changed`-marking) its transform
+/// every frame — see the write guard in [`apply_pose`].
+const CAMERA_SETTLE_POS_EPSILON_SQ: f32 = 0.000_000_25;
+
+/// The rotational companion to [`CAMERA_SETTLE_POS_EPSILON_SQ`] (radians,
+/// ~0.017°): below this the settled camera's transform is left untouched.
+const CAMERA_SETTLE_ROT_EPSILON: f32 = 0.000_3;
+
 /// The mouselook eye's smoothing half-life (seconds) — short, so the first-person
 /// aim stays responsive, but enough to filter out the animated head joint's
 /// per-frame vibration (the idle-animation micro-motion that otherwise shakes the
@@ -1324,7 +1334,21 @@ fn apply_pose(
     } else {
         vadd(final_eye, transform.forward().as_vec3())
     };
-    *transform = Transform::from_translation(final_eye).looking_at(target, Vec3::Y);
+    let new_transform = Transform::from_translation(final_eye).looking_at(target, Vec3::Y);
+    // Only write when the pose actually moved beyond a sub-perceptible epsilon.
+    // The exponential smoothing above approaches its target asymptotically and
+    // never settles *exactly*, so an unguarded write would mark the camera
+    // `Changed` every single frame even when parked — which defeats every
+    // change-driven consumer that gates on camera movement (e.g. the async
+    // shadow-cull dispatch). A `snap` always writes.
+    let settled = transform
+        .translation
+        .distance_squared(new_transform.translation)
+        <= CAMERA_SETTLE_POS_EPSILON_SQ
+        && transform.rotation.angle_between(new_transform.rotation) <= CAMERA_SETTLE_ROT_EPSILON;
+    if snap || !settled {
+        *transform = new_transform;
+    }
 }
 
 /// Pull the camera `eye` in toward `focus` if a world surface obstructs the line
