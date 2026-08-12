@@ -15,6 +15,10 @@ sl-repl-bevy.log
 # sl-conformance local run state (per-avatar aditi login cooldown stamps) and log
 /.sl-conformance/
 sl-conformance.log
+# sl-conformance run records: committing them is paused during the high-churn
+# implementation phase (every behavioural commit stales them all); revisit once
+# that settles — see roadmap/deferred/test-recommit-conformance-records.md.
+/records/
 tarpaulin-report.html
 tarpaulin-report.json
 /target

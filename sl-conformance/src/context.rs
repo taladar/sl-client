@@ -12,7 +12,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, ExperienceKey,
     GroupKey, InventoryCacheConfig, LoginParams, LoginRejectKind, LoginRequest, MeshKey,
-    RegionHandle, StartLocation,
+    RegionHandle, StartLocation, Uuid,
 };
 use sl_repl::Avatar;
 use time::format_description::well_known::Rfc3339;
@@ -51,6 +51,11 @@ const LOGOUT_GRACE: Duration = Duration::from_secs(15);
 pub struct Session {
     /// The agent's own id, available after login.
     agent_id: Option<AgentKey>,
+    /// The agent's login session id, available after login. Needed by a case
+    /// that hand-builds a raw wire message for
+    /// [`Command::Send`] (most messages carry an
+    /// `AgentData` block of agent id + session id the simulator validates).
+    login_session_id: Option<Uuid>,
     /// The handle of the region the agent is currently in. Seeded from the login
     /// response and kept current as [`Session::wait_for`] observes region
     /// handovers ([`Event::RegionChanged`] from a teleport or border crossing), so
@@ -135,6 +140,14 @@ impl Session {
     #[must_use]
     pub const fn agent_id(&self) -> Option<AgentKey> {
         self.agent_id
+    }
+
+    /// The agent's login session id, if login reported one. Pairs with
+    /// [`Session::agent_id`] to fill the `AgentData` block of a hand-built wire
+    /// message sent via [`Command::Send`].
+    #[must_use]
+    pub const fn session_id(&self) -> Option<Uuid> {
+        self.login_session_id
     }
 
     /// The handle of the region the agent is currently in, if login reported one.
@@ -573,6 +586,7 @@ async fn connect_and_spawn(
     });
 
     let agent_id = client.agent_id();
+    let login_session_id = client.session_id();
     let region_handle = client.region_handle();
     let circuit_id = client.root_circuit_id();
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
@@ -609,6 +623,7 @@ async fn connect_and_spawn(
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
     Ok(Session {
         agent_id,
+        login_session_id,
         region_handle,
         circuit_id,
         events: events_rx,

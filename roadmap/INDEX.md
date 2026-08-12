@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 248 |
+| ready | 247 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 775 |
-| deferred | 22 |
+| done | 776 |
+| deferred | 23 |
 | wont-do | 10 |
-| **total** | **1225** |
+| **total** | **1226** |
 
 ## ideas (55)
 
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (248)
+## ready (247)
 
 ### protocol
 
@@ -722,8 +722,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Presence online/offline — [aditi] variant
 - [`test-reliable-retransmit`](ready/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
   — exercise reliable resend under loss
-- [`test-server-error`](ready/test-server-error-provoke-and-assert-error-featuredisabled.md)
-  — provoke and assert Error / FeatureDisabled
 - [`test-session-mark-read-aditi`](ready/test-session-mark-read-aditi-add-the-aditi-variant.md)
   — Session mark-read — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
@@ -1063,7 +1061,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (775)
+## done (776)
 
 ### protocol
 
@@ -2616,6 +2614,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — create a script, upload source, read the compile
 - [`test-server-appearance-bake`](done/test-server-appearance-bake-trigger-a-modern-server-side-appearance-bake-over-the-update.md)
   — trigger a modern **server-side** appearance bake over the UpdateAvatar
+- [`test-server-error`](done/test-server-error-provoke-and-assert-error-featuredisabled.md)
+  — provoke and assert Error / FeatureDisabled
 - [`test-session-mark-read`](done/test-session-mark-read-unread-mark-read-transition.md)
   — unread → mark-read transition
 - [`test-set-appearance`](done/test-set-appearance-publish-appearance-agentsetappearance-and-query-the-baked-te.md)
@@ -2716,7 +2716,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (22)
+## deferred (23)
 
 ### protocol
 
@@ -2782,6 +2782,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
+- [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
+  — Revisit committing sl-conformance records once implementation churn settles
 
 ## wont-do (10)
 
