@@ -2,7 +2,7 @@
 id: test-group-proposal-vote
 title: start a proposal, cast a ballot
 topic: test
-status: ready
+status: wont-do
 origin: TEST_ROADMAP.md — Phase 6 — Groups `[both]`
 ---
 

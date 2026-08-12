@@ -12,13 +12,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 244 |
+| ready | 243 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
 | done | 779 |
 | deferred | 23 |
-| wont-do | 10 |
+| wont-do | 11 |
 | **total** | **1226** |
 
 ## ideas (55)
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -701,8 +701,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group join/leave — [aditi] variant
 - [`test-group-notice-aditi`](ready/test-group-notice-aditi-add-the-aditi-variant.md)
   — Group notice — [aditi] variant
-- [`test-group-proposal-vote`](ready/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
-  — start a proposal, cast a ballot
 - [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
   — Group session message — [aditi] variant
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -2785,7 +2783,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (10)
+## wont-do (11)
 
 ### viewer
 
@@ -2812,5 +2810,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-group-proposal-vote`](wont-do/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
+  — start a proposal, cast a ballot
 - [`test-parcel-voice-info`](wont-do/test-parcel-voice-info-request-parcel-voice-info.md)
   — request parcel voice info
