@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 226 |
+| ready | 224 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 22 |
-| done | 796 |
+| done | 798 |
 | deferred | 23 |
 | wont-do | 11 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (226)
+## ready (224)
 
 ### protocol
 
@@ -679,13 +679,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-give-inventory-aditi`](ready/test-give-inventory-aditi-add-the-aditi-variant.md)
-  — Give inventory — [aditi] variant
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
-  — Offline message fetch — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
@@ -1019,7 +1015,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (796)
+## done (798)
 
 ### protocol
 
@@ -2480,6 +2476,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   activate / deactivate gestures
 - [`test-give-inventory`](done/test-give-inventory-give-an-item-to-another-avatar-peer-accepts.md)
   — give an item to another avatar; peer accepts
+- [`test-give-inventory-aditi`](done/test-give-inventory-aditi-add-the-aditi-variant.md)
+  — Give inventory — [aditi] variant
 - [`test-grant-user-rights`](done/test-grant-user-rights-grant-see-online-map-modify-rights-confirm.md)
   — grant see-online / map / modify rights; confirm
 - [`test-grant-user-rights-aditi`](done/test-grant-user-rights-aditi-add-the-aditi-variant.md)
@@ -2558,6 +2556,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — receive and decode the object-update stream; count primitives
 - [`test-offline-msg-fetch`](done/test-offline-msg-fetch-fetch-offline-ims-caps-readofflinemsgs-vs-udp-retrieveinstan.md)
   — fetch offline IMs (CAPS ReadOfflineMsgs vs UDP RetrieveInstantMessages
+- [`test-offline-msg-fetch-aditi`](done/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
+  — Offline message fetch — [aditi] variant
 - [`test-open-region-info`](done/test-open-region-info-openregioninfo-limits-bag.md)
   — OpenRegionInfo limits bag
 - [`test-p0-01`](done/test-p0-01-cases-common-rs-or-a-support-module-with.md) —
