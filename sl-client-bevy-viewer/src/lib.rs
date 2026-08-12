@@ -158,6 +158,7 @@ mod pie_menu;
 mod preferences;
 mod preferences_alerts;
 mod preferences_general;
+mod preferences_graphics;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -1406,6 +1407,7 @@ fn run_session(
     // UI-scale write and the maturity-preference server conversation behind
     // the panel build_general_tab plugs into the shell's registry.
     .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
+    .add_plugins(crate::preferences_graphics::PreferencesGraphicsPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.

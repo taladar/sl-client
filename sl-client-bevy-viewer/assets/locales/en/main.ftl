@@ -3091,6 +3091,7 @@ preferences-ok = OK
 preferences-cancel = Cancel
 # The tab strip.
 preferences-tab-general = General
+preferences-tab-graphics = Graphics
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
@@ -3159,6 +3160,62 @@ preferences-row-worldmap-infohubs = Show infohubs on the world map
 preferences-row-worldmap-land-sale = Show land for sale on the world map
 preferences-row-worldmap-events = Show events on the world map
 preferences-row-worldmap-region-names = Show region names on the world map
+# The graphics tab (viewer-preferences-graphics-tab): quality tier, draw
+# distance, LOD factor, shadows, reflections / mirrors, glow, tone mapping
+# and the vsync / frame-rate cap.
+preferences-section-render-quality = Quality & speed
+preferences-row-render-quality = Quality preset
+preferences-quality-low = Low
+preferences-quality-medium-low = Medium-Low
+preferences-quality-medium = Medium
+preferences-quality-medium-high = Medium-High
+preferences-quality-high = High
+preferences-quality-high-ultra = High-Ultra
+preferences-quality-ultra = Ultra
+preferences-row-draw-distance = Draw distance (m)
+preferences-row-lod-factor = Mesh detail (LOD factor)
+preferences-row-max-particles = Maximum particle count
+preferences-section-shadows = Shadows
+preferences-row-shadow-detail = Shadows
+preferences-shadows-none = None
+preferences-shadows-sun-moon = Sun and moon
+preferences-row-shadow-map-size = Shadow map resolution
+preferences-shadow-map-1024 = 1024 (fastest)
+preferences-shadow-map-2048 = 2048
+preferences-shadow-map-4096 = 4096 (default)
+preferences-shadow-map-8192 = 8192 (sharpest)
+preferences-row-shadow-cascades = Shadow cascades
+preferences-section-reflections = Reflections & mirrors
+preferences-row-probe-dynamic = Show avatars in reflections
+preferences-row-mirrors = Realtime mirrors
+preferences-row-mirror-resolution = Mirror resolution (takes effect after restart)
+preferences-mirror-res-256 = 256
+preferences-mirror-res-512 = 512 (default)
+preferences-mirror-res-1024 = 1024
+preferences-mirror-res-2048 = 2048
+preferences-row-mirror-update-rate = Mirror update rate
+preferences-mirror-rate-1 = Every frame
+preferences-mirror-rate-2 = Every 2nd frame
+preferences-mirror-rate-4 = Every 4th frame
+preferences-mirror-rate-8 = Every 8th frame
+preferences-section-glow = Glow
+preferences-row-glow = Render glow
+preferences-row-glow-strength = Glow strength
+preferences-row-glow-width = Glow width
+preferences-row-glow-iterations = Glow quality (blur iterations)
+preferences-section-tonemap = Tone mapping & exposure
+preferences-row-tonemap-type = Tone curve
+preferences-tonemap-khronos = Khronos PBR Neutral
+preferences-tonemap-aces = ACES
+preferences-tonemap-none = None
+preferences-row-tonemap-mix = Tone curve mix
+preferences-row-exposure = Exposure
+preferences-row-dynamic-exposure = Dynamic exposure (eye adaptation)
+preferences-row-auto-adjust-legacy = Auto-adjust legacy skies
+preferences-section-display = Display & frame rate
+preferences-row-vsync = Vertical sync (VSync)
+preferences-row-limit-framerate = Limit frame rate
+preferences-row-fps-limit = Maximum frames per second
 # The alerts tab (viewer-preferences-alerts-tab): headline toggles, then the
 # per-notification popup list.
 preferences-section-alert-headlines = Notices
