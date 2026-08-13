@@ -34,12 +34,13 @@ mod test {
         RegionLocalObjectId, RegionLocalParcelId, RegionStats, RegionTerrainComposition,
         RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
         SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
-        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
-        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource,
-        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions, ServerError,
+        ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags,
+        SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+        TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey,
+        Throttle, TransactionId, TransferRequestSource, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE};
     use sl_proto::{
@@ -5467,6 +5468,147 @@ mod test {
         Ok(())
     }
 
+    /// The script permission/control flow round-trips: the sim's
+    /// `send_script_question` surfaces on the client, the client's
+    /// `answer_script_permissions` converges both grant mirrors
+    /// ([`ServerEvent::ScriptPermissionAnswer`]), the sim's
+    /// `send_script_control_change` folds the client's taken-controls
+    /// tracker, and `release_script_controls` surfaces
+    /// [`ServerEvent::ForceScriptControlRelease`].
+    #[test]
+    fn script_permission_and_control_flow_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5C41));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5C42));
+        let asked = ScriptPermissions(
+            ScriptPermissions::TAKE_CONTROLS | ScriptPermissions::TRIGGER_ANIMATION,
+        );
+        let question = ScriptPermissionRequest {
+            task_id: task,
+            item_id: item,
+            object_name: "Dance Ball".to_owned(),
+            object_owner: "Test User".to_owned(),
+            experience_id: None,
+            permissions: asked,
+        };
+        sim.send_script_question(&question, now)?;
+        assert_eq!(sim.script_question(task, item), Some(asked));
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let received = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ScriptPermissionRequest(request) => Some((**request).clone()),
+                _ => None,
+            })
+            .ok_or("expected a ScriptPermissionRequest client event")?;
+        assert_eq!(received, question);
+
+        // Grant a subset; both mirrors converge on the answer.
+        let granted = ScriptPermissions(ScriptPermissions::TAKE_CONTROLS);
+        client.answer_script_permissions(task, item, granted, None, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ScriptPermissionAnswer {
+                    task_id,
+                    item_id,
+                    permissions,
+                } if *task_id == task && *item_id == item && *permissions == granted
+            )),
+            "expected ScriptPermissionAnswer, got {server_events:?}"
+        );
+        assert_eq!(sim.script_question(task, item), None);
+        assert_eq!(sim.script_grant(task, item), Some(granted));
+        assert_eq!(client.granted_permissions(task, item), granted);
+
+        // The granted TAKE_CONTROLS now lets a script take controls.
+        sim.send_script_control_change(
+            &[ScriptControl {
+                action: ScriptControlAction::Take,
+                controls: ControlFlags::AT_POS,
+                pass_to_agent: false,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ScriptControlChange(changes)
+                    if changes.iter().any(|change| change.controls == ControlFlags::AT_POS)
+            )),
+            "expected ScriptControlChange, got {events:?}"
+        );
+        assert_eq!(client.script_controls().taken, ControlFlags::AT_POS);
+
+        client.release_script_controls(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::ForceScriptControlRelease)),
+            "expected ForceScriptControlRelease, got {server_events:?}"
+        );
+        assert_eq!(client.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    /// An all-clear `ScriptAnswerYes` is recorded as an explicit deny on both
+    /// mirrors — `Some(empty)` on the sim, `Denied` on the client — distinct
+    /// from a never-asked holder.
+    #[test]
+    fn script_permission_deny_is_recorded() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xDE41));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xDE42));
+        sim.send_script_question(
+            &ScriptPermissionRequest {
+                task_id: task,
+                item_id: item,
+                object_name: "Grabby Cube".to_owned(),
+                object_owner: "Test User".to_owned(),
+                experience_id: None,
+                permissions: ScriptPermissions(ScriptPermissions::DEBIT),
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+
+        client.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ScriptPermissionAnswer {
+                    permissions: ScriptPermissions(0),
+                    ..
+                }
+            )),
+            "expected an explicit-deny ScriptPermissionAnswer, got {server_events:?}"
+        );
+        assert_eq!(sim.script_grant(task, item), Some(ScriptPermissions(0)));
+        assert_eq!(
+            client.script_permission_status(task, item),
+            ScriptPermissionStatus::Denied
+        );
+        Ok(())
+    }
+
     /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
     /// One row per flow-level (multi-message) state machine the client
     /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
@@ -5502,7 +5644,7 @@ mod test {
             ("friendship / presence", FlowMirrorStatus::Pending),
             (
                 "script permission / control mirror",
-                FlowMirrorStatus::Pending,
+                FlowMirrorStatus::Mirrored,
             ),
         ];
         assert_eq!(

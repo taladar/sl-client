@@ -164,10 +164,10 @@ use crate::types::{
     OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
     PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
-    SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus, Transmit,
-    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
@@ -178,6 +178,7 @@ use sl_wire::messages::{
 };
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
+    ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
 };
 use sl_wire::messages::{
     DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
@@ -444,7 +445,7 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
     ("friendship / presence", FlowMirrorStatus::Pending),
     (
         "script permission / control mirror",
-        FlowMirrorStatus::Pending,
+        FlowMirrorStatus::Mirrored,
     ),
 ];
 
@@ -696,6 +697,22 @@ pub enum ServerEvent {
     /// taken (`ForceScriptControlRelease`); the simulator should drop all
     /// script-held controls for this agent.
     ForceScriptControlRelease,
+    /// The client answered a [`SimSession::send_script_question`]
+    /// (`ScriptAnswerYes`), granting `permissions` to the script `item_id` in
+    /// object `task_id` — the inverse of the client's
+    /// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
+    /// An empty set is an explicit deny. The answer is recorded in the grant
+    /// mirror ([`SimSession::script_grant`]) whether or not a question was
+    /// outstanding — the simulator stays authoritative for enforcement; the
+    /// mirror only records what the agent answered.
+    ScriptPermissionAnswer {
+        /// The task (object) id holding the script.
+        task_id: ObjectKey,
+        /// The script item id within the object.
+        item_id: InventoryKey,
+        /// The granted permission subset (empty = explicit deny).
+        permissions: ScriptPermissions,
+    },
     /// The client asked to track an agent's position (`TrackAgent`); the
     /// simulator would stream the tracked agent's coarse location back via
     /// [`SimSession::send_coarse_location_update`].
@@ -1763,6 +1780,15 @@ pub struct SimSession {
     /// The agent's sit state (the server-side mirror of the client's sit
     /// machine).
     sit: SimSitState,
+    /// Outstanding `ScriptQuestion`s awaiting the client's `ScriptAnswerYes`,
+    /// keyed by (task, item) and holding the asked permission set
+    /// ([`SimSession::script_question`]).
+    script_questions: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
+    /// Recorded script-permission answers — the server twin of the client's
+    /// grant registry ([`SimSession::script_grant`]). An empty
+    /// [`ScriptPermissions`] is an explicit deny, distinct from an absent
+    /// (never-answered) holder.
+    script_grants: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1800,6 +1826,8 @@ impl SimSession {
             transfer_serves: BTreeMap::new(),
             agent_presence: AgentPresence::Child,
             sit: SimSitState::NotSitting,
+            script_questions: BTreeMap::new(),
+            script_grants: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -1830,6 +1858,31 @@ impl SimSession {
             SimSitState::Seated { on } => Some(on),
             SimSitState::NotSitting | SimSitState::ResponseSent { .. } => None,
         }
+    }
+
+    /// The permission set a [`SimSession::send_script_question`] asked for the
+    /// script `item_id` in object `task_id`, while its answer is still
+    /// outstanding (`None` once answered or never asked).
+    #[must_use]
+    pub fn script_question(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> Option<ScriptPermissions> {
+        self.script_questions.get(&(task_id, item_id)).copied()
+    }
+
+    /// The recorded answer to a `ScriptQuestion` for the script `item_id` in
+    /// object `task_id`: `None` when never answered, `Some` of an empty set
+    /// for an explicit deny — the server twin of the client's tri-state
+    /// [`Session::script_permission_status`](crate::Session::script_permission_status).
+    #[must_use]
+    pub fn script_grant(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> Option<ScriptPermissions> {
+        self.script_grants.get(&(task_id, item_id)).copied()
     }
 
     /// The agent id once the circuit is open.
@@ -2223,6 +2276,47 @@ impl SimSession {
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ScriptQuestion` asking the agent to grant
+    /// `question.permissions` to the script `question.item_id` in object
+    /// `question.task_id` (`llRequestPermissions`). Surfaces on the client as
+    /// [`Event::ScriptPermissionRequest`](crate::Event::ScriptPermissionRequest);
+    /// the client answers with `ScriptAnswerYes`
+    /// ([`ServerEvent::ScriptPermissionAnswer`]). The asked set is recorded
+    /// as outstanding ([`SimSession::script_question`]) until the answer
+    /// arrives. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_script_question(
+        &mut self,
+        question: &ScriptPermissionRequest,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ScriptQuestion(ScriptQuestion {
+            data: ScriptQuestionDataBlock {
+                task_id: question.task_id.uuid(),
+                item_id: question.item_id.uuid(),
+                object_name: with_nul(&question.object_name),
+                object_owner: with_nul(&question.object_owner),
+                questions: question.permissions.0,
+            },
+            experience: ScriptQuestionExperienceBlock {
+                experience_id: question
+                    .experience_id
+                    .map_or_else(Uuid::nil, |experience| experience.uuid()),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        self.script_questions
+            .insert((question.task_id, question.item_id), question.permissions);
         Ok(())
     }
 
@@ -5194,6 +5288,21 @@ impl SimSession {
             AnyMessage::ForceScriptControlRelease(_release) => {
                 self.events
                     .push_back(ServerEvent::ForceScriptControlRelease);
+            }
+            AnyMessage::ScriptAnswerYes(answer) => {
+                let task_id = ObjectKey::from(answer.data.task_id);
+                let item_id = InventoryKey::from(answer.data.item_id);
+                // The answer settles any outstanding question; an unsolicited
+                // answer is still recorded — the mirror observes the agent's
+                // stated answer, enforcement stays with the simulator.
+                self.script_questions.remove(&(task_id, item_id));
+                let permissions = ScriptPermissions(answer.data.questions);
+                self.script_grants.insert((task_id, item_id), permissions);
+                self.events.push_back(ServerEvent::ScriptPermissionAnswer {
+                    task_id,
+                    item_id,
+                    permissions,
+                });
             }
             AnyMessage::TrackAgent(track) => {
                 self.events.push_back(ServerEvent::TrackAgent {
