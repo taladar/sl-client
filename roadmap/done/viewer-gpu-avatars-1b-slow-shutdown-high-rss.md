@@ -2,7 +2,7 @@
 id: viewer-gpu-avatars-1b-slow-shutdown-high-rss
 title: GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
 topic: viewer
-status: bugs
+status: done
 origin: Phase 1b Aditi tracy capture (2026-08-13)
 refs: [viewer-perf-gpu-avatar-phase1-gpu-fk-palettes]
 ---
@@ -61,7 +61,93 @@ opportunistically." Note: the intra-session RSS *trend* wasn't captured (window
 closed before the monitor sampled mid-run) — a future capture should log RSS
 periodically.
 
-## Status (2026-08-13): OPEN — two live hypotheses, observe across runs
+## Update — Phase 3 aditi runs (2026-08-13): disk/tracy explanations refuted
+
+Two Phase 3 captures on a **free disk**, same binary family (GPU avatars +
+GPU pick), bracket the behaviour and kill the earlier "mostly full disk /
+tracy flush" downgrade:
+
+- **P3 run 1:** 4252 frames, **time span 3:04.6, elapsed 3:05.1** — shutdown
+  flush **~0.5 s** on a **615 MB** trace. Instant.
+- **P3 run 2:** 1410 frames, **time span 52.94 s, elapsed 7:48** — the user
+  hit **Quit** ~53 s in, then the process took most of **~7 minutes** to
+  exit, on a **free disk** with a **smaller 421 MB** trace.
+
+So within one session type, a **larger** trace flushed in 0.5 s while a
+**smaller** one took ~7 min — the delay **cannot** be the tracy serialize,
+and the disk was not full. This is an **app-side shutdown hang** on the
+Quit → process-exit path, and it is **intermittent** (0.5 s vs 7 min with no
+code change between the two beyond the pick crop-cull + a menu-gate flip,
+neither shutdown-related). Cross-run: 1b ~2 min (full disk), P2 ~45 s, P3r1
+~0.5 s, P3r2 ~7 min. Hypothesis 2 (tracy buffering) is effectively **ruled
+out**; hypothesis 1 (app-side teardown not joining/dropping — tokio, a GPU
+buffer unmap, an entity-despawn loop, the GPU-avatar buffer/entity lifecycle)
+is the live one.
+
+**Next reproduction is the cheap discriminator:** if it hangs on Quit again,
+`gdb -p <pid>` → `thread apply all bt` (or `samply`) on the still-running
+process reveals where the wall-clock goes — no recompile needed. The
+"starting flush" RSS shutdown marker (below) is still worth adding so every
+capture self-reports, but the live backtrace is the decisive one and needs
+catching the hang in the act.
+
+## Update — no-tracy control run (2026-08-13): points back at tracy
+
+A **plain release build with tracy compiled out** (Phase 4 increment-1 check,
+`SL_VIEWER_GPU_AVATARS_READBACK=1`, normally driven, quit via the menu),
+instrumented with a 2 s CPU%/RSS sampler across its whole life:
+
+- **RSS plateaued at ~5.15 GB** (648 MB → 5.1 GB, then flat for ~40 samples) —
+  **no climb**, so no app-side leak over the session.
+- **Shutdown ~3 s, clean**: app rendered until 17:37:44, Quit → teardown began
+  17:37:45.5 (readback channel closed), process **EXITED 17:37:48**. No spin.
+
+Against the tracy runs (RSS **10–12 GB**, shutdown 0.5 s … **7 min** spinning),
+this is the clean discriminator the earlier cross-trace-size argument only
+gestured at. Two conclusions:
+
+- The extra **~5–7 GB** in tracy sessions is **tracy's own buffer**, not app
+  memory (no-tracy plateaus at ~5 GB).
+- With tracy **out**, a normally-driven/normally-quit run **does not hang** —
+  so tracy (its buffer flush / teardown interacting with our exit) is
+  implicated in the multi-minute spin, not a shipping-viewer teardown bug.
+
+**Reframing:** this is very likely a **profiling-build-only** shutdown cost,
+not a problem for released builds. Still worth the definitive backtrace if it
+recurs (`gdb -p <pid>` on the next tracy hang), but **downgraded** — it does
+not gate the GPU-avatar work or affect users. The ~5 GB no-tracy baseline
+(GPU-avatar buffers + textures) is expected, not a leak.
+
+## RESOLVED (2026-08-13): it is the tracy-client worker, not our code
+
+Caught live and backtraced. During a Phase-4 tracy run the viewer window
+closed but the process kept spinning — **193 % CPU, 9.5 GB RSS, 132 s+** after
+close. `gdb -p <pid> -batch -ex "thread apply all bt"` (saved:
+`scratchpad/shutdown-hang-backtrace.txt`) shows:
+
+- **The one hot thread (98 % CPU) is `Tracy Profiler` (the tracy-client worker
+  thread)**, stack: `tracy::Profiler::Worker` (TracyProfiler.cpp:2210) →
+  `tracy::Socket::HasData` (TracySocket.cpp:432) → `poll(timeout=0)`. A
+  non-blocking poll in a tight loop = the busy-spin.
+- **Every one of our own threads is idle** — the IO Task Pools and the
+  sl-async/tokio workers are all parked in `futex_wait` / `condvar::wait`.
+
+So the ~9.5 GB is **tracy's buffer** and the multi-minute spin is **tracy's own
+client draining that buffer to `tracy-capture`** after `App::run()` already
+returned. It is entirely inside the `tracy-client` library — **none of our
+code**. Combined with the earlier no-tracy control (clean ~3 s shutdown, ~5 GB
+plateau), this is conclusive:
+
+- **Shipping (non-tracy) builds are unaffected** — no such thread, no such
+  buffer, clean shutdown.
+- **Profiling (`--features profile-tracy`) builds** pay a shutdown flush
+  proportional to the buffered trace, and tracy's worker busy-polls while it
+  drains — worse when the trace is large / the capturer is slow / disk is full.
+
+**Resolution:** external tracy-client behaviour, profiling-only, **no viewer
+fix warranted**. Not a leak, not an OOM risk, not a shipping concern. If it
+ever becomes annoying during profiling, the only levers are tracy-side (smaller
+captures, faster capturer sink); do not spend viewer effort on it. Closing.
 
 Decision: **do not rabbit-hole now.** Chasing this immediately means a
 non-tracy recompile + inconclusive A/B (an hour+); instead 1b is committed and

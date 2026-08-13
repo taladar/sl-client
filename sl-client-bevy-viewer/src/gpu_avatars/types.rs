@@ -17,7 +17,7 @@ use bevy::math::{Mat4, Quat, Vec3, Vec4};
 use bevy::render::render_resource::ShaderType;
 use sl_anim::Motion;
 use sl_client_bevy::{
-    AnimationPose, AssetKey, BevySkeleton, JointOverrides, SkeletalDeformations, VolumeDeformations,
+    AssetKey, BevySkeleton, JointOverrides, SkeletalDeformations, VolumeDeformations,
 };
 
 /// The `parent` sentinel for a joint with no parent (the skeleton root). Also
@@ -125,13 +125,13 @@ pub(crate) struct GpuLocalPose {
 }
 
 /// One posed avatar's per-frame **frame data** (§1.3(e)): the Bevy-world root
-/// affine (SL→Bevy axis change + world placement + the ghost display offset)
-/// and which avatar slot it belongs to — pass C reads these compactly, one per
-/// dispatched thread. std430 stride 80 B; mirrored in `pose.wgsl`.
+/// affine (SL→Bevy axis change + world placement) and which avatar slot it
+/// belongs to — pass C reads these compactly, one per dispatched thread.
+/// std430 stride 80 B; mirrored in `pose.wgsl`.
 #[derive(ShaderType, Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct GpuAvatarFrame {
-    /// The Bevy-world matrix every joint world matrix is composed under —
-    /// `ghost_offset * avatar_root_global`.
+    /// The Bevy-world matrix every joint world matrix is composed under — the
+    /// avatar root global.
     pub(crate) root: Mat4,
     /// The avatar's dense slot: the row block `slot * joint_count ..` of the
     /// rest / local-pose / joint-world buffers.
@@ -314,8 +314,13 @@ pub(crate) fn compose_rest_joints(
 /// Densify one avatar's blended [`AnimationPose`] into `joint_count`
 /// [`GpuLocalPose`] rows (the §1.3(f) `LocalPose` upload): each animated
 /// joint's channels with their flags, every other joint an all-zero "keep the
-/// rest" row.
-pub(crate) fn pose_rows(pose: &AnimationPose, joint_count: usize) -> Vec<GpuLocalPose> {
+/// rest" row. Test-only since Phase 4 removed the CPU-blended live upload — the
+/// headless FK tests hand-stage a `LocalPose` block with it.
+#[cfg(test)]
+pub(crate) fn pose_rows(
+    pose: &sl_client_bevy::AnimationPose,
+    joint_count: usize,
+) -> Vec<GpuLocalPose> {
     (0..joint_count)
         .map(|index| {
             let mut row = GpuLocalPose::default();
@@ -430,7 +435,7 @@ pub(crate) fn reference_fk(rest: &[GpuRestJoint], pose: &[GpuLocalPose], root: M
         world_rot.push(rotation);
         world_pos.push(translation);
         // Own scale enters only the final matrix (never inherited), then the
-        // root affine — exactly `write_joint_globals`' compose.
+        // root affine — the same compose the CPU skinning path used.
         out.push(root.mul_mat4(&Mat4::from_scale_rotation_translation(
             joint.local_scale,
             rotation,

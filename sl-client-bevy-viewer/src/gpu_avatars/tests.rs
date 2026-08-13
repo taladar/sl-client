@@ -385,81 +385,6 @@ fn golden_animated_rotations_compose_bit_exact() -> Result<(), TestError> {
 }
 
 // ---------------------------------------------------------------------------
-// Ghost skin-joint resolution: never all-or-nothing (the missing-eyes class).
-// ---------------------------------------------------------------------------
-
-/// A submesh whose joint list contains entries that cannot resolve — an entity
-/// that is no avatar joint at all, and a joint belonging to a *different*
-/// avatar — still yields a **full-length** joint map (the bad entries pinned
-/// to the fallback), with each failure reported by position, entity and
-/// reason. A dropped submesh (the bug this guards) would have returned no map
-/// at all and silently vanished from the pass-D instance table.
-#[test]
-fn resolve_joint_map_survives_unresolvable_joints() {
-    use super::stage::resolve_joint_map;
-    use sl_client_bevy::{AgentKey, Uuid};
-
-    let mut world = World::new();
-    let wearer = AgentKey::from(Uuid::from_u128(1));
-    let other = AgentKey::from(Uuid::from_u128(2));
-    let good_a = world.spawn_empty().id();
-    let good_b = world.spawn_empty().id();
-    let foreign = world.spawn_empty().id();
-    let stranger = world.spawn_empty().id();
-
-    let mut lookup = std::collections::HashMap::new();
-    let _prev = lookup.insert(good_a, (wearer, 3_u32));
-    let _prev = lookup.insert(good_b, (wearer, 7_u32));
-    let _prev = lookup.insert(foreign, (other, 5_u32));
-
-    let joints = vec![good_a, foreign, stranger, good_b];
-    let (map, unresolved) = resolve_joint_map(&joints, wearer, &lookup, 42);
-
-    assert_eq!(
-        map,
-        vec![3, 42, 42, 7],
-        "resolvable joints keep their canonical index; unresolvable ones take \
-         the fallback instead of dropping the submesh"
-    );
-    assert_eq!(unresolved.len(), 2, "both failures are reported");
-    let foreign_report = unresolved
-        .iter()
-        .find(|entry| entry.joint == foreign)
-        .copied();
-    assert!(
-        foreign_report.is_some_and(|entry| entry.position == 1 && entry.owner == Some(other)),
-        "the other avatar's joint is reported with its owner: {unresolved:?}"
-    );
-    let stranger_report = unresolved
-        .iter()
-        .find(|entry| entry.joint == stranger)
-        .copied();
-    assert!(
-        stranger_report.is_some_and(|entry| entry.position == 2 && entry.owner.is_none()),
-        "the non-avatar entity is reported ownerless: {unresolved:?}"
-    );
-}
-
-/// A fully resolvable joint list resolves untouched, with nothing reported.
-#[test]
-fn resolve_joint_map_passes_a_clean_list_through() {
-    use super::stage::resolve_joint_map;
-    use sl_client_bevy::{AgentKey, Uuid};
-
-    let mut world = World::new();
-    let wearer = AgentKey::from(Uuid::from_u128(1));
-    let a = world.spawn_empty().id();
-    let b = world.spawn_empty().id();
-    let mut lookup = std::collections::HashMap::new();
-    let _prev = lookup.insert(a, (wearer, 0_u32));
-    let _prev = lookup.insert(b, (wearer, 9_u32));
-
-    let (map, unresolved) = resolve_joint_map(&[a, b], wearer, &lookup, 42);
-    assert_eq!(map, vec![0, 9]);
-    assert!(unresolved.is_empty(), "nothing to report: {unresolved:?}");
-}
-
-// ---------------------------------------------------------------------------
 // Buffer-packing pins: the ShaderType byte layouts the WGSL mirrors assume.
 // ---------------------------------------------------------------------------
 
@@ -740,18 +665,13 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
     .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
     .add_plugins(SlFaceMaterialPlugin)
     .add_plugins(GpuAvatarsPlugin {
-        mode: Some(GpuAvatarsMode {
-            // The render half is placement-agnostic (it writes whatever
-            // instances are staged); ghost placement documents that the
-            // fixture stages an explicit target entity.
-            placement: super::GpuAvatarPlacement::Ghost,
+        mode: GpuAvatarsMode {
             active: true,
             readback: true,
             // The test stages fixture data by hand instead of reading the
             // (absent) avatar state.
             live: false,
-            ghost_offset: 2.0,
-        }),
+        },
     });
 
     // Keep the skinned mesh's transform dirty every frame (same-value write):
@@ -1856,13 +1776,11 @@ fn the_gpu_sampled_blended_palette_matches_the_cpu_mirror() -> Result<(), TestEr
     .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO))
     .add_plugins(SlFaceMaterialPlugin)
     .add_plugins(GpuAvatarsPlugin {
-        mode: Some(GpuAvatarsMode {
-            placement: super::GpuAvatarPlacement::Real,
+        mode: GpuAvatarsMode {
             active: true,
             readback: true,
             live: false,
-            ghost_offset: 2.0,
-        }),
+        },
     });
     app.add_systems(
         Update,

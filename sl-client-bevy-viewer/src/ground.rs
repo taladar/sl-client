@@ -24,8 +24,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use sl_client_bevy::{AgentKey, RegionHandle};
+use sl_client_bevy::{AgentKey, AnimationPose, RegionHandle, VolumeDeformations};
 
+use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarState};
 use crate::coords::region_offset_bevy;
 use crate::physics::AvatarMotion;
@@ -212,9 +213,14 @@ fn ground_under(
 /// [`AvatarGround::targets`] for why using the posed ones instead sets the knees buzzing)
 /// from the terrain land height and the simulator's collision plane, and records it for
 /// [`crate::locomotion_ik`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries"
+)]
 pub(crate) fn probe_avatar_ground(
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
+    library: Option<Res<AvatarAssetLibrary>>,
     globals: Query<&GlobalTransform>,
     motions: Query<&AvatarMotion>,
     terrain: Res<TerrainState>,
@@ -262,14 +268,30 @@ pub(crate) fn probe_avatar_ground(
         }
         let plane = ground.planes.get(&agent).copied();
         let region = motion.region();
-        let joints = state.joint_entities_of(agent);
-        let rest_ankle = |index: Option<usize>| -> Option<Vec3> {
-            let entity = joints?.get(index?)?;
-            Some(globals.get(*entity).ok()?.translation())
-        };
         let (left_point, right_point) = match ground.targets.get(&agent).copied() {
             Some((left, right)) => (Some(left), Some(right)),
-            None => (rest_ankle(ankles.0), rest_ankle(ankles.1)),
+            None => {
+                // Before the pose driver has published probe targets (an avatar's
+                // first frame), fall back to a one-shot rest solve of the shaped
+                // skeleton (Phase 4 removed the ankle joint entities) and read the
+                // ankle worlds, composing each avatar-frame position with the
+                // avatar-root global.
+                let rest = state.deformations(agent).and_then(|deform| {
+                    let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+                    let skeleton = library.as_deref()?.skeleton();
+                    Some(skeleton.deformed_world_matrices(
+                        deform,
+                        &VolumeDeformations::default(),
+                        &overrides,
+                        &AnimationPose::default(),
+                    ))
+                });
+                let ankle = |index: Option<usize>| -> Option<Vec3> {
+                    let local = rest.as_ref()?.get(index?)?.w_axis.truncate();
+                    Some(root_global.transform_point(local))
+                };
+                (ankle(ankles.0), ankle(ankles.1))
+            }
         };
         let probes = AgentGround {
             root: ground_under(root_global.translation(), plane, region, origin, &terrain),

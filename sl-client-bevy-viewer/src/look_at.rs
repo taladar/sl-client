@@ -503,18 +503,6 @@ impl LookAtMotion {
             .entry(agent)
             .or_insert_with(|| AgentLookAt::new(agent))
     }
-
-    /// Whether `agent`'s head / neck fold is fully released: no aiming weight
-    /// remains (the terminal snap makes the ease *reach* zero), so re-running the
-    /// fold with no target would leave the head / neck on their keyframe pose.
-    /// Part of the pose gate's settle test; the gate separately requires no live
-    /// look-at target and no saccade event this frame (the eyes' held offsets are
-    /// constant between events).
-    pub(crate) fn is_settled(&self, agent: AgentKey) -> bool {
-        self.states
-            .get(&agent)
-            .is_none_or(|state| state.weight == 0.0)
-    }
 }
 
 /// The skeleton indices of the joints the look-at motions drive, resolved once per
@@ -798,12 +786,6 @@ pub(crate) struct LookAtDebug {
 }
 
 impl LookAtDebug {
-    /// Whether the debug override forces a look-at target onto every avatar —
-    /// a pose-gate wake source (a forced gaze must keep evaluating).
-    pub(crate) const fn forces_target(&self) -> bool {
-        self.force_dir.is_some()
-    }
-
     /// Read the debug switches from the environment.
     pub(crate) fn from_env() -> Self {
         let force_dir = if std::env::var("SL_VIEWER_LOOK_AT_TEST").as_deref() == Ok("1") {

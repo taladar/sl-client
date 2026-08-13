@@ -36,7 +36,7 @@ Builds on: the HDR scene target and the P33.3 tone-mapping stage.
 the Bevy `Bloom` approximation; the P27.4 glow→emissive hack is gone. Full
 design, the staged 1→3 build, the live-verified aditi run, and the remaining
 follow-ups (edit-mode eyeball; particle glow was also plumbed) live in
-[viewer-sun-disc-grey-aditi-hdr-scale](../bugs/viewer-sun-disc-grey-aditi-hdr-scale.md),
+[viewer-sun-disc-grey-aditi-hdr-scale](../done/viewer-sun-disc-grey-aditi-hdr-scale.md),
 where the work happened.
 
 **Two corrections to this task's premise, found by reading the reference:**

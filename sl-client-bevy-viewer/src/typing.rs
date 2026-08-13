@@ -149,7 +149,7 @@ pub(crate) fn drive_own_typing(
     // Play `ANIM_AGENT_TYPE` locally for immediate feedback while typing, but only on
     // a rigged own avatar (a placeholder sphere has no skeleton to pose); ease it out
     // otherwise.
-    let desired = if active && avatars.joint_entities_of(own).is_some() {
+    let desired = if active && avatars.is_rigged(own) {
         type_id
     } else {
         None

@@ -345,17 +345,6 @@ struct AgentAdjust {
     /// (`mRotationToGroundNormal`), captured when the `standup` motion starts (the
     /// reference captures it in `onActivate`) and held for the motion's life.
     fall_ground_rotation: Option<Quat>,
-    /// The ground samples consumed by the last [`apply`] run, so the pose gate can
-    /// tell whether re-running the fold would read different ground (the probe
-    /// keeps running every frame; only its consumption is gated).
-    last_ground: Option<AgentGround>,
-    /// Which adjusters the last [`apply`] ran under (`walking`, `standing`,
-    /// `fall`), so the gate wakes the avatar when the animation set flips one.
-    last_anims: (bool, bool, bool),
-    /// Whether the last [`apply`] left every eased quantity latched (weight and
-    /// displacements exactly at their targets, no roll, no fall) — the fold's
-    /// output is then a pure function of the (unchanged) pose and ground.
-    settled: bool,
 }
 
 /// Per-avatar [`AgentAdjust`] state, keyed by agent, retained across frames so the
@@ -383,25 +372,6 @@ impl LocomotionAdjust {
     /// not grow without bound over a long session.
     pub(crate) fn retain(&mut self, live: &impl Fn(AgentKey) -> bool) {
         self.states.retain(|&agent, _state| live(agent));
-    }
-
-    /// Whether re-running `agent`'s locomotion fold would reproduce its last
-    /// output exactly: the last run left every eased quantity latched
-    /// ([`AgentAdjust::settled`]), the active adjuster set is unchanged, and the
-    /// ground samples it would consume are the ones it consumed last time. Part
-    /// of the pose gate's settle test. A fresh (never-run) avatar reports
-    /// unsettled so its first fold always runs.
-    pub(crate) fn is_settled(
-        &self,
-        agent: AgentKey,
-        anims: &AdjusterAnims,
-        ground: &AgentGround,
-    ) -> bool {
-        self.states.get(&agent).is_some_and(|state| {
-            state.settled
-                && state.last_anims == (anims.walking, anims.standing, anims.fall.is_some())
-                && state.last_ground == Some(*ground)
-        })
     }
 }
 
@@ -668,32 +638,6 @@ pub(crate) fn apply(
             plant_foot(pose, input, Leg::Right, weight, right),
         );
     }
-
-    // Record what this run consumed and whether every eased quantity is latched,
-    // for the pose gate's [`LocomotionAdjust::is_settled`]: with the weight and
-    // displacements exactly at their targets, no fly bank, no fall recovery and
-    // no walk servo, re-running this fold on the same pose and ground reproduces
-    // its output bit-for-bit.
-    state.last_ground = Some(input.ground);
-    state.last_anims = (
-        input.anims.walking,
-        input.anims.standing,
-        input.anims.fall.is_some(),
-    );
-    // With the IK fully released (weight latched at zero) the stale smoothed
-    // displacements are never read, so they do not block the settle.
-    let displacements_latched = state.foot_ik_weight == 0.0
-        || input.ground.root.is_none_or(|root_ground| {
-            let raw =
-                |hit: Option<GroundHit>| hit.map_or(0.0, |hit| hit.point.y - root_ground.point.y);
-            state.foot_displacement.0.to_bits() == raw(input.ground.left).to_bits()
-                && state.foot_displacement.1.to_bits() == raw(input.ground.right).to_bits()
-        });
-    state.settled = !input.anims.walking
-        && input.anims.fall.is_none()
-        && state.roll == 0.0
-        && state.foot_ik_weight.to_bits() == target_weight.to_bits()
-        && displacements_latched;
 
     AdjustReport {
         walk_speed: state.anim_speed,

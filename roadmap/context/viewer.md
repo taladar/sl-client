@@ -1531,8 +1531,9 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     source deltas away and replaces every one with a single constant
     displacement — the source morph only selects *which* vertices move, and
     donates their UV shifts).
-  `BaseMesh::from_bytes` now does the same (`synthesize_physics_morphs`). Without
-  this the driven params are silently inert: `LLPolyMorphTarget::setInfo` looks
+  `BaseMesh::from_bytes` now does the same (`synthesize_physics_morphs`).
+  Without this the driven params are silently inert:
+  `LLPolyMorphTarget::setInfo` looks
   the morph data up by param name (stripping a `_Driven` suffix as a fallback),
   and our own `MorphWeights::apply` simply finds no target of that name.
 

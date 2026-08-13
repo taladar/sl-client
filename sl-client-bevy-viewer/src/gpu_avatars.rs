@@ -11,60 +11,36 @@
 //!
 //! **The GPU in-place path is the DEFAULT** on a capable device (compute
 //! shaders + storage-buffer skinning, checked once at startup against the
-//! render device — [`select_gpu_avatar_path`] logs which path won); a
-//! downlevel device falls back to the fully intact legacy CPU path
-//! automatically. `SL_VIEWER_GPU_AVATARS` (read once at App build) is an
-//! **override**, not an enable:
+//! render device — [`select_gpu_avatar_path`] logs which path won). Phase 4
+//! removed the per-avatar joint entities, so the in-place path is now the
+//! ONLY skinning path: pass D writes the **real avatar's** skin slots — the
+//! rendered avatar IS GPU-sampled, GPU-blended and GPU-FK-posed. The CPU is
+//! demoted to scheduling (playback reconcile + the §2.1 sample-job dedup) and
+//! the §5.3 **adjuster mini-pose** (look-at / reach / IK / physics run
+//! against a chain mini-FK over ~a tenth of the joints, and publish their
+//! channel changes as sparse `GpuCorrection`s pass B folds in). The skinning
+//! joints are gone entirely, so `extract_skins` sees no avatar joints at all;
+//! only the **socket subset** — worn attachment-point nodes, the rigid
+//! eyeballs, and the `mHead` camera focus — is CPU-written, from the §5.4
+//! mini-FK ([`sl_client_bevy::BevySkeleton::deformed_world_chain`]).
 //!
-//! - **unset / `1` / `real`** — the default **in-place path** (Phase 2):
-//!   pass D writes the **real avatar's** skin slots (no offset, no ghosts) —
-//!   the rendered avatar IS GPU-sampled, GPU-blended and GPU-FK-posed. The
-//!   CPU is demoted to scheduling (playback reconcile + the §2.1 sample-job
-//!   dedup) and the §5.3 **adjuster mini-pose** (look-at / reach / IK /
-//!   physics run against a chain mini-FK over ~a tenth of the joints, and
-//!   publish their channel changes as sparse `GpuCorrection`s pass B folds
-//!   in); it stops writing the ~200 skinning joints' `GlobalTransform`s, so
-//!   `extract_skins` sees no changed joints and its serial cost collapses;
-//!   only the **socket subset** — worn attachment-point joints, the rigid
-//!   eyeballs' eye joints, and `mHead` (the camera focus) — stays
-//!   CPU-written, from the §5.4 mini-FK
-//!   ([`sl_client_bevy::BevySkeleton::deformed_world_chain`]).
-//!   Note Bevy's transform propagation still re-globals (and re-dirties) the
-//!   whole joint tree on any frame the avatar's **anchor moves** — the
-//!   collapse holds for stationary (dancing/idle) avatars, the crowd case;
-//!   walking avatars pay the propagation + extract cost until Phase 4
-//!   removes the joint entities.
-//! - **`cpu` / `off` / `0`** — force the legacy CPU pose path (manual
-//!   fallback / debugging); registers nothing, byte-for-byte today's path.
-//! - **`ghost`** — the Phase 1a **side-by-side comparison harness**: the CPU
-//!   path is fully live (joints written, `extract_skins` uploads), and each
-//!   rigged avatar additionally gets a **GPU ghost** — a duplicate of its
-//!   skinned submeshes whose own palette slots the compute overwrites with
-//!   the GPU-FK result, root-offset ~2 m aside
-//!   (`SL_VIEWER_GPU_AVATARS_OFFSET`, Bevy world +X, default 2), rigid
-//!   eyeballs CPU-mirrored and a floating "GPU" label overhead. A correct FK
-//!   renders the identical pose twice; a failed compute write leaves the
-//!   ghost exactly on top of the original (no second avatar = the failure
-//!   signature).
+//! A **downlevel** device (no compute shaders / no storage-buffer skinning)
+//! has no GPU path and — with the joint entities removed — no CPU skinner
+//! either: [`select_gpu_avatar_path`] flips [`GpuAvatarsMode::active`] off and
+//! warns once, and such avatars render at their bind pose.
 //!
-//! **Live verdict channel (both placements):**
-//! `SL_VIEWER_GPU_AVATARS_READBACK=1` copies the most-jointed target's
-//! just-written palette back (a compute copy — the skin buffer carries no
-//! `COPY_SRC`) next to a CPU-expected palette computed the same frame — in
-//! ghost mode from the live joint globals (the true CPU path), in real mode
-//! from the full CPU mirror pipeline ([`types::mirror_local_pose`] over the
-//! very clip/playback/job/correction data uploaded this frame, then
-//! [`types::reference_fk`] — the golden-tested pass A+B+C references; the
-//! joint globals are frozen there) — and logs
-//! `GPU-avatar palette readback: … GPU palette == CPU palette` (or `!=`, the
-//! divergence signal) at ~1 Hz.
+//! **Live verdict channel:** `SL_VIEWER_GPU_AVATARS_READBACK=1` copies the
+//! most-jointed target's just-written palette back (a compute copy — the skin
+//! buffer carries no `COPY_SRC`) next to a CPU-expected palette computed the
+//! same frame from the full CPU mirror pipeline ([`types::mirror_local_pose`]
+//! over the very clip/playback/job/correction data uploaded this frame, then
+//! [`types::reference_fk`] — the golden-tested pass A+B+C references) — and
+//! logs `GPU-avatar palette readback: … GPU palette == CPU palette` (or `!=`,
+//! the divergence signal) at ~1 Hz.
 //!
-//! Still deliberately **not** here: GPU picking (Phase 3 — the CPU pick
-//! reads frozen joints in real mode and degrades to rest-pose accuracy
-//! meanwhile), and animesh control avatars (fully CPU, per the design's
-//! Phase 4 migration). The **ghost harness keeps the Phase 1 split** (CPU
-//! sample+blend, `LocalPose` upload, passes C+D only): its purpose is
-//! comparing the GPU FK against the live CPU pose path side by side.
+//! Still deliberately **not** here: animesh control avatars (fully CPU, per
+//! the design's later migration — their control-avatar joints are a separate
+//! joint set kept intact this phase).
 
 pub(crate) mod render;
 pub(crate) mod stage;
@@ -84,107 +60,55 @@ use bevy::render::render_resource::DownlevelFlags;
 use bevy::render::renderer::{RenderAdapter, RenderDevice};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
-pub(crate) use stage::GpuAvatarPoseFeed;
+pub(crate) use stage::{GpuAvatarPoseFeed, GpuSkinBinding, PoseSlotKey};
 
 /// The internal handle `pose.wgsl` is loaded under.
 const POSE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7e3a9c15-24d8-4b6f-9a01-c85e2f7b4d39");
 
-/// The path **override** (the GPU in-place path is the default): `=cpu` /
-/// `=off` / `=0` forces the legacy CPU pose path, `=ghost` the side-by-side
-/// comparison harness; unset / `=1` / `=real` selects the default GPU
-/// in-place path (which still falls back to the CPU path automatically on a
-/// device without compute/storage-buffer support).
-const ENV_FLAG: &str = "SL_VIEWER_GPU_AVATARS";
-
 /// The debug sub-flag: `SL_VIEWER_GPU_AVATARS_READBACK=1` turns the per-frame
-/// palette readback + verdict log on (any placement).
+/// palette readback + verdict log on.
 const ENV_READBACK: &str = "SL_VIEWER_GPU_AVATARS_READBACK";
-
-/// The ghost display offset in metres along Bevy world +X (default
-/// [`DEFAULT_GHOST_OFFSET`]; ghost placement only).
-const ENV_OFFSET: &str = "SL_VIEWER_GPU_AVATARS_OFFSET";
-
-/// The default ghost display offset, metres.
-const DEFAULT_GHOST_OFFSET: f32 = 2.0;
 
 /// How many storage buffers the pose pipeline binds in one compute stage
 /// (`pose.wgsl` group 0, bindings 1..=8) — the device must allow at least
 /// this many per stage.
 const REQUIRED_STORAGE_BUFFERS: u32 = 8;
 
-/// Where the compute-written palettes land.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GpuAvatarPlacement {
-    /// The side-by-side comparison harness (Phase 1a): spawned ghost
-    /// duplicates, offset aside; the CPU path fully live underneath.
-    Ghost,
-    /// The in-place path (Phase 1b, the default): the real avatars' own skin
-    /// slots; skinning joints frozen, sockets CPU-mini-FK'd.
-    Real,
-}
-
 /// The pipeline's resolved run mode, read once from the environment at App
 /// build and carried as a resource (never re-read per frame).
 #[derive(Resource, Clone, Copy, Debug)]
 pub(crate) struct GpuAvatarsMode {
-    /// Ghost harness or the in-place real path.
-    pub(crate) placement: GpuAvatarPlacement,
     /// Whether the pipeline is actually running: `true` from build, flipped
     /// to `false` by [`select_gpu_avatar_path`] when the device lacks the
-    /// required capabilities — every main-world consumer gates on this, so a
-    /// downlevel device runs the legacy CPU pose path automatically.
+    /// required capabilities — every main-world consumer gates on this. With
+    /// the joint entities removed (Phase 4) a downlevel device has no CPU
+    /// skinner fallback, so its avatars render at their bind pose.
     pub(crate) active: bool,
     /// Whether the palette readback + verdict log is on.
     pub(crate) readback: bool,
     /// Whether the live staging systems run (`false` only in the headless
     /// tests, which stage fixture data by hand).
     pub(crate) live: bool,
-    /// The ghost display offset, metres along Bevy world +X (ghost placement
-    /// only; the real path writes in place).
-    pub(crate) ghost_offset: f32,
 }
 
-/// The GPU-avatar plugin. `mode: None` (the `cpu` override) registers
-/// **nothing** — the byte-for-byte legacy CPU path.
+/// The GPU-avatar plugin. Phase 4 made the GPU in-place path the only
+/// skinning path, so this always registers.
 pub(crate) struct GpuAvatarsPlugin {
-    /// The resolved mode, or `None` for the forced legacy CPU path.
-    pub(crate) mode: Option<GpuAvatarsMode>,
+    /// The resolved mode.
+    pub(crate) mode: GpuAvatarsMode,
 }
 
 impl GpuAvatarsPlugin {
-    /// Build the plugin from the environment, read once here. The GPU
-    /// in-place path is the **default**; the env var only overrides.
+    /// Build the plugin from the environment, read once here.
     #[must_use]
     pub(crate) fn from_env() -> Self {
-        let placement = match std::env::var(ENV_FLAG) {
-            Ok(value) if value == "cpu" || value == "off" || value == "0" => {
-                warn!("GPU avatars: legacy CPU pose path forced by {ENV_FLAG}={value}");
-                None
-            }
-            Ok(value) if value == "ghost" => Some(GpuAvatarPlacement::Ghost),
-            Ok(value) if value == "1" || value == "real" => Some(GpuAvatarPlacement::Real),
-            Ok(other) => {
-                warn!(
-                    "{ENV_FLAG}={other:?} is not a recognised value (expected `cpu`/`off`, \
-                     `ghost`, or `1`/`real`); using the default GPU in-place path"
-                );
-                Some(GpuAvatarPlacement::Real)
-            }
-            // The default: GPU in-place, hardware permitting.
-            Err(_unset) => Some(GpuAvatarPlacement::Real),
-        };
-        let mode = placement.map(|placement| GpuAvatarsMode {
-            placement,
-            active: true,
-            readback: std::env::var(ENV_READBACK).as_deref() == Ok("1"),
-            live: true,
-            ghost_offset: std::env::var(ENV_OFFSET)
-                .ok()
-                .and_then(|raw| raw.parse::<f32>().ok())
-                .filter(|offset| offset.is_finite())
-                .unwrap_or(DEFAULT_GHOST_OFFSET),
-        });
-        Self { mode }
+        Self {
+            mode: GpuAvatarsMode {
+                active: true,
+                readback: std::env::var(ENV_READBACK).as_deref() == Ok("1"),
+                live: true,
+            },
+        }
     }
 }
 
@@ -225,33 +149,21 @@ fn select_gpu_avatar_path(
     if !capable {
         mode.active = false;
         warn!(
-            "GPU avatars: the device lacks compute-shader / storage-buffer support — \
-             falling back to the legacy CPU pose path"
+            "GPU avatars: the device lacks compute-shader / storage-buffer support and \
+             Phase 4 removed the CPU skinner — avatars render at their bind pose"
         );
         return;
     }
-    match mode.placement {
-        GpuAvatarPlacement::Real => info!(
-            "GPU avatars: GPU in-place pose path ACTIVE (the default): rendered avatars \
-             are GPU-FK-posed, skinning joints frozen, sockets CPU-mini-FK'd \
-             (readback {})",
-            if mode.readback { "on" } else { "off" },
-        ),
-        GpuAvatarPlacement::Ghost => warn!(
-            "GPU avatars: side-by-side GHOST harness active: every rigged avatar renders \
-             twice — the CPU pose in place and a GPU-FK ghost {} m to the side \
-             (readback {})",
-            mode.ghost_offset,
-            if mode.readback { "on" } else { "off" },
-        ),
-    }
+    info!(
+        "GPU avatars: GPU in-place pose path ACTIVE: rendered avatars are GPU-FK-posed, \
+         no skinning joint entities, sockets CPU-mini-FK'd (readback {})",
+        if mode.readback { "on" } else { "off" },
+    );
 }
 
 impl Plugin for GpuAvatarsPlugin {
     fn build(&self, app: &mut App) {
-        let Some(mode) = self.mode else {
-            return;
-        };
+        let mode = self.mode;
         load_internal_asset!(
             app,
             POSE_SHADER_HANDLE,
@@ -273,27 +185,11 @@ impl Plugin for GpuAvatarsPlugin {
                 // After the pose driver, so the feed holds this frame's final
                 // blended poses and (in ghost mode) the joint globals are
                 // posed.
-                stage::stage_gpu_avatars.after(crate::animations::pose_avatar_skeletons),
-            );
-        }
-        if mode.live && mode.placement == GpuAvatarPlacement::Ghost {
-            // The ghost-harness companions; the real path has no ghost
-            // entities, no rigid mirrors and no labels.
-            app.add_systems(
-                PostUpdate,
-                (
-                    // Before propagation, so a fresh ghost's re-extract (and
-                    // its baked `current_skin_index`) lands the same frame.
-                    stage::churn_gpu_ghost_transforms.before(TransformSystems::Propagate),
-                    // Rigid ghosts (the eyeballs) are CPU-placed from the
-                    // posed source globals — after the staging system so a
-                    // just-spawned record is already tracked.
-                    stage::place_gpu_rigid_ghosts.after(stage::stage_gpu_avatars),
-                    // The floating "GPU" label over each ghost, placed from
-                    // the same feed roots the ghost palettes are composed
-                    // under.
-                    stage::sync_gpu_avatar_labels.after(stage::stage_gpu_avatars),
-                ),
+                // After both pose feeds: avatars publish in `pose_avatar_skeletons`,
+                // animesh in `publish_control_avatars`.
+                stage::stage_gpu_avatars
+                    .after(crate::animations::pose_avatar_skeletons)
+                    .after(crate::animesh::publish_control_avatars),
             );
         }
         if mode.readback {

@@ -10,65 +10,67 @@
 //! The control avatar reuses the standard avatar skeleton ([`AvatarBody`]) and the
 //! Phase 18 blend driver:
 //!
-//! - [`ControlAvatarState::ensure_spawned`] instances the skeleton joints as a
-//!   child of the animesh root object entity, so the whole skeleton follows the
-//!   object as it moves (the reference viewer's `matchVolumeTransform` pins the
-//!   control avatar to the root prim's render transform);
+//! - [`ControlAvatarState::ensure_spawned`] spawns the control avatar's root as
+//!   a child of the animesh root object entity, so it (and the rigged submeshes
+//!   parented to it) follows the object as it moves (the reference viewer's
+//!   `matchVolumeTransform` pins the control avatar to the root prim's render
+//!   transform);
 //! - [`apply_rigged_attachments`](crate::objects::apply_rigged_attachments) binds
 //!   the linkset's rigged submeshes to those joints (the animesh branch of the
 //!   worn-rigged-mesh bind), recording the rig's joint position overrides on the
 //!   control avatar rather than on any wearer;
-//! - [`ingest_object_animations`] fetches each signalled animation's motion,
-//!   [`drive_control_avatars`] folds each object's `ObjectAnimation` set into a
-//!   blended per-joint [`AnimationPose`], and [`pose_control_avatars`] writes that
-//!   pose into the control avatar's joint world matrices.
+//! - [`ingest_object_animations`] fetches each signalled animation's motion and
+//!   [`drive_control_avatars`] reconciles each object's `ObjectAnimation` set
+//!   into a merged per-root playing set, which — via
+//!   [`publish_control_avatars`] publishing the object's root matrix to the
+//!   GPU-avatar feed — the shared passes-A–D pipeline samples, blends and
+//!   FK-poses in place (§5), exactly as it does an avatar's clips.
 //!
-//! The two driver systems mirror
-//! [`drive_avatar_skeletons`](crate::animations::drive_avatar_skeletons) /
-//! [`pose_avatar_skeletons`](crate::animations::pose_avatar_skeletons) exactly, but
-//! keyed by the animesh object rather than an avatar and against a rest
-//! (un-shaped) skeleton — an animated object has no visual-param shape, only the
-//! joint position overrides its own rigged meshes impose.
+//! Phase 4 removed the per-object joint entities and the CPU skinner: an animesh
+//! is a GPU pose slot ([`Animesh`](crate::gpu_avatars::PoseSlotKey::Animesh))
+//! keyed by its object rather than an avatar, posed against a rest (un-shaped)
+//! skeleton — an animated object has no visual-param shape, only the joint
+//! position overrides its own rigged meshes impose.
 
 use std::collections::HashMap;
 
-use bevy::math::Affine3A;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AnimationPose, AssetKey, JointOverrides, ObjectKey, SkeletalDeformations, SlEvent,
-    SlSessionEvent, Uuid, VolumeDeformations,
+    AnimationPose, AssetKey, JointOverrides, ObjectKey, SlEvent, SlSessionEvent, Uuid,
 };
 
 use crate::animations::{
     AnimationManager, PlayState, reconcile_playing, resolve_pose, retain_active,
 };
-use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::AvatarBody;
 
-/// One animesh's control avatar: the skeleton-instance root and joint entities,
-/// plus the joint position overrides its own rigged meshes impose (R1).
+/// One animesh's control avatar (§5): the skeleton root the linkset's rigged
+/// submeshes parent to, plus the joint position overrides its own rigged meshes
+/// impose (R1). Phase 4 removed the per-object joint entities — the submeshes
+/// bind the shared dummy joint and are GPU-posed in place on an
+/// [`Animesh`](crate::gpu_avatars::PoseSlotKey::Animesh) pose slot.
 struct ControlAvatar {
     /// The skeleton root anchor — an identity child of the animesh root object
-    /// entity, so its world transform (and therefore the whole skeleton) tracks
-    /// the object as it moves. Composed with each joint's Second Life world matrix
-    /// to place the posed joints in Bevy world space.
+    /// entity, so its world transform tracks the object as it moves. The rigged
+    /// submeshes parent to it, and its `GlobalTransform` is the pose slot's root
+    /// matrix (the SL → Bevy basis change + the object's world placement).
     root: Entity,
-    /// The skeleton-instance joint entities, in joint order (parallel to
-    /// [`AvatarBody`]'s joint tables) — the entities the linkset's rigged submeshes
-    /// bind to and the pose driver writes each frame.
-    joints: Vec<Entity>,
     /// The joint position overrides each of the linkset's rigged meshes imposes on
     /// this control avatar's skeleton (R1), keyed by the contributing mesh asset id
     /// — the animesh counterpart of [`AvatarState`](crate::avatars::AvatarState)'s
     /// per-avatar `joint_overrides`. Merged (highest mesh id wins per joint) into
-    /// the effective set the pose driver folds into the skeletal recurrence.
+    /// the effective set the GPU rest solve folds into the skeleton.
     overrides: HashMap<Uuid, JointOverrides>,
+    /// Bumped whenever [`overrides`](Self::overrides) changes, so the GPU
+    /// staging re-composes this slot's rest rows only on a real change (the
+    /// animesh counterpart of an avatar's `pose_inputs_generation`).
+    overrides_generation: u64,
 }
 
 /// Viewer-side animesh bookkeeping (P29): the control avatar per animated object,
 /// plus its animation playback state — which animations each signalled part is
-/// playing, their timing / activation order, and the per-joint pose the driver
-/// blended this frame for [`pose_control_avatars`] to write.
+/// playing, their timing / activation order, and the merged per-root playing set
+/// the GPU-avatar scheduler samples and blends this frame.
 ///
 /// **Two different keys (P29.2).** The control avatars and poses are keyed by
 /// the animesh **root**'s full [`ObjectKey`] (the flagged animated object the
@@ -96,8 +98,15 @@ pub(crate) struct ControlAvatarState {
     /// [`AnimationPlayback`](crate::animations::AnimationPlayback)).
     next_order: u64,
     /// Each root object's resolved per-joint pose this frame (only roots with a
-    /// drivable animation and a spawned control avatar appear).
+    /// drivable animation and a spawned control avatar appear). Kept for the
+    /// edge-triggered posing log only — the GPU samples/blends the clips itself.
     poses: HashMap<ObjectKey, AnimationPose>,
+    /// Each root object's **merged** playing set this frame (the union of its
+    /// linkset parts' sets), keyed by animation id — the animesh counterpart of
+    /// [`AnimationPlayback::merged_active`](crate::animations::AnimationPlayback::merged_active).
+    /// The GPU-avatar scheduler builds this slot's playback rows + sample jobs
+    /// from it, so passes A+B blend the same motions the CPU resolver would.
+    merged: HashMap<ObjectKey, HashMap<Uuid, PlayState>>,
 }
 
 /// The signalled-part cap: above this many parts with live animation sets, the
@@ -109,25 +118,23 @@ const MAX_SIGNALLED_PARTS: usize = 4096;
 
 impl ControlAvatarState {
     /// Ensure a control avatar exists for the animesh root `object` (whose scene
-    /// entity is `object_entity`), spawning the standard skeleton as an identity
-    /// child of the object entity on first call. Returns the skeleton root and the
-    /// joint entities the caller binds the linkset's rigged submeshes to.
+    /// entity is `object_entity`), spawning its identity **root** as a child of
+    /// the object entity on first call. Returns that root — the caller parents
+    /// the linkset's rigged submeshes to it (§5: they carry no joint entities;
+    /// the GPU poses them in place off the `Animesh` pose slot).
     ///
-    /// The root is parented under the object entity so the whole skeleton follows
-    /// the object's world transform (which already carries the Second Life → Bevy
-    /// basis change and the object's world placement / rotation) and despawns with
-    /// it. The joint local transforms do not place the final geometry — the pose
-    /// driver overwrites each joint's world matrix in `PostUpdate` — but they seed
-    /// the hierarchy so the joints exist to bind to.
+    /// The root is parented under the object entity so it follows the object's
+    /// world transform (which already carries the Second Life → Bevy basis change
+    /// and the object's world placement / rotation) and despawns with it. Its
+    /// `GlobalTransform` is the pose slot's root matrix.
     pub(crate) fn ensure_spawned(
         &mut self,
         object: ObjectKey,
         object_entity: Entity,
-        body: &AvatarBody,
         commands: &mut Commands,
-    ) -> (Entity, Vec<Entity>) {
+    ) -> Entity {
         if let Some(control) = self.avatars.get(&object) {
-            return (control.root, control.joints.clone());
+            return control.root;
         }
         let root = commands
             .spawn((
@@ -136,20 +143,44 @@ impl ControlAvatarState {
                 ChildOf(object_entity),
             ))
             .id();
-        let joints = body.spawn_bare_skeleton(root, commands);
-        debug!(
-            "animesh {object}: spawned control avatar ({} joints)",
-            joints.len()
-        );
+        debug!("animesh {object}: spawned control avatar root");
         let _prev = self.avatars.insert(
             object,
             ControlAvatar {
                 root,
-                joints: joints.clone(),
                 overrides: HashMap::new(),
+                overrides_generation: 0,
             },
         );
-        (root, joints)
+        root
+    }
+
+    /// Every animesh root that has a spawned control avatar — the GPU staging
+    /// enumerates these as its animesh pose slots.
+    pub(crate) fn animesh_roots(&self) -> impl Iterator<Item = ObjectKey> + '_ {
+        self.avatars.keys().copied()
+    }
+
+    /// `object`'s override generation, bumped whenever its effective joint
+    /// overrides change (the GPU rest-row re-compose trigger). `0` for an object
+    /// with no control avatar.
+    pub(crate) fn overrides_generation(&self, object: ObjectKey) -> u64 {
+        self.avatars
+            .get(&object)
+            .map_or(0, |control| control.overrides_generation)
+    }
+
+    /// `object`'s merged playing set as owned `(animation id, play state)` pairs
+    /// — the animesh counterpart of
+    /// [`AnimationPlayback::merged_active`](crate::animations::AnimationPlayback::merged_active),
+    /// which the GPU scheduler builds this slot's playback rows + sample jobs from.
+    #[must_use]
+    pub(crate) fn merged_active(&self, object: ObjectKey) -> Vec<(Uuid, PlayState)> {
+        self.merged
+            .get(&object)
+            .into_iter()
+            .flat_map(|set| set.iter().map(|(&anim, play)| (anim, *play)))
+            .collect()
     }
 
     /// The parts with a live signalled animation set (the `ObjectAnimation`
@@ -183,13 +214,16 @@ impl ControlAvatarState {
         } else {
             let _prev = control.overrides.insert(mesh, overrides);
         }
+        // A real change: bump the generation so the GPU staging re-composes this
+        // slot's rest rows (its skeleton was repositioned by the rig).
+        control.overrides_generation = control.overrides_generation.wrapping_add(1);
     }
 
     /// The effective joint position overrides for `object`'s control avatar (R1):
     /// the per-joint winner across every one of the linkset's rigged meshes,
     /// resolved to the highest mesh id on a conflict (the reference viewer's
     /// `findActiveOverride`). Empty when the linkset carries no position-bearing rig.
-    fn effective_overrides(&self, object: ObjectKey) -> JointOverrides {
+    pub(crate) fn effective_overrides(&self, object: ObjectKey) -> JointOverrides {
         let Some(control) = self.avatars.get(&object) else {
             return JointOverrides::default();
         };
@@ -212,6 +246,7 @@ impl ControlAvatarState {
     pub(crate) fn retain(&mut self, keep: impl Fn(ObjectKey) -> bool) {
         self.avatars.retain(|&object, _| keep(object));
         self.poses.retain(|&object, _| keep(object));
+        self.merged.retain(|&object, _| keep(object));
     }
 
     /// The memory backstop on the persistent signalled-animation map: once more
@@ -295,6 +330,7 @@ pub(crate) fn drive_control_avatars(
     // Without the avatar asset library there is no skeleton to resolve names for.
     let Some(body) = body else {
         control.poses.clear();
+        control.merged.clear();
         return;
     };
     // Resolve each signalled part to its animesh root and merge the linkset's
@@ -319,15 +355,23 @@ pub(crate) fn drive_control_avatars(
         }
     }
     let mut poses: HashMap<ObjectKey, AnimationPose> = HashMap::new();
+    // Keep only the merged sets of roots with a spawned control avatar, so the
+    // GPU scheduler (`crate::gpu_avatars`) iterates exactly the animesh slots it
+    // can pose. The set is what passes A+B sample and blend GPU-side.
+    let mut root_merged: HashMap<ObjectKey, HashMap<Uuid, PlayState>> = HashMap::new();
     for (&root, anims) in &merged {
         // Only a root with a spawned control avatar can be posed.
         if !control.avatars.contains_key(&root) {
             continue;
         }
+        let _prev = root_merged.insert(root, anims.clone());
         if let Some(pose) = resolve_pose(anims, now, &manager, |name| body.joint_index(name)) {
             let _prev = poses.insert(root, pose);
         }
     }
+    // The GPU staging reads this every frame, so no write-on-change guard is
+    // needed here (`PlayState` is not `PartialEq`).
+    control.merged = root_merged;
     // Edge-triggered logging: an object starting / stopping being posed is the live
     // signal that a keyframe motion decoded and drove its control avatar.
     for &object in poses.keys() {
@@ -340,77 +384,41 @@ pub(crate) fn drive_control_avatars(
             debug!("animesh: released control avatar for object {object} back to rest");
         }
     }
-    // Write-on-change: [`pose_control_avatars`] gates its joint rewrites on this
-    // resource's change tick, so an unchanged pose set (idle animesh, or a pose
-    // released last frame and already written back to rest) must not re-dirty it.
+    // Kept for the edge-triggered posing log above (the GPU does the real
+    // blend); write-on-change so an idle animesh does not re-dirty the resource.
     if control.poses != poses {
         control.poses = poses;
     }
 }
 
-/// Write each posed animesh control avatar's animated joint world matrices straight
-/// into its joint entities' `GlobalTransform`s (P29.2), the animesh mirror of
-/// [`pose_avatar_skeletons`](crate::animations::pose_avatar_skeletons).
+/// Publish each animesh control avatar's pose slot to the GPU feed (§5): its
+/// root matrix (the object's Bevy world transform, the SL → Bevy basis change +
+/// world placement) and — since an animesh has no procedural adjusters — an
+/// empty correction list. The GPU then samples, blends and FK-poses the
+/// skeleton in place (passes A–D), exactly like an avatar; there are no per-
+/// object joint entities to write.
 ///
-/// Runs in `PostUpdate` **after** transform propagation, so it overwrites the
-/// just-propagated joint globals with the animated ones for the frame's skinning.
-/// For each posed object it re-runs the Second Life skeletal recurrence with the
-/// resolved [`AnimationPose`] and the linkset's effective joint overrides folded in
-/// (against a rest [`SkeletalDeformations`] — an animated object has no shape),
-/// composes each joint's Second Life world matrix with the control-avatar-root
-/// global (its object's Bevy world transform), and writes it to the joint entity.
-///
-/// The pose gate, animesh edition: a control avatar is (re)written only when the
-/// animesh state changed since this system last ran (a pose advanced, started,
-/// or was released — [`drive_control_avatars`] writes the resource only then;
-/// the release frame itself writes the rest pose once, latching it) or when its
-/// **root moved** (its object was carried / rebased, so every joint global must
-/// re-compose against the new root). Between those, the joints hold the driver's
-/// last write — Bevy's dirty-bit propagation cannot clobber them, exactly the
-/// invariant the avatar driver relies on.
-pub(crate) fn pose_control_avatars(
+/// Runs in `PostUpdate` **after** transform propagation (so the control-avatar
+/// root's `GlobalTransform` is current) and **before**
+/// [`stage_gpu_avatars`](crate::gpu_avatars) reads the feed. A no-op on a
+/// downlevel device, where the GPU pipeline is inactive.
+pub(crate) fn publish_control_avatars(
     control: Res<ControlAvatarState>,
-    library: Option<Res<AvatarAssetLibrary>>,
-    mut globals: Query<&mut GlobalTransform>,
+    mut feed: ResMut<crate::gpu_avatars::GpuAvatarPoseFeed>,
+    mode: Option<Res<crate::gpu_avatars::GpuAvatarsMode>>,
+    globals: Query<&GlobalTransform>,
 ) {
-    let Some(library) = library else {
+    if !mode.is_some_and(|mode| mode.active) {
         return;
-    };
-    let control_changed = control.is_changed();
-    // A control avatar (animesh) has no visual params, so both the skeletal and the
-    // collision-volume deformations are the rest ones.
-    let rest = SkeletalDeformations::default();
-    let rest_volumes = VolumeDeformations::default();
-    let empty = AnimationPose::default();
+    }
     for (&object, avatar) in &control.avatars {
-        // Root moved? Read the change tick without a mutable deref (this is what
-        // wakes a *carried* animesh whose own animation is idle).
-        let root_moved = globals
-            .get_mut(avatar.root)
-            .is_ok_and(|global| global.is_changed());
-        if !control_changed && !root_moved {
-            continue;
-        }
-        let pose = control.poses.get(&object).unwrap_or(&empty);
-        let overrides = control.effective_overrides(object);
-        let world =
-            library
-                .skeleton()
-                .deformed_world_matrices(&rest, &rest_volumes, &overrides, pose);
-        // The control-avatar-root global carries the object's Bevy world transform
-        // (the SL → Bevy basis change + world placement); each joint's Bevy global
-        // is that composed with its Second Life world matrix. Copied out so the
-        // mutable joint writes below do not overlap the read.
         let Ok(root_global) = globals.get(avatar.root) else {
             continue;
         };
-        // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
-        // `arithmetic_side_effects` lint the glam operators trip.
-        let root_matrix = root_global.to_matrix();
-        for (entity, matrix) in avatar.joints.iter().zip(world.iter()) {
-            if let Ok(mut global) = globals.get_mut(*entity) {
-                *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-            }
-        }
+        feed.publish_real(
+            crate::gpu_avatars::PoseSlotKey::Animesh(object),
+            root_global.to_matrix(),
+            Vec::new(),
+        );
     }
 }

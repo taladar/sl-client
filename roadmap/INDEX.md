@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 61 |
-| ready | 248 |
-| blocked | 80 |
+| ideas | 62 |
+| ready | 250 |
+| blocked | 78 |
 | in-progress | 15 |
-| bugs | 24 |
-| done | 779 |
+| bugs | 25 |
+| done | 782 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1240** |
+| **total** | **1245** |
 
-## ideas (61)
+## ideas (62)
 
 ### viewer
 
@@ -74,6 +74,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Flexi prims — distance / pixel-area LOD and tessellation-allocation reuse
 - [`viewer-perf-frame-churn-cleanups`](ideas/viewer-perf-frame-churn-cleanups.md)
   — Small per-frame churn cleanups (throttles + scratch reuse)
+- [`viewer-perf-frame-work-budget-priorities`](ideas/viewer-perf-frame-work-budget-priorities.md)
+  — Frame-work budget arbiter with priorities (skip low-priority work)
 - [`viewer-perf-gpu-avatar-crowd`](ideas/viewer-perf-gpu-avatar-crowd.md) — GPU
   avatar crowd — compute-pass animation + same-body instancing
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
@@ -153,7 +155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (248)
+## ready (250)
 
 ### protocol
 
@@ -480,13 +482,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-perf-asset-streaming-frame-spikes`](ready/viewer-perf-asset-streaming-frame-spikes.md)
+  — Budget asset upload/prep to kill single-digit-FPS streaming spikes
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
-- [`viewer-perf-gpu-avatar-phase3-gpu-picking`](ready/viewer-perf-gpu-avatar-phase3-gpu-picking.md)
-  — GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
-  (blocked by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done))
+- [`viewer-perf-gpu-avatar-phase5-lod-polish`](ready/viewer-perf-gpu-avatar-phase5-lod-polish.md)
+  — GPU avatars Phase 5 — LOD, scalability hooks, polish
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
@@ -507,6 +510,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reflection-probe quality settings (detail, resolution, pool, budget)
 - [`viewer-perf-probe-scheduling`](ready/viewer-perf-probe-scheduling.md) —
   Change-driven probe capture scheduling (zero idle cost)
+- [`viewer-perf-render-app-bound-frame`](ready/viewer-perf-render-app-bound-frame.md)
+  — Average frame is now render-app bound (render graph / GPU draw)
 - [`viewer-perf-teleport-overlay-idle-visibility`](ready/viewer-perf-teleport-overlay-idle-visibility.md)
   — Teleport progress overlay writes Hidden visibility every idle frame
 - [`viewer-perf-update-objects-budget-moves-removes`](ready/viewer-perf-update-objects-budget-moves-removes.md)
@@ -750,7 +755,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (80)
+## blocked (78)
 
 ### protocol
 
@@ -874,13 +879,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-perf-gpu-avatar-phase4-remove-scaffolding`](blocked/viewer-perf-gpu-avatar-phase4-remove-scaffolding.md)
-  — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding (blocked
-  by `viewer-perf-gpu-avatar-phase2-gpu-sample-blend` (done),
-  `viewer-perf-gpu-avatar-phase3-gpu-picking`)
-- [`viewer-perf-gpu-avatar-phase5-lod-polish`](blocked/viewer-perf-gpu-avatar-phase5-lod-polish.md)
-  — GPU avatars Phase 5 — LOD, scalability hooks, polish (blocked by
-  `viewer-perf-gpu-avatar-phase4-remove-scaffolding`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
@@ -1024,7 +1022,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (24)
+## bugs (25)
 
 ### protocol
 
@@ -1050,8 +1048,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
-- [`viewer-gpu-avatars-1b-slow-shutdown-high-rss`](bugs/viewer-gpu-avatars-1b-slow-shutdown-high-rss.md)
-  — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
+- [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
+  — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1059,6 +1057,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
   Minimap other-avatar dots are red, not green like the reference
+- [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
+  — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-nametags-occluded-by-clouds`](bugs/viewer-nametags-occluded-by-clouds.md)
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1087,7 +1087,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (779)
+## done (782)
 
 ### protocol
 
@@ -1373,6 +1373,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom
+- [`viewer-gpu-avatars-1b-slow-shutdown-high-rss`](done/viewer-gpu-avatars-1b-slow-shutdown-high-rss.md)
+  — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
 - [`viewer-grey-avatars-bakes-not-showing`](done/viewer-grey-avatars-bakes-not-showing.md)
   — Most other avatars render grey (baked skin/textures not showing) on aditi
 - [`viewer-group-notice-body-links`](done/viewer-group-notice-body-links.md) —
@@ -1863,6 +1865,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](done/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
   — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
   `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes` (done))
+- [`viewer-perf-gpu-avatar-phase3-gpu-picking`](done/viewer-perf-gpu-avatar-phase3-gpu-picking.md)
+  — GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
+  (blocked by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done))
+- [`viewer-perf-gpu-avatar-phase4-remove-scaffolding`](done/viewer-perf-gpu-avatar-phase4-remove-scaffolding.md)
+  — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)

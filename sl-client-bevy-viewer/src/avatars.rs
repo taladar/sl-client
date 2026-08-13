@@ -351,18 +351,6 @@ fn uv_grid_image() -> Image {
     image
 }
 
-/// A marker on one skeleton-instance joint entity, tying it back to its avatar
-/// and its index in the shared [`BevySkeleton`] so
-/// the appearance system ([`apply_avatar_appearance`]) can re-set that joint's
-/// local transform from the avatar's resolved skeletal deformations (P13.4).
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct AvatarJoint {
-    /// The avatar this joint belongs to.
-    agent: AgentKey,
-    /// The joint's index into the shared skeleton (joint order).
-    index: usize,
-}
-
 /// A marker on one avatar attachment-point node (P16.2) — the node parented to a
 /// skeleton joint at the `avatar_lad.xml` offset, off which a worn **rigid**
 /// attachment hangs. The pose driver overwrites each joint's `GlobalTransform`
@@ -568,17 +556,17 @@ pub(crate) struct AvatarState {
     /// A reverse map from an object's scoped id to its agent id, so an
     /// `ObjectRemoved` can find the avatar to despawn.
     by_scoped: HashMap<ScopedObjectId, AgentKey>,
-    /// The skeleton-instance joint entities of each rigged-body avatar, in joint
-    /// order (parallel to [`AvatarBody`]'s joint tables), keyed by agent id — the
-    /// entities a worn attachment is parented to so it follows the posed skeleton
-    /// (P16.1). Absent for a sphere-only (no `--viewer-assets`) avatar.
-    joints: HashMap<AgentKey, Vec<Entity>>,
     /// The per-avatar attachment-point node entities, keyed by agent id then by
     /// raw attachment-point id (P16.2). Each node is a child of its skeleton joint
     /// carrying the fixed `avatar_lad.xml` offset; a worn attachment parents to the
     /// node for its point so it seats at the stored local offset from the joint.
     /// Absent for a sphere-only (no `--viewer-assets`) avatar.
     attachment_nodes: HashMap<AgentKey, HashMap<u8, Entity>>,
+    /// The camera's head-focus socket entity per rigged avatar (Phase 4 §5.4):
+    /// a root child the pose driver's socket writer places at the posed `mHead`
+    /// joint each frame, so the camera holds the animated head without a head
+    /// joint entity. Absent for a sphere-only avatar; despawned with the anchor.
+    head_sockets: HashMap<AgentKey, Entity>,
     /// Resolved names, keyed by agent id — the "simple name cache" that keeps
     /// a repeatedly-seen avatar from being re-requested; merged from the
     /// NameValue seed, the legacy `UUIDNameReply` and the display-name cap.
@@ -786,6 +774,15 @@ pub(crate) struct AvatarBody {
     /// Each joint's parent index (`None` for a root), parallel to
     /// [`joint_locals`](Self::joint_locals).
     joint_parents: Vec<Option<usize>>,
+    /// Each joint's **unshaped rest** world matrix (avatar Second Life frame),
+    /// computed once from the default skeleton via
+    /// [`BevySkeleton::deformed_world_matrices`](sl_client_bevy::BevySkeleton::deformed_world_matrices)
+    /// — the initial placement every socket entity (head socket, attachment-point
+    /// nodes, rigid base parts) is seeded with at spawn (§5.4), so a socket is at
+    /// its joint (not the avatar root/feet) from frame 1, before the pose driver
+    /// first runs. Refined to the shaped/animated pose by the socket writer once
+    /// the avatar's appearance resolves.
+    rest_world: Vec<Mat4>,
     /// The rest shape's root drop (Second Life Z, metres): how far below the
     /// reported wire Z (the physics-capsule centre) the body root is planted
     /// until the avatar's own appearance resolves (R23). From
@@ -815,9 +812,30 @@ pub(crate) struct AvatarBody {
     /// [`joint_locals`](Self::joint_locals) — so the rigged-mesh bind can report
     /// whether a rig is *fitted* (binds the volumes the shape displaces, P34.3).
     joint_is_volume: Vec<bool>,
+    /// The single shared **inert dummy joint** entity (Phase 4): every avatar /
+    /// worn-rig `SkinnedMesh` binds all its palette slots to this one entity in
+    /// place of the removed per-avatar joint entities. It carries an identity
+    /// `GlobalTransform` that is never written — the GPU-avatar compute pass
+    /// overwrites the real palette in `SkinUniforms` directly (§1.3(f)), so what
+    /// the dummy's transform would skin to never reaches the screen. Spawned
+    /// once at [`setup_avatar_body`]; excluded from all avatar iteration (it
+    /// carries no [`AvatarBodyPart`] or avatar marker).
+    dummy_joint: Entity,
 }
 
 impl AvatarBody {
+    /// The single shared inert dummy joint every avatar / worn-rig `SkinnedMesh`
+    /// binds its palette slots to (Phase 4; see [`Self::dummy_joint`]).
+    pub(crate) const fn dummy_joint(&self) -> Entity {
+        self.dummy_joint
+    }
+
+    /// How many joints the standard skeleton has (the dummy-joint palette
+    /// length for a full-skeleton bind).
+    pub(crate) const fn skeleton_joint_count(&self) -> usize {
+        self.joint_parents.len()
+    }
+
     /// The skeleton joint index a rigged mesh's joint name binds to, resolving a
     /// canonical name or an alias like the base body does (P17.2). `None` for a
     /// name the standard skeleton does not carry.
@@ -832,6 +850,16 @@ impl AvatarBody {
     pub(crate) fn is_collision_volume(&self, name: &str) -> bool {
         self.joint_index(name)
             .is_some_and(|index| self.joint_is_volume.get(index).copied().unwrap_or(false))
+    }
+
+    /// The skeleton joint index a raw attachment-point id hangs from and its
+    /// fixed local `avatar_lad.xml` offset (Second Life Z-up) — the socket
+    /// writer (§5.4) composes the two to place a worn attachment-point node
+    /// under the avatar root. `None` for a point the body does not define.
+    pub(crate) fn attachment_point(&self, point_id: u8) -> Option<(usize, Transform)> {
+        self.attachment_points
+            .get(&point_id)
+            .map(|point| (point.joint_index, point.offset))
     }
 
     /// The skeleton joint index a **rigid** base part (the eyeballs) is pinned to,
@@ -854,31 +882,6 @@ impl AvatarBody {
     /// viewer's `addAttachmentOverridesForObject`).
     pub(crate) fn joint_overrides(&self, skin: &MeshSkin) -> JointOverrides {
         joint_position_overrides(skin, &self.joint_lookup, &self.joint_locals)
-    }
-
-    /// Spawn a **bare** skeleton instance — one joint entity per skeleton joint,
-    /// in joint order, parented into the hierarchy under `root` — with no base-body
-    /// parts, attachment nodes, or name tag. Used by the animesh control avatar
-    /// (P29), which drives the standard skeleton for a scripted linkset that has no
-    /// wearer, so it needs the joints but none of the avatar body chrome.
-    ///
-    /// The joints carry no [`AvatarJoint`] marker (a control avatar is not an
-    /// agent-keyed avatar and is not touched by the appearance pass); the caller
-    /// owns them via the returned list and despawns them with the `root`
-    /// sub-hierarchy. Mirrors the joint-spawning half of [`AvatarState::spawn_body`].
-    pub(crate) fn spawn_bare_skeleton(&self, root: Entity, commands: &mut Commands) -> Vec<Entity> {
-        let joints: Vec<Entity> = self
-            .joint_locals
-            .iter()
-            .map(|local| commands.spawn((*local, Visibility::default())).id())
-            .collect();
-        for (entity, parent) in joints.iter().zip(self.joint_parents.iter().copied()) {
-            let target = parent
-                .and_then(|index| joints.get(index).copied())
-                .unwrap_or(root);
-            commands.entity(*entity).insert(ChildOf(target));
-        }
-        joints
     }
 }
 
@@ -964,11 +967,29 @@ pub(crate) fn setup_avatar_body(
     }
     let skeleton = library.skeleton();
     let part_count = parts.len();
+    // The single shared inert dummy joint every avatar / worn-rig `SkinnedMesh`
+    // binds to (Phase 4): an identity global that is never written — the
+    // GPU-avatar compute overwrites the real palette in `SkinUniforms` directly.
+    let dummy_joint = commands
+        .spawn((
+            Transform::default(),
+            GlobalTransform::IDENTITY,
+            Visibility::Hidden,
+        ))
+        .id();
     commands.insert_resource(AvatarBody {
         material,
         parts,
+        dummy_joint,
         joint_locals: skeleton.local_transforms().to_vec(),
         joint_parents: skeleton.parents().to_vec(),
+        // The unshaped rest world matrices, for seeding socket entities at spawn.
+        rest_world: skeleton.deformed_world_matrices(
+            &SkeletalDeformations::default(),
+            &VolumeDeformations::default(),
+            &JointOverrides::default(),
+            &AnimationPose::default(),
+        ),
         joint_lookup: skeleton.lookup().clone(),
         joint_is_volume: (0..skeleton.len())
             .map(|index| skeleton.is_collision_volume(index))
@@ -1153,9 +1174,14 @@ const AVATAR_HOVER_PARAM: i32 = 11001;
 /// `SL_VIEWER_CAMERA_DISTANCE` sets how far back to stand (default 3 m).
 ///
 /// Runs after the fly-camera (so it overrides the login snap and the input pose).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries"
+)]
 pub(crate) fn focus_camera_on_volume_shape(
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
+    library: Option<Res<AvatarAssetLibrary>>,
     roots: Query<&GlobalTransform>,
     mut mode: ResMut<crate::camera::CameraMode>,
     mut camera: Query<
@@ -1198,13 +1224,26 @@ pub(crate) fn focus_camera_on_volume_shape(
     // where the posed skeleton (and therefore the rendered mesh body) actually is,
     // and its world rotation gives the direction the avatar faces. The anchor's
     // rotation is not a reliable basis for that.
-    let Some(chest) = body.as_ref().and_then(|body| {
+    // Resolve the chest world from a one-shot rest solve of the shaped skeleton
+    // (Phase 4 removed the joint entities), composed with the avatar-root global
+    // — its translation is chest height, its rotation the avatar's facing.
+    let Some(global) = body.as_ref().and_then(|body| {
         let index = body.joint_index("mChest")?;
-        state.joint_entities_of(agent)?.get(index).copied()
+        let root = state.body_root_of(agent)?;
+        let root_global = roots.get(root).ok()?;
+        let deform = state.deformations(agent)?;
+        let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
+        let world = library.as_deref()?.skeleton().deformed_world_matrices(
+            deform,
+            &VolumeDeformations::default(),
+            &overrides,
+            &AnimationPose::default(),
+        );
+        let chest_sl = world.get(index)?;
+        Some(GlobalTransform::from(Transform::from_matrix(
+            root_global.to_matrix().mul_mat4(chest_sl),
+        )))
     }) else {
-        return;
-    };
-    let Ok(global) = roots.get(chest) else {
         return;
     };
     let Ok((mut transform, mut rig)) = camera.single_mut() else {
@@ -1335,11 +1374,12 @@ fn spawn_body_part(
     part: &BodyPart,
     index: usize,
     agent: AgentKey,
-    joints: &[Entity],
+    body: &AvatarBody,
     root: Entity,
-    material: &Handle<FaceMaterial>,
     commands: &mut Commands,
 ) {
+    let material = &body.material;
+    let rest_world = &body.rest_world;
     let marker = AvatarBodyPart {
         agent,
         part: index,
@@ -1358,14 +1398,19 @@ fn spawn_body_part(
             inverse_bindposes,
             joint_map,
         } => {
-            let Some(part_joints) = joint_map
+            // The canonical skeleton joint index of each palette slot, for the
+            // GPU-avatar real-skin resolver (`crate::gpu_avatars::GpuSkinBinding`):
+            // the part's own `joint_map`. A slot whose index does not fit `u32`
+            // (never in a real skeleton) drops the whole binding below.
+            let canonical: Option<Vec<u32>> = joint_map
                 .iter()
-                .map(|&index| joints.get(index).copied())
-                .collect::<Option<Vec<Entity>>>()
-            else {
-                return;
-            };
-            commands.spawn((
+                .map(|&index| u32::try_from(index).ok())
+                .collect();
+            // Phase 4: every palette slot binds to the single shared dummy joint
+            // — the GPU compute overwrites the real palette in place, so the
+            // skinned entities carry no per-avatar joint entities at all.
+            let part_joints = vec![body.dummy_joint; joint_map.len()];
+            let mut spawned = commands.spawn((
                 Mesh3d(part.mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
@@ -1385,21 +1430,37 @@ fn spawn_body_part(
                 // its wearer. See [`AvatarPickTarget`].
                 AvatarPickTarget { agent },
             ));
+            if let Some(canonical) = canonical {
+                spawned.insert(crate::gpu_avatars::GpuSkinBinding {
+                    slot: crate::gpu_avatars::PoseSlotKey::Avatar(agent),
+                    canonical: std::sync::Arc::from(canonical),
+                });
+            }
         }
         BodyPartBinding::Rigid(joint_index) => {
-            let Some(joint) = joints.get(*joint_index).copied() else {
+            // Skip a rigid part whose joint the skeleton lacks; the part hangs
+            // off the avatar root and the pose driver's socket writer places it
+            // at its posed joint each frame (Phase 4 §5.4).
+            if *joint_index >= body.joint_parents.len() {
                 return;
-            };
+            }
+            // Seed the rigid part at its unshaped rest joint world so it sits in
+            // place (eyes in the head, not at the root) from frame 1; the socket
+            // writer refines it to the shaped/animated pose each frame.
+            let rest_transform = rest_world
+                .get(*joint_index)
+                .copied()
+                .map_or_else(Transform::default, Transform::from_matrix);
             commands.spawn((
                 Mesh3d(part.mesh.clone()),
                 MeshMaterial3d(material.clone()),
-                Transform::default(),
+                rest_transform,
                 initial,
                 // Match the skinned parts: never frustum-cull an avatar part, so a
                 // close camera can pass through the body the way it does in Second
                 // Life instead of the part popping out of view.
                 NoFrustumCulling,
-                ChildOf(joint),
+                ChildOf(root),
                 marker,
                 // Reusable avatar identity: a ray hitting this part resolves to
                 // its wearer. See [`AvatarPickTarget`].
@@ -1427,40 +1488,33 @@ fn placeholder_sphere_mesh() -> Mesh {
 /// the crown ([`HEAD_TOP_MARGIN`]) and quantised to a 1 cm grid so idle
 /// breathe/sway cannot churn the tag target every frame.
 ///
-/// (Until the Phase 4 joint-entity removal, the joints this reads are the
-/// CPU-written — in the GPU in-place path, frozen rest-pose — globals; the
-/// tag height only needs the avatar's standing extent, which those carry.)
+/// The standing extent comes from the analytic
+/// [`BevySkeleton::body_size_metrics`](sl_client_bevy::BevySkeleton::body_size_metrics)
+/// — the reference's sole-to-head-top height resolved from the avatar's
+/// appearance deformation and rig overrides — so no per-joint entity read is
+/// needed (Phase 4 removes the joint entities).
 pub(crate) fn fit_avatar_tag_heights(
     avatars: Res<AvatarState>,
-    globals: Query<&GlobalTransform>,
+    library: Option<Res<AvatarAssetLibrary>>,
     mut tags: Query<&mut NameTag>,
 ) {
+    let Some(library) = library else {
+        return;
+    };
+    let skeleton = library.skeleton();
     for (agent, _anchor, _tag) in avatars.labelled_avatars() {
-        let (Some(root), Some(joints)) = (
-            avatars.body_root_of(agent),
-            avatars.joint_entities_of(agent),
-        ) else {
+        let Some(deform) = avatars.deformations(agent) else {
             continue;
         };
-        let Ok(root_global) = globals.get(root) else {
+        let overrides = avatars.effective_joint_overrides(agent).unwrap_or_default();
+        // The reference sole-to-head-top standing height (Second Life Z-up
+        // metres above the avatar root), grown to the crown and quantised to a
+        // 1 cm grid so idle breathe/sway cannot churn the tag target.
+        let Some(metrics) = skeleton.body_size_metrics(deform, &overrides) else {
             continue;
         };
-        // Joint heights in the root's own (Second Life, Z-up) frame, via its
-        // inverse — the `z` component is the vertical one here.
-        let to_local = root_global.affine().inverse();
-        let mut max_z = f32::NEG_INFINITY;
-        for joint in joints {
-            let Ok(joint_global) = globals.get(*joint) else {
-                continue;
-            };
-            let z = to_local.transform_point3(joint_global.translation()).z;
-            max_z = max_z.max(z);
-        }
-        if !max_z.is_finite() {
-            continue;
-        }
         let quantise = |value: f32| (value * 100.0).round() / 100.0;
-        let top = quantise(max_z + HEAD_TOP_MARGIN);
+        let top = quantise(metrics.body_size_z + HEAD_TOP_MARGIN);
         if let Some(label) = avatars.label_of(agent)
             && let Ok(mut tag) = tags.get_mut(label)
         {
@@ -1717,7 +1771,7 @@ impl AvatarState {
         body: &AvatarBody,
         region_offset: Vec3,
         commands: &mut Commands,
-    ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
+    ) -> (AvatarEntities, HashMap<u8, Entity>, Entity) {
         let root_drop = self
             .root_drops
             .get(&agent)
@@ -1729,58 +1783,67 @@ impl AvatarState {
                 Visibility::default(),
                 AvatarAnchor,
                 // Avatars are dynamic content for reflection probes: propagate the
-                // dynamic probe layer to the whole skeleton / body-part / worn-
-                // attachment subtree hanging off this body root (a separate root,
-                // so the object entity's own `Propagate` does not reach it). A worn
+                // dynamic probe layer to the whole body-part / worn-attachment
+                // subtree hanging off this body root (a separate root, so the
+                // object entity's own `Propagate` does not reach it). A worn
                 // attachment carries its own `Propagate` and so overrides this with
                 // the static-geometry layer — acceptable, and only visible when the
                 // dynamic-content setting is off.
                 Propagate(dynamic_render_layers()),
             ))
             .id();
-        // A fresh joint entity per skeleton joint, parented in a second pass once
-        // all entities exist (a parent always precedes its children, but building
-        // first keeps the parenting simple). Each carries an [`AvatarJoint`]
-        // marker so the appearance system can re-deform it (P13.4).
-        let joints: Vec<Entity> = body
-            .joint_locals
-            .iter()
-            .enumerate()
-            .map(|(index, local)| {
-                commands
-                    .spawn((*local, Visibility::default(), AvatarJoint { agent, index }))
-                    .id()
-            })
-            .collect();
-        for (entity, parent) in joints.iter().zip(body.joint_parents.iter().copied()) {
-            let target = parent
-                .and_then(|index| joints.get(index).copied())
-                .unwrap_or(root);
-            commands.entity(*entity).insert(ChildOf(target));
-        }
+        // Phase 4: no per-avatar joint entities are spawned — each skinned base
+        // part binds its palette slots to the single shared dummy joint and is
+        // GPU-posed in place (`crate::gpu_avatars`).
         for (index, part) in body.parts.iter().enumerate() {
-            spawn_body_part(part, index, agent, &joints, root, &body.material, commands);
+            spawn_body_part(part, index, agent, body, root, commands);
         }
-        // One attachment-point node per point, parented to its joint at the fixed
-        // `avatar_lad.xml` offset (P16.2). A worn attachment then parents to the
-        // node for its point and carries only its own local transform, matching
-        // the reference viewer's joint → attachment-point → object chain.
+        // One attachment-point node per point, hanging off the avatar root at the
+        // fixed `avatar_lad.xml` offset (Phase 4 §5.4). A worn attachment then
+        // parents to the node for its point and carries only its own local
+        // transform; the socket writer places the node at its joint each frame,
+        // matching the reference viewer's joint → attachment-point → object chain.
         let attachment_nodes: HashMap<u8, Entity> = body
             .attachment_points
             .iter()
             .filter_map(|(&point_id, point)| {
-                let joint = joints.get(point.joint_index).copied()?;
+                // Skip a point whose joint the skeleton lacks.
+                if point.joint_index >= body.joint_parents.len() {
+                    return None;
+                }
+                // Seed the node at its unshaped rest joint × the fixed offset, so
+                // it sits at the joint from frame 1 (the socket writer refines it
+                // to the shaped/animated pose once the appearance resolves).
+                let initial = body
+                    .rest_world
+                    .get(point.joint_index)
+                    .map_or(point.offset, |world| {
+                        Transform::from_matrix(world.mul_mat4(&point.offset.to_matrix()))
+                    });
                 let node = commands
                     .spawn((
-                        point.offset,
+                        initial,
                         Visibility::default(),
                         AttachmentPointNode,
-                        ChildOf(joint),
+                        ChildOf(root),
                     ))
                     .id();
                 Some((point_id, node))
             })
             .collect();
+        // The camera's head-focus socket (Phase 4 §5.4): a root child whose
+        // local `Transform` the socket writer sets to the posed `mHead` joint
+        // each frame, so the camera holds the animated head without a head joint
+        // entity. Seeded at the unshaped rest `mHead` world so the camera focuses
+        // the head — never the avatar root/feet — from frame 1, before the pose
+        // driver first runs (the feet-then-jump fix).
+        let head_local = body
+            .joint_index("mHead")
+            .and_then(|index| body.rest_world.get(index).copied())
+            .map_or_else(Transform::default, Transform::from_matrix);
+        let head_socket = commands
+            .spawn((head_local, Visibility::default(), ChildOf(root)))
+            .id();
         // (The old invisible pick-collider box is gone: the GPU ID-buffer
         // pick — `crate::gpu_pick` — picks the drawn, GPU-posed pixels
         // directly, so no rigid stand-in volume is needed.)
@@ -1792,8 +1855,8 @@ impl AvatarState {
                 anchor: root,
                 label,
             },
-            joints,
             attachment_nodes,
+            head_socket,
         )
     }
 
@@ -1999,13 +2062,14 @@ impl AvatarState {
         self.request_name(agent);
         let entities = match body {
             Some(body) => {
-                let (entities, joints, attachment_nodes) =
+                let (entities, attachment_nodes, head_socket) =
                     self.spawn_body(agent, object, body, region_offset, commands);
-                // Record the joint entities and per-point attachment nodes so a
-                // worn attachment can be parented at the right joint offset once it
-                // arrives (P16.1/P16.2).
-                self.joints.insert(agent, joints);
+                // Record the per-point attachment nodes so a worn attachment can be
+                // seated at the right joint offset once it arrives (P16.2), plus
+                // the camera's head-focus socket. The head socket's presence is the
+                // rigged-avatar marker (Phase 4 removed the joint entities).
                 self.attachment_nodes.insert(agent, attachment_nodes);
+                let _prev = self.head_sockets.insert(agent, head_socket);
                 entities
             }
             None => self.spawn_sphere(
@@ -2045,12 +2109,12 @@ impl AvatarState {
         if let Some(entities) = self.objects.remove(&agent) {
             despawn_avatar(entities, commands);
         }
-        // The body's joint entities and attachment-point nodes are despawned with
+        // The body's attachment-point nodes and head socket are despawned with
         // its anchor; drop the stores so a later attachment can no longer resolve
-        // them (P16.1/P16.2). The recorded joint overrides go too, so a re-spawn
+        // them (P16.2). The recorded joint overrides go too, so a re-spawn
         // rebuilds them from the meshes that re-bind (R1).
-        let _dropped = self.joints.remove(&agent);
         let _dropped_nodes = self.attachment_nodes.remove(&agent);
+        let _dropped_head = self.head_sockets.remove(&agent);
         let _dropped_deform = self.deformations.remove(&agent);
         let _dropped_volumes = self.volume_deformations.remove(&agent);
         let _dropped_physics = self.body_physics.remove(&agent);
@@ -2152,27 +2216,36 @@ impl AvatarState {
         self.objects.get(&agent).map(|entities| entities.anchor)
     }
 
-    /// The skeleton-instance joint entities (in joint order) of `agent`'s avatar
-    /// (P17.2): the entities a worn rigged mesh's `SkinnedMesh` binds to, indexed by
-    /// skeleton joint index. `None` if that avatar has no rigged body (a sphere-only,
-    /// no-`--viewer-assets` avatar, or simply not spawned yet).
-    pub(crate) fn joint_entities_of(&self, agent: AgentKey) -> Option<&Vec<Entity>> {
-        self.joints.get(&agent)
+    /// Whether `agent` has a spawned rigged body (Phase 4: keyed on the presence
+    /// of the head socket, spawned with the body — the joint entities the old
+    /// `joint_entities_of` returned are gone). `false` for a sphere-only
+    /// (no-`--viewer-assets`) avatar or one not spawned yet.
+    pub(crate) fn is_rigged(&self, agent: AgentKey) -> bool {
+        self.head_sockets.contains_key(&agent)
     }
 
-    /// The attachment-point node entities of `agent`'s rigged avatar (P16.2),
-    /// in no particular order — the GPU-avatar real path's socket scan walks
-    /// them to find which attachment-point joints carry a worn subtree and
-    /// must therefore stay CPU-written while the skinning joints are frozen.
-    /// Empty for an avatar with no rigged body.
-    pub(crate) fn attachment_node_entities(
+    /// The per-point attachment-point node entities of `agent`'s rigged avatar
+    /// as `(raw attachment-point id, node entity)` pairs — the socket writer
+    /// (§5.4) places each worn node at its joint's posed world composed with the
+    /// point's fixed `avatar_lad.xml` offset each frame. Empty for an avatar
+    /// with no rigged body.
+    pub(crate) fn attachment_nodes_of(
         &self,
         agent: AgentKey,
-    ) -> impl Iterator<Item = Entity> + '_ {
+    ) -> impl Iterator<Item = (u8, Entity)> + '_ {
         self.attachment_nodes
             .get(&agent)
             .into_iter()
-            .flat_map(|nodes| nodes.values().copied())
+            .flat_map(|nodes| nodes.iter().map(|(&point_id, &entity)| (point_id, entity)))
+    }
+
+    /// The camera's head-focus socket entity of `agent`'s rigged avatar
+    /// (Phase 4 §5.4): a root child the socket writer places at the posed
+    /// `mHead` joint each frame, so the camera reads the animated head without a
+    /// head joint entity. `None` for a sphere-only avatar or before the body
+    /// spawns.
+    pub(crate) fn head_socket_of(&self, agent: AgentKey) -> Option<Entity> {
+        self.head_sockets.get(&agent).copied()
     }
 
     /// The resolved skeletal deformations the animation driver (P18.3) folds a
@@ -2191,14 +2264,12 @@ impl AvatarState {
         self.volume_deformations.get(&agent)
     }
 
-    /// Every avatar with a spawned rigged-body skeleton instance (P18.3): the
-    /// driver writes each one's joint world matrices every frame — its animated
-    /// pose or its plain deformed rest — so an avatar returns to rest when its
-    /// animations stop and overlapping animations compose without a per-animation
-    /// reset (Bevy's dirty-bit propagation cannot un-freeze a joint whose global
-    /// the driver overwrote).
+    /// Every avatar with a spawned rigged body (Phase 4: keyed on the head
+    /// socket, since the joint entities are gone). The pose driver publishes each
+    /// one's root + adjuster corrections and places its sockets every frame; the
+    /// GPU samples, blends and FK-poses the skinning in place.
     pub(crate) fn rigged_agents(&self) -> Vec<AgentKey> {
-        self.joints.keys().copied().collect()
+        self.head_sockets.keys().copied().collect()
     }
 
     /// Note that `agent` wears the rigged mesh asset `mesh` (for the avatar-state
@@ -2423,8 +2494,8 @@ impl AvatarState {
         // Retain only the own agent on the per-agent bookkeeping.
         self.coarse_region.retain(|agent, _| keep(agent));
         self.coarse_pos.retain(|agent, _| keep(agent));
-        self.joints.retain(|agent, _| keep(agent));
         self.attachment_nodes.retain(|agent, _| keep(agent));
+        self.head_sockets.retain(|agent, _| keep(agent));
         self.names.retain(|agent, _| keep(agent));
         self.titles.retain(|agent, _| keep(agent));
         self.requested.retain(keep);
@@ -3967,15 +4038,13 @@ pub(crate) fn apply_avatar_appearance(
     mut commands: Commands,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
     mut parts: Query<(Entity, &AvatarBodyPart, &mut Mesh3d)>,
-    mut joints: Query<(&AvatarJoint, &mut Transform)>,
     // The rigged body roots, re-planted when their shoe lift changes (R17);
-    // disjoint from `joints` (never an `AvatarJoint`) and from the sphere anchors.
+    // disjoint from the sphere anchors and the body parts.
     mut anchors: Query<
         &mut Transform,
         (
             With<AvatarAnchor>,
             Without<AvatarSphere>,
-            Without<AvatarJoint>,
             Without<AvatarBodyPart>,
         ),
     >,
@@ -4106,7 +4175,6 @@ pub(crate) fn apply_avatar_appearance(
     // apart from the baked shape so a part's render-time morph targets start at
     // the avatar's own resolved values rather than zero.
     let mut runtime_weights: HashMap<AgentKey, MorphWeights> = HashMap::new();
-    let mut joint_transforms: HashMap<AgentKey, Vec<Transform>> = HashMap::new();
     let mut deformations: HashMap<AgentKey, SkeletalDeformations> = HashMap::new();
     // The per-avatar root drop resolved from the shape (R23).
     let mut root_drops: HashMap<AgentKey, f32> = HashMap::new();
@@ -4161,12 +4229,6 @@ pub(crate) fn apply_avatar_appearance(
             // fitted mesh body/head poses the skeleton to the positions its
             // inverse-bind matrices were baked against, rather than the plain shape.
             let overrides = state.effective_joint_overrides(agent).unwrap_or_default();
-            joint_transforms.insert(
-                agent,
-                library
-                    .skeleton()
-                    .deformed_local_transforms_with(&deform, &volume, &overrides),
-            );
             // The shape's root plant (R23): the `computeBodySize` quantities of
             // the deformed (and override-posed) chain, lifted by the shape's
             // `Hover` param, decide how far below the wire Z (the capsule
@@ -4309,25 +4371,13 @@ pub(crate) fn apply_avatar_appearance(
             morphed_parts = morphed_parts.saturating_add(1);
         }
     }
-    // Re-set every joint transform of a resolved avatar's skeleton instance.
-    // Write-on-change: a re-apply with an unchanged shape re-derives identical
-    // transforms, and an unguarded write would dirty the whole avatar transform
-    // tree — which makes Bevy propagation revert the pose driver's joint
-    // globals to rest and forces the pose gate to re-evaluate (see
-    // `log_pose_gate_churn`).
-    let mut deformed_joints = 0_usize;
-    for (joint, mut transform) in &mut joints {
-        if let Some(transforms) = joint_transforms.get(&joint.agent)
-            && let Some(deformed) = transforms.get(joint.index)
-            && *transform != *deformed
-        {
-            *transform = *deformed;
-            deformed_joints = deformed_joints.saturating_add(1);
-        }
-    }
-    if morphed_parts > 0 || deformed_joints > 0 {
+    // Phase 4: there are no per-avatar joint entities to re-set — the resolved
+    // deformations recorded above feed the GPU-avatar rest solve
+    // (`compose_rest_joints`), which the staging pass re-composes on the
+    // `pose_inputs_generation` bump `bump_pose_inputs` raised.
+    if morphed_parts > 0 {
         debug!(
-            "shaped {morphed_parts} body part(s) + {deformed_joints} joint(s) across {} avatar(s)",
+            "shaped {morphed_parts} body part(s) across {} avatar(s)",
             morph_weights.len()
         );
     }

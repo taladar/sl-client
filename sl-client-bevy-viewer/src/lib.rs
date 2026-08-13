@@ -272,10 +272,10 @@ use crate::about_land::AboutLandPlugin;
 use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
-    poll_animations, pose_attachment_nodes, pose_avatar_skeletons, update_animation_caps,
+    poll_animations, pose_avatar_skeletons, update_animation_caps,
 };
 use crate::animesh::{
-    ControlAvatarState, drive_control_avatars, ingest_object_animations, pose_control_avatars,
+    ControlAvatarState, drive_control_avatars, ingest_object_animations, publish_control_avatars,
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::attachment_menu::AttachmentMenuPlugin;
@@ -367,8 +367,8 @@ use crate::objects::{
     PendingObjectEvents, PrimLodTargets, RiggedBindSkipLog, SpawnBudget, TreeLodTargets,
     adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
     apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
-    pick_worn_attachment, prune_control_avatars, recenter_objects, reset_geometry_apply_budget,
-    reset_lod_apply_budget, spawn_animesh_control_avatars, update_objects,
+    prune_control_avatars, recenter_objects, reset_geometry_apply_budget, reset_lod_apply_budget,
+    spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1596,7 +1596,6 @@ fn run_session(
         .init_resource::<PendingPatchRebuilds>()
         .init_resource::<TerrainRebuildBudget>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
-        .init_resource::<crate::animations::PoseGate>()
         .init_resource::<ObjectState>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<SpawnBudget>()
@@ -2024,7 +2023,6 @@ fn run_session(
             Update,
             (
                 pick_object.run_if(world_has_keyboard),
-                pick_worn_attachment.run_if(world_has_keyboard),
                 // The screen-space HUD (P35.2): keep each HUD point anchored to its
                 // corner of the viewport as the window's aspect changes, and render every
                 // HUD face fullbright (the reference forces `LLFace::FULLBRIGHT` on a HUD
@@ -2262,11 +2260,16 @@ fn run_session(
             PostUpdate,
             (
                 pose_avatar_skeletons.after(TransformSystems::Propagate),
-                pose_control_avatars.after(TransformSystems::Propagate),
-                // Re-place worn rigid attachments (earrings, piercings) from the
-                // joint globals `pose_avatar_skeletons` just wrote — propagation ran
-                // before the driver, so without this they freeze at the rest pose.
-                pose_attachment_nodes.after(pose_avatar_skeletons),
+                // Publish each animesh control avatar's pose slot to the GPU
+                // feed (its object world matrix + empty corrections) after
+                // propagation, so the GPU samples/blends/FK-poses it in place
+                // (§5) — no per-object joint entities remain.
+                publish_control_avatars.after(TransformSystems::Propagate),
+                // (Worn rigid attachments no longer need a hand re-propagation:
+                // their attachment-point node is an avatar-root child whose local
+                // `Transform` the pose driver's socket writer sets each frame, so
+                // ordinary change-gated propagation seats the worn subtree — the
+                // former `pose_attachment_nodes` pass, Phase 4 §5.4.)
                 // Object floating text placement (viewer-hover-text): read the
                 // object's freshly-propagated world pose and lift the text by
                 // 0.6 × the prim's Z scale in world up (the billboard's own
@@ -2336,14 +2339,6 @@ fn run_session(
         // Aim the camera at the avatar whose shape displaces its collision
         // volumes the most (P34.3).
         app.add_systems(Update, focus_camera_on_volume_shape.after(position_camera));
-    }
-    if std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
-        // The pose-gate churn tracer, before the driver so it reports the same
-        // frame's Transform churn the gate reacts to.
-        app.add_systems(
-            PostUpdate,
-            crate::animations::log_pose_gate_churn.before(pose_avatar_skeletons),
-        );
     }
     if std::env::var_os(crate::notification_host::DEMO_ENV).is_some() {
         // Raise a sample notification spread on startup so the live stacking /

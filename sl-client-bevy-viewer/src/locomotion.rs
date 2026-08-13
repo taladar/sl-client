@@ -149,7 +149,7 @@ pub(crate) fn drive_own_locomotion(
     };
     // Only a rigged own avatar has a skeleton to pose; a placeholder sphere gains
     // nothing, so do not fetch locomotion assets for it.
-    if avatars.joint_entities_of(own).is_none() {
+    if !avatars.is_rigged(own) {
         playback.set_client_locomotion(own, None, now);
         log_state(&mut last_state, None);
         return;

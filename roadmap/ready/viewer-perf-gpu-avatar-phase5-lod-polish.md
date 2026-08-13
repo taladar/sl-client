@@ -2,10 +2,9 @@
 id: viewer-perf-gpu-avatar-phase5-lod-polish
 title: GPU avatars Phase 5 — LOD, scalability hooks, polish
 topic: viewer
-status: blocked
+status: ready
 origin: GPU-avatar design (2026-08-12), context/gpu-avatars.md §8, §7 Phase 5
 refs: [viewer-perf-gpu-avatar-crowd, viewer-perf-animation-lod-pose-cache, viewer-avatar-impostors-billboard]
-blocked_by: [viewer-perf-gpu-avatar-phase4-remove-scaffolding]
 ---
 
 Context: [context/gpu-avatars.md](../context/gpu-avatars.md) §8, §7 "Phase 5".

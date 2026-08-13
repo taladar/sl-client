@@ -38,7 +38,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::ecs::system::SystemParam;
-use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_anim::{
@@ -481,11 +480,6 @@ pub(crate) struct AnimationPlayback {
     /// drivable animation appear). An avatar absent here keeps its plain deformed
     /// rest pose, produced by ordinary transform propagation.
     poses: HashMap<AgentKey, AnimationPose>,
-    /// A per-avatar counter bumped whenever the avatar's resolved pose *changed*
-    /// from the previous frame — including gaining or losing a pose entirely. A
-    /// held pose (a single-frame AO stand) keeps its tick, so the pose gate can
-    /// skip the skeleton fold; any animating joint bumps it every frame.
-    pose_ticks: HashMap<AgentKey, u64>,
 }
 
 impl AnimationPlayback {
@@ -953,7 +947,6 @@ fn mini_pose_subset(
     state: &AvatarState,
     hooks: &GpuAvatarHooks<'_, '_>,
     agent: AgentKey,
-    joints: &[Entity],
 ) -> HashSet<usize> {
     let mut targets: Vec<usize> = ADJUSTER_JOINT_NAMES
         .iter()
@@ -964,9 +957,10 @@ fn mini_pose_subset(
             targets.push(index);
         }
     }
-    for node in state.attachment_node_entities(agent) {
+    for (point_id, node) in state.attachment_nodes_of(agent) {
         // Worn = the node carries an attachment subtree (the same test the
-        // socket writer applies).
+        // socket writer applies). The node is a root child now (§5.4), so its
+        // joint comes from the point's `avatar_lad.xml` binding, not its parent.
         let worn = hooks
             .children
             .get(node)
@@ -974,12 +968,8 @@ fn mini_pose_subset(
         if !worn {
             continue;
         }
-        let Ok(child_of) = hooks.parents.get(node) else {
-            continue;
-        };
-        let joint_entity = child_of.parent();
-        if let Some(index) = joints.iter().position(|&joint| joint == joint_entity) {
-            targets.push(index);
+        if let Some((joint_index, _offset)) = body.attachment_point(point_id) {
+            targets.push(joint_index);
         }
     }
     // The ancestor closure (parents precede children in canonical order; a
@@ -1092,19 +1082,19 @@ pub(crate) fn drive_avatar_skeletons(
     agents.extend(playback.client_typing.keys().copied());
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
     for agent in agents {
-        // Only a rigged avatar (with skeleton-instance joints) can be posed.
-        let Some(joints) = state.joint_entities_of(agent) else {
+        // Only a rigged avatar (with a spawned body) can be posed.
+        if !state.is_rigged(agent) {
             continue;
-        };
+        }
         let merged = merge_playing(
             playback.playing.get(&agent),
             playback.client_locomotion.get(&agent),
             playback.client_typing.get(&agent),
         );
         let subset = if gpu_real {
-            library.as_deref().map(|library| {
-                mini_pose_subset(library.skeleton(), &body, &state, &gpu, agent, joints)
-            })
+            library
+                .as_deref()
+                .map(|library| mini_pose_subset(library.skeleton(), &body, &state, &gpu, agent))
         } else {
             None
         };
@@ -1131,22 +1121,6 @@ pub(crate) fn drive_avatar_skeletons(
             debug!("animation: released avatar {agent} skeleton back to rest");
         }
     }
-    // Bump each avatar's pose tick when its resolved pose changed — including a
-    // pose appearing or disappearing (Some↔None) — so the pose gate re-evaluates
-    // exactly the avatars whose keyframe pose moved. Exact equality is the
-    // point: a held pose samples identically every frame and keeps its tick.
-    let changed: Vec<AgentKey> = poses
-        .keys()
-        .chain(playback.poses.keys())
-        .copied()
-        .collect::<HashSet<AgentKey>>()
-        .into_iter()
-        .filter(|agent| poses.get(agent) != playback.poses.get(agent))
-        .collect();
-    for agent in changed {
-        let tick = playback.pose_ticks.entry(agent).or_default();
-        *tick = tick.wrapping_add(1);
-    }
     playback.poses = poses;
 }
 
@@ -1159,178 +1133,31 @@ pub(crate) fn drive_avatar_skeletons(
 /// the GPU-avatar scheduler quantises pass B's `idle_now` to the same grid.
 pub(crate) const POSE_IDLE_HZ: f32 = 15.0;
 
-/// The pose gate's per-avatar skip stamp: when it matches the stored one — and
-/// every procedural adjuster reports settled, and the avatar's root anchor did
-/// not move — re-running the skeleton fold would rewrite every joint global
-/// with the values it already wrote, so the whole evaluation is skipped.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct PoseStamp {
-    /// The avatar's keyframe-pose change tick ([`AnimationPlayback::pose_ticks`]).
-    pose_tick: u64,
-    /// The quantised idle-clock value, as bits (a new tick moves every avatar).
-    idle_time_bits: u32,
-    /// The appearance-side inputs generation
-    /// ([`AvatarState::pose_inputs_generation`]).
-    inputs_generation: u64,
-    /// Whether the debug T-pose freeze was on (toggling it wakes everyone).
-    t_pose: bool,
-}
-
-/// The pose gate: per-avatar skip stamps plus the skip-rate meter
-/// (`SL_VIEWER_LOG_POSE_GATE=1`, the ui_perf `log_layout_skip_rate` pattern).
-/// Kill-switch: `SL_VIEWER_POSE_GATE=0` disables all skipping.
-#[derive(Resource, Default)]
-pub(crate) struct PoseGate {
-    /// The stamp each avatar was last evaluated at.
-    stamps: HashMap<AgentKey, PoseStamp>,
-    /// Avatar-frames evaluated since the last meter log.
-    evaluated: u64,
-    /// Avatar-frames skipped since the last meter log.
-    skipped: u64,
-    /// Wake-reason tallies for the evaluated frames (one frame can tally several
-    /// reasons), so the meter says *why* the gate is not skipping.
-    wake: WakeReasons,
-    /// Each avatar's root pose at its last evaluation, so the meter can report
-    /// how far an "anchor moved" wake actually moved — `0` on both exposes a
-    /// same-value dirtying writer, non-zero a genuine drift (server jitter).
-    anchor_positions: HashMap<AgentKey, (Vec3, Quat)>,
-    /// When (elapsed seconds) the meter logs next.
-    next_log: f32,
-}
-
-/// Why evaluated avatar-frames were not skipped, tallied per meter window.
-#[derive(Default)]
-struct WakeReasons {
-    /// The root anchor's `GlobalTransform` changed (the avatar moved / was moved).
-    anchor: u64,
-    /// An adjuster reported unsettled (look-at / reach / locomotion / physics /
-    /// saccade event).
-    unsettled: u64,
-    /// The keyframe pose tick moved (an animating joint).
-    pose_tick: u64,
-    /// The quantised idle clock ticked.
-    idle_tick: u64,
-    /// The appearance-side inputs generation moved.
-    inputs: u64,
-    /// No stored stamp yet (a freshly rigged avatar) or the T-pose flag flipped.
-    fresh: u64,
-    /// The largest anchor translation delta (metres) among the `anchor` wakes.
-    max_anchor_delta: f32,
-    /// The largest anchor rotation delta (radians) among the `anchor` wakes.
-    max_anchor_rot: f32,
-}
-
-/// Whether the pose gate may skip settled avatars (`SL_VIEWER_POSE_GATE`,
-/// default on; `0` forces every avatar to evaluate every frame — the A/B and
-/// escape hatch if a wake condition turns out to be missing).
-fn pose_gate_enabled() -> bool {
-    std::env::var("SL_VIEWER_POSE_GATE").as_deref() != Ok("0")
-}
-
-/// Env-gated (`SL_VIEWER_LOG_POSE_GATE=1`) churn tracer: any `Transform` change
-/// under an avatar root dirties the transform tree, and Bevy's propagation then
-/// **reverts the driver-written joint globals to rest** on a frame the pose gate
-/// skips (the T-pose flicker). This names the churning entities (~1 s throttle)
-/// so the writer can be fixed at the source.
-#[expect(
-    clippy::type_complexity,
-    reason = "one query classifying each changed entity by the avatar-subtree markers it carries"
-)]
-pub(crate) fn log_pose_gate_churn(
-    time: Res<Time>,
-    mut next_log: Local<f32>,
-    changed: Query<
-        (
-            Entity,
-            Has<crate::avatars::AvatarAnchor>,
-            Has<crate::avatars::AttachmentPointNode>,
-            Has<AvatarBodyPart>,
-        ),
-        Changed<Transform>,
-    >,
-    parents: Query<&ChildOf>,
-    anchors: Query<(), With<crate::avatars::AvatarAnchor>>,
-) {
-    if std::env::var("SL_VIEWER_LOG_POSE_GATE").is_err() {
-        return;
-    }
-    let now = time.elapsed_secs();
-    if now < *next_log {
-        return;
-    }
-    for (entity, is_anchor, is_node, is_part) in &changed {
-        // Walk up: is this entity under an avatar root?
-        let mut current = entity;
-        let mut under_avatar = is_anchor;
-        while let Ok(child_of) = parents.get(current) {
-            current = child_of.parent();
-            if anchors.get(current).is_ok() {
-                under_avatar = true;
-                break;
-            }
-        }
-        if under_avatar {
-            *next_log = now + 1.0;
-            info!(
-                "pose gate churn: {entity} changed Transform under an avatar root \
-                 (anchor={is_anchor} attachment_node={is_node} body_part={is_part})"
-            );
-        }
-    }
-}
-
 /// The GPU-avatar pipeline's hooks into the pose driver (`crate::gpu_avatars`),
 /// bundled into one system param:
 ///
-/// - the **pose feed**, which receives each avatar's FINAL blended pose
-///   (keyframes + idle + look-at + IK + physics — exactly what the recurrence
-///   below consumes) plus its root matrix, so the GPU FK reproduces this
-///   frame's CPU result;
-/// - the **mode**, deciding whether the in-place real path owns the skinning
-///   joints (freezing them) this run;
-/// - the attachment-node queries the real path's **socket scan** needs to
-///   find which attachment-point joints carry a worn subtree.
-///
-/// Both resources exist only while the GPU pipeline is registered; absent
-/// (the `cpu` override) the hooks cost nothing and the driver is
-/// byte-for-byte the legacy CPU path.
+/// - the **pose feed**, which receives each avatar's root matrix plus the
+///   sparse adjuster corrections pass B folds in;
+/// - the **mode**, whose capability-checked `active` flag says whether the
+///   in-place GPU path is running this device;
+/// - the attachment-node queries the **socket scan** needs to find which
+///   attachment-point nodes carry a worn subtree.
 #[derive(SystemParam)]
 pub(crate) struct GpuAvatarHooks<'w, 's> {
-    /// The blended-pose feed pass C consumes.
+    /// The correction feed pass B consumes.
     feed: Option<ResMut<'w, crate::gpu_avatars::GpuAvatarPoseFeed>>,
-    /// The pipeline's placement / capability-checked activity.
+    /// The pipeline's capability-checked activity.
     mode: Option<Res<'w, crate::gpu_avatars::GpuAvatarsMode>>,
     /// Attachment-node children (a node with children carries a worn
     /// attachment).
     children: Query<'w, 's, &'static Children>,
-    /// Attachment-node parents (the node's parent is its skeleton joint).
-    parents: Query<'w, 's, &'static ChildOf>,
 }
 
 impl GpuAvatarHooks<'_, '_> {
-    /// Whether the in-place GPU path owns the skinning joints this run: the
-    /// pipeline is registered, the device passed the startup capability
-    /// check, and the placement is `Real` (not the ghost harness).
+    /// Whether the in-place GPU path owns the skinning this run: the pipeline
+    /// is registered and the device passed the startup capability check.
     fn real_active(&self) -> bool {
-        self.mode.as_deref().is_some_and(|mode| {
-            mode.active && mode.placement == crate::gpu_avatars::GpuAvatarPlacement::Real
-        })
-    }
-
-    /// Publish one avatar's final blended pose + root to the feed (the ghost
-    /// harness's Phase 1 channel — the real path publishes corrections via
-    /// [`Self::publish_real`] instead). No-op when the pipeline is off —
-    /// including when the startup capability check demoted the device to the
-    /// CPU path (nothing would consume the feed, and the staging system that
-    /// prunes it is idle then too).
-    fn publish(&mut self, agent: AgentKey, pose: &AnimationPose, joint_count: usize, root: Mat4) {
-        let active = self.mode.as_deref().is_some_and(|mode| mode.active);
-        if !active {
-            return;
-        }
-        if let Some(feed) = self.feed.as_mut() {
-            feed.publish(agent, pose, joint_count, root);
-        }
+        self.mode.as_deref().is_some_and(|mode| mode.active)
     }
 
     /// Publish one avatar's root matrix + sparse adjuster corrections to the
@@ -1347,7 +1174,11 @@ impl GpuAvatarHooks<'_, '_> {
             return;
         }
         if let Some(feed) = self.feed.as_mut() {
-            feed.publish_real(agent, root, corrections);
+            feed.publish_real(
+                crate::gpu_avatars::PoseSlotKey::Avatar(agent),
+                root,
+                corrections,
+            );
         }
     }
 }
@@ -1412,34 +1243,33 @@ pub(crate) struct AvatarAdjusters<'w> {
     runtime_morphs: ResMut<'w, AvatarRuntimeMorphs>,
 }
 
-/// Write each posed avatar's animated joint world matrices straight into the
-/// skeleton-instance joints' `GlobalTransform`s (P18.3, the reference viewer's
-/// matrix-palette skinning), so a shaped avatar's limbs keep their length under
-/// animation instead of shearing.
+/// Drive each rigged avatar's **socket subset** and publish its GPU-pose feed
+/// (Phase 4, `roadmap/context/gpu-avatars.md` §5.3–§5.4). The per-avatar
+/// skinning joints are gone — the GPU samples, blends and FK-poses the palette
+/// in place ([`crate::gpu_avatars`]) — so this system no longer writes ~200
+/// joint globals. Instead, per rigged avatar it:
 ///
-/// Runs in `PostUpdate` **after** transform propagation, so it overwrites the
-/// just-propagated rest globals with the animated ones for the frame's skinning /
-/// render extraction. For each posed avatar it re-runs the Second Life skeletal
-/// recurrence with the resolved [`AnimationPose`] folded in
-/// ([`BevySkeleton::deformed_world_matrices`](sl_client_bevy::BevySkeleton::deformed_world_matrices)),
-/// composes each joint's Second Life world matrix with the avatar-root global (the
-/// SL → Bevy axis change + world placement), and writes it to the joint entity. A
-/// rigid base part (the eyeballs, parented to an eye joint) is re-placed from its
-/// joint's posed global too, since propagation ran before this.
+/// - folds the keyframe pose + idle + the procedural adjusters (look-at, reach,
+///   locomotion IK, body physics) over the **mini pose** — a chain mini-FK
+///   restricted to the adjuster / socket joints ([`BevySkeleton::deformed_world_chain`]);
+/// - writes only the **socket** entities (worn attachment-point nodes, rigid
+///   base parts, the `mHead` camera focus) by their local `Transform`, from the
+///   same chain mini-FK ([`write_socket_locals`]);
+/// - publishes the avatar's root matrix plus the **sparse adjuster corrections**
+///   (the channels the folds changed vs. the keyframe+idle baseline) to the
+///   GPU feed ([`GpuAvatarPoseFeed::publish_real`](crate::gpu_avatars::GpuAvatarPoseFeed)),
+///   which passes A+B fold in GPU-side.
 ///
-/// Every rigged avatar is written **each frame** — its animated pose when a motion
-/// is playing, or its plain deformed rest pose (an empty pose) when none is — so an
-/// avatar returns to rest when its animations stop and several overlapping
-/// animations with different runtimes compose without any per-animation reset.
-/// Bevy's dirty-bit transform propagation cannot recompute a static joint whose
-/// `GlobalTransform` the driver overwrote, so the driver owns every rigged avatar's
-/// joint globals outright.
+/// Runs in `PostUpdate` after transform propagation, so it seats the sockets on
+/// the just-propagated avatar root. A downlevel device (no GPU path) has no
+/// skinning at all, so the whole system is a no-op there.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries; the \
               procedural folds' own resources are already bundled into one \
               `AvatarAdjusters`, and what is left is the animation pipeline, the avatar \
-              asset library and state, the ground, and the joint / part queries"
+              asset library and state, the ground, the part query, the root globals, \
+              and the socket transforms"
 )]
 pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
@@ -1449,17 +1279,28 @@ pub(crate) fn pose_avatar_skeletons(
     body: Option<Res<AvatarBody>>,
     state: Res<AvatarState>,
     mut ground: ResMut<AvatarGround>,
-    mut gate: ResMut<PoseGate>,
     mut adjusters: AvatarAdjusters,
     motions: Query<&AvatarMotion>,
     parts: Query<(Entity, &AvatarBodyPart)>,
-    anchors: Query<Ref<Transform>, With<crate::avatars::AvatarAnchor>>,
-    mut globals: Query<&mut GlobalTransform>,
+    // The avatar root's `GlobalTransform`, read to compose each socket and the
+    // published feed root under. Read-only: Phase 4 writes no joint globals.
+    globals: Query<&GlobalTransform>,
+    // The socket entities (attachment-point nodes, rigid base parts, the head
+    // socket) are avatar-root children the socket writer places by their **local**
+    // `Transform` (§5.4), so ordinary propagation seats the worn/rigid subtrees.
+    // A different component from `globals`.
+    mut socket_transforms: Query<&mut Transform, Without<crate::avatars::AvatarAnchor>>,
     mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
         return;
     };
+    // A downlevel device runs no GPU skinning and has no joint entities, so
+    // nothing consumes this system's output — the startup capability check
+    // already warned. Skip the whole pass.
+    if !gpu.real_active() {
+        return;
+    }
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
     let look_debug = crate::look_at::LookAtDebug::from_env();
@@ -1479,7 +1320,6 @@ pub(crate) fn pose_avatar_skeletons(
     adjusters
         .runtime_morphs
         .retain(&|agent| rigged.contains(&agent));
-    gate.stamps.retain(|agent, _stamp| rigged.contains(agent));
     let leg_joints = LegJoints::resolve(|name| body.joint_index(name));
     let reach_joints = ReachJoints::resolve(|name| body.joint_index(name));
     // The fallback for an avatar whose shape displaces no collision volume (P34.3),
@@ -1489,33 +1329,26 @@ pub(crate) fn pose_avatar_skeletons(
     // runs of the viewer frame the same body from the same angle and can be compared
     // pixel for pixel (an avatar's AO would otherwise walk and turn it).
     let t_pose = t_pose_enabled();
-    // Whether the in-place GPU pipeline owns the skinning joints this run
-    // (Phase 1b): the full joint-global writes are replaced by the socket
-    // mini-FK, and the GPU consumes the published pose feed instead.
-    let gpu_real = gpu.real_active();
-    let gate_enabled = pose_gate_enabled();
     // The quantised procedural idle clock (see [`POSE_IDLE_HZ`]).
     let idle_now = (now * POSE_IDLE_HZ).floor() / POSE_IDLE_HZ;
     for agent in rigged {
         let Some(root) = state.body_root_of(agent) else {
             continue;
         };
-        let Some(joints) = state.joint_entities_of(agent) else {
-            continue;
-        };
         let Some(deform) = state.deformations(agent) else {
             continue;
         };
+        // The camera's head-focus socket (§5.4), placed by the socket writer.
+        let head_socket = state.head_socket_of(agent);
 
-        // Advance the eye saccade / blink timers **every frame** (skipped frames
-        // included): blinks drive the (equality-guarded) runtime-morph path, not
-        // the skeleton, and stalling the timers would freeze them. The returned
-        // event flag is a wake source — a jitter re-aim / look-away toggle moves
-        // the eye joints. The T-pose freeze takes none of this, as before.
-        let eye_event = if t_pose {
-            false
-        } else {
-            let (blink, event) =
+        // Advance the eye saccade / blink timers **every frame**: blinks drive the
+        // (equality-guarded) runtime-morph path, not the skeleton, and stalling the
+        // timers would freeze them. The returned event flag was a pose-gate wake
+        // source; the gate is gone (Phase 4: every rigged avatar re-poses each
+        // frame, the mini pose + socket writes being cheap and no joint globals
+        // left to churn), so it is discarded. The T-pose freeze takes none of this.
+        if !t_pose {
+            let (blink, _event) =
                 crate::look_at::advance_eyes(agent, &mut adjusters.look_motion, dt);
             adjusters
                 .runtime_morphs
@@ -1523,95 +1356,8 @@ pub(crate) fn pose_avatar_skeletons(
             adjusters
                 .runtime_morphs
                 .set(agent, BLINK_RIGHT_PARAM, blink.right);
-            event
-        };
-
-        // The pose gate: skip the whole evaluation when nothing that feeds it
-        // changed. The anchor test reads the root's change tick **without** a
-        // mutable deref — after the anchor settle guards, "changed since this
-        // system last ran" means propagation actually moved the avatar (walking,
-        // a seat / vehicle carrying it, an origin rebase).
+        }
         let anims: AdjusterAnims = playback.adjuster_anims(agent, now, &manager);
-        let stamp = PoseStamp {
-            pose_tick: playback.pose_ticks.get(&agent).copied().unwrap_or(0),
-            idle_time_bits: idle_now.to_bits(),
-            inputs_generation: state.pose_inputs_generation(),
-            t_pose,
-        };
-        // Two wake signals, both load-bearing:
-        //
-        // - The root's **`Transform`** tick: every genuine avatar move (the
-        //   dead-reckoner, a seat, an origin rebase, a server snap) writes it.
-        // - The root's **`GlobalTransform`** tick: Bevy's parallel propagation
-        //   rewrites a dirty tree's root global (and `set_if_neq`-recomposes the
-        //   descendants under it — REVERTING the driver-written joint globals to
-        //   the rest pose!) whenever any descendant's `Transform` changed. On
-        //   such a frame the driver MUST re-pose or the avatar renders at rest
-        //   until the next wake — the T-pose flicker. A per-frame Transform
-        //   churner anywhere under the avatar therefore pins this wake on and
-        //   the gate off; `log_pose_gate_churn` names such churners.
-        let anchor_moved = anchors
-            .get(root)
-            .map_or(true, |transform| transform.is_changed())
-            || globals
-                .get_mut(root)
-                .map_or(true, |global| global.is_changed());
-        let settled = t_pose
-            || (!eye_event
-                && adjusters.look_targets.point(agent).is_none()
-                && !look_debug.forces_target()
-                && adjusters.look_motion.is_settled(agent)
-                && adjusters.point_at_targets.point(agent).is_none()
-                && !playback.is_aiming(agent)
-                && adjusters.reach.is_settled(agent)
-                && adjusters
-                    .locomotion
-                    .is_settled(agent, &anims, &ground.get(agent))
-                && !state
-                    .body_physics(agent)
-                    .is_some_and(sl_client_bevy::BodyPhysics::is_active));
-        let stored = gate.stamps.get(&agent).copied();
-        if gate_enabled && !anchor_moved && settled && stored == Some(stamp) {
-            gate.skipped = gate.skipped.wrapping_add(1);
-            continue;
-        }
-        gate.evaluated = gate.evaluated.wrapping_add(1);
-        // Tally why (a frame can tally several reasons) for the meter below.
-        if anchor_moved {
-            gate.wake.anchor = gate.wake.anchor.wrapping_add(1);
-            if let Ok(global) = globals.get(root) {
-                let translation = global.translation();
-                let rotation = global.rotation();
-                if let Some((prev_pos, prev_rot)) =
-                    gate.anchor_positions.insert(agent, (translation, rotation))
-                {
-                    let delta = translation.distance(prev_pos);
-                    gate.wake.max_anchor_delta = gate.wake.max_anchor_delta.max(delta);
-                    let rot_delta = rotation.angle_between(prev_rot);
-                    gate.wake.max_anchor_rot = gate.wake.max_anchor_rot.max(rot_delta);
-                }
-            }
-        }
-        if !settled {
-            gate.wake.unsettled = gate.wake.unsettled.wrapping_add(1);
-        }
-        match stored {
-            Some(prev) => {
-                if prev.pose_tick != stamp.pose_tick {
-                    gate.wake.pose_tick = gate.wake.pose_tick.wrapping_add(1);
-                }
-                if prev.idle_time_bits != stamp.idle_time_bits {
-                    gate.wake.idle_tick = gate.wake.idle_tick.wrapping_add(1);
-                }
-                if prev.inputs_generation != stamp.inputs_generation {
-                    gate.wake.inputs = gate.wake.inputs.wrapping_add(1);
-                }
-                if prev.t_pose != stamp.t_pose {
-                    gate.wake.fresh = gate.wake.fresh.wrapping_add(1);
-                }
-            }
-            None => gate.wake.fresh = gate.wake.fresh.wrapping_add(1),
-        }
 
         // Start from the resolved keyframe pose (or an empty rest pose), then fold
         // in the always-on procedural idle adjusters (P31.8) so every avatar
@@ -1642,40 +1388,21 @@ pub(crate) fn pose_avatar_skeletons(
         // procedural adjusters below folded in (they would tilt the head, plant the
         // feet and bounce the body, all of which move between runs).
         if t_pose {
-            if gpu_real {
-                // In-place GPU path: the skinning joints stay frozen; only
-                // the socket subset is written, from the chain mini-FK. The
-                // scheduler mirrors the freeze GPU-side (no playback staged,
-                // idle disabled), so no corrections are needed.
-                write_socket_globals(
-                    &mut globals,
-                    &parts,
-                    &gpu,
-                    &state,
-                    &body,
-                    skeleton,
-                    agent,
-                    &root_global,
-                    joints,
-                    (deform, volumes, &overrides, &pose),
-                );
-                gpu.publish_real(agent, root_global.to_matrix(), Vec::new());
-            } else {
-                let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
-                write_joint_globals(
-                    &mut globals,
-                    &parts,
-                    &body,
-                    agent,
-                    &root_global,
-                    joints,
-                    &world,
-                );
-                // Feed the ghost harness the same (empty, T-pose) pose + root
-                // this frame's pose was resolved under.
-                gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
-            }
-            let _prev = gate.stamps.insert(agent, stamp);
+            // Only the socket subset is written, from the chain mini-FK. The
+            // scheduler mirrors the freeze GPU-side (no playback staged, idle
+            // disabled), so no corrections are needed.
+            write_socket_locals(
+                &mut socket_transforms,
+                &parts,
+                &gpu,
+                &state,
+                &body,
+                skeleton,
+                agent,
+                head_socket,
+                (deform, volumes, &overrides, &pose),
+            );
+            gpu.publish_real(agent, root_global.to_matrix(), Vec::new());
             continue;
         }
         // Fold in the head & eye look-at adjusters (P31.12) before the final world
@@ -1701,7 +1428,7 @@ pub(crate) fn pose_avatar_skeletons(
         // chain map (which includes every ancestor) is scattered into a dense
         // vector so the adjusters' `&[Mat4]` reads are unchanged; joints
         // outside the closure hold identity, and no adjuster reads one.
-        let world0 = if gpu_real {
+        let world0 = {
             let targets: Vec<usize> = ADJUSTER_JOINT_NAMES
                 .iter()
                 .filter_map(|name| body.joint_index(name))
@@ -1714,13 +1441,11 @@ pub(crate) fn pose_avatar_skeletons(
                 }
             }
             dense
-        } else {
-            skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose)
         };
         // The adjuster-diff baseline (§5.3): the mini pose as it stands after
         // the keyframe + idle folds — exactly what pass B computes GPU-side —
         // so the corrections carry only what the adjusters below change.
-        let baseline = gpu_real.then(|| pose.clone());
+        let baseline = pose.clone();
         let joint_pos = |index: Option<usize>| {
             index
                 .and_then(|i| world0.get(i))
@@ -1890,212 +1615,47 @@ pub(crate) fn pose_avatar_skeletons(
                 );
             }
         }
-        if gpu_real {
-            // In-place GPU path (Phase 2): the final full solve, the ~200
-            // joint-global writes AND the full sample+blend are dropped — the
-            // GPU samples, blends and re-runs FK itself (passes A+B+C), and
-            // `extract_skins` sees no changed joints. Only the socket subset
-            // (worn attachment points, the rigid eyeballs' joints, the
-            // camera's head joint) is written, from the §5.4 chain mini-FK
-            // over the mini pose — and the adjusters' channel changes are
-            // published as sparse corrections pass B folds in.
-            write_socket_globals(
-                &mut globals,
-                &parts,
-                &gpu,
-                &state,
-                &body,
-                skeleton,
-                agent,
-                &root_global,
-                joints,
-                (deform, volumes, &overrides, &pose),
-            );
-            let corrections = baseline
-                .as_ref()
-                .map(|baseline| pose_corrections(baseline, &pose))
-                .unwrap_or_default();
-            gpu.publish_real(agent, root_global.to_matrix(), corrections);
-        } else {
-            let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
-            write_joint_globals(
-                &mut globals,
-                &parts,
-                &body,
-                agent,
-                &root_global,
-                joints,
-                &world,
-            );
-            // Feed the ghost harness the FINAL blended pose (all folds
-            // applied) + the root matrix this frame's pose was resolved
-            // under, so its FK re-derives exactly the world matrices the CPU
-            // path just wrote.
-            gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
-        }
-        let _prev = gate.stamps.insert(agent, stamp);
-    }
-
-    // The skip-rate meter (`SL_VIEWER_LOG_POSE_GATE=1`): "evaluated X of Y
-    // avatar-frames" every ~5 s, the ui_perf `log_layout_skip_rate` pattern.
-    if now >= gate.next_log {
-        if gate.next_log > 0.0 && std::env::var_os("SL_VIEWER_LOG_POSE_GATE").is_some() {
-            let total = gate.evaluated.saturating_add(gate.skipped);
-            info!(
-                "pose gate: evaluated {} of {total} avatar-frames over the last 5s \
-                 (gate {}; wake: anchor={} (max delta {:.6} m / {:.6} rad) unsettled={} \
-                 pose={} idle={} inputs={} fresh={})",
-                gate.evaluated,
-                if gate_enabled { "on" } else { "OFF" },
-                gate.wake.anchor,
-                gate.wake.max_anchor_delta,
-                gate.wake.max_anchor_rot,
-                gate.wake.unsettled,
-                gate.wake.pose_tick,
-                gate.wake.idle_tick,
-                gate.wake.inputs,
-                gate.wake.fresh,
-            );
-        }
-        gate.evaluated = 0;
-        gate.skipped = 0;
-        gate.wake = WakeReasons::default();
-        gate.next_log = now + 5.0;
+        // The GPU samples, blends and re-runs FK itself (passes A+B+C). Only the
+        // socket subset (worn attachment points, the rigid eyeballs, the camera's
+        // head focus) is written, from the §5.4 chain mini-FK over the mini pose
+        // — and the adjusters' channel changes are published as sparse
+        // corrections pass B folds in.
+        write_socket_locals(
+            &mut socket_transforms,
+            &parts,
+            &gpu,
+            &state,
+            &body,
+            skeleton,
+            agent,
+            head_socket,
+            (deform, volumes, &overrides, &pose),
+        );
+        let corrections = pose_corrections(&baseline, &pose);
+        gpu.publish_real(agent, root_global.to_matrix(), corrections);
     }
 }
 
-/// Re-place every avatar attachment-point node — and the worn **rigid**
-/// attachment subtree hanging off it — from its now-posed skeleton joint, so a
-/// rigid attachment (an earring, a piercing, a rigid hat) tracks the animated
-/// joint instead of freezing at the rest / T-pose.
+/// Place one avatar's **socket entities** — avatar-root children whose posed
+/// world the CPU still owns (§5.4) — by writing their **local** `Transform`
+/// (relative to the root) from the same final pose, so ordinary transform
+/// propagation seats them and any worn/rigid subtree hanging off them:
 ///
-/// [`pose_avatar_skeletons`] overwrites each joint's `GlobalTransform` **directly**
-/// in `PostUpdate`, *after* Bevy's transform propagation — so the attachment-point
-/// node (a `ChildOf` the joint, at the `avatar_lad.xml` offset) still holds the
-/// stale global propagation computed from the joint's *pre-animation* transform,
-/// and so does every rigid attachment below it. Bevy's dirty-bit propagation will
-/// not recompute them (their ancestor's global was overwritten out from under it),
-/// exactly as the driver already hand-re-places the rigid base parts (the
-/// eyeballs). This does the same for the attachment subtrees: for each node it
-/// reads its parent joint's posed global and walks the node's descendants,
-/// composing `global = parent_global × local` down the tree — a targeted
-/// re-propagation of only the subtrees the direct-global-write orphaned.
+/// - every **worn attachment-point node** (a node carrying an attachment
+///   subtree): local = its joint's posed world × the point's fixed
+///   `avatar_lad.xml` offset, so worn attachments ride normal propagation
+///   (this is what let the old `pose_attachment_nodes` re-propagation go);
+/// - the **rigid base parts** (the eyeballs): local = their bound joint's posed
+///   world;
+/// - the **head socket** (`mHead`): the camera's third-person focus / mouselook
+///   eye (`crate::camera::own_avatar_head`).
 ///
-/// Runs `after` the driver so the joint globals it reads are the posed ones, and
-/// its writes land before render extraction. A node whose joint or transform is
-/// momentarily missing (an avatar mid-spawn) is skipped and retried next frame.
-pub(crate) fn pose_attachment_nodes(
-    nodes: Query<Entity, With<crate::avatars::AttachmentPointNode>>,
-    parents: Query<&ChildOf>,
-    transforms: Query<&Transform>,
-    children: Query<&Children>,
-    mut globals: Query<&mut GlobalTransform>,
-) {
-    for node in &nodes {
-        // The node's parent is its skeleton joint, whose `GlobalTransform` the pose
-        // driver just wrote. Copy it out as a plain matrix so the borrow of
-        // `globals` ends before the subtree walk below borrows it mutably.
-        let Ok(child_of) = parents.get(node) else {
-            continue;
-        };
-        // Change-tick gate: this system runs immediately after the driver, so
-        // "changed since this system last ran" is precisely "the driver (or, for
-        // a moving avatar, propagation) rewrote this joint this frame". A joint
-        // the pose gate skipped is unchanged, and the subtree below it already
-        // holds the correct globals — a subtree whose *own* local Transform
-        // changed was recomposed by ordinary change-gated propagation against
-        // the joint's stable global. Read without a mutable deref.
-        let joint_matrix = {
-            let Ok(joint_global) = globals.get_mut(child_of.parent()) else {
-                continue;
-            };
-            if !joint_global.is_changed() {
-                continue;
-            }
-            joint_global.to_matrix()
-        };
-        // Iterative depth-first walk of the node's subtree, carrying each entity's
-        // freshly-composed world matrix down to its children — Bevy's own
-        // propagation in miniature, but seeded from the posed joint.
-        let mut stack: Vec<(Entity, Mat4)> = vec![(node, joint_matrix)];
-        while let Some((entity, parent_matrix)) = stack.pop() {
-            let Ok(local) = transforms.get(entity) else {
-                continue;
-            };
-            // `mul_mat4` (a method, not `*`) keeps clear of the workspace
-            // `arithmetic_side_effects` lint.
-            let global_matrix = parent_matrix.mul_mat4(&local.to_matrix());
-            if let Ok(mut global) = globals.get_mut(entity) {
-                *global = GlobalTransform::from(Affine3A::from_mat4(global_matrix));
-            }
-            if let Ok(kids) = children.get(entity) {
-                for &kid in kids {
-                    stack.push((kid, global_matrix));
-                }
-            }
-        }
-    }
-}
-
-/// Write one avatar's posed joint **world** matrices into its joint entities'
-/// `GlobalTransform`s (and re-place its rigid base parts, the eyeballs, from the
-/// eye joints' posed globals — transform propagation used the pre-overwrite joint
-/// global).
-///
-/// `world` is in the avatar's own Second Life frame, so each matrix is composed
-/// with the avatar-root global that carries the SL → Bevy axis change and the
-/// world placement.
-fn write_joint_globals(
-    globals: &mut Query<&mut GlobalTransform>,
-    parts: &Query<(Entity, &AvatarBodyPart)>,
-    body: &AvatarBody,
-    agent: AgentKey,
-    root_global: &GlobalTransform,
-    joints: &[Entity],
-    world: &[Mat4],
-) {
-    // `mul_mat4` (a method, not the `*` operator) keeps clear of the workspace
-    // `arithmetic_side_effects` lint the glam operators trip.
-    let root_matrix = root_global.to_matrix();
-    for (entity, matrix) in joints.iter().zip(world.iter()) {
-        if let Ok(mut global) = globals.get_mut(*entity) {
-            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-        }
-    }
-    for (entity, part) in parts {
-        if part.agent() != agent {
-            continue;
-        }
-        if let Some(index) = body.rigid_joint_index(part.part())
-            && let Some(matrix) = world.get(index)
-            && let Ok(mut global) = globals.get_mut(entity)
-        {
-            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-        }
-    }
-}
-
-/// Write one avatar's **socket subset** — and nothing else — while the
-/// in-place GPU pipeline owns the skinning joints (Phase 1b of
-/// `roadmap/context/gpu-avatars.md`, the §5.4 socket mini-FK): the rendered
-/// skin comes from the GPU palettes, but a handful of consumers still read
-/// joint `GlobalTransform`s and must keep tracking —
-///
-/// - **worn attachment-point joints** (an attachment node with children):
-///   [`pose_attachment_nodes`] re-propagates the worn subtrees off them;
-/// - the **rigid-part joints** (the eyeballs' eye joints) plus the rigid part
-///   entities themselves, exactly as [`write_joint_globals`] placed them;
-/// - **`mHead`**, the camera's third-person focus / mouselook eye
-///   (`crate::camera::own_avatar_head`).
-///
-/// The joint worlds come from
+/// The joint worlds are avatar-frame matrices from
 /// [`BevySkeleton::deformed_world_chain`] over the same final pose — bit-equal
 /// to the full recurrence on these joints (golden-tested), at the cost of only
-/// their ancestor chains. Every other joint is left unwritten, so
-/// `extract_skins` sees no `Changed<GlobalTransform>` on it and the serial
-/// extract collapses (for avatars whose anchor did not move — a moving anchor
-/// makes Bevy propagation re-global the whole tree regardless, until Phase 4
-/// removes the joint entities).
+/// their ancestor chains. Because each socket is a root child, its avatar-frame
+/// world matrix *is* its local transform (the root global carries the SL → Bevy
+/// change + placement), so no root composition is needed here.
 ///
 /// `chain_inputs` bundles the recurrence inputs `(deform, volumes, overrides,
 /// pose)` to stay inside the argument-count lint.
@@ -2103,18 +1663,17 @@ fn write_joint_globals(
     clippy::too_many_arguments,
     reason = "the socket writer takes the pose driver's own borrowed context (queries, \
               state, skeleton, per-avatar identifiers); packing them into a struct would \
-              only move the argument list into a struct literal at the two call sites"
+              only move the argument list into a struct literal at the call sites"
 )]
-fn write_socket_globals(
-    globals: &mut Query<&mut GlobalTransform>,
+fn write_socket_locals(
+    socket_transforms: &mut Query<&mut Transform, Without<crate::avatars::AvatarAnchor>>,
     parts: &Query<(Entity, &AvatarBodyPart)>,
     hooks: &GpuAvatarHooks<'_, '_>,
     state: &AvatarState,
     body: &AvatarBody,
     skeleton: &BevySkeleton,
     agent: AgentKey,
-    root_global: &GlobalTransform,
-    joints: &[Entity],
+    head_socket: Option<Entity>,
     chain_inputs: (
         &SkeletalDeformations,
         &VolumeDeformations,
@@ -2123,10 +1682,9 @@ fn write_socket_globals(
     ),
 ) {
     let (deform, volumes, overrides, pose) = chain_inputs;
-    // The socket subset: rigid-part joints (remembering the part entities for
-    // the re-place below), the camera's head joint, and every worn
-    // attachment-point joint.
+    // The socket subset and, per socket, the joint whose posed world places it.
     let mut targets: Vec<usize> = Vec::new();
+    // Rigid base parts (the eyeballs), placed straight from their bound joint.
     let mut rigid_parts: Vec<(Entity, usize)> = Vec::new();
     for (entity, part) in parts {
         if part.agent() != agent {
@@ -2137,10 +1695,9 @@ fn write_socket_globals(
             rigid_parts.push((entity, index));
         }
     }
-    if let Some(head) = body.joint_index("mHead") {
-        targets.push(head);
-    }
-    for node in state.attachment_node_entities(agent) {
+    // Worn attachment-point nodes, placed from their joint × the fixed offset.
+    let mut worn_nodes: Vec<(Entity, usize, Mat4)> = Vec::new();
+    for (point_id, node) in state.attachment_nodes_of(agent) {
         // Worn = the node carries an attachment subtree.
         let worn = hooks
             .children
@@ -2149,34 +1706,42 @@ fn write_socket_globals(
         if !worn {
             continue;
         }
-        let Ok(child_of) = hooks.parents.get(node) else {
+        let Some((joint_index, offset)) = body.attachment_point(point_id) else {
             continue;
         };
-        let joint_entity = child_of.parent();
-        if let Some(index) = joints.iter().position(|&joint| joint == joint_entity) {
-            targets.push(index);
-        }
+        targets.push(joint_index);
+        worn_nodes.push((node, joint_index, offset.to_matrix()));
+    }
+    // The head socket's joint (the camera's focus).
+    let head_index = body.joint_index("mHead");
+    if let Some(index) = head_index {
+        targets.push(index);
     }
     let world = skeleton.deformed_world_chain(deform, volumes, overrides, pose, &targets);
-    // `mul_mat4` (a method, not `*`) keeps clear of the workspace
-    // `arithmetic_side_effects` lint.
-    let root_matrix = root_global.to_matrix();
-    for &index in &targets {
-        let (Some(matrix), Some(&joint)) = (world.get(&index), joints.get(index)) else {
-            continue;
-        };
-        if let Ok(mut global) = globals.get_mut(joint) {
-            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
-        }
-    }
-    // Re-place the rigid parts (the eyeballs) from their joints' chain
-    // worlds, exactly as `write_joint_globals` does from the full solve.
+    // Rigid parts: local (root-relative) = the joint's avatar-frame world.
     for (entity, index) in rigid_parts {
         if let Some(matrix) = world.get(&index)
-            && let Ok(mut global) = globals.get_mut(entity)
+            && let Ok(mut transform) = socket_transforms.get_mut(entity)
         {
-            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+            *transform = Transform::from_matrix(*matrix);
         }
+    }
+    // Worn nodes: local = the joint's world × the point's fixed offset
+    // (`mul_mat4` is a method, not `*`, keeping clear of the workspace
+    // `arithmetic_side_effects` lint).
+    for (node, index, offset) in worn_nodes {
+        if let Some(matrix) = world.get(&index)
+            && let Ok(mut transform) = socket_transforms.get_mut(node)
+        {
+            *transform = Transform::from_matrix(matrix.mul_mat4(&offset));
+        }
+    }
+    // The head socket: local = the `mHead` joint's world.
+    if let (Some(socket), Some(index)) = (head_socket, head_index)
+        && let Some(matrix) = world.get(&index)
+        && let Ok(mut transform) = socket_transforms.get_mut(socket)
+    {
+        *transform = Transform::from_matrix(*matrix);
     }
 }
 
@@ -2254,132 +1819,6 @@ mod tests {
         reconcile_playing(&mut entry, &mut next_order, &[(stand(), 2)], 9.0);
         assert_eq!(stop_of(&entry, walk())?, Some(9.0 - 5.0));
         assert_eq!(stop_of(&entry, stand())?, None);
-        Ok(())
-    }
-
-    /// A worn **rigid** attachment tracks its posed joint: `pose_attachment_nodes`
-    /// re-places the attachment-point node and every descendant from the joint's
-    /// (driver-written) `GlobalTransform`, composing `parent × local` down the
-    /// tree — so the node and the rigid attachment below it land at the posed
-    /// joint, not the stale rest global Bevy's propagation left behind (the bug
-    /// that froze an earring at the T-pose ear position).
-    #[test]
-    fn attachment_subtree_follows_the_posed_joint() -> Result<(), TestError> {
-        use crate::avatars::AttachmentPointNode;
-        use bevy::ecs::system::RunSystemOnce as _;
-        use bevy::prelude::*;
-
-        let mut world = World::new();
-        // The joint, "posed" by the driver to a non-rest place — a pure translation
-        // is enough to catch a node frozen elsewhere.
-        let joint_global = GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0));
-        let joint = world.spawn((Transform::default(), joint_global)).id();
-        // The attachment-point node at a fixed local offset from the joint; its
-        // stale `GlobalTransform` starts at the identity (what froze the earring).
-        let node = world
-            .spawn((
-                Transform::from_xyz(0.0, 0.5, 0.0),
-                GlobalTransform::default(),
-                AttachmentPointNode,
-                ChildOf(joint),
-            ))
-            .id();
-        // The worn rigid attachment hanging off the node.
-        let worn = world
-            .spawn((
-                Transform::from_xyz(0.1, 0.0, 0.0),
-                GlobalTransform::default(),
-                ChildOf(node),
-            ))
-            .id();
-
-        world
-            .run_system_once(super::pose_attachment_nodes)
-            .map_err(|error| format!("run pose_attachment_nodes: {error:?}"))?;
-
-        // node = joint (1,2,3) × offset (0,0.5,0) = (1, 2.5, 3).
-        let node_pos = world
-            .get::<GlobalTransform>(node)
-            .ok_or("node global")?
-            .translation();
-        assert!(node_pos.abs_diff_eq(Vec3::new(1.0, 2.5, 3.0), 1.0e-5));
-        // worn = node (1,2.5,3) × local (0.1,0,0) = (1.1, 2.5, 3).
-        let worn_pos = world
-            .get::<GlobalTransform>(worn)
-            .ok_or("worn global")?
-            .translation();
-        assert!(worn_pos.abs_diff_eq(Vec3::new(1.1, 2.5, 3.0), 1.0e-5));
-        Ok(())
-    }
-
-    /// The attachment pass's change-tick gate: a node whose parent joint the
-    /// driver did **not** rewrite this frame is left untouched (its subtree
-    /// already holds the correct globals), and a joint write wakes it again.
-    /// Uses a registered (persistent) system so change ticks carry across runs
-    /// — `run_system_once` would see everything as freshly changed each time.
-    #[test]
-    fn attachment_subtree_skips_an_unchanged_joint() -> Result<(), TestError> {
-        use crate::avatars::AttachmentPointNode;
-        use bevy::prelude::*;
-
-        let mut world = World::new();
-        let joint_global = GlobalTransform::from(Transform::from_xyz(1.0, 2.0, 3.0));
-        let joint = world.spawn((Transform::default(), joint_global)).id();
-        let node = world
-            .spawn((
-                Transform::from_xyz(0.0, 0.5, 0.0),
-                GlobalTransform::default(),
-                AttachmentPointNode,
-                ChildOf(joint),
-            ))
-            .id();
-        let system = world.register_system(super::pose_attachment_nodes);
-
-        // First run: the joint is freshly observed (changed), so the node is
-        // composed from it.
-        world
-            .run_system(system)
-            .map_err(|error| format!("first run: {error:?}"))?;
-        let node_pos = world
-            .get::<GlobalTransform>(node)
-            .ok_or("node global")?
-            .translation();
-        assert!(node_pos.abs_diff_eq(Vec3::new(1.0, 2.5, 3.0), 1.0e-5));
-
-        // Plant a sentinel on the node. The joint is untouched, so the second
-        // run must skip the subtree and the sentinel must survive.
-        let sentinel = GlobalTransform::from(Transform::from_xyz(9.0, 9.0, 9.0));
-        *world
-            .get_mut::<GlobalTransform>(node)
-            .ok_or("node global mut")? = sentinel;
-        world
-            .run_system(system)
-            .map_err(|error| format!("second run: {error:?}"))?;
-        let node_pos = world
-            .get::<GlobalTransform>(node)
-            .ok_or("node global")?
-            .translation();
-        assert!(
-            node_pos.abs_diff_eq(Vec3::new(9.0, 9.0, 9.0), 1.0e-5),
-            "an unchanged joint must not re-place its subtree (got {node_pos})"
-        );
-
-        // Rewrite the joint (the driver evaluating this avatar again): the node
-        // recomposes and the sentinel is gone.
-        *world
-            .get_mut::<GlobalTransform>(joint)
-            .ok_or("joint global mut")? = GlobalTransform::from(Transform::from_xyz(2.0, 2.0, 3.0));
-        world
-            .run_system(system)
-            .map_err(|error| format!("third run: {error:?}"))?;
-        let node_pos = world
-            .get::<GlobalTransform>(node)
-            .ok_or("node global")?
-            .translation();
-        assert!(
-            node_pos.abs_diff_eq(Vec3::new(2.0, 2.5, 3.0), 1.0e-5),
-            "a rewritten joint must wake its subtree (got {node_pos})"
-        );
         Ok(())
     }
 }

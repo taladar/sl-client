@@ -55,7 +55,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
-use crate::avatars::{AvatarBody, AvatarState, SeatChainQuery, seat_world_transform};
+use crate::avatars::{AvatarState, SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::input_context::InputContext;
@@ -1124,7 +1124,6 @@ pub(crate) fn position_camera(
     avatars: Res<AvatarState>,
     objects: Res<crate::objects::ObjectState>,
     sit_camera: Res<crate::sit_camera::SitCamera>,
-    body: Option<Res<AvatarBody>>,
     time: Res<Time>,
     globals: AvatarPoseQuery,
     transforms: AvatarTransformQuery,
@@ -1166,7 +1165,7 @@ pub(crate) fn position_camera(
             // height), nudged a touch forward along the look so the view is not
             // inside the face. Falls back to the anchor plus a head-height offset for
             // a placeholder-sphere avatar with no skeleton.
-            let eye = own_avatar_head(&identity, &avatars, body.as_deref(), &globals, &transforms)
+            let eye = own_avatar_head(&identity, &avatars, &globals, &transforms)
                 .map(|head| vadd(head, vscale(look_forward, MOUSELOOK_EYE_OFFSET.x)))
                 .or_else(|| {
                     avatar_pose.map(|(avatar, facing)| {
@@ -1250,13 +1249,7 @@ pub(crate) fn position_camera(
                     let Some((anchor, facing)) = avatar_pose else {
                         return;
                     };
-                    let head = own_avatar_head(
-                        &identity,
-                        &avatars,
-                        body.as_deref(),
-                        &globals,
-                        &transforms,
-                    );
+                    let head = own_avatar_head(&identity, &avatars, &globals, &transforms);
                     let focus = third_person_focus(head, anchor, facing);
                     let eye =
                         third_person_eye(focus, facing, rig.azimuth, rig.elevation, rig.distance);
@@ -1451,22 +1444,22 @@ fn sit_camera_pose(
 fn own_avatar_head(
     identity: &SlIdentity,
     avatars: &AvatarState,
-    body: Option<&AvatarBody>,
     globals: &AvatarPoseQuery,
     transforms: &AvatarTransformQuery,
 ) -> Option<Vec3> {
     let agent = identity.agent_id?;
     let anchor = avatars.body_root_of(agent)?;
-    let index = body?.joint_index("mHead")?;
-    let head = avatars.joint_entities_of(agent)?.get(index)?;
-    // The head joint is deep in the skeleton, so its world pose is only available
-    // through its `GlobalTransform` — which lags a frame (and its animated pose is
-    // written in `PostUpdate`). Correct it by the anchor's own motion this frame
-    // (current `Transform` minus frame-late `GlobalTransform`, both taken from the
-    // same root anchor) so the head focus tracks the avatar's live position — the
-    // per-frame head sway relative to the anchor is negligible (measured
-    // `d_head ≈ d_root`).
-    let head_global = globals.get(*head).ok()?.translation();
+    // The head-focus socket (§5.4): an avatar-root child the pose driver places
+    // at the posed `mHead` joint, so the camera holds the animated head without a
+    // head joint entity.
+    let head = avatars.head_socket_of(agent)?;
+    // The socket's world pose is available through its `GlobalTransform` — which
+    // lags a frame (its local is written in `PostUpdate`, propagated next frame).
+    // Correct it by the anchor's own motion this frame (current `Transform` minus
+    // frame-late `GlobalTransform`, both taken from the same root anchor) so the
+    // head focus tracks the avatar's live position — the per-frame head sway
+    // relative to the anchor is negligible (measured `d_head ≈ d_root`).
+    let head_global = globals.get(head).ok()?.translation();
     let anchor_global = globals.get(anchor).ok()?.translation();
     let anchor_now = transforms.get(anchor).ok()?.translation;
     Some(vadd(head_global, vsub(anchor_now, anchor_global)))
