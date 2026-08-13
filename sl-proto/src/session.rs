@@ -1449,9 +1449,10 @@ pub use chat_session::{
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
+pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, instant_message, region_handshake_message,
-    shape_from_object_shape_block,
+    shape_from_object_shape_block, unpack_uuids,
 };
 pub use conversions::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,

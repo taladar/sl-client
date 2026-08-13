@@ -42,7 +42,9 @@ mod test {
         Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
         ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
-    use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, UserRightsEntry};
+    use sl_proto::{
+        AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
+    };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
@@ -6062,6 +6064,264 @@ mod test {
         Ok(())
     }
 
+    /// A group chat session's lifecycle on the sim side: the client's
+    /// start/send/leave fold the sim's registry (roster + server history),
+    /// and the sim's `send_session_message` / `send_session_participant`
+    /// surface as the client's group-session events.
+    #[test]
+    fn group_session_lifecycle_and_history_on_sim() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let own_agent = AgentKey::from(uuid::Uuid::from_u128(1));
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x9EE7));
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x64019));
+        let session_id = ImSessionId::from(group.uuid());
+
+        client.start_group_session(group, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::GroupSessionStartRequested { group_id } if *group_id == group
+            )),
+            "expected GroupSessionStartRequested, got {server_events:?}"
+        );
+        let session = sim
+            .chat_session(session_id)
+            .ok_or("expected the group session in the sim registry")?;
+        assert_eq!(session.kind, SimChatSessionKind::Group { group_id: group });
+        assert!(session.participants.contains(&own_agent));
+
+        // The sim announces a peer joining the group channel.
+        sim.send_session_participant(session_id, peer, "Peer User", true, true, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::GroupSessionParticipant {
+                    group_id,
+                    agent_id,
+                    joined: true,
+                } if *group_id == group && *agent_id == peer
+            )),
+            "expected the joined GroupSessionParticipant, got {events:?}"
+        );
+
+        // The client's own message lands in the sim's server history…
+        client.send_group_message(group, "hello group", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionMessageSent { session_id: sid, message }
+                    if *sid == session_id && message == "hello group"
+            )),
+            "expected SessionMessageSent, got {server_events:?}"
+        );
+        // …as does a relayed peer message, which the client folds as group chat.
+        sim.send_session_message(session_id, peer, "Peer User", "hi back", true, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::GroupSessionMessage {
+                    group_id,
+                    from_agent_id,
+                    from_name,
+                    message,
+                } if *group_id == group
+                    && *from_agent_id == peer
+                    && from_name == "Peer User"
+                    && message == "hi back"
+            )),
+            "expected GroupSessionMessage, got {events:?}"
+        );
+        let history: Vec<(String, String)> = sim
+            .chat_session(session_id)
+            .ok_or("expected the group session in the sim registry")?
+            .history
+            .iter()
+            .map(|entry| (entry.sender_name.clone(), entry.text.clone()))
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                ("Test User".to_owned(), "hello group".to_owned()),
+                ("Peer User".to_owned(), "hi back".to_owned()),
+            ]
+        );
+
+        // Leaving drops the client from the roster (the peer keeps the
+        // session alive).
+        client.leave_group_session(group, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionLeaveRequested { session_id: sid } if *sid == session_id
+            )),
+            "expected SessionLeaveRequested, got {server_events:?}"
+        );
+        let session = sim
+            .chat_session(session_id)
+            .ok_or("expected the session to survive while the peer remains")?;
+        assert!(!session.participants.contains(&own_agent));
+        assert!(session.participants.contains(&peer));
+        Ok(())
+    }
+
+    /// An ad-hoc conference relays between two avatars: A's conference start
+    /// registers on A's sim, the driver materialises it on B's sim and
+    /// delivers the `ChatterBoxInvitation` over B's event queue, B joins and
+    /// speaks, and the relayed message lands in both sims' server histories
+    /// and A's client events.
+    #[test]
+    fn conference_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        let session_id = ImSessionId::from(uuid::Uuid::from_u128(0xC04F));
+
+        a.client
+            .start_conference(session_id, &[b_agent], "join us", now)?;
+        pump_end(&mut a, now)?;
+        let server_events = drain_server(&mut a.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ConferenceStartRequested {
+                    session_id: sid,
+                    invitees,
+                    message,
+                } if *sid == session_id && *invitees == vec![b_agent] && message == "join us"
+            )),
+            "expected ConferenceStartRequested, got {server_events:?}"
+        );
+        let session = a
+            .sim
+            .chat_session(session_id)
+            .ok_or("expected the conference on A's sim")?;
+        assert_eq!(session.kind, SimChatSessionKind::Conference);
+        assert!(session.participants.contains(&a_agent));
+        assert!(session.participants.contains(&b_agent));
+
+        // Driver: materialise the conference on B's sim and deliver the
+        // invitation over B's event queue.
+        b.sim.open_chat_session(
+            session_id,
+            SimChatSessionKind::Conference,
+            &[a_agent, b_agent],
+        );
+        b.sim
+            .enqueue_chatterbox_invitation(&Event::ConferenceInvited {
+                session_id: session_id.get(),
+                from_agent_id: a_agent,
+                from_name: "Test User".to_owned(),
+                dialog: ImDialog::SessionConferenceStart,
+                from_group: false,
+                session_name: "join us".to_owned(),
+                message: "join us".to_owned(),
+                region_id: uuid::Uuid::nil(),
+                position: RegionCoordinates::new(1.0, 2.0, 3.0),
+                parent_estate_id: 1,
+                timestamp: None,
+                binary_bucket: Vec::new(),
+            });
+        deliver_caps(&mut b.client, &mut b.sim, now)?;
+        let kind = ChatSessionKind::Conference { id: session_id };
+        let info = b
+            .client
+            .chat_sessions_info()
+            .find(|info| info.kind == kind)
+            .ok_or("expected the invited conference on B's client")?;
+        assert!(matches!(info.lifecycle, ChatLifecycleView::Invited { .. }));
+
+        // B accepts and speaks; the message reaches B's sim (and history).
+        b.client.accept_chat_invite(session_id, false, now);
+        b.client.send_conference_message(session_id, "here", now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionMessageSent { session_id: sid, message }
+                    if *sid == session_id && message == "here"
+            )),
+            "expected SessionMessageSent on B's sim, got {server_events:?}"
+        );
+
+        // Driver relays B's message to A, whose client folds it as a
+        // conference message.
+        a.sim
+            .send_session_message(session_id, b_agent, "Peer User", "here", false, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ConferenceSessionMessage {
+                    session_id: sid,
+                    from_agent_id,
+                    from_name,
+                    message,
+                } if *sid == session_id.get()
+                    && *from_agent_id == b_agent
+                    && from_name == "Peer User"
+                    && message == "here"
+            )),
+            "expected ConferenceSessionMessage on A, got {events:?}"
+        );
+        for (label, sim) in [("A", &a.sim), ("B", &b.sim)] {
+            let history = &sim
+                .chat_session(session_id)
+                .ok_or_else(|| format!("expected the conference on {label}'s sim"))?
+                .history;
+            assert!(
+                history
+                    .iter()
+                    .any(|entry| entry.sender == b_agent && entry.text == "here"),
+                "expected the message in {label}'s server history, got {history:?}"
+            );
+        }
+
+        // B leaves; the driver notifies A's client via A's sim.
+        b.client.leave_conference(session_id, now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionLeaveRequested { session_id: sid } if *sid == session_id
+            )),
+            "expected SessionLeaveRequested on B's sim, got {server_events:?}"
+        );
+        a.sim
+            .send_session_participant(session_id, b_agent, "Peer User", false, false, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ConferenceSessionParticipant {
+                    session_id: sid,
+                    agent_id,
+                    joined: false,
+                } if *sid == session_id.get() && *agent_id == b_agent
+            )),
+            "expected the left ConferenceSessionParticipant on A, got {events:?}"
+        );
+        Ok(())
+    }
+
     /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
     /// One row per flow-level (multi-message) state machine the client
     /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
@@ -6092,7 +6352,7 @@ mod test {
             ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
             (
                 "chat-session lifecycle + server history",
-                FlowMirrorStatus::Pending,
+                FlowMirrorStatus::Mirrored,
             ),
             ("friendship / presence", FlowMirrorStatus::Mirrored),
             (

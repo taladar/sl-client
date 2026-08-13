@@ -19,7 +19,7 @@
 //! `PacketFlags`/`PacketAck`), so a [`SimSession`] and a client [`Session`] can
 //! be driven against each other through the real wire path.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -135,19 +135,20 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{LureId, PingId, QueryId, TransactionId, TransferId, XferId};
+use crate::bookkeeping_ids::{
+    ImSessionId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
+};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
-    agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, build_task_inventory, crossed_region_to_caps_llsd,
-    display_name_update_to_llsd, enable_simulator_to_caps_llsd,
-    establish_agent_communication_to_llsd, instant_message, nav_mesh_status_to_llsd,
-    open_region_info_to_llsd, region_handshake_message, required_voice_version_to_llsd,
-    set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
-    teleport_finish_to_llsd, windlight_refresh_to_llsd,
+    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd, agent_state_update_to_llsd,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, instant_message,
+    nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
+    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
+    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
-use crate::types::EventId;
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
@@ -157,9 +158,9 @@ use crate::types::{
     FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
     GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, InventoryType, Kick, LandBrushAction,
-    LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem,
-    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryItemMove, InventoryType, Kick,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
     NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
     ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
     ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
@@ -170,6 +171,7 @@ use crate::types::{
     TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
     ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
+use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
 use sl_wire::messages::{
@@ -448,7 +450,7 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
     ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
     (
         "chat-session lifecycle + server history",
-        FlowMirrorStatus::Pending,
+        FlowMirrorStatus::Mirrored,
     ),
     ("friendship / presence", FlowMirrorStatus::Mirrored),
     (
@@ -551,6 +553,50 @@ pub struct UserRightsEntry {
     pub rights: FriendRights,
 }
 
+/// What a simulator-side chat session is — a group's IM channel or an ad-hoc
+/// conference. The server twin of the client's `ChatSessionKind` (a 1:1
+/// exchange is not a server-side session: it is plain IM relay).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SimChatSessionKind {
+    /// A group's IM session; the wire session id is the group id.
+    Group {
+        /// The group whose channel this is.
+        group_id: GroupKey,
+    },
+    /// An ad-hoc conference of individual agents, keyed by a minted session
+    /// id.
+    Conference,
+}
+
+/// One live chat session on the simulator side — the mirror of the client's
+/// session registry entry, plus the **server history** backlog the
+/// `ChatSessionRequest` capability's `fetch history` method serves (the cap
+/// dispatch belongs to the CAPS surface; the state lives here).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SimChatSession {
+    /// Whether this is a group channel or an ad-hoc conference.
+    pub kind: SimChatSessionKind,
+    /// The current participant roster.
+    pub participants: BTreeSet<AgentKey>,
+    /// The recent-message backlog (newest last, capped like the client's
+    /// mirror): every message relayed through this session, whether sent by
+    /// this session's own client ([`ServerEvent::SessionMessageSent`]) or
+    /// pushed to it ([`SimSession::send_session_message`]).
+    pub history: Vec<ServerHistoryMessage>,
+}
+
+impl SimChatSession {
+    /// Appends one message to the history backlog, dropping the oldest
+    /// entries beyond the cap.
+    fn log(&mut self, message: ServerHistoryMessage) {
+        self.history.push(message);
+        if self.history.len() > SERVER_HISTORY_CAP {
+            let excess = self.history.len().saturating_sub(SERVER_HISTORY_CAP);
+            self.history.drain(..excess);
+        }
+    }
+}
+
 /// The server-side sit state machine — the mirror of the client's private
 /// `SitState` (`AwaitingResponse` on the client corresponds to nothing here:
 /// the request is surfaced as [`ServerEvent::SitRequested`] and the machine
@@ -618,8 +664,63 @@ pub enum ServerEvent {
         /// The chat type (whisper/normal/shout/typing/…).
         chat_type: ChatType,
     },
-    /// The client sent an instant message (`ImprovedInstantMessage`).
+    /// The client sent an instant message (`ImprovedInstantMessage`). The
+    /// group/conference **session dialogs** do not take this path — they
+    /// decode into the typed session events below, exactly as the client
+    /// routes them away from its own generic IM event.
     InstantMessage(Box<InstantMessage>),
+    /// The client asked to start (join) a group's IM session
+    /// (`ImprovedInstantMessage`, `SessionGroupStart`) — the inverse of the
+    /// client's
+    /// [`Session::start_group_session`](crate::Session::start_group_session).
+    /// The registry entry is created with the sender in its roster
+    /// ([`SimSession::chat_session`]).
+    GroupSessionStartRequested {
+        /// The group whose session the client joins (the wire session id).
+        group_id: GroupKey,
+    },
+    /// The client started an ad-hoc conference (`ImprovedInstantMessage`,
+    /// `SessionConferenceStart`) — the inverse of the client's
+    /// [`Session::start_conference`](crate::Session::start_conference). The
+    /// registry entry is created with the sender and the invitees in its
+    /// roster; the driver materialises the session on each invitee's
+    /// [`SimSession`] ([`SimSession::open_chat_session`]) and delivers the
+    /// invitation over its event queue
+    /// ([`SimSession::enqueue_chatterbox_invitation`]).
+    ConferenceStartRequested {
+        /// The conference's minted session id.
+        session_id: ImSessionId,
+        /// The invited agents, unpacked from the binary bucket.
+        invitees: Vec<AgentKey>,
+        /// The accompanying invitation message text.
+        message: String,
+    },
+    /// The client sent a message into a group/conference session
+    /// (`ImprovedInstantMessage`, `SessionSend`) — the inverse of the
+    /// client's [`Session::send_group_message`](crate::Session::send_group_message)
+    /// / [`Session::send_conference_message`](crate::Session::send_conference_message).
+    /// When the session is known the message is appended to its server
+    /// history; an unknown session still surfaces (the simulator is
+    /// authoritative for membership — the driver polices). The driver relays
+    /// to the other participants' sessions with
+    /// [`SimSession::send_session_message`].
+    SessionMessageSent {
+        /// The session the message was sent into.
+        session_id: ImSessionId,
+        /// The message text.
+        message: String,
+    },
+    /// The client left a group/conference session
+    /// (`ImprovedInstantMessage`, `SessionLeave`) — the inverse of the
+    /// client's [`Session::leave_group_session`](crate::Session::leave_group_session)
+    /// / [`Session::leave_conference`](crate::Session::leave_conference). The
+    /// sender is dropped from the roster (an emptied session is removed); the
+    /// driver notifies the remaining participants with
+    /// [`SimSession::send_session_participant`].
+    SessionLeaveRequested {
+        /// The session being left.
+        session_id: ImSessionId,
+    },
     /// The client accepted a friendship offer (`AcceptFriendship`) — the
     /// inverse of the client's
     /// [`Session::accept_friendship`](crate::Session::accept_friendship). The
@@ -1858,6 +1959,10 @@ pub struct SimSession {
     /// [`ScriptPermissions`] is an explicit deny, distinct from an absent
     /// (never-answered) holder.
     script_grants: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
+    /// The live group/conference chat sessions, keyed by the wire session id
+    /// (a group session's id **is** the group id) —
+    /// [`SimSession::chat_session`].
+    chat_sessions: BTreeMap<ImSessionId, SimChatSession>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1897,6 +2002,7 @@ impl SimSession {
             sit: SimSitState::NotSitting,
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
+            chat_sessions: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -1952,6 +2058,13 @@ impl SimSession {
         item_id: InventoryKey,
     ) -> Option<ScriptPermissions> {
         self.script_grants.get(&(task_id, item_id)).copied()
+    }
+
+    /// The live chat session keyed by `session_id` (a group session's id is
+    /// the group id), or `None` if this session does not know it.
+    #[must_use]
+    pub fn chat_session(&self, session_id: ImSessionId) -> Option<&SimChatSession> {
+        self.chat_sessions.get(&session_id)
     }
 
     /// The agent id once the circuit is open.
@@ -4092,6 +4205,133 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a group/conference session message from `from` into
+    /// `session_id` — the relay half of [`ServerEvent::SessionMessageSent`]
+    /// (a `SessionSend` IM; `from_group` selects how the client folds it:
+    /// `true` surfaces as a group message, `false` as a conference message).
+    /// When this session knows `session_id`, the message is also appended to
+    /// its server history. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_session_message(
+        &mut self,
+        session_id: ImSessionId,
+        from: AgentKey,
+        from_name: &str,
+        message: &str,
+        from_group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let im = InstantMessage {
+            from_agent_id: from,
+            from_agent_name: from_name.to_owned(),
+            to_agent_id: self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+            dialog: ImDialog::SessionSend,
+            from_group,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: session_id.get(),
+            parent_estate_id: 0,
+            message: message.to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        self.send_instant_message(&im, now)?;
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.log(ServerHistoryMessage {
+                sender: from,
+                sender_name: from_name.to_owned(),
+                text: message.to_owned(),
+                timestamp: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// Sends a group/conference roster notification: `agent` joined
+    /// (`SessionAdd`) or left (`SessionLeave`) `session_id` — the relay half
+    /// of [`ServerEvent::SessionLeaveRequested`] and of a peer joining
+    /// (`from_group` selects the client-side fold, as on
+    /// [`SimSession::send_session_message`]). When this session knows
+    /// `session_id`, its roster is folded the same way (a session emptied by
+    /// a leave is removed). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_session_participant(
+        &mut self,
+        session_id: ImSessionId,
+        agent: AgentKey,
+        agent_name: &str,
+        joined: bool,
+        from_group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let im = InstantMessage {
+            from_agent_id: agent,
+            from_agent_name: agent_name.to_owned(),
+            to_agent_id: self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+            dialog: if joined {
+                ImDialog::SessionAdd
+            } else {
+                ImDialog::SessionLeave
+            },
+            from_group,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: session_id.get(),
+            parent_estate_id: 0,
+            message: String::new(),
+            binary_bucket: Vec::new(),
+        };
+        self.send_instant_message(&im, now)?;
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            if joined {
+                chat_session.participants.insert(agent);
+            } else {
+                chat_session.participants.remove(&agent);
+                if chat_session.participants.is_empty() {
+                    self.chat_sessions.remove(&session_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Materialises a chat session in this session's registry without any
+    /// wire traffic — the driver API for the relay topology: a conference
+    /// started on one client's [`SimSession`]
+    /// ([`ServerEvent::ConferenceStartRequested`]) must also exist on each
+    /// invitee's session (whose region never saw the starter's
+    /// conference-start IM) before messages relay through it. Extends the
+    /// roster of an already-known session.
+    pub fn open_chat_session(
+        &mut self,
+        session_id: ImSessionId,
+        kind: SimChatSessionKind,
+        participants: &[AgentKey],
+    ) {
+        let chat_session = self
+            .chat_sessions
+            .entry(session_id)
+            .or_insert_with(|| SimChatSession {
+                kind,
+                participants: BTreeSet::new(),
+                history: Vec::new(),
+            });
+        chat_session
+            .participants
+            .extend(participants.iter().copied());
+    }
+
     /// Sends an `OfferCallingCard` — another agent offers this agent their
     /// calling card (the inverse of the client's
     /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered)), a
@@ -4849,6 +5089,24 @@ impl SimSession {
         );
     }
 
+    /// Queues a `ChatterBoxInvitation` on the event queue — invites this
+    /// session's client into a group/conference chat (the inverse of the
+    /// client's
+    /// [`Event::ConferenceInvited`](crate::Event::ConferenceInvited), which
+    /// is also the expected `invitation` payload — the shape
+    /// [`chatterbox_invitation_to_llsd`](crate::chatterbox_invitation_to_llsd)
+    /// serializes). Any other [`Event`] variant enqueues nothing (the same
+    /// contract as the conversion, which serializes it as undefined).
+    pub fn enqueue_chatterbox_invitation(&mut self, invitation: &Event) {
+        if !matches!(invitation, Event::ConferenceInvited { .. }) {
+            return;
+        }
+        self.enqueue_caps_event(
+            "ChatterBoxInvitation",
+            chatterbox_invitation_to_llsd(invitation),
+        );
+    }
+
     /// Replies to a finished (or refused) legacy asset upload with an
     /// `AssetUploadComplete`, the message the uploading client surfaces as
     /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
@@ -5347,11 +5605,87 @@ impl SimSession {
                 });
             }
             AnyMessage::ImprovedInstantMessage(im) => {
-                self.events
-                    .push_back(ServerEvent::InstantMessage(Box::new(instant_message(
-                        &im.agent_data,
-                        &im.message_block,
-                    ))));
+                // The session dialogs get typed events and fold the session
+                // registry (mirroring how the client routes them away from its
+                // generic IM event); everything else stays the plain IM path.
+                let block = &im.message_block;
+                let sender = AgentKey::from(im.agent_data.agent_id);
+                match ImDialog::from_u8(block.dialog) {
+                    ImDialog::SessionGroupStart => {
+                        let group_id = GroupKey::from(block.id);
+                        let chat_session = self
+                            .chat_sessions
+                            .entry(ImSessionId::from(block.id))
+                            .or_insert_with(|| SimChatSession {
+                                kind: SimChatSessionKind::Group { group_id },
+                                participants: BTreeSet::new(),
+                                history: Vec::new(),
+                            });
+                        chat_session.participants.insert(sender);
+                        self.events
+                            .push_back(ServerEvent::GroupSessionStartRequested { group_id });
+                    }
+                    ImDialog::SessionConferenceStart => {
+                        let session_id = ImSessionId::from(block.id);
+                        let invitees: Vec<AgentKey> = unpack_uuids(&block.binary_bucket)
+                            .into_iter()
+                            .map(AgentKey::from)
+                            .collect();
+                        let chat_session =
+                            self.chat_sessions.entry(session_id).or_insert_with(|| {
+                                SimChatSession {
+                                    kind: SimChatSessionKind::Conference,
+                                    participants: BTreeSet::new(),
+                                    history: Vec::new(),
+                                }
+                            });
+                        chat_session.participants.insert(sender);
+                        chat_session.participants.extend(invitees.iter().copied());
+                        self.events
+                            .push_back(ServerEvent::ConferenceStartRequested {
+                                session_id,
+                                invitees,
+                                message: trimmed_string(&block.message),
+                            });
+                    }
+                    ImDialog::SessionSend => {
+                        let session_id = ImSessionId::from(block.id);
+                        let message = trimmed_string(&block.message);
+                        // A send into an unknown session surfaces but creates
+                        // no state: membership is the simulator's call, and
+                        // the driver polices it (deliberately NOT the client's
+                        // lazy-open — the client trusts inbound traffic, the
+                        // server must not).
+                        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+                            chat_session.log(ServerHistoryMessage {
+                                sender,
+                                sender_name: trimmed_string(&block.from_agent_name),
+                                text: message.clone(),
+                                timestamp: None,
+                            });
+                        }
+                        self.events.push_back(ServerEvent::SessionMessageSent {
+                            session_id,
+                            message,
+                        });
+                    }
+                    ImDialog::SessionLeave => {
+                        let session_id = ImSessionId::from(block.id);
+                        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+                            chat_session.participants.remove(&sender);
+                            if chat_session.participants.is_empty() {
+                                self.chat_sessions.remove(&session_id);
+                            }
+                        }
+                        self.events
+                            .push_back(ServerEvent::SessionLeaveRequested { session_id });
+                    }
+                    _ => {
+                        self.events.push_back(ServerEvent::InstantMessage(Box::new(
+                            instant_message(&im.agent_data, block),
+                        )));
+                    }
+                }
             }
             AnyMessage::AcceptFriendship(accept) => {
                 self.events.push_back(ServerEvent::FriendshipAccepted {

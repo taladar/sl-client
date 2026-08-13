@@ -145,6 +145,16 @@ pub(crate) fn pack_uuids(uuids: &[Uuid]) -> Vec<u8> {
     packed
 }
 
+/// Splits a conference-start invitee bucket back into its packed 16-byte ids —
+/// the inverse of [`pack_uuids`], used by the simulator side to decode a
+/// client's `SessionConferenceStart`. A trailing partial chunk is ignored.
+pub(crate) fn unpack_uuids(bucket: &[u8]) -> Vec<Uuid> {
+    bucket
+        .chunks_exact(16)
+        .filter_map(|chunk| Uuid::from_slice(chunk).ok())
+        .collect()
+}
+
 /// Extracts the region handle encoded in a teleport lure id (OpenSim's
 /// `BuildFakeParcelID`: the handle is the first eight little-endian bytes).
 /// Returns `0` for an id that is not a fake parcel id (e.g. a Second Life lure
