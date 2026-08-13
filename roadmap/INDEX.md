@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 244 |
+| ready | 243 |
 | blocked | 77 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 780 |
-| deferred | 22 |
+| done | 781 |
+| deferred | 23 |
 | wont-do | 10 |
-| **total** | **1227** |
+| **total** | **1228** |
 
 ## ideas (56)
 
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (244)
+## ready (243)
 
 ### protocol
 
@@ -522,9 +522,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-ui-color-picker` (done))
 - [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
   — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
-- [`viewer-preferences-network-cache-tab`](ready/viewer-preferences-network-cache-tab.md)
-  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
-  (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -1054,7 +1051,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (780)
+## done (781)
 
 ### protocol
 
@@ -1897,6 +1894,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Preferences — general tab (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-graphics-tab`](done/viewer-preferences-graphics-tab.md) —
   Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-network-cache-tab`](done/viewer-preferences-network-cache-tab.md)
+  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
+  (done))
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))
@@ -2720,7 +2720,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (22)
+## deferred (23)
 
 ### protocol
 
@@ -2774,6 +2774,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
   — Per-frame byte budget for media-surface uploads
+- [`viewer-socks5-udp-proxy`](deferred/viewer-socks5-udp-proxy.md) — SOCKS5
+  proxy for the UDP circuit
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 
