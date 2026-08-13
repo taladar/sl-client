@@ -14,6 +14,7 @@ mod object_update;
 mod particles;
 mod scoped_id;
 mod session;
+mod sim_caps;
 mod sim_session;
 mod terrain;
 mod types;
@@ -91,6 +92,9 @@ pub use session::{
     sky_settings_from_asset, teleport_finish_to_llsd, water_settings_from_asset,
     windlight_refresh_to_llsd,
 };
+pub use sim_caps::{
+    CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
+};
 pub use sim_session::{AgentUpdateInfo, ServerEvent, SimSession};
 pub use terrain::encode_layer;
 pub use types::{
@@ -160,7 +164,7 @@ pub use sl_wire::{
     AbuseReport, AbuseReportType, AgentPreferences, AisCategoryCreate, AisItemUpdate, AisUpdate,
     AnimatedObjects, AnyMessage, AssetUploadResponse, AttachmentLocation,
     AttachmentResourcesReport, CircuitCode, ControlFlags, CreateInventoryCategoryRequest,
-    Direction, DisplayName, EventQueueEvent, EventQueueResponse, ExperienceInfo,
+    Direction, DisplayName, EventQueueEvent, EventQueueRequest, EventQueueResponse, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut,
     GLTF_MATERIAL_OVERRIDE_METHOD, GestureEntry, GlobalCoordinates, GlobalTextures,
     GltfMaterialOverride, HomeLocation, IceCandidate, InitialOutfit, LSL_SYNTAX_VERSION,
@@ -199,19 +203,20 @@ pub use sl_wire::{
     build_remote_parcel_request, build_remote_parcel_response, build_render_materials_put_request,
     build_render_materials_request, build_render_materials_response,
     build_resource_cost_selected_request, build_resource_cost_selected_response,
-    build_seed_request, build_send_user_report, build_set_experience_permission_request,
-    build_simulator_features_response, build_update_avatar_appearance_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, combine_uuids, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    parse_agent_preferences, parse_ais_category_children_fetch_url,
-    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
-    parse_ais_create_category_url, parse_ais_item_url, parse_ais_move_body,
-    parse_ais_rename_category_body, parse_ais_update_item_body, parse_asset_upload_response,
-    parse_attachment_resources, parse_create_inventory_category_request, parse_display_names,
-    parse_display_names_query, parse_event_queue_response, parse_experience_id_query,
+    build_seed_request, build_seed_response, build_send_user_report,
+    build_set_experience_permission_request, build_simulator_features_response,
+    build_update_avatar_appearance_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, combine_uuids,
+    display_names_query, experience_id_query, experience_info_query, find_experience_query,
+    forget_experience_query, group_experiences_query, parse_agent_preferences,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_url, parse_ais_category_url,
+    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_asset_upload_response, parse_attachment_resources,
+    parse_create_inventory_category_request, parse_display_names, parse_display_names_query,
+    parse_event_queue_request, parse_event_queue_response, parse_experience_id_query,
     parse_experience_ids, parse_experience_info_query, parse_experience_infos,
     parse_experience_permissions, parse_experience_status, parse_find_experience_query,
     parse_forget_experience_query, parse_get_object_cost, parse_get_object_physics_data,
@@ -222,8 +227,8 @@ pub use sl_wire::{
     parse_provision_voice_account_request, parse_region_experiences,
     parse_region_experiences_request, parse_remote_parcel_reply, parse_remote_parcel_request,
     parse_render_materials_response, parse_resource_cost_selected,
-    parse_resource_cost_selected_request, parse_seed_response, parse_send_user_report,
-    parse_set_experience_permission_request, parse_simulator_features,
+    parse_resource_cost_selected_request, parse_seed_request, parse_seed_response,
+    parse_send_user_report, parse_set_experience_permission_request, parse_simulator_features,
     parse_update_experience_request, parse_voice_signaling_request, region_name_from_wire,
     region_name_to_wire, sim_access,
 };

@@ -36,6 +36,26 @@ pub fn build_seed_request(capability_names: &[&str]) -> String {
     out
 }
 
+/// Parses a capability-seed request — the inverse of [`build_seed_request`]:
+/// an LLSD array of the capability names the client wants granted. Entries
+/// that are not strings are skipped; a body that is not an array yields an
+/// empty list. The requested order is preserved.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_seed_request(xml: &str) -> Result<Vec<String>, roxmltree::Error> {
+    let mut names = Vec::new();
+    if let Llsd::Array(entries) = parse_llsd_xml(xml)? {
+        for entry in entries {
+            if let Some(name) = entry.as_str() {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    Ok(names)
+}
+
 /// Builds the LLSD-XML body for an `EventQueueGet` poll: `{ ack, done }`.
 #[must_use]
 pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
@@ -47,6 +67,32 @@ pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
     format!(
         "<llsd><map><key>ack</key>{ack_xml}<key>done</key><boolean>{done_xml}</boolean></map></llsd>"
     )
+}
+
+/// A parsed `EventQueueGet` long-poll request body: `{ ack, done }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventQueueRequest {
+    /// The last batch id the client received (echoed from the previous
+    /// response's `id`), or `None` (`<undef />`) on the first poll of a
+    /// session.
+    pub ack: Option<i32>,
+    /// Whether the client is tearing the queue down (sent on region exit).
+    pub done: bool,
+}
+
+/// Parses an `EventQueueGet` request — the inverse of
+/// [`build_event_queue_request`], the server counterpart of
+/// [`parse_event_queue_response`]. A missing or `<undef />` `ack` is `None`;
+/// a missing `done` is `false`.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_event_queue_request(xml: &str) -> Result<EventQueueRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let ack = root.get("ack").and_then(Llsd::as_i32);
+    let done = root.get("done").and_then(Llsd::as_bool).unwrap_or(false);
+    Ok(EventQueueRequest { ack, done })
 }
 
 /// Builds the LLSD-XML body for a `FetchInventoryDescendents2` request: a
@@ -810,6 +856,21 @@ pub fn parse_seed_response(xml: &str) -> Result<HashMap<String, String>, roxmltr
         }
     }
     Ok(capabilities)
+}
+
+/// Builds a capability-seed grant response — the inverse of
+/// [`parse_seed_response`], the server counterpart of the client's
+/// [`build_seed_request`]: an LLSD map of granted capability name to URL.
+/// Built on [`Llsd::to_llsd_xml`], whose sorted map keys make the output
+/// deterministic — equal grants serialize byte-identically, so a retried
+/// seed POST can be answered with an identical body.
+#[must_use]
+pub fn build_seed_response(capabilities: &HashMap<String, String>) -> String {
+    let map = capabilities
+        .iter()
+        .map(|(name, url)| (name.clone(), Llsd::String(url.clone())))
+        .collect();
+    Llsd::Map(map).to_llsd_xml()
 }
 
 /// Parses an `EventQueueGet` response into its id and events.
