@@ -8,6 +8,7 @@ mod command;
 mod error;
 mod extra_params;
 pub mod j2c;
+mod marketplace;
 pub mod mesh_lod;
 mod object_update;
 mod particles;
@@ -34,6 +35,15 @@ pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;
 pub use j2c::{DiscardLevel, MAX_DISCARD_LEVEL};
+pub use marketplace::{
+    AssociateInventory, CreateListing, Listing, ListingId, MarketplaceApiError,
+    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceBuildRequestError,
+    MarketplaceInventoryInfo, MarketplaceMethod, MarketplaceOperation, MarketplaceRequest,
+    MerchantStatus, UpdateListing, associate_inventory_request, create_listing_request,
+    delete_listing_request, listing_request, listings_request, marketplace_failure_event,
+    marketplace_reply_event, merchant_status_request, parse_deleted_ids, parse_listings_response,
+    parse_merchant_status, update_listing_request,
+};
 pub use mesh_lod::{DEFAULT_LOD_FACTOR, MESH_LOD_COUNT, MeshLod};
 pub use object_update::{
     TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
@@ -46,36 +56,37 @@ pub use scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 pub use session::{
     CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_ANIMATION, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
-    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatLifecycleView, ChatSessionInfo,
-    ChatSessionKind, ChatSessionLifecycle, FolderState, FriendPresence, INVENTORY_CACHE_VERSION,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, InventoryOwner, InviteChannel, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, MessageCursor, NearbyHistoryLine, PendingInvite, RECV_BUFFER_SIZE,
-    REQUESTED_CAPABILITIES, Session, SessionMessage, VoiceChannelInfo, VoiceChannelState,
-    agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply,
-    bulk_update_inventory_to_llsd, chat_session_request_body, chatterbox_invitation_to_llsd,
-    copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
-    display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
-    environment_to_llsd, establish_agent_communication_to_llsd, group_invite_response_body,
-    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
-    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
-    parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
+    CAP_GET_MESH2, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_ANIMATION,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FolderState,
+    FriendPresence, INVENTORY_CACHE_VERSION, INVENTORY_FETCH_MAX_IN_FLIGHT, InventoryOwner,
+    InviteChannel, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, MessageCursor,
+    NearbyHistoryLine, PendingInvite, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
+    SessionMessage, VoiceChannelInfo, VoiceChannelState, agent_drop_group_to_llsd,
+    agent_state_update_to_llsd, ais_inventory_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
+    chat_session_request_body, chatterbox_invitation_to_llsd, copy_inventory_from_notecard_body,
+    created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_to_llsd,
+    establish_agent_communication_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
+    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
+    required_voice_version_to_llsd, server_appearance_update_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
     teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
 };

@@ -808,6 +808,15 @@ impl Survey {
             | Event::SimConsoleResponse { .. }
             | Event::RequiredVoiceVersion(_)
             | Event::OpenRegionInfo(_)
+            | Event::MarketplaceMerchantStatus(_)
+            | Event::MarketplaceListings(_)
+            | Event::MarketplaceListing(_)
+            | Event::MarketplaceListingCreated(_)
+            | Event::MarketplaceListingUpdated(_)
+            | Event::MarketplaceInventoryAssociated(_)
+            | Event::MarketplaceListingDeleted(_)
+            | Event::MarketplaceListingGone(_)
+            | Event::MarketplaceError { .. }
             | Event::Ping { .. }
             | Event::Environment(_) => {}
         }

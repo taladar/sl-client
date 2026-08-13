@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 223 |
+| ready | 222 |
 | blocked | 78 |
-| in-progress | 15 |
+| in-progress | 16 |
 | bugs | 22 |
 | done | 799 |
 | deferred | 22 |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (222)
 
 ### protocol
 
@@ -157,8 +157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
   sl-lsl (LslSyntax) types
-- [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
-  sl-marketplace crate — SLM DirectDelivery JSON transport
 
 ### viewer
 
@@ -913,7 +911,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (15)
+## in-progress (16)
+
+### protocol
+
+- [`protocol-slm-directdelivery`](in-progress/protocol-slm-directdelivery.md) —
+  sl-marketplace crate — SLM DirectDelivery JSON transport
 
 ### viewer
 

@@ -333,6 +333,15 @@ fn on_events(
             | SlSessionEvent::SimConsoleResponse { .. }
             | SlSessionEvent::RequiredVoiceVersion(_)
             | SlSessionEvent::OpenRegionInfo(_)
+            | SlSessionEvent::MarketplaceMerchantStatus(_)
+            | SlSessionEvent::MarketplaceListings(_)
+            | SlSessionEvent::MarketplaceListing(_)
+            | SlSessionEvent::MarketplaceListingCreated(_)
+            | SlSessionEvent::MarketplaceListingUpdated(_)
+            | SlSessionEvent::MarketplaceInventoryAssociated(_)
+            | SlSessionEvent::MarketplaceListingDeleted(_)
+            | SlSessionEvent::MarketplaceListingGone(_)
+            | SlSessionEvent::MarketplaceError { .. }
             | SlSessionEvent::Ping { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),

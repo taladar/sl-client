@@ -14,38 +14,39 @@ use std::collections::{BTreeSet, HashMap};
 use sl_proto::{
     CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    ChatSessionKind, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse,
-    MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_render_materials_put_request, build_resource_cost_selected_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, chat_session_request_body, copy_inventory_from_notecard_body,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor,
+    RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    associate_inventory_request, build_agent_preferences_request, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_render_materials_put_request,
+    build_resource_cost_selected_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
+    copy_inventory_from_notecard_body, create_listing_request, delete_listing_request,
     display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body,
-    parse_login_response,
+    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
+    listings_request, merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -53,18 +54,18 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, AssetKey, AssetUpdateLocation, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick,
-    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
-    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    AnyMessage, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
+    AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
+    AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig,
+    ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode,
+    CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
     ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
-    Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DisconnectReason, DisplayName, DisplayNameUpdate,
-    Distance, EconomyData, EnvironmentAsset, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
-    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ConversationKind, CreateGroupParams, CreateListing, DayCycle, DayCycleFrame, DeRezDestination,
+    DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DisconnectReason, DisplayName,
+    DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
+    EventId, EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
     ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
     FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
     GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
@@ -75,14 +76,16 @@ pub use sl_proto::{
     InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
     InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
     InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandSearchType,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
-    LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
-    Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing,
+    ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
+    LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MerchantStatus, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine,
+    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
     ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
     ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
@@ -105,12 +108,12 @@ pub use sl_proto::{
     TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation,
     TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
     TimestampFormat, TransactionId, TransferId, Transmit, UpdatableAssetType,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    avatar_texture, azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, environment_asset_from_bytes, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
-    texture_anim_mode,
+    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
+    WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
+    sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -302,6 +305,7 @@ mod http;
 mod inventory;
 mod inventory_cache;
 mod lsl_syntax_cache;
+mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
@@ -367,6 +371,7 @@ use crate::inventory::{
 };
 use crate::inventory_cache::InventoryCache;
 use crate::lsl_syntax_cache::LslSyntaxCache;
+use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{
     run_modify_material_params, run_render_materials_fetch, run_set_render_materials,
 };
@@ -3923,6 +3928,76 @@ fn advance_running(
             }
             Command::ViewerStartAuction { parcel, snapshot } => {
                 session.viewer_start_auction(*parcel, *snapshot, now).ok();
+            }
+            Command::MarketplaceMerchantStatus => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::MerchantStatus,
+                        Ok(merchant_status_request()),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceListings => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::GetListings,
+                        Ok(listings_request()),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceListing(id) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::GetListing(*id),
+                        Ok(listing_request(*id)),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceCreateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::CreateListing,
+                        create_listing_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceUpdateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::UpdateListing(payload.id),
+                        update_listing_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceAssociateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::AssociateInventory(payload.id),
+                        associate_inventory_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceDeleteListing(id) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::DeleteListing(*id),
+                        Ok(delete_listing_request(*id)),
+                        &caps.asset_tx,
+                    );
+                }
             }
             Command::Logout => session.initiate_logout(now),
         }

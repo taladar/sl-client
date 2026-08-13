@@ -2,7 +2,7 @@
 id: protocol-slm-directdelivery
 title: sl-marketplace crate — SLM DirectDelivery JSON transport
 topic: protocol
-status: ready
+status: in-progress
 origin: split out of viewer-inventory-marketplace-operations
   (2026-07-22) — the SLM API is JSON over a cap URL, unlike every
   LLSD transport we speak, so it gets its own crate and book chapter

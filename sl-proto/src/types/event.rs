@@ -27,6 +27,9 @@ use super::{
     SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
+use crate::marketplace::{
+    Listing, ListingId, MarketplaceApiError, MarketplaceOperation, MerchantStatus,
+};
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
     ParcelKey, TextureKey,
@@ -1814,6 +1817,51 @@ pub enum Event {
     /// OpenSim's extended per-region settings/limits (`OpenRegionInfo`, pushed
     /// over the CAPS event queue). OpenSim-only — Second Life never sends it.
     OpenRegionInfo(Box<OpenRegionInfo>),
+    /// The reply to the SLM `GET /merchant` probe (the runtime
+    /// `MarketplaceMerchantStatus` command): whether the agent is a
+    /// marketplace merchant. Second Life only — OpenSim serves no
+    /// `DirectDelivery` capability, so there the runtimes answer with
+    /// [`MerchantStatus::ConnectionFailure`].
+    MarketplaceMerchantStatus(MerchantStatus),
+    /// The reply to an SLM `GET /listings` (the runtime
+    /// `MarketplaceListings` command): all of the agent's marketplace
+    /// listings. SL-only.
+    MarketplaceListings(Vec<Listing>),
+    /// The reply to an SLM `GET /listing/<id>` (the runtime
+    /// `MarketplaceListing` command): the queried listing (the wire
+    /// envelope is an array even for a single listing). SL-only.
+    MarketplaceListing(Vec<Listing>),
+    /// The reply to an SLM `POST /listings` (the runtime
+    /// `MarketplaceCreateListing` command): the created listing(s).
+    /// SL-only.
+    MarketplaceListingCreated(Vec<Listing>),
+    /// The reply to an SLM `PUT /listing/<id>` (the runtime
+    /// `MarketplaceUpdateListing` command): the listing(s) after the
+    /// update. SL-only.
+    MarketplaceListingUpdated(Vec<Listing>),
+    /// The reply to an SLM `PUT /associate_inventory/<id>` (the runtime
+    /// `MarketplaceAssociateListing` command): the listing(s) after the
+    /// association. SL-only.
+    MarketplaceInventoryAssociated(Vec<Listing>),
+    /// The reply to an SLM `DELETE /listing/<id>` (the runtime
+    /// `MarketplaceDeleteListing` command): the ids of the deleted
+    /// (archived) listings. SL-only.
+    MarketplaceListingDeleted(Vec<ListingId>),
+    /// An SLM `GET /listing/<id>` answered HTTP 404: the listing no
+    /// longer exists on the marketplace and a client mirroring it
+    /// should drop its local record (reference-viewer semantics; not
+    /// an error). SL-only.
+    MarketplaceListingGone(ListingId),
+    /// An SLM request failed: the service answered with an error
+    /// status, the reply body did not decode, or the request never
+    /// completed (including the missing-`DirectDelivery`-capability
+    /// case, e.g. on OpenSim). SL-only.
+    MarketplaceError {
+        /// The route the failed request belonged to.
+        operation: MarketplaceOperation,
+        /// The typed error detail.
+        error: MarketplaceApiError,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.

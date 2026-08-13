@@ -9066,6 +9066,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-marketplace"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sl-types",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
 name = "sl-material"
 version = "0.1.0"
 dependencies = [
@@ -9146,6 +9158,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-lsl",
+ "sl-marketplace",
  "sl-types",
  "sl-wire",
  "thiserror 2.0.19",

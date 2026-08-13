@@ -207,8 +207,12 @@ conventions.
 ## Out of scope (not LLUDP/CAPS protocol)
 
 Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
-and the Marketplace (web, not protocol) are deliberately excluded — this roadmap
-covers protocol features only. **Server roles are in scope as of Tier F
+and the Marketplace *website* (browsing/purchase, web not protocol) are
+deliberately excluded — this roadmap covers protocol features only. (The
+Marketplace's **DirectDelivery listing-management API** turned out to be a
+protocol surface after all — a JSON transport behind a region capability —
+and is in scope as [[protocol-slm-directdelivery]] / the `sl-marketplace`
+crate.) **Server roles are in scope as of Tier F
 (#52–#65) — the bidirectional codec and the per-role sans-I/O skeletons — but
 a *running* grid is not: world authority, persistence, multi-client broadcast,
 and the socket/event-loop I/O remain the consumer's job, not these crates'.**

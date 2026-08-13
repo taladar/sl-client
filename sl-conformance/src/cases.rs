@@ -58,6 +58,7 @@ pub mod library_tree_fetch;
 pub mod login_handshake;
 pub mod logout_clean;
 pub mod map_blocks_items;
+pub mod marketplace_direct_delivery;
 pub mod mesh_fetch_http;
 pub mod modify_land;
 pub mod money_balance;

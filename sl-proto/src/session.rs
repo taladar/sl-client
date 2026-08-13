@@ -506,6 +506,19 @@ pub const CAP_SEND_USER_REPORT: &str = "SendUserReport";
 /// `llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
 pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreenshot";
 
+/// The HTTP capability for the **Second Life Marketplace (SLM)
+/// DirectDelivery API** (`DirectDelivery`): the base URL of the
+/// marketplace listing-management REST service. Unlike every other
+/// capability this one speaks **plain JSON**, not LLSD — routes
+/// (`/merchant`, `/listings`, `/listing/<id>`,
+/// `/associate_inventory/<id>`) are appended verbatim to the cap URL
+/// (the reference viewer's `getSLMConnectURL` in
+/// `llmarketplacefunctions.cpp`). Request builders and response
+/// parsers live in the `sl-marketplace` crate; the runtimes drive it
+/// via the `Marketplace*` commands. Second Life only; OpenSim grids do
+/// not serve this capability at all.
+pub const CAP_DIRECT_DELIVERY: &str = "DirectDelivery";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -574,6 +587,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_LAND_RESOURCES,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_DIRECT_DELIVERY,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

@@ -14,6 +14,7 @@
 - [Messages & the Template](comms/messages.md)
 - [Generic Messages](comms/generic-messages.md)
 - [Xfer File Transfer](comms/xfer.md)
+- [Marketplace JSON (SLM)](comms/marketplace.md)
 
 ## Content Layer
 

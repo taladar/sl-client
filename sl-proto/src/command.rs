@@ -8,26 +8,27 @@ use crate::j2c::DiscardLevel;
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
-    AssetUpdateLocation, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
-    ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
-    EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission,
-    ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights,
-    GestureActivation, GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey,
-    GroupRequestId, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId,
-    InterestsUpdate, InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey,
-    InventoryOffer, InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount,
-    LureId, MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate,
-    RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
-    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdatableAssetType,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
+    ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ControlFlags, CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
+    DirectoryVisibility, Distance, EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId,
+    ExperienceKey, ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType,
+    FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryCursor,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
+    LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
+    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
+    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
+    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -2667,6 +2668,47 @@ pub enum Command {
         /// snapshot).
         snapshot: Option<TextureKey>,
     },
+    /// Probe the agent's Second Life Marketplace merchant status over the
+    /// **SLM JSON** path (`GET /merchant` on the `DirectDelivery`
+    /// capability). The reply arrives as
+    /// [`Event::MarketplaceMerchantStatus`](crate::Event::MarketplaceMerchantStatus).
+    /// SL-only — on a grid without the capability (OpenSim) the runtimes
+    /// answer with a connection failure.
+    MarketplaceMerchantStatus,
+    /// Fetch all of the agent's marketplace listings over the **SLM JSON**
+    /// path (`GET /listings`). The reply arrives as
+    /// [`Event::MarketplaceListings`](crate::Event::MarketplaceListings).
+    /// SL-only.
+    MarketplaceListings,
+    /// Fetch one marketplace listing over the **SLM JSON** path
+    /// (`GET /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListing`](crate::Event::MarketplaceListing), or as
+    /// [`Event::MarketplaceListingGone`](crate::Event::MarketplaceListingGone)
+    /// when the service answers 404 (the listing was deleted server-side).
+    /// SL-only.
+    MarketplaceListing(ListingId),
+    /// Create a marketplace listing from a listing folder over the **SLM
+    /// JSON** path (`POST /listings`). The reply arrives as
+    /// [`Event::MarketplaceListingCreated`](crate::Event::MarketplaceListingCreated).
+    /// SL-only.
+    MarketplaceCreateListing(CreateListing),
+    /// Update a marketplace listing (list / unlist, switch the version
+    /// folder, stock count) over the **SLM JSON** path
+    /// (`PUT /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListingUpdated`](crate::Event::MarketplaceListingUpdated).
+    /// SL-only.
+    MarketplaceUpdateListing(UpdateListing),
+    /// Associate a listing folder with an existing marketplace listing id
+    /// over the **SLM JSON** path (`PUT /associate_inventory/<id>`). The
+    /// reply arrives as
+    /// [`Event::MarketplaceInventoryAssociated`](crate::Event::MarketplaceInventoryAssociated).
+    /// SL-only.
+    MarketplaceAssociateListing(AssociateInventory),
+    /// Delete (archive) a marketplace listing over the **SLM JSON** path
+    /// (`DELETE /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListingDeleted`](crate::Event::MarketplaceListingDeleted).
+    /// SL-only.
+    MarketplaceDeleteListing(ListingId),
     /// Begin a clean logout.
     Logout,
 }
