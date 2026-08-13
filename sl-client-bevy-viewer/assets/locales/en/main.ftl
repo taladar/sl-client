@@ -630,6 +630,29 @@ landmark-teleport = Teleport
 animation-play-inworld = Play in world
 animation-stop = Stop
 
+## The About Landmark floater (viewer-about-landmark-floater).
+
+about-landmark-title = About Landmark
+about-landmark-name = Title:
+about-landmark-notes = Notes:
+about-landmark-region = Region:
+about-landmark-parcel = Parcel:
+about-landmark-maturity = Rating:
+about-landmark-maturity-pg = General
+about-landmark-maturity-mature = Moderate
+about-landmark-maturity-adult = Adult
+about-landmark-owner = Owner:
+about-landmark-traffic = Traffic:
+about-landmark-area = Area:
+about-landmark-creator = Creator:
+about-landmark-acquired = Acquired:
+about-landmark-slurl = SLURL:
+about-landmark-copy-slurl = Copy SLURL
+about-landmark-loading = (loading)
+about-landmark-unavailable = (parcel details unavailable)
+about-landmark-unreadable = (unreadable landmark)
+about-landmark-parcel-unnamed = (no name)
+
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
 notecard-save = Save

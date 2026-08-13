@@ -30,6 +30,7 @@
 
 mod about_floater;
 mod about_land;
+mod about_landmark;
 mod about_region;
 mod animations;
 mod animesh;
@@ -278,6 +279,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 use crate::about_floater::AboutFloaterPlugin;
 use crate::about_land::AboutLandPlugin;
+use crate::about_landmark::AboutLandmarkPlugin;
 use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
@@ -1224,6 +1226,7 @@ fn run_session(
     .add_plugins(InventoryFiltersPlugin)
     .add_plugins(InventoryGalleryPlugin)
     .add_plugins(InventoryPropertiesPlugin)
+    .add_plugins(AboutLandmarkPlugin)
     .add_plugins(AvatarPickerPlugin)
     // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
     // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's

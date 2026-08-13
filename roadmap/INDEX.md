@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 241 |
+| ready | 240 |
 | blocked | 77 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 784 |
+| done | 785 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1229** |
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (241)
+## ready (240)
 
 ### protocol
 
@@ -166,8 +166,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
-- [`viewer-about-landmark-floater`](ready/viewer-about-landmark-floater.md) —
-  About Landmark floater — full detail view
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
 - [`viewer-ambient-wind-sound`](ready/viewer-ambient-wind-sound.md) — Ambient
@@ -1046,7 +1044,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (784)
+## done (785)
 
 ### protocol
 
@@ -1183,6 +1181,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
+- [`viewer-about-landmark-floater`](done/viewer-about-landmark-floater.md) —
+  About Landmark floater — full detail view
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)

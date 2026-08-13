@@ -3,8 +3,9 @@
 //! name / description editing, creator / owner / acquired, the permission
 //! toggles and sale settings, written back via `UpdateInventoryItem` — and
 //! the small per-type preview floaters behind the context menu's Open:
-//! a notecard reader, a texture / snapshot preview, About Landmark (with
-//! Teleport), and an animation preview (play in-world / stop).
+//! a notecard reader, a texture / snapshot preview, and an animation preview
+//! (play in-world / stop). A landmark's Open forwards to the full About
+//! Landmark floater ([`crate::about_landmark`]).
 //!
 //! # Layout follows the Vintage skin
 //!
@@ -30,9 +31,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AnimationKey, AssetKey, AssetType, Command, InventoryItem, InventoryType, ItemInfo,
-    LindenAmount, Permissions, SaleType, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TextureKey, TransactionId, Uuid, to_bevy_image,
+    AnimationKey, AssetKey, Command, InventoryItem, InventoryType, ItemInfo, LindenAmount,
+    Permissions, SaleType, SlCommand, SlIdentity, TextureKey, TransactionId, Uuid, to_bevy_image,
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -40,7 +40,7 @@ use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
-use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_font::UiFont;
 
 /// The chrome font size, in logical pixels.
@@ -64,9 +64,6 @@ const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
 const CHECKED_GLYPH: &str = "\u{2611}";
 /// The unchecked glyph.
 const UNCHECKED_GLYPH: &str = "\u{2610}";
-
-/// The notecard / landmark preview text viewport height, in logical pixels.
-const PREVIEW_TEXT_HEIGHT: f32 = 260.0;
 
 /// The texture preview's largest edge, in logical pixels.
 const TEXTURE_PREVIEW_EDGE: f32 = 256.0;
@@ -170,7 +167,6 @@ impl Plugin for InventoryPropertiesPlugin {
                     open_properties,
                     commit_text_edits,
                     open_previews,
-                    ingest_preview_assets,
                     poll_texture_preview,
                 )
                     .chain(),
@@ -178,7 +174,7 @@ impl Plugin for InventoryPropertiesPlugin {
     }
 }
 
-/// Spawn the properties floater and the four preview floaters, all hidden.
+/// Spawn the properties floater and the preview floaters, all hidden.
 fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
     // Properties.
     let properties = spawn_floater(
@@ -215,19 +211,14 @@ fn spawn_preview_floaters(mut commands: Commands, root: Res<UiRoot>) {
         price_field: None,
     });
 
-    // Notecards open in their own editor floater (`crate::edit_notecard`), not
+    // Notecards open in their own editor floater (`crate::edit_notecard`),
+    // landmarks in the About Landmark floater (`crate::about_landmark`) — not
     // here.
     // Texture.
     let texture = spawn_preview_floater(&mut commands, root.0, "preview-texture", "Texture");
-    // Landmark.
-    let landmark = spawn_preview_floater(&mut commands, root.0, "preview-landmark", "Landmark");
     // Animation.
     let animation = spawn_preview_floater(&mut commands, root.0, "preview-animation", "Animation");
-    commands.insert_resource(PreviewUi {
-        texture,
-        landmark,
-        animation,
-    });
+    commands.insert_resource(PreviewUi { texture, animation });
 }
 
 /// Spawn one preview floater shell, returning its handles.
@@ -282,8 +273,6 @@ struct PreviewFloater {
 struct PreviewUi {
     /// The texture / snapshot preview.
     texture: PreviewFloater,
-    /// The About Landmark floater.
-    landmark: PreviewFloater,
     /// The animation preview.
     animation: PreviewFloater,
 }
@@ -755,8 +744,9 @@ fn commit_text_edits(
 }
 
 /// Send an `UpdateInventoryItem` for the (edited) item and refresh its
-/// folder page.
-fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>) {
+/// folder page (shared with the About Landmark floater's title / notes
+/// editing, [`crate::about_landmark`]).
+pub(crate) fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>) {
     commands.write(SlCommand(Command::UpdateInventoryItem {
         item: Box::new(to_wire_item(item)),
         transaction_id: TransactionId::from(Uuid::nil()),
@@ -851,8 +841,6 @@ const fn civil_from_days(days: i64) -> (i64, u8, u8) {
 /// The previews' in-flight fetches.
 #[derive(Resource, Debug, Default)]
 struct PreviewState {
-    /// The landmark asset awaited.
-    pending_landmark: Option<Uuid>,
     /// The texture awaited from the texture pipeline, with the node to give
     /// the image to.
     pending_texture: Option<(TextureKey, Entity)>,
@@ -876,9 +864,9 @@ fn open_previews(
     mut panels: Query<&mut UiPanelShown>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
-    mut sl_commands: MessageWriter<SlCommand>,
     mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
     mut script_opens: MessageWriter<crate::edit_script::OpenScript>,
+    mut landmark_opens: MessageWriter<crate::about_landmark::OpenAboutLandmark>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -944,44 +932,9 @@ fn open_previews(
                 show(&mut panels, ui.texture.panel);
             }
             InventoryType::Landmark => {
-                reset_preview(
-                    &ui.landmark,
-                    &item.name,
-                    &children,
-                    &mut texts,
-                    &mut commands,
-                );
-                spawn_preview_text(
-                    &mut commands,
-                    ui.landmark.content,
-                    "(loading)".to_owned(),
-                    LandmarkText,
-                );
-                // The Teleport button works regardless of the asset fetch.
-                let asset_id = item.asset_id;
-                let teleport = spawn_text_button(
-                    &mut commands,
-                    ui.landmark.content,
-                    "landmark-teleport",
-                    1,
-                    true,
-                );
-                commands.entity(teleport).observe(
-                    move |press: On<Pointer<Press>>, mut commands: MessageWriter<SlCommand>| {
-                        if press.button == PointerButton::Primary {
-                            commands.write(SlCommand(Command::TeleportViaLandmark {
-                                landmark: Some(AssetKey::from(asset_id)),
-                            }));
-                        }
-                    },
-                );
-                state.pending_landmark = Some(item.asset_id);
-                sl_commands.write(SlCommand(Command::FetchAsset {
-                    asset_id: AssetKey::from(item.asset_id),
-                    asset_type: AssetType::Landmark,
-                    byte_range: None,
-                }));
-                show(&mut panels, ui.landmark.panel);
+                // The full About Landmark floater owns this type.
+                landmark_opens
+                    .write(crate::about_landmark::OpenAboutLandmark { item: item.clone() });
             }
             InventoryType::Animation => {
                 reset_preview(
@@ -1029,10 +982,6 @@ fn open_previews(
     }
 }
 
-/// The marker on the landmark preview's text node.
-#[derive(Component)]
-struct LandmarkText;
-
 /// Clear a preview floater's content and set its title to the item's name.
 fn reset_preview(
     floater: &PreviewFloater,
@@ -1056,31 +1005,6 @@ fn show(panels: &mut Query<&mut UiPanelShown>, panel: Entity) {
     if let Ok(mut shown) = panels.get_mut(panel) {
         shown.0 = true;
     }
-}
-
-/// Spawn a preview's wrapped text block.
-fn spawn_preview_text(
-    commands: &mut Commands,
-    parent: Entity,
-    text: String,
-    marker: impl Component,
-) {
-    commands
-        .spawn((
-            Node {
-                max_width: Val::Px(420.0),
-                max_height: Val::Px(PREVIEW_TEXT_HEIGHT),
-                overflow: Overflow::clip(),
-                ..column(Val::Px(2.0))
-            },
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(text),
-            UiFont::Sans.at(PROPS_FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            marker,
-        ));
 }
 
 /// A bordered translated button (greyed when not `enabled`).
@@ -1118,38 +1042,6 @@ fn spawn_text_button(
             Pickable::IGNORE,
         ))
         .id()
-}
-
-/// Fold fetched landmark assets into the About Landmark preview.
-fn ingest_preview_assets(
-    mut events: MessageReader<SlEvent>,
-    mut state: ResMut<PreviewState>,
-    mut landmark_texts: Query<&mut Text, With<LandmarkText>>,
-) {
-    for event in events.read() {
-        let SlSessionEvent::AssetReceived(asset) = &event.0 else {
-            continue;
-        };
-        if state.pending_landmark == Some(asset.id) {
-            state.pending_landmark = None;
-            let text = String::from_utf8_lossy(&asset.data).into_owned();
-            let describe = parse_landmark(&text).map_or_else(
-                || "(unreadable landmark)".to_owned(),
-                |landmark| {
-                    format!(
-                        "Region: {}\nPosition: {:.1}, {:.1}, {:.1}",
-                        landmark.region_id,
-                        landmark.position.0,
-                        landmark.position.1,
-                        landmark.position.2
-                    )
-                },
-            );
-            for mut node in &mut landmark_texts {
-                node.0.clone_from(&describe);
-            }
-        }
-    }
 }
 
 /// A parsed landmark asset: the tiny `Landmark version 2` text body.
