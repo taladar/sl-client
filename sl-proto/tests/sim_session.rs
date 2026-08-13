@@ -9,7 +9,6 @@ mod test {
     use std::time::{Duration, Instant};
 
     use pretty_assertions::assert_eq;
-    use sl_proto::AgentPresence;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AssetKey, AssetType,
         AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource,
@@ -42,6 +41,7 @@ mod test {
         Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
         ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
+    use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE};
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
@@ -5317,6 +5317,52 @@ mod test {
             "a legacy plain-asset request must not surface, got {server_events:?}"
         );
         Ok(())
+    }
+
+    /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
+    /// One row per flow-level (multi-message) state machine the client
+    /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
+    /// task opened with. `Mirrored` rows are proven by the loopback tests in
+    /// this file; `Pending` rows await a follow-up `protocol-sim-*` task;
+    /// `Legacy` rows are deliberately skipped because BOTH grids offer a
+    /// modern (CAPS) alternative. Any drift is a loud diff — if intended,
+    /// bless it by editing this table (and `SESSION_FLOW_COVERAGE`).
+    #[test]
+    fn flow_coverage_table_is_pinned() {
+        let expected: Vec<(&str, FlowMirrorStatus)> = vec![
+            ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
+            ("child-agent circuits", FlowMirrorStatus::Mirrored),
+            ("teleport / region handover", FlowMirrorStatus::Mirrored),
+            ("object sit", FlowMirrorStatus::Pending),
+            ("Xfer download", FlowMirrorStatus::Mirrored),
+            ("Xfer upload", FlowMirrorStatus::Mirrored),
+            (
+                "legacy transaction asset upload",
+                FlowMirrorStatus::Mirrored,
+            ),
+            ("task-inventory fetch", FlowMirrorStatus::Mirrored),
+            (
+                "UDP asset Transfer (task item + estate covenant)",
+                FlowMirrorStatus::Mirrored,
+            ),
+            ("UDP texture download", FlowMirrorStatus::Legacy),
+            ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
+            (
+                "chat-session lifecycle + server history",
+                FlowMirrorStatus::Pending,
+            ),
+            ("friendship / presence", FlowMirrorStatus::Pending),
+            (
+                "script permission / control mirror",
+                FlowMirrorStatus::Pending,
+            ),
+        ];
+        assert_eq!(
+            SESSION_FLOW_COVERAGE.to_vec(),
+            expected,
+            "a Session flow's server-side mirror status changed — if \
+             intended, bless it by editing this table"
+        );
     }
 
     /// The destination simulator's UDP address for two-region tests.

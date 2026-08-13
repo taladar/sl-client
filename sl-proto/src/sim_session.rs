@@ -384,6 +384,67 @@ struct SimXferReceive {
 /// safely under a datagram's worth.
 const TRANSFER_CHUNK_SIZE: usize = 1000;
 
+/// The server-side mirror status of one client-[`Session`](crate::Session)
+/// flow-level state machine, as pinned in [`SESSION_FLOW_COVERAGE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FlowMirrorStatus {
+    /// The [`SimSession`] implements the mirroring server-side machine,
+    /// proven by `Session` ↔ `SimSession` loopback tests.
+    Mirrored,
+    /// No server-side machine yet — a follow-up `protocol-sim-*` task will
+    /// mirror it.
+    Pending,
+    /// Deliberately **not** mirrored: both Second Life and OpenSim offer a
+    /// modern (CAPS) alternative for this flow, so the legacy UDP leg is
+    /// skipped per the legacy-skip rule (`roadmap/context/protocol.md`).
+    Legacy,
+}
+
+/// **The `Session` ↔ [`SimSession`] flow-mirroring coverage table.** One row
+/// per flow-level (multi-message) state machine the client
+/// [`Session`](crate::Session) implements, with its server-side mirror
+/// status. Pinned by the `flow_coverage_table_is_pinned` loopback test —
+/// changing a row is a deliberate edit there.
+///
+/// Stateless request/reply surfaces (money, object selection, appearance,
+/// group management edits, directory/map/profile queries) are *not* rows:
+/// they carry no per-flow client state, so a canned `send_*` reply — most of
+/// which [`SimSession`] already has — covers them without a state machine.
+///
+/// The `Legacy` rows are pinned so skipping them stays a deliberate,
+/// documented decision: the UDP texture download is superseded by the
+/// `GetTexture` capability on both grids, and the UDP inventory-folder fetch
+/// by `FetchInventoryDescendents2`/AISv3 (whose *server* side belongs to the
+/// `protocol-sim-caps-inventory` task).
+pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
+    ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
+    ("child-agent circuits", FlowMirrorStatus::Mirrored),
+    ("teleport / region handover", FlowMirrorStatus::Mirrored),
+    ("object sit", FlowMirrorStatus::Pending),
+    ("Xfer download", FlowMirrorStatus::Mirrored),
+    ("Xfer upload", FlowMirrorStatus::Mirrored),
+    (
+        "legacy transaction asset upload",
+        FlowMirrorStatus::Mirrored,
+    ),
+    ("task-inventory fetch", FlowMirrorStatus::Mirrored),
+    (
+        "UDP asset Transfer (task item + estate covenant)",
+        FlowMirrorStatus::Mirrored,
+    ),
+    ("UDP texture download", FlowMirrorStatus::Legacy),
+    ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
+    (
+        "chat-session lifecycle + server history",
+        FlowMirrorStatus::Pending,
+    ),
+    ("friendship / presence", FlowMirrorStatus::Pending),
+    (
+        "script permission / control mirror",
+        FlowMirrorStatus::Pending,
+    ),
+];
+
 /// Whether the circuit hosts a **child** agent (scene streaming only) or the
 /// **root** agent (the avatar is present in this region). A client opens a
 /// child circuit with `UseCircuitCode` alone — a neighbour holding presence
