@@ -135,6 +135,54 @@ to decode (or whose `from_llsd` returns nothing) is a `CapsDecodeFailed`. As
 with the other diagnostics these are off by default and surface only when
 enabled.
 
+## The server side
+
+The same codecs work in the grid direction. Every client-direction
+`build_*_request` / `parse_*_response` pair gains (or will gain) its
+server-direction `parse_*_request` / `build_*_response` inverse — the
+**inverse-pairing convention** — verified by round-tripping against the
+client functions in memory. For the framework itself those inverses are
+`parse_seed_request` / `build_seed_response` (the seed grant) and
+`parse_event_queue_request` (pairing with the long-standing
+`build_event_queue_response`).
+
+`SimCaps` is the dispatch registry a simulator hangs its capability
+handlers off. It mints one unguessable `…/cap/<uuid>` URL per *served*
+capability under a public base URL (token randomness is caller-supplied —
+the sans-I/O crates never roll dice themselves), answers the seed POST
+with the granted `name → URL` map, and routes each request on a granted
+URL to its handler. Three properties mirror what real grids do:
+
+- **The grant is idempotent.** All tokens are minted at construction, so a
+  retried seed POST — the reference viewer retries up to 30 times —
+  receives a byte-identical reply (the LLSD serializer's sorted map keys
+  make equal grants serialize identically).
+- **Unsupported names are omitted**, which is the protocol's feature
+  negotiation (see above); a capability only enters the grant once a
+  server-side handler exists for it.
+- **The seed URL is a plain value.** `SimCaps` holds no login state; the
+  login server — possibly a *different process* — just embeds
+  `SimCaps::seed_url()` in its login response's `seed_capability` field.
+  Nothing else crosses the login↔simulator boundary, so the login and
+  CAPS HTTP servers stay independently deployable.
+
+The `EventQueueGet` handler implements the server half of the long-poll
+against `SimSession`'s event buffer:
+
+- events queued → `200` with the next `{ id, events }` batch;
+- nothing queued → a *would-block* outcome: the (future) HTTP glue holds
+  the request open and, when its hold (~30 s in the reference stack)
+  expires, answers `502` — the status the viewer treats as "nothing yet,
+  re-poll";
+- `done: true` → teardown; that poll is answered and every later one gets
+  `404`, the viewer's "stop polling" signal (a closed session answers
+  `404` too).
+
+The `ack` field is parsed but deliberately fire-and-forget, exactly like
+OpenSim's event-queue module: a batch is dropped when it is serialized,
+so a response lost in transit loses that batch. Nothing keys on `ack`,
+which also makes the batch id's eventual `i32` wrap harmless.
+
 ---
 
 > **In this codebase**
@@ -170,3 +218,13 @@ enabled.
 >   `sl-proto/src/session/conversions.rs`; the simulator-side inverses are the
 >   matching `SimSession::enqueue_*` helpers (`sl-proto/src/sim_session.rs`),
 >   each building the same LLSD body via `enqueue_caps_event`.
+> - The server-direction inverses (`parse_seed_request` /
+>   `build_seed_response`, `parse_event_queue_request` with its
+>   `EventQueueRequest` type, and `build_event_queue_response`) sit next to
+>   their client pairs in `sl-wire/src/llsd.rs`. `SimCaps` — with the
+>   transport-agnostic `CapsRequest` / `CapsResponse` / `CapsDispatch`
+>   types — is `sl-proto/src/sim_caps.rs`; its pinned coverage table
+>   (`caps_coverage_table_is_pinned`, one row per `REQUESTED_CAPABILITIES`
+>   entry) is the ledger the `protocol-sim-caps-*` cluster tasks tick off,
+>   and the in-memory loopback tests driving the client's own builders
+>   against `SimCaps::dispatch` are `sl-proto/tests/sim_caps.rs`.

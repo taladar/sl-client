@@ -2,7 +2,7 @@
 id: protocol-sim-caps-assets
 title: Server-side asset delivery caps — GetTexture, GetMesh, ViewerAsset
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 8
 blocked_by: [protocol-sim-caps-framework]

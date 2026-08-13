@@ -2,7 +2,7 @@
 id: protocol-sim-caps-inventory
 title: Server-side inventory caps — AISv3 and the legacy fetch caps
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 8
 blocked_by: [protocol-sim-caps-framework]

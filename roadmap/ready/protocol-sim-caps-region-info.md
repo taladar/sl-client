@@ -2,7 +2,7 @@
 id: protocol-sim-caps-region-info
 title: Server-side region/object-info caps
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 5
 blocked_by: [protocol-sim-caps-framework]

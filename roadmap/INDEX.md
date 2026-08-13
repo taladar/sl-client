@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 221 |
-| blocked | 77 |
+| ready | 228 |
+| blocked | 69 |
 | in-progress | 16 |
 | bugs | 22 |
-| done | 801 |
+| done | 802 |
 | deferred | 22 |
 | wont-do | 12 |
 | **total** | **1226** |
@@ -141,16 +141,34 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (221)
+## ready (228)
 
 ### protocol
 
-- [`protocol-sim-caps-framework`](ready/protocol-sim-caps-framework.md) —
-  Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-caps-agent-comms`](ready/protocol-sim-caps-agent-comms.md) —
+  Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
+  (done))
+- [`protocol-sim-caps-assets`](ready/protocol-sim-caps-assets.md) — Server-side
+  asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-content`](ready/protocol-sim-caps-content.md) —
+  Server-side content upload/update caps, materials and MOAP (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-experiences`](ready/protocol-sim-caps-experiences.md) —
+  Server-side experience caps (blocked by `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-inventory`](ready/protocol-sim-caps-inventory.md) —
+  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-region-info`](ready/protocol-sim-caps-region-info.md) —
+  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
+  (done))
 - [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
   server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
   state machines for the higher-level LLUDP flows
+- [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
+  Server-side voice provisioning and WebRTC signalling stub (blocked by
+  `protocol-sim-caps-framework` (done))
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -311,6 +329,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-fake-grid`](ready/viewer-fake-grid.md) — A loopback fake grid over
+  SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -679,29 +699,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (77)
-
-### protocol
-
-- [`protocol-sim-caps-agent-comms`](blocked/protocol-sim-caps-agent-comms.md) —
-  Server-side agent-communication caps (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-assets`](blocked/protocol-sim-caps-assets.md) —
-  Server-side asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-content`](blocked/protocol-sim-caps-content.md) —
-  Server-side content upload/update caps, materials and MOAP (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-experiences`](blocked/protocol-sim-caps-experiences.md) —
-  Server-side experience caps (blocked by `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-inventory`](blocked/protocol-sim-caps-inventory.md) —
-  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-region-info`](blocked/protocol-sim-caps-region-info.md) —
-  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`)
-- [`protocol-sim-voice-signalling`](blocked/protocol-sim-voice-signalling.md) —
-  Server-side voice provisioning and WebRTC signalling stub (blocked by
-  `protocol-sim-caps-framework`)
+## blocked (69)
 
 ### viewer
 
@@ -721,8 +719,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
-  SimSession (blocked by `protocol-sim-caps-framework`)
 - [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
   The real client stack against the fake grid (blocked by `viewer-fake-grid`)
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
@@ -1008,7 +1004,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (801)
+## done (802)
 
 ### protocol
 
@@ -1133,6 +1129,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-sim-caps-framework`](done/protocol-sim-caps-framework.md) —
+  Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —

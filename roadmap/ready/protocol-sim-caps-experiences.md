@@ -2,7 +2,7 @@
 id: protocol-sim-caps-experiences
 title: Server-side experience caps
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 3
 blocked_by: [protocol-sim-caps-framework]

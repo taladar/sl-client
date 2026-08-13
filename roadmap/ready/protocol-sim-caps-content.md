@@ -2,7 +2,7 @@
 id: protocol-sim-caps-content
 title: Server-side content upload/update caps, materials and MOAP
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 8
 blocked_by: [protocol-sim-caps-framework]

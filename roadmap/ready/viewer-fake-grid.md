@@ -2,7 +2,7 @@
 id: viewer-fake-grid
 title: A loopback fake grid over SimSession
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — full client testing without a real server
 points: 8
 refs: [viewer-world-test-harness, protocol-sim-login, protocol-sim-http-misc,

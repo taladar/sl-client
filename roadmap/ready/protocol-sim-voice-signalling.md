@@ -2,7 +2,7 @@
 id: protocol-sim-voice-signalling
 title: Server-side voice provisioning and WebRTC signalling stub
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 5
 blocked_by: [protocol-sim-caps-framework]

@@ -2,7 +2,7 @@
 id: protocol-sim-caps-agent-comms
 title: Server-side agent-communication caps
 topic: protocol
-status: blocked
+status: ready
 origin: user request (2026-07) — complete simulator protocol surface
 points: 5
 blocked_by: [protocol-sim-caps-framework]
