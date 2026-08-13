@@ -97,6 +97,8 @@ struct AboutLandmarkUi {
     title_text: Entity,
     /// The parcel snapshot's image box.
     snapshot_box: Option<Entity>,
+    /// The snapshot box's placeholder label ("(loading)" / "(no image)").
+    snapshot_label: Option<Entity>,
     /// The region line's value node (`SimName (x, y, z)`).
     region_text: Option<Entity>,
     /// The parcel name's value node.
@@ -223,6 +225,7 @@ fn spawn_about_landmark_floater(mut commands: Commands, root: Res<UiRoot>) {
         content: handle.content,
         title_text: handle.title_text,
         snapshot_box: None,
+        snapshot_label: None,
         region_text: None,
         parcel_text: None,
         description_text: None,
@@ -298,10 +301,13 @@ fn open_about_landmark(
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
             ChildOf(content),
         ))
-        .with_child((
+        .id();
+    let snapshot_label = commands
+        .spawn((
             Text::new(loading.clone()),
             UiFont::Sans.at(ABOUT_FONT_SIZE),
             TextColor(DIM_LABEL_COLOR),
+            ChildOf(snapshot_box),
         ))
         .id();
 
@@ -454,6 +460,7 @@ fn open_about_landmark(
     }));
 
     ui.snapshot_box = Some(snapshot_box);
+    ui.snapshot_label = Some(snapshot_label);
     ui.region_text = Some(region_text);
     ui.parcel_text = Some(parcel_text);
     ui.description_text = Some(description_text);
@@ -643,15 +650,23 @@ fn apply_details(
         set_text(texts, ui.slurl_text, &slurl);
         state.slurl = Some(slurl);
     }
-    // Snapshot through the shared texture pipeline.
+    // Snapshot through the shared texture pipeline; a parcel without one
+    // labels the box instead.
     let snapshot = details
         .snapshot_id
         .filter(|key| *key != TextureKey::from(Uuid::nil()));
-    if let Some(key) = snapshot
-        && let Some(node) = ui.snapshot_box
-    {
-        textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
-        state.pending_snapshot = Some((key, node));
+    match (snapshot, ui.snapshot_box) {
+        (Some(key), Some(node)) => {
+            textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+            state.pending_snapshot = Some((key, node));
+        }
+        _no_snapshot => {
+            set_text(
+                texts,
+                ui.snapshot_label,
+                &translator.get("about-landmark-no-image"),
+            );
+        }
     }
 }
 

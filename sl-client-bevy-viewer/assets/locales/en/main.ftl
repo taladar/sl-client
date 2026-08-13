@@ -649,6 +649,7 @@ about-landmark-acquired = Acquired:
 about-landmark-slurl = SLURL:
 about-landmark-copy-slurl = Copy SLURL
 about-landmark-loading = (loading)
+about-landmark-no-image = (no image)
 about-landmark-unavailable = (parcel details unavailable)
 about-landmark-unreadable = (unreadable landmark)
 about-landmark-parcel-unnamed = (no name)
