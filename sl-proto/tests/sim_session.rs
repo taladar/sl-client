@@ -35,10 +35,10 @@ mod test {
         RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
         SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem,
-        TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
+        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
         ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE};
@@ -5319,6 +5319,154 @@ mod test {
         Ok(())
     }
 
+    /// The object-sit flow round-trips: the client's `sit_on` surfaces
+    /// [`ServerEvent::SitRequested`], the driver's `send_avatar_sit_response`
+    /// seats the client — whose completing `AgentSit` surfaces
+    /// [`ServerEvent::SitConfirmed`] and marks the sim-side machine seated —
+    /// and standing up via the transient `STAND_UP` control flag surfaces
+    /// [`ServerEvent::StoodUp`] and resets both mirrors.
+    #[test]
+    fn object_sit_flow_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let target = ObjectKey::from(uuid::Uuid::from_u128(0x5EA7));
+        let offset = sl_types::lsl::Vector {
+            x: 0.5,
+            y: -0.25,
+            z: 1.0,
+        };
+        client.sit_on(target, offset.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SitRequested { target: t, offset: o }
+                    if *t == target && *o == offset
+            )),
+            "expected SitRequested, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+
+        let transform = SitTransform {
+            autopilot: true,
+            sit_position: sl_types::lsl::Vector {
+                x: 0.1,
+                y: 0.2,
+                z: 0.6,
+            },
+            sit_rotation: sl_types::lsl::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+                s: 0.0,
+            },
+            camera_eye_offset: sl_types::lsl::Vector {
+                x: -3.0,
+                y: 0.0,
+                z: 1.5,
+            },
+            camera_at_offset: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.5,
+            },
+            force_mouselook: true,
+        };
+        sim.send_avatar_sit_response(target, &transform, now)?;
+        // One pump both delivers the response and returns the client's
+        // completing `AgentSit`.
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let result = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SitResult {
+                    sit_object,
+                    autopilot,
+                    sit_position,
+                    sit_rotation,
+                    camera_eye_offset,
+                    camera_at_offset,
+                    force_mouselook,
+                } => Some((
+                    *sit_object,
+                    *autopilot,
+                    sit_position.clone(),
+                    sit_rotation.clone(),
+                    camera_eye_offset.clone(),
+                    camera_at_offset.clone(),
+                    *force_mouselook,
+                )),
+                _ => None,
+            })
+            .ok_or("expected a SitResult client event")?;
+        assert_eq!(
+            result,
+            (
+                target,
+                transform.autopilot,
+                transform.sit_position.clone(),
+                transform.sit_rotation.clone(),
+                transform.camera_eye_offset.clone(),
+                transform.camera_at_offset.clone(),
+                transform.force_mouselook,
+            )
+        );
+        assert_eq!(client.seat(), Some(target));
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SitConfirmed { on: Some(on) } if *on == target)),
+            "expected SitConfirmed, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), Some(target));
+
+        client.stand(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::StoodUp)),
+            "expected StoodUp, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+        assert_eq!(client.seat(), None);
+        Ok(())
+    }
+
+    /// An `AgentSit` with no outstanding sit response is surfaced with
+    /// `on: None` and leaves the sim-side machine not sitting (the mirror of
+    /// the client ignoring an unsolicited `AvatarSitResponse`).
+    #[test]
+    fn unsolicited_agent_sit_leaves_sim_not_sitting() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let message = AnyMessage::AgentSit(sl_wire::messages::AgentSit {
+            agent_data: sl_wire::messages::AgentSitAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&message, 9000, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SitConfirmed { on: None })),
+            "expected an unsolicited SitConfirmed, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+        Ok(())
+    }
+
     /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
     /// One row per flow-level (multi-message) state machine the client
     /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
@@ -5333,7 +5481,7 @@ mod test {
             ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
             ("child-agent circuits", FlowMirrorStatus::Mirrored),
             ("teleport / region handover", FlowMirrorStatus::Mirrored),
-            ("object sit", FlowMirrorStatus::Pending),
+            ("object sit", FlowMirrorStatus::Mirrored),
             ("Xfer download", FlowMirrorStatus::Mirrored),
             ("Xfer upload", FlowMirrorStatus::Mirrored),
             (

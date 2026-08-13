@@ -177,6 +177,9 @@ use sl_wire::messages::{
     SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
 };
 use sl_wire::messages::{
+    AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
+};
+use sl_wire::messages::{
     DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
     TeleportLocalInfoBlock, TeleportProgress, TeleportProgressAgentDataBlock,
     TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
@@ -420,7 +423,7 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
     ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
     ("child-agent circuits", FlowMirrorStatus::Mirrored),
     ("teleport / region handover", FlowMirrorStatus::Mirrored),
-    ("object sit", FlowMirrorStatus::Pending),
+    ("object sit", FlowMirrorStatus::Mirrored),
     ("Xfer download", FlowMirrorStatus::Mirrored),
     ("Xfer upload", FlowMirrorStatus::Mirrored),
     (
@@ -496,6 +499,54 @@ pub struct AgentUpdateInfo {
     pub state: u8,
     /// The `AgentUpdate` flags byte.
     pub flags: u8,
+}
+
+/// The seat placement an `AvatarSitResponse` carries — the server-authored
+/// half of the sit handshake, mirroring the fields the client surfaces on
+/// [`Event::SitResult`](crate::Event::SitResult).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SitTransform {
+    /// Whether the viewer should autopilot (walk) to the seat first (the
+    /// target is out of immediate sit range).
+    pub autopilot: bool,
+    /// The seat position relative to the object, in metres.
+    pub sit_position: Vector,
+    /// The seated orientation relative to the object — which way the avatar
+    /// faces once seated.
+    pub sit_rotation: Rotation,
+    /// The scripted-sit camera eye position relative to the seat
+    /// (`llSetCameraEyeOffset`); the zero vector when the seat's script sets
+    /// no custom camera.
+    pub camera_eye_offset: Vector,
+    /// The scripted-sit camera focus point relative to the seat
+    /// (`llSetCameraAtOffset`); the zero vector when the seat's script sets
+    /// no custom camera.
+    pub camera_at_offset: Vector,
+    /// Whether sitting forces the avatar into mouselook (set by vehicles and
+    /// weapon huds).
+    pub force_mouselook: bool,
+}
+
+/// The server-side sit state machine — the mirror of the client's private
+/// `SitState` (`AwaitingResponse` on the client corresponds to nothing here:
+/// the request is surfaced as [`ServerEvent::SitRequested`] and the machine
+/// only advances once the driver answers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum SimSitState {
+    /// The agent is not seated and no sit offer is outstanding.
+    NotSitting,
+    /// [`SimSession::send_avatar_sit_response`] was sent; awaiting the
+    /// client's completing `AgentSit`.
+    ResponseSent {
+        /// The object offered as a seat.
+        on: ObjectKey,
+    },
+    /// The client completed the handshake with `AgentSit`; the agent is
+    /// seated.
+    Seated {
+        /// The object sat upon.
+        on: ObjectKey,
+    },
 }
 
 /// A server-side event decoded from a client-only message, the inverse of the
@@ -1425,6 +1476,31 @@ pub enum ServerEvent {
     /// inverse of the client's
     /// [`Session::cancel_teleport`](crate::Session::cancel_teleport).
     CancelTeleport,
+    /// The client asked to sit on an object (`AgentRequestSit`). The inverse
+    /// of the client's [`Session::sit_on`](crate::Session::sit_on). The
+    /// driver answers with [`SimSession::send_avatar_sit_response`] (the
+    /// client then completes the handshake with `AgentSit`).
+    SitRequested {
+        /// The object the client wants to sit on.
+        target: ObjectKey,
+        /// The clicked sit offset relative to the object, in metres.
+        offset: Vector,
+    },
+    /// The client completed the sit handshake (`AgentSit`). `on` is the seat
+    /// from the outstanding [`SimSession::send_avatar_sit_response`] (the
+    /// agent is now seated — [`SimSession::seated_on`] reports it); `None`
+    /// for an unsolicited `AgentSit`, which leaves the sit state untouched
+    /// (mirroring the client ignoring an unsolicited `AvatarSitResponse`).
+    SitConfirmed {
+        /// The object sat upon, when a sit response was outstanding.
+        on: Option<ObjectKey>,
+    },
+    /// The client stood up: an `AgentUpdate` carried the transient
+    /// `STAND_UP` control flag while the agent was seated (or awaiting the
+    /// completing `AgentSit`). The inverse of the client's
+    /// [`Session::stand`](crate::Session::stand). The sit state resets to
+    /// not-sitting.
+    StoodUp,
     /// The client recorded a start location (`SetStartLocationRequest`): stores
     /// the region-local `position` and `look_at` as the named [`StartLocationSlot`]
     /// (the everyday case being [`StartLocationSlot::Home`], "set home to here").
@@ -1684,6 +1760,9 @@ pub struct SimSession {
     /// Whether this circuit hosts a child or the root agent: `Child` from
     /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
     agent_presence: AgentPresence,
+    /// The agent's sit state (the server-side mirror of the client's sit
+    /// machine).
+    sit: SimSitState,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1720,6 +1799,7 @@ impl SimSession {
             secure_session_id: None,
             transfer_serves: BTreeMap::new(),
             agent_presence: AgentPresence::Child,
+            sit: SimSitState::NotSitting,
             events: VecDeque::new(),
         }
     }
@@ -1737,6 +1817,19 @@ impl SimSession {
     #[must_use]
     pub const fn is_root_agent(&self) -> bool {
         matches!(self.agent_presence, AgentPresence::Root)
+    }
+
+    /// The object the agent is seated on, once the sit handshake completed
+    /// with the client's `AgentSit` (the mirror of the client's
+    /// [`Session::seat`](crate::Session::seat)). `None` while not sitting or
+    /// while an [`SimSession::send_avatar_sit_response`] is still awaiting
+    /// its `AgentSit`.
+    #[must_use]
+    pub const fn seated_on(&self) -> Option<ObjectKey> {
+        match self.sit {
+            SimSitState::Seated { on } => Some(on),
+            SimSitState::NotSitting | SimSitState::ResponseSent { .. } => None,
+        }
     }
 
     /// The agent id once the circuit is open.
@@ -4218,6 +4311,46 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends an `AvatarSitResponse` — accepts a [`ServerEvent::SitRequested`]
+    /// by placing the agent on `sit_object` with the given seat `transform`
+    /// (the inverse of the client's
+    /// [`Event::SitResult`](crate::Event::SitResult)). The sit machine then
+    /// awaits the client's completing `AgentSit`
+    /// ([`ServerEvent::SitConfirmed`]); refusing a sit request is simply not
+    /// answering (the reference simulators send no refusal message — the
+    /// client's own sit timeout recovers it).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_avatar_sit_response(
+        &mut self,
+        sit_object: ObjectKey,
+        transform: &SitTransform,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AvatarSitResponse(AvatarSitResponse {
+            sit_object: AvatarSitResponseSitObjectBlock {
+                id: sit_object.uuid(),
+            },
+            sit_transform: AvatarSitResponseSitTransformBlock {
+                auto_pilot: transform.autopilot,
+                sit_position: transform.sit_position.clone(),
+                sit_rotation: transform.sit_rotation.clone(),
+                camera_eye_offset: transform.camera_eye_offset.clone(),
+                camera_at_offset: transform.camera_at_offset.clone(),
+                force_mouselook: transform.force_mouselook,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        self.sit = SimSitState::ResponseSent { on: sit_object };
+        Ok(())
+    }
+
     /// Sends a `TeleportStart` — the simulator accepted a teleport request and
     /// the client should show its teleport screen (the inverse of the client's
     /// [`Event::TeleportStarted`](crate::Event::TeleportStarted)). The
@@ -4855,11 +4988,12 @@ impl SimSession {
             }
             AnyMessage::AgentUpdate(update) => {
                 let data = &update.agent_data;
+                let controls = ControlFlags::from_bits(data.control_flags);
                 self.events
                     .push_back(ServerEvent::AgentUpdate(Box::new(AgentUpdateInfo {
                         body_rotation: data.body_rotation.clone(),
                         head_rotation: data.head_rotation.clone(),
-                        controls: ControlFlags::from_bits(data.control_flags),
+                        controls,
                         camera: Camera::new_unchecked(
                             data.camera_center.clone(),
                             data.camera_at_axis.clone(),
@@ -4870,6 +5004,28 @@ impl SimSession {
                         state: data.state,
                         flags: data.flags,
                     })));
+                if controls.contains(ControlFlags::STAND_UP)
+                    && !matches!(self.sit, SimSitState::NotSitting)
+                {
+                    self.sit = SimSitState::NotSitting;
+                    self.events.push_back(ServerEvent::StoodUp);
+                }
+            }
+            AnyMessage::AgentRequestSit(request) => {
+                self.events.push_back(ServerEvent::SitRequested {
+                    target: ObjectKey::from(request.target_object.target_id),
+                    offset: request.target_object.offset.clone(),
+                });
+            }
+            AnyMessage::AgentSit(_) => {
+                let on = match self.sit {
+                    SimSitState::ResponseSent { on } => {
+                        self.sit = SimSitState::Seated { on };
+                        Some(on)
+                    }
+                    SimSitState::NotSitting | SimSitState::Seated { .. } => None,
+                };
+                self.events.push_back(ServerEvent::SitConfirmed { on });
             }
             AnyMessage::ChatFromViewer(chat) => {
                 self.events.push_back(ServerEvent::Chat {
