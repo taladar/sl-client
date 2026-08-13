@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 245 |
+| ready | 244 |
 | blocked | 77 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 779 |
+| done | 780 |
 | deferred | 22 |
 | wont-do | 10 |
 | **total** | **1227** |
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (245)
+## ready (244)
 
 ### protocol
 
@@ -517,9 +517,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
-  — Preferences — camera + move-and-view tab (blocked by
-  `viewer-preferences-floater` (done))
 - [`viewer-preferences-colors-skins-tab`](ready/viewer-preferences-colors-skins-tab.md)
   — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
   (done), `viewer-ui-color-picker` (done))
@@ -1057,7 +1054,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (779)
+## done (780)
 
 ### protocol
 
@@ -1887,6 +1884,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-preferences-audio-tab`](done/viewer-preferences-audio-tab.md) —
   Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-camera-move-tab`](done/viewer-preferences-camera-move-tab.md)
+  — Preferences — camera + move-and-view tab (blocked by
+  `viewer-preferences-floater` (done))
 - [`viewer-preferences-chat-privacy-tab`](done/viewer-preferences-chat-privacy-tab.md)
   — Preferences — chat / IM + privacy tab (blocked by
   `viewer-preferences-floater` (done))
