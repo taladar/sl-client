@@ -22,6 +22,10 @@ it, each targeting the object by [`ScopedObjectId`](world.md#objects):
   surfacing the parsed items as `Event::TaskInventoryContents` (the
   `TaskInventoryReply` is still emitted first). See [Xfer File
   Transfer](../comms/xfer.md) for the download mechanism and the listing format.
+  To read a listed item's *asset* — a script or notecard body — fetch it over
+  the [UDP asset Transfer](../comms/transfer.md) path
+  (`Command::FetchTaskItemAsset`), the only path for task-item assets on
+  either grid.
 - `Command::UpdateTaskInventory { target, key, item }` writes (adds or replaces)
   an item. `key` is a `TaskInventoryKey` choosing whether the simulator matches
   the existing entry by item id or by asset id; `item` is the full inventory

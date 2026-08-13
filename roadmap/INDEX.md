@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 69 |
 | in-progress | 16 |
 | bugs | 22 |
-| done | 802 |
+| done | 803 |
 | deferred | 22 |
 | wont-do | 12 |
-| **total** | **1226** |
+| **total** | **1227** |
 
 ## ideas (55)
 
@@ -164,8 +164,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
   server channels — grid info, map tiles, helper URIs
-- [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
-  state machines for the higher-level LLUDP flows
+- [`protocol-sim-udp-flows-2`](ready/protocol-sim-udp-flows-2.md) — Server-side
+  mirrors for the remaining Session flow machines
 - [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
   Server-side voice provisioning and WebRTC signalling stub (blocked by
   `protocol-sim-caps-framework` (done))
@@ -1004,7 +1004,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (802)
+## done (803)
 
 ### protocol
 
@@ -1133,6 +1133,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
+- [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state
+  machines for the higher-level LLUDP flows
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
