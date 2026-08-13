@@ -187,6 +187,18 @@ impl SaleType {
             _ => Self::NotForSale,
         }
     }
+
+    /// The short sale-type name LL writes into a text inventory listing (the
+    /// inverse of [`from_sale_name`](Self::from_sale_name)).
+    #[must_use]
+    pub const fn to_sale_name(self) -> &'static str {
+        match self {
+            Self::NotForSale => "not",
+            Self::Original => "orig",
+            Self::Copy => "copy",
+            Self::Contents => "cntn",
+        }
+    }
 }
 
 /// Which id the simulator matches an `UpdateTaskInventory` against (the
@@ -829,7 +841,22 @@ mod tests {
     use sl_types::key::{InventoryFolderKey, InventoryKey, ObjectKey};
     use uuid::Uuid;
 
-    use super::DeRezDestination;
+    use super::{DeRezDestination, SaleType};
+
+    /// Every [`SaleType`] survives a `to_sale_name` → `from_sale_name`
+    /// round-trip, keeping the server-side task-inventory listing writer and
+    /// the client parser in agreement.
+    #[test]
+    fn sale_type_name_round_trips() {
+        for variant in [
+            SaleType::NotForSale,
+            SaleType::Original,
+            SaleType::Copy,
+            SaleType::Contents,
+        ] {
+            assert_eq!(SaleType::from_sale_name(variant.to_sale_name()), variant);
+        }
+    }
 
     /// Each [`DeRezDestination`] reports the `DRD_*` wire byte and surfaces the
     /// folder/item/task id it carries (or [`Uuid::nil`] for the id-less ones).

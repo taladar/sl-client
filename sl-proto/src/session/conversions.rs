@@ -477,6 +477,105 @@ fn parse_i32_field(field: &'static str, value: &str) -> Result<i32, sl_wire::Wir
         })
 }
 
+/// Builds a task-inventory `Xfer` listing — the exact tab-delimited text format
+/// OpenSim's `SceneObjectPartInventory.RequestInventoryFile` writes, and the
+/// mirror of [`parse_task_inventory`]: a leading `inv_object` block for the
+/// virtual `Contents` folder of `task` (the folder id is the holding prim, the
+/// parent nil), then one `inv_item` block per item with nested `permissions`
+/// and `sale_info` sections, 8-digit lowercase-hex masks, and `|`-terminated
+/// `name`/`desc` values. A redacted asset id ([`None`]) writes the nil UUID,
+/// exactly as a simulator does for a requester without inventory-edit
+/// permission. Unlike OpenSim (which hardcodes `not`/`0`), the item's real
+/// sale type and price are written; the parser reads both forms.
+pub(crate) fn build_task_inventory(task: ObjectKey, items: &[TaskInventoryItem]) -> String {
+    let mut out = String::new();
+    out.push_str("\tinv_object\t0\n\t{\n");
+    push_listing_line(&mut out, "obj_id", &task.uuid().to_string());
+    push_listing_line(&mut out, "parent_id", &Uuid::nil().to_string());
+    push_listing_line(&mut out, "type", "category");
+    push_listing_line(&mut out, "name", "Contents|");
+    out.push_str("\t}\n");
+    for item in items {
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+        out.push_str("\tinv_item\t0\n\t{\n");
+        push_listing_line(&mut out, "item_id", &item.item_id.uuid().to_string());
+        push_listing_line(&mut out, "parent_id", &item.parent_task.uuid().to_string());
+        out.push_str("\tpermissions 0\n\t{\n");
+        push_listing_line(
+            &mut out,
+            "base_mask",
+            &hex_mask(item.permissions.base.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "owner_mask",
+            &hex_mask(item.permissions.owner.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "group_mask",
+            &hex_mask(item.permissions.group.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "everyone_mask",
+            &hex_mask(item.permissions.everyone.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "next_owner_mask",
+            &hex_mask(item.permissions.next_owner.bits()),
+        );
+        push_listing_line(&mut out, "creator_id", &item.creator_id.uuid().to_string());
+        push_listing_line(
+            &mut out,
+            "last_owner_id",
+            &item.last_owner_id.uuid().to_string(),
+        );
+        push_listing_line(&mut out, "group_id", &group_id.to_string());
+        push_listing_line(&mut out, "owner_id", &owner_id.to_string());
+        push_listing_line(
+            &mut out,
+            "group_owned",
+            if item.group_owned { "1" } else { "0" },
+        );
+        out.push_str("\t}\n");
+        let asset_id = item
+            .asset_id
+            .as_ref()
+            .map_or_else(Uuid::nil, AssetKey::uuid);
+        push_listing_line(&mut out, "asset_id", &asset_id.to_string());
+        push_listing_line(&mut out, "type", item.asset_type.to_type_name());
+        push_listing_line(&mut out, "inv_type", item.inv_type.to_type_name());
+        push_listing_line(&mut out, "flags", &hex_mask(item.flags));
+        out.push_str("\tsale_info\t0\n\t{\n");
+        push_listing_line(&mut out, "sale_type", item.sale_type.to_sale_name());
+        push_listing_line(&mut out, "sale_price", &item.sale_price.0.to_string());
+        out.push_str("\t}\n");
+        push_listing_line(&mut out, "name", &format!("{}|", item.name));
+        push_listing_line(&mut out, "desc", &format!("{}|", item.description));
+        push_listing_line(&mut out, "creation_date", &item.creation_date.to_string());
+        out.push_str("\t}\n");
+    }
+    out
+}
+
+/// Appends one `\t\t<name>\t<value>\n` listing line (OpenSim's
+/// `InventoryStringBuilder.AddNameValueLine`).
+fn push_listing_line(out: &mut String, name: &str, value: &str) {
+    out.push_str("\t\t");
+    out.push_str(name);
+    out.push('\t');
+    out.push_str(value);
+    out.push('\n');
+}
+
+/// Formats a permission/flags mask as LL's `UIntToHexString` does: 8 lowercase
+/// hex digits, no prefix.
+fn hex_mask(bits: u32) -> String {
+    format!("{bits:08x}")
+}
+
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
 /// 64-bit flags / protocols come from the optional `RegionInfo4` block (absent on
 /// OpenSim and older grids), falling back to the zero-extended 32-bit flags. The
@@ -5403,6 +5502,88 @@ mod caps_serializer_tests {
         assert_eq!(note.inv_type, crate::types::InventoryType::Notecard);
         assert_eq!(note.name, "Readme");
         assert_eq!(note.description, "a note");
+        Ok(())
+    }
+
+    /// [`build_task_inventory`] writes the exact OpenSim
+    /// `RequestInventoryFile` listing shape — folder header included — and
+    /// [`parse_task_inventory`] reads it back item-for-item, covering a
+    /// redacted (`None`) asset id, a group-owned item, and a non-default sale
+    /// block: the server side serves listings the client parser accepts
+    /// verbatim.
+    #[test]
+    fn build_task_inventory_round_trips() -> Result<(), sl_wire::WireError> {
+        use crate::asset_keys::AssetKey;
+        use crate::types::{AssetType, InventoryType, SaleType, TaskInventoryItem};
+        use sl_types::key::{GroupKey, OwnerKey};
+
+        let prim = ObjectKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222));
+        let creator = AgentKey::from(Uuid::from_u128(0x4444_4444_4444_4444_4444_4444_4444_4444));
+        let group = GroupKey::from(Uuid::from_u128(0x6666_6666_6666_6666_6666_6666_6666_6666));
+        let script = TaskInventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(0x3333_3333_3333_3333_3333_3333_3333_3333)),
+            parent_task: prim,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Agent(creator),
+            group: None,
+            group_owned: false,
+            asset_id: Some(AssetKey::from(Uuid::from_u128(
+                0x5555_5555_5555_5555_5555_5555_5555_5555,
+            ))),
+            asset_type: AssetType::ScriptText,
+            inv_type: InventoryType::Script,
+            flags: 0,
+            sale_type: SaleType::Copy,
+            sale_price: LindenAmount(25),
+            name: "Hello World Script".to_owned(),
+            description: String::new(),
+            creation_date: 1_700_000_000,
+        };
+        let note = TaskInventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(0x7777_7777_7777_7777_7777_7777_7777_7777)),
+            parent_task: prim,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0007_ffff),
+                owner: Permissions::from_bits(0x0007_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0007_ffff),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Group(group),
+            group: Some(group),
+            group_owned: true,
+            asset_id: None,
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: LindenAmount(0),
+            name: "Readme".to_owned(),
+            description: "a note".to_owned(),
+            creation_date: 1_700_000_001,
+        };
+
+        let listing = super::build_task_inventory(prim, &[script.clone(), note.clone()]);
+        // The folder header is the OpenSim shape: the holding prim as the
+        // folder id, a nil parent, the `Contents` category.
+        let prim_uuid = prim.uuid();
+        assert!(listing.starts_with(&format!(
+            "\tinv_object\t0\n\t{{\n\t\tobj_id\t{prim_uuid}\n\
+             \t\tparent_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\ttype\tcategory\n\t\tname\tContents|\n\t}}\n"
+        )));
+        let parsed = super::parse_task_inventory(listing.as_bytes())?;
+        assert_eq!(parsed, vec![script, note]);
         Ok(())
     }
 

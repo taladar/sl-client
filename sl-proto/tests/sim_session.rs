@@ -21,34 +21,36 @@ mod test {
         GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
         GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
         GroupName, GroupRequestId, GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog,
-        InventoryFolderKey, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey,
-        InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount, LindenBalance,
-        LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-        Maturity, MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus,
-        NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
-        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
-        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5,
-        PingId, PlacesResult, PointAtType, Postcard, PrimShapeParams, ProductType, QueryId,
-        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionStats, RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
-        RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
-        SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags, SimulatorTime,
-        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
+        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
+        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount,
+        LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo,
+        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem,
+        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
+        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
+        ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
+        PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
+        RegionLocalObjectId, RegionLocalParcelId, RegionStats, RegionTerrainComposition,
+        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
+        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem,
+        TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
+        TextureFace, TextureKey, Throttle, TransactionId, Transmit, UpdateGroupInfoParams,
+        UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
     };
     use sl_wire::messages::{
-        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
+        AbortXfer, AbortXferXferIDBlock, ImprovedInstantMessage,
+        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+        ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
+        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
+        StartPingCheck, StartPingCheckPingIDBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -4768,6 +4770,374 @@ mod test {
             })
             .ok_or("expected the group name on the client")?;
         assert_eq!(group.name, "The Club");
+        Ok(())
+    }
+
+    /// The secure session id of the [`success`] login fixture, which the
+    /// simulator needs to derive legacy-upload asset ids the same way the
+    /// client predicts them.
+    fn secure_session() -> uuid::Uuid {
+        uuid::Uuid::from_u128(3)
+    }
+
+    /// A minimal wearable inventory item for the legacy asset-upload tests.
+    fn wearable_item() -> InventoryItem {
+        InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x11)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x12)),
+            name: "Tattered Shirt".to_owned(),
+            description: String::new(),
+            asset_id: uuid::Uuid::nil(),
+            item_type: 5,
+            inv_type: 18,
+            flags: 0,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 1_700_000_000,
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))),
+            last_owner_id: uuid::Uuid::nil(),
+            creator_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::ALL,
+                owner: Permissions::ALL,
+                group: Permissions::NONE,
+                everyone: Permissions::NONE,
+                next_owner: Permissions::ALL,
+            },
+        }
+    }
+
+    /// A task-inventory item fixture for the serving round-trip.
+    fn task_script_item(task: ObjectKey) -> TaskInventoryItem {
+        let creator = AgentKey::from(uuid::Uuid::from_u128(0x44));
+        TaskInventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x33)),
+            parent_task: task,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Agent(creator),
+            group: None,
+            group_owned: false,
+            asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(0x55))),
+            asset_type: AssetType::ScriptText,
+            inv_type: InventoryType::Script,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: LindenAmount(0),
+            name: "Hello World Script".to_owned(),
+            description: String::new(),
+            creation_date: 1_700_000_000,
+        }
+    }
+
+    /// A small legacy asset upload round-trips inline: the client's
+    /// `save_inventory_asset` carries the bytes in the `AssetUploadRequest`
+    /// itself, the simulator derives the stored asset id as
+    /// `combine(transaction, secure_session)` exactly as the client predicts
+    /// it, replies with an `AssetUploadComplete`, and both sides surface their
+    /// completion events.
+    #[test]
+    fn inline_asset_upload_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xABCD));
+        let data = vec![7_u8; 100];
+        client.save_inventory_asset(
+            &wearable_item(),
+            AssetType::Clothing,
+            data.clone(),
+            txn,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let expected_asset = sl_wire::combine_uuids(txn.get(), secure_session());
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploadRequested {
+                    transaction_id,
+                    asset_type: AssetType::Clothing,
+                    inline: true,
+                    ..
+                } if *transaction_id == txn
+            )),
+            "expected an inline AssetUploadRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploaded {
+                    asset_id,
+                    asset_type: AssetType::Clothing,
+                    transaction_id,
+                    data: got,
+                } if asset_id.uuid() == expected_asset && *transaction_id == txn && *got == data
+            )),
+            "expected the uploaded asset bytes, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+            )),
+            "expected InventoryAssetSaved, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// An oversized legacy asset upload is pulled over `Xfer`: the client sends
+    /// an empty `AssetData`, the simulator issues a `RequestXfer` keyed by the
+    /// predicted `VFileID`, the client streams the bytes (seq-0 size prefix,
+    /// high-bit end marker, one packet per confirmation), and the reassembled
+    /// asset is byte-identical before the `AssetUploadComplete` closes the
+    /// client side.
+    #[test]
+    fn oversize_asset_upload_pulls_via_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xBEEF));
+        // Several Xfer chunks (chunk size is 1000 bytes).
+        let data: Vec<u8> = (0..3500_u32)
+            .map(|i| u8::try_from(i % 251).unwrap_or(0))
+            .collect();
+        client.save_inventory_asset(
+            &wearable_item(),
+            AssetType::Bodypart,
+            data.clone(),
+            txn,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let expected_asset = sl_wire::combine_uuids(txn.get(), secure_session());
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AssetUploadRequested { inline: false, .. })),
+            "expected an Xfer-pull AssetUploadRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploaded {
+                    asset_id,
+                    asset_type: AssetType::Bodypart,
+                    transaction_id,
+                    data: got,
+                } if asset_id.uuid() == expected_asset && *transaction_id == txn && *got == data
+            )),
+            "expected the reassembled asset bytes, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+            )),
+            "expected InventoryAssetSaved, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A registered file serves over `Xfer`: the client's `request_xfer`
+    /// downloads it chunk-by-chunk (paced by its own confirmations) and
+    /// receives the exact registered bytes; the simulator surfaces the request
+    /// and the completed send.
+    #[test]
+    fn xfer_file_serving_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // More than two chunks, so the pacing loop is exercised.
+        let bytes: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 199).unwrap_or(0))
+            .collect();
+        sim.register_xfer_file("motd.txt", bytes.clone());
+        let xfer_id = client.request_xfer("motd.txt", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferDownloaded { xfer_id: got, data } if *got == xfer_id && *data == bytes
+            )),
+            "expected the downloaded bytes, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferRequested { xfer_id: got, filename, served: true }
+                    if *got == xfer_id && filename == "motd.txt"
+            )),
+            "expected XferRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferServed { xfer_id: got, filename, byte_count }
+                    if *got == xfer_id && filename == "motd.txt" && *byte_count == bytes.len()
+            )),
+            "expected XferServed, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A `RequestXfer` for a name that was never registered is refused with an
+    /// `AbortXfer`, so the requesting client is not left waiting.
+    #[test]
+    fn xfer_request_for_unknown_file_aborts() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let xfer_id = client.request_xfer("nope.txt", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferAborted { xfer_id: got, result: -1 } if *got == xfer_id
+            )),
+            "expected XferAborted, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::XferRequested { served: false, .. })),
+            "expected a refused XferRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// Both abort directions: a simulator-side `abort_xfer` mid-send reaches
+    /// the client as [`Event::XferAborted`] (and the download never
+    /// completes), and a client-sent `AbortXfer` drops the simulator's send
+    /// and surfaces [`ServerEvent::XferAborted`].
+    #[test]
+    fn abort_xfer_paths() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // Simulator-side abort: deliver only the request, then abort before
+        // the client sees the remaining packets.
+        sim.register_xfer_file("big.bin", vec![9_u8; 2500]);
+        let xfer_id = client.request_xfer("big.bin", now)?;
+        while let Some(transmit) = client.poll_transmit() {
+            sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+        }
+        sim.abort_xfer(xfer_id, 3, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferAborted { xfer_id: got, result: 3 } if *got == xfer_id
+            )),
+            "expected the sim abort on the client, got {client_events:?}"
+        );
+        assert!(
+            !client_events
+                .iter()
+                .any(|e| matches!(e, Event::XferDownloaded { .. })),
+            "the aborted download must not complete, got {client_events:?}"
+        );
+        drain_server(&mut sim);
+
+        // Client-side abort (no client helper API sends `AbortXfer`, so it is
+        // injected as a wire datagram): the sim drops its in-flight send and
+        // surfaces the abort.
+        sim.register_xfer_file("cancelme.bin", vec![4_u8; 2500]);
+        let second = client.request_xfer("cancelme.bin", now)?;
+        while let Some(transmit) = client.poll_transmit() {
+            sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+        }
+        let abort = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: second.get(),
+                result: -7,
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&abort, 9000, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferAborted { xfer_id: got, result: -7 } if *got == second
+            )),
+            "expected the client abort on the sim, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The full task-inventory serving path: the client's
+    /// `fetch_task_inventory` sends the request, the driver answers with
+    /// `serve_task_inventory` (listing writer + `Xfer` registration +
+    /// `ReplyTaskInventory`), and the client downloads and parses the listing
+    /// back into the exact served items.
+    #[test]
+    fn task_inventory_fetch_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        client.fetch_task_inventory(ScopedObjectId::new(circuit, RegionLocalObjectId(77)), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestTaskInventory { local_id } if *local_id == RegionLocalObjectId(77)
+            )),
+            "expected RequestTaskInventory, got {server_events:?}"
+        );
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x2222));
+        let items = vec![task_script_item(task)];
+        sim.serve_task_inventory(task, 5, &items, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskInventoryReply(reply)
+                    if reply.task == task && reply.serial == 5 && !reply.filename.is_empty()
+            )),
+            "expected TaskInventoryReply, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskInventoryContents { task: got, serial: 5, items: parsed }
+                    if *got == task && *parsed == items
+            )),
+            "expected the parsed task inventory, got {client_events:?}"
+        );
         Ok(())
     }
 }

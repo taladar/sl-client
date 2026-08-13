@@ -135,13 +135,13 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{PingId, QueryId, TransactionId};
+use crate::bookkeeping_ids::{PingId, QueryId, TransactionId, XferId};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, display_name_update_to_llsd, instant_message,
-    nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory, display_name_update_to_llsd,
+    instant_message, nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
     required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
     sim_console_response_to_llsd, windlight_refresh_to_llsd,
 };
@@ -163,11 +163,17 @@ use crate::types::{
     PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
     ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
-    SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType,
+    SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
+use sl_wire::combine_uuids;
+use sl_wire::messages::{
+    AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
+    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
+    SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+};
 
 /// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
 /// blocks the rez messages carry (`RezRestoreToWorld`, `RezObject`, `RezScript`).
@@ -318,6 +324,44 @@ enum SimState {
     Active,
     /// The session is finished (the client logged out or the link timed out).
     Closed,
+}
+
+/// An outbound server-side `Xfer` file send in flight — the mirror of the
+/// client's inbound [`Session::request_xfer`](crate::Session::request_xfer)
+/// download. The registered file bytes are streamed one `SendXferPacket` at a
+/// time, each released by the client's `ConfirmXferPacket` (the same
+/// one-packet-in-flight pacing the client's own upload side uses).
+#[derive(Debug)]
+struct SimXferSend {
+    /// The filename the file was registered (and requested) under.
+    filename: String,
+    /// The complete file bytes being streamed.
+    data: Vec<u8>,
+    /// How many bytes of [`data`](Self::data) have already been sent.
+    sent: usize,
+    /// The sequence number of the next `SendXferPacket` (the first is 0).
+    next_sequence: u32,
+    /// Whether the final packet (high-bit end-of-file marker) has been sent
+    /// and is only awaiting its confirmation.
+    last_sent: bool,
+}
+
+/// An inbound server-side `Xfer` pull in flight — the byte stream of an
+/// oversized legacy asset upload
+/// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
+/// the simulator requested from the client by its predicted `VFileID`.
+#[derive(Debug)]
+struct SimXferReceive {
+    /// The predicted stored asset id,
+    /// `combine(transaction_id, secure_session_id)`.
+    asset_id: Uuid,
+    /// The asset type declared by the `AssetUploadRequest`.
+    asset_type: AssetType,
+    /// The upload's transaction id, echoed on
+    /// [`ServerEvent::AssetUploaded`].
+    transaction_id: TransactionId,
+    /// The file bytes accumulated so far (the seq-0 length prefix stripped).
+    buffer: Vec<u8>,
 }
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
@@ -1075,6 +1119,74 @@ pub enum ServerEvent {
         /// The inventory item id being removed.
         item_id: InventoryKey,
     },
+    /// The client asked to download a file over the legacy `Xfer` path
+    /// (`RequestXfer`). When the named file was registered
+    /// ([`SimSession::register_xfer_file`]) the simulator began streaming it;
+    /// otherwise it refused with an `AbortXfer`. The inverse of the client's
+    /// [`Session::request_xfer`](crate::Session::request_xfer).
+    XferRequested {
+        /// The client-chosen transfer id.
+        xfer_id: XferId,
+        /// The requested filename.
+        filename: String,
+        /// Whether a registered file matched and streaming began.
+        served: bool,
+    },
+    /// The client confirmed the final packet of a served `Xfer` file send —
+    /// the download completed. The inverse of the client's
+    /// [`Event::XferDownloaded`](crate::Event::XferDownloaded).
+    XferServed {
+        /// The transfer id.
+        xfer_id: XferId,
+        /// The filename the file was registered under.
+        filename: String,
+        /// The number of file bytes streamed.
+        byte_count: usize,
+    },
+    /// The client aborted an in-flight `Xfer` transfer (`AbortXfer`), in
+    /// either direction. The inverse of the client's
+    /// [`Event::XferAborted`](crate::Event::XferAborted).
+    XferAborted {
+        /// The transfer id.
+        xfer_id: XferId,
+        /// The abort result code.
+        result: i32,
+    },
+    /// The client started a legacy transaction asset upload
+    /// (`AssetUploadRequest`) — the in-place wearable-save path. Small assets
+    /// arrive inline and complete immediately; an oversized one is pulled from
+    /// the client over `Xfer` first. Completion (either way) surfaces
+    /// separately as [`ServerEvent::AssetUploaded`]. The inverse of the
+    /// client's
+    /// [`Session::save_inventory_asset`](crate::Session::save_inventory_asset).
+    AssetUploadRequested {
+        /// The upload's transaction id (the stored asset id is
+        /// `combine(transaction_id, secure_session_id)`).
+        transaction_id: TransactionId,
+        /// The declared asset type.
+        asset_type: AssetType,
+        /// Whether the asset bytes were carried inline (small upload) rather
+        /// than pulled over `Xfer`.
+        inline: bool,
+        /// Whether the asset is a temporary upload.
+        tempfile: bool,
+        /// Whether the asset should only be stored sim-locally.
+        store_local: bool,
+    },
+    /// A legacy transaction asset upload finished: the asset bytes are fully
+    /// received (inline, or over the `Xfer` pull) and the simulator has
+    /// replied with an `AssetUploadComplete`. The inverse of the client's
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    AssetUploaded {
+        /// The stored asset id, `combine(transaction_id, secure_session_id)`.
+        asset_id: AssetKey,
+        /// The asset type.
+        asset_type: AssetType,
+        /// The upload's transaction id.
+        transaction_id: TransactionId,
+        /// The complete asset bytes.
+        data: Vec<u8>,
+    },
     /// The client applied a terraform brush stroke (`ModifyLand`). The inverse
     /// of the client's
     /// [`Session::modify_land`](crate::Session::modify_land).
@@ -1386,6 +1498,24 @@ pub struct SimSession {
     /// The id of the next `EventQueueGet` batch (echoed as the client's next
     /// `ack`).
     event_queue_id: i32,
+    /// Files registered for the client to download over the legacy `Xfer`
+    /// path, keyed by filename. An entry is consumed by the `RequestXfer`
+    /// that starts its download (requests ask for delete-on-completion), so
+    /// re-serving a name needs a fresh
+    /// [`SimSession::register_xfer_file`].
+    xfer_files: BTreeMap<String, Vec<u8>>,
+    /// Outbound `Xfer` file sends in flight, keyed by the client-chosen id.
+    xfer_sends: BTreeMap<XferId, SimXferSend>,
+    /// Inbound `Xfer` asset pulls in flight (oversized legacy uploads),
+    /// keyed by the simulator-assigned id.
+    xfer_receives: BTreeMap<XferId, SimXferReceive>,
+    /// The next simulator-assigned `Xfer` id for an asset pull (never zero).
+    next_xfer_id: XferId,
+    /// The account's secure session id — the extra entropy the legacy asset
+    /// upload path combines with a transaction id to derive the stored asset
+    /// id. `None` until [`SimSession::set_secure_session_id`]; an upload
+    /// arriving while unset is refused with a failed `AssetUploadComplete`.
+    secure_session_id: Option<Uuid>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1415,6 +1545,11 @@ impl SimSession {
             ping: None,
             caps_events: Vec::new(),
             event_queue_id: 1,
+            xfer_files: BTreeMap::new(),
+            xfer_sends: BTreeMap::new(),
+            xfer_receives: BTreeMap::new(),
+            next_xfer_id: XferId(1),
+            secure_session_id: None,
             events: VecDeque::new(),
         }
     }
@@ -3654,6 +3789,165 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sets the account's secure session id (from the login response), enabling
+    /// the legacy transaction asset upload path: the simulator derives a stored
+    /// asset id as `combine(transaction_id, secure_session_id)`, exactly as the
+    /// uploading client predicts it. An `AssetUploadRequest` arriving while this
+    /// is unset is refused with a failed `AssetUploadComplete`.
+    pub const fn set_secure_session_id(&mut self, id: Uuid) {
+        self.secure_session_id = Some(id);
+    }
+
+    /// Registers `filename` as servable over the legacy `Xfer` download path:
+    /// the next client `RequestXfer` naming it streams `data` in
+    /// `SendXferPacket`s (one in flight, paced by the client's
+    /// `ConfirmXferPacket`s). The entry is consumed by that request — the
+    /// transfers ask for delete-on-completion — so re-serving the same name
+    /// needs a fresh registration.
+    pub fn register_xfer_file(&mut self, filename: impl Into<String>, data: Vec<u8>) {
+        let _prev = self.xfer_files.insert(filename.into(), data);
+    }
+
+    /// Serves an in-world object's task inventory — the full server side of the
+    /// client's
+    /// [`Session::fetch_task_inventory`](crate::Session::fetch_task_inventory):
+    /// writes the contents listing in the exact `RequestInventoryFile` text
+    /// format (the inverse of the client-side parser behind
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)),
+    /// registers it under the deterministic name
+    /// `inventory_<task>.tmp` (a real simulator mints a random temp name; the
+    /// client treats it as opaque, and a sans-I/O session has no randomness),
+    /// and sends the `ReplyTaskInventory` naming it. Pass the current contents
+    /// `serial`. For a task whose inventory is empty a real simulator sends an
+    /// empty filename instead — use
+    /// [`send_reply_task_inventory`](Self::send_reply_task_inventory) directly
+    /// for that case.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the reply fails to encode.
+    pub fn serve_task_inventory(
+        &mut self,
+        task: ObjectKey,
+        serial: i16,
+        items: &[TaskInventoryItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let filename = format!("inventory_{}.tmp", task.uuid());
+        let listing = build_task_inventory(task, items);
+        self.register_xfer_file(filename.clone(), listing.into_bytes());
+        self.send_reply_task_inventory(
+            &TaskInventoryReply {
+                task,
+                serial,
+                filename,
+            },
+            now,
+        )
+    }
+
+    /// Aborts an in-flight `Xfer` transfer (either direction) with the given
+    /// result code: drops its state and tells the client (`AbortXfer`), the
+    /// inverse of the client's abort handling that surfaces
+    /// [`Event::XferAborted`](crate::Event::XferAborted).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn abort_xfer(&mut self, xfer_id: XferId, result: i32, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let _send = self.xfer_sends.remove(&xfer_id);
+        let _receive = self.xfer_receives.remove(&xfer_id);
+        let message = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: xfer_id.get(),
+                result,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Allocates the next simulator-assigned `Xfer` id (used for asset pulls),
+    /// mirroring the client's own mint: monotonically increasing, never zero.
+    fn alloc_xfer_id(&mut self) -> XferId {
+        let id = self.next_xfer_id;
+        self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
+        id
+    }
+
+    /// Streams the next chunk of the outbound `Xfer` send `xfer_id` as a
+    /// `SendXferPacket` — the server side of the strictly one-packet-in-flight
+    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`. The
+    /// first packet (sequence 0) carries a 4-byte little-endian total-size
+    /// prefix before the data; the final packet sets the high-bit end-of-file
+    /// marker in its packet number. A no-op if the send is already gone.
+    fn send_next_xfer_send_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
+        let Some(send) = self.xfer_sends.get_mut(&xfer_id) else {
+            return Ok(());
+        };
+        let sequence = send.next_sequence;
+        let is_first = sequence == 0;
+        let remaining = send.data.len().saturating_sub(send.sent);
+        let take = remaining.min(crate::session::XFER_UPLOAD_CHUNK_SIZE);
+        let end = send.sent.saturating_add(take);
+        let chunk = send.data.get(send.sent..end).unwrap_or(&[]);
+        let mut payload = Vec::with_capacity(take.saturating_add(4));
+        if is_first {
+            #[expect(
+                clippy::little_endian_bytes,
+                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
+            )]
+            let total_le = u32::try_from(send.data.len())
+                .unwrap_or(u32::MAX)
+                .to_le_bytes();
+            payload.extend_from_slice(&total_le);
+        }
+        payload.extend_from_slice(chunk);
+        send.sent = end;
+        let is_last = send.sent >= send.data.len();
+        send.last_sent = is_last;
+        send.next_sequence = sequence.wrapping_add(1);
+        let packet = if is_last {
+            sequence | 0x8000_0000
+        } else {
+            sequence
+        };
+        let message = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id.get(),
+                packet,
+            },
+            data_packet: SendXferPacketDataPacketBlock { data: payload },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Replies to a finished (or refused) legacy asset upload with an
+    /// `AssetUploadComplete`, the message the uploading client surfaces as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    fn send_asset_upload_complete(
+        &mut self,
+        asset_id: Uuid,
+        asset_type: AssetType,
+        success: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AssetUploadComplete(AssetUploadComplete {
+            asset_block: AssetUploadCompleteAssetBlockBlock {
+                uuid: asset_id,
+                r#type: i8::try_from(asset_type.to_code()).unwrap_or_default(),
+                success,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
     /// Sends a `UserInfoReply` — the agent's own account contact preferences, in
     /// reply to the client's `UserInfoRequest` (the inverse of the client's
     /// [`Event::UserInfo`](crate::Event::UserInfo)): whether offline IMs are
@@ -4789,6 +5083,172 @@ impl SimSession {
                     local_id: RegionLocalObjectId(remove.inventory_data.local_id),
                     item_id: InventoryKey::from(remove.inventory_data.item_id),
                 });
+            }
+            AnyMessage::RequestXfer(request) => {
+                // The client asks to download a file by name. Only registered
+                // files are served; the client picked the transfer id. An
+                // unknown name is refused with an `AbortXfer` so the requester
+                // is not left hanging.
+                let xfer_id = XferId(request.xfer_id.id);
+                let filename = trimmed_string(&request.xfer_id.filename);
+                let served = if let Some(data) = self.xfer_files.remove(&filename) {
+                    self.xfer_sends.insert(
+                        xfer_id,
+                        SimXferSend {
+                            filename: filename.clone(),
+                            data,
+                            sent: 0,
+                            next_sequence: 0,
+                            last_sent: false,
+                        },
+                    );
+                    self.send_next_xfer_send_packet(xfer_id, now)?;
+                    true
+                } else {
+                    let abort = AnyMessage::AbortXfer(AbortXfer {
+                        xfer_id: AbortXferXferIDBlock {
+                            id: xfer_id.get(),
+                            // The reference `LL_ERR_ASSET_REQUEST_FAILED`.
+                            result: -1,
+                        },
+                    });
+                    self.send(&abort, Reliability::Reliable, now)?;
+                    false
+                };
+                self.events.push_back(ServerEvent::XferRequested {
+                    xfer_id,
+                    filename,
+                    served,
+                });
+            }
+            AnyMessage::ConfirmXferPacket(confirm) => {
+                // The client confirmed the packet we last sent for an outbound
+                // file send; release the next one, or finish if that was the
+                // final packet (strictly one packet in flight).
+                let xfer_id = XferId(confirm.xfer_id.id);
+                if let Some(send) = self.xfer_sends.get(&xfer_id) {
+                    if send.last_sent {
+                        if let Some(send) = self.xfer_sends.remove(&xfer_id) {
+                            self.events.push_back(ServerEvent::XferServed {
+                                xfer_id,
+                                filename: send.filename,
+                                byte_count: send.data.len(),
+                            });
+                        }
+                    } else {
+                        self.send_next_xfer_send_packet(xfer_id, now)?;
+                    }
+                }
+            }
+            AnyMessage::AssetUploadRequest(request) => {
+                // The legacy transaction asset upload (the in-place wearable
+                // save). Small assets arrive inline; an oversized one sent an
+                // empty `AssetData`, and we pull it from the client over
+                // `Xfer` by its predicted `VFileID`.
+                let block = &request.asset_block;
+                let transaction_id = TransactionId::new(block.transaction_id);
+                let asset_type = AssetType::from_code(i32::from(block.r#type));
+                let inline = !block.asset_data.is_empty();
+                self.events.push_back(ServerEvent::AssetUploadRequested {
+                    transaction_id,
+                    asset_type,
+                    inline,
+                    tempfile: block.tempfile,
+                    store_local: block.store_local,
+                });
+                if let Some(secure) = self.secure_session_id {
+                    let asset_id = combine_uuids(block.transaction_id, secure);
+                    if inline {
+                        self.send_asset_upload_complete(asset_id, asset_type, true, now)?;
+                        self.events.push_back(ServerEvent::AssetUploaded {
+                            asset_id: AssetKey::from(asset_id),
+                            asset_type,
+                            transaction_id,
+                            data: block.asset_data.clone(),
+                        });
+                    } else {
+                        let xfer_id = self.alloc_xfer_id();
+                        self.xfer_receives.insert(
+                            xfer_id,
+                            SimXferReceive {
+                                asset_id,
+                                asset_type,
+                                transaction_id,
+                                buffer: Vec::new(),
+                            },
+                        );
+                        let pull = AnyMessage::RequestXfer(RequestXfer {
+                            xfer_id: RequestXferXferIDBlock {
+                                id: xfer_id.get(),
+                                filename: Vec::new(),
+                                file_path: 0,
+                                delete_on_completion: false,
+                                use_big_packets: false,
+                                v_file_id: asset_id,
+                                v_file_type: i16::from(block.r#type),
+                            },
+                        });
+                        self.send(&pull, Reliability::Reliable, now)?;
+                    }
+                } else {
+                    // Without the secure session id the stored asset id cannot
+                    // be derived; refuse so the client's save does not hang.
+                    self.send_asset_upload_complete(Uuid::nil(), asset_type, false, now)?;
+                }
+            }
+            AnyMessage::SendXferPacket(packet) => {
+                // A chunk of an oversized asset upload we are pulling from the
+                // client — the mirror of the client's download handler: strip
+                // the seq-0 length prefix, confirm every packet, finish on the
+                // high-bit end-of-file marker.
+                let xfer_id = XferId(packet.xfer_id.id);
+                let packet_num = packet.xfer_id.packet;
+                let is_last = packet_num & 0x8000_0000 != 0;
+                let sequence = packet_num & 0x7fff_ffff;
+                if self.xfer_receives.contains_key(&xfer_id) {
+                    let chunk: &[u8] = if sequence == 0 {
+                        packet.data_packet.data.get(4..).unwrap_or(&[])
+                    } else {
+                        &packet.data_packet.data
+                    };
+                    if let Some(receive) = self.xfer_receives.get_mut(&xfer_id) {
+                        receive.buffer.extend_from_slice(chunk);
+                    }
+                    let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+                        xfer_id: ConfirmXferPacketXferIDBlock {
+                            id: xfer_id.get(),
+                            packet: packet_num,
+                        },
+                    });
+                    self.send(&confirm, Reliability::Reliable, now)?;
+                    if is_last && let Some(receive) = self.xfer_receives.remove(&xfer_id) {
+                        self.send_asset_upload_complete(
+                            receive.asset_id,
+                            receive.asset_type,
+                            true,
+                            now,
+                        )?;
+                        self.events.push_back(ServerEvent::AssetUploaded {
+                            asset_id: AssetKey::from(receive.asset_id),
+                            asset_type: receive.asset_type,
+                            transaction_id: receive.transaction_id,
+                            data: receive.buffer,
+                        });
+                    }
+                }
+            }
+            AnyMessage::AbortXfer(abort) => {
+                // The client aborted an in-flight transfer in either direction;
+                // drop the state and surface the reason.
+                let xfer_id = XferId(abort.xfer_id.id);
+                let aborted = self.xfer_sends.remove(&xfer_id).is_some()
+                    || self.xfer_receives.remove(&xfer_id).is_some();
+                if aborted {
+                    self.events.push_back(ServerEvent::XferAborted {
+                        xfer_id,
+                        result: abort.xfer_id.result,
+                    });
+                }
             }
             AnyMessage::ModifyLand(modify) => {
                 let block = &modify.modify_block;
