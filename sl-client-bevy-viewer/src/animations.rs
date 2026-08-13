@@ -419,6 +419,29 @@ pub(crate) struct PlayState {
     order: u64,
 }
 
+impl PlayState {
+    /// The wall-clock time this animation started at.
+    pub(crate) const fn start(&self) -> f32 {
+        self.start
+    }
+
+    /// The elapsed-since-start time the simulator dropped it at, or `None`
+    /// while still signalled.
+    pub(crate) const fn stopped_at(&self) -> Option<f32> {
+        self.stopped_at
+    }
+
+    /// The accumulated walk-speed playback-clock skew (P31.14), seconds.
+    pub(crate) const fn anim_offset(&self) -> f32 {
+        self.anim_offset
+    }
+
+    /// The activation recency stamp (higher = more recent).
+    pub(crate) const fn order(&self) -> u64 {
+        self.order
+    }
+}
+
 /// Per-avatar animation *playback* state (P18.3 / P18.4), distinct from the
 /// [`AnimationManager`]'s asset resolve/cache: which animations each avatar is
 /// playing, their timing / activation order, and the per-joint pose the driver
@@ -642,6 +665,22 @@ impl AnimationPlayback {
         merged.iter().any(|(&anim_id, play)| {
             play.stopped_at.is_none() && sl_anim::is_gun_aim_trigger(anim_id)
         })
+    }
+
+    /// The avatar's merged playing set — simulator-driven plus the two
+    /// client-driven sets — as owned `(animation id, play state)` pairs. The
+    /// GPU-avatar scheduler (`crate::gpu_avatars`) builds its per-avatar
+    /// playback rows and sample jobs from exactly this set, so the GPU blends
+    /// the same motions the CPU pose resolver would.
+    #[must_use]
+    pub(crate) fn merged_active(&self, agent: AgentKey) -> Vec<(Uuid, PlayState)> {
+        merge_playing(
+            self.playing.get(&agent),
+            self.client_locomotion.get(&agent),
+            self.client_typing.get(&agent),
+        )
+        .into_iter()
+        .collect()
     }
 
     /// Advance the speed-scaled playback clocks (P31.14): every
@@ -872,6 +911,96 @@ pub(crate) fn resolve_pose(
     Some(pose)
 }
 
+/// The joints the CPU adjusters read geometry from or write channels to —
+/// the static half of the §5.3 mini-pose subset: the look-at chain (neck /
+/// head / eyes), the leg chains the locomotion IK solves, the left-arm reach
+/// chain and aim wrists, the idle adjusters' chest / torso, and the physics
+/// sample joints (`mChest` / `mPelvis` are already listed).
+const ADJUSTER_JOINT_NAMES: &[&str] = &[
+    "mPelvis",
+    "mTorso",
+    "mChest",
+    "mNeck",
+    "mHead",
+    "mEyeLeft",
+    "mEyeRight",
+    "mFaceEyeAltLeft",
+    "mFaceEyeAltRight",
+    "mHipLeft",
+    "mKneeLeft",
+    "mAnkleLeft",
+    "mHipRight",
+    "mKneeRight",
+    "mAnkleRight",
+    "mCollarLeft",
+    "mShoulderLeft",
+    "mElbowLeft",
+    "mWristLeft",
+    "mWristRight",
+];
+
+/// One avatar's §5.3 **mini-pose subset** while the in-place GPU path owns
+/// the skinning joints: the ancestor closure of every joint the CPU still
+/// consumes — the [`ADJUSTER_JOINT_NAMES`] chains, every collision volume
+/// (body-physics displacement targets), and the §5.4 sockets (every worn
+/// attachment-point joint; the rigid eyeballs' joints are in the static list
+/// already). The closure matters: the chain solve reads every ancestor's
+/// animated channels, so an ancestor missing from the resolve would place a
+/// socket or adjuster input at rest.
+fn mini_pose_subset(
+    skeleton: &BevySkeleton,
+    body: &AvatarBody,
+    state: &AvatarState,
+    hooks: &GpuAvatarHooks<'_, '_>,
+    agent: AgentKey,
+    joints: &[Entity],
+) -> HashSet<usize> {
+    let mut targets: Vec<usize> = ADJUSTER_JOINT_NAMES
+        .iter()
+        .filter_map(|name| body.joint_index(name))
+        .collect();
+    for index in 0..skeleton.len() {
+        if skeleton.is_collision_volume(index) {
+            targets.push(index);
+        }
+    }
+    for node in state.attachment_node_entities(agent) {
+        // Worn = the node carries an attachment subtree (the same test the
+        // socket writer applies).
+        let worn = hooks
+            .children
+            .get(node)
+            .is_ok_and(|children| !children.is_empty());
+        if !worn {
+            continue;
+        }
+        let Ok(child_of) = hooks.parents.get(node) else {
+            continue;
+        };
+        let joint_entity = child_of.parent();
+        if let Some(index) = joints.iter().position(|&joint| joint == joint_entity) {
+            targets.push(index);
+        }
+    }
+    // The ancestor closure (parents precede children in canonical order; a
+    // forward parent — the synthetic root — never chains further).
+    let parents = skeleton.parents();
+    let mut subset: HashSet<usize> = HashSet::new();
+    for target in targets {
+        let mut current = target;
+        loop {
+            if !subset.insert(current) {
+                break;
+            }
+            match parents.get(current).copied().flatten() {
+                Some(parent) if parent < current => current = parent,
+                _root_or_forward => break,
+            }
+        }
+    }
+    subset
+}
+
 /// Resolve each rigged avatar's per-joint animation pose from the motions it is
 /// playing, blending concurrent motions by priority with ease-in/out (P18.4), for
 /// [`pose_avatar_skeletons`] to apply.
@@ -887,6 +1016,12 @@ pub(crate) fn resolve_pose(
 /// simply omitted, so ordinary transform propagation leaves it at its deformed
 /// rest pose. Procedural built-ins (walk / stand / …) have no cached motion, so an
 /// idle avatar signalling only those keeps its rest pose.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources; the GPU hooks are \
+              already bundled into one `GpuAvatarHooks` param, and the rest is the \
+              animation pipeline, the adjuster feedback, and the avatar state / assets"
+)]
 pub(crate) fn drive_avatar_skeletons(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
@@ -895,6 +1030,8 @@ pub(crate) fn drive_avatar_skeletons(
     adjust: Res<LocomotionAdjust>,
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
+    library: Option<Res<AvatarAssetLibrary>>,
+    gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
@@ -941,21 +1078,44 @@ pub(crate) fn drive_avatar_skeletons(
     // Resolve each avatar's blended per-joint pose from its playing motions — the
     // union of the simulator-driven set and the own avatar's client locomotion and
     // typing sets.
+    //
+    // While the in-place GPU path owns the skinning joints (Phase 2 of
+    // `roadmap/context/gpu-avatars.md`, §5.3), the full fold is the GPU's job
+    // (passes A+B): the CPU resolve is demoted to the **adjuster mini-pose**,
+    // restricted to the joints the CPU still consumes — the adjuster chains,
+    // the sockets, and their ancestors — so `pose_avatar_skeletons`' chain
+    // solves and corrections see the same animated channels the full solve
+    // would, at a fraction of the sampling cost.
+    let gpu_real = gpu.real_active();
     let mut agents: HashSet<AgentKey> = playback.playing.keys().copied().collect();
     agents.extend(playback.client_locomotion.keys().copied());
     agents.extend(playback.client_typing.keys().copied());
     let mut poses: HashMap<AgentKey, AnimationPose> = HashMap::new();
     for agent in agents {
         // Only a rigged avatar (with skeleton-instance joints) can be posed.
-        if state.joint_entities_of(agent).is_none() {
+        let Some(joints) = state.joint_entities_of(agent) else {
             continue;
-        }
+        };
         let merged = merge_playing(
             playback.playing.get(&agent),
             playback.client_locomotion.get(&agent),
             playback.client_typing.get(&agent),
         );
-        if let Some(pose) = resolve_pose(&merged, now, &manager, |name| body.joint_index(name)) {
+        let subset = if gpu_real {
+            library.as_deref().map(|library| {
+                mini_pose_subset(library.skeleton(), &body, &state, &gpu, agent, joints)
+            })
+        } else {
+            None
+        };
+        let resolved = resolve_pose(&merged, now, &manager, |name| {
+            let index = body.joint_index(name)?;
+            match subset.as_ref() {
+                Some(subset) if !subset.contains(&index) => None,
+                _within => Some(index),
+            }
+        });
+        if let Some(pose) = resolved {
             let _prev = poses.insert(agent, pose);
         }
     }
@@ -995,8 +1155,9 @@ pub(crate) fn drive_avatar_skeletons(
 /// breathe / body-noise output is **bit-identical between ticks** — which is
 /// what makes an idle avatar's pose comparable frame-to-frame at all (the idle
 /// motions are continuous functions of time). 15 Hz stepping of a 0.05 rad
-/// breathing sine over a ~6 s period is imperceptible.
-const POSE_IDLE_HZ: f32 = 15.0;
+/// breathing sine over a ~6 s period is imperceptible. `pub(crate)` because
+/// the GPU-avatar scheduler quantises pass B's `idle_now` to the same grid.
+pub(crate) const POSE_IDLE_HZ: f32 = 15.0;
 
 /// The pose gate's per-avatar skip stamp: when it matches the stored one — and
 /// every procedural adjuster reports settled, and the avatar's root anchor did
@@ -1156,10 +1317,12 @@ impl GpuAvatarHooks<'_, '_> {
         })
     }
 
-    /// Publish one avatar's final blended pose + root to the feed. No-op when
-    /// the pipeline is off — including when the startup capability check
-    /// demoted the device to the CPU path (nothing would consume the feed,
-    /// and the staging system that prunes it is idle then too).
+    /// Publish one avatar's final blended pose + root to the feed (the ghost
+    /// harness's Phase 1 channel — the real path publishes corrections via
+    /// [`Self::publish_real`] instead). No-op when the pipeline is off —
+    /// including when the startup capability check demoted the device to the
+    /// CPU path (nothing would consume the feed, and the staging system that
+    /// prunes it is idle then too).
     fn publish(&mut self, agent: AgentKey, pose: &AnimationPose, joint_count: usize, root: Mat4) {
         let active = self.mode.as_deref().is_some_and(|mode| mode.active);
         if !active {
@@ -1169,6 +1332,61 @@ impl GpuAvatarHooks<'_, '_> {
             feed.publish(agent, pose, joint_count, root);
         }
     }
+
+    /// Publish one avatar's root matrix + sparse adjuster corrections to the
+    /// feed (the in-place real path, Phase 2: the GPU samples and blends the
+    /// keyframes itself; the CPU contributes only what its adjusters
+    /// changed). The corrections arrive sorted by joint.
+    fn publish_real(
+        &mut self,
+        agent: AgentKey,
+        root: Mat4,
+        corrections: Vec<(u32, crate::gpu_avatars::types::GpuLocalPose)>,
+    ) {
+        if !self.real_active() {
+            return;
+        }
+        if let Some(feed) = self.feed.as_mut() {
+            feed.publish_real(agent, root, corrections);
+        }
+    }
+}
+
+/// Diff one avatar's mini pose across the adjuster folds (§5.3): every
+/// channel of `posed` that differs from `baseline` — the mini pose as it
+/// stood after the keyframe + idle folds, i.e. exactly what pass B computes
+/// GPU-side — becomes a sparse correction replacing that channel. Sorted by
+/// joint (the GPU binary-searches). Exact float comparison is deliberate: an
+/// adjuster that wrote the identical value needs no correction, and an
+/// active adjuster's output moves every frame.
+fn pose_corrections(
+    baseline: &AnimationPose,
+    posed: &AnimationPose,
+) -> Vec<(u32, crate::gpu_avatars::types::GpuLocalPose)> {
+    use crate::gpu_avatars::types::{GpuLocalPose, POSE_FLAG_POS, POSE_FLAG_ROT};
+    let mut by_joint: HashMap<usize, GpuLocalPose> = HashMap::new();
+    for (index, rotation) in posed.rotations() {
+        if baseline.rotation(index) == Some(rotation) {
+            continue;
+        }
+        let entry = by_joint.entry(index).or_default();
+        entry.rot = Vec4::new(rotation.x, rotation.y, rotation.z, rotation.w);
+        entry.flags |= POSE_FLAG_ROT;
+    }
+    for (index, position) in posed.positions() {
+        if baseline.position(index) == Some(position) {
+            continue;
+        }
+        let entry = by_joint.entry(index).or_default();
+        entry.pos = position;
+        entry.flags |= POSE_FLAG_POS;
+    }
+    let mut out: Vec<(u32, GpuLocalPose)> = by_joint
+        .into_iter()
+        .filter_map(|(index, value)| Some((u32::try_from(index).ok()?, value)))
+        .collect();
+    out.sort_by_key(|&(joint, _value)| joint);
+    out
 }
 
 /// The procedural adjusters' resources, bundled so [`pose_avatar_skeletons`] stays
@@ -1426,7 +1644,9 @@ pub(crate) fn pose_avatar_skeletons(
         if t_pose {
             if gpu_real {
                 // In-place GPU path: the skinning joints stay frozen; only
-                // the socket subset is written, from the chain mini-FK.
+                // the socket subset is written, from the chain mini-FK. The
+                // scheduler mirrors the freeze GPU-side (no playback staged,
+                // idle disabled), so no corrections are needed.
                 write_socket_globals(
                     &mut globals,
                     &parts,
@@ -1439,6 +1659,7 @@ pub(crate) fn pose_avatar_skeletons(
                     joints,
                     (deform, volumes, &overrides, &pose),
                 );
+                gpu.publish_real(agent, root_global.to_matrix(), Vec::new());
             } else {
                 let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
                 write_joint_globals(
@@ -1450,10 +1671,10 @@ pub(crate) fn pose_avatar_skeletons(
                     joints,
                     &world,
                 );
+                // Feed the ghost harness the same (empty, T-pose) pose + root
+                // this frame's pose was resolved under.
+                gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
             }
-            // Feed the GPU pipeline the same (empty, T-pose) pose + root this
-            // frame's pose was resolved under.
-            gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
             let _prev = gate.stamps.insert(agent, stamp);
             continue;
         }
@@ -1474,7 +1695,32 @@ pub(crate) fn pose_avatar_skeletons(
         // which the procedural adjusters that need to know *where the avatar's joints
         // currently are* read from: the look-at's head / eye positions and the neck
         // parent's rotation, and the locomotion adjusters' whole leg geometry (P31.14).
-        let world0 = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
+        //
+        // Under the in-place GPU path (Phase 2, §5.3) the full solve is
+        // replaced by the chain mini-FK over just the adjuster joints: the
+        // chain map (which includes every ancestor) is scattered into a dense
+        // vector so the adjusters' `&[Mat4]` reads are unchanged; joints
+        // outside the closure hold identity, and no adjuster reads one.
+        let world0 = if gpu_real {
+            let targets: Vec<usize> = ADJUSTER_JOINT_NAMES
+                .iter()
+                .filter_map(|name| body.joint_index(name))
+                .collect();
+            let chain = skeleton.deformed_world_chain(deform, volumes, &overrides, &pose, &targets);
+            let mut dense = vec![Mat4::IDENTITY; skeleton.len()];
+            for (index, matrix) in chain {
+                if let Some(slot) = dense.get_mut(index) {
+                    *slot = matrix;
+                }
+            }
+            dense
+        } else {
+            skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose)
+        };
+        // The adjuster-diff baseline (§5.3): the mini pose as it stands after
+        // the keyframe + idle folds — exactly what pass B computes GPU-side —
+        // so the corrections carry only what the adjusters below change.
+        let baseline = gpu_real.then(|| pose.clone());
         let joint_pos = |index: Option<usize>| {
             index
                 .and_then(|i| world0.get(i))
@@ -1645,12 +1891,14 @@ pub(crate) fn pose_avatar_skeletons(
             }
         }
         if gpu_real {
-            // In-place GPU path (Phase 1b): the final full solve and the
-            // ~200 joint-global writes are dropped — the GPU re-runs FK from
-            // the published pose, and `extract_skins` sees no changed joints.
-            // Only the socket subset (worn attachment points, the rigid
-            // eyeballs' joints, the camera's head joint) is written, from the
-            // §5.4 chain mini-FK over the very same final pose.
+            // In-place GPU path (Phase 2): the final full solve, the ~200
+            // joint-global writes AND the full sample+blend are dropped — the
+            // GPU samples, blends and re-runs FK itself (passes A+B+C), and
+            // `extract_skins` sees no changed joints. Only the socket subset
+            // (worn attachment points, the rigid eyeballs' joints, the
+            // camera's head joint) is written, from the §5.4 chain mini-FK
+            // over the mini pose — and the adjusters' channel changes are
+            // published as sparse corrections pass B folds in.
             write_socket_globals(
                 &mut globals,
                 &parts,
@@ -1663,6 +1911,11 @@ pub(crate) fn pose_avatar_skeletons(
                 joints,
                 (deform, volumes, &overrides, &pose),
             );
+            let corrections = baseline
+                .as_ref()
+                .map(|baseline| pose_corrections(baseline, &pose))
+                .unwrap_or_default();
+            gpu.publish_real(agent, root_global.to_matrix(), corrections);
         } else {
             let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
             write_joint_globals(
@@ -1674,12 +1927,12 @@ pub(crate) fn pose_avatar_skeletons(
                 joints,
                 &world,
             );
+            // Feed the ghost harness the FINAL blended pose (all folds
+            // applied) + the root matrix this frame's pose was resolved
+            // under, so its FK re-derives exactly the world matrices the CPU
+            // path just wrote.
+            gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
         }
-        // Feed the GPU pipeline the FINAL blended pose (all folds applied) +
-        // the root matrix this frame's pose was resolved under, so its FK
-        // re-derives exactly the world matrices the CPU path would have
-        // written.
-        gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
         let _prev = gate.stamps.insert(agent, stamp);
     }
 
@@ -1935,8 +2188,9 @@ fn write_socket_globals(
 /// An avatar's AO walks, turns and fidgets it, so two runs of the viewer never
 /// frame the same body the same way. Freezing the pose makes an A/B of anything
 /// that shapes the body (a shape slider, a collision-volume displacement, a joint
-/// override) comparable between runs.
-fn t_pose_enabled() -> bool {
+/// override) comparable between runs. `pub(crate)` because the GPU-avatar
+/// scheduler mirrors the freeze (no playback staged, idle disabled in pass B).
+pub(crate) fn t_pose_enabled() -> bool {
     std::env::var("SL_VIEWER_TPOSE").as_deref() == Ok("1")
 }
 

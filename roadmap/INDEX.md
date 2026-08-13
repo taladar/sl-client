@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 60 |
-| ready | 249 |
+| ready | 248 |
 | blocked | 80 |
 | in-progress | 15 |
 | bugs | 24 |
-| done | 778 |
+| done | 779 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1239** |
@@ -151,7 +151,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (249)
+## ready (248)
 
 ### protocol
 
@@ -482,9 +482,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
-- [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](ready/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
-  — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
-  `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes` (done))
 - [`viewer-perf-gpu-avatar-phase3-gpu-picking`](ready/viewer-perf-gpu-avatar-phase3-gpu-picking.md)
   — GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
   (blocked by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done))
@@ -877,7 +874,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-voice-audio`)
 - [`viewer-perf-gpu-avatar-phase4-remove-scaffolding`](blocked/viewer-perf-gpu-avatar-phase4-remove-scaffolding.md)
   — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding (blocked
-  by `viewer-perf-gpu-avatar-phase2-gpu-sample-blend`,
+  by `viewer-perf-gpu-avatar-phase2-gpu-sample-blend` (done),
   `viewer-perf-gpu-avatar-phase3-gpu-picking`)
 - [`viewer-perf-gpu-avatar-phase5-lod-polish`](blocked/viewer-perf-gpu-avatar-phase5-lod-polish.md)
   — GPU avatars Phase 5 — LOD, scalability hooks, polish (blocked by
@@ -1088,7 +1085,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (778)
+## done (779)
 
 ### protocol
 
@@ -1861,6 +1858,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract) (blocked
   by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done),
   `viewer-perf-gpu-avatar-keystone-skinuniforms-spike` (done))
+- [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](done/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
+  — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
+  `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes` (done))
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)

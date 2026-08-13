@@ -28,7 +28,8 @@ use bevy::render::sync_world::MainEntity;
 use super::POSE_SHADER_HANDLE;
 use super::stage::GpuAvatarStaging;
 use super::types::{
-    GpuAvatarFrame, GpuComputeParams, GpuLocalPose, GpuRestJoint, GpuSkinInstance, MAX_GPU_JOINTS,
+    GpuAvatarFrame, GpuClipHeader, GpuComputeParams, GpuCorrection, GpuJointTrack, GpuLocalPose,
+    GpuPlayState, GpuRestJoint, GpuSampleJob, GpuSkinInstance, MAX_GPU_JOINTS,
 };
 
 /// The WGSL `@workgroup_size` shared by all three entry points.
@@ -36,6 +37,10 @@ const WORKGROUP_SIZE: u32 = 64;
 
 /// One `mat4x4<f32>` palette entry, in bytes.
 pub(super) const MAT4_BYTES: usize = 64;
+
+/// One pose-cache / local-pose row (`GpuLocalPose`), in bytes — the std430
+/// stride the packing test pins.
+const POSE_ENTRY_BYTES: u64 = 32;
 
 /// How far a read-back GPU palette component may sit from the CPU-path value
 /// before the verdict flips to "diverges". The FK itself is golden-tested at
@@ -60,6 +65,20 @@ pub(super) struct GpuAvatarPipelines {
     fk_pipeline: CachedComputePipelineId,
     /// The pass D (skin palettes) pipeline, entry point `palettes`.
     palettes_pipeline: CachedComputePipelineId,
+    /// The pass A layout: params + the sample-job / clip-arena / pose-cache
+    /// bindings, at the module's binding indices `{0, 11, 12, 13, 15, 16, 17}`
+    /// (6 storage buffers).
+    sample_layout: BindGroupLayoutDescriptor,
+    /// The pass A (clip sample) pipeline, entry point `sample`.
+    sample_pipeline: CachedComputePipelineId,
+    /// The pass B layout: params + frames / clip / playback / cache /
+    /// corrections / local-pose bindings, at the module's binding indices
+    /// `{0, 1, 12, 13, 14, 17, 18, 19, 20}` (8 storage buffers — the same
+    /// per-stage floor the capability check requires).
+    blend_layout: BindGroupLayoutDescriptor,
+    /// The pass B (priority/ease blend + idle + corrections) pipeline, entry
+    /// point `blend`.
+    blend_pipeline: CachedComputePipelineId,
     /// The debug readback layout: params + instances + palette + expected +
     /// destination, at the module's binding indices `{0, 7, 8, 9, 10}`.
     readback_layout: BindGroupLayoutDescriptor,
@@ -112,6 +131,66 @@ pub(super) fn init_gpu_avatar_pipelines(
         entry_point: Some("palettes".into()),
         ..default()
     });
+    let sample_layout = BindGroupLayoutDescriptor::new(
+        "gpu_avatar_sample_layout",
+        &BindGroupLayoutEntries::with_indices(
+            ShaderStages::COMPUTE,
+            (
+                (0, uniform_buffer::<GpuComputeParams>(false)),
+                // jobs
+                (11, storage_buffer_read_only_sized(false, None)),
+                // clip headers
+                (12, storage_buffer_read_only_sized(false, None)),
+                // clip tracks
+                (13, storage_buffer_read_only_sized(false, None)),
+                // key times
+                (15, storage_buffer_read_only_sized(false, None)),
+                // key values
+                (16, storage_buffer_read_only_sized(false, None)),
+                // pose cache (written)
+                (17, storage_buffer_sized(false, None)),
+            ),
+        ),
+    );
+    let sample_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("gpu_avatar_sample_pipeline".into()),
+        layout: vec![sample_layout.clone()],
+        shader: POSE_SHADER_HANDLE,
+        entry_point: Some("sample".into()),
+        ..default()
+    });
+    let blend_layout = BindGroupLayoutDescriptor::new(
+        "gpu_avatar_blend_layout",
+        &BindGroupLayoutEntries::with_indices(
+            ShaderStages::COMPUTE,
+            (
+                (0, uniform_buffer::<GpuComputeParams>(false)),
+                // frames (slot lookup)
+                (1, storage_buffer_read_only_sized(false, None)),
+                // clip headers
+                (12, storage_buffer_read_only_sized(false, None)),
+                // clip tracks (priorities)
+                (13, storage_buffer_read_only_sized(false, None)),
+                // track-of-joint pool
+                (14, storage_buffer_read_only_sized(false, None)),
+                // pose cache (read; declared read_write in the module)
+                (17, storage_buffer_sized(false, None)),
+                // playback row blocks
+                (18, storage_buffer_read_only_sized(false, None)),
+                // corrections
+                (19, storage_buffer_read_only_sized(false, None)),
+                // local pose (written; pass C reads it at binding 3)
+                (20, storage_buffer_sized(false, None)),
+            ),
+        ),
+    );
+    let blend_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("gpu_avatar_blend_pipeline".into()),
+        layout: vec![blend_layout.clone()],
+        shader: POSE_SHADER_HANDLE,
+        entry_point: Some("blend".into()),
+        ..default()
+    });
     let readback_layout = BindGroupLayoutDescriptor::new(
         "gpu_avatar_readback_layout",
         &BindGroupLayoutEntries::with_indices(
@@ -136,6 +215,10 @@ pub(super) fn init_gpu_avatar_pipelines(
         layout,
         fk_pipeline,
         palettes_pipeline,
+        sample_layout,
+        sample_pipeline,
+        blend_layout,
+        blend_pipeline,
         readback_layout,
         readback_pipeline,
     });
@@ -170,6 +253,33 @@ pub(super) struct GpuAvatarBuffers {
     /// The CPU-expected palette for the debug readback, rewritten every frame
     /// the readback is staged.
     expected: StorageBuffer<Vec<Mat4>>,
+    /// The clip arena's headers, rewritten on clip-generation bump.
+    clip_headers: StorageBuffer<Vec<GpuClipHeader>>,
+    /// The clip arena's shared track pool, rewritten with the headers.
+    clip_tracks: StorageBuffer<Vec<GpuJointTrack>>,
+    /// The clip arena's joint→track lookup pool, rewritten with the headers.
+    track_of_joint: StorageBuffer<Vec<u32>>,
+    /// The clip arena's keyframe time pool, rewritten with the headers.
+    key_times: StorageBuffer<Vec<f32>>,
+    /// The clip arena's keyframe value pool, rewritten with the headers.
+    key_values: StorageBuffer<Vec<Vec4>>,
+    /// The staged clip generation the arena buffers currently hold.
+    clip_generation: Option<u64>,
+    /// This frame's sample jobs, rewritten every frame (tiny).
+    jobs: StorageBuffer<Vec<GpuSampleJob>>,
+    /// The playback row blocks, rewritten on playback-generation bump only
+    /// (§1.3(d): steady-state loops upload nothing).
+    playback: StorageBuffer<Vec<GpuPlayState>>,
+    /// The staged playback generation the buffer currently holds.
+    playback_generation: Option<u64>,
+    /// The sparse corrections, rewritten every frame (sparse).
+    corrections: StorageBuffer<Vec<GpuCorrection>>,
+    /// The GPU-only pose-cache working buffer and its current byte size
+    /// (pass A output / pass B input; transient within one frame).
+    pose_cache: Option<(Buffer, u64)>,
+    /// How many local-pose rows the buffer was last sized for in **blend**
+    /// mode (where contents are GPU-written and only the allocation matters).
+    local_pose_rows: usize,
 }
 
 impl Default for GpuAvatarBuffers {
@@ -186,6 +296,18 @@ impl Default for GpuAvatarBuffers {
             instances: StorageBuffer::default(),
             joint_world: None,
             expected: StorageBuffer::default(),
+            clip_headers: StorageBuffer::default(),
+            clip_tracks: StorageBuffer::default(),
+            track_of_joint: StorageBuffer::default(),
+            key_times: StorageBuffer::default(),
+            key_values: StorageBuffer::default(),
+            clip_generation: None,
+            jobs: StorageBuffer::default(),
+            playback: StorageBuffer::default(),
+            playback_generation: None,
+            corrections: StorageBuffer::default(),
+            pose_cache: None,
+            local_pose_rows: 0,
         };
         buffers.frames.set_label(Some("gpu_avatar_frames"));
         buffers.rest.set_label(Some("gpu_avatar_rest"));
@@ -194,6 +316,22 @@ impl Default for GpuAvatarBuffers {
         buffers.ibps.set_label(Some("gpu_avatar_ibps"));
         buffers.instances.set_label(Some("gpu_avatar_instances"));
         buffers.expected.set_label(Some("gpu_avatar_expected"));
+        buffers
+            .clip_headers
+            .set_label(Some("gpu_avatar_clip_headers"));
+        buffers
+            .clip_tracks
+            .set_label(Some("gpu_avatar_clip_tracks"));
+        buffers
+            .track_of_joint
+            .set_label(Some("gpu_avatar_track_of_joint"));
+        buffers.key_times.set_label(Some("gpu_avatar_key_times"));
+        buffers.key_values.set_label(Some("gpu_avatar_key_values"));
+        buffers.jobs.set_label(Some("gpu_avatar_jobs"));
+        buffers.playback.set_label(Some("gpu_avatar_playback"));
+        buffers
+            .corrections
+            .set_label(Some("gpu_avatar_corrections"));
         buffers
     }
 }
@@ -212,6 +350,12 @@ struct PreparedData {
     fk_workgroups: u32,
     /// Workgroups covering `(max_skin_joints, instance_count)` (pass D).
     palette_workgroups: (u32, u32),
+    /// The pass A bind group and its `(track, job)` workgroup grid, when this
+    /// frame staged sample jobs.
+    sample: Option<(BindGroup, (u32, u32))>,
+    /// The pass B bind group and its `(joint, avatar)` workgroup grid, when
+    /// the GPU blend is on (Phase 2 real placement).
+    blend: Option<(BindGroup, (u32, u32))>,
     /// The debug readback bind group and its workgroup count, when staged.
     readback: Option<(BindGroup, u32)>,
 }
@@ -288,14 +432,36 @@ pub(super) fn prepare_gpu_avatars(
     // Per-frame uploads.
     buffers.frames.set(staging.frames.clone());
     buffers.frames.write_buffer(&render_device, &render_queue);
-    buffers.local_pose.set(staging.local_pose.clone());
-    buffers
-        .local_pose
-        .write_buffer(&render_device, &render_queue);
+    let rows_len = usize::try_from(staging.slot_capacity)
+        .ok()
+        .and_then(|slots| slots.checked_mul(usize::try_from(staging.joint_count).ok()?))
+        .unwrap_or(0);
+    if staging.blend {
+        // Phase 2: the local pose is GPU-written by pass B — only the
+        // allocation matters. (Re)size it on slot growth; never upload rows.
+        if buffers.local_pose_rows < rows_len {
+            buffers
+                .local_pose
+                .set(vec![GpuLocalPose::default(); rows_len]);
+            buffers
+                .local_pose
+                .write_buffer(&render_device, &render_queue);
+            buffers.local_pose_rows = rows_len;
+        }
+    } else {
+        // Phase 1 upload (ghost placement / hand-staged tests): the CPU rows.
+        buffers.local_pose.set(staging.local_pose.clone());
+        buffers
+            .local_pose
+            .write_buffer(&render_device, &render_queue);
+        buffers.local_pose_rows = staging.local_pose.len();
+    }
     buffers.instances.set(gpu_instances);
     buffers
         .instances
         .write_buffer(&render_device, &render_queue);
+    let job_count = u32::try_from(staging.jobs.len()).unwrap_or(0);
+    let correction_count = u32::try_from(staging.corrections.len()).unwrap_or(0);
     buffers.params.set(GpuComputeParams {
         avatar_count,
         joint_count: staging.joint_count,
@@ -303,10 +469,107 @@ pub(super) fn prepare_gpu_avatars(
         max_skin_joints,
         readback_instance,
         readback_joint_count,
+        sample_job_count: job_count,
+        correction_count,
+        now: staging.now,
+        idle_now: staging.idle_now,
+        chest_joint: staging.chest_joint,
+        torso_joint: staging.torso_joint,
+        flags: staging.param_flags,
         pad0: 0,
         pad1: 0,
+        pad2: 0,
     });
     buffers.params.write_buffer(&render_device, &render_queue);
+
+    // Phase 2 per-frame uploads (tiny): the job list and corrections; the
+    // playback rows only on a content bump; the clip arena only on growth.
+    // Empty vecs are padded with one default row so the storage bindings
+    // exist (the params counts govern every GPU read).
+    if staging.blend {
+        let mut jobs = staging.jobs.clone();
+        if jobs.is_empty() {
+            jobs.push(GpuSampleJob::default());
+        }
+        buffers.jobs.set(jobs);
+        buffers.jobs.write_buffer(&render_device, &render_queue);
+        let mut corrections = staging.corrections.clone();
+        if corrections.is_empty() {
+            corrections.push(GpuCorrection::default());
+        }
+        buffers.corrections.set(corrections);
+        buffers
+            .corrections
+            .write_buffer(&render_device, &render_queue);
+        if buffers.playback_generation != Some(staging.playback_generation) {
+            let mut playback = (*staging.playback).clone();
+            if playback.is_empty() {
+                playback.push(GpuPlayState::default());
+            }
+            buffers.playback.set(playback);
+            buffers.playback.write_buffer(&render_device, &render_queue);
+            buffers.playback_generation = Some(staging.playback_generation);
+        }
+        if buffers.clip_generation != Some(staging.clip_generation) {
+            let mut headers = (*staging.clip_headers).clone();
+            if headers.is_empty() {
+                headers.push(GpuClipHeader::default());
+            }
+            buffers.clip_headers.set(headers);
+            buffers
+                .clip_headers
+                .write_buffer(&render_device, &render_queue);
+            let mut tracks = (*staging.clip_tracks).clone();
+            if tracks.is_empty() {
+                tracks.push(GpuJointTrack::default());
+            }
+            buffers.clip_tracks.set(tracks);
+            buffers
+                .clip_tracks
+                .write_buffer(&render_device, &render_queue);
+            let mut track_of_joint = (*staging.track_of_joint).clone();
+            if track_of_joint.is_empty() {
+                track_of_joint.push(0);
+            }
+            buffers.track_of_joint.set(track_of_joint);
+            buffers
+                .track_of_joint
+                .write_buffer(&render_device, &render_queue);
+            let mut key_times = (*staging.key_times).clone();
+            if key_times.is_empty() {
+                key_times.push(0.0);
+            }
+            buffers.key_times.set(key_times);
+            buffers
+                .key_times
+                .write_buffer(&render_device, &render_queue);
+            let mut key_values = (*staging.key_values).clone();
+            if key_values.is_empty() {
+                key_values.push(Vec4::ZERO);
+            }
+            buffers.key_values.set(key_values);
+            buffers
+                .key_values
+                .write_buffer(&render_device, &render_queue);
+            buffers.clip_generation = Some(staging.clip_generation);
+        }
+        // The GPU-only pose-cache scratch: grow-on-demand (transient within
+        // one frame's A→B), never smaller than one row so the binding exists.
+        let cache_bytes = u64::from(staging.cache_len.max(1)).saturating_mul(POSE_ENTRY_BYTES);
+        let recreate_cache = buffers
+            .pose_cache
+            .as_ref()
+            .is_none_or(|(_buffer, size)| *size < cache_bytes);
+        if recreate_cache {
+            let buffer = render_device.create_buffer(&BufferDescriptor {
+                label: Some("gpu_avatar_pose_cache"),
+                size: cache_bytes,
+                usage: BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            buffers.pose_cache = Some((buffer, cache_bytes));
+        }
+    }
 
     // Change-driven uploads: the composed rest skeletons and the joint-map /
     // inverse-bindpose pools rewrite only when their staged generation moved.
@@ -387,9 +650,9 @@ pub(super) fn prepare_gpu_avatars(
         &pipeline_cache.get_bind_group_layout(&pipelines.layout),
         &BindGroupEntries::sequential((
             params_binding.clone(),
-            frames_binding,
+            frames_binding.clone(),
             rest_binding,
-            local_pose_binding,
+            local_pose_binding.clone(),
             joint_world.as_entire_binding(),
             joint_map_binding,
             ibps_binding,
@@ -397,6 +660,95 @@ pub(super) fn prepare_gpu_avatars(
             skin_uniforms.current_buffer.as_entire_binding(),
         )),
     );
+
+    // The Phase 2 pass A/B bind groups (real placement): pass A over the
+    // clip arena + jobs + pose cache; pass B over the playback / corrections
+    // and the same local-pose buffer pass C reads.
+    let mut sample = None;
+    let mut blend = None;
+    if staging.blend {
+        let cache_binding = buffers
+            .pose_cache
+            .as_ref()
+            .map(|(buffer, _size)| buffer.clone());
+        let (Some(cache_buffer), Some(playback_binding), Some(corrections_binding)) = (
+            cache_binding,
+            buffers.playback.binding(),
+            buffers.corrections.binding(),
+        ) else {
+            return;
+        };
+        let (
+            Some(jobs_binding),
+            Some(headers_binding),
+            Some(tracks_binding),
+            Some(track_of_joint_binding),
+            Some(times_binding),
+            Some(values_binding),
+        ) = (
+            buffers.jobs.binding(),
+            buffers.clip_headers.binding(),
+            buffers.clip_tracks.binding(),
+            buffers.track_of_joint.binding(),
+            buffers.key_times.binding(),
+            buffers.key_values.binding(),
+        )
+        else {
+            return;
+        };
+        if !staging.jobs.is_empty() {
+            let sample_bind_group = render_device.create_bind_group(
+                "gpu_avatar_sample_bind_group",
+                &pipeline_cache.get_bind_group_layout(&pipelines.sample_layout),
+                &BindGroupEntries::with_indices((
+                    (0, params_binding.clone()),
+                    (11, jobs_binding),
+                    (12, headers_binding.clone()),
+                    (13, tracks_binding.clone()),
+                    (15, times_binding),
+                    (16, values_binding),
+                    (17, cache_buffer.as_entire_binding()),
+                )),
+            );
+            // The widest staged clip bounds the x-dispatch over tracks.
+            let max_tracks = staging
+                .jobs
+                .iter()
+                .filter_map(|job| {
+                    usize::try_from(job.clip_id)
+                        .ok()
+                        .and_then(|index| staging.clip_headers.get(index))
+                })
+                .map(|header| header.track_count)
+                .max()
+                .unwrap_or(0);
+            if max_tracks > 0 {
+                sample = Some((
+                    sample_bind_group,
+                    (max_tracks.div_ceil(WORKGROUP_SIZE), job_count),
+                ));
+            }
+        }
+        let blend_bind_group = render_device.create_bind_group(
+            "gpu_avatar_blend_bind_group",
+            &pipeline_cache.get_bind_group_layout(&pipelines.blend_layout),
+            &BindGroupEntries::with_indices((
+                (0, params_binding.clone()),
+                (1, frames_binding),
+                (12, headers_binding),
+                (13, tracks_binding),
+                (14, track_of_joint_binding),
+                (17, cache_buffer.as_entire_binding()),
+                (18, playback_binding),
+                (19, corrections_binding),
+                (20, local_pose_binding),
+            )),
+        );
+        blend = Some((
+            blend_bind_group,
+            (staging.joint_count.div_ceil(WORKGROUP_SIZE), avatar_count),
+        ));
+    }
 
     // The readback bind group, when this frame staged a request whose
     // instance resolved and whose destination asset has prepared.
@@ -430,14 +782,21 @@ pub(super) fn prepare_gpu_avatars(
         bind_group,
         fk_workgroups: avatar_count.div_ceil(WORKGROUP_SIZE),
         palette_workgroups: (max_skin_joints.div_ceil(WORKGROUP_SIZE), instance_count),
+        sample,
+        blend,
         readback,
     });
 }
 
-/// Encode passes C and D in one compute pass — first in the frame's `Core3d`
+/// Encode passes A→D in one compute pass — first in the frame's `Core3d`
 /// pass stream, before the prepass and both shadow encoders, so every palette
-/// consumer this frame reads the compute-written ghost palettes (step 3 of the
+/// consumer this frame reads the compute-written palettes (step 3 of the
 /// spike's §2.4 ordering) — then the optional readback copy pass.
+///
+/// A pass whose pipeline is still compiling (or whose data is not staged —
+/// passes A/B outside the Phase 2 real placement) is skipped; storage writes
+/// are visible between dispatches of one compute pass, so B reads A's cache,
+/// C reads B's local pose, and D reads C's joint worlds.
 ///
 /// `Core3d` runs once per 3D camera; the extra dispatches on secondary views
 /// recompute identical values — idempotent by construction.
@@ -456,6 +815,22 @@ pub(super) fn run_gpu_avatar_compute(
     ) else {
         return;
     };
+    // The blend must not run against a still-compiling sample pipeline (it
+    // would read a never-written pose cache); hold the whole pose pass until
+    // every staged stage is ready.
+    let sample_pipeline = prepared
+        .sample
+        .as_ref()
+        .map(|_stage| pipeline_cache.get_compute_pipeline(pipelines.sample_pipeline));
+    let blend_pipeline = prepared
+        .blend
+        .as_ref()
+        .map(|_stage| pipeline_cache.get_compute_pipeline(pipelines.blend_pipeline));
+    if sample_pipeline.as_ref().is_some_and(Option::is_none)
+        || blend_pipeline.as_ref().is_some_and(Option::is_none)
+    {
+        return;
+    }
     {
         let mut pass = ctx
             .command_encoder()
@@ -463,8 +838,22 @@ pub(super) fn run_gpu_avatar_compute(
                 label: Some("gpu_avatar_pose_pass"),
                 timestamp_writes: None,
             });
-        pass.set_bind_group(0, &*prepared.bind_group, &[]);
+        if let (Some((bind_group, (x, y))), Some(Some(pipeline))) =
+            (prepared.sample.as_ref(), sample_pipeline)
+        {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &**bind_group, &[]);
+            pass.dispatch_workgroups(*x, *y, 1);
+        }
+        if let (Some((bind_group, (x, y))), Some(Some(pipeline))) =
+            (prepared.blend.as_ref(), blend_pipeline)
+        {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &**bind_group, &[]);
+            pass.dispatch_workgroups(*x, *y, 1);
+        }
         pass.set_pipeline(fk);
+        pass.set_bind_group(0, &*prepared.bind_group, &[]);
         pass.dispatch_workgroups(prepared.fk_workgroups, 1, 1);
         // Storage writes are visible between dispatches of one pass: pass D
         // reads the joint worlds pass C just wrote.

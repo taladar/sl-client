@@ -38,6 +38,29 @@ understand before committing 1b.
    client buffers unboundedly in RAM → 10.6 GB → a slow serialize on exit. Would
    *not* reproduce in a non-tracy build.
 
+## Update — Phase 2 aditi run (2026-08-13): alarm largely defused
+
+Second data point (Phase 2 tracy run, disk now 1.1 TB free): **VmRSS 11.8 GB**,
+shutdown flush **~45 s** (elapsed 3:22 vs time-span 2:46), clean 627 MB save.
+Cross-run comparison is the useful part:
+
+- 1b: **10.6 GB / ~90 s session / ~2 min shutdown** — but that shutdown was on a
+  **~100 %-full disk**, so the trace *write* was crawling; the 2 min was largely
+  disk I/O, not flush/mem.
+- P2: **11.8 GB / ~166 s session (2644 frames) / ~45 s shutdown** on a free
+  disk.
+
+**Similar RSS (~10–12 GB) despite ~2× the session length** ⇒ not a linear ~5
+MB/frame leak (that would have pushed P2 well past 15 GB); it looks like a
+**high-but-bounded footprint that plateaus** (GPU-avatar buffers + Tracy +
+textures), and the scary "2 min shutdown" was mostly the full disk. So:
+**not a commit blocker, not an OOM risk.** Still worth understanding the 10–12
+GB baseline eventually (compare a non-tracy session's RSS; and where the
+GPU-avatar allocations sit). Downgraded from "hard blocker" to "investigate
+opportunistically." Note: the intra-session RSS *trend* wasn't captured (window
+closed before the monitor sampled mid-run) — a future capture should log RSS
+periodically.
+
 ## Status (2026-08-13): OPEN — two live hypotheses, observe across runs
 
 Decision: **do not rabbit-hole now.** Chasing this immediately means a
@@ -87,5 +110,7 @@ the bracket is viewer-`flushing`→capturer-`done!` (gap = flush duration).
 - If a leak: bisect by toggling the 1b sub-paths (`=cpu` forces the legacy path
   = control; `=ghost` vs `=real`) to localise which added system leaks.
 
-Do not commit 1b until this is understood — a 10.6 GB RSS in ~4 minutes, if it
-is hypothesis 1, is a normal-session OOM risk.
+(Superseded by the Phase 2 update above: 1b and Phase 2 are committed; the
+cross-run comparison shows a bounded ~10–12 GB plateau, not an unbounded leak,
+and the "~2 min shutdown" was mostly the full disk. Downgraded to
+investigate-opportunistically — the plan below stays valid for that.)

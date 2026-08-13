@@ -345,6 +345,20 @@ impl AnimationPose {
     pub fn position(&self, index: usize) -> Option<Vec3> {
         self.positions.get(&index).copied()
     }
+
+    /// Every animated local rotation, as `(joint index, rotation)` pairs in
+    /// arbitrary order. Public so a consumer diffing two poses (the viewer's
+    /// GPU-avatar correction channel) can enumerate the animated channels
+    /// without knowing the joint set in advance.
+    pub fn rotations(&self) -> impl Iterator<Item = (usize, Quat)> + '_ {
+        self.rotations.iter().map(|(&index, &rot)| (index, rot))
+    }
+
+    /// Every animated local position, as `(joint index, position)` pairs in
+    /// arbitrary order.
+    pub fn positions(&self) -> impl Iterator<Item = (usize, Vec3)> + '_ {
+        self.positions.iter().map(|(&index, &pos)| (index, pos))
+    }
 }
 
 /// The reference viewer's `computeBodySize` quantities for one avatar shape

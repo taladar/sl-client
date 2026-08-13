@@ -1,15 +1,23 @@
 //! The GPU-avatar pipeline's **main-world half**: the pose feed the CPU pose
-//! driver publishes into, the per-avatar slot allocator, the ghost-entity
-//! lifecycle, and [`stage_gpu_avatars`] — the system that assembles one
-//! [`GpuAvatarStaging`] snapshot per frame for the render world to upload.
+//! driver publishes into, the per-avatar slot allocator, the §1.2(a) clip
+//! arena + §2.1 sample-job scheduler, the ghost-entity lifecycle, and
+//! [`stage_gpu_avatars`] — the system that assembles one [`GpuAvatarStaging`]
+//! snapshot per frame for the render world to upload.
 //!
-//! **Real placement (Phase 1b, the default):** no ghosts — every skinned
+//! **Real placement (Phase 2, the default):** no ghosts — every skinned
 //! submesh of a rigged avatar stages **its own** palette slot as a pass-D
-//! target (offset identity), so the rendered avatar is GPU-FK-posed in place.
-//! The pose driver freezes the skinning joints and CPU-writes only the socket
-//! subset (see `crate::animations::write_socket_globals`); the readback's
-//! CPU-expected palette comes from [`reference_fk`] over the same uploaded
-//! pose, since the joint globals no longer carry the pose.
+//! target (offset identity), so the rendered avatar is GPU-posed in place.
+//! The GPU also samples and blends the keyframes itself (passes A+B): the
+//! scheduler here uploads each decoded clip once, dedups this frame's
+//! `(clip, phase)` sample jobs (synced far dancers collapse onto one job —
+//! the §3.4 animation-data instancing), builds the per-avatar playback row
+//! blocks (uploaded only on content change), and stages the sparse adjuster
+//! corrections the pose driver published. The pose driver freezes the
+//! skinning joints and CPU-writes only the socket subset (see
+//! `crate::animations::write_socket_globals`); the readback's CPU-expected
+//! palette comes from the full mirror pipeline ([`mirror_local_pose`] then
+//! [`reference_fk`]) over the same uploaded data, since the joint globals no
+//! longer carry the pose.
 //!
 //! **The ghost scheme (Phase 1a verification):** the real avatar's skin slots
 //! are left untouched — it keeps rendering the normal CPU pose in place. For
@@ -44,13 +52,16 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::text::TextBounds;
-use sl_client_bevy::{AgentKey, AnimationPose, VolumeDeformations};
+use sl_client_bevy::{AgentKey, AnimationPose, AssetKey, VolumeDeformations};
 
 use super::GpuAvatarsMode;
 use super::types::{
-    GpuAvatarFrame, GpuLocalPose, GpuRestJoint, MAX_GPU_JOINTS, compose_rest_joints, pose_rows,
+    ClipArena, GpuAvatarFrame, GpuClipHeader, GpuCorrection, GpuJointTrack, GpuLocalPose,
+    GpuPlayState, GpuRestJoint, GpuSampleJob, JOINT_NONE, MAX_ACTIVE_CLIPS, MAX_GPU_JOINTS,
+    PARAMS_FLAG_TPOSE, PLAY_STOPPED_NONE, compose_rest_joints, mirror_local_pose, pose_rows,
     reference_fk,
 };
+use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarState};
 use crate::face_material::FaceMaterial;
@@ -70,24 +81,34 @@ use crate::name_tag_content::TagContent;
 /// (Bevy's skin allocator never moves a live skin).
 const GHOST_CHURN_FRAMES: u32 = 300;
 
-/// One avatar's latest CPU-blended pose, as published by the pose driver.
+/// One avatar's latest CPU-published pose data, as published by the pose
+/// driver: in **ghost** placement the full dense local-pose rows (Phase 1's
+/// CPU-blended upload); in **real** placement (Phase 2) only the root matrix
+/// plus the sparse adjuster **corrections** — the GPU samples and blends the
+/// keyframes itself (passes A+B).
 pub(crate) struct FeedEntry {
-    /// The dense per-joint local pose rows (the §1.3(f) `LocalPose` upload).
+    /// The dense per-joint local pose rows (ghost placement only; empty in
+    /// real placement, where passes A+B compute the local pose GPU-side).
     pub(crate) rows: Arc<Vec<GpuLocalPose>>,
     /// The avatar root's Bevy-world matrix (SL→Bevy axis change + placement)
     /// — the same matrix `write_joint_globals` composes the CPU pose under.
     pub(crate) root: Mat4,
+    /// The sparse adjuster corrections (real placement, §5.3): the final
+    /// CPU-computed local channels of each joint the look-at / reach / IK /
+    /// physics folds changed this frame, sorted by joint, as
+    /// `(canonical joint, replacement channels)`.
+    pub(crate) corrections: Arc<Vec<(u32, GpuLocalPose)>>,
 }
 
 /// The channel between the CPU pose driver and the GPU pipeline
-/// (`roadmap/context/gpu-avatars.md` Phase 1: the CPU still samples, blends
-/// and adjusts; the GPU re-runs FK from the blended result):
+/// (`roadmap/context/gpu-avatars.md`):
 /// [`pose_avatar_skeletons`](crate::animations::pose_avatar_skeletons)
-/// publishes each avatar's **final** blended local pose — keyframes, idle,
-/// look-at, IK, physics, all folded — plus its root matrix, on every frame it
-/// evaluates that avatar. A pose-gate-skipped frame publishes nothing and the
-/// stored entry stays valid (the CPU path's joint globals are equally stale
-/// then, so the two stay in lockstep). Exists only while
+/// publishes, per evaluated avatar, its root matrix plus — in ghost placement
+/// — the full CPU-blended local pose (Phase 1's upload), or — in real
+/// placement — the sparse adjuster corrections (Phase 2: passes A+B blend the
+/// keyframes GPU-side). A pose-gate-skipped frame publishes nothing and the
+/// stored entry stays valid (its corrections are settled by construction —
+/// active adjusters keep the gate awake). Exists only while
 /// `SL_VIEWER_GPU_AVATARS` is on.
 #[derive(Resource, Default)]
 pub(crate) struct GpuAvatarPoseFeed {
@@ -96,8 +117,8 @@ pub(crate) struct GpuAvatarPoseFeed {
 }
 
 impl GpuAvatarPoseFeed {
-    /// Record `agent`'s final blended pose for this frame, densified to
-    /// `joint_count` rows, along with its root matrix.
+    /// Record `agent`'s ghost-placement publish for this frame: the final
+    /// blended pose densified to `joint_count` rows, plus its root matrix.
     pub(crate) fn publish(
         &mut self,
         agent: AgentKey,
@@ -110,6 +131,25 @@ impl GpuAvatarPoseFeed {
             FeedEntry {
                 rows: Arc::new(pose_rows(pose, joint_count)),
                 root,
+                corrections: Arc::new(Vec::new()),
+            },
+        );
+    }
+
+    /// Record `agent`'s real-placement publish for this frame (Phase 2): the
+    /// root matrix plus the sparse adjuster corrections, sorted by joint.
+    pub(crate) fn publish_real(
+        &mut self,
+        agent: AgentKey,
+        root: Mat4,
+        corrections: Vec<(u32, GpuLocalPose)>,
+    ) {
+        let _prev = self.entries.insert(
+            agent,
+            FeedEntry {
+                rows: Arc::new(Vec::new()),
+                root,
+                corrections: Arc::new(corrections),
             },
         );
     }
@@ -241,6 +281,17 @@ pub(crate) struct GpuAvatarRegistry {
     real_skins: HashMap<Entity, RealSkinRecord>,
     /// Agent → its floating "GPU" label billboard over the ghost.
     labels: HashMap<AgentKey, Entity>,
+    /// The §1.2(a) clip arena: every decoded `.anim` uploaded once as GPU
+    /// keyframe data (real placement; the ghost harness keeps the Phase 1
+    /// CPU-blended upload).
+    clips: ClipArena,
+    /// The last staged playback rows and their generation, so the render side
+    /// re-uploads the playback buffer **only when its content changed**
+    /// (§1.3(d): idle loops and dances cost zero upload per frame — the
+    /// per-frame phases ride the tiny job list instead).
+    playback_rows: Arc<Vec<GpuPlayState>>,
+    /// Bumped when [`Self::playback_rows`] content changed.
+    playback_generation: u64,
     /// Whether the too-many-joints warning already fired (once per run).
     warned_joint_overflow: bool,
     /// Sources whose unresolved-joint diagnostic already fired (once per
@@ -439,6 +490,44 @@ pub(crate) struct GpuAvatarStaging {
     pub(crate) instances: Vec<StagedSkinInstance>,
     /// The debug readback request, when the sub-flag is on.
     pub(crate) readback: Option<StagedReadback>,
+    /// Whether passes A+B run this frame (Phase 2 real placement): the GPU
+    /// samples + blends into the local-pose buffer, and [`Self::local_pose`]
+    /// is left empty. `false` = the Phase 1 CPU-blended upload (ghost
+    /// placement and the hand-staged headless FK tests).
+    pub(crate) blend: bool,
+    /// The clip arena's headers, re-uploaded on generation bump.
+    pub(crate) clip_headers: Arc<Vec<GpuClipHeader>>,
+    /// The clip arena's shared track pool.
+    pub(crate) clip_tracks: Arc<Vec<GpuJointTrack>>,
+    /// The clip arena's shared joint→track lookup pool.
+    pub(crate) track_of_joint: Arc<Vec<u32>>,
+    /// The clip arena's shared keyframe time pool.
+    pub(crate) key_times: Arc<Vec<f32>>,
+    /// The clip arena's shared keyframe value pool.
+    pub(crate) key_values: Arc<Vec<Vec4>>,
+    /// Bumps when the clip arena grew.
+    pub(crate) clip_generation: u64,
+    /// This frame's deduplicated sample jobs (pass A).
+    pub(crate) jobs: Vec<GpuSampleJob>,
+    /// The pose-cache length the jobs cover (elements).
+    pub(crate) cache_len: u32,
+    /// The frame-indexed playback row blocks (`MAX_ACTIVE` per frame row).
+    pub(crate) playback: Arc<Vec<GpuPlayState>>,
+    /// Bumps when [`Self::playback`] content changed (the render side
+    /// re-uploads only then).
+    pub(crate) playback_generation: u64,
+    /// The sparse CPU corrections, sorted by (frame index, joint).
+    pub(crate) corrections: Vec<GpuCorrection>,
+    /// The wall clock pass B's ease weights run on.
+    pub(crate) now: f32,
+    /// The 15 Hz-quantised procedural idle clock.
+    pub(crate) idle_now: f32,
+    /// The canonical `mChest` index (or [`JOINT_NONE`]).
+    pub(crate) chest_joint: u32,
+    /// The canonical `mTorso` index (or [`JOINT_NONE`]).
+    pub(crate) torso_joint: u32,
+    /// The [`PARAMS_FLAG_TPOSE`] bit for the params uniform.
+    pub(crate) param_flags: u32,
 }
 
 impl ExtractResource for GpuAvatarStaging {
@@ -517,11 +606,39 @@ pub(crate) struct GhostQueries<'w, 's> {
     >,
 }
 
+/// How far (metres) an avatar may sit from the camera before a **looping**
+/// clip's sample phase is quantised to [`PHASE_BUCKET_HZ`] buckets (§2.1):
+/// near avatars sample at their exact per-avatar phase so nothing visibly
+/// snaps; far synced dancers collapse onto shared sample jobs.
+const PHASE_SYNC_DISTANCE_METRES: f32 = 20.0;
+
+/// The far-avatar phase-bucket rate, Hz (§2.1: `round(anim_elapsed × 30)`).
+const PHASE_BUCKET_HZ: f32 = 30.0;
+
+/// The Phase 2 scheduling inputs (§2.1 CPU frame prep), bundled so
+/// [`stage_gpu_avatars`] stays within the argument-count lint: the wall
+/// clock, the reconciled per-avatar playback sets, the decoded-motion cache,
+/// and the camera the phase-bucket sync distance is measured from.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct BlendInputs<'w, 's> {
+    /// The wall clock (`Time::elapsed_secs`) — the same `now` the playback
+    /// reconcile stamped `start` / `stopped_at` with this frame.
+    time: Res<'w, Time>,
+    /// The reconciled playback sets (`reconcile_playing` ran in `Update`).
+    playback: Option<Res<'w, AnimationPlayback>>,
+    /// The decoded-motion cache the clip arena uploads from.
+    manager: Option<Res<'w, AnimationManager>>,
+    /// The viewer camera, for the exact-phase sync distance.
+    camera: Query<'w, 's, &'static GlobalTransform, With<crate::camera::ViewerCamera>>,
+}
+
 /// Assemble this frame's [`GpuAvatarStaging`] snapshot (and keep the ghost
 /// population in sync): free/allocate avatar slots, re-compose rest rows on a
 /// `pose_inputs_generation` bump, densify the published poses and roots,
-/// spawn/sync/despawn ghosts, resolve their skins into the shared pools, and
-/// stage the pass-D instance table plus the optional readback request.
+/// spawn/sync/despawn ghosts, resolve their skins into the shared pools,
+/// schedule the Phase 2 sample jobs / playback rows / corrections (§2.1, real
+/// placement), and stage the pass-D instance table plus the optional readback
+/// request.
 ///
 /// Runs in `PostUpdate` after
 /// [`pose_avatar_skeletons`](crate::animations::pose_avatar_skeletons), so the
@@ -544,6 +661,7 @@ pub(crate) fn stage_gpu_avatars(
     mut staging: ResMut<GpuAvatarStaging>,
     queries: GhostQueries<'_, '_>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+    blend_inputs: BlendInputs<'_, '_>,
 ) {
     // The startup capability check demoted this device to the CPU path:
     // stage nothing, so the render half never dispatches.
@@ -661,10 +779,13 @@ pub(crate) fn stage_gpu_avatars(
         registry.rest_dirty = false;
     }
 
-    // The per-frame uploads: one frame row per avatar and the dense
-    // local-pose block. In ghost placement the root affine carries the
-    // side-by-side display offset; in real placement the palettes land in
-    // place, so the offset is identity.
+    // The per-frame uploads: one frame row per avatar and — in ghost
+    // placement — the dense CPU-blended local-pose block (Phase 1's upload).
+    // In real placement (Phase 2) the local pose is GPU-computed by passes
+    // A+B, so only the frame rows are built here; the keyframe data rides the
+    // clip arena / jobs / playback below. In ghost placement the root affine
+    // carries the side-by-side display offset; in real placement the palettes
+    // land in place, so the offset is identity.
     let ghost_mode = mode.placement == super::GpuAvatarPlacement::Ghost;
     let offset_mat = if ghost_mode {
         Mat4::from_translation(Vec3::new(mode.ghost_offset, 0.0, 0.0))
@@ -672,7 +793,14 @@ pub(crate) fn stage_gpu_avatars(
         Mat4::IDENTITY
     };
     let mut frames: Vec<GpuAvatarFrame> = Vec::with_capacity(active.len());
-    let mut local_pose = vec![GpuLocalPose::default(); rows_len];
+    // The frame-row order of each staged avatar (frame index = row index),
+    // for the playback blocks / corrections / readback mirror below.
+    let mut frame_of_agent: Vec<AgentKey> = Vec::with_capacity(active.len());
+    let mut local_pose = if ghost_mode {
+        vec![GpuLocalPose::default(); rows_len]
+    } else {
+        Vec::new()
+    };
     for (agent, slot) in &active {
         let Some(entry) = feed.get(*agent) else {
             continue;
@@ -684,6 +812,10 @@ pub(crate) fn stage_gpu_avatars(
             pad1: 0,
             pad2: 0,
         });
+        frame_of_agent.push(*agent);
+        if !ghost_mode {
+            continue;
+        }
         let Some(start) = usize::try_from(*slot)
             .ok()
             .and_then(|slot| slot.checked_mul(joint_count))
@@ -692,6 +824,148 @@ pub(crate) fn stage_gpu_avatars(
         };
         for (dst, src) in local_pose.iter_mut().skip(start).zip(entry.rows.iter()) {
             *dst = *src;
+        }
+    }
+
+    // Phase 2 CPU frame prep (§2.1, real placement): upload newly decoded
+    // clips into the arena, build the deduplicated sample-job list — distinct
+    // (clip, phase) across all avatars' active slots, phases bucketed for far
+    // avatars — assign cache bases, and build the frame-indexed playback row
+    // blocks plus the sparse correction list.
+    let t_pose = crate::animations::t_pose_enabled();
+    let blend = !ghost_mode;
+    let mut jobs: Vec<GpuSampleJob> = Vec::new();
+    let mut cache_len = 0_u32;
+    let mut corrections: Vec<GpuCorrection> = Vec::new();
+    let now = blend_inputs.time.elapsed_secs();
+    let idle_now =
+        (now * crate::animations::POSE_IDLE_HZ).floor() / crate::animations::POSE_IDLE_HZ;
+    let joint_of = |name: &str| -> u32 {
+        body.as_deref()
+            .and_then(|body| body.joint_index(name))
+            .and_then(|index| u32::try_from(index).ok())
+            .unwrap_or(JOINT_NONE)
+    };
+    let (chest_joint, torso_joint) = (joint_of("mChest"), joint_of("mTorso"));
+    if blend {
+        let camera_pos = blend_inputs
+            .camera
+            .iter()
+            .next()
+            .map(|camera| camera.translation());
+        let mut playback_rows =
+            vec![GpuPlayState::default(); frames.len().saturating_mul(MAX_ACTIVE_CLIPS)];
+        // (clip, phase-bits) → cache base: the §2.1 dedup that IS the
+        // animation-data instancing (synced dancers share one job).
+        let mut job_lookup: HashMap<(u32, u32), u32> = HashMap::new();
+        for (frame_index, agent) in frame_of_agent.iter().enumerate() {
+            if t_pose {
+                break;
+            }
+            let (Some(playback), Some(manager), Some(body)) = (
+                blend_inputs.playback.as_deref(),
+                blend_inputs.manager.as_deref(),
+                body.as_deref(),
+            ) else {
+                break;
+            };
+            // The avatar's merged playing set, decoded motions only, capped
+            // to the MAX_ACTIVE most recently activated, in id order for
+            // deterministic cache-base assignment frame over frame.
+            let mut states = playback.merged_active(*agent);
+            states.retain(|(id, _play)| manager.motion(AssetKey::from(*id)).is_some());
+            if states.len() > MAX_ACTIVE_CLIPS {
+                states.sort_by_key(|(_id, play)| core::cmp::Reverse(play.order()));
+                states.truncate(MAX_ACTIVE_CLIPS);
+            }
+            states.sort_by_key(|(id, _play)| *id);
+            let far = camera_pos.is_some_and(|camera| {
+                feed.get(*agent).is_some_and(|entry| {
+                    entry.root.w_axis.truncate().distance(camera) > PHASE_SYNC_DISTANCE_METRES
+                })
+            });
+            for (slot_index, (anim_id, play)) in states.iter().enumerate() {
+                let Some(motion) = manager.motion(AssetKey::from(*anim_id)) else {
+                    continue;
+                };
+                let Some(clip_id) = registry.clips.ensure_clip(
+                    AssetKey::from(*anim_id),
+                    motion,
+                    joint_count_u32,
+                    |name| body.joint_index(name),
+                ) else {
+                    continue;
+                };
+                // The motion-elapsed sampling phase: the walk-speed clock skew
+                // folds in here, so the GPU play state needs no anim_offset.
+                let elapsed = now - play.start() + play.anim_offset();
+                let bucketed = far && motion.loops;
+                let phase = if bucketed {
+                    (elapsed * PHASE_BUCKET_HZ).round() / PHASE_BUCKET_HZ
+                } else {
+                    elapsed
+                };
+                let cache_base = match job_lookup.entry((clip_id, phase.to_bits())) {
+                    std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        let base = cache_len;
+                        jobs.push(GpuSampleJob {
+                            clip_id,
+                            cache_base: base,
+                            phase,
+                            pad0: 0,
+                        });
+                        cache_len = cache_len.saturating_add(registry.clips.track_count(clip_id));
+                        *entry.insert(base)
+                    }
+                };
+                let row = GpuPlayState {
+                    clip_id,
+                    cache_base,
+                    start: play.start(),
+                    stopped_at: play.stopped_at().unwrap_or(PLAY_STOPPED_NONE),
+                    // Truncated stamp: only the relative order within one
+                    // avatar's ≤ 16 slots is ever compared.
+                    order: u32::try_from(play.order() & u64::from(u32::MAX)).unwrap_or(0),
+                    pad0: 0,
+                    pad1: 0,
+                    pad2: 0,
+                };
+                let index = frame_index
+                    .checked_mul(MAX_ACTIVE_CLIPS)
+                    .and_then(|base| base.checked_add(slot_index));
+                if let Some(slot) = index.and_then(|index| playback_rows.get_mut(index)) {
+                    *slot = row;
+                }
+            }
+        }
+        // The sparse corrections, sorted by (frame index, joint) so pass B
+        // binary-searches its entry (frames are already in index order and
+        // the per-avatar lists sorted by joint at publish).
+        for (frame_index, agent) in frame_of_agent.iter().enumerate() {
+            let Some(entry) = feed.get(*agent) else {
+                continue;
+            };
+            let Ok(avatar) = u32::try_from(frame_index) else {
+                continue;
+            };
+            for &(joint, value) in entry.corrections.iter() {
+                corrections.push(GpuCorrection {
+                    avatar,
+                    joint,
+                    flags: value.flags,
+                    pad0: 0,
+                    rot: value.rot,
+                    pos: value.pos,
+                    pad1: 0,
+                });
+            }
+        }
+        // Re-upload the playback buffer only when its content changed
+        // (§1.3(d)): steady-state loops keep bit-identical rows.
+        if *registry.playback_rows != playback_rows {
+            registry.playback_rows = Arc::new(playback_rows.clone());
+            registry.playback_generation = registry.playback_generation.wrapping_add(1);
         }
     }
 
@@ -842,6 +1116,7 @@ pub(crate) fn stage_gpu_avatars(
     // The debug readback: pick the most-jointed staged instance (the spike's
     // convergence idiom — the mesh body, not an early system part) and stage
     // its CPU-expected palette alongside.
+    let param_flags = if t_pose { PARAMS_FLAG_TPOSE } else { 0 };
     let registry = &*registry;
     let readback = if mode.readback {
         instances
@@ -851,13 +1126,29 @@ pub(crate) fn stage_gpu_avatars(
                 if ghost_mode {
                     ghost_readback_expected(instance, registry, &queries, &bindposes, offset_mat)
                 } else {
-                    real_readback_expected(instance, registry, &feed)
+                    real_readback_expected(
+                        instance,
+                        registry,
+                        &feed,
+                        &RealReadbackFrame {
+                            frame_of_agent: &frame_of_agent,
+                            jobs: &jobs,
+                            cache_len,
+                            joint_count: joint_count_u32,
+                            now,
+                            idle: (!t_pose).then_some(idle_now),
+                            chest_joint,
+                            torso_joint,
+                        },
+                    )
                 }
             })
     } else {
         None
     };
 
+    let (clip_headers, clip_tracks, track_of_joint, key_times, key_values, clip_generation) =
+        registry.clips.staged();
     *staging = GpuAvatarStaging {
         joint_count: joint_count_u32,
         slot_capacity: registry.slot_capacity,
@@ -870,6 +1161,23 @@ pub(crate) fn stage_gpu_avatars(
         pool_generation: registry.pool_generation,
         instances,
         readback,
+        blend,
+        clip_headers,
+        clip_tracks,
+        track_of_joint,
+        key_times,
+        key_values,
+        clip_generation,
+        jobs,
+        cache_len,
+        playback: Arc::clone(&registry.playback_rows),
+        playback_generation: registry.playback_generation,
+        corrections,
+        now,
+        idle_now,
+        chest_joint,
+        torso_joint,
+        param_flags,
     };
 }
 
@@ -1093,21 +1401,67 @@ fn ghost_readback_expected(
     })
 }
 
-/// The real placement's readback expectation: the joint globals are frozen
-/// there, so the CPU-path truth is [`reference_fk`] — the golden-tested Rust
-/// mirror of the WGSL recurrence — over the very rest rows, local-pose rows
-/// and root the pipeline uploaded this frame, times the pooled inverse
-/// bindposes. A mismatch therefore isolates a GPU-side fault (upload, layout,
-/// shader), not a pose-source difference.
+/// The staged frame context [`real_readback_expected`] mirrors the GPU passes
+/// over: the frame-row order, this frame's sample jobs, and the pass-B frame
+/// params — everything needed to re-run passes A+B on the CPU for one avatar.
+struct RealReadbackFrame<'a> {
+    /// The staged frame rows' agents, in frame-index order.
+    frame_of_agent: &'a [AgentKey],
+    /// This frame's deduplicated sample jobs.
+    jobs: &'a [GpuSampleJob],
+    /// The pose-cache length the jobs cover.
+    cache_len: u32,
+    /// The canonical skeleton's joint count.
+    joint_count: u32,
+    /// The wall clock the ease weights run on.
+    now: f32,
+    /// The quantised idle clock, or `None` under the T-pose freeze.
+    idle: Option<f32>,
+    /// The canonical `mChest` index (or [`JOINT_NONE`]).
+    chest_joint: u32,
+    /// The canonical `mTorso` index (or [`JOINT_NONE`]).
+    torso_joint: u32,
+}
+
+/// The real placement's readback expectation (Phase 2): the joint globals are
+/// frozen there and the local pose is GPU-computed, so the CPU-path truth is
+/// the full mirror pipeline — [`mirror_local_pose`] (the golden-tested Rust
+/// mirror of passes A+B: sample, priority/ease blend, idle, corrections) over
+/// the very clip/playback/job data the pipeline uploaded this frame, then
+/// [`reference_fk`] (the pass-C mirror) under the staged root, times the
+/// pooled inverse bindposes. A mismatch therefore isolates a GPU-side fault
+/// (upload, layout, shader), not a pose-source difference.
 fn real_readback_expected(
     instance: &StagedSkinInstance,
     registry: &GpuAvatarRegistry,
     feed: &GpuAvatarPoseFeed,
+    frame: &RealReadbackFrame<'_>,
 ) -> Option<StagedReadback> {
     let record = registry.real_skins.get(&instance.target)?;
     let entry = feed.get(record.agent)?;
     let (_generation, rest_rows) = registry.rest_rows.get(&record.agent)?;
-    let world = reference_fk(rest_rows, &entry.rows, entry.root);
+    let frame_index = frame
+        .frame_of_agent
+        .iter()
+        .position(|agent| *agent == record.agent)?;
+    let play_start = frame_index.checked_mul(MAX_ACTIVE_CLIPS)?;
+    let plays = registry
+        .playback_rows
+        .get(play_start..play_start.checked_add(MAX_ACTIVE_CLIPS)?)
+        .unwrap_or(&[]);
+    let rows = mirror_local_pose(
+        registry.clips.slices(),
+        plays,
+        frame.jobs,
+        frame.cache_len,
+        frame.joint_count,
+        frame.now,
+        frame.idle,
+        frame.chest_joint,
+        frame.torso_joint,
+        &entry.corrections,
+    );
+    let world = reference_fk(rest_rows, &rows, entry.root);
     let count = usize::try_from(instance.joint_count).ok()?;
     let map_start = usize::try_from(instance.joint_map_offset).ok()?;
     let ibp_start = usize::try_from(instance.ibp_offset).ok()?;

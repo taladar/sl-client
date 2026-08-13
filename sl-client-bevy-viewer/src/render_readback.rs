@@ -320,7 +320,10 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
     const STEP: f32 = 1.0 / 30.0;
     /// Frames before the first read — enough for the scene to spawn, the animation
     /// driver to publish its params, and a readback to complete (an early cell).
-    const WARMUP: usize = 10;
+    /// 400, matching `WARMUP_FRAMES`: on Mesa/RADV the async pipeline compile is
+    /// slow, so a short warm-up makes the first sample read pre-render black and the
+    /// two frames come back identical — a flaky failure under parallel GPU load.
+    const WARMUP: usize = 400;
     /// Frames between the two reads: ~1.8 s of clock, many flipbook cells later.
     const BETWEEN: usize = 54;
 

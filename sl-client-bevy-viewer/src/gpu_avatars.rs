@@ -1,11 +1,13 @@
-//! **The GPU-avatar pose pipeline, Phases 1a+1b**
-//! (`roadmap/context/gpu-avatars.md` §1, §2.2 passes C+D, §2.3, §2.4, §5.4,
-//! §7 "Phase 1"): a compute pipeline that re-runs the Second Life skeletal
-//! recurrence on the GPU — from CPU-composed rest skeletons and the
-//! CPU-blended local pose — and writes real skin palettes into Bevy's
-//! `SkinUniforms` buffer at the offsets Bevy allocated, exactly as the
-//! keystone spike proved (`crate::gpu_avatar_spike`), but with the real pose
-//! instead of a marker.
+//! **The GPU-avatar pose pipeline, Phases 1a+1b+2**
+//! (`roadmap/context/gpu-avatars.md` §1, §2.1–§2.4, §5.3, §5.4, §7): a
+//! compute pipeline that samples each playing `.anim` clip (pass A, over the
+//! upload-once clip arena, deduplicated per (clip, phase) sample job),
+//! blends the contributions per joint by priority/ease with the procedural
+//! idle adjusters and the sparse CPU adjuster corrections (pass B), re-runs
+//! the Second Life skeletal recurrence over the CPU-composed rest skeletons
+//! (pass C), and writes real skin palettes into Bevy's `SkinUniforms` buffer
+//! at the offsets Bevy allocated (pass D), exactly as the keystone spike
+//! proved (`crate::gpu_avatar_spike`).
 //!
 //! **The GPU in-place path is the DEFAULT** on a capable device (compute
 //! shaders + storage-buffer skinning, checked once at startup against the
@@ -14,15 +16,19 @@
 //! automatically. `SL_VIEWER_GPU_AVATARS` (read once at App build) is an
 //! **override**, not an enable:
 //!
-//! - **unset / `1` / `real`** — the default **in-place path** (Phase 1b):
+//! - **unset / `1` / `real`** — the default **in-place path** (Phase 2):
 //!   pass D writes the **real avatar's** skin slots (no offset, no ghosts) —
-//!   the rendered avatar IS GPU-FK-posed. The CPU still samples + blends (it
-//!   publishes the `LocalPose` feed pass C consumes) but stops writing the
-//!   ~200 skinning joints' `GlobalTransform`s, so `extract_skins` sees no
-//!   changed joints and its serial cost collapses; only the **socket
-//!   subset** — worn attachment-point joints, the rigid eyeballs' eye
-//!   joints, and `mHead` (the camera focus) — stays CPU-written, from the
-//!   §5.4 mini-FK ([`sl_client_bevy::BevySkeleton::deformed_world_chain`]).
+//!   the rendered avatar IS GPU-sampled, GPU-blended and GPU-FK-posed. The
+//!   CPU is demoted to scheduling (playback reconcile + the §2.1 sample-job
+//!   dedup) and the §5.3 **adjuster mini-pose** (look-at / reach / IK /
+//!   physics run against a chain mini-FK over ~a tenth of the joints, and
+//!   publish their channel changes as sparse `GpuCorrection`s pass B folds
+//!   in); it stops writing the ~200 skinning joints' `GlobalTransform`s, so
+//!   `extract_skins` sees no changed joints and its serial cost collapses;
+//!   only the **socket subset** — worn attachment-point joints, the rigid
+//!   eyeballs' eye joints, and `mHead` (the camera focus) — stays
+//!   CPU-written, from the §5.4 mini-FK
+//!   ([`sl_client_bevy::BevySkeleton::deformed_world_chain`]).
 //!   Note Bevy's transform propagation still re-globals (and re-dirties) the
 //!   whole joint tree on any frame the avatar's **anchor moves** — the
 //!   collapse holds for stationary (dancing/idle) avatars, the crowd case;
@@ -46,15 +52,19 @@
 //! just-written palette back (a compute copy — the skin buffer carries no
 //! `COPY_SRC`) next to a CPU-expected palette computed the same frame — in
 //! ghost mode from the live joint globals (the true CPU path), in real mode
-//! from [`types::reference_fk`] over the same uploaded `LocalPose` (the
-//! golden-tested CPU reference; the joint globals are frozen there) — and
-//! logs `GPU-avatar palette readback: … GPU palette == CPU palette` (or
-//! `!=`, the divergence signal) at ~1 Hz.
+//! from the full CPU mirror pipeline ([`types::mirror_local_pose`] over the
+//! very clip/playback/job/correction data uploaded this frame, then
+//! [`types::reference_fk`] — the golden-tested pass A+B+C references; the
+//! joint globals are frozen there) — and logs
+//! `GPU-avatar palette readback: … GPU palette == CPU palette` (or `!=`, the
+//! divergence signal) at ~1 Hz.
 //!
-//! Still deliberately **not** here: GPU sampling/blending (Phase 2 — the CPU
-//! supplies the blended pose via [`GpuAvatarPoseFeed`]), GPU picking
-//! (Phase 3 — the CPU pick reads frozen joints in real mode and degrades to
-//! rest-pose accuracy meanwhile), and animesh control avatars (fully CPU).
+//! Still deliberately **not** here: GPU picking (Phase 3 — the CPU pick
+//! reads frozen joints in real mode and degrades to rest-pose accuracy
+//! meanwhile), and animesh control avatars (fully CPU, per the design's
+//! Phase 4 migration). The **ghost harness keeps the Phase 1 split** (CPU
+//! sample+blend, `LocalPose` upload, passes C+D only): its purpose is
+//! comparing the GPU FK against the live CPU pose path side by side.
 
 pub(crate) mod render;
 pub(crate) mod stage;
